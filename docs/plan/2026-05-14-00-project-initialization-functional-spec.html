@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Functional Spec - Project Initialization</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 1040px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    h3 { margin-top: 22px; font-size: 1rem; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    blockquote { border-left: 4px solid #b9c6bd; margin: 16px 0; padding: 8px 14px; background: #fff; color: #34413d; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; }
+    th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #edf1eb; }
+    .status { display: inline-block; border: 1px solid #aebbad; border-radius: 999px; padding: 2px 10px; background: #fff; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Functional Spec: Project Initialization</h1>
+    <p><span class="status">Status: implemented</span></p>
+
+    <h2>Source Context</h2>
+    <p>
+      This spec is derived from the Notion database
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>,
+      especially the framework overview, runtime architecture, role model loop,
+      and MVP roadmap pages.
+    </p>
+    <blockquote>
+      "Build the runtime first using the four-module architecture."
+    </blockquote>
+
+    <h2>Goal</h2>
+    <p>
+      Initialize the repository so future work can proceed in small, reviewed,
+      TDD-driven slices without adding premature runtime code or empty module
+      folders.
+    </p>
+
+    <h2>Functional Requirements</h2>
+    <ul>
+      <li>Create local documentation roots: <code>docs/wiki</code>, <code>docs/plan</code>, and <code>docs/develop-journal</code>.</li>
+      <li>Create a date-scoped journal folder for 2026-05-14.</li>
+      <li>Create top-level <code>src</code> as the future source root, without domain module folders.</li>
+      <li>Create <code>tests/unit</code> and <code>tests/integration</code> roots for TDD work.</li>
+      <li>Write HTML documentation that links Notion sources, local docs, source policy, and test policy.</li>
+      <li>Record a development workflow that requires spec review before code and code review after code.</li>
+      <li>Identify the next small candidate implementation slice without implementing it.</li>
+    </ul>
+
+    <h2>Non-Functional Requirements</h2>
+    <ul>
+      <li><strong>Modularity:</strong> no module-specific source directories until a TDD slice needs them.</li>
+      <li><strong>Security:</strong> ignore local secrets such as <code>.env</code> files by default.</li>
+      <li><strong>Efficiency:</strong> keep docs concise and link to source pages instead of duplicating the whole Notion spec.</li>
+      <li><strong>Maintainability:</strong> local docs must be browsable as static HTML files.</li>
+    </ul>
+
+    <h2>Acceptance Criteria</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Criterion</th>
+          <th>Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Repository has wiki, plan, and develop-journal documentation roots.</td>
+          <td>Met</td>
+        </tr>
+        <tr>
+          <td>Repository has source and test roots, with unit and integration test areas.</td>
+          <td>Met</td>
+        </tr>
+        <tr>
+          <td>No runtime implementation module is added during initialization.</td>
+          <td>Met</td>
+        </tr>
+        <tr>
+          <td>Docs link to Notion source pages and local related files.</td>
+          <td>Met</td>
+        </tr>
+        <tr>
+          <td>Workflow documents TDD, pre-code review, and post-code review expectations.</td>
+          <td>Met</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Implementation Notes</h2>
+    <p>
+      This slice intentionally does not choose a language, runtime package
+      manager, database, model provider, or test runner. Those choices belong to
+      the first runtime slice functional spec, where they can be reviewed against
+      the actual behavior being implemented.
+    </p>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>No existing source logic was present in the repository, so no code reuse was possible.</li>
+      <li>Only root-level source and test folders were created; runtime module boundaries remain uncommitted.</li>
+      <li>The next runtime slice should avoid model calls and persistence details beyond an interface until the contract is tested.</li>
+    </ul>
+
+    <h2>Related Files</h2>
+    <ul>
+      <li><a href="../wiki/index.html">Project wiki</a></li>
+      <li><a href="../wiki/development-workflow.html">Development workflow</a></li>
+      <li><a href="../develop-journal/2026-05-14/001-initialization.html">Initialization journal</a></li>
+      <li><a href="../../src/README.html">Source layout policy</a></li>
+      <li><a href="../../tests/README.html">Test layout policy</a></li>
+    </ul>
+  </main>
+</body>
+</html>
