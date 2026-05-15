@@ -1108,6 +1108,81 @@ smallest useful part.
 
 ---
 
+# Branch and Merge Policy
+
+The repository uses one protected main branch.
+
+## Branches
+
+- `main` is the only permanent development branch.
+- `main` must always be stable.
+- Development work happens on short-lived branches.
+- Do not use a permanent `develop` branch.
+
+Branch naming:
+
+- `feature/<slice-id>-<short-name>`
+- `fix/<short-name>`
+- `docs/<short-name>`
+- `chore/<short-name>`
+
+Examples:
+
+- `feature/mvp-001-runtime-event-intake`
+- `feature/mvp-002-kernel-tests`
+- `docs/revise-agents-md`
+- `chore/setup-ci`
+
+## Pull Requests
+
+All changes to `main` must go through a pull request.
+
+Each PR should:
+
+- implement one active slice only
+- link the active slice spec
+- include tests for implemented behavior
+- keep the diff small and reviewable
+- avoid speculative future modules
+- update the development journal for non-trivial changes
+- pass all required CI checks
+
+## Merge Rules
+
+The `main` branch ruleset requires:
+
+- pull request before merge
+- at least 1 approving review
+- stale approvals dismissed when new commits are pushed
+- approval of the most recent reviewable push
+- all review conversations resolved
+- required CI checks passing
+- branch up to date before merge
+- linear history
+- no force pushes
+- no branch deletion
+
+Use squash merge as the default merge method.
+
+## CI/CD
+
+Required checks:
+
+- `ci / lint`
+- `ci / typecheck`
+- `ci / test`
+
+No PR may merge into `main` unless required checks pass.
+
+## Bypass
+
+No normal developer should bypass branch rules.
+
+Emergency bypass may be reserved for repository admins, but it should be used
+only for urgent recovery and documented afterward.
+
+---
+
 ## Final Rule
 
 Design the architecture globally.
