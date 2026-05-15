@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal - MVP-003 Shared Contract Review</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 32px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-003 Shared Contract Review</h1>
+    <p><strong>Date:</strong> 2026-05-15</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Added <code>runtime.contracts</code> for shared normalized <code>USER_MESSAGE</code> and visible-reply <code>CharacterDecision</code> validation.</li>
+      <li>Updated Runtime Kernel to validate its normalized event output through <code>validate_normalized_user_message_event()</code>.</li>
+      <li>Updated Role Model Loop to parse and validate visible-reply decisions through <code>normalize_visible_reply_decision()</code> while still raising <code>RoleModelValidationError</code>.</li>
+      <li>Updated Commit and Effects to validate source events and decisions through the same shared helpers while still raising <code>CommitValidationError</code>.</li>
+      <li>Added focused contract tests and a commit-boundary regression for malformed <code>created_at</code>.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      Review found that the MVP-003 commit boundary duplicated the Role Model
+      <code>CharacterDecision</code> contract and manually revalidated normalized
+      <code>USER_MESSAGE</code> events. Shared helpers reduce schema drift as future slices add
+      event fields, decision action types, or optional decision fields.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>src/runtime/contracts.py</code></li>
+      <li><code>src/runtime/kernel.py</code></li>
+      <li><code>src/role_model/loop.py</code></li>
+      <li><code>src/commit_effects/visible_reply.py</code></li>
+      <li><code>tests/unit/test_runtime_contracts.py</code></li>
+      <li><code>tests/unit/test_visible_reply_commit.py</code></li>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/develop-journal/2026-05-15/008-mvp-003-shared-contract-review.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 49 tests.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff format --check .</code> - passed, 18 files already formatted.</li>
+      <li><code>python3 -m html.parser docs/plan/active-slice.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/develop-journal/2026-05-15/008-mvp-003-shared-contract-review.html</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>Shared contract helpers remain limited to already implemented MVP-001 through MVP-003 shapes.</li>
+      <li>Boundary modules still own their public error types and translate shared contract errors at the boundary.</li>
+      <li>No new decision action, event type, storage adapter, orchestration layer, or external side effect was added.</li>
+    </ul>
+
+    <h2>Future Ideas Discovered</h2>
+    <p>No new future ideas were discovered.</p>
+
+    <h2>Next Action</h2>
+    <p>Continue MVP-003 review. Future schema additions should extend <code>runtime.contracts</code> first, then update boundary wrappers and tests.</p>
+  </main>
+</body>
+</html>

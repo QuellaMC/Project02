@@ -4,7 +4,17 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Protocol
 
-from runtime.kernel import USER_MESSAGE, RawEventLog, RuntimeEvent
+from runtime.contracts import (
+    USER_MESSAGE,
+    VISIBLE_REPLY_ACTION,
+    RuntimeEvent,
+    normalize_visible_reply_decision,
+    validate_normalized_user_message_event,
+)
+from runtime.contracts import (
+    ContractValidationError as SharedContractValidationError,
+)
+from runtime.kernel import RawEventLog
 from runtime.logging import (
     SCHEMA_VERSION,
     Clock,
@@ -16,7 +26,6 @@ from runtime.logging import (
 )
 
 VISIBLE_OUTPUT_KIND = "assistant_visible_reply"
-VISIBLE_REPLY_ACTION = "visible_reply"
 DECISION_READY_FOR_COMMIT_STATUS = "decision_ready_for_commit"
 VISIBLE_REPLY_COMMITTED_STATUS = "visible_reply_committed"
 VISIBLE_REPLY_REJECTED_STATUS = "visible_reply_rejected"
@@ -199,36 +208,12 @@ def build_visible_reply_rejected_log_entry(
 
 
 def _validate_source_event(source_event: Any) -> RuntimeEvent:
-    if not isinstance(source_event, Mapping):
-        raise CommitValidationError("source_event must be a mapping.")
-    trace_id = _require_string(source_event.get("trace_id"), "trace_id")
-    event_id = _require_string(source_event.get("event_id"), "event_id")
-    _require_equal(source_event.get("schema_version"), SCHEMA_VERSION, "schema_version")
-    _require_equal(source_event.get("type"), USER_MESSAGE, "source_event.type")
-
-    payload = source_event.get("payload")
-    if not isinstance(payload, Mapping):
-        raise CommitValidationError("source_event.payload must be a mapping.")
-    text = payload.get("text")
-    if not isinstance(text, str) or not text.strip():
-        raise CommitValidationError("source_event.payload.text must be a non-empty string.")
-
-    normalized_payload: dict[str, str] = {"text": text}
-    for field_name in ("user_id", "conversation_id"):
-        if field_name in payload:
-            value = payload[field_name]
-            if not isinstance(value, str):
-                raise CommitValidationError(f"source_event.payload.{field_name} must be a string.")
-            normalized_payload[field_name] = value
-
-    return {
-        "event_id": event_id,
-        "trace_id": trace_id,
-        "type": USER_MESSAGE,
-        "created_at": _require_string(source_event.get("created_at"), "created_at"),
-        "schema_version": SCHEMA_VERSION,
-        "payload": normalized_payload,
-    }
+    return _wrap_contract_error(
+        lambda: validate_normalized_user_message_event(
+            source_event,
+            source_name="source_event",
+        )
+    )
 
 
 def _validate_role_model_result(
@@ -277,40 +262,15 @@ def _validate_role_model_result(
 
 
 def _validate_decision(decision: Any, *, source_event: RuntimeEvent) -> dict[str, Any]:
-    if not isinstance(decision, Mapping):
-        raise CommitValidationError("decision must be a mapping.")
-    _reject_extra_keys(
-        decision,
-        {"schema_version", "trace_id", "event_id", "action", "visible_reply"},
-        "CharacterDecision",
+    return _wrap_contract_error(
+        lambda: normalize_visible_reply_decision(
+            decision,
+            trace_id=source_event["trace_id"],
+            event_id=source_event["event_id"],
+            require_attached_ids=True,
+            source_name="CharacterDecision",
+        )
     )
-    _require_equal(decision.get("schema_version"), SCHEMA_VERSION, "schema_version")
-    _require_matching_identity(decision.get("trace_id"), source_event["trace_id"], "trace_id")
-    _require_matching_identity(decision.get("event_id"), source_event["event_id"], "event_id")
-    if decision.get("action") != VISIBLE_REPLY_ACTION:
-        raise CommitValidationError(
-            f"action must be {VISIBLE_REPLY_ACTION!r}.",
-            code="unsupported_action",
-        )
-
-    visible_reply = decision.get("visible_reply")
-    if not isinstance(visible_reply, Mapping):
-        raise CommitValidationError("visible_reply must be a mapping.")
-    _reject_extra_keys(visible_reply, {"text"}, "visible_reply")
-    reply_text = visible_reply.get("text")
-    if not isinstance(reply_text, str) or not reply_text.strip():
-        raise CommitValidationError(
-            "visible_reply.text must be a non-empty string.",
-            code="empty_reply_text",
-        )
-
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "trace_id": source_event["trace_id"],
-        "event_id": source_event["event_id"],
-        "action": VISIBLE_REPLY_ACTION,
-        "visible_reply": {"text": reply_text.strip()},
-    }
 
 
 def _validate_visible_conversation_output(
@@ -427,6 +387,13 @@ def _build_failure(code: str, message: str) -> dict[str, str]:
         "code": code,
         "message": message,
     }
+
+
+def _wrap_contract_error(callback):
+    try:
+        return callback()
+    except SharedContractValidationError as error:
+        raise CommitValidationError(str(error), code=error.code) from error
 
 
 def _require_matching_identity(value: Any, expected: str, field_name: str) -> None:

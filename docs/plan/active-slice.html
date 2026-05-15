@@ -345,6 +345,8 @@
       <li>Malformed source identity raises before a rejection log because there is no trustworthy <code>trace_id</code> and <code>event_id</code>.</li>
       <li>Committed output and raw log snapshots are deep-copied so caller mutation cannot change append-only in-memory truth.</li>
       <li>The implementation reuses <code>runtime.logging.build_raw_log_entry()</code>, <code>generate_id()</code>, and <code>clock_timestamp()</code> for envelope, ID, and timestamp behavior.</li>
+      <li>Runtime Kernel, Role Model Loop, and Commit and Effects now share <code>runtime.contracts.validate_normalized_user_message_event()</code> for normalized <code>USER_MESSAGE</code> validation.</li>
+      <li>Role Model Loop and Commit and Effects now share <code>runtime.contracts.normalize_visible_reply_decision()</code> for the visible-reply <code>CharacterDecision</code> contract while preserving boundary-specific error types.</li>
       <li>No Runtime Kernel orchestration, Role Model Loop changes, character state, incidents, tools, retrieval, Live2D, assets, scheduler, or concrete storage were introduced.</li>
     </ul>
 

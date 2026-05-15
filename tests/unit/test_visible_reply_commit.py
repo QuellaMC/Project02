@@ -115,6 +115,10 @@ class VisibleConversationOutputTests(unittest.TestCase):
         unsupported_schema["schema_version"] = "0.2"
         cases.append((unsupported_schema, role_model_result(), "schema_version"))
 
+        malformed_created_at = normalized_user_message()
+        malformed_created_at["created_at"] = "2026-05-15"
+        cases.append((malformed_created_at, role_model_result(), "created_at"))
+
         unsupported_status = role_model_result()
         unsupported_status["status"] = "already_committed"
         cases.append((normalized_user_message(), unsupported_status, "decision_ready_for_commit"))
