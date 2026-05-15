@@ -450,6 +450,28 @@ it came from.
 
 Prefer explicit data shapes over implicit prompt behavior.
 
+Write code that is future-compatible without implementing future behavior. When
+the current slice already has a normalized record or explicit contract field,
+derive downstream values from that record instead of duplicating today's literal
+constant. Keep validation and dispatch tables limited to implemented behavior,
+but shape them so a later reviewed slice can add a new event type, action type,
+or route by adding tested cases instead of changing existing contracts.
+
+Routing values such as `model_needed` and `next_step` are event-specific policy,
+not universal defaults. Add one event type or one boundary at a time, and require
+each added type to define its own tested validation, logging, and routing policy.
+
+Do not confuse future-compatible code with speculative scaffolding. Do not add
+placeholder event types, schema fields, modules, interfaces, side effects, or
+configuration just to look extensible.
+
+Keep `RuntimeKernel` small. It may coordinate intake, normalization, trace and
+event IDs, raw-log append requests, and route selection for implemented event
+types. Move character state, model calls, commit validation, tools, Live2D, and
+other side-effect boundaries into separate modules only when an active slice
+requires them. Keep `RawEventLog` and trace IDs stable while schemas evolve
+gradually.
+
 Prefer deterministic runtime behavior where model judgment is not needed.
 
 Do not call the model for:

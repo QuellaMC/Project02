@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Future Slices</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 960px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    dl { background: #fff; border: 1px solid #d9ded6; border-radius: 8px; padding: 18px; }
+    dt { font-weight: 700; margin-top: 12px; }
+    dt:first-child { margin-top: 0; }
+    dd { margin: 4px 0 0 0; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Future Slices</h1>
+    <p>
+      This parking lot preserves useful ideas without expanding the active implementation slice.
+      Do not implement these while <a href="active-slice.html">MVP-001</a> is active.
+    </p>
+
+    <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add the smallest Role Model Loop after runtime intake and raw logging work.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The Notion roadmap's Phase 1 user turn loop eventually needs model input rendering, a model boundary, and structured output parsing.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while writing <code>MVP-001 - Runtime Event Intake and Raw Logging</code>.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-001 must first prove event intake, trace identity, raw logging, and deterministic routing.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>The model contract can become too large if CharacterRuntimeState, incidents, tools, or retrieval are added at the same time.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely introduces a minimal <code>DecisionContext</code>, fake model response shape, and parsed decision shape.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active slice only proves runtime intake and raw event logging without any model call.</dd>
+    </dl>
+  </main>
+</body>
+</html>
