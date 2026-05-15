@@ -1,0 +1,81 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint and Readability
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install lint tools
+        run: python -m pip install --upgrade pip ruff
+
+      - name: Run Ruff lint
+        run: ruff check .
+
+      - name: Check Ruff formatting
+        run: ruff format --check .
+
+  test:
+    name: Unit and Integration Tests
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Compile Python sources
+        run: python -m compileall src tests
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests/unit -t .
+
+      - name: Run integration tests
+        run: python -m unittest discover -s tests/integration -t .
+
+      - name: Run full test discovery
+        run: python -m unittest discover -s tests -t .
+
+  pull-request-gate:
+    name: Pull Request Gate
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+      - test
+    if: ${{ always() }}
+
+    steps:
+      - name: Require CI/CD jobs to pass
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+            echo "CI/CD gate failed."
+            exit 1
+          fi
+          echo "CI/CD gate passed."

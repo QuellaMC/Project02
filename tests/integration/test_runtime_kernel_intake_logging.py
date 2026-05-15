@@ -37,9 +37,7 @@ class FailingRawEventLog:
 class RuntimeKernelIntakeLoggingTests(unittest.TestCase):
     def test_user_message_intake_appends_one_raw_log_and_routes_logged_only(self):
         raw_log = RecordingRawEventLog()
-        kernel = RuntimeKernel(
-            raw_log, id_generator=SequenceIdGenerator(), clock=fixed_clock
-        )
+        kernel = RuntimeKernel(raw_log, id_generator=SequenceIdGenerator(), clock=fixed_clock)
 
         route = kernel.handle_event(
             {
@@ -75,9 +73,7 @@ class RuntimeKernelIntakeLoggingTests(unittest.TestCase):
 
     def test_validation_failure_does_not_append_raw_log(self):
         raw_log = RecordingRawEventLog()
-        kernel = RuntimeKernel(
-            raw_log, id_generator=SequenceIdGenerator(), clock=fixed_clock
-        )
+        kernel = RuntimeKernel(raw_log, id_generator=SequenceIdGenerator(), clock=fixed_clock)
 
         with self.assertRaises(RuntimeValidationError):
             kernel.handle_event({"type": "TIMER", "payload": {"text": "hello"}})
