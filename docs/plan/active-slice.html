@@ -28,9 +28,9 @@
 <body>
   <main>
     <h1>MVP-003 - Minimal Visible Reply Commit</h1>
-    <p><span class="status">Status: active functional spec, not implemented</span></p>
+    <p><span class="status">Status: implemented and tested, pending review</span></p>
     <p class="meta">
-      Created: 2026-05-15. Active slice path:
+      Created: 2026-05-15. Implemented: 2026-05-15. Active slice path:
       <code>docs/plan/active-slice.html</code>.
       Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
     </p>
@@ -336,7 +336,15 @@
 
     <h2>Post-Code Review Notes</h2>
     <ul>
-      <li>Not started. Fill this section after the MVP-003 implementation pass.</li>
+      <li>The implementation adds one focused <code>commit_effects.visible_reply</code> module for the first Commit and Effects boundary.</li>
+      <li>The visible conversation store is an injected <code>VisibleConversationLog.append(output)</code> protocol; no concrete database, UI delivery, outbox, transaction layer, or external side effect was added.</li>
+      <li>Successful commits validate the normalized source event, MVP-002 result status, matching trace/event IDs, and <code>visible_reply</code> decision before appending visible output.</li>
+      <li>Successful commits append visible output before appending <code>visible_reply_committed</code>; a visible append failure therefore does not write a committed raw log.</li>
+      <li>Supported validation failures with trustworthy source identity append one <code>visible_reply_rejected</code> raw log entry and return a rejected result without visible output.</li>
+      <li>Malformed source identity raises before a rejection log because there is no trustworthy <code>trace_id</code> and <code>event_id</code>.</li>
+      <li>Committed output and raw log snapshots are deep-copied so caller mutation cannot change append-only in-memory truth.</li>
+      <li>The implementation reuses <code>runtime.logging.build_raw_log_entry()</code>, <code>generate_id()</code>, and <code>clock_timestamp()</code> for envelope, ID, and timestamp behavior.</li>
+      <li>No Runtime Kernel orchestration, Role Model Loop changes, character state, incidents, tools, retrieval, Live2D, assets, scheduler, or concrete storage were introduced.</li>
     </ul>
 
     <h2>Open Questions</h2>
