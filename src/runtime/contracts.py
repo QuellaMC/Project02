@@ -16,7 +16,7 @@ CharacterDecision = dict[str, Any]
 class ContractValidationError(ValueError):
     """Raised when a shared runtime contract is violated."""
 
-    def __init__(self, message: str, *, code: str = "malformed_commit_input") -> None:
+    def __init__(self, message: str, *, code: str = "invalid_contract") -> None:
         super().__init__(message)
         self.code = code
 

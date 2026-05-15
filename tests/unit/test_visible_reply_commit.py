@@ -149,6 +149,20 @@ class VisibleConversationOutputTests(unittest.TestCase):
                         clock=fixed_clock,
                     )
 
+    def test_maps_neutral_shared_contract_code_to_malformed_commit_input(self):
+        event = normalized_user_message()
+        event["created_at"] = "2026-05-15"
+
+        with self.assertRaisesRegex(CommitValidationError, "created_at") as context:
+            build_visible_conversation_output(
+                event,
+                role_model_result(),
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+            )
+
+        self.assertEqual(context.exception.code, "malformed_commit_input")
+
 
 class VisibleReplyLogEntryTests(unittest.TestCase):
     def test_committed_log_entry_deep_copies_snapshots(self):

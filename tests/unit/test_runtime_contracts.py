@@ -33,8 +33,10 @@ class RuntimeContractTests(unittest.TestCase):
         event = normalized_user_message()
         event["created_at"] = "2026-05-15"
 
-        with self.assertRaisesRegex(ContractValidationError, "created_at"):
+        with self.assertRaisesRegex(ContractValidationError, "created_at") as context:
             validate_normalized_user_message_event(event)
+
+        self.assertEqual(context.exception.code, "invalid_contract")
 
     def test_normalizes_visible_reply_decision_with_attached_identity(self):
         decision = normalize_visible_reply_decision(

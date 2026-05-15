@@ -27,6 +27,7 @@
       <li>Updated Runtime Kernel to validate its normalized event output through <code>validate_normalized_user_message_event()</code>.</li>
       <li>Updated Role Model Loop to parse and validate visible-reply decisions through <code>normalize_visible_reply_decision()</code> while still raising <code>RoleModelValidationError</code>.</li>
       <li>Updated Commit and Effects to validate source events and decisions through the same shared helpers while still raising <code>CommitValidationError</code>.</li>
+      <li>Kept shared contract failures neutral with <code>invalid_contract</code> and mapped that to <code>malformed_commit_input</code> only inside the visible-reply commit boundary.</li>
       <li>Added focused contract tests and a commit-boundary regression for malformed <code>created_at</code>.</li>
     </ul>
 

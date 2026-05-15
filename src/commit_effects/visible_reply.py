@@ -393,7 +393,8 @@ def _wrap_contract_error(callback):
     try:
         return callback()
     except SharedContractValidationError as error:
-        raise CommitValidationError(str(error), code=error.code) from error
+        code = "malformed_commit_input" if error.code == "invalid_contract" else error.code
+        raise CommitValidationError(str(error), code=code) from error
 
 
 def _require_matching_identity(value: Any, expected: str, field_name: str) -> None:
