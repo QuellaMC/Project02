@@ -27,6 +27,7 @@
       <li>Added an integration regression for <code>commit_visible_reply()</code> with a source event whose raw <code>type</code> is <code>TIMER</code>.</li>
       <li>Promoted <code>decision_ready_for_commit</code> to a shared <code>runtime.contracts</code> constant used by Role Model Loop and Commit and Effects.</li>
       <li>Clarified the active spec wording: MVP-003 did not change Role Model Loop behavior or model-provider execution, but it did reuse shared contract helpers.</li>
+      <li>Clarified the rejected-log schema so <code>data.source_event</code> is documented as a raw source-event snapshot instead of a normalized <code>RuntimeEvent</code>.</li>
       <li>Parked a future idea for a full shared <code>RoleModelTurnResult</code> envelope validator after another commit consumer exists.</li>
     </ul>
 
@@ -36,7 +37,9 @@
       visible-reply reject result, even though the MVP-003 result schema only
       implements <code>USER_MESSAGE</code>. The same review also found stale spec wording
       and one remaining duplicated status literal between Role Model Loop and
-      Commit and Effects.
+      Commit and Effects. A later review noted that the rejected raw log preserves
+      malformed source-event snapshots for audit truth, so the spec needed to
+      stop typing that field as a normalized <code>RuntimeEvent</code>.
     </p>
 
     <h2>Files Touched</h2>
@@ -68,6 +71,7 @@
     <ul>
       <li>The raw rejection log still snapshots the malformed source event so audit/replay can see the original unsupported type.</li>
       <li>The public reject result stays within the MVP-003 implemented result schema.</li>
+      <li>The rejected-log <code>source_event</code> field name stays unchanged for MVP-003; the schema now makes the raw snapshot behavior explicit.</li>
       <li>The shared status constant does not add new actions, result states, orchestration, or storage behavior.</li>
     </ul>
 

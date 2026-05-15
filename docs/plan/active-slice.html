@@ -173,7 +173,7 @@
   created_at: string
   schema_version: "0.1"
   data: {
-    source_event: RuntimeEvent
+    source_event: unknown
     role_model_result_snapshot: unknown
     decision_snapshot?: unknown
     failure: {
@@ -188,6 +188,11 @@
     }
   }
 }</code></pre>
+    <p>
+      In rejected logs, <code>source_event</code> is a raw source-event snapshot for
+      audit and replay. It may be malformed or unsupported, so it is intentionally
+      not typed as a normalized <code>RuntimeEvent</code>.
+    </p>
 
     <h3>VisibleReplyCommitResult</h3>
     <pre><code>type VisibleReplyCommitResult = {
@@ -342,6 +347,7 @@
       <li>Successful commits append <code>visible_reply_committed</code> before visible output so raw-log storage failure cannot leave an unlogged visible side effect.</li>
       <li>Visible output append failure now leaves a raw audit record with the intended output for reconciliation instead of an unlogged visible output.</li>
       <li>Supported validation failures with trustworthy source identity append one <code>visible_reply_rejected</code> raw log entry and return a rejected result without visible output.</li>
+      <li>Rejected logs store <code>data.source_event</code> as a raw source-event snapshot, not a normalized <code>RuntimeEvent</code>, so malformed-but-identifiable inputs remain available for audit and replay.</li>
       <li>Malformed source identity raises before a rejection log because there is no trustworthy <code>trace_id</code> and <code>event_id</code>.</li>
       <li>Committed output and raw log snapshots are deep-copied so caller mutation cannot change append-only in-memory truth.</li>
       <li>The implementation reuses <code>runtime.logging.build_raw_log_entry()</code>, <code>generate_id()</code>, and <code>clock_timestamp()</code> for envelope, ID, and timestamp behavior.</li>
