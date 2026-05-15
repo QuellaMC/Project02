@@ -250,7 +250,7 @@
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>After the visible output append succeeds, the commit boundary appends exactly one <code>visible_reply_committed</code> raw log entry.</td>
+          <td>Before appending visible output, the commit boundary appends exactly one <code>visible_reply_committed</code> raw log entry.</td>
         </tr>
         <tr>
           <td>FR-9</td>
@@ -300,7 +300,7 @@
 
     <h3>Integration Tests</h3>
     <ul>
-      <li>MVP-002-style result plus normalized source event to visible output append to <code>visible_reply_committed</code> raw log append.</li>
+      <li>MVP-002-style result plus normalized source event to <code>visible_reply_committed</code> raw log append to visible output append.</li>
       <li>Invalid visible-reply decision with valid trace identity to <code>visible_reply_rejected</code> raw log append and no visible output append.</li>
     </ul>
 
@@ -319,8 +319,8 @@
       <li>Malformed source event identity fails before visible output append. If no trustworthy <code>trace_id</code> and <code>event_id</code> are available, no raw rejection log is appended.</li>
       <li>Unsupported result status, unsupported action, empty reply text, or identity mismatch appends one <code>visible_reply_rejected</code> entry when the source event provides trustworthy trace identity.</li>
       <li>Rejected commits do not append visible output and do not append <code>visible_reply_committed</code>.</li>
-      <li>Visible output append failure propagates and does not append a committed raw log entry.</li>
-      <li>Raw log append failure prevents a successful <code>VisibleReplyCommitResult</code> from being returned.</li>
+      <li>Raw log append failure prevents visible output append and prevents a successful <code>VisibleReplyCommitResult</code> from being returned.</li>
+      <li>Visible output append failure propagates after <code>visible_reply_committed</code> is logged, leaving an audit record that can drive reconciliation or retry.</li>
       <li>No retry, dedupe, transaction, or recovery policy is implemented in this slice.</li>
     </ul>
 
@@ -339,7 +339,8 @@
       <li>The implementation adds one focused <code>commit_effects.visible_reply</code> module for the first Commit and Effects boundary.</li>
       <li>The visible conversation store is an injected <code>VisibleConversationLog.append(output)</code> protocol; no concrete database, UI delivery, outbox, transaction layer, or external side effect was added.</li>
       <li>Successful commits validate the normalized source event, MVP-002 result status, matching trace/event IDs, and <code>visible_reply</code> decision before appending visible output.</li>
-      <li>Successful commits append visible output before appending <code>visible_reply_committed</code>; a visible append failure therefore does not write a committed raw log.</li>
+      <li>Successful commits append <code>visible_reply_committed</code> before visible output so raw-log storage failure cannot leave an unlogged visible side effect.</li>
+      <li>Visible output append failure now leaves a raw audit record with the intended output for reconciliation instead of an unlogged visible output.</li>
       <li>Supported validation failures with trustworthy source identity append one <code>visible_reply_rejected</code> raw log entry and return a rejected result without visible output.</li>
       <li>Malformed source identity raises before a rejection log because there is no trustworthy <code>trace_id</code> and <code>event_id</code>.</li>
       <li>Committed output and raw log snapshots are deep-copied so caller mutation cannot change append-only in-memory truth.</li>

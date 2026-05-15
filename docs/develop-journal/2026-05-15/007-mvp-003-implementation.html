@@ -53,7 +53,7 @@
 
     <h2>Tests Run</h2>
     <ul>
-      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 44 tests.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 45 tests.</li>
       <li><code>python3 -m html.parser docs/plan/active-slice.html</code> - passed.</li>
       <li><code>python3 -m html.parser docs/plan/index.html</code> - passed.</li>
       <li><code>python3 -m html.parser docs/develop-journal/2026-05-15/007-mvp-003-implementation.html</code> - passed.</li>
@@ -66,7 +66,8 @@
     <ul>
       <li>The slice scope did not expand beyond the active MVP-003 spec.</li>
       <li>The implementation uses injected append interfaces only; there is no concrete database, transaction manager, UI delivery, external service, scheduler, or worker.</li>
-      <li>Successful commits append the visible output before appending <code>visible_reply_committed</code>, so visible append failure does not create a false committed raw log.</li>
+      <li>Successful commits append <code>visible_reply_committed</code> before visible output so raw-log storage failure cannot leave an unlogged visible side effect.</li>
+      <li>Visible output append failure propagates after the raw audit record exists, leaving enough logged output data for reconciliation or retry.</li>
       <li>Supported validation failures with trustworthy source identity append <code>visible_reply_rejected</code> and return a rejected result without visible output.</li>
       <li>Malformed source identity raises before rejection logging because there is no reliable trace/event envelope.</li>
       <li>The visible output and raw log snapshots are deep-copied to preserve append-only in-memory truth.</li>

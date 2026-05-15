@@ -86,16 +86,15 @@ def commit_visible_reply(
             "failure": failure,
         }
 
-    visible_conversation_log.append(deepcopy(output))
-    raw_event_log.append(
-        build_visible_reply_committed_log_entry(
-            source_event,
-            role_model_result,
-            output,
-            id_generator=id_generator,
-            clock=clock,
-        )
+    committed_log_entry = build_visible_reply_committed_log_entry(
+        source_event,
+        role_model_result,
+        output,
+        id_generator=id_generator,
+        clock=clock,
     )
+    raw_event_log.append(committed_log_entry)
+    visible_conversation_log.append(deepcopy(output))
     return {
         "trace_id": output["trace_id"],
         "event_id": output["source_event_id"],

@@ -131,7 +131,22 @@ class VisibleReplyCommitIntegrationTests(unittest.TestCase):
             },
         )
 
-    def test_visible_output_append_failure_does_not_append_committed_raw_log(self):
+    def test_raw_log_append_failure_does_not_append_visible_output(self):
+        visible_log = RecordingAppendLog()
+
+        with self.assertRaisesRegex(RuntimeError, "append failed"):
+            commit_visible_reply(
+                normalized_user_message(),
+                role_model_result(),
+                visible_conversation_log=visible_log,
+                raw_event_log=FailingAppendLog(),
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+            )
+
+        self.assertEqual(visible_log.entries, [])
+
+    def test_visible_output_append_failure_keeps_committed_raw_log_for_reconciliation(self):
         raw_log = RecordingAppendLog()
 
         with self.assertRaisesRegex(RuntimeError, "append failed"):
@@ -144,7 +159,9 @@ class VisibleReplyCommitIntegrationTests(unittest.TestCase):
                 clock=fixed_clock,
             )
 
-        self.assertEqual(raw_log.entries, [])
+        self.assertEqual(len(raw_log.entries), 1)
+        self.assertEqual(raw_log.entries[0]["kind"], "visible_reply_committed")
+        self.assertEqual(raw_log.entries[0]["data"]["output"]["text"], "hello back")
 
     def test_malformed_source_identity_raises_without_rejection_log(self):
         visible_log = RecordingAppendLog()
