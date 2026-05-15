@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-001 - Runtime Event Intake and Raw Logging</title>
+  <title>MVP-002 - Minimal Role Model Loop with Fake Adapter</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,12 +27,12 @@
 </head>
 <body>
   <main>
-    <h1>MVP-001 - Runtime Event Intake and Raw Logging</h1>
-    <p><span class="status">Status: implemented and tested</span></p>
+    <h1>MVP-002 - Minimal Role Model Loop with Fake Adapter</h1>
+    <p><span class="status">Status: implemented and tested, pending review</span></p>
     <p class="meta">
-      Created: 2026-05-14. Implemented: 2026-05-14. Active slice path:
-      <code>docs/plan/active-slice.html</code>. Runtime language: Python 3.
-      Test runner: Python standard library <code>unittest</code>.
+      Created: 2026-05-15. Implemented: 2026-05-15. Active slice path:
+      <code>docs/plan/active-slice.html</code>.
+      Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
     </p>
 
     <h2>Source Context</h2>
@@ -46,130 +46,173 @@
       <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.
     </p>
     <blockquote>
-      Notion direction: all triggers become RuntimeEvents, the Runtime Kernel owns event intake and routing,
-      and Raw Event Log preserves runtime truth.
+      Current direction: Runtime Kernel routes events, Role Model Loop is the only model-call
+      boundary, Commit and Effects Engine validates durable changes, and Raw Event Log preserves
+      the runtime truth.
     </blockquote>
     <p>
-      Local implementation direction comes from <a href="../../AGENTS.md">AGENTS.md</a> and
-      <a href="../wiki/development-workflow.html">Development Workflow</a>: build one small behavior slice,
-      write tests, implement only that behavior, then record the result in the journal.
+      Local implementation truth comes from
+      <a href="completed/mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001</a>:
+      the runtime can accept a <code>USER_MESSAGE</code>, normalize IDs and timestamps, append one
+      raw event log entry, and return a deterministic <code>logged_only</code> route without a
+      model call.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Implement the smallest runtime foundation that accepts a <code>USER_MESSAGE</code>-like
-      <code>RuntimeEvent</code>, normalizes it, assigns event and trace identifiers, appends one raw
-      log entry through a logging interface, and returns a deterministic routing result without
-      calling a model.
+      Add the smallest testable model-call path after MVP-001. The path accepts an
+      already-normalized <code>USER_MESSAGE</code> event, builds a minimal
+      <code>DecisionContext</code> through a tiny context-builder boundary, renders one deterministic
+      model input through the Role Model Loop, calls an injected fake model adapter, parses a
+      <code>visible_reply</code>-only <code>CharacterDecision</code>, records the model turn through
+      the existing raw log boundary, and returns the parsed decision for a future commit slice.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li><code>RuntimeEvent</code> input shape for <code>USER_MESSAGE</code> only.</li>
-      <li><code>event_id</code> assignment when missing.</li>
-      <li><code>trace_id</code> assignment when missing.</li>
-      <li><code>schema_version</code> assignment.</li>
-      <li><code>created_at</code> normalization when missing.</li>
-      <li>Basic event type validation.</li>
-      <li>Basic message text validation.</li>
-      <li><code>RawEventLog</code> append interface.</li>
-      <li>Deterministic route result.</li>
-      <li>Python implementation under <code>src/runtime/</code>.</li>
-      <li>Ignored runtime artifact root at <code>artifacts/</code>.</li>
-      <li>Focused unit tests.</li>
-      <li>One integration test for Runtime Kernel intake to raw log append.</li>
-      <li>Development journal entry after implementation.</li>
+      <li>One accepted event type: normalized <code>USER_MESSAGE</code> from the MVP-001 contract.</li>
+      <li>One call type: <code>user_message_visible_reply</code>.</li>
+      <li>One allowed action: <code>visible_reply</code>.</li>
+      <li>Minimal <code>DecisionContext</code> built by a tiny context builder from the current event only.</li>
+      <li>Deterministic model input rendering from the context.</li>
+      <li>An injected <code>RoleModelAdapter</code> interface, tested with a fake adapter.</li>
+      <li>Strict parsing of a JSON-like model output into a <code>CharacterDecision</code>.</li>
+      <li>One raw log entry for the completed role-model turn after parsing succeeds.</li>
+      <li>Focused unit tests for context building, input rendering, adapter calls, and output parsing.</li>
+      <li>One integration test from normalized runtime event to parsed decision and raw log append.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>Model provider calls.</li>
-      <li><code>DecisionContext</code>.</li>
-      <li><code>CharacterDecision</code>.</li>
-      <li><code>CharacterRuntimeState</code>.</li>
-      <li>Living state, incidents, virtual body, scheduled directives, retrieval, tools, Live2D, assets, compaction, or replay UI.</li>
-      <li>Real database persistence.</li>
-      <li>External services.</li>
-      <li>Placeholder modules for future systems.</li>
+      <li>Live model provider calls.</li>
+      <li>Provider configuration, API keys, retry policy, streaming, or network access.</li>
+      <li>Conversation history or recent visible message retrieval.</li>
+      <li><code>CharacterRuntimeState</code>, living state, virtual body, incidents, scheduled directives, active threads, continuity, retrieval, tools, Live2D, assets, compaction, or replay UI.</li>
+      <li>Commit and Effects Engine implementation.</li>
+      <li>Visible reply delivery or conversation persistence.</li>
+      <li>State patch actions, incident actions, tool requests, scheduled directive actions, or continuity writes.</li>
+      <li>Changing the MVP-001 raw event intake schema.</li>
+      <li>Changing existing MVP-001 behavior except where an integration seam is required and tested.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
     <p>
-      These TypeScript-style shapes define the behavior contract. MVP-001 implements the contract in
-      Python 3 and tests it with <code>unittest</code>.
+      These TypeScript-style shapes define the intended behavior contract. MVP-002 should implement
+      the contract in Python 3 and test it with <code>unittest</code>.
     </p>
 
-    <h3>RuntimeEventInput</h3>
-    <pre><code>type RuntimeEventInput = {
-  type: "USER_MESSAGE"
-  payload: {
-    text: string
-    user_id?: string
-    conversation_id?: string
-  }
-  event_id?: string
-  trace_id?: string
-  created_at?: string
-  schema_version?: string
-}</code></pre>
-
-    <h3>RuntimeEvent</h3>
-    <pre><code>type RuntimeEvent = {
-  event_id: string
-  trace_id: string
-  type: "USER_MESSAGE"
-  created_at: string
+    <h3>DecisionContext</h3>
+    <pre><code>type DecisionContext = {
   schema_version: "0.1"
-  payload: {
+  trace_id: string
+  event_id: string
+  call_type: "user_message_visible_reply"
+  event: {
+    type: "USER_MESSAGE"
     text: string
+    created_at: string
     user_id?: string
     conversation_id?: string
   }
+  allowed_actions: ["visible_reply"]
 }</code></pre>
 
-    <h3>RawEventLogEntry</h3>
-    <pre><code>type RawEventLogEntry = {
+    <h3>RoleModelInput</h3>
+    <pre><code>type RoleModelInput = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  instructions: string
+  decision_context: DecisionContext
+}</code></pre>
+
+    <h3>RoleModelAdapterOutput</h3>
+    <pre><code>type RoleModelAdapterOutput = {
+  model_id: string
+  created_at: string
+  raw_text: string
+}</code></pre>
+
+    <h3>RoleModelRawTextJson</h3>
+    <pre><code>type RoleModelRawTextJson = {
+  schema_version: "0.1"
+  action: "visible_reply"
+  visible_reply: {
+    text: string
+  }
+}</code></pre>
+    <p>
+      <code>RoleModelAdapterOutput.raw_text</code> must be a JSON object matching
+      <code>RoleModelRawTextJson</code>. The parser requires <code>schema_version</code>,
+      <code>action</code>, and <code>visible_reply.text</code>. <code>schema_version</code> must
+      be exactly <code>"0.1"</code>, <code>action</code> must be exactly
+      <code>"visible_reply"</code>, and <code>visible_reply.text</code> must be a non-empty string
+      after trimming. Extra top-level fields and extra <code>visible_reply</code> fields are
+      rejected in this slice. <code>trace_id</code> and <code>event_id</code> are attached from the
+      source <code>RoleModelInput</code>, not accepted from model output.
+    </p>
+
+    <h3>CharacterDecision</h3>
+    <pre><code>type CharacterDecision = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  action: "visible_reply"
+  visible_reply: {
+    text: string
+  }
+}</code></pre>
+
+    <h3>RoleModelTurnCompletedLogEntry</h3>
+    <pre><code>type RoleModelTurnCompletedLogEntry = {
   log_id: string
   trace_id: string
   event_id: string
-  kind: "runtime_event_received"
+  kind: "role_model_turn_completed"
   created_at: string
   schema_version: "0.1"
   data: {
-    event: RuntimeEvent
+    model_input: RoleModelInput
+    model_output: RoleModelAdapterOutput
+    decision: CharacterDecision
   }
 }</code></pre>
 
-    <h3>RuntimeRouteResult</h3>
-    <pre><code>type RuntimeRouteResult = {
+    <h3>RoleModelTurnFailedLogEntry</h3>
+    <pre><code>type RoleModelTurnFailedLogEntry = {
+  log_id: string
+  trace_id: string
+  event_id: string
+  kind: "role_model_turn_failed"
+  created_at: string
+  schema_version: "0.1"
+  data: {
+    model_input: RoleModelInput
+    model_output?: RoleModelAdapterOutput
+    raw_model_output_snapshot?: unknown
+    failure: {
+      stage: "adapter_call" | "parse_output"
+      code: "adapter_exception" | "malformed_model_output"
+      message: string
+    }
+  }
+}</code></pre>
+    <p>
+      <code>model_output</code> is present only when the adapter returned a valid
+      <code>RoleModelAdapterOutput</code> envelope that failed later parsing. If the adapter returned
+      a malformed envelope, the failed log uses <code>raw_model_output_snapshot</code> instead so
+      future consumers do not mistake an invalid envelope for a valid adapter output.
+    </p>
+
+    <h3>RoleModelTurnResult</h3>
+    <pre><code>type RoleModelTurnResult = {
   trace_id: string
   event_id: string
   event_type: "USER_MESSAGE"
-  model_needed: false
-  next_step: "logged_only"
+  model_called: true
+  status: "decision_ready_for_commit"
+  decision: CharacterDecision
 }</code></pre>
-    <p>
-      For MVP-001, <code>"USER_MESSAGE"</code> is still the only accepted event type. The route
-      implementation should populate <code>event_type</code> from the normalized
-      <code>RuntimeEvent.type</code> field instead of duplicating the literal constant, so a later
-      reviewed event type can reuse the route contract without rewriting existing fields.
-      The <code>model_needed</code> and <code>next_step</code> values are event-type-specific
-      route policy, not universal defaults. MVP-001 registers only the <code>USER_MESSAGE</code>
-      route policy, which returns <code>model_needed = false</code> and
-      <code>next_step = "logged_only"</code>.
-    </p>
-
-    <h2>Normalization Rules</h2>
-    <ul>
-      <li><code>type</code> must be exactly <code>"USER_MESSAGE"</code>.</li>
-      <li><code>payload.text</code> must be a string with at least one non-whitespace character. Accepted text is preserved as provided.</li>
-      <li>Provided <code>event_id</code> and <code>trace_id</code> values are valid when they are non-empty strings after trimming. Valid provided IDs are preserved exactly.</li>
-      <li>Missing, empty, or whitespace-only <code>event_id</code> and <code>trace_id</code> values are treated as absent and generated by the injected ID generator.</li>
-      <li>Missing <code>created_at</code> means the field is absent and is assigned from the injected clock. Provided <code>created_at</code>, including explicit <code>null</code>, must be a valid ISO-8601 timestamp string with a datetime component and is preserved when valid.</li>
-      <li>Missing <code>schema_version</code> becomes <code>"0.1"</code>. Provided <code>schema_version</code> must be <code>"0.1"</code>; other values are rejected until compatibility handling exists.</li>
-      <li>The raw log entry is appended only after event validation and normalization succeeds.</li>
-      <li>The raw log interface for this slice is append-only and should expose no update or delete operation.</li>
-    </ul>
 
     <h2>Functional Requirements</h2>
     <table>
@@ -182,224 +225,147 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>The runtime accepts a <code>USER_MESSAGE</code> event input.</td>
+          <td>The Role Model Loop accepts only a normalized <code>USER_MESSAGE</code> event with <code>schema_version = "0.1"</code>.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>If <code>event_id</code> is missing, the runtime assigns one.</td>
+          <td>A minimal context-builder boundary builds a <code>DecisionContext</code> from the current event without loading state, history, retrieval, tools, or incidents.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>If <code>trace_id</code> is missing, the runtime assigns one.</td>
+          <td>The rendered <code>RoleModelInput</code> is deterministic for the same normalized event.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>If <code>created_at</code> is missing, the runtime assigns the current timestamp through an injectable clock.</td>
+          <td>The loop calls exactly one injected <code>RoleModelAdapter</code> per accepted event.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>The normalized event includes <code>schema_version = "0.1"</code>.</td>
+          <td>The default tests use a fake adapter and do not call a live model provider or external service.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>The runtime rejects unsupported event types.</td>
+          <td>The parser accepts only <code>raw_text</code> JSON matching <code>RoleModelRawTextJson</code>.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>The runtime rejects <code>USER_MESSAGE</code> events with empty or whitespace-only text.</td>
+          <td>Adapter exceptions and malformed adapter output append one <code>role_model_turn_failed</code> raw log entry and do not append a success log entry.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>The runtime appends exactly one <code>RawEventLogEntry</code> through a logging interface.</td>
+          <td>After successful parsing, the loop appends exactly one <code>role_model_turn_completed</code> raw log entry.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>The runtime returns a deterministic route result for accepted events.</td>
+          <td>The result envelope preserves the source <code>trace_id</code>, <code>event_id</code>, and <code>event_type</code>.</td>
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>The route result states <code>model_needed = false</code>.</td>
-        </tr>
-        <tr>
-          <td>FR-11</td>
-          <td>The repository provides a separate <code>artifacts/</code> folder for runtime artifacts and excludes it from Git.</td>
+          <td>The post-call result states <code>model_called = true</code> and <code>status = "decision_ready_for_commit"</code>.</td>
         </tr>
       </tbody>
     </table>
 
     <h2>Non-Functional Requirements</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Requirement</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>NFR-1</td>
-          <td>No live model provider is called.</td>
-        </tr>
-        <tr>
-          <td>NFR-2</td>
-          <td>No external service is called.</td>
-        </tr>
-        <tr>
-          <td>NFR-3</td>
-          <td>Runtime logic is deterministic except ID and timestamp generation.</td>
-        </tr>
-        <tr>
-          <td>NFR-4</td>
-          <td>ID generation and clock access are injectable or mockable in tests.</td>
-        </tr>
-        <tr>
-          <td>NFR-5</td>
-          <td>Raw logging happens through an explicit interface.</td>
-        </tr>
-        <tr>
-          <td>NFR-6</td>
-          <td>The slice must not create placeholder modules for future systems.</td>
-        </tr>
-        <tr>
-          <td>NFR-7</td>
-          <td>Runtime artifacts are stored under <code>artifacts/</code> and are not committed.</td>
-        </tr>
-      </tbody>
-    </table>
+    <ul>
+      <li>Keep the implementation deterministic under injected clock, ID generator, and fake adapter.</li>
+      <li>Keep the new code under the smallest module path needed for the role model boundary.</li>
+      <li>Use explicit validation errors for unsupported event types, unsupported schema versions, malformed context, malformed model output, and empty reply text.</li>
+      <li>Do not add speculative provider adapters, state stores, prompt registries, tool registries, or commit/effects abstractions.</li>
+      <li>Preserve MVP-001 tests unless a spec-backed integration change requires a targeted update.</li>
+    </ul>
 
     <h2>Acceptance Criteria</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Criterion</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>AC-1</td>
-          <td>A valid <code>USER_MESSAGE</code> input returns a normalized event route result.</td>
-        </tr>
-        <tr>
-          <td>AC-2</td>
-          <td>Missing <code>event_id</code> is filled.</td>
-        </tr>
-        <tr>
-          <td>AC-3</td>
-          <td>Missing <code>trace_id</code> is filled.</td>
-        </tr>
-        <tr>
-          <td>AC-4</td>
-          <td>Existing valid <code>event_id</code> and <code>trace_id</code> are preserved.</td>
-        </tr>
-        <tr>
-          <td>AC-5</td>
-          <td>One raw event log append is requested.</td>
-        </tr>
-        <tr>
-          <td>AC-6</td>
-          <td>Unsupported event type is rejected.</td>
-        </tr>
-        <tr>
-          <td>AC-7</td>
-          <td>Empty message text is rejected.</td>
-        </tr>
-        <tr>
-          <td>AC-8</td>
-          <td>The returned route has <code>model_needed = false</code>.</td>
-        </tr>
-        <tr>
-          <td>AC-9</td>
-          <td>Tests pass without calling a model or external service.</td>
-        </tr>
-        <tr>
-          <td>AC-10</td>
-          <td>The development journal records files changed, tests run, review notes, and next action.</td>
-        </tr>
-        <tr>
-          <td>AC-11</td>
-          <td><code>artifacts/</code> exists locally and is ignored by Git.</td>
-        </tr>
-      </tbody>
-    </table>
+    <ul>
+      <li>A normalized <code>USER_MESSAGE</code> can produce a deterministic <code>DecisionContext</code>.</li>
+      <li>The fake adapter receives the rendered <code>RoleModelInput</code> exactly once.</li>
+      <li>A valid fake output parses into a <code>visible_reply</code>-only <code>CharacterDecision</code>.</li>
+      <li>The role model turn appends one raw log entry after successful parsing.</li>
+      <li>Malformed model output appends one failure log entry and fails without a success log append.</li>
+      <li>Adapter exceptions append one failure log entry and fail without a success log append.</li>
+      <li>No live model provider or external service is called.</li>
+      <li>Relevant unit tests pass.</li>
+      <li>Relevant integration tests pass.</li>
+      <li>The development journal records files changed and tests run.</li>
+      <li>Future ideas discovered during implementation are recorded in <a href="future-slices.html">future-slices.html</a>.</li>
+    </ul>
 
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li>Normalize <code>USER_MESSAGE</code> with missing IDs.</li>
-      <li>Preserve existing IDs.</li>
-      <li>Assign <code>schema_version</code>.</li>
-      <li>Reject unsupported <code>schema_version</code>.</li>
-      <li>Preserve valid provided <code>created_at</code>.</li>
-      <li>Reject unsupported event type.</li>
-      <li>Reject empty or whitespace-only text.</li>
-      <li>Return deterministic route result.</li>
-      <li>Route result reflects the normalized event type field instead of a duplicated constant.</li>
-      <li>Reject unknown event types at routing instead of defaulting them to <code>logged_only</code>.</li>
+      <li>Builds minimal <code>DecisionContext</code> from a normalized <code>USER_MESSAGE</code>.</li>
+      <li>Rejects unsupported event type or unsupported <code>schema_version</code>.</li>
+      <li>Renders stable <code>RoleModelInput</code> for the same event.</li>
+      <li>Parses valid fake adapter JSON into <code>CharacterDecision</code>.</li>
+      <li>Rejects malformed JSON, missing or unsupported output <code>schema_version</code>, unknown actions, missing <code>visible_reply</code>, empty reply text, and extra output fields.</li>
     </ul>
 
-    <h3>Integration Test</h3>
+    <h3>Integration Tests</h3>
     <ul>
-      <li>Given <code>USER_MESSAGE</code> input, when Runtime Kernel handles it, then one <code>RawEventLog</code> append is called and route result says <code>logged_only</code> with <code>model_needed = false</code>.</li>
+      <li>Normalized MVP-001 event to fake adapter call to parsed decision to one raw log append.</li>
+      <li>Fake adapter failure or malformed output appends one <code>role_model_turn_failed</code> raw log entry and does not return a successful turn result.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li>Runtime Kernel owns event intake, normalization, validation, ID assignment, trace assignment, and deterministic route selection for this slice.</li>
-      <li>Raw Event Log is represented by a minimal append interface. The implementation may use an in-memory fake for tests.</li>
-      <li>Clock and ID generation must be injected or mockable so tests can assert deterministic output.</li>
-      <li>Generated ID format is an implementation detail behind the ID generator. Tests should assert fake generated values, not a global future ID scheme.</li>
-      <li>The runtime artifact root is <code>artifacts/</code>. This slice does not add a file-backed raw log adapter yet; storage remains the append interface.</li>
-      <li>No Character State Engine, Role Model Loop, Commit &amp; Effects Engine, database adapter, or external service should be introduced unless required to satisfy this exact contract.</li>
-      <li>Future-compatible code should derive downstream fields from normalized runtime records while keeping accepted event types limited to the active slice.</li>
-      <li>Future route policies should be added one event type at a time through tested routing cases, not by widening the current <code>USER_MESSAGE</code> route.</li>
+      <li><code>Runtime Kernel</code> remains responsible for event intake and normalization.</li>
+      <li>A minimal context-builder boundary owns <code>DecisionContext</code> construction for this slice. It does not introduce durable character state.</li>
+      <li><code>Role Model Loop</code> owns model input rendering, fake adapter invocation, and output parsing.</li>
+      <li><code>RawEventLog</code> remains an explicit append-only boundary for the orchestrating model-call path.</li>
+      <li><code>Commit and Effects Engine</code> is not implemented in MVP-002; the parsed decision is returned for a later commit slice.</li>
+      <li>No concrete database, model provider, network client, UI, renderer, or tool implementation is introduced.</li>
     </ul>
 
     <h2>Failure Behavior</h2>
     <ul>
-      <li>Unsupported event type returns a validation error and does not append a raw log entry.</li>
-      <li>Missing payload or empty text returns a validation error and does not append a raw log entry.</li>
-      <li>Unsupported <code>schema_version</code> or malformed <code>created_at</code> returns a validation error and does not append a raw log entry.</li>
-      <li>Raw log append failure returns an error and does not return a successful route result.</li>
-      <li>ID or clock generation failure, if the chosen implementation can fail, returns an explicit runtime error.</li>
+      <li>Unsupported event type or schema version fails before adapter invocation.</li>
+      <li>Adapter exceptions append one <code>role_model_turn_failed</code> entry with <code>stage = "adapter_call"</code>, then propagate as runtime failures.</li>
+      <li>Malformed adapter output appends one <code>role_model_turn_failed</code> entry with <code>stage = "parse_output"</code>, then raises a validation error.</li>
+      <li>Failure log entries include the rendered <code>RoleModelInput</code>, a valid <code>model_output</code> or <code>raw_model_output_snapshot</code> when adapter output exists, and a narrow failure code/message.</li>
+      <li>No <code>role_model_turn_completed</code> entry is appended for failed adapter calls or rejected model outputs.</li>
+      <li>Raw log append failure prevents a successful <code>RoleModelTurnResult</code> from being returned.</li>
     </ul>
 
     <h2>Pre-Code Review Notes</h2>
     <ul>
-      <li>The repository currently has no runtime implementation to reuse.</li>
-      <li>The slice is intentionally smaller than the Notion Phase 1 user turn loop because it excludes Character State Engine, Role Model Loop, visible reply commits, and model calls.</li>
-      <li>The schema fields are limited to the event, log entry, and route result required by this behavior.</li>
-      <li>The logging interface is justified because raw logging is part of the behavior contract and must remain replaceable before a real database exists.</li>
-      <li>The implementation should not widen this into chat, memory, character state, or provider selection.</li>
-      <li>Future-compatible code should derive downstream fields from normalized runtime records while keeping accepted event types limited to the active slice.</li>
+      <li>The behavior does not already exist; MVP-001 intentionally stopped before any context or model boundary.</li>
+      <li>Existing <code>RuntimeEvent</code>, <code>RawEventLog</code>, ID generator, clock, and validation style should be reused.</li>
+      <li>A minimal context-builder function is justified because the framework assigns <code>DecisionContext</code> construction to the Character State Engine side of the architecture.</li>
+      <li>A shared role-model module is justified only for model input rendering, fake adapter invocation, and parser behavior.</li>
+      <li>The slice is intentionally smaller than the full Phase 1 user turn loop.</li>
+      <li>Security and persistence boundaries stay narrow because no real provider, tool, or visible output effect exists.</li>
+      <li>The schema introduces only <code>DecisionContext</code>, <code>RoleModelInput</code>, adapter output, and visible-reply decision fields needed for this slice.</li>
     </ul>
 
-    <h2>Resolved Implementation Decisions</h2>
+    <h2>Post-Code Review Notes</h2>
     <ul>
-      <li>Use Python 3 for MVP-001 runtime implementation.</li>
-      <li>Use Python standard library <code>unittest</code> for MVP-001 tests.</li>
-      <li>Use the minimal <code>src/runtime/</code> package needed by this slice.</li>
-      <li>Use <code>artifacts/</code> as the ignored runtime artifact root.</li>
+      <li>The implementation uses a standalone <code>role_model.loop</code> module instead of wiring the loop behind <code>RuntimeKernel</code>, keeping MVP-001 intake behavior unchanged.</li>
+      <li>The fake adapter boundary is an injected <code>RoleModelAdapter.generate(model_input)</code> protocol; no provider configuration, API key, retry policy, streaming, or network client was added.</li>
+      <li>CharacterDecision parsing and completed-log validation share the same canonical normalizer so reply text trimming cannot diverge between paths.</li>
+      <li>Runtime and role-model raw log entries use a shared <code>runtime.logging.build_raw_log_entry()</code> helper for the common envelope and snapshot copy.</li>
+      <li>Downstream <code>event.type</code> and <code>event_type</code> values are derived from the validated normalized event instead of duplicating the current literal.</li>
+      <li><code>render_role_model_input()</code> validates the required nested <code>DecisionContext.event</code> fields and rejects unsupported extra context fields before rendering a model input.</li>
+      <li>Optional normalized payload strings are preserved from MVP-001 events, and adapter-side mutation cannot change the model-input snapshot written to the raw log.</li>
+      <li>Completed and failed raw log entries deep-copy their snapshots so caller-side mutation cannot change append-only in-memory log truth.</li>
+      <li>Malformed adapter output and adapter exceptions both append one <code>role_model_turn_failed</code> entry and do not append a success entry.</li>
+      <li>Malformed adapter-output envelopes are logged under <code>raw_model_output_snapshot</code> so <code>model_output</code> remains a valid <code>RoleModelAdapterOutput</code> when present.</li>
+      <li>Role-model log builders validate completed decisions, failure stages, and failure codes before returning appendable raw-log records.</li>
+      <li>Successful fake-adapter turns append one <code>role_model_turn_completed</code> entry after parsing and return a <code>decision_ready_for_commit</code> result.</li>
+      <li>No Commit and Effects Engine, visible conversation persistence, character state, incidents, tools, retrieval, Live2D, assets, or background workers were introduced.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>No open MVP-001 implementation questions remain after the 2026-05-14 implementation pass.</li>
+      <li>Should <code>CharacterDecision</code> gain a generated <code>decision_id</code> in the commit slice, or only when durable decision records are introduced?</li>
+      <li>Should <code>role_model_turn_failed</code> remain a single failure kind after Commit and Effects failure logging exists, or split by failure stage later?</li>
     </ul>
 
-    <h2>Future Ideas Parking Lot</h2>
-    <p>
-      Future ideas are tracked in <a href="future-slices.html">future-slices.html</a>. MVP-002 should introduce
-      the minimal Role Model Loop with a fake model adapter only after MVP-001 is implemented, tested, and journaled.
-    </p>
-
-    <h2>Review Completion Checklist</h2>
+    <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Spec defines one behavior slice.</li>
-      <li>Spec defines only minimal schema fields.</li>
-      <li>Spec excludes model calls and future framework systems.</li>
-      <li>Spec defines boundary behavior and failure behavior.</li>
-      <li>Spec includes unit and integration test expectations.</li>
+      <li>Minimal Commit and Effects Engine that stores a visible reply after a parsed decision.</li>
+      <li>Recent visible messages in <code>DecisionContext</code>.</li>
+      <li>Real model provider adapter behind the same <code>RoleModelAdapter</code> interface.</li>
+      <li>State-aware context from Character State Engine after a minimal state slice exists.</li>
     </ul>
   </main>
 </body>

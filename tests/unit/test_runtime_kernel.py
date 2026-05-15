@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from runtime.kernel import (  # noqa: E402
     RuntimeValidationError,
+    build_raw_event_log_entry,
     normalize_runtime_event,
     route_runtime_event,
 )
@@ -160,6 +161,25 @@ class RuntimeEventNormalizationTests(unittest.TestCase):
                 "next_step": "logged_only",
             },
         )
+
+    def test_raw_event_log_entry_copies_event_snapshot(self):
+        event = {
+            "event_id": "event-1",
+            "trace_id": "trace-1",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:30:00+00:00",
+            "schema_version": "0.1",
+            "payload": {"text": "hello"},
+        }
+
+        entry = build_raw_event_log_entry(
+            event,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+        event["payload"]["text"] = "mutated"
+
+        self.assertEqual(entry["data"]["event"]["payload"]["text"], "hello")
 
     def test_rejects_unknown_event_route_instead_of_defaulting_logged_only(self):
         event = {
