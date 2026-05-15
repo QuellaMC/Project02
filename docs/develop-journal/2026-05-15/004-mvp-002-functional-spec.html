@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal - MVP-002 Functional Spec</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 960px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-002 Functional Spec</h1>
+    <p>Date: 2026-05-15</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Created a short-lived branch for MVP-002: <code>feature/mvp-002-functional-spec</code>.</li>
+      <li>Recorded MVP-001 as completed at <a href="../../plan/completed/mvp-001-runtime-event-intake-and-raw-logging.html">docs/plan/completed/mvp-001-runtime-event-intake-and-raw-logging.html</a>.</li>
+      <li>Replaced <a href="../../plan/active-slice.html">docs/plan/active-slice.html</a> with <code>MVP-002 - Minimal Role Model Loop with Fake Adapter</code>.</li>
+      <li>Updated the plan index so MVP-002 is active and MVP-001 is listed under completed plans.</li>
+      <li>Updated the future-slices parking lot to mark MVP-002 as promoted and park commit/history work separately.</li>
+      <li>Updated <a href="../../../AGENTS.md">AGENTS.md</a> and <a href="../../wiki/development-workflow.html">docs/wiki/development-workflow.html</a> to remove stale <code>codex/</code> branch-prefix guidance and require the repository branch naming policy.</li>
+      <li>Resolved pre-code review findings by defining failure logging, the exact fake adapter output JSON contract, and post-call result fields.</li>
+    </ul>
+
+    <h2>Why It Changed</h2>
+    <p>
+      MVP-001 is implemented and tested, so the active planning slot can move to the next runtime
+      slice. MVP-002 stays narrow by defining only a current-event DecisionContext builder plus the
+      fake-adapter Role Model Loop boundary, while deferring visible reply commits, recent-message
+      context, real provider calls, state, incidents, tools, retrieval, Live2D, and assets.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/completed/mvp-001-runtime-event-intake-and-raw-logging.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-15/004-mvp-002-functional-spec.html</code></li>
+      <li><code>AGENTS.md</code></li>
+      <li><code>docs/wiki/development-workflow.html</code></li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>git diff --check</code> - passed.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff format --check .</code> - passed, 7 files already formatted.</li>
+      <li><code>python3 -m compileall src tests</code> - passed.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 14 tests.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>The earlier AGENTS.md policy change was already committed on <code>main</code> before this branch; this pass only resolves the stale <code>codex/</code> branch-prefix conflict.</li>
+      <li>No production runtime code changed in this planning pass.</li>
+      <li>The active slice introduces only the minimum schema needed for a current-event context builder and fake-adapter Role Model Loop contract.</li>
+      <li>Rejected model outputs now use a narrow <code>role_model_turn_failed</code> log entry instead of leaving failure logging open.</li>
+      <li><code>RoleModelAdapterOutput.raw_text</code> now has an exact accepted JSON shape.</li>
+      <li>The post-call result now uses <code>model_called</code> and <code>status</code> instead of reusing Runtime Kernel route policy fields.</li>
+      <li>The full Phase 1 user turn loop is split so Commit and Effects work can be reviewed separately.</li>
+    </ul>
+
+    <h2>Future Ideas Discovered</h2>
+    <ul>
+      <li>Minimal visible reply commit in Commit and Effects Engine.</li>
+      <li>Recent visible messages in <code>DecisionContext</code>.</li>
+      <li>Real provider adapter after the fake adapter contract is proven.</li>
+      <li>State-aware context after a minimal character state slice exists.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Review the MVP-002 spec. If accepted, write the MVP-002 tests first, then implement only the
+      fake-adapter Role Model Loop behavior described in the active slice.
+    </p>
+  </main>
+</body>
+</html>

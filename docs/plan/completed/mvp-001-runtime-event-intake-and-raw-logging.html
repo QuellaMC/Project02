@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Completed - MVP-001 - Runtime Event Intake and Raw Logging</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    h3 { margin-top: 22px; font-size: 1rem; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul, ol { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    pre { overflow-x: auto; background: #202923; color: #f3f7f1; border-radius: 8px; padding: 16px; }
+    pre code { background: transparent; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; }
+    th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #edf1eb; }
+    blockquote { border-left: 4px solid #b9c6bd; margin: 16px 0; padding: 8px 14px; background: #fff; color: #34413d; }
+    .status { display: inline-block; border: 1px solid #aebbad; border-radius: 999px; padding: 2px 10px; background: #fff; font-size: 0.9rem; }
+    .meta { color: #4a5651; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-001 - Runtime Event Intake and Raw Logging</h1>
+    <p><span class="status">Status: implemented and tested</span></p>
+    <p class="meta">
+      Created: 2026-05-14. Implemented: 2026-05-14. Completed record:
+      <code>docs/plan/completed/mvp-001-runtime-event-intake-and-raw-logging.html</code>.
+      Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
+    </p>
+
+    <h2>Source Context</h2>
+    <p>
+      Product direction comes from the Notion project hub
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.
+      The relevant source pages are
+      <a href="https://www.notion.so/35f8995c0c5e818f948dfbf3944f52ce">01 - Framework Overview</a>,
+      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.
+    </p>
+    <blockquote>
+      Notion direction: all triggers become RuntimeEvents, the Runtime Kernel owns event intake and routing,
+      and Raw Event Log preserves runtime truth.
+    </blockquote>
+    <p>
+      Local implementation direction comes from <a href="../../../AGENTS.md">AGENTS.md</a> and
+      <a href="../../wiki/development-workflow.html">Development Workflow</a>: build one small behavior slice,
+      write tests, implement only that behavior, then record the result in the journal.
+    </p>
+
+    <h2>Goal</h2>
+    <p>
+      Implement the smallest runtime foundation that accepts a <code>USER_MESSAGE</code>-like
+      <code>RuntimeEvent</code>, normalizes it, assigns event and trace identifiers, appends one raw
+      log entry through a logging interface, and returns a deterministic routing result without
+      calling a model.
+    </p>
+
+    <h2>Current Scope</h2>
+    <ul>
+      <li><code>RuntimeEvent</code> input shape for <code>USER_MESSAGE</code> only.</li>
+      <li><code>event_id</code> assignment when missing.</li>
+      <li><code>trace_id</code> assignment when missing.</li>
+      <li><code>schema_version</code> assignment.</li>
+      <li><code>created_at</code> normalization when missing.</li>
+      <li>Basic event type validation.</li>
+      <li>Basic message text validation.</li>
+      <li><code>RawEventLog</code> append interface.</li>
+      <li>Deterministic route result.</li>
+      <li>Python implementation under <code>src/runtime/</code>.</li>
+      <li>Ignored runtime artifact root at <code>artifacts/</code>.</li>
+      <li>Focused unit tests.</li>
+      <li>One integration test for Runtime Kernel intake to raw log append.</li>
+      <li>Development journal entry after implementation.</li>
+    </ul>
+
+    <h2>Explicit Non-Goals</h2>
+    <ul>
+      <li>Model provider calls.</li>
+      <li><code>DecisionContext</code>.</li>
+      <li><code>CharacterDecision</code>.</li>
+      <li><code>CharacterRuntimeState</code>.</li>
+      <li>Living state, incidents, virtual body, scheduled directives, retrieval, tools, Live2D, assets, compaction, or replay UI.</li>
+      <li>Real database persistence.</li>
+      <li>External services.</li>
+      <li>Placeholder modules for future systems.</li>
+    </ul>
+
+    <h2>Minimal Schema</h2>
+    <p>
+      These TypeScript-style shapes define the behavior contract. MVP-001 implements the contract in
+      Python 3 and tests it with <code>unittest</code>.
+    </p>
+
+    <h3>RuntimeEventInput</h3>
+    <pre><code>type RuntimeEventInput = {
+  type: "USER_MESSAGE"
+  payload: {
+    text: string
+    user_id?: string
+    conversation_id?: string
+  }
+  event_id?: string
+  trace_id?: string
+  created_at?: string
+  schema_version?: string
+}</code></pre>
+
+    <h3>RuntimeEvent</h3>
+    <pre><code>type RuntimeEvent = {
+  event_id: string
+  trace_id: string
+  type: "USER_MESSAGE"
+  created_at: string
+  schema_version: "0.1"
+  payload: {
+    text: string
+    user_id?: string
+    conversation_id?: string
+  }
+}</code></pre>
+
+    <h3>RawEventLogEntry</h3>
+    <pre><code>type RawEventLogEntry = {
+  log_id: string
+  trace_id: string
+  event_id: string
+  kind: "runtime_event_received"
+  created_at: string
+  schema_version: "0.1"
+  data: {
+    event: RuntimeEvent
+  }
+}</code></pre>
+
+    <h3>RuntimeRouteResult</h3>
+    <pre><code>type RuntimeRouteResult = {
+  trace_id: string
+  event_id: string
+  event_type: "USER_MESSAGE"
+  model_needed: false
+  next_step: "logged_only"
+}</code></pre>
+    <p>
+      For MVP-001, <code>"USER_MESSAGE"</code> is still the only accepted event type. The route
+      implementation should populate <code>event_type</code> from the normalized
+      <code>RuntimeEvent.type</code> field instead of duplicating the literal constant, so a later
+      reviewed event type can reuse the route contract without rewriting existing fields.
+      The <code>model_needed</code> and <code>next_step</code> values are event-type-specific
+      route policy, not universal defaults. MVP-001 registers only the <code>USER_MESSAGE</code>
+      route policy, which returns <code>model_needed = false</code> and
+      <code>next_step = "logged_only"</code>.
+    </p>
+
+    <h2>Normalization Rules</h2>
+    <ul>
+      <li><code>type</code> must be exactly <code>"USER_MESSAGE"</code>.</li>
+      <li><code>payload.text</code> must be a string with at least one non-whitespace character. Accepted text is preserved as provided.</li>
+      <li>Provided <code>event_id</code> and <code>trace_id</code> values are valid when they are non-empty strings after trimming. Valid provided IDs are preserved exactly.</li>
+      <li>Missing, empty, or whitespace-only <code>event_id</code> and <code>trace_id</code> values are treated as absent and generated by the injected ID generator.</li>
+      <li>Missing <code>created_at</code> means the field is absent and is assigned from the injected clock. Provided <code>created_at</code>, including explicit <code>null</code>, must be a valid ISO-8601 timestamp string with a datetime component and is preserved when valid.</li>
+      <li>Missing <code>schema_version</code> becomes <code>"0.1"</code>. Provided <code>schema_version</code> must be <code>"0.1"</code>; other values are rejected until compatibility handling exists.</li>
+      <li>The raw log entry is appended only after event validation and normalization succeeds.</li>
+      <li>The raw log interface for this slice is append-only and should expose no update or delete operation.</li>
+    </ul>
+
+    <h2>Functional Requirements</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Requirement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>FR-1</td>
+          <td>The runtime accepts a <code>USER_MESSAGE</code> event input.</td>
+        </tr>
+        <tr>
+          <td>FR-2</td>
+          <td>If <code>event_id</code> is missing, the runtime assigns one.</td>
+        </tr>
+        <tr>
+          <td>FR-3</td>
+          <td>If <code>trace_id</code> is missing, the runtime assigns one.</td>
+        </tr>
+        <tr>
+          <td>FR-4</td>
+          <td>If <code>created_at</code> is missing, the runtime assigns the current timestamp through an injectable clock.</td>
+        </tr>
+        <tr>
+          <td>FR-5</td>
+          <td>The normalized event includes <code>schema_version = "0.1"</code>.</td>
+        </tr>
+        <tr>
+          <td>FR-6</td>
+          <td>The runtime rejects unsupported event types.</td>
+        </tr>
+        <tr>
+          <td>FR-7</td>
+          <td>The runtime rejects <code>USER_MESSAGE</code> events with empty or whitespace-only text.</td>
+        </tr>
+        <tr>
+          <td>FR-8</td>
+          <td>The runtime appends exactly one <code>RawEventLogEntry</code> through a logging interface.</td>
+        </tr>
+        <tr>
+          <td>FR-9</td>
+          <td>The runtime returns a deterministic route result for accepted events.</td>
+        </tr>
+        <tr>
+          <td>FR-10</td>
+          <td>The route result states <code>model_needed = false</code>.</td>
+        </tr>
+        <tr>
+          <td>FR-11</td>
+          <td>The repository provides a separate <code>artifacts/</code> folder for runtime artifacts and excludes it from Git.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Non-Functional Requirements</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Requirement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>NFR-1</td>
+          <td>No live model provider is called.</td>
+        </tr>
+        <tr>
+          <td>NFR-2</td>
+          <td>No external service is called.</td>
+        </tr>
+        <tr>
+          <td>NFR-3</td>
+          <td>Runtime logic is deterministic except ID and timestamp generation.</td>
+        </tr>
+        <tr>
+          <td>NFR-4</td>
+          <td>ID generation and clock access are injectable or mockable in tests.</td>
+        </tr>
+        <tr>
+          <td>NFR-5</td>
+          <td>Raw logging happens through an explicit interface.</td>
+        </tr>
+        <tr>
+          <td>NFR-6</td>
+          <td>The slice must not create placeholder modules for future systems.</td>
+        </tr>
+        <tr>
+          <td>NFR-7</td>
+          <td>Runtime artifacts are stored under <code>artifacts/</code> and are not committed.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Acceptance Criteria</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Criterion</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>AC-1</td>
+          <td>A valid <code>USER_MESSAGE</code> input returns a normalized event route result.</td>
+        </tr>
+        <tr>
+          <td>AC-2</td>
+          <td>Missing <code>event_id</code> is filled.</td>
+        </tr>
+        <tr>
+          <td>AC-3</td>
+          <td>Missing <code>trace_id</code> is filled.</td>
+        </tr>
+        <tr>
+          <td>AC-4</td>
+          <td>Existing valid <code>event_id</code> and <code>trace_id</code> are preserved.</td>
+        </tr>
+        <tr>
+          <td>AC-5</td>
+          <td>One raw event log append is requested.</td>
+        </tr>
+        <tr>
+          <td>AC-6</td>
+          <td>Unsupported event type is rejected.</td>
+        </tr>
+        <tr>
+          <td>AC-7</td>
+          <td>Empty message text is rejected.</td>
+        </tr>
+        <tr>
+          <td>AC-8</td>
+          <td>The returned route has <code>model_needed = false</code>.</td>
+        </tr>
+        <tr>
+          <td>AC-9</td>
+          <td>Tests pass without calling a model or external service.</td>
+        </tr>
+        <tr>
+          <td>AC-10</td>
+          <td>The development journal records files changed, tests run, review notes, and next action.</td>
+        </tr>
+        <tr>
+          <td>AC-11</td>
+          <td><code>artifacts/</code> exists locally and is ignored by Git.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Test Plan</h2>
+    <h3>Unit Tests</h3>
+    <ul>
+      <li>Normalize <code>USER_MESSAGE</code> with missing IDs.</li>
+      <li>Preserve existing IDs.</li>
+      <li>Assign <code>schema_version</code>.</li>
+      <li>Reject unsupported <code>schema_version</code>.</li>
+      <li>Preserve valid provided <code>created_at</code>.</li>
+      <li>Reject unsupported event type.</li>
+      <li>Reject empty or whitespace-only text.</li>
+      <li>Return deterministic route result.</li>
+      <li>Route result reflects the normalized event type field instead of a duplicated constant.</li>
+      <li>Reject unknown event types at routing instead of defaulting them to <code>logged_only</code>.</li>
+    </ul>
+
+    <h3>Integration Test</h3>
+    <ul>
+      <li>Given <code>USER_MESSAGE</code> input, when Runtime Kernel handles it, then one <code>RawEventLog</code> append is called and route result says <code>logged_only</code> with <code>model_needed = false</code>.</li>
+    </ul>
+
+    <h2>Implementation Boundaries</h2>
+    <ul>
+      <li>Runtime Kernel owns event intake, normalization, validation, ID assignment, trace assignment, and deterministic route selection for this slice.</li>
+      <li>Raw Event Log is represented by a minimal append interface. The implementation may use an in-memory fake for tests.</li>
+      <li>Clock and ID generation must be injected or mockable so tests can assert deterministic output.</li>
+      <li>Generated ID format is an implementation detail behind the ID generator. Tests should assert fake generated values, not a global future ID scheme.</li>
+      <li>The runtime artifact root is <code>artifacts/</code>. This slice does not add a file-backed raw log adapter yet; storage remains the append interface.</li>
+      <li>No Character State Engine, Role Model Loop, Commit &amp; Effects Engine, database adapter, or external service should be introduced unless required to satisfy this exact contract.</li>
+      <li>Future-compatible code should derive downstream fields from normalized runtime records while keeping accepted event types limited to the active slice.</li>
+      <li>Future route policies should be added one event type at a time through tested routing cases, not by widening the current <code>USER_MESSAGE</code> route.</li>
+    </ul>
+
+    <h2>Failure Behavior</h2>
+    <ul>
+      <li>Unsupported event type returns a validation error and does not append a raw log entry.</li>
+      <li>Missing payload or empty text returns a validation error and does not append a raw log entry.</li>
+      <li>Unsupported <code>schema_version</code> or malformed <code>created_at</code> returns a validation error and does not append a raw log entry.</li>
+      <li>Raw log append failure returns an error and does not return a successful route result.</li>
+      <li>ID or clock generation failure, if the chosen implementation can fail, returns an explicit runtime error.</li>
+    </ul>
+
+    <h2>Pre-Code Review Notes</h2>
+    <ul>
+      <li>The repository currently has no runtime implementation to reuse.</li>
+      <li>The slice is intentionally smaller than the Notion Phase 1 user turn loop because it excludes Character State Engine, Role Model Loop, visible reply commits, and model calls.</li>
+      <li>The schema fields are limited to the event, log entry, and route result required by this behavior.</li>
+      <li>The logging interface is justified because raw logging is part of the behavior contract and must remain replaceable before a real database exists.</li>
+      <li>The implementation should not widen this into chat, memory, character state, or provider selection.</li>
+      <li>Future-compatible code should derive downstream fields from normalized runtime records while keeping accepted event types limited to the active slice.</li>
+    </ul>
+
+    <h2>Resolved Implementation Decisions</h2>
+    <ul>
+      <li>Use Python 3 for MVP-001 runtime implementation.</li>
+      <li>Use Python standard library <code>unittest</code> for MVP-001 tests.</li>
+      <li>Use the minimal <code>src/runtime/</code> package needed by this slice.</li>
+      <li>Use <code>artifacts/</code> as the ignored runtime artifact root.</li>
+    </ul>
+
+    <h2>Open Questions</h2>
+    <ul>
+      <li>No open MVP-001 implementation questions remain after the 2026-05-14 implementation pass.</li>
+    </ul>
+
+    <h2>Future Ideas Parking Lot</h2>
+    <p>
+      Future ideas are tracked in <a href="../future-slices.html">future-slices.html</a>. MVP-002 should introduce
+      the minimal Role Model Loop with a fake model adapter only after MVP-001 is implemented, tested, and journaled.
+    </p>
+
+    <h2>Review Completion Checklist</h2>
+    <ul>
+      <li>Spec defines one behavior slice.</li>
+      <li>Spec defines only minimal schema fields.</li>
+      <li>Spec excludes model calls and future framework systems.</li>
+      <li>Spec defines boundary behavior and failure behavior.</li>
+      <li>Spec includes unit and integration test expectations.</li>
+    </ul>
+  </main>
+</body>
+</html>

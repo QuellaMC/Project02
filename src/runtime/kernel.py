@@ -5,15 +5,21 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
 
-SCHEMA_VERSION = "0.1"
+from runtime.logging import (
+    SCHEMA_VERSION,
+    Clock,
+    IdGenerator,
+    RawEventLogEntry,
+    build_raw_log_entry,
+    clock_timestamp,
+    generate_id,
+)
+
 USER_MESSAGE = "USER_MESSAGE"
 RAW_EVENT_RECEIVED_KIND = "runtime_event_received"
 
 RuntimeEvent = dict[str, Any]
-RawEventLogEntry = dict[str, Any]
 RuntimeRouteResult = dict[str, Any]
-IdGenerator = Callable[[str], str]
-Clock = Callable[[], datetime]
 PayloadNormalizer = Callable[[Any], dict[str, Any]]
 RouteBuilder = Callable[[RuntimeEvent], RuntimeRouteResult]
 _MISSING = object()
@@ -104,15 +110,14 @@ def build_raw_event_log_entry(
     id_generator: IdGenerator = default_id_generator,
     clock: Clock = default_clock,
 ) -> RawEventLogEntry:
-    return {
-        "log_id": _generate_id("log", id_generator),
-        "trace_id": event["trace_id"],
-        "event_id": event["event_id"],
-        "kind": RAW_EVENT_RECEIVED_KIND,
-        "created_at": _clock_timestamp(clock),
-        "schema_version": SCHEMA_VERSION,
-        "data": {"event": event},
-    }
+    return build_raw_log_entry(
+        trace_id=event["trace_id"],
+        event_id=event["event_id"],
+        kind=RAW_EVENT_RECEIVED_KIND,
+        data={"event": event},
+        id_generator=id_generator,
+        clock=clock,
+    )
 
 
 def route_runtime_event(event: RuntimeEvent) -> RuntimeRouteResult:
@@ -177,37 +182,21 @@ def _normalize_optional_id(
     id_generator: IdGenerator,
 ) -> str:
     if value is None:
-        return _generate_id(generated_kind, id_generator)
+        return generate_id(generated_kind, id_generator)
     if not isinstance(value, str):
         raise RuntimeValidationError(f"{field_name} must be a string when provided.")
     if not value.strip():
-        return _generate_id(generated_kind, id_generator)
+        return generate_id(generated_kind, id_generator)
     return value
-
-
-def _generate_id(kind: str, id_generator: IdGenerator) -> str:
-    generated = id_generator(kind)
-    if not isinstance(generated, str) or not generated.strip():
-        raise RuntimeError(f"ID generator returned an invalid {kind} id.")
-    return generated
 
 
 def _normalize_created_at(value: Any, *, clock: Clock) -> str:
     if value is _MISSING:
-        return _clock_timestamp(clock)
+        return clock_timestamp(clock)
     if not isinstance(value, str):
         raise RuntimeValidationError("created_at must be an ISO-8601 timestamp string.")
     _parse_iso8601_timestamp(value)
     return value
-
-
-def _clock_timestamp(clock: Clock) -> str:
-    timestamp = clock()
-    if not isinstance(timestamp, datetime):
-        raise RuntimeError("Clock returned a non-datetime value.")
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=UTC)
-    return timestamp.isoformat()
 
 
 def _parse_iso8601_timestamp(value: str) -> None:
