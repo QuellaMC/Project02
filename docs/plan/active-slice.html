@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-002 - Minimal Role Model Loop with Fake Adapter</title>
+  <title>MVP-003 - Minimal Visible Reply Commit</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,7 +27,7 @@
 </head>
 <body>
   <main>
-    <h1>MVP-002 - Minimal Role Model Loop with Fake Adapter</h1>
+    <h1>MVP-003 - Minimal Visible Reply Commit</h1>
     <p><span class="status">Status: implemented and tested, pending review</span></p>
     <p class="meta">
       Created: 2026-05-15. Implemented: 2026-05-15. Active slice path:
@@ -46,172 +46,174 @@
       <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.
     </p>
     <blockquote>
-      Current direction: Runtime Kernel routes events, Role Model Loop is the only model-call
-      boundary, Commit and Effects Engine validates durable changes, and Raw Event Log preserves
-      the runtime truth.
+      Current direction: the model proposes a structured <code>CharacterDecision</code>;
+      Commit and Effects validates what the runtime accepts, commits durable effects,
+      and records the result in the raw log.
     </blockquote>
     <p>
       Local implementation truth comes from
-      <a href="completed/mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001</a>:
-      the runtime can accept a <code>USER_MESSAGE</code>, normalize IDs and timestamps, append one
-      raw event log entry, and return a deterministic <code>logged_only</code> route without a
-      model call.
+      <a href="completed/mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001</a>
+      and
+      <a href="completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html">MVP-002</a>.
+      MVP-002 can parse a <code>visible_reply</code>-only <code>CharacterDecision</code>
+      and return <code>status = "decision_ready_for_commit"</code>. It intentionally
+      stops before storing any visible reply.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Add the smallest testable model-call path after MVP-001. The path accepts an
-      already-normalized <code>USER_MESSAGE</code> event, builds a minimal
-      <code>DecisionContext</code> through a tiny context-builder boundary, renders one deterministic
-      model input through the Role Model Loop, calls an injected fake model adapter, parses a
-      <code>visible_reply</code>-only <code>CharacterDecision</code>, records the model turn through
-      the existing raw log boundary, and returns the parsed decision for a future commit slice.
+      Add the smallest Commit and Effects Engine behavior after MVP-002: accept a
+      parsed visible-reply decision plus the normalized source <code>USER_MESSAGE</code>,
+      validate that the decision belongs to that event, append one visible conversation
+      output through an injected interface, append one raw commit log entry, and return
+      a deterministic commit result. Invalid decisions with trustworthy trace identity
+      are rejected through a raw log entry and do not create visible output.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>One accepted event type: normalized <code>USER_MESSAGE</code> from the MVP-001 contract.</li>
-      <li>One call type: <code>user_message_visible_reply</code>.</li>
-      <li>One allowed action: <code>visible_reply</code>.</li>
-      <li>Minimal <code>DecisionContext</code> built by a tiny context builder from the current event only.</li>
-      <li>Deterministic model input rendering from the context.</li>
-      <li>An injected <code>RoleModelAdapter</code> interface, tested with a fake adapter.</li>
-      <li>Strict parsing of a JSON-like model output into a <code>CharacterDecision</code>.</li>
-      <li>One raw log entry for the completed role-model turn after parsing succeeds.</li>
-      <li>Focused unit tests for context building, input rendering, adapter calls, and output parsing.</li>
-      <li>One integration test from normalized runtime event to parsed decision and raw log append.</li>
+      <li>One source event type: normalized <code>USER_MESSAGE</code> from MVP-001.</li>
+      <li>One model-turn result status: <code>decision_ready_for_commit</code> from MVP-002.</li>
+      <li>One allowed decision action: <code>visible_reply</code>.</li>
+      <li>One visible output kind: <code>assistant_visible_reply</code>.</li>
+      <li>One injected append-only <code>VisibleConversationLog</code> interface for the committed output.</li>
+      <li>One accepted raw log kind: <code>visible_reply_committed</code>.</li>
+      <li>One rejected raw log kind: <code>visible_reply_rejected</code>.</li>
+      <li>Deterministic output ID, log ID, and timestamp generation through existing injected helpers.</li>
+      <li>Focused unit tests for validation, output building, raw-log builders, and rejection behavior.</li>
+      <li>One integration test from MVP-002-style result to visible output append and raw commit log append.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>Live model provider calls.</li>
-      <li>Provider configuration, API keys, retry policy, streaming, or network access.</li>
-      <li>Conversation history or recent visible message retrieval.</li>
-      <li><code>CharacterRuntimeState</code>, living state, virtual body, incidents, scheduled directives, active threads, continuity, retrieval, tools, Live2D, assets, compaction, or replay UI.</li>
-      <li>Commit and Effects Engine implementation.</li>
-      <li>Visible reply delivery or conversation persistence.</li>
-      <li>State patch actions, incident actions, tool requests, scheduled directive actions, or continuity writes.</li>
-      <li>Changing the MVP-001 raw event intake schema.</li>
-      <li>Changing existing MVP-001 behavior except where an integration seam is required and tested.</li>
+      <li>Calling a live model provider or changing Role Model Loop behavior or model-provider execution.</li>
+      <li>Wiring a full user-turn orchestrator through <code>RuntimeKernel</code>.</li>
+      <li>Real UI delivery, push notifications, streaming, network calls, or external side effects.</li>
+      <li>Concrete database adapters, migrations, or transactional storage.</li>
+      <li>Conversation history retrieval or adding recent messages to <code>DecisionContext</code>.</li>
+      <li><code>CharacterRuntimeState</code>, living state, virtual body, incidents, scheduled directives, continuity, retrieval, tools, Live2D, assets, compaction, or replay UI.</li>
+      <li>State patches, incident actions, tool requests, scheduled directive actions, continuity writes, or permission-confirmation flows.</li>
+      <li>Generating a durable <code>decision_id</code> or introducing a separate decision store.</li>
+      <li>Changing the MVP-001 event schema or MVP-002 decision schema.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
     <p>
-      These TypeScript-style shapes define the intended behavior contract. MVP-002 should implement
-      the contract in Python 3 and test it with <code>unittest</code>.
+      These TypeScript-style shapes define the intended behavior contract. MVP-003
+      should implement the contract in Python 3 and test it with <code>unittest</code>.
     </p>
 
-    <h3>DecisionContext</h3>
-    <pre><code>type DecisionContext = {
+    <h3>VisibleReplyCommitInput</h3>
+    <pre><code>type VisibleReplyCommitInput = {
   schema_version: "0.1"
-  trace_id: string
-  event_id: string
-  call_type: "user_message_visible_reply"
-  event: {
+  source_event: RuntimeEvent &amp; {
     type: "USER_MESSAGE"
-    text: string
-    created_at: string
-    user_id?: string
-    conversation_id?: string
+    event_id: string
+    trace_id: string
+    payload: {
+      text: string
+      user_id?: string
+      conversation_id?: string
+    }
   }
-  allowed_actions: ["visible_reply"]
+  role_model_result: RoleModelTurnResult &amp; {
+    status: "decision_ready_for_commit"
+    model_called: true
+    decision: CharacterDecision &amp; {
+      action: "visible_reply"
+      visible_reply: {
+        text: string
+      }
+    }
+  }
 }</code></pre>
 
-    <h3>RoleModelInput</h3>
-    <pre><code>type RoleModelInput = {
-  schema_version: "0.1"
+    <h3>VisibleConversationOutput</h3>
+    <pre><code>type VisibleConversationOutput = {
+  output_id: string
   trace_id: string
-  event_id: string
-  instructions: string
-  decision_context: DecisionContext
-}</code></pre>
-
-    <h3>RoleModelAdapterOutput</h3>
-    <pre><code>type RoleModelAdapterOutput = {
-  model_id: string
+  source_event_id: string
+  kind: "assistant_visible_reply"
   created_at: string
-  raw_text: string
-}</code></pre>
-
-    <h3>RoleModelRawTextJson</h3>
-    <pre><code>type RoleModelRawTextJson = {
   schema_version: "0.1"
-  action: "visible_reply"
-  visible_reply: {
-    text: string
+  text: string
+  user_id?: string
+  conversation_id?: string
+  source: {
+    decision_action: "visible_reply"
+    role_model_status: "decision_ready_for_commit"
   }
 }</code></pre>
     <p>
-      <code>RoleModelAdapterOutput.raw_text</code> must be a JSON object matching
-      <code>RoleModelRawTextJson</code>. The parser requires <code>schema_version</code>,
-      <code>action</code>, and <code>visible_reply.text</code>. <code>schema_version</code> must
-      be exactly <code>"0.1"</code>, <code>action</code> must be exactly
-      <code>"visible_reply"</code>, and <code>visible_reply.text</code> must be a non-empty string
-      after trimming. Extra top-level fields and extra <code>visible_reply</code> fields are
-      rejected in this slice. <code>trace_id</code> and <code>event_id</code> are attached from the
-      source <code>RoleModelInput</code>, not accepted from model output.
+      <code>user_id</code> and <code>conversation_id</code> are copied from the normalized
+      source event payload when present. The commit step does not invent these values.
     </p>
 
-    <h3>CharacterDecision</h3>
-    <pre><code>type CharacterDecision = {
-  schema_version: "0.1"
-  trace_id: string
-  event_id: string
-  action: "visible_reply"
-  visible_reply: {
-    text: string
-  }
-}</code></pre>
-
-    <h3>RoleModelTurnCompletedLogEntry</h3>
-    <pre><code>type RoleModelTurnCompletedLogEntry = {
+    <h3>VisibleReplyCommittedLogEntry</h3>
+    <pre><code>type VisibleReplyCommittedLogEntry = {
   log_id: string
   trace_id: string
   event_id: string
-  kind: "role_model_turn_completed"
+  kind: "visible_reply_committed"
   created_at: string
   schema_version: "0.1"
   data: {
-    model_input: RoleModelInput
-    model_output: RoleModelAdapterOutput
-    decision: CharacterDecision
+    source_event: RuntimeEvent
+    role_model_result: RoleModelTurnResult
+    output: VisibleConversationOutput
   }
 }</code></pre>
 
-    <h3>RoleModelTurnFailedLogEntry</h3>
-    <pre><code>type RoleModelTurnFailedLogEntry = {
+    <h3>VisibleReplyRejectedLogEntry</h3>
+    <pre><code>type VisibleReplyRejectedLogEntry = {
   log_id: string
   trace_id: string
   event_id: string
-  kind: "role_model_turn_failed"
+  kind: "visible_reply_rejected"
   created_at: string
   schema_version: "0.1"
   data: {
-    model_input: RoleModelInput
-    model_output?: RoleModelAdapterOutput
-    raw_model_output_snapshot?: unknown
+    source_event: unknown
+    role_model_result_snapshot: unknown
+    decision_snapshot?: unknown
     failure: {
-      stage: "adapter_call" | "parse_output"
-      code: "adapter_exception" | "malformed_model_output"
+      stage: "commit_validation"
+      code:
+        | "malformed_commit_input"
+        | "identity_mismatch"
+        | "unsupported_result_status"
+        | "unsupported_action"
+        | "empty_reply_text"
       message: string
     }
   }
 }</code></pre>
     <p>
-      <code>model_output</code> is present only when the adapter returned a valid
-      <code>RoleModelAdapterOutput</code> envelope that failed later parsing. If the adapter returned
-      a malformed envelope, the failed log uses <code>raw_model_output_snapshot</code> instead so
-      future consumers do not mistake an invalid envelope for a valid adapter output.
+      In rejected logs, <code>source_event</code> is a raw source-event snapshot for
+      audit and replay. It may be malformed or unsupported, so it is intentionally
+      not typed as a normalized <code>RuntimeEvent</code>.
     </p>
 
-    <h3>RoleModelTurnResult</h3>
-    <pre><code>type RoleModelTurnResult = {
+    <h3>VisibleReplyCommitResult</h3>
+    <pre><code>type VisibleReplyCommitResult = {
   trace_id: string
   event_id: string
   event_type: "USER_MESSAGE"
-  model_called: true
-  status: "decision_ready_for_commit"
-  decision: CharacterDecision
+  status: "visible_reply_committed"
+  output: VisibleConversationOutput
+}</code></pre>
+
+    <h3>VisibleReplyRejectResult</h3>
+    <pre><code>type VisibleReplyRejectResult = {
+  trace_id: string
+  event_id: string
+  event_type: "USER_MESSAGE"
+  status: "visible_reply_rejected"
+  failure: {
+    stage: "commit_validation"
+    code: string
+    message: string
+  }
 }</code></pre>
 
     <h2>Functional Requirements</h2>
@@ -225,65 +227,65 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>The Role Model Loop accepts only a normalized <code>USER_MESSAGE</code> event with <code>schema_version = "0.1"</code>.</td>
+          <td>The commit boundary accepts only a normalized <code>USER_MESSAGE</code> source event with <code>schema_version = "0.1"</code>.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>A minimal context-builder boundary builds a <code>DecisionContext</code> from the current event without loading state, history, retrieval, tools, or incidents.</td>
+          <td>The commit boundary accepts only an MVP-002 result with <code>status = "decision_ready_for_commit"</code> and <code>model_called = true</code>.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>The rendered <code>RoleModelInput</code> is deterministic for the same normalized event.</td>
+          <td><code>trace_id</code> and <code>event_id</code> must match across the source event, role-model result, and parsed decision.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>The loop calls exactly one injected <code>RoleModelAdapter</code> per accepted event.</td>
+          <td>Only <code>action = "visible_reply"</code> is accepted.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>The default tests use a fake adapter and do not call a live model provider or external service.</td>
+          <td><code>visible_reply.text</code> must be a non-empty string after trimming.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>The parser accepts only <code>raw_text</code> JSON matching <code>RoleModelRawTextJson</code>.</td>
+          <td>Successful validation builds one <code>VisibleConversationOutput</code> using an injected output ID generator and clock.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>Adapter exceptions and malformed adapter output append one <code>role_model_turn_failed</code> raw log entry and do not append a success log entry.</td>
+          <td>Successful validation appends exactly one visible output through <code>VisibleConversationLog</code>.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>After successful parsing, the loop appends exactly one <code>role_model_turn_completed</code> raw log entry.</td>
+          <td>Before appending visible output, the commit boundary appends exactly one <code>visible_reply_committed</code> raw log entry.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>The result envelope preserves the source <code>trace_id</code>, <code>event_id</code>, and <code>event_type</code>.</td>
+          <td>Supported validation failures with trustworthy source trace identity append one <code>visible_reply_rejected</code> raw log entry and append no visible output.</td>
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>The post-call result states <code>model_called = true</code> and <code>status = "decision_ready_for_commit"</code>.</td>
+          <td>The result envelope preserves <code>trace_id</code>, <code>event_id</code>, and <code>event_type</code> from the normalized source event.</td>
         </tr>
       </tbody>
     </table>
 
     <h2>Non-Functional Requirements</h2>
     <ul>
-      <li>Keep the implementation deterministic under injected clock, ID generator, and fake adapter.</li>
-      <li>Keep the new code under the smallest module path needed for the role model boundary.</li>
-      <li>Use explicit validation errors for unsupported event types, unsupported schema versions, malformed context, malformed model output, and empty reply text.</li>
-      <li>Do not add speculative provider adapters, state stores, prompt registries, tool registries, or commit/effects abstractions.</li>
-      <li>Preserve MVP-001 tests unless a spec-backed integration change requires a targeted update.</li>
+      <li>Keep the implementation deterministic under injected clock and ID generator.</li>
+      <li>Reuse <code>runtime.logging.build_raw_log_entry()</code> for raw log envelopes.</li>
+      <li>Keep the new code under the smallest module path needed for Commit and Effects behavior.</li>
+      <li>Deep-copy committed output and log snapshots so caller-side mutation cannot change append-only in-memory truth.</li>
+      <li>Do not add speculative storage adapters, transaction managers, permission matrices, outbox workers, UI delivery, or orchestration layers.</li>
+      <li>Preserve MVP-001 and MVP-002 tests unless a spec-backed compatibility issue is found.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>A normalized <code>USER_MESSAGE</code> can produce a deterministic <code>DecisionContext</code>.</li>
-      <li>The fake adapter receives the rendered <code>RoleModelInput</code> exactly once.</li>
-      <li>A valid fake output parses into a <code>visible_reply</code>-only <code>CharacterDecision</code>.</li>
-      <li>The role model turn appends one raw log entry after successful parsing.</li>
-      <li>Malformed model output appends one failure log entry and fails without a success log append.</li>
-      <li>Adapter exceptions append one failure log entry and fail without a success log append.</li>
-      <li>No live model provider or external service is called.</li>
+      <li>A valid MVP-002 visible-reply result can produce one visible output record.</li>
+      <li>The visible output append is called exactly once for a valid commit.</li>
+      <li>A valid commit appends exactly one <code>visible_reply_committed</code> raw log entry.</li>
+      <li>Unsupported action, unsupported status, empty reply text, or trace/event mismatch rejects without visible output.</li>
+      <li>A supported rejection appends exactly one <code>visible_reply_rejected</code> raw log entry.</li>
+      <li>No live model provider, external service, UI delivery, or concrete database is called.</li>
       <li>Relevant unit tests pass.</li>
       <li>Relevant integration tests pass.</li>
       <li>The development journal records files changed and tests run.</li>
@@ -293,79 +295,83 @@
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li>Builds minimal <code>DecisionContext</code> from a normalized <code>USER_MESSAGE</code>.</li>
-      <li>Rejects unsupported event type or unsupported <code>schema_version</code>.</li>
-      <li>Renders stable <code>RoleModelInput</code> for the same event.</li>
-      <li>Parses valid fake adapter JSON into <code>CharacterDecision</code>.</li>
-      <li>Rejects malformed JSON, missing or unsupported output <code>schema_version</code>, unknown actions, missing <code>visible_reply</code>, empty reply text, and extra output fields.</li>
+      <li>Validates matching <code>trace_id</code> and <code>event_id</code> across source event, role-model result, and decision.</li>
+      <li>Builds a minimal <code>VisibleConversationOutput</code> from a visible-reply decision.</li>
+      <li>Copies optional <code>user_id</code> and <code>conversation_id</code> from the source event when present.</li>
+      <li>Rejects unsupported result status, unsupported action, empty reply text, unsupported source event type, unsupported schema version, and identity mismatch.</li>
+      <li>Builds committed and rejected raw log entries with deep-copied snapshots.</li>
+      <li>Rejects unsupported rejection failure codes.</li>
     </ul>
 
     <h3>Integration Tests</h3>
     <ul>
-      <li>Normalized MVP-001 event to fake adapter call to parsed decision to one raw log append.</li>
-      <li>Fake adapter failure or malformed output appends one <code>role_model_turn_failed</code> raw log entry and does not return a successful turn result.</li>
+      <li>MVP-002-style result plus normalized source event to <code>visible_reply_committed</code> raw log append to visible output append.</li>
+      <li>Invalid visible-reply decision with valid trace identity to <code>visible_reply_rejected</code> raw log append and no visible output append.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
       <li><code>Runtime Kernel</code> remains responsible for event intake and normalization.</li>
-      <li>A minimal context-builder boundary owns <code>DecisionContext</code> construction for this slice. It does not introduce durable character state.</li>
-      <li><code>Role Model Loop</code> owns model input rendering, fake adapter invocation, and output parsing.</li>
-      <li><code>RawEventLog</code> remains an explicit append-only boundary for the orchestrating model-call path.</li>
-      <li><code>Commit and Effects Engine</code> is not implemented in MVP-002; the parsed decision is returned for a later commit slice.</li>
-      <li>No concrete database, model provider, network client, UI, renderer, or tool implementation is introduced.</li>
+      <li><code>Role Model Loop</code> remains responsible for model input rendering, fake adapter invocation, and output parsing.</li>
+      <li><code>Commit and Effects Engine</code> owns validation, visible output construction, visible output append, and commit/reject raw logging for this slice.</li>
+      <li><code>RawEventLog</code> remains an explicit append-only boundary.</li>
+      <li><code>VisibleConversationLog</code> is an injected append-only test interface, not a concrete database or UI delivery layer.</li>
+      <li>No concrete database, network client, model provider, renderer, scheduler, worker, or tool implementation is introduced.</li>
     </ul>
 
     <h2>Failure Behavior</h2>
     <ul>
-      <li>Unsupported event type or schema version fails before adapter invocation.</li>
-      <li>Adapter exceptions append one <code>role_model_turn_failed</code> entry with <code>stage = "adapter_call"</code>, then propagate as runtime failures.</li>
-      <li>Malformed adapter output appends one <code>role_model_turn_failed</code> entry with <code>stage = "parse_output"</code>, then raises a validation error.</li>
-      <li>Failure log entries include the rendered <code>RoleModelInput</code>, a valid <code>model_output</code> or <code>raw_model_output_snapshot</code> when adapter output exists, and a narrow failure code/message.</li>
-      <li>No <code>role_model_turn_completed</code> entry is appended for failed adapter calls or rejected model outputs.</li>
-      <li>Raw log append failure prevents a successful <code>RoleModelTurnResult</code> from being returned.</li>
+      <li>Malformed source event identity fails before visible output append. If no trustworthy <code>trace_id</code> and <code>event_id</code> are available, no raw rejection log is appended.</li>
+      <li>Unsupported result status, unsupported action, empty reply text, or identity mismatch appends one <code>visible_reply_rejected</code> entry when the source event provides trustworthy trace identity.</li>
+      <li>Rejected commits do not append visible output and do not append <code>visible_reply_committed</code>.</li>
+      <li>Raw log append failure prevents visible output append and prevents a successful <code>VisibleReplyCommitResult</code> from being returned.</li>
+      <li>Visible output append failure propagates after <code>visible_reply_committed</code> is logged, leaving an audit record that can drive reconciliation or retry.</li>
+      <li>No retry, dedupe, transaction, or recovery policy is implemented in this slice.</li>
     </ul>
 
     <h2>Pre-Code Review Notes</h2>
     <ul>
-      <li>The behavior does not already exist; MVP-001 intentionally stopped before any context or model boundary.</li>
-      <li>Existing <code>RuntimeEvent</code>, <code>RawEventLog</code>, ID generator, clock, and validation style should be reused.</li>
-      <li>A minimal context-builder function is justified because the framework assigns <code>DecisionContext</code> construction to the Character State Engine side of the architecture.</li>
-      <li>A shared role-model module is justified only for model input rendering, fake adapter invocation, and parser behavior.</li>
-      <li>The slice is intentionally smaller than the full Phase 1 user turn loop.</li>
-      <li>Security and persistence boundaries stay narrow because no real provider, tool, or visible output effect exists.</li>
-      <li>The schema introduces only <code>DecisionContext</code>, <code>RoleModelInput</code>, adapter output, and visible-reply decision fields needed for this slice.</li>
+      <li>The behavior does not already exist; MVP-002 intentionally stopped at <code>decision_ready_for_commit</code>.</li>
+      <li>The slice is intentionally smaller than the full Phase 1 user turn loop because it does not orchestrate Runtime Kernel to Role Model Loop to Commit and Effects in one public API.</li>
+      <li>A minimal Commit and Effects module is justified because the framework assigns durable output commits and side effects to that boundary.</li>
+      <li>The visible output store is an interface only because this slice needs a commit target but not a concrete database.</li>
+      <li>The schema introduces only a visible output record plus commit/reject log records needed for this behavior.</li>
+      <li>Security stays narrow because the only effect is an in-process visible conversation output append; there are no external messages, tools, files, accounts, or money-related actions.</li>
     </ul>
 
     <h2>Post-Code Review Notes</h2>
     <ul>
-      <li>The implementation uses a standalone <code>role_model.loop</code> module instead of wiring the loop behind <code>RuntimeKernel</code>, keeping MVP-001 intake behavior unchanged.</li>
-      <li>The fake adapter boundary is an injected <code>RoleModelAdapter.generate(model_input)</code> protocol; no provider configuration, API key, retry policy, streaming, or network client was added.</li>
-      <li>CharacterDecision parsing and completed-log validation share the same canonical normalizer so reply text trimming cannot diverge between paths.</li>
-      <li>Runtime and role-model raw log entries use a shared <code>runtime.logging.build_raw_log_entry()</code> helper for the common envelope and snapshot copy.</li>
-      <li>Downstream <code>event.type</code> and <code>event_type</code> values are derived from the validated normalized event instead of duplicating the current literal.</li>
-      <li><code>render_role_model_input()</code> validates the required nested <code>DecisionContext.event</code> fields and rejects unsupported extra context fields before rendering a model input.</li>
-      <li>Optional normalized payload strings are preserved from MVP-001 events, and adapter-side mutation cannot change the model-input snapshot written to the raw log.</li>
-      <li>Completed and failed raw log entries deep-copy their snapshots so caller-side mutation cannot change append-only in-memory log truth.</li>
-      <li>Malformed adapter output and adapter exceptions both append one <code>role_model_turn_failed</code> entry and do not append a success entry.</li>
-      <li>Malformed adapter-output envelopes are logged under <code>raw_model_output_snapshot</code> so <code>model_output</code> remains a valid <code>RoleModelAdapterOutput</code> when present.</li>
-      <li>Role-model log builders validate completed decisions, failure stages, and failure codes before returning appendable raw-log records.</li>
-      <li>Successful fake-adapter turns append one <code>role_model_turn_completed</code> entry after parsing and return a <code>decision_ready_for_commit</code> result.</li>
-      <li>No Commit and Effects Engine, visible conversation persistence, character state, incidents, tools, retrieval, Live2D, assets, or background workers were introduced.</li>
+      <li>The implementation adds one focused <code>commit_effects.visible_reply</code> module for the first Commit and Effects boundary.</li>
+      <li>The visible conversation store is an injected <code>VisibleConversationLog.append(output)</code> protocol; no concrete database, UI delivery, outbox, transaction layer, or external side effect was added.</li>
+      <li>Successful commits validate the normalized source event, MVP-002 result status, matching trace/event IDs, and <code>visible_reply</code> decision before appending visible output.</li>
+      <li>Successful commits append <code>visible_reply_committed</code> before visible output so raw-log storage failure cannot leave an unlogged visible side effect.</li>
+      <li>Visible output append failure now leaves a raw audit record with the intended output for reconciliation instead of an unlogged visible output.</li>
+      <li>Supported validation failures with trustworthy source identity append one <code>visible_reply_rejected</code> raw log entry and return a rejected result without visible output.</li>
+      <li>Rejected logs store <code>data.source_event</code> as a raw source-event snapshot, not a normalized <code>RuntimeEvent</code>, so malformed-but-identifiable inputs remain available for audit and replay.</li>
+      <li>Malformed source identity raises before a rejection log because there is no trustworthy <code>trace_id</code> and <code>event_id</code>.</li>
+      <li>Committed output and raw log snapshots are deep-copied so caller mutation cannot change append-only in-memory truth.</li>
+      <li>The implementation reuses <code>runtime.logging.build_raw_log_entry()</code>, <code>generate_id()</code>, and <code>clock_timestamp()</code> for envelope, ID, and timestamp behavior.</li>
+      <li>Runtime Kernel, Role Model Loop, and Commit and Effects now share <code>runtime.contracts.validate_normalized_user_message_event()</code> for normalized <code>USER_MESSAGE</code> validation.</li>
+      <li>Role Model Loop and Commit and Effects now share <code>runtime.contracts.normalize_visible_reply_decision()</code> for the visible-reply <code>CharacterDecision</code> contract while preserving boundary-specific error types.</li>
+      <li>Role Model Loop and Commit and Effects now share the <code>decision_ready_for_commit</code> status constant; a fuller turn-result envelope validator remains parked as a future idea.</li>
+      <li>No Runtime Kernel orchestration, Role Model Loop behavioral or model-provider changes, character state, incidents, tools, retrieval, Live2D, assets, scheduler, or concrete storage were introduced.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should <code>CharacterDecision</code> gain a generated <code>decision_id</code> in the commit slice, or only when durable decision records are introduced?</li>
-      <li>Should <code>role_model_turn_failed</code> remain a single failure kind after Commit and Effects failure logging exists, or split by failure stage later?</li>
+      <li>Should concrete storage later make visible output append and raw commit log append transactional?</li>
+      <li>Should <code>ConversationLog</code> and UI delivery outbox remain separate records once real delivery exists?</li>
+      <li>Should a durable <code>decision_id</code> appear in a future decision-store slice rather than this commit-only slice?</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Minimal Commit and Effects Engine that stores a visible reply after a parsed decision.</li>
-      <li>Recent visible messages in <code>DecisionContext</code>.</li>
-      <li>Real model provider adapter behind the same <code>RoleModelAdapter</code> interface.</li>
-      <li>State-aware context from Character State Engine after a minimal state slice exists.</li>
+      <li>Full user-turn orchestrator that runs Runtime Kernel, Role Model Loop, and Commit and Effects as one tested flow.</li>
+      <li>Recent visible messages in <code>DecisionContext</code> after visible outputs are committed.</li>
+      <li>Concrete append-only conversation storage with transactional raw-log commit behavior.</li>
+      <li>Visible delivery outbox or UI adapter after the internal conversation output record is proven.</li>
+      <li>Durable decision IDs and rejected-decision analysis records.</li>
+      <li>Shared <code>RoleModelTurnResult</code> envelope validator after another commit consumer exists.</li>
     </ul>
   </main>
 </body>

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal - MVP-003 Functional Spec</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 32px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-003 Functional Spec</h1>
+    <p><strong>Date:</strong> 2026-05-15</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Created the short-lived branch <code>feature/mvp-003-minimal-visible-reply-commit</code>.</li>
+      <li>Recorded MVP-002 as completed at <a href="../../plan/completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html">docs/plan/completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html</a>.</li>
+      <li>Replaced <a href="../../plan/active-slice.html">docs/plan/active-slice.html</a> with <code>MVP-003 - Minimal Visible Reply Commit</code>.</li>
+      <li>Updated <a href="../../plan/index.html">docs/plan/index.html</a> so MVP-003 is active and MVP-002 is listed under completed plans.</li>
+      <li>Updated <a href="../../plan/future-slices.html">docs/plan/future-slices.html</a> to mark MVP-003 as promoted and park orchestration/storage work separately.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      MVP-002 is implemented and tested, and it intentionally returns a parsed
+      <code>visible_reply</code> decision without committing visible output. The next
+      smallest useful runtime slice is therefore the first Commit and Effects boundary:
+      validate the parsed decision, append one internal visible output, and log the accepted
+      or rejected commit.
+    </p>
+
+    <h2>Source Context</h2>
+    <ul>
+      <li>Fetched the Notion project hub before planning.</li>
+      <li>Fetched the Notion pages for framework overview, runtime architecture, runtime logging and trace, and MVP roadmap.</li>
+      <li>Used local completed MVP-001 and MVP-002 docs as implementation truth for existing behavior.</li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-15/006-mvp-003-functional-spec.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 34 tests.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>MVP-003 does not add production code yet; it is a functional spec and planning move only.</li>
+      <li>The active scope stays narrow: no concrete database, UI delivery, full orchestrator, tools, Live2D, character state, incidents, or retrieval.</li>
+      <li>The only new planned schema is a visible output record plus commit/reject raw log entries.</li>
+      <li>The active slice scope changed from MVP-002 to MVP-003 after MVP-002 was recorded as completed.</li>
+    </ul>
+
+    <h2>Future Ideas Discovered</h2>
+    <ul>
+      <li>Full user-turn orchestrator after the commit boundary is proven.</li>
+      <li>Concrete append-only conversation storage with transaction behavior.</li>
+      <li>Recent visible messages in <code>DecisionContext</code> after visible output records exist.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Review the MVP-003 active spec. If accepted, write the MVP-003 tests first,
+      then implement only the minimal visible reply commit behavior described in the active slice.
+    </p>
+  </main>
+</body>
+</html>

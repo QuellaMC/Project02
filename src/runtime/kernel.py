@@ -5,6 +5,12 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
 
+from runtime.contracts import (
+    USER_MESSAGE,
+    ContractValidationError,
+    validate_iso8601_timestamp,
+    validate_normalized_user_message_event,
+)
 from runtime.logging import (
     SCHEMA_VERSION,
     Clock,
@@ -15,7 +21,6 @@ from runtime.logging import (
     generate_id,
 )
 
-USER_MESSAGE = "USER_MESSAGE"
 RAW_EVENT_RECEIVED_KIND = "runtime_event_received"
 
 RuntimeEvent = dict[str, Any]
@@ -81,7 +86,7 @@ def normalize_runtime_event(
     event_type = _normalize_event_type(event_input.get("type"))
     payload = _normalize_payload_for_event_type(event_type, event_input.get("payload"))
 
-    return {
+    normalized_event = {
         "event_id": _normalize_optional_id(
             event_input.get("event_id"),
             field_name="event_id",
@@ -102,6 +107,10 @@ def normalize_runtime_event(
         "schema_version": _normalize_schema_version(event_input),
         "payload": payload,
     }
+    try:
+        return validate_normalized_user_message_event(normalized_event)
+    except ContractValidationError as error:
+        raise RuntimeValidationError(str(error)) from error
 
 
 def build_raw_event_log_entry(
@@ -200,18 +209,10 @@ def _normalize_created_at(value: Any, *, clock: Clock) -> str:
 
 
 def _parse_iso8601_timestamp(value: str) -> None:
-    if not value.strip():
-        raise RuntimeValidationError("created_at must be an ISO-8601 timestamp string.")
-    if not _has_datetime_component(value.strip()):
-        raise RuntimeValidationError("created_at must be an ISO-8601 timestamp string.")
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        validate_iso8601_timestamp(value, "created_at")
     except ValueError as error:
         raise RuntimeValidationError("created_at must be an ISO-8601 timestamp string.") from error
-
-
-def _has_datetime_component(value: str) -> bool:
-    return "T" in value or "t" in value or (len(value) > 10 and value[10].isspace())
 
 
 def _normalize_schema_version(event_input: Mapping[str, Any]) -> str:
