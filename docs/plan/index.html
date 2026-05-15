@@ -38,6 +38,11 @@
       </thead>
       <tbody>
         <tr>
+          <td><a href="active-slice.html">MVP-001 - Runtime Event Intake and Raw Logging</a></td>
+          <td>Implemented and tested</td>
+          <td>Accept a USER_MESSAGE RuntimeEvent, assign event and trace IDs, append one raw log entry, and return a deterministic route without calling a model.</td>
+        </tr>
+        <tr>
           <td><a href="2026-05-14-00-project-initialization-functional-spec.html">Project initialization functional spec</a></td>
           <td>Implemented</td>
           <td>Create local docs, test roots, source root, and development rules without runtime code.</td>
@@ -47,16 +52,15 @@
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Based on the Notion MVP roadmap, the next slice should be the smallest
-      part of Phase 1: RuntimeEvent intake for a user message and raw event log
-      append through a replaceable interface. This needs its own functional spec
-      before tests or implementation code.
+      After MVP-001 is implemented, tested, reviewed, and journaled, the next likely slice is
+      parked in <a href="future-slices.html">future-slices.html</a>.
     </p>
 
     <h2>Related Local Docs</h2>
     <ul>
       <li><a href="../wiki/index.html">Project wiki</a></li>
       <li><a href="../wiki/development-workflow.html">Development workflow</a></li>
+      <li><a href="future-slices.html">Future slices parking lot</a></li>
       <li><a href="../develop-journal/2026-05-14/001-initialization.html">Initialization journal</a></li>
     </ul>
   </main>

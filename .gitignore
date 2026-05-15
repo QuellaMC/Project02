@@ -5,6 +5,7 @@
 node_modules/
 dist/
 build/
+artifacts/
 coverage/
 .coverage
 __pycache__/

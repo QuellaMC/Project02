@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal - MVP-001 Future Compatibility Review</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 960px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-001 Future Compatibility Review</h1>
+    <p>Date: 2026-05-15</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Updated <a href="../../../src/runtime/kernel.py">src/runtime/kernel.py</a> so normalized events preserve the validated input event type instead of restamping the current constant.</li>
+      <li>Replaced the logged-only route helper with <code>route_runtime_event</code>, which copies <code>event_type</code> from <code>RuntimeEvent.type</code>.</li>
+      <li>Added an event-route registry so <code>model_needed</code> and <code>next_step</code> come from an event-specific route policy instead of a universal fallback.</li>
+      <li>Kept accepted runtime behavior limited to <code>USER_MESSAGE</code>; unsupported event types still fail before logging.</li>
+      <li>Added a payload-normalizer registry containing only the implemented <code>USER_MESSAGE</code> case.</li>
+      <li>Added a focused route regression test in <a href="../../../tests/unit/test_runtime_kernel.py">tests/unit/test_runtime_kernel.py</a>.</li>
+      <li>Updated <a href="../../../AGENTS.md">AGENTS.md</a> with future-compatible implementation guidance that does not permit speculative behavior.</li>
+      <li>Clarified <a href="../../plan/active-slice.html">docs/plan/active-slice.html</a> so route output is derived from the normalized event record.</li>
+    </ul>
+
+    <h2>Why It Changed</h2>
+    <p>
+      The first implementation hard-coded <code>USER_MESSAGE</code> in route output. That matched
+      MVP-001 behavior, but it would force a contract-level edit when a later reviewed slice adds
+      another event type. This pass keeps today's behavior unchanged while making the existing
+      route result depend on the normalized runtime record and the registered route policy for
+      that event type.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>AGENTS.md</code></li>
+      <li><code>src/runtime/kernel.py</code></li>
+      <li><code>tests/unit/test_runtime_kernel.py</code></li>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-15/001-mvp-001-future-compatibility-review.html</code></li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>python3 -m unittest discover -s tests/unit</code> - passed, 10 tests.</li>
+      <li><code>python3 -m unittest discover -s tests/integration</code> - passed, 3 tests.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 13 tests.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>No new event type was accepted by <code>RuntimeKernel.handle_event</code>.</li>
+      <li>Unknown event types do not receive a default <code>logged_only</code> route.</li>
+      <li>No model provider, external service, character state, incident system, retrieval, tools, Live2D, asset code, compaction, replay code, or persistence adapter was added.</li>
+      <li>No schema fields were added or renamed.</li>
+      <li>The only route-contract clarification is that <code>event_type</code> is derived from the normalized event record, while <code>model_needed</code> and <code>next_step</code> are owned by event-specific route policy.</li>
+    </ul>
+
+    <h2>Future Ideas Discovered</h2>
+    <p>No new future ideas were discovered. Adding the next event type still needs its own active slice, tests, and schema review.</p>
+
+    <h2>Next Action</h2>
+    <p>
+      Keep MVP-001 closed unless another review issue appears. Plan the next slice from
+      <a href="../../plan/future-slices.html">future-slices.html</a> before adding model-loop behavior.
+    </p>
+  </main>
+</body>
+</html>
