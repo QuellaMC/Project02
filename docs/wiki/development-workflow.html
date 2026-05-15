@@ -28,6 +28,7 @@
     <h2>Sequence</h2>
     <ol>
       <li>Select one small roadmap slice from the Notion source.</li>
+      <li>Create a new <code>codex/...</code> branch from the current mainline before editing the functional spec or code.</li>
       <li>Check local docs and source for existing logic that can be reused.</li>
       <li>Write or update the HTML functional spec in <code>docs/plan</code>.</li>
       <li>Peer review the spec before code: contract, risks, tests, boundaries, and reuse.</li>
@@ -37,7 +38,21 @@
       <li>Run the relevant tests again.</li>
       <li>Review the written code for unused code, duplicate logic, security issues, efficiency issues, and gotchas.</li>
       <li>Update the date-scoped journal with files touched, decisions, tests, and next slice.</li>
+      <li>Commit the completed spec, code, tests, and journal changes.</li>
+      <li>Open a pull request and treat the CI/CD workflow as the merge gate.</li>
     </ol>
+
+    <h2>Pull Request Gate</h2>
+    <p>
+      Every new functional spec or coding pass should finish as a pull request.
+      The pull request is ready for review only after lint/readability checks,
+      source compilation, unit tests, integration tests, and full test discovery
+      pass in the GitHub CI/CD workflow.
+    </p>
+    <p>
+      Fix CI/CD failures on the branch. Do not bypass lint failures or merge a
+      branch whose workflow failed.
+    </p>
 
     <h2>Pre-Code Review Checklist</h2>
     <ul>

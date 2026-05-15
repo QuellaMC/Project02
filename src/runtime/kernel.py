@@ -117,13 +117,9 @@ def build_raw_event_log_entry(
 
 def route_runtime_event(event: RuntimeEvent) -> RuntimeRouteResult:
     event_type = event.get("type")
-    route_builder = (
-        EVENT_ROUTE_BUILDERS.get(event_type) if isinstance(event_type, str) else None
-    )
+    route_builder = EVENT_ROUTE_BUILDERS.get(event_type) if isinstance(event_type, str) else None
     if route_builder is None:
-        raise RuntimeValidationError(
-            f"Unsupported event type for routing: {event_type!r}."
-        )
+        raise RuntimeValidationError(f"Unsupported event type for routing: {event_type!r}.")
     return route_builder(event)
 
 
@@ -222,9 +218,7 @@ def _parse_iso8601_timestamp(value: str) -> None:
     try:
         datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as error:
-        raise RuntimeValidationError(
-            "created_at must be an ISO-8601 timestamp string."
-        ) from error
+        raise RuntimeValidationError("created_at must be an ISO-8601 timestamp string.") from error
 
 
 def _has_datetime_component(value: str) -> bool:

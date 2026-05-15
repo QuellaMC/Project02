@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal - CI/CD and Pull Request Gate</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 960px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>CI/CD and Pull Request Gate</h1>
+    <p>Date: 2026-05-15</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Added <a href="../../../.github/workflows/ci-cd.yml">.github/workflows/ci-cd.yml</a> for pull requests, pushes to <code>main</code>, and manual runs.</li>
+      <li>Added <a href="../../../pyproject.toml">pyproject.toml</a> with Ruff lint settings.</li>
+      <li>Updated <a href="../../../AGENTS.md">AGENTS.md</a> so new functional spec or coding work starts on a branch, gets committed, and finishes with a pull request.</li>
+      <li>Updated <a href="../../wiki/development-workflow.html">docs/wiki/development-workflow.html</a> with the branch and PR gate workflow.</li>
+      <li>Applied Ruff-safe formatting updates to the current runtime and test files so the new lint gate passes on the existing codebase.</li>
+    </ul>
+
+    <h2>Why It Changed</h2>
+    <p>
+      Future implementation slices need a repeatable review path. The workflow
+      now makes lint/readability checks, source compilation, unit tests,
+      integration tests, and full test discovery part of the pull request gate.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>.github/workflows/ci-cd.yml</code></li>
+      <li><code>pyproject.toml</code></li>
+      <li><code>AGENTS.md</code></li>
+      <li><code>docs/wiki/development-workflow.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-15/003-ci-cd-and-pr-gate.html</code></li>
+      <li><code>src/runtime/kernel.py</code></li>
+      <li><code>tests/unit/test_runtime_kernel.py</code></li>
+      <li><code>tests/integration/test_runtime_kernel_intake_logging.py</code></li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>/private/tmp/project02-ruff/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff format --check .</code> - passed.</li>
+      <li><code>python3 -m compileall src tests</code> - passed.</li>
+      <li><code>python3 -m unittest discover -s tests/unit -t .</code> - passed, 10 tests.</li>
+      <li><code>python3 -m unittest discover -s tests/integration -t .</code> - passed, 4 tests.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 14 tests.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>No runtime schema, event type, route policy, model provider, persistence adapter, or side-effect boundary changed.</li>
+      <li>The workflow does not add deployment behavior because this repo does not yet define a deploy target or artifact.</li>
+      <li>Lint/readability is enforced with Ruff through <code>ruff check .</code> and <code>ruff format --check .</code>.</li>
+    </ul>
+
+    <h2>Future Ideas Discovered</h2>
+    <p>No new future slice ideas were discovered.</p>
+
+    <h2>Next Action</h2>
+    <p>
+      Use the branch, commit, pull request, and CI/CD gate workflow for the next
+      functional spec or coding pass.
+    </p>
+  </main>
+</body>
+</html>

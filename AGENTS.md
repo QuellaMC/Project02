@@ -299,6 +299,10 @@ working code.
 
 Do not implement code until the active slice has a local spec.
 
+Before working on a new functional spec or production code, create a new git
+branch from the current mainline using the `codex/` prefix unless the user asks
+for a different branch name.
+
 When planning, prefer this pattern:
 
 ```text
@@ -308,8 +312,38 @@ When planning, prefer this pattern:
 4. Implement the smallest code that passes.
 5. Log the change.
 6. Review the result.
-7. Record future ideas separately.
+7. Commit the completed spec, code, tests, and journal changes.
+8. Open a pull request for review.
+9. Record future ideas separately.
 ```
+
+---
+
+## Branch, Commit, and Pull Request Workflow
+
+Every new functional spec or coding pass should happen on its own branch.
+
+Use this sequence:
+
+1. Start from the current mainline and create a new `codex/...` branch before
+   editing the spec or code.
+2. Keep commits coherent and small enough to review; include the active spec,
+   implementation, tests, journal, and future-slice notes when they changed.
+3. Sign every commit using the repository/user configured Git signing setup.
+   Use signed commit and rebase flows, such as `git commit -S` or
+   `git rebase --gpg-sign`, and make sure the configured signing key is loaded
+   before creating, amending, squashing, or rebasing commits.
+4. Do not mix unrelated slice work into the branch.
+5. After the slice is complete and local checks pass, push the branch and create
+   a pull request.
+6. The pull request must pass the repository CI/CD workflow before it is ready
+   to merge.
+7. Treat lint/readability failures as blockers. Fix them on the branch instead
+   of bypassing the workflow.
+
+The CI/CD workflow is the pull request quality gate for this repository. It
+should run lint/readability checks, source compilation, unit tests, integration
+tests, and full test discovery for the currently implemented behavior.
 
 ---
 
