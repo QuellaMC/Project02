@@ -17,7 +17,24 @@
     th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
     th { background: #edf1eb; }
     code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    .graph-panel { background: #fff; border: 1px solid #d9ded6; border-radius: 8px; padding: 18px; margin-top: 12px; overflow-x: auto; }
+    .mermaid { min-width: 820px; margin: 0; background: #fff; }
   </style>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "base",
+      themeVariables: {
+        fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+        primaryColor: "#e7f1e9",
+        primaryBorderColor: "#5c8a65",
+        primaryTextColor: "#172026",
+        lineColor: "#8a978e",
+        tertiaryColor: "#f7f8f5"
+      }
+    });
+  </script>
 </head>
 <body>
   <main>
@@ -26,6 +43,56 @@
       Plans are local, HTML, and scoped to one small slice. A plan should be
       reviewed before code is written.
     </p>
+
+    <h2>Implementation Graph</h2>
+    <p>
+      This Mermaid graph summarizes the project architecture currently implemented by local slices.
+      Update it after each pull request is created so the index stays current.
+    </p>
+    <div class="graph-panel">
+      <pre class="mermaid">
+flowchart LR
+  UserMessage["USER_MESSAGE RuntimeEvent"]
+
+  subgraph RuntimeKernel["Runtime Kernel - MVP-001 implemented"]
+    Normalize["Normalize event&lt;br/&gt;schema, timestamp, ids"]
+    Route["Deterministic route&lt;br/&gt;model_needed = false"]
+  end
+
+  subgraph RawLogging["Raw Event Logging - implemented"]
+    LogHelper["runtime.logging&lt;br/&gt;shared raw-log envelope"]
+    RuntimeLog["runtime_event_received"]
+    RoleLog["role_model_turn_completed&lt;br/&gt;role_model_turn_failed"]
+  end
+
+  subgraph RoleModelLoop["Role Model Loop - MVP-002 PR created"]
+    Context["DecisionContext builder&lt;br/&gt;current event only"]
+    Render["RoleModelInput renderer&lt;br/&gt;strict context validation"]
+    Adapter["Injected fake RoleModelAdapter"]
+    Parse["CharacterDecision parser&lt;br/&gt;visible_reply only"]
+  end
+
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003 next"]
+    Commit["Minimal visible reply commit"]
+    Conversation["Visible output record"]
+    CommitLog["commit accepted/rejected raw log"]
+  end
+
+  UserMessage --> Normalize --> Route
+  Normalize --> LogHelper --> RuntimeLog
+  Normalize --> Context --> Render --> Adapter --> Parse
+  Parse --> LogHelper --> RoleLog
+  Parse -. next slice .-> Commit --> Conversation
+  Commit -. next slice .-> CommitLog
+
+  classDef implemented fill:#e7f1e9,stroke:#5c8a65,color:#172026;
+  classDef active fill:#e5f0f2,stroke:#43747b,color:#172026;
+  classDef next fill:#f6f0df,stroke:#9b7c32,color:#172026,stroke-dasharray: 6 4;
+  class Normalize,Route,LogHelper,RuntimeLog implemented;
+  class Context,Render,Adapter,Parse,RoleLog active;
+  class Commit,Conversation,CommitLog next;
+      </pre>
+    </div>
 
     <h2>Active Plan</h2>
     <table>
@@ -38,7 +105,25 @@
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-001 - Runtime Event Intake and Raw Logging</a></td>
+          <td><a href="active-slice.html">MVP-002 - Minimal Role Model Loop with Fake Adapter</a></td>
+          <td>Implemented and tested, pending review</td>
+          <td>Build a minimal current-event DecisionContext, call an injected fake model adapter through the Role Model Loop, parse a visible_reply-only decision, and log the model turn.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Completed Plans</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Plan</th>
+          <th>Status</th>
+          <th>Scope</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><a href="completed/mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001 - Runtime Event Intake and Raw Logging</a></td>
           <td>Implemented and tested</td>
           <td>Accept a USER_MESSAGE RuntimeEvent, assign event and trace IDs, append one raw log entry, and return a deterministic route without calling a model.</td>
         </tr>
@@ -52,8 +137,8 @@
 
     <h2>Next Candidate Slice</h2>
     <p>
-      After MVP-001 is implemented, tested, reviewed, and journaled, the next likely slice is
-      parked in <a href="future-slices.html">future-slices.html</a>.
+      Ideas beyond the active MVP-002 fake-adapter Role Model Loop are parked in
+      <a href="future-slices.html">future-slices.html</a>.
     </p>
 
     <h2>Related Local Docs</h2>

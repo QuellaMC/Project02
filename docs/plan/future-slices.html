@@ -24,13 +24,13 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-001</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-002</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Add the smallest Role Model Loop after runtime intake and raw logging work.</dd>
+      <dd>Promoted to the active slice on 2026-05-15. See <a href="active-slice.html">active-slice.html</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>The Notion roadmap's Phase 1 user turn loop eventually needs model input rendering, a model boundary, and structured output parsing.</dd>
@@ -51,7 +51,61 @@
       <dd>Likely introduces a minimal <code>DecisionContext</code>, fake model response shape, and parsed decision shape.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active slice only proves runtime intake and raw event logging without any model call.</dd>
+      <dd>This item is no longer parked; it is the active MVP-002 spec.</dd>
+    </dl>
+
+    <h2>MVP-003 - Minimal Visible Reply Commit</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add the smallest Commit and Effects Engine behavior after MVP-002 parses a visible reply decision.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The parsed role-model decision should eventually become a committed visible reply, but committing effects is outside the fake-adapter loop.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while narrowing MVP-002 to Role Model Loop only.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-002 must first prove deterministic context rendering, fake adapter invocation, output parsing, and role-model turn logging.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>MVP-003 - Minimal Visible Reply Commit</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>The commit boundary can become too broad if state patches, tools, incidents, or Live2D updates are added at the same time.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely introduces a visible conversation output record and a commit/reject log kind.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active slice only proves the Role Model Loop boundary and parsed visible reply decision.</dd>
+    </dl>
+
+    <h2>Recent Visible Messages in DecisionContext</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a small recent-message view to <code>DecisionContext</code>.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The Notion roadmap's Phase 1 user turn loop mentions recent messages as the first context source.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while reviewing whether MVP-002 should include conversation history.</dd>
+
+      <dt>Dependency</dt>
+      <dd>A visible conversation log or equivalent committed output record should exist first.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>DecisionContext recent visible messages v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Adding history before there is a committed conversation record would force speculative storage decisions.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds <code>recent_visible_messages</code> to <code>DecisionContext</code>.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-002 uses only the current normalized event to keep the model boundary narrow.</dd>
     </dl>
   </main>
 </body>
