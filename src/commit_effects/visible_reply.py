@@ -5,6 +5,7 @@ from copy import deepcopy
 from typing import Any, Protocol
 
 from runtime.contracts import (
+    DECISION_READY_FOR_COMMIT_STATUS,
     USER_MESSAGE,
     VISIBLE_REPLY_ACTION,
     RuntimeEvent,
@@ -26,7 +27,6 @@ from runtime.logging import (
 )
 
 VISIBLE_OUTPUT_KIND = "assistant_visible_reply"
-DECISION_READY_FOR_COMMIT_STATUS = "decision_ready_for_commit"
 VISIBLE_REPLY_COMMITTED_STATUS = "visible_reply_committed"
 VISIBLE_REPLY_REJECTED_STATUS = "visible_reply_rejected"
 VISIBLE_REPLY_COMMITTED_KIND = "visible_reply_committed"
@@ -354,13 +354,10 @@ def _extract_trusted_source_identity(source_event: Any) -> dict[str, str]:
         raise CommitValidationError("source_event must be a mapping.")
     trace_id = _require_string(source_event.get("trace_id"), "trace_id")
     event_id = _require_string(source_event.get("event_id"), "event_id")
-    event_type = source_event.get("type")
     return {
         "trace_id": trace_id,
         "event_id": event_id,
-        "event_type": event_type
-        if isinstance(event_type, str) and event_type.strip()
-        else USER_MESSAGE,
+        "event_type": USER_MESSAGE,
     }
 
 

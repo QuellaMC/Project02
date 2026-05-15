@@ -135,6 +135,33 @@
       <dd>The active slice only validates and commits an already parsed visible reply decision.</dd>
     </dl>
 
+    <h2>Shared RoleModelTurnResult Validator</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a shared validator or normalizer for the <code>RoleModelTurnResult</code> envelope after a second commit path or orchestrator needs it.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Role Model Loop produces <code>decision_ready_for_commit</code> results and Commit and Effects validates the same envelope before committing visible output.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered during MVP-003 review of cross-boundary result-status drift.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-003 should first finish with only the shared status constant and visible-reply decision contract.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>RoleModelTurnResult contract helper v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>A shared validator could overfit to one action before the runtime has another commit consumer or turn orchestration boundary.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Would likely promote the turn-result envelope fields into <code>runtime.contracts</code> without changing persisted raw logs.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-003 only needs one status constant and the visible-reply commit input; a full envelope validator would be speculative until another consumer exists.</dd>
+    </dl>
+
     <h2>Concrete Conversation Storage</h2>
     <dl>
       <dt>Idea</dt>

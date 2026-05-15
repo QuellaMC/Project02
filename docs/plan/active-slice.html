@@ -86,7 +86,7 @@
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>Calling a live model provider or changing the Role Model Loop.</li>
+      <li>Calling a live model provider or changing Role Model Loop behavior or model-provider execution.</li>
       <li>Wiring a full user-turn orchestrator through <code>RuntimeKernel</code>.</li>
       <li>Real UI delivery, push notifications, streaming, network calls, or external side effects.</li>
       <li>Concrete database adapters, migrations, or transactional storage.</li>
@@ -347,7 +347,8 @@
       <li>The implementation reuses <code>runtime.logging.build_raw_log_entry()</code>, <code>generate_id()</code>, and <code>clock_timestamp()</code> for envelope, ID, and timestamp behavior.</li>
       <li>Runtime Kernel, Role Model Loop, and Commit and Effects now share <code>runtime.contracts.validate_normalized_user_message_event()</code> for normalized <code>USER_MESSAGE</code> validation.</li>
       <li>Role Model Loop and Commit and Effects now share <code>runtime.contracts.normalize_visible_reply_decision()</code> for the visible-reply <code>CharacterDecision</code> contract while preserving boundary-specific error types.</li>
-      <li>No Runtime Kernel orchestration, Role Model Loop changes, character state, incidents, tools, retrieval, Live2D, assets, scheduler, or concrete storage were introduced.</li>
+      <li>Role Model Loop and Commit and Effects now share the <code>decision_ready_for_commit</code> status constant; a fuller turn-result envelope validator remains parked as a future idea.</li>
+      <li>No Runtime Kernel orchestration, Role Model Loop behavioral or model-provider changes, character state, incidents, tools, retrieval, Live2D, assets, scheduler, or concrete storage were introduced.</li>
     </ul>
 
     <h2>Open Questions</h2>
@@ -364,6 +365,7 @@
       <li>Concrete append-only conversation storage with transactional raw-log commit behavior.</li>
       <li>Visible delivery outbox or UI adapter after the internal conversation output record is proven.</li>
       <li>Durable decision IDs and rejected-decision analysis records.</li>
+      <li>Shared <code>RoleModelTurnResult</code> envelope validator after another commit consumer exists.</li>
     </ul>
   </main>
 </body>

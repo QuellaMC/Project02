@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any, Protocol
 
 from runtime.contracts import (
+    DECISION_READY_FOR_COMMIT_STATUS,
     USER_MESSAGE,
     VISIBLE_REPLY_ACTION,
     ContractValidationError,
@@ -169,7 +170,7 @@ def run_role_model_turn(
         "event_id": event["event_id"],
         "event_type": event_type,
         "model_called": True,
-        "status": "decision_ready_for_commit",
+        "status": DECISION_READY_FOR_COMMIT_STATUS,
         "decision": decision,
     }
 

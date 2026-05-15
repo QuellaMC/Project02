@@ -182,6 +182,37 @@ class VisibleReplyCommitIntegrationTests(unittest.TestCase):
         self.assertEqual(visible_log.entries, [])
         self.assertEqual(raw_log.entries, [])
 
+    def test_unsupported_source_type_rejects_with_user_message_event_type(self):
+        visible_log = RecordingAppendLog()
+        raw_log = RecordingAppendLog()
+        event = normalized_user_message()
+        event["type"] = "TIMER"
+
+        result = commit_visible_reply(
+            event,
+            role_model_result(),
+            visible_conversation_log=visible_log,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(visible_log.entries, [])
+        self.assertEqual(len(raw_log.entries), 1)
+        self.assertEqual(raw_log.entries[0]["kind"], "visible_reply_rejected")
+        self.assertEqual(raw_log.entries[0]["data"]["source_event"]["type"], "TIMER")
+        self.assertEqual(raw_log.entries[0]["data"]["failure"]["code"], "malformed_commit_input")
+        self.assertEqual(
+            result,
+            {
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "event_type": "USER_MESSAGE",
+                "status": "visible_reply_rejected",
+                "failure": raw_log.entries[0]["data"]["failure"],
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
