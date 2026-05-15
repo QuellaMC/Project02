@@ -5,7 +5,16 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Protocol
 
-from runtime.kernel import USER_MESSAGE, RawEventLog, RuntimeEvent
+from runtime.contracts import (
+    DECISION_READY_FOR_COMMIT_STATUS,
+    USER_MESSAGE,
+    VISIBLE_REPLY_ACTION,
+    ContractValidationError,
+    RuntimeEvent,
+    normalize_visible_reply_decision,
+    validate_normalized_user_message_event,
+)
+from runtime.kernel import RawEventLog
 from runtime.logging import (
     SCHEMA_VERSION,
     Clock,
@@ -15,7 +24,6 @@ from runtime.logging import (
 )
 
 USER_MESSAGE_VISIBLE_REPLY_CALL = "user_message_visible_reply"
-VISIBLE_REPLY_ACTION = "visible_reply"
 ROLE_MODEL_TURN_COMPLETED_KIND = "role_model_turn_completed"
 ROLE_MODEL_TURN_FAILED_KIND = "role_model_turn_failed"
 FAILURE_CODES_BY_STAGE = {
@@ -44,34 +52,24 @@ class RoleModelAdapter(Protocol):
 
 
 def build_decision_context(event: RuntimeEvent) -> DecisionContext:
-    if not isinstance(event, Mapping):
-        raise RoleModelValidationError("Runtime event must be a mapping.")
-    _require_equal(event.get("schema_version"), SCHEMA_VERSION, "schema_version")
-    event_type = _require_event_type(event.get("type"), "event.type")
-
-    payload = event.get("payload")
-    if not isinstance(payload, Mapping):
-        raise RoleModelValidationError("event.payload must be a mapping.")
-
-    text = payload.get("text")
-    if not isinstance(text, str) or not text.strip():
-        raise RoleModelValidationError("event.payload.text must be a non-empty string.")
+    normalized_event = _wrap_contract_error(
+        lambda: validate_normalized_user_message_event(event, source_name="event")
+    )
+    payload = normalized_event["payload"]
 
     event_context = {
-        "type": event_type,
-        "text": text,
-        "created_at": _require_string(event.get("created_at"), "created_at"),
+        "type": normalized_event["type"],
+        "text": payload["text"],
+        "created_at": normalized_event["created_at"],
     }
     for field_name in ("user_id", "conversation_id"):
         if field_name in payload:
-            event_context[field_name] = _require_optional_payload_string(
-                payload[field_name], f"payload.{field_name}"
-            )
+            event_context[field_name] = payload[field_name]
 
     return {
         "schema_version": SCHEMA_VERSION,
-        "trace_id": _require_string(event.get("trace_id"), "trace_id"),
-        "event_id": _require_string(event.get("event_id"), "event_id"),
+        "trace_id": normalized_event["trace_id"],
+        "event_id": normalized_event["event_id"],
         "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
         "event": event_context,
         "allowed_actions": [VISIBLE_REPLY_ACTION],
@@ -104,11 +102,14 @@ def parse_character_decision(
     if not isinstance(parsed, Mapping):
         raise RoleModelValidationError("raw_text must contain a JSON object.")
 
-    return _normalize_character_decision(
-        parsed,
-        model_input=validated_model_input,
-        require_attached_ids=False,
-        source_name="model output",
+    return _wrap_contract_error(
+        lambda: normalize_visible_reply_decision(
+            parsed,
+            trace_id=validated_model_input["trace_id"],
+            event_id=validated_model_input["event_id"],
+            require_attached_ids=False,
+            source_name="model output",
+        )
     )
 
 
@@ -169,7 +170,7 @@ def run_role_model_turn(
         "event_id": event["event_id"],
         "event_type": event_type,
         "model_called": True,
-        "status": "decision_ready_for_commit",
+        "status": DECISION_READY_FOR_COMMIT_STATUS,
         "decision": decision,
     }
 
@@ -329,57 +330,27 @@ def _validate_decision_context(decision_context: Any) -> DecisionContext:
     }
 
 
-def _normalize_character_decision(
-    decision: Any,
-    *,
-    model_input: RoleModelInput,
-    require_attached_ids: bool,
-    source_name: str,
-) -> CharacterDecision:
-    if not isinstance(decision, Mapping):
-        raise RoleModelValidationError("CharacterDecision must be a mapping.")
-    allowed_keys = {"schema_version", "action", "visible_reply"}
-    if require_attached_ids:
-        allowed_keys |= {"trace_id", "event_id"}
-    _reject_extra_keys(
-        decision,
-        allowed_keys,
-        source_name,
-    )
-    _require_equal(decision.get("schema_version"), SCHEMA_VERSION, "schema_version")
-    if require_attached_ids:
-        _require_equal(decision.get("trace_id"), model_input["trace_id"], "trace_id")
-        _require_equal(decision.get("event_id"), model_input["event_id"], "event_id")
-    _require_equal(decision.get("action"), VISIBLE_REPLY_ACTION, "action")
-
-    visible_reply = decision.get("visible_reply")
-    if not isinstance(visible_reply, Mapping):
-        raise RoleModelValidationError("visible_reply must be a mapping.")
-    _reject_extra_keys(visible_reply, {"text"}, "visible_reply")
-    reply_text = visible_reply.get("text")
-    if not isinstance(reply_text, str) or not reply_text.strip():
-        raise RoleModelValidationError("visible_reply.text must be a non-empty string.")
-
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "trace_id": model_input["trace_id"],
-        "event_id": model_input["event_id"],
-        "action": VISIBLE_REPLY_ACTION,
-        "visible_reply": {"text": reply_text.strip()},
-    }
-
-
 def _validate_character_decision(
     decision: CharacterDecision,
     *,
     model_input: RoleModelInput,
 ) -> CharacterDecision:
-    return _normalize_character_decision(
-        decision,
-        model_input=model_input,
-        require_attached_ids=True,
-        source_name="CharacterDecision",
+    return _wrap_contract_error(
+        lambda: normalize_visible_reply_decision(
+            decision,
+            trace_id=model_input["trace_id"],
+            event_id=model_input["event_id"],
+            require_attached_ids=True,
+            source_name="CharacterDecision",
+        )
     )
+
+
+def _wrap_contract_error(callback):
+    try:
+        return callback()
+    except ContractValidationError as error:
+        raise RoleModelValidationError(str(error)) from error
 
 
 def _validate_failure(*, stage: str, code: str, message: str) -> dict[str, str]:

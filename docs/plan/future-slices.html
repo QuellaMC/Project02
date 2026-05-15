@@ -24,13 +24,13 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-002</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-003</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Promoted to the active slice on 2026-05-15. See <a href="active-slice.html">active-slice.html</a>.</dd>
+      <dd>Completed on 2026-05-15. See <a href="completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html">completed MVP-002</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>The Notion roadmap's Phase 1 user turn loop eventually needs model input rendering, a model boundary, and structured output parsing.</dd>
@@ -51,13 +51,13 @@
       <dd>Likely introduces a minimal <code>DecisionContext</code>, fake model response shape, and parsed decision shape.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>This item is no longer parked; it is the active MVP-002 spec.</dd>
+      <dd>This item is no longer parked; it has been completed and recorded under completed plans.</dd>
     </dl>
 
     <h2>MVP-003 - Minimal Visible Reply Commit</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Add the smallest Commit and Effects Engine behavior after MVP-002 parses a visible reply decision.</dd>
+      <dd>Promoted to the active slice on 2026-05-15. See <a href="active-slice.html">active-slice.html</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>The parsed role-model decision should eventually become a committed visible reply, but committing effects is outside the fake-adapter loop.</dd>
@@ -78,7 +78,7 @@
       <dd>Likely introduces a visible conversation output record and a commit/reject log kind.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active slice only proves the Role Model Loop boundary and parsed visible reply decision.</dd>
+      <dd>This item is no longer parked; it is the active MVP-003 spec.</dd>
     </dl>
 
     <h2>Recent Visible Messages in DecisionContext</h2>
@@ -96,7 +96,7 @@
       <dd>A visible conversation log or equivalent committed output record should exist first.</dd>
 
       <dt>Possible Future Slice</dt>
-      <dd><code>DecisionContext recent visible messages v0.1</code>.</dd>
+      <dd><code>MVP-004 - Recent Visible Messages in DecisionContext</code>.</dd>
 
       <dt>Risk Or Unknown</dt>
       <dd>Adding history before there is a committed conversation record would force speculative storage decisions.</dd>
@@ -105,7 +105,88 @@
       <dd>Likely adds <code>recent_visible_messages</code> to <code>DecisionContext</code>.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-002 uses only the current normalized event to keep the model boundary narrow.</dd>
+      <dd>MVP-003 should first prove that a visible reply can be committed as an internal output record.</dd>
+    </dl>
+
+    <h2>Full User Turn Orchestrator</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Expose one tested flow that runs Runtime Kernel intake, Role Model Loop, and Commit and Effects for a user message.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The Phase 1 roadmap wants a minimal user turn loop, but each boundary needs to be proven separately first.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while keeping MVP-003 limited to Commit and Effects.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-003 visible reply commit should work first.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Minimal user turn orchestrator v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>The orchestrator could blur boundary ownership if introduced before commit validation is tested.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely introduces a top-level turn result envelope without changing existing event, decision, or output records.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active slice only validates and commits an already parsed visible reply decision.</dd>
+    </dl>
+
+    <h2>Shared RoleModelTurnResult Validator</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a shared validator or normalizer for the <code>RoleModelTurnResult</code> envelope after a second commit path or orchestrator needs it.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Role Model Loop produces <code>decision_ready_for_commit</code> results and Commit and Effects validates the same envelope before committing visible output.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered during MVP-003 review of cross-boundary result-status drift.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-003 should first finish with only the shared status constant and visible-reply decision contract.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>RoleModelTurnResult contract helper v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>A shared validator could overfit to one action before the runtime has another commit consumer or turn orchestration boundary.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Would likely promote the turn-result envelope fields into <code>runtime.contracts</code> without changing persisted raw logs.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-003 only needs one status constant and the visible-reply commit input; a full envelope validator would be speculative until another consumer exists.</dd>
+    </dl>
+
+    <h2>Concrete Conversation Storage</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a concrete append-only conversation storage adapter after the in-memory visible output interface is proven.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Visible replies eventually need durable storage and transaction behavior with raw commit logs.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while narrowing MVP-003 away from database and transaction design.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-003 should first prove the output record shape and commit/reject behavior.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>ConversationLog storage adapter v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Choosing storage too early could force schema migrations before conversation output usage is proven.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active slice uses injected append-only interfaces and no concrete database.</dd>
     </dl>
   </main>
 </body>

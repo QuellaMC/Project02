@@ -65,14 +65,14 @@ flowchart LR
     RoleLog["role_model_turn_completed&lt;br/&gt;role_model_turn_failed"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002 PR created"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002 completed"]
     Context["DecisionContext builder&lt;br/&gt;current event only"]
     Render["RoleModelInput renderer&lt;br/&gt;strict context validation"]
     Adapter["Injected fake RoleModelAdapter"]
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply only"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003 next"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003 PR #2"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -82,15 +82,14 @@ flowchart LR
   Normalize --> LogHelper --> RuntimeLog
   Normalize --> Context --> Render --> Adapter --> Parse
   Parse --> LogHelper --> RoleLog
-  Parse -. next slice .-> Commit --> Conversation
-  Commit -. next slice .-> CommitLog
+  Parse -. active spec .-> Commit --> Conversation
+  Commit -. active spec .-> CommitLog
 
   classDef implemented fill:#e7f1e9,stroke:#5c8a65,color:#172026;
   classDef active fill:#e5f0f2,stroke:#43747b,color:#172026;
   classDef next fill:#f6f0df,stroke:#9b7c32,color:#172026,stroke-dasharray: 6 4;
-  class Normalize,Route,LogHelper,RuntimeLog implemented;
-  class Context,Render,Adapter,Parse,RoleLog active;
-  class Commit,Conversation,CommitLog next;
+  class Normalize,Route,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog implemented;
+  class Commit,Conversation,CommitLog active;
       </pre>
     </div>
 
@@ -105,9 +104,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-002 - Minimal Role Model Loop with Fake Adapter</a></td>
-          <td>Implemented and tested, pending review</td>
-          <td>Build a minimal current-event DecisionContext, call an injected fake model adapter through the Role Model Loop, parse a visible_reply-only decision, and log the model turn.</td>
+          <td><a href="active-slice.html">MVP-003 - Minimal Visible Reply Commit</a></td>
+          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/2">PR #2</a> open for review</td>
+          <td>Validate an MVP-002 visible_reply decision, append one internal visible output, append commit/reject raw logs, and return a deterministic commit result.</td>
         </tr>
       </tbody>
     </table>
@@ -123,6 +122,11 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
+          <td><a href="completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html">MVP-002 - Minimal Role Model Loop with Fake Adapter</a></td>
+          <td>Implemented and tested</td>
+          <td>Build a minimal current-event DecisionContext, call an injected fake model adapter through the Role Model Loop, parse a visible_reply-only decision, and log the model turn.</td>
+        </tr>
+        <tr>
           <td><a href="completed/mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001 - Runtime Event Intake and Raw Logging</a></td>
           <td>Implemented and tested</td>
           <td>Accept a USER_MESSAGE RuntimeEvent, assign event and trace IDs, append one raw log entry, and return a deterministic route without calling a model.</td>
@@ -137,7 +141,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active MVP-002 fake-adapter Role Model Loop are parked in
+      Ideas beyond the active MVP-003 visible reply commit are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 
