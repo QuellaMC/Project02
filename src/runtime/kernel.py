@@ -25,6 +25,7 @@ RAW_EVENT_RECEIVED_KIND = "runtime_event_received"
 
 RuntimeEvent = dict[str, Any]
 RuntimeRouteResult = dict[str, Any]
+RuntimeEventIntakeResult = dict[str, Any]
 PayloadNormalizer = Callable[[Any], dict[str, Any]]
 RouteBuilder = Callable[[RuntimeEvent], RuntimeRouteResult]
 _MISSING = object()
@@ -59,19 +60,36 @@ class RuntimeKernel:
         self._clock = clock
 
     def handle_event(self, event_input: Mapping[str, Any]) -> RuntimeRouteResult:
-        event = normalize_runtime_event(
+        intake_result = intake_runtime_event(
             event_input,
+            raw_event_log=self._raw_event_log,
             id_generator=self._id_generator,
             clock=self._clock,
         )
-        self._raw_event_log.append(
-            build_raw_event_log_entry(
-                event,
-                id_generator=self._id_generator,
-                clock=self._clock,
-            )
+        return intake_result["route"]
+
+
+def intake_runtime_event(
+    event_input: Mapping[str, Any],
+    *,
+    raw_event_log: RawEventLog,
+    id_generator: IdGenerator = default_id_generator,
+    clock: Clock = default_clock,
+) -> RuntimeEventIntakeResult:
+    event = normalize_runtime_event(
+        event_input,
+        id_generator=id_generator,
+        clock=clock,
+    )
+    raw_event_log.append(
+        build_raw_event_log_entry(
+            event,
+            id_generator=id_generator,
+            clock=clock,
         )
-        return route_runtime_event(event)
+    )
+    route = route_runtime_event(event)
+    return {"event": event, "route": route}
 
 
 def normalize_runtime_event(
@@ -142,8 +160,8 @@ def _route_user_message_event(event: RuntimeEvent) -> RuntimeRouteResult:
         "trace_id": event["trace_id"],
         "event_id": event["event_id"],
         "event_type": event["type"],
-        "model_needed": False,
-        "next_step": "logged_only",
+        "model_needed": True,
+        "next_step": "user_turn",
     }
 
 

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal - MVP-007 Functional Spec</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 32px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-007 Functional Spec</h1>
+    <p><strong>Date:</strong> 2026-05-16</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Pulled <code>origin main</code> and created <code>feature/mvp-007-functional-spec</code>.</li>
+      <li>Archived MVP-006 as completed at <code>docs/plan/completed/mvp-006-visible-conversation-recent-source.html</code>.</li>
+      <li>Replaced <code>docs/plan/active-slice.html</code> with the active MVP-007 functional spec.</li>
+      <li>Kept MVP-007 narrow: one fake-backed user-turn orchestrator that composes existing Runtime Kernel, Role Model Loop, visible projection, recent context, and visible reply commit boundaries.</li>
+      <li>Review cleanup: made the MVP-007 <code>USER_MESSAGE</code> route authoritative with <code>model_needed = true</code> and <code>next_step = "user_turn"</code> so <code>kernel_route</code> no longer contradicts the model call.</li>
+      <li>Review cleanup: required a shared Runtime Kernel intake path so <code>RuntimeKernel.handle_event()</code> and the orchestrator reuse the same normalize, append, and route logic.</li>
+      <li>Updated <code>docs/plan/future-slices.html</code> so MVP-006 is completed, MVP-007 is active, and outside-scope provider, storage, reconciliation, context logging, state-engine, and richer route-policy ideas stay parked.</li>
+      <li>Updated <code>docs/plan/index.html</code> so the active plan, completed plan list, and implementation graph reflect MVP-007.</li>
+      <li>Updated <code>docs/develop-journal/index.html</code> with this entry.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      MVP-001 through MVP-006 now prove the individual boundaries for user event intake,
+      model input/output handling, visible assistant commit, recent visible context, user
+      visible projection, and read-side visible conversation mapping. The narrow next step
+      is to prove these pieces compose for one <code>USER_MESSAGE</code> turn before adding
+      state, storage, retrieval, real provider behavior, or broader route-policy expansion.
+      The route itself must be updated in this slice because Runtime Kernel owns whether
+      model judgment is needed.
+    </p>
+
+    <h2>Notion Sources Checked</h2>
+    <ul>
+      <li><a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a></li>
+      <li><a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a></li>
+      <li><a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a></li>
+      <li><a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a></li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/completed/mvp-006-visible-conversation-recent-source.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-16/009-mvp-007-functional-spec.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>python3 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-006-visible-conversation-recent-source.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-16/009-mvp-007-functional-spec.html</code> - passed.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 82 tests.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>MVP-007 is a spec-only change in this branch so far; production code and tests remain future work under this active slice.</li>
+      <li>The active spec intentionally avoids concrete storage, state, retrieval, tools, Live2D, scheduling, real provider calls, broad route-policy rewrite, rollback, and reconciliation.</li>
+      <li>The orchestrator should reuse existing boundary functions and validators instead of copying validation logic.</li>
+      <li>The key regression target is excluding the current user message from <code>recent_visible_messages</code> even though the user message is projected to the visible conversation before the model call.</li>
+      <li>If implementation needs a new Runtime Kernel helper, keep it to normalized intake data and route details only, and route <code>RuntimeKernel.handle_event()</code> through the same helper.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Review the MVP-007 functional spec, then implement only the fake-backed minimal user-turn orchestration tests and smallest passing code.
+    </p>
+  </main>
+</body>
+</html>

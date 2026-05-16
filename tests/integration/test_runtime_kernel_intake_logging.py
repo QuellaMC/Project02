@@ -35,7 +35,7 @@ class FailingRawEventLog:
 
 
 class RuntimeKernelIntakeLoggingTests(unittest.TestCase):
-    def test_user_message_intake_appends_one_raw_log_and_routes_logged_only(self):
+    def test_user_message_intake_appends_one_raw_log_and_routes_user_turn(self):
         raw_log = RecordingRawEventLog()
         kernel = RuntimeKernel(raw_log, id_generator=SequenceIdGenerator(), clock=fixed_clock)
 
@@ -56,8 +56,8 @@ class RuntimeKernelIntakeLoggingTests(unittest.TestCase):
                 "trace_id": "trace-generated-2",
                 "event_id": "event-generated-1",
                 "event_type": "USER_MESSAGE",
-                "model_needed": False,
-                "next_step": "logged_only",
+                "model_needed": True,
+                "next_step": "user_turn",
             },
         )
         self.assertEqual(len(raw_log.entries), 1)
