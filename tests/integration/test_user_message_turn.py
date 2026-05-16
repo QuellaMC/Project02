@@ -177,6 +177,61 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         self.assertEqual(visible_conversation.records[1]["text"], "hello now")
         self.assertEqual(visible_conversation.records[2]["text"], "hello back")
 
+    def test_second_turn_uses_completed_prior_turn_as_recent_context(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation()
+        first_adapter = RecordingAdapter()
+        second_adapter = RecordingAdapter()
+
+        run_user_message_turn(
+            {
+                "event_id": "event-first",
+                "trace_id": "trace-first",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:20:00+00:00",
+                "payload": {"text": "first hello", "conversation_id": "c-1"},
+            },
+            adapter=first_adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        second_result = run_user_message_turn(
+            {
+                "event_id": "event-second",
+                "trace_id": "trace-second",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:31:00+00:00",
+                "payload": {"text": "second hello", "conversation_id": "c-1"},
+            },
+            adapter=second_adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(second_result["status"], "user_turn_committed")
+        recent_messages = second_adapter.calls[0]["decision_context"]["character_snapshot"][
+            "recent_visible_messages"
+        ]
+        self.assertEqual(
+            [
+                (message["source_event_id"], message["role"], message["text"])
+                for message in recent_messages
+            ],
+            [
+                ("event-first", "user", "first hello"),
+                ("event-first", "assistant", "hello back"),
+            ],
+        )
+        self.assertNotIn(
+            "event-second",
+            {message["source_event_id"] for message in recent_messages},
+        )
+
     def test_kernel_handle_event_and_user_turn_share_intake_route(self):
         kernel_log = RecordingRawEventLog()
         turn_log = RecordingRawEventLog()

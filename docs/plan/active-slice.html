@@ -315,6 +315,7 @@
       <li>Preserved existing boundary ownership: Commit and Effects still appends visible user and assistant records, Role Model Loop still calls/parses the fake adapter, and Runtime Kernel still owns intake and route policy.</li>
       <li>Added unit tests for stop envelopes when user visible projection or assistant visible reply commit returns a rejected result.</li>
       <li>Added integration tests for successful end-to-end composition, shared route semantics with <code>RuntimeKernel.handle_event()</code>, malformed input, malformed model output, raw log order, visible append order, copy isolation, and current-message exclusion from <code>recent_visible_messages</code>.</li>
+      <li>PR review fix: recent visible context now allows a completed prior turn to contribute both its user message and assistant reply even though they share the same <code>source_event_id</code>; duplicate protection is now based on <code>message_id</code> plus the <code>source_event_id</code> / <code>role</code> pair.</li>
       <li>No concrete storage, live model provider, Character State Engine package, retrieval index, tool execution, Live2D behavior, scheduler, rollback, or reconciliation was added.</li>
       <li>Current verification: Ruff lint and format checks, mypy, compileall, full unittest discovery, HTML parser checks, and <code>git diff --check</code> passed after implementation.</li>
     </ul>

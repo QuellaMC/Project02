@@ -349,7 +349,7 @@ def _read_recent_visible_messages(
     event_created_at = _parse_sortable_timestamp(event["created_at"])
     normalized_messages: list[tuple[datetime, RecentVisibleMessage]] = []
     seen_message_ids: set[str] = set()
-    seen_source_event_ids: set[str] = set()
+    seen_source_event_roles: set[tuple[str, str]] = set()
     for raw_message in raw_messages:
         normalized_message = _validate_recent_visible_message(
             raw_message,
@@ -360,7 +360,7 @@ def _read_recent_visible_messages(
         _reject_duplicate_recent_message_identity(
             normalized_message,
             seen_message_ids=seen_message_ids,
-            seen_source_event_ids=seen_source_event_ids,
+            seen_source_event_roles=seen_source_event_roles,
         )
         message_created_at = _parse_recent_message_timestamp_before_event(
             normalized_message,
@@ -704,17 +704,19 @@ def _reject_duplicate_recent_message_identity(
     message: RecentVisibleMessage,
     *,
     seen_message_ids: set[str],
-    seen_source_event_ids: set[str],
+    seen_source_event_roles: set[tuple[str, str]],
 ) -> None:
     message_id = message["message_id"]
     if message_id in seen_message_ids:
         raise RoleModelValidationError("RecentVisibleMessage.message_id must be unique.")
     seen_message_ids.add(message_id)
 
-    source_event_id = message["source_event_id"]
-    if source_event_id in seen_source_event_ids:
-        raise RoleModelValidationError("RecentVisibleMessage.source_event_id must be unique.")
-    seen_source_event_ids.add(source_event_id)
+    source_event_role = (message["source_event_id"], message["role"])
+    if source_event_role in seen_source_event_roles:
+        raise RoleModelValidationError(
+            "RecentVisibleMessage.source_event_id and role pair must be unique."
+        )
+    seen_source_event_roles.add(source_event_role)
 
 
 def _select_recent_visible_messages(
@@ -918,7 +920,7 @@ def _validate_character_snapshot(
     event_timestamp = _parse_sortable_timestamp(event_created_at)
     normalized_messages: list[tuple[datetime, RecentVisibleMessage]] = []
     seen_message_ids: set[str] = set()
-    seen_source_event_ids: set[str] = set()
+    seen_source_event_roles: set[tuple[str, str]] = set()
     for message in recent_visible_messages:
         normalized_message = _validate_recent_visible_message(
             message,
@@ -929,7 +931,7 @@ def _validate_character_snapshot(
         _reject_duplicate_recent_message_identity(
             normalized_message,
             seen_message_ids=seen_message_ids,
-            seen_source_event_ids=seen_source_event_ids,
+            seen_source_event_roles=seen_source_event_roles,
         )
         message_created_at = _parse_recent_message_timestamp_before_event(
             normalized_message,

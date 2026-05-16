@@ -382,7 +382,7 @@ class DecisionContextTests(unittest.TestCase):
                         source_event_id="event-message-1",
                     ),
                 ],
-                "source_event_id",
+                "source_event_id and role",
             ),
         ]
 
@@ -393,6 +393,40 @@ class DecisionContextTests(unittest.TestCase):
                         normalized_user_message(),
                         recent_visible_messages_source=RecordingRecentMessagesSource(messages),
                     )
+
+    def test_allows_user_and_assistant_recent_messages_from_same_source_event(self):
+        messages = [
+            recent_message(
+                "message-prior-user",
+                role="user",
+                source_event_id="event-prior-turn",
+                created_at="2026-05-14T11:21:00+00:00",
+                text="prior user message",
+            ),
+            recent_message(
+                "message-prior-assistant",
+                role="assistant",
+                source_event_id="event-prior-turn",
+                created_at="2026-05-14T11:22:00+00:00",
+                text="prior assistant reply",
+            ),
+        ]
+
+        context = build_decision_context(
+            normalized_user_message(),
+            recent_visible_messages_source=RecordingRecentMessagesSource(messages),
+        )
+
+        self.assertEqual(
+            [
+                (message["source_event_id"], message["role"], message["text"])
+                for message in context["character_snapshot"]["recent_visible_messages"]
+            ],
+            [
+                ("event-prior-turn", "user", "prior user message"),
+                ("event-prior-turn", "assistant", "prior assistant reply"),
+            ],
+        )
 
     def test_rejects_malformed_recent_message_records(self):
         cases = [

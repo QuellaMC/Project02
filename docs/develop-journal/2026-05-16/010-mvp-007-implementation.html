@@ -30,6 +30,8 @@
       <li>Returned <code>user_turn_stopped</code> envelopes when user visible projection or assistant visible reply commit returns a rejected result, without adding rollback, reconciliation, or fallback text.</li>
       <li>Updated old runtime route tests so they deliberately assert the new MVP-007 route semantics instead of the MVP-001 logged-only behavior.</li>
       <li>Added integration coverage for one full user turn, shared kernel/orchestrator route semantics, malformed input, malformed model output, raw log order, visible append order, current-message exclusion, and result copy isolation.</li>
+      <li>PR review fix: changed recent-message duplicate validation so a completed prior user turn can contribute both the user visible message and assistant visible reply with the same <code>source_event_id</code>.</li>
+      <li>PR review fix: added a second-turn orchestrator regression test proving completed prior turns flow into <code>recent_visible_messages</code> without duplicating the current user message.</li>
       <li>Updated <code>docs/plan/active-slice.html</code> and <code>docs/plan/index.html</code> from spec-only to implemented-and-tested-local status.</li>
     </ul>
 
@@ -66,7 +68,7 @@
 
     <h2>Tests Run</h2>
     <ul>
-      <li><code>python3 -m unittest discover -s tests -t .</code> - passed after implementation, 89 tests.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed after PR review fix, 91 tests.</li>
       <li><code>/private/tmp/project02-ruff/bin/ruff check .</code> - passed after import-order fix.</li>
       <li><code>/private/tmp/project02-ruff/bin/ruff format --check .</code> - passed.</li>
       <li><code>/private/tmp/project02-mypy/bin/mypy src</code> - passed.</li>
@@ -82,6 +84,7 @@
       <li>Role Model Loop remains the only boundary that renders model input, calls the fake adapter, parses model output, and logs role-model success or failure.</li>
       <li>Runtime Kernel route policy changed only for the implemented <code>USER_MESSAGE</code> event type.</li>
       <li>The current user message is projected to the visible conversation before the model call, but the MVP-004/MVP-006 current-event exclusion still keeps it out of <code>recent_visible_messages</code>.</li>
+      <li>Completed prior turns intentionally include one user and one assistant record with the same source event. The duplicate guard now rejects duplicate <code>message_id</code> values and duplicate <code>source_event_id</code> / <code>role</code> pairs, not all repeated source events.</li>
       <li>No concrete storage, live provider, Character State Engine package, retrieval, tool, Live2D, scheduler, transaction, rollback, or reconciliation behavior was added.</li>
     </ul>
 
