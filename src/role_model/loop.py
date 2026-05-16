@@ -659,7 +659,7 @@ def _validate_recent_visible_message(
         lambda: require_equal(message.get("conversation_id"), conversation_id, "conversation_id")
     )
     role = _wrap_contract_error(lambda: require_string(message.get("role"), "role"))
-    if role not in {"user", "assistant"}:
+    if role not in {USER_VISIBLE_MESSAGE_ROLE, ASSISTANT_VISIBLE_REPLY_ROLE}:
         raise RoleModelValidationError("role must be 'user' or 'assistant'.")
     text = _wrap_contract_error(lambda: require_string(message.get("text"), "text"))
 
