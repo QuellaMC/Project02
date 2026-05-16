@@ -292,6 +292,45 @@ class UserVisibleMessageCommitIntegrationTests(unittest.TestCase):
             },
         )
 
+    def test_unsupported_source_type_logs_rejection_without_visible_message(self):
+        visible_log = RecordingAppendLog()
+        raw_log = RecordingAppendLog()
+        ids = SequenceIdGenerator()
+        event = normalized_user_message()
+        event["type"] = "TIMER"
+
+        result = commit_user_visible_message(
+            event,
+            visible_conversation_log=visible_log,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(ids.calls, ["log"])
+        self.assertEqual(visible_log.entries, [])
+        self.assertEqual(len(raw_log.entries), 1)
+        self.assertEqual(raw_log.entries[0]["kind"], "user_visible_message_rejected")
+        self.assertEqual(raw_log.entries[0]["data"]["source_event"]["type"], "TIMER")
+        self.assertEqual(
+            raw_log.entries[0]["data"]["failure"],
+            {
+                "stage": "user_visible_message_validation",
+                "code": "malformed_commit_input",
+                "message": "source_event.type must be 'USER_MESSAGE'.",
+            },
+        )
+        self.assertEqual(
+            result,
+            {
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "event_type": "USER_MESSAGE",
+                "status": "user_visible_message_rejected",
+                "failure": raw_log.entries[0]["data"]["failure"],
+            },
+        )
+
     def test_missing_trusted_type_raises_without_rejection_log(self):
         visible_log = RecordingAppendLog()
         raw_log = RecordingAppendLog()

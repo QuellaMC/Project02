@@ -28,6 +28,7 @@
       <li>Added user projection builders for <code>user_visible_message</code>, <code>user_visible_message_committed</code>, and <code>user_visible_message_rejected</code>.</li>
       <li>Widened the existing <code>VisibleConversationLog</code> append typing to visible conversation records without adding a second append protocol or changing assistant visible-reply behavior.</li>
       <li>Added focused unit and integration tests for the MVP-005 projection contract.</li>
+      <li>Review follow-up: added a direct top-level integration case proving unsupported source event type rejection through <code>commit_user_visible_message()</code>.</li>
       <li>Updated <code>docs/plan/active-slice.html</code> and <code>docs/plan/index.html</code> so they reflect the implemented state.</li>
     </ul>
 
@@ -57,8 +58,9 @@
       <li><code>python3 -m compileall src tests</code> - passed.</li>
       <li><code>python3 -m unittest tests.unit.test_visible_reply_commit tests.integration.test_visible_reply_commit</code> - passed, 24 tests.</li>
       <li><code>python3 -m unittest discover -s tests/unit -t .</code> - passed, 49 tests.</li>
-      <li><code>python3 -m unittest discover -s tests/integration -t .</code> - passed, 26 tests.</li>
-      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 75 tests.</li>
+      <li><code>python3 -m unittest tests.integration.test_visible_reply_commit</code> - passed, 12 tests.</li>
+      <li><code>python3 -m unittest discover -s tests/integration -t .</code> - passed, 27 tests.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 76 tests.</li>
       <li><code>python3 -m html.parser docs/plan/active-slice.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-16/005-mvp-005-implementation.html</code> - passed.</li>
       <li><code>git diff --check</code> - passed.</li>
     </ul>
