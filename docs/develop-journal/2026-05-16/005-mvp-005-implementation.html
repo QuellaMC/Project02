@@ -73,6 +73,7 @@
       <li>Trusted source-event validation failures append <code>user_visible_message_rejected</code> and return a reject result; missing trusted identity still raises without logging.</li>
       <li>Raw log and visible message snapshots are deep-copied so caller-side mutation cannot alter append-only truth.</li>
       <li>No concrete <code>ConversationLog</code> storage, recent-message read source, idempotency policy, model call, or user-turn orchestrator was added.</li>
+      <li>Future-slice compatibility note: MVP-005 <code>UserVisibleMessage</code> includes <code>kind</code> and <code>source</code>, so a later visible-record-backed recent source must map to the narrower MVP-004 <code>RecentVisibleMessage</code> shape or deliberately widen that schema with tests.</li>
     </ul>
 
     <h2>Next Action</h2>

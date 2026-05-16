@@ -343,9 +343,10 @@
 
       <dt>Risk Or Unknown</dt>
       <dd>Reading before the storage boundary is explicit could hide ordering, pagination, and idempotency decisions in test fakes.</dd>
+      <dd>MVP-005 <code>UserVisibleMessage</code> records include <code>kind</code> and <code>source</code>, while the MVP-004 <code>RecentVisibleMessage</code> validator currently rejects extra fields and accepts only <code>schema_version</code>, <code>message_id</code>, <code>trace_id</code>, <code>source_event_id</code>, <code>conversation_id</code>, <code>role</code>, <code>created_at</code>, and <code>text</code>.</dd>
 
       <dt>Schema Evolution Impact</dt>
-      <dd>Likely adapts committed visible transcript records into the existing <code>RecentVisibleMessage</code> shape without changing <code>DecisionContext</code>.</dd>
+      <dd>The next storage/source slice should either map committed <code>UserVisibleMessage</code> records into the narrower <code>RecentVisibleMessage</code> shape before feeding Role Model Loop, or deliberately widen the recent-message schema with tests.</dd>
 
       <dt>Do Not Implement Now Because</dt>
       <dd>The active MVP-005 slice only commits the incoming user message projection and does not add read/query behavior.</dd>
