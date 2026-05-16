@@ -51,6 +51,8 @@
       index stays current.
       MVP-005 is tracked in
       <a href="https://github.com/QuellaMC/Project02/pull/5">PR #5</a>.
+      MVP-006 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/6">PR #6</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -82,8 +84,9 @@ flowchart LR
     UserProjection["User visible message projection&lt;br/&gt;raw log then visible transcript"]
   end
 
-  subgraph RecentContext["Context Source - MVP-004 implemented"]
+  subgraph RecentContext["Context Source - MVP-004 and MVP-006 implemented"]
     RecentMessages["Recent visible message tail&lt;br/&gt;bounded read-only source"]
+    VisibleRecentSource["Visible conversation recent source&lt;br/&gt;maps committed records to context"]
   end
 
   UserMessage --> Normalize --> Route
@@ -92,15 +95,14 @@ flowchart LR
   Normalize --> UserProjection
   UserProjection --> Conversation
   UserProjection --> CommitLog
-  UserProjection -. future transcript source .-> RecentMessages
-  Conversation -. future storage source .-> RecentMessages --> Context
+  Conversation -. active MVP-006 source .-> VisibleRecentSource --> RecentMessages --> Context
   Parse --> LogHelper --> RoleLog
   Parse --> Commit --> Conversation
   Commit --> CommitLog
 
   classDef implemented fill:#e7f1e9,stroke:#5c8a65,color:#172026;
   classDef next fill:#f6f0df,stroke:#9b7c32,color:#172026,stroke-dasharray: 6 4;
-  class Normalize,Route,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages,UserProjection implemented;
+  class Normalize,Route,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages,UserProjection,VisibleRecentSource implemented;
       </pre>
     </div>
 
@@ -115,9 +117,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-005 - User Visible Message Projection</a></td>
-          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/5">PR #5</a> open</td>
-          <td>Project a normalized <code>USER_MESSAGE</code> into the visible conversation boundary with one raw projection log and one injected visible append, without concrete storage, orchestration, model calls, retrieval, or state.</td>
+          <td><a href="active-slice.html">MVP-006 - Visible Conversation Recent Source</a></td>
+          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/6">PR #6</a> open</td>
+          <td>Map committed visible user and assistant records into the existing <code>RecentVisibleMessage</code> context shape through an injected read-only source, without concrete storage, orchestration, model calls, retrieval, or state.</td>
         </tr>
       </tbody>
     </table>
@@ -132,6 +134,11 @@ flowchart LR
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td><a href="completed/mvp-005-user-visible-message-projection.html">MVP-005 - User Visible Message Projection</a></td>
+          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/5">PR #5</a> open</td>
+          <td>Project a normalized <code>USER_MESSAGE</code> into the visible conversation boundary with one raw projection log and one injected visible append, without concrete storage, orchestration, model calls, retrieval, or state.</td>
+        </tr>
         <tr>
           <td><a href="completed/mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004 - Recent Visible Messages in DecisionContext</a></td>
           <td>Implemented and tested</td>
@@ -162,7 +169,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active MVP-005 user visible message projection slice are parked in
+      Ideas beyond the active MVP-006 visible conversation recent source slice are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 

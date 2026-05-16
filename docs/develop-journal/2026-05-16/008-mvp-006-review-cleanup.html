@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal - MVP-006 Review Cleanup</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 32px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-006 Review Cleanup</h1>
+    <p><strong>Date:</strong> 2026-05-16</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Addressed the review finding about drift risk between the Commit and Effects visible-record writer and the Role Model Loop visible-record reader.</li>
+      <li>Moved shared visible-record kind and role constants into <code>runtime.contracts</code>.</li>
+      <li>Updated <code>commit_effects.visible_reply</code> and <code>role_model.loop</code> to use the shared visible-record vocabulary.</li>
+      <li>Follow-up cleanup: replaced the remaining <code>RecentVisibleMessage</code> role literal set in <code>role_model.loop</code> with the shared user and assistant role constants.</li>
+      <li>Follow-up cleanup: composed the matching human-readable role validation message from the same shared role constants.</li>
+      <li>Follow-up cleanup: replaced the integration test's hard-coded recent-message candidate limit with <code>RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES</code>.</li>
+      <li>Added an integration test that builds committed user and assistant records through <code>build_user_visible_message()</code> and <code>build_visible_conversation_output()</code>, then feeds them into <code>VisibleConversationRecentMessagesSource</code>.</li>
+      <li>Updated the active slice implementation results to record the shared-constant cleanup and real-builder integration coverage.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      MVP-006 reads records written by the Commit and Effects boundary. Using separate
+      reader-side literals and only hand-built reader fixtures could let writer-side schema
+      drift pass MVP-006 tests while breaking real committed records at read time.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>src/runtime/contracts.py</code></li>
+      <li><code>src/commit_effects/visible_reply.py</code></li>
+      <li><code>src/role_model/loop.py</code></li>
+      <li><code>tests/integration/test_role_model_loop.py</code></li>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/develop-journal/2026-05-16/008-mvp-006-review-cleanup.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>python3 -m unittest tests.integration.test_role_model_loop</code> - passed.</li>
+      <li><code>python3 -m unittest tests.unit.test_role_model_loop tests.unit.test_visible_reply_commit tests.unit.test_runtime_contracts</code> - passed.</li>
+      <li><code>python3 -m unittest tests.unit.test_role_model_loop tests.integration.test_role_model_loop</code> - passed after the role-constant follow-up.</li>
+      <li><code>python3 -m unittest tests.unit.test_role_model_loop tests.integration.test_role_model_loop</code> - passed after the role-message follow-up.</li>
+      <li><code>python3 -m unittest tests.integration.test_role_model_loop</code> - passed after the candidate-limit test cleanup.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff format --check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-mypy/bin/mypy src</code> - passed.</li>
+      <li><code>python3 -m compileall src tests</code> - passed.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-005-user-visible-message-projection.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-16/006-mvp-006-functional-spec.html docs/develop-journal/2026-05-16/007-mvp-006-implementation.html docs/develop-journal/2026-05-16/008-mvp-006-review-cleanup.html</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>The cleanup does not add storage, write behavior, new runtime routes, retrieval, model-provider behavior, or orchestration.</li>
+      <li>The existing hand-built malformed-record fixtures remain useful because they intentionally exercise invalid reader-side shapes.</li>
+      <li>The new integration test proves the reader accepts actual writer-produced committed records before applying ordering, current-event exclusion, duplicate detection, and budget selection.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Review <a href="https://github.com/QuellaMC/Project02/pull/6">PR #6</a>,
+      wait for required CI checks, and merge by the protected-branch workflow after approval.
+    </p>
+  </main>
+</body>
+</html>
