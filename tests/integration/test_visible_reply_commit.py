@@ -5,7 +5,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from commit_effects.visible_reply import CommitValidationError, commit_visible_reply  # noqa: E402
+from commit_effects.visible_reply import (  # noqa: E402
+    CommitValidationError,
+    commit_user_visible_message,
+    commit_visible_reply,
+)
 
 
 def fixed_clock():
@@ -212,6 +216,129 @@ class VisibleReplyCommitIntegrationTests(unittest.TestCase):
                 "failure": raw_log.entries[0]["data"]["failure"],
             },
         )
+
+
+class UserVisibleMessageCommitIntegrationTests(unittest.TestCase):
+    def test_valid_user_message_appends_raw_projection_log_then_visible_message(self):
+        visible_log = RecordingAppendLog()
+        raw_log = RecordingAppendLog()
+        ids = SequenceIdGenerator()
+
+        result = commit_user_visible_message(
+            normalized_user_message(),
+            visible_conversation_log=visible_log,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(ids.calls, ["message", "log"])
+        self.assertEqual(len(raw_log.entries), 1)
+        self.assertEqual(len(visible_log.entries), 1)
+        self.assertEqual(
+            result,
+            {
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "event_type": "USER_MESSAGE",
+                "status": "user_visible_message_committed",
+                "message": visible_log.entries[0],
+            },
+        )
+        self.assertEqual(visible_log.entries[0]["message_id"], "message-generated-1")
+        self.assertEqual(visible_log.entries[0]["kind"], "user_visible_message")
+        self.assertEqual(visible_log.entries[0]["role"], "user")
+        self.assertEqual(visible_log.entries[0]["created_at"], "2026-05-15T11:59:00+00:00")
+        self.assertEqual(visible_log.entries[0]["text"], "hello")
+        self.assertEqual(raw_log.entries[0]["log_id"], "log-generated-2")
+        self.assertEqual(raw_log.entries[0]["kind"], "user_visible_message_committed")
+        self.assertEqual(raw_log.entries[0]["data"]["message"], visible_log.entries[0])
+
+    def test_invalid_source_event_with_trusted_identity_logs_rejection(self):
+        visible_log = RecordingAppendLog()
+        raw_log = RecordingAppendLog()
+        ids = SequenceIdGenerator()
+        event = normalized_user_message()
+        event["created_at"] = "2026-05-15"
+
+        result = commit_user_visible_message(
+            event,
+            visible_conversation_log=visible_log,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(ids.calls, ["log"])
+        self.assertEqual(visible_log.entries, [])
+        self.assertEqual(len(raw_log.entries), 1)
+        self.assertEqual(raw_log.entries[0]["kind"], "user_visible_message_rejected")
+        self.assertEqual(
+            raw_log.entries[0]["data"]["failure"]["stage"],
+            "user_visible_message_validation",
+        )
+        self.assertEqual(
+            raw_log.entries[0]["data"]["failure"]["code"],
+            "malformed_commit_input",
+        )
+        self.assertEqual(
+            result,
+            {
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "event_type": "USER_MESSAGE",
+                "status": "user_visible_message_rejected",
+                "failure": raw_log.entries[0]["data"]["failure"],
+            },
+        )
+
+    def test_missing_trusted_type_raises_without_rejection_log(self):
+        visible_log = RecordingAppendLog()
+        raw_log = RecordingAppendLog()
+        event = normalized_user_message()
+        del event["type"]
+
+        with self.assertRaisesRegex(CommitValidationError, "type"):
+            commit_user_visible_message(
+                event,
+                visible_conversation_log=visible_log,
+                raw_event_log=raw_log,
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+            )
+
+        self.assertEqual(visible_log.entries, [])
+        self.assertEqual(raw_log.entries, [])
+
+    def test_raw_log_append_failure_does_not_append_user_visible_message(self):
+        visible_log = RecordingAppendLog()
+
+        with self.assertRaisesRegex(RuntimeError, "append failed"):
+            commit_user_visible_message(
+                normalized_user_message(),
+                visible_conversation_log=visible_log,
+                raw_event_log=FailingAppendLog(),
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+            )
+
+        self.assertEqual(visible_log.entries, [])
+
+    def test_visible_append_failure_keeps_user_projection_log_for_reconciliation(self):
+        raw_log = RecordingAppendLog()
+
+        with self.assertRaisesRegex(RuntimeError, "append failed"):
+            commit_user_visible_message(
+                normalized_user_message(),
+                visible_conversation_log=FailingAppendLog(),
+                raw_event_log=raw_log,
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+            )
+
+        self.assertEqual(len(raw_log.entries), 1)
+        self.assertEqual(raw_log.entries[0]["kind"], "user_visible_message_committed")
+        self.assertEqual(raw_log.entries[0]["data"]["message"]["text"], "hello")
 
 
 if __name__ == "__main__":

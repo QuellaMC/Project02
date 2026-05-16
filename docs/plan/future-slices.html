@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-004</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-005</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -84,7 +84,7 @@
     <h2>Recent Visible Messages in DecisionContext</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Promoted to the active slice on 2026-05-15. See <a href="active-slice.html">active-slice.html</a>.</dd>
+      <dd>Completed on 2026-05-16. See <a href="completed/mvp-004-recent-visible-messages-in-decisioncontext.html">completed MVP-004</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>The Notion roadmap's Phase 1 user turn loop mentions recent messages as the first context source.</dd>
@@ -105,13 +105,13 @@
       <dd>Likely adds <code>recent_visible_messages</code> to <code>DecisionContext</code>.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>This item is no longer parked; it is the active MVP-004 spec.</dd>
+      <dd>This item is no longer parked; it has been completed and recorded under completed plans.</dd>
     </dl>
 
     <h2>ConversationLog User Message Records</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Commit user-visible message records so recent-message context can be sourced from the same visible conversation projection as assistant replies.</dd>
+      <dd>Promoted to the active slice on 2026-05-16. See <a href="active-slice.html">active-slice.html</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>MVP-004 can read an injected recent-message source, but a real conversation tail eventually needs user and assistant visible records.</dd>
@@ -123,7 +123,7 @@
       <dd>MVP-004 should first prove the <code>recent_visible_messages</code> context contract with a fake source.</dd>
 
       <dt>Possible Future Slice</dt>
-      <dd><code>ConversationLog user-message append v0.1</code>.</dd>
+      <dd><code>MVP-005 - User Visible Message Projection</code>.</dd>
 
       <dt>Risk Or Unknown</dt>
       <dd>User-message conversation records could duplicate raw event truth if the projection boundary is not explicit.</dd>
@@ -132,7 +132,7 @@
       <dd>Likely adds a user-visible conversation record shape compatible with <code>RecentVisibleMessage</code>.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-004 slice only reads a bounded message tail through an injected source.</dd>
+      <dd>This item is no longer parked; it is the active MVP-005 spec.</dd>
     </dl>
 
     <h2>Context Build Raw Log Entries</h2>
@@ -186,7 +186,7 @@
       <dd>Likely preserves the current <code>DecisionContext</code> shape while moving source reads, context-budget policy, and future context-build logs behind an explicit boundary.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-004 slice has only one read-only context source and no state, incidents, retrieval, active-thread, or context-build-log behavior.</dd>
+      <dd>MVP-004 completed with only one read-only context source, and MVP-005 does not add state, incidents, retrieval, active-thread, or context-build-log behavior.</dd>
     </dl>
 
     <h2>Shared RecentVisibleMessage Contract</h2>
@@ -213,7 +213,7 @@
       <dd>Likely moves existing validation into <code>runtime.contracts</code> without changing the current <code>DecisionContext</code> shape.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-004 slice has only one production consumer and should not add shared abstractions before they are needed.</dd>
+      <dd>MVP-004 still has only one production consumer, and MVP-005 should not add shared abstractions before they are needed.</dd>
     </dl>
 
     <h2>Full User Turn Orchestrator</h2>
@@ -222,13 +222,13 @@
       <dd>Expose one tested flow that runs Runtime Kernel intake, Role Model Loop, and Commit and Effects for a user message.</dd>
 
       <dt>Why It May Matter</dt>
-      <dd>The Phase 1 roadmap wants a minimal user turn loop, but each boundary needs to be proven separately first.</dd>
+      <dd>The Phase 1 roadmap wants a minimal user turn loop, but each boundary and visible projection needs to be proven separately first.</dd>
 
       <dt>Source Or Trigger</dt>
       <dd>Discovered while keeping MVP-003 limited to Commit and Effects.</dd>
 
       <dt>Dependency</dt>
-      <dd>MVP-003 visible reply commit should work first.</dd>
+      <dd>MVP-003 visible reply commit, MVP-004 recent-message context, and MVP-005 user visible projection should work first.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>Minimal user turn orchestrator v0.1</code>.</dd>
@@ -240,7 +240,7 @@
       <dd>Likely introduces a top-level turn result envelope without changing existing event, decision, or output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active slice only validates and commits an already parsed visible reply decision.</dd>
+      <dd>The active MVP-005 slice only projects the incoming user message into the visible transcript boundary.</dd>
     </dl>
 
     <h2>Shared RoleModelTurnResult Validator</h2>
@@ -282,7 +282,7 @@
       <dd>Discovered while narrowing MVP-003 away from database and transaction design.</dd>
 
       <dt>Dependency</dt>
-      <dd>MVP-003 should first prove the output record shape and commit/reject behavior.</dd>
+      <dd>MVP-003 should first prove assistant output records, and MVP-005 should first prove user message projection through the same injected boundary.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>ConversationLog storage adapter v0.1</code>.</dd>
@@ -294,7 +294,88 @@
       <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active slice uses injected append-only interfaces and no concrete database.</dd>
+      <dd>The active MVP-005 slice uses injected append-only interfaces and no concrete database.</dd>
+    </dl>
+
+    <h2>Shared Visible Conversation Message Contract</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Converge user and assistant visible transcript records into one shared visible-message contract after both sides have a real second consumer.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Recent-message sources, concrete storage, and debug views should eventually read one consistent transcript shape.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while narrowing MVP-005 away from reshaping the MVP-003 assistant visible output schema.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-005 should first prove user message projection without changing MVP-003 assistant commit behavior.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>VisibleConversationMessage shared contract v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Unifying the contract too early could break the existing assistant commit path before storage or context reading needs the shared shape.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds a shared <code>role</code> / <code>message_id</code> visible transcript contract while preserving compatibility with existing assistant output records.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active MVP-005 slice only adds the user-side projection and explicitly preserves MVP-003 assistant output behavior.</dd>
+    </dl>
+
+    <h2>Recent Source Backed By Visible Conversation Records</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Implement a recent-message source that reads committed visible user and assistant records instead of hand-built test fixtures.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>MVP-004 defines the read-side context contract, and MVP-005 defines the user write-side projection. A later slice can connect them through a real source boundary.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while keeping MVP-005 limited to writing the user visible projection.</dd>
+
+      <dt>Dependency</dt>
+      <dd>Both user and assistant visible records should be available through an injected or concrete conversation log boundary.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Visible conversation recent source v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Reading before the storage boundary is explicit could hide ordering, pagination, and idempotency decisions in test fakes.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adapts committed visible transcript records into the existing <code>RecentVisibleMessage</code> shape without changing <code>DecisionContext</code>.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active MVP-005 slice only commits the incoming user message projection and does not add read/query behavior.</dd>
+    </dl>
+
+    <h2>Conversation Projection Reconciliation</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add reconciliation for cases where a raw projection log commits but visible transcript append fails.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>MVP-003 and MVP-005 deliberately append raw logs before visible transcript records, leaving enough truth for later repair.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while specifying MVP-005 failure behavior.</dd>
+
+      <dt>Dependency</dt>
+      <dd>A concrete conversation store or replay/reconciliation worker must exist first.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Conversation projection reconciliation v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Reconciliation policy requires idempotency keys and storage semantics that do not exist in the current in-memory boundaries.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds reconciliation status or retry metadata to projection logs without changing visible message records.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-005 has no concrete storage, worker, scheduler, or replay boundary.</dd>
     </dl>
   </main>
 </body>

@@ -7,6 +7,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from commit_effects.visible_reply import (  # noqa: E402
     CommitValidationError,
+    build_user_visible_message,
+    build_user_visible_message_committed_log_entry,
+    build_user_visible_message_rejected_log_entry,
     build_visible_conversation_output,
     build_visible_reply_committed_log_entry,
     build_visible_reply_rejected_log_entry,
@@ -230,6 +233,139 @@ class VisibleReplyLogEntryTests(unittest.TestCase):
                 failure={
                     "stage": "commit_validation",
                     "code": "adapter_exception",
+                    "message": "wrong boundary",
+                },
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+            )
+
+
+class UserVisibleMessageTests(unittest.TestCase):
+    def test_builds_user_visible_message_from_normalized_user_message(self):
+        ids = SequenceIdGenerator()
+
+        message = build_user_visible_message(
+            normalized_user_message(),
+            id_generator=ids,
+        )
+
+        self.assertEqual(ids.calls, ["message"])
+        self.assertEqual(
+            message,
+            {
+                "message_id": "message-generated-1",
+                "trace_id": "trace-1",
+                "source_event_id": "event-1",
+                "kind": "user_visible_message",
+                "role": "user",
+                "created_at": "2026-05-15T11:59:00+00:00",
+                "schema_version": "0.1",
+                "text": "hello",
+                "user_id": "user-1",
+                "conversation_id": "conversation-1",
+                "source": {"runtime_event_type": "USER_MESSAGE"},
+            },
+        )
+
+    def test_user_visible_message_omits_absent_optional_conversation_fields(self):
+        event = normalized_user_message()
+        del event["payload"]["user_id"]
+        del event["payload"]["conversation_id"]
+
+        message = build_user_visible_message(
+            event,
+            id_generator=SequenceIdGenerator(),
+        )
+
+        self.assertNotIn("user_id", message)
+        self.assertNotIn("conversation_id", message)
+
+    def test_user_visible_message_rejects_invalid_source_events(self):
+        cases = []
+
+        unsupported_event = normalized_user_message()
+        unsupported_event["type"] = "TIMER"
+        cases.append((unsupported_event, "USER_MESSAGE"))
+
+        unsupported_schema = normalized_user_message()
+        unsupported_schema["schema_version"] = "0.2"
+        cases.append((unsupported_schema, "schema_version"))
+
+        malformed_created_at = normalized_user_message()
+        malformed_created_at["created_at"] = "2026-05-15"
+        cases.append((malformed_created_at, "created_at"))
+
+        missing_payload = normalized_user_message()
+        del missing_payload["payload"]
+        cases.append((missing_payload, "payload"))
+
+        empty_text = normalized_user_message()
+        empty_text["payload"]["text"] = "   "
+        cases.append((empty_text, "payload.text"))
+
+        for source_event, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(CommitValidationError, error_pattern):
+                    build_user_visible_message(
+                        source_event,
+                        id_generator=SequenceIdGenerator(),
+                    )
+
+
+class UserVisibleMessageLogEntryTests(unittest.TestCase):
+    def test_committed_log_entry_deep_copies_snapshots(self):
+        event = normalized_user_message()
+        message = build_user_visible_message(
+            event,
+            id_generator=SequenceIdGenerator(),
+        )
+
+        entry = build_user_visible_message_committed_log_entry(
+            event,
+            message,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        event["payload"]["text"] = "mutated event"
+        message["text"] = "mutated message"
+
+        self.assertEqual(entry["kind"], "user_visible_message_committed")
+        self.assertEqual(entry["data"]["source_event"]["payload"]["text"], "hello")
+        self.assertEqual(entry["data"]["message"]["text"], "hello")
+
+    def test_rejected_log_entry_deep_copies_snapshots(self):
+        event = normalized_user_message()
+        failure = {
+            "stage": "user_visible_message_validation",
+            "code": "malformed_commit_input",
+            "message": "source_event.type must be 'USER_MESSAGE'.",
+        }
+
+        entry = build_user_visible_message_rejected_log_entry(
+            event,
+            failure=failure,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        event["payload"]["text"] = "mutated event"
+        failure["message"] = "mutated failure"
+
+        self.assertEqual(entry["kind"], "user_visible_message_rejected")
+        self.assertEqual(entry["data"]["source_event"]["payload"]["text"], "hello")
+        self.assertEqual(
+            entry["data"]["failure"]["message"],
+            "source_event.type must be 'USER_MESSAGE'.",
+        )
+
+    def test_rejected_log_entry_rejects_invalid_failure_code(self):
+        with self.assertRaisesRegex(CommitValidationError, "failure.code"):
+            build_user_visible_message_rejected_log_entry(
+                normalized_user_message(),
+                failure={
+                    "stage": "user_visible_message_validation",
+                    "code": "unsupported_action",
                     "message": "wrong boundary",
                 },
                 id_generator=SequenceIdGenerator(),

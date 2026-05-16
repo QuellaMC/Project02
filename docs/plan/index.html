@@ -46,8 +46,9 @@
 
     <h2>Implementation Graph</h2>
     <p>
-      This Mermaid graph summarizes the project architecture currently implemented by local slices.
-      Update it after each pull request is created so the index stays current.
+      This Mermaid graph summarizes the project architecture currently implemented by local slices
+      plus the active spec target when useful. Update it after each pull request is created so the
+      index stays current.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -72,10 +73,11 @@ flowchart LR
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply only"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003 completed"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003 and MVP-005 implemented"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
+    UserProjection["User visible message projection&lt;br/&gt;raw log then visible transcript"]
   end
 
   subgraph RecentContext["Context Source - MVP-004 implemented"]
@@ -85,6 +87,10 @@ flowchart LR
   UserMessage --> Normalize --> Route
   Normalize --> LogHelper --> RuntimeLog
   Normalize --> Context --> Render --> Adapter --> Parse
+  Normalize --> UserProjection
+  UserProjection --> Conversation
+  UserProjection --> CommitLog
+  UserProjection -. future transcript source .-> RecentMessages
   Conversation -. future storage source .-> RecentMessages --> Context
   Parse --> LogHelper --> RoleLog
   Parse --> Commit --> Conversation
@@ -92,7 +98,7 @@ flowchart LR
 
   classDef implemented fill:#e7f1e9,stroke:#5c8a65,color:#172026;
   classDef next fill:#f6f0df,stroke:#9b7c32,color:#172026,stroke-dasharray: 6 4;
-  class Normalize,Route,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages implemented;
+  class Normalize,Route,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages,UserProjection implemented;
       </pre>
     </div>
 
@@ -107,9 +113,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-004 - Recent Visible Messages in DecisionContext</a></td>
+          <td><a href="active-slice.html">MVP-005 - User Visible Message Projection</a></td>
           <td>Implemented and tested; pending review</td>
-          <td>Add a bounded recent visible message tail to <code>DecisionContext</code> through an injected read-only source, without concrete storage, retrieval, orchestration, or new model actions.</td>
+          <td>Project a normalized <code>USER_MESSAGE</code> into the visible conversation boundary with one raw projection log and one injected visible append, without concrete storage, orchestration, model calls, retrieval, or state.</td>
         </tr>
       </tbody>
     </table>
@@ -124,6 +130,11 @@ flowchart LR
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td><a href="completed/mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004 - Recent Visible Messages in DecisionContext</a></td>
+          <td>Implemented and tested</td>
+          <td>Add a bounded recent visible message tail to <code>DecisionContext</code> through an injected read-only source, without concrete storage, retrieval, orchestration, or new model actions.</td>
+        </tr>
         <tr>
           <td><a href="completed/mvp-003-minimal-visible-reply-commit.html">MVP-003 - Minimal Visible Reply Commit</a></td>
           <td>Implemented and tested</td>
@@ -149,7 +160,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active MVP-004 recent-message context slice are parked in
+      Ideas beyond the active MVP-005 user visible message projection slice are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 
