@@ -7,8 +7,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from role_model.loop import (  # noqa: E402
+    RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES,
+    RECENT_VISIBLE_MESSAGES_MAX_MESSAGES,
+    RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS,
     ROLE_MODEL_INSTRUCTIONS,
     RoleModelValidationError,
+    approximate_text_tokens,
     build_decision_context,
     build_role_model_turn_completed_log_entry,
     build_role_model_turn_failed_log_entry,
@@ -61,6 +65,37 @@ class UserMessageType(str):
     pass
 
 
+def recent_message(
+    message_id,
+    *,
+    role="assistant",
+    created_at="2026-05-14T11:20:00+00:00",
+    text="previous reply",
+    conversation_id="conversation-1",
+    source_event_id=None,
+):
+    return {
+        "schema_version": "0.1",
+        "message_id": message_id,
+        "trace_id": f"trace-{message_id}",
+        "source_event_id": source_event_id or f"event-{message_id}",
+        "conversation_id": conversation_id,
+        "role": role,
+        "created_at": created_at,
+        "text": text,
+    }
+
+
+class RecordingRecentMessagesSource:
+    def __init__(self, messages):
+        self.messages = messages
+        self.requests = []
+
+    def read_recent_visible_messages(self, request):
+        self.requests.append(request)
+        return self.messages
+
+
 class DecisionContextTests(unittest.TestCase):
     def test_builds_minimal_decision_context_from_normalized_user_message(self):
         context = build_decision_context(normalized_user_message())
@@ -79,6 +114,7 @@ class DecisionContextTests(unittest.TestCase):
                     "user_id": "user-1",
                     "conversation_id": "conversation-1",
                 },
+                "character_snapshot": {"recent_visible_messages": []},
                 "allowed_actions": ["visible_reply"],
             },
         )
@@ -100,6 +136,185 @@ class DecisionContextTests(unittest.TestCase):
         context = build_decision_context(event)
 
         self.assertIs(context["event"]["type"], event["type"])
+
+    def test_without_conversation_id_does_not_call_recent_message_source(self):
+        event = normalized_user_message()
+        event["payload"].pop("conversation_id")
+        source = RecordingRecentMessagesSource([recent_message("message-1")])
+
+        context = build_decision_context(event, recent_visible_messages_source=source)
+
+        self.assertEqual(source.requests, [])
+        self.assertEqual(context["character_snapshot"]["recent_visible_messages"], [])
+
+    def test_reads_recent_messages_with_expected_request(self):
+        source = RecordingRecentMessagesSource([recent_message("message-1")])
+
+        context = build_decision_context(
+            normalized_user_message(),
+            recent_visible_messages_source=source,
+        )
+
+        self.assertEqual(
+            source.requests,
+            [
+                {
+                    "schema_version": "0.1",
+                    "conversation_id": "conversation-1",
+                    "before_event_id": "event-1",
+                    "before_created_at": "2026-05-14T11:30:00+00:00",
+                    "max_candidate_messages": RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES,
+                }
+            ],
+        )
+        self.assertEqual(
+            context["character_snapshot"]["recent_visible_messages"][0]["message_id"], "message-1"
+        )
+
+    def test_recent_messages_are_normalized_limited_and_ordered_oldest_to_newest(self):
+        messages = [
+            recent_message("message-7", created_at="2026-05-14T11:27:00+00:00"),
+            recent_message("message-2", created_at="2026-05-14T11:22:00+00:00"),
+            recent_message("message-5", created_at="2026-05-14T11:25:00+00:00"),
+            recent_message(
+                "message-1",
+                role="user",
+                created_at="2026-05-14T11:21:00+00:00",
+                text=" prior user ",
+            ),
+            recent_message("message-6", created_at="2026-05-14T11:26:00+00:00"),
+            recent_message("message-3", created_at="2026-05-14T11:23:00+00:00"),
+            recent_message("message-4", created_at="2026-05-14T11:24:00+00:00"),
+        ]
+
+        context = build_decision_context(
+            normalized_user_message(),
+            recent_visible_messages_source=RecordingRecentMessagesSource(messages),
+        )
+
+        self.assertEqual(
+            [
+                message["message_id"]
+                for message in context["character_snapshot"]["recent_visible_messages"]
+            ],
+            [
+                "message-2",
+                "message-3",
+                "message-4",
+                "message-5",
+                "message-6",
+                "message-7",
+            ],
+        )
+        self.assertEqual(
+            len(context["character_snapshot"]["recent_visible_messages"]),
+            RECENT_VISIBLE_MESSAGES_MAX_MESSAGES,
+        )
+        self.assertEqual(
+            context["character_snapshot"]["recent_visible_messages"][0],
+            {
+                "schema_version": "0.1",
+                "message_id": "message-2",
+                "trace_id": "trace-message-2",
+                "source_event_id": "event-message-2",
+                "conversation_id": "conversation-1",
+                "role": "assistant",
+                "created_at": "2026-05-14T11:22:00+00:00",
+                "text": "previous reply",
+            },
+        )
+
+    def test_recent_message_token_budget_skips_without_truncating(self):
+        oversized_text = "x" * ((RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS * 4) + 1)
+        messages = [
+            recent_message(
+                "message-1", created_at="2026-05-14T11:21:00+00:00", text=oversized_text
+            ),
+            recent_message("message-2", created_at="2026-05-14T11:22:00+00:00", text="small"),
+            recent_message("message-3", created_at="2026-05-14T11:23:00+00:00", text="also small"),
+        ]
+
+        context = build_decision_context(
+            normalized_user_message(),
+            recent_visible_messages_source=RecordingRecentMessagesSource(messages),
+        )
+
+        recent_messages = context["character_snapshot"]["recent_visible_messages"]
+        self.assertEqual(
+            [message["message_id"] for message in recent_messages], ["message-2", "message-3"]
+        )
+        self.assertEqual(recent_messages[0]["text"], "small")
+        self.assertEqual(approximate_text_tokens("x" * 5), 2)
+
+    def test_excludes_current_source_event_from_recent_messages(self):
+        messages = [
+            recent_message("event-1", created_at="2026-05-14T11:21:00+00:00"),
+            recent_message(
+                "message-2",
+                created_at="2026-05-14T11:22:00+00:00",
+                source_event_id="event-1",
+            ),
+            recent_message("message-3", created_at="2026-05-14T11:23:00+00:00"),
+        ]
+
+        context = build_decision_context(
+            normalized_user_message(),
+            recent_visible_messages_source=RecordingRecentMessagesSource(messages),
+        )
+
+        self.assertEqual(
+            [
+                message["message_id"]
+                for message in context["character_snapshot"]["recent_visible_messages"]
+            ],
+            ["message-3"],
+        )
+
+    def test_rejects_recent_messages_at_or_after_current_event_timestamp(self):
+        cases = [
+            recent_message("message-1", created_at="2026-05-14T11:30:00+00:00"),
+            recent_message("message-2", created_at="2026-05-14T11:30:01+00:00"),
+        ]
+
+        for message in cases:
+            with self.subTest(created_at=message["created_at"]):
+                with self.assertRaisesRegex(RoleModelValidationError, "before event.created_at"):
+                    build_decision_context(
+                        normalized_user_message(),
+                        recent_visible_messages_source=RecordingRecentMessagesSource([message]),
+                    )
+
+    def test_rejects_malformed_recent_message_records(self):
+        cases = [
+            ([{"schema_version": "0.2"}], "schema_version"),
+            (
+                [recent_message("message-1", conversation_id="other-conversation")],
+                "conversation_id",
+            ),
+            ([recent_message("message-1", role="system")], "role"),
+            ([recent_message("message-1", created_at="not-a-timestamp")], "created_at"),
+            ([recent_message("message-1", text="   ")], "text"),
+            ([{**recent_message("message-1"), "future_field": "nope"}], "future_field"),
+            (
+                [
+                    recent_message(
+                        f"message-{index}",
+                        created_at="2026-05-14T11:21:00+00:00",
+                    )
+                    for index in range(RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES + 1)
+                ],
+                "too many",
+            ),
+            ("not a list", "RecentVisibleMessagesSource"),
+        ]
+
+        for messages, error_pattern in cases:
+            with self.subTest(messages=messages):
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    build_decision_context(
+                        normalized_user_message(),
+                        recent_visible_messages_source=RecordingRecentMessagesSource(messages),
+                    )
 
     def test_rejects_unsupported_event_type_or_schema_version(self):
         unsupported_type = normalized_user_message()
@@ -172,11 +387,48 @@ class DecisionContextTests(unittest.TestCase):
         with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
             render_role_model_input(context)
 
+    def test_render_validates_recent_messages(self):
+        context = build_decision_context(normalized_user_message())
+        context["character_snapshot"]["recent_visible_messages"] = [
+            recent_message("message-1", text="")
+        ]
+
+        with self.assertRaisesRegex(RoleModelValidationError, "text"):
+            render_role_model_input(context)
+
+        context = build_decision_context(normalized_user_message())
+        context["character_snapshot"]["future_field"] = "not allowed yet"
+
+        with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
+            render_role_model_input(context)
+
         context = build_decision_context(normalized_user_message())
         context["event"]["future_field"] = "not allowed yet"
 
         with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
             render_role_model_input(context)
+
+        context = build_decision_context(normalized_user_message())
+        context["character_snapshot"]["recent_visible_messages"] = [
+            recent_message("message-1", created_at="2026-05-14T11:30:00+00:00")
+        ]
+
+        with self.assertRaisesRegex(RoleModelValidationError, "before event.created_at"):
+            render_role_model_input(context)
+
+        for event_conversation_id in (None, ""):
+            with self.subTest(event_conversation_id=event_conversation_id):
+                context = build_decision_context(normalized_user_message())
+                if event_conversation_id is None:
+                    context["event"].pop("conversation_id")
+                else:
+                    context["event"]["conversation_id"] = event_conversation_id
+                context["character_snapshot"]["recent_visible_messages"] = [
+                    recent_message("message-1", conversation_id="")
+                ]
+
+                with self.assertRaisesRegex(RoleModelValidationError, "event.conversation_id"):
+                    render_role_model_input(context)
 
 
 class RoleModelLogEntryTests(unittest.TestCase):

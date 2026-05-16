@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal - MVP-004 Review Cleanups</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 32px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-004 Review Cleanups</h1>
+    <p><strong>Date:</strong> 2026-05-16</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Closed the recent-message time boundary: records with <code>created_at</code> greater than or equal to the current event timestamp now fail validation before adapter invocation.</li>
+      <li>Made <code>render_role_model_input()</code> reject non-empty <code>recent_visible_messages</code> when the context event has no non-empty <code>conversation_id</code>.</li>
+      <li>Replaced role-model and Commit and Effects local primitive validation helpers with the shared helpers from <code>runtime.contracts</code>, while keeping boundary-specific validation local.</li>
+      <li>Added unit and integration regression coverage for future/equal timestamp records and the missing conversation-id render path.</li>
+      <li>Updated the MVP-004 active spec to state the timestamp and conversation-id render validation rules.</li>
+      <li>Updated the plan index Mermaid graph so MVP-004 recent-message context is shown as implemented for the pull request.</li>
+      <li>Parked the shared <code>RecentVisibleMessage</code> contract idea for a later slice with a second consumer.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      Review found that a stale or buggy recent-message source could over-return records from after the current
+      <code>USER_MESSAGE</code>, and a manually built context could render recent messages without a real conversation.
+      Both cases could leak invalid context to the model, so MVP-004 now fails closed before model input rendering or
+      adapter invocation.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>src/role_model/loop.py</code></li>
+      <li><code>src/commit_effects/visible_reply.py</code></li>
+      <li><code>tests/unit/test_role_model_loop.py</code></li>
+      <li><code>tests/integration/test_role_model_loop.py</code></li>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-16/002-mvp-004-review-cleanups.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>python3 -m unittest tests.unit.test_role_model_loop tests.integration.test_role_model_loop</code> - passed, 30 tests.</li>
+      <li><code>python3 -m unittest tests.unit.test_visible_reply_commit tests.integration.test_visible_reply_commit</code> - passed, 13 tests.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 62 tests.</li>
+      <li><code>python3 -m compileall src</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/plan/index.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/plan/active-slice.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/plan/future-slices.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/develop-journal/2026-05-16/002-mvp-004-review-cleanups.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/develop-journal/index.html</code> - passed.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff format --check .</code> - passed, 18 files already formatted.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>The timestamp rule is strict: equal timestamps are rejected because the source request is explicitly <code>before_created_at</code>.</li>
+      <li>Shared primitive validation now comes from <code>runtime.contracts</code>; the Role Model Loop still wraps contract errors as <code>RoleModelValidationError</code>, and Commit and Effects still wraps them as <code>CommitValidationError</code>.</li>
+      <li>The recent-message shape stays local to <code>role_model.loop</code> for MVP-004. Shared contract extraction is recorded in <a href="../../plan/future-slices.html">future-slices.html</a>.</li>
+      <li>No Commit and Effects behavior, storage, retrieval, orchestration, model-provider, or external side-effect behavior changed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Review the MVP-004 cleanup diff and then open a PR for the completed slice.
+    </p>
+  </main>
+</body>
+</html>

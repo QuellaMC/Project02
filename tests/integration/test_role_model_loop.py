@@ -63,7 +63,11 @@ class FailingRoleModelAdapter:
 
 
 class BadShapeRoleModelAdapter:
+    def __init__(self):
+        self.inputs = []
+
     def generate(self, model_input):
+        self.inputs.append(model_input)
         return {
             "model_id": "fake-role-model",
             "created_at": "2026-05-14T11:31:00+00:00",
@@ -101,10 +105,39 @@ def normalized_user_message():
     }
 
 
+def normalized_user_message_with_conversation():
+    event = normalized_user_message()
+    event["payload"]["conversation_id"] = "conversation-1"
+    return event
+
+
 def normalized_user_message_with_tracked_type():
     event = normalized_user_message()
     event["type"] = UserMessageType("USER_MESSAGE")
     return event
+
+
+def recent_message(message_id, *, created_at, text="previous reply"):
+    return {
+        "schema_version": "0.1",
+        "message_id": message_id,
+        "trace_id": f"trace-{message_id}",
+        "source_event_id": f"event-{message_id}",
+        "conversation_id": "conversation-1",
+        "role": "assistant",
+        "created_at": created_at,
+        "text": text,
+    }
+
+
+class FakeRecentMessagesSource:
+    def __init__(self, messages):
+        self.messages = messages
+        self.requests = []
+
+    def read_recent_visible_messages(self, request):
+        self.requests.append(request)
+        return self.messages
 
 
 class RoleModelLoopIntegrationTests(unittest.TestCase):
@@ -155,6 +188,91 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
         self.assertEqual(raw_log.entries[0]["created_at"], "2026-05-14T11:31:00+00:00")
         self.assertEqual(raw_log.entries[0]["data"]["model_input"], expected_input)
         self.assertEqual(raw_log.entries[0]["data"]["decision"], result["decision"])
+
+    def test_recent_messages_flow_to_adapter_and_success_log(self):
+        raw_log = RecordingRawEventLog()
+        source = FakeRecentMessagesSource(
+            [
+                recent_message("message-2", created_at="2026-05-14T11:22:00+00:00"),
+                recent_message("message-1", created_at="2026-05-14T11:21:00+00:00", text="earlier"),
+            ]
+        )
+        adapter = FakeRoleModelAdapter(
+            json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                }
+            )
+        )
+
+        run_role_model_turn(
+            normalized_user_message_with_conversation(),
+            adapter=adapter,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            recent_visible_messages_source=source,
+        )
+
+        recent_messages = adapter.inputs[0]["decision_context"]["character_snapshot"][
+            "recent_visible_messages"
+        ]
+        self.assertEqual(
+            [message["message_id"] for message in recent_messages], ["message-1", "message-2"]
+        )
+        self.assertEqual(
+            raw_log.entries[0]["data"]["model_input"]["decision_context"]["character_snapshot"][
+                "recent_visible_messages"
+            ],
+            recent_messages,
+        )
+
+    def test_malformed_recent_messages_fail_before_adapter_invocation(self):
+        raw_log = RecordingRawEventLog()
+        adapter = BadShapeRoleModelAdapter()
+        source = FakeRecentMessagesSource(
+            [
+                {
+                    **recent_message("message-1", created_at="2026-05-14T11:21:00+00:00"),
+                    "role": "system",
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(RoleModelValidationError, "role"):
+            run_role_model_turn(
+                normalized_user_message_with_conversation(),
+                adapter=adapter,
+                raw_event_log=raw_log,
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+                recent_visible_messages_source=source,
+            )
+
+        self.assertEqual(adapter.inputs, [])
+        self.assertEqual(raw_log.entries, [])
+
+    def test_future_recent_messages_fail_before_adapter_invocation(self):
+        raw_log = RecordingRawEventLog()
+        adapter = BadShapeRoleModelAdapter()
+        source = FakeRecentMessagesSource(
+            [recent_message("message-1", created_at="2026-05-14T11:30:00+00:00")]
+        )
+
+        with self.assertRaisesRegex(RoleModelValidationError, "before event.created_at"):
+            run_role_model_turn(
+                normalized_user_message_with_conversation(),
+                adapter=adapter,
+                raw_event_log=raw_log,
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+                recent_visible_messages_source=source,
+            )
+
+        self.assertEqual(adapter.inputs, [])
+        self.assertEqual(raw_log.entries, [])
 
     def test_result_event_type_is_derived_from_normalized_event(self):
         raw_log = RecordingRawEventLog()

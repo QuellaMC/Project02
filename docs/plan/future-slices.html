@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-003</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-004</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -57,7 +57,7 @@
     <h2>MVP-003 - Minimal Visible Reply Commit</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Promoted to the active slice on 2026-05-15. See <a href="active-slice.html">active-slice.html</a>.</dd>
+      <dd>Completed on 2026-05-15. See <a href="completed/mvp-003-minimal-visible-reply-commit.html">completed MVP-003</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>The parsed role-model decision should eventually become a committed visible reply, but committing effects is outside the fake-adapter loop.</dd>
@@ -78,13 +78,13 @@
       <dd>Likely introduces a visible conversation output record and a commit/reject log kind.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>This item is no longer parked; it is the active MVP-003 spec.</dd>
+      <dd>This item is no longer parked; it has been completed and recorded under completed plans.</dd>
     </dl>
 
     <h2>Recent Visible Messages in DecisionContext</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Add a small recent-message view to <code>DecisionContext</code>.</dd>
+      <dd>Promoted to the active slice on 2026-05-15. See <a href="active-slice.html">active-slice.html</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>The Notion roadmap's Phase 1 user turn loop mentions recent messages as the first context source.</dd>
@@ -105,7 +105,88 @@
       <dd>Likely adds <code>recent_visible_messages</code> to <code>DecisionContext</code>.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-003 should first prove that a visible reply can be committed as an internal output record.</dd>
+      <dd>This item is no longer parked; it is the active MVP-004 spec.</dd>
+    </dl>
+
+    <h2>ConversationLog User Message Records</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Commit user-visible message records so recent-message context can be sourced from the same visible conversation projection as assistant replies.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>MVP-004 can read an injected recent-message source, but a real conversation tail eventually needs user and assistant visible records.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while narrowing MVP-004 to context building without concrete storage.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-004 should first prove the <code>recent_visible_messages</code> context contract with a fake source.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>ConversationLog user-message append v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>User-message conversation records could duplicate raw event truth if the projection boundary is not explicit.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds a user-visible conversation record shape compatible with <code>RecentVisibleMessage</code>.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active MVP-004 slice only reads a bounded message tail through an injected source.</dd>
+    </dl>
+
+    <h2>Context Build Raw Log Entries</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a dedicated raw log entry for context-build inputs, source requests, accepted context records, and validation failures.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Debug inspector and replay will eventually need to explain exactly how <code>DecisionContext</code> was built.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while defining MVP-004 failure behavior for malformed recent-message source output.</dd>
+
+      <dt>Dependency</dt>
+      <dd>A second context source or debug-inspector slice should justify the extra log kind.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>DecisionContext build logging v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Adding context logs too early could create duplicate snapshots before the context boundary stabilizes.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds a <code>decision_context_built</code> raw log kind without changing existing role-model turn logs.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-004 can rely on existing role-model turn logs to snapshot rendered model input after context is built.</dd>
+    </dl>
+
+    <h2>Shared RecentVisibleMessage Contract</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Promote <code>RecentVisibleMessage</code> validation into shared contract code when a second boundary consumes the same shape.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>MVP-004 validates recent messages inside <code>role_model.loop</code>, which is acceptable with one consumer but could drift once storage or another context boundary uses the same record.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered during MVP-004 review of recent-message validation ownership.</dd>
+
+      <dt>Dependency</dt>
+      <dd>A concrete conversation store, Character State Engine context source, or debug inspector should become the second consumer first.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>RecentVisibleMessage shared contract v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Promoting too early would create shared framework surface before the visible conversation projection is proven.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely moves existing validation into <code>runtime.contracts</code> without changing the current <code>DecisionContext</code> shape.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active MVP-004 slice has only one production consumer and should not add shared abstractions before they are needed.</dd>
     </dl>
 
     <h2>Full User Turn Orchestrator</h2>
