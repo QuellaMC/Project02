@@ -27,6 +27,7 @@
       <li>Moved shared visible-record kind and role constants into <code>runtime.contracts</code>.</li>
       <li>Updated <code>commit_effects.visible_reply</code> and <code>role_model.loop</code> to use the shared visible-record vocabulary.</li>
       <li>Follow-up cleanup: replaced the remaining <code>RecentVisibleMessage</code> role literal set in <code>role_model.loop</code> with the shared user and assistant role constants.</li>
+      <li>Follow-up cleanup: composed the matching human-readable role validation message from the same shared role constants.</li>
       <li>Added an integration test that builds committed user and assistant records through <code>build_user_visible_message()</code> and <code>build_visible_conversation_output()</code>, then feeds them into <code>VisibleConversationRecentMessagesSource</code>.</li>
       <li>Updated the active slice implementation results to record the shared-constant cleanup and real-builder integration coverage.</li>
     </ul>
@@ -54,6 +55,7 @@
       <li><code>python3 -m unittest tests.integration.test_role_model_loop</code> - passed.</li>
       <li><code>python3 -m unittest tests.unit.test_role_model_loop tests.unit.test_visible_reply_commit tests.unit.test_runtime_contracts</code> - passed.</li>
       <li><code>python3 -m unittest tests.unit.test_role_model_loop tests.integration.test_role_model_loop</code> - passed after the role-constant follow-up.</li>
+      <li><code>python3 -m unittest tests.unit.test_role_model_loop tests.integration.test_role_model_loop</code> - passed after the role-message follow-up.</li>
       <li><code>/private/tmp/project02-ruff/bin/ruff check .</code> - passed.</li>
       <li><code>/private/tmp/project02-ruff/bin/ruff format --check .</code> - passed.</li>
       <li><code>/private/tmp/project02-mypy/bin/mypy src</code> - passed.</li>
