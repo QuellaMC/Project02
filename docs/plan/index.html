@@ -49,6 +49,8 @@
       This Mermaid graph summarizes the project architecture currently implemented by local slices
       plus the active spec target when useful. Update it after each pull request is created so the
       index stays current.
+      MVP-005 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/5">PR #5</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -73,7 +75,7 @@ flowchart LR
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply only"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003 and MVP-005 implemented"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003 and MVP-005 implemented in PR #5"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -114,7 +116,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">MVP-005 - User Visible Message Projection</a></td>
-          <td>Implemented and tested; pending review</td>
+          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/5">PR #5</a> open</td>
           <td>Project a normalized <code>USER_MESSAGE</code> into the visible conversation boundary with one raw projection log and one injected visible append, without concrete storage, orchestration, model calls, retrieval, or state.</td>
         </tr>
       </tbody>
