@@ -286,13 +286,14 @@
     <h2>Implementation Results</h2>
     <ul>
       <li>Implemented <code>VisibleConversationRecentMessagesSource</code> in <code>src/role_model/loop.py</code> as a read-only adapter satisfying the existing <code>RecentVisibleMessagesSource</code> protocol.</li>
+      <li>Moved shared visible-record kind and role constants into <code>runtime.contracts</code> so the Commit and Effects writer and Role Model Loop reader use the same committed-record vocabulary.</li>
       <li>Added an injected <code>VisibleConversationRecordSource</code> boundary that receives a copied request with <code>max_candidate_records</code> and returns committed visible conversation records.</li>
       <li>Mapped <code>user_visible_message</code> records to <code>RecentVisibleMessage</code> by preserving <code>message_id</code> and <code>role = "user"</code>.</li>
       <li>Mapped <code>assistant_visible_reply</code> records to <code>RecentVisibleMessage</code> by using <code>output_id</code> as <code>message_id</code> and <code>role = "assistant"</code>.</li>
       <li>Validated request shape, visible record kinds, required identity fields, schema version, source metadata, conversation match, timestamps, text, and extra keys before returning mapped records.</li>
       <li>Reused the existing Role Model Loop recent-message validator for the final mapped shape, keeping ordering, current-event exclusion, duplicate detection, and budget selection in the existing context path.</li>
       <li>Added unit tests for mapping, malformed request rejection, malformed record rejection, non-list source output, stripped implementation-only fields, and copy isolation.</li>
-      <li>Added an integration test proving committed visible records flow through <code>run_role_model_turn()</code> into the rendered model input and completed raw log snapshot.</li>
+      <li>Added integration tests proving both direct visible-record fixtures and records produced by <code>build_user_visible_message()</code> / <code>build_visible_conversation_output()</code> flow through <code>run_role_model_turn()</code> into the rendered model input and completed raw log snapshot.</li>
       <li>No concrete storage, write behavior, Runtime Kernel change, model provider, retrieval index, Character State Engine package, or user-turn orchestrator was added.</li>
       <li>Current verification: Ruff lint/format, mypy, compileall, unit tests, integration tests, full test discovery, HTML parser checks, and <code>git diff --check</code> passed.</li>
     </ul>

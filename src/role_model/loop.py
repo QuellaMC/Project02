@@ -8,8 +8,12 @@ from math import ceil
 from typing import Any, Protocol
 
 from runtime.contracts import (
+    ASSISTANT_VISIBLE_REPLY_KIND,
+    ASSISTANT_VISIBLE_REPLY_ROLE,
     DECISION_READY_FOR_COMMIT_STATUS,
     USER_MESSAGE,
+    USER_VISIBLE_MESSAGE_KIND,
+    USER_VISIBLE_MESSAGE_ROLE,
     VISIBLE_REPLY_ACTION,
     ContractValidationError,
     RuntimeEvent,
@@ -36,10 +40,6 @@ RECENT_VISIBLE_MESSAGES_MAX_MESSAGES = 6
 RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS = 1200
 ROLE_MODEL_TURN_COMPLETED_KIND = "role_model_turn_completed"
 ROLE_MODEL_TURN_FAILED_KIND = "role_model_turn_failed"
-USER_VISIBLE_MESSAGE_KIND = "user_visible_message"
-ASSISTANT_VISIBLE_REPLY_KIND = "assistant_visible_reply"
-USER_VISIBLE_MESSAGE_ROLE = "user"
-ASSISTANT_VISIBLE_REPLY_ROLE = "assistant"
 FAILURE_CODES_BY_STAGE = {
     "adapter_call": {"adapter_exception"},
     "parse_output": {"malformed_model_output"},

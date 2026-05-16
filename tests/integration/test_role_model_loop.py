@@ -6,6 +6,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
+from commit_effects.visible_reply import (  # noqa: E402
+    build_user_visible_message,
+    build_visible_conversation_output,
+)
 from role_model.loop import (  # noqa: E402
     RoleModelValidationError,
     VisibleConversationRecentMessagesSource,
@@ -17,6 +21,10 @@ from role_model.loop import (  # noqa: E402
 
 def fixed_clock():
     return datetime(2026, 5, 14, 11, 31, 0, tzinfo=UTC)
+
+
+def prior_assistant_clock():
+    return datetime(2026, 5, 14, 11, 22, 0, tzinfo=UTC)
 
 
 class SequenceIdGenerator:
@@ -116,6 +124,38 @@ def normalized_user_message_with_tracked_type():
     event = normalized_user_message()
     event["type"] = UserMessageType("USER_MESSAGE")
     return event
+
+
+def prior_visible_source_event(
+    *,
+    event_id,
+    trace_id,
+    created_at,
+    text,
+):
+    event = normalized_user_message_with_conversation()
+    event["event_id"] = event_id
+    event["trace_id"] = trace_id
+    event["created_at"] = created_at
+    event["payload"]["text"] = text
+    return event
+
+
+def role_model_result_for_event(event, *, reply_text):
+    return {
+        "trace_id": event["trace_id"],
+        "event_id": event["event_id"],
+        "event_type": "USER_MESSAGE",
+        "model_called": True,
+        "status": "decision_ready_for_commit",
+        "decision": {
+            "schema_version": "0.1",
+            "trace_id": event["trace_id"],
+            "event_id": event["event_id"],
+            "action": "visible_reply",
+            "visible_reply": {"text": reply_text},
+        },
+    }
 
 
 def recent_message(message_id, *, created_at, text="previous reply"):
@@ -264,6 +304,92 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
         ]
         self.assertEqual(
             [message["message_id"] for message in recent_messages], ["message-1", "message-2"]
+        )
+        self.assertEqual(
+            raw_log.entries[0]["data"]["model_input"]["decision_context"]["character_snapshot"][
+                "recent_visible_messages"
+            ],
+            recent_messages,
+        )
+
+    def test_commit_effects_visible_records_flow_to_context_and_success_log(self):
+        raw_log = RecordingRawEventLog()
+        user_event = prior_visible_source_event(
+            event_id="event-user-1",
+            trace_id="trace-user-1",
+            created_at="2026-05-14T11:21:00+00:00",
+            text="earlier user message",
+        )
+        assistant_event = prior_visible_source_event(
+            event_id="event-assistant-1",
+            trace_id="trace-assistant-1",
+            created_at="2026-05-14T11:21:30+00:00",
+            text="earlier assistant prompt",
+        )
+        record_source = FakeVisibleConversationRecordSource(
+            [
+                build_visible_conversation_output(
+                    assistant_event,
+                    role_model_result_for_event(
+                        assistant_event,
+                        reply_text="previous assistant reply",
+                    ),
+                    id_generator=SequenceIdGenerator(),
+                    clock=prior_assistant_clock,
+                ),
+                build_user_visible_message(
+                    user_event,
+                    id_generator=SequenceIdGenerator(),
+                ),
+            ]
+        )
+        recent_source = VisibleConversationRecentMessagesSource(record_source)
+        adapter = FakeRoleModelAdapter(
+            json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                }
+            )
+        )
+
+        run_role_model_turn(
+            normalized_user_message_with_conversation(),
+            adapter=adapter,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            recent_visible_messages_source=recent_source,
+        )
+
+        recent_messages = adapter.inputs[0]["decision_context"]["character_snapshot"][
+            "recent_visible_messages"
+        ]
+        self.assertEqual(
+            recent_messages,
+            [
+                {
+                    "schema_version": "0.1",
+                    "message_id": "message-generated-1",
+                    "trace_id": "trace-user-1",
+                    "source_event_id": "event-user-1",
+                    "conversation_id": "conversation-1",
+                    "role": "user",
+                    "created_at": "2026-05-14T11:21:00+00:00",
+                    "text": "earlier user message",
+                },
+                {
+                    "schema_version": "0.1",
+                    "message_id": "output-generated-1",
+                    "trace_id": "trace-assistant-1",
+                    "source_event_id": "event-assistant-1",
+                    "conversation_id": "conversation-1",
+                    "role": "assistant",
+                    "created_at": "2026-05-14T11:22:00+00:00",
+                    "text": "previous assistant reply",
+                },
+            ],
         )
         self.assertEqual(
             raw_log.entries[0]["data"]["model_input"]["decision_context"]["character_snapshot"][
