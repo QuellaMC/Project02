@@ -47,21 +47,24 @@
     <h2>Implementation Graph</h2>
     <p>
       This Mermaid graph summarizes the project architecture currently implemented by local slices
-      plus the active spec target when useful. Update it after each pull request is created so the
+      plus the active implementation target when useful. Update it after each pull request is created so the
       index stays current.
-      MVP-005 is tracked in
+      MVP-005 is recorded from
       <a href="https://github.com/QuellaMC/Project02/pull/5">PR #5</a>.
-      MVP-006 is tracked in
+      MVP-006 is recorded from
       <a href="https://github.com/QuellaMC/Project02/pull/6">PR #6</a>.
+      MVP-007 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/7">PR #7</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
 flowchart LR
   UserMessage["USER_MESSAGE RuntimeEvent"]
 
-  subgraph RuntimeKernel["Runtime Kernel - MVP-001 implemented"]
+  subgraph RuntimeKernel["Runtime Kernel - MVP-001 and MVP-007 implemented"]
     Normalize["Normalize event&lt;br/&gt;schema, timestamp, ids"]
-    Route["Deterministic route&lt;br/&gt;model_needed = false"]
+    SharedIntake["Shared intake helper&lt;br/&gt;raw log append + route"]
+    RouteUpdate["USER_MESSAGE route&lt;br/&gt;model_needed = true&lt;br/&gt;next_step = user_turn"]
   end
 
   subgraph RawLogging["Raw Event Logging - implemented"]
@@ -89,20 +92,30 @@ flowchart LR
     VisibleRecentSource["Visible conversation recent source&lt;br/&gt;maps committed records to context"]
   end
 
-  UserMessage --> Normalize --> Route
-  Normalize --> LogHelper --> RuntimeLog
+  subgraph UserTurn["User Turn Orchestrator - MVP-007 implemented locally"]
+    Turn["Compose existing boundaries&lt;br/&gt;single USER_MESSAGE turn"]
+    TurnResult["UserMessageTurnResult&lt;br/&gt;committed or stopped"]
+  end
+
+  UserMessage --> Normalize --> SharedIntake --> RouteUpdate
+  SharedIntake --> LogHelper --> RuntimeLog
   Normalize --> Context --> Render --> Adapter --> Parse
   Normalize --> UserProjection
   UserProjection --> Conversation
   UserProjection --> CommitLog
-  Conversation -. active MVP-006 source .-> VisibleRecentSource --> RecentMessages --> Context
+  Conversation --> VisibleRecentSource --> RecentMessages --> Context
   Parse --> LogHelper --> RoleLog
   Parse --> Commit --> Conversation
   Commit --> CommitLog
+  RouteUpdate --> Turn
+  Turn --> UserProjection
+  Turn --> VisibleRecentSource
+  Turn --> Render
+  Turn --> Commit
+  Turn --> TurnResult
 
   classDef implemented fill:#e7f1e9,stroke:#5c8a65,color:#172026;
-  classDef next fill:#f6f0df,stroke:#9b7c32,color:#172026,stroke-dasharray: 6 4;
-  class Normalize,Route,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages,UserProjection,VisibleRecentSource implemented;
+  class Normalize,SharedIntake,RouteUpdate,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages,UserProjection,VisibleRecentSource,Turn,TurnResult implemented;
       </pre>
     </div>
 
@@ -117,9 +130,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-006 - Visible Conversation Recent Source</a></td>
-          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/6">PR #6</a> open</td>
-          <td>Map committed visible user and assistant records into the existing <code>RecentVisibleMessage</code> context shape through an injected read-only source, without concrete storage, orchestration, model calls, retrieval, or state.</td>
+          <td><a href="active-slice.html">MVP-007 - Minimal User Turn Orchestrator</a></td>
+          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/7">PR #7</a> open</td>
+          <td>Route <code>USER_MESSAGE</code> to <code>model_needed = true</code> / <code>next_step = "user_turn"</code>, then compose Runtime Kernel intake, user visible projection, recent visible source, Role Model Loop, and assistant visible reply commit with fakes and injected boundaries.</td>
         </tr>
       </tbody>
     </table>
@@ -135,8 +148,13 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
+          <td><a href="completed/mvp-006-visible-conversation-recent-source.html">MVP-006 - Visible Conversation Recent Source</a></td>
+          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/6">PR #6</a></td>
+          <td>Map committed visible user and assistant records into the existing <code>RecentVisibleMessage</code> context shape through an injected read-only source, without concrete storage, orchestration, model calls, retrieval, or state.</td>
+        </tr>
+        <tr>
           <td><a href="completed/mvp-005-user-visible-message-projection.html">MVP-005 - User Visible Message Projection</a></td>
-          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/5">PR #5</a> open</td>
+          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/5">PR #5</a></td>
           <td>Project a normalized <code>USER_MESSAGE</code> into the visible conversation boundary with one raw projection log and one injected visible append, without concrete storage, orchestration, model calls, retrieval, or state.</td>
         </tr>
         <tr>
@@ -169,7 +187,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active MVP-006 visible conversation recent source slice are parked in
+      Ideas beyond the active MVP-007 minimal user turn orchestrator slice are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 
