@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal - MVP-004 Notion Cross-Check and Implementation</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 32px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-004 Notion Cross-Check and Implementation</h1>
+    <p><strong>Date:</strong> 2026-05-16</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Answered the MVP-004 planning questions directly in <code>docs/plan/active-slice.html</code>.</li>
+      <li>Added a Notion cross-check section confirming the slice still satisfies roadmap, boundary, logging, context, budget, and scope requirements.</li>
+      <li>Implemented the MVP-004 recent visible message context tail in <code>src/role_model/loop.py</code>.</li>
+      <li>Added focused unit and integration coverage for source requests, validation, ordering, message and token budgets, current-event exclusion, adapter input, and raw-log snapshots.</li>
+      <li>Kept the implementation narrow: no concrete storage, retrieval, orchestration, character state, model-provider, or Commit and Effects changes.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      The open questions were answerable from the current Notion source. The spec records those answers so implementation
+      does not re-open settled planning decisions or accidentally widen MVP-004. The code now implements only the
+      settled read-only context-source behavior.
+    </p>
+
+    <h2>Notion Sources Checked</h2>
+    <ul>
+      <li><a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a></li>
+      <li><a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a></li>
+      <li><a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a></li>
+      <li><a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a></li>
+      <li><a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a></li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>src/role_model/loop.py</code></li>
+      <li><code>tests/unit/test_role_model_loop.py</code></li>
+      <li><code>tests/integration/test_role_model_loop.py</code></li>
+      <li><code>docs/develop-journal/2026-05-16/001-mvp-004-notion-cross-check.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>python3 -m html.parser docs/plan/active-slice.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/develop-journal/2026-05-16/001-mvp-004-notion-cross-check.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/develop-journal/index.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/plan/index.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/plan/future-slices.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/plan/completed/mvp-003-minimal-visible-reply-commit.html</code> - passed.</li>
+      <li><code>python3 -m unittest tests.unit.test_role_model_loop tests.integration.test_role_model_loop</code> - passed, 28 tests.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 60 tests.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff format --check .</code> - passed, 18 files already formatted.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>Future visible transcript storage should use one <code>ConversationLog</code>; <code>RawEventLog</code> remains the separate lossless runtime truth.</li>
+      <li>Context-build raw log kinds are valid future work, but remain outside MVP-004.</li>
+      <li>The MVP-004 recent-message budget is a provisional deterministic default until a broader <code>ContextBudgetPolicy</code> slice exists.</li>
+      <li>The implementation keeps the read-only source in the Role Model Loop context path rather than adding a concrete Character State Engine package before another context source exists.</li>
+      <li>Malformed recent-message source output fails before adapter invocation, so invalid context is not sent to the model.</li>
+      <li>An over-returning recent-message source is rejected when it exceeds <code>max_candidate_messages = 24</code>.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Review the MVP-004 implementation and then open a PR for the completed slice.
+    </p>
+  </main>
+</body>
+</html>

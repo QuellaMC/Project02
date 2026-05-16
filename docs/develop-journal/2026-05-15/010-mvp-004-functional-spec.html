@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal - MVP-004 Functional Spec</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 32px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-004 Functional Spec</h1>
+    <p><strong>Date:</strong> 2026-05-15</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Pulled <code>origin/main</code> and created <code>feature/mvp-004-functional-spec</code>.</li>
+      <li>Recorded MVP-003 as completed in <code>docs/plan/completed/mvp-003-minimal-visible-reply-commit.html</code>.</li>
+      <li>Replaced <code>docs/plan/active-slice.html</code> with the MVP-004 functional spec.</li>
+      <li>Kept MVP-004 narrowed to a bounded <code>recent_visible_messages</code> tail in <code>DecisionContext</code> through an injected read-only source.</li>
+      <li>Updated the plan index so MVP-004 is active and MVP-003 is listed as completed.</li>
+      <li>Promoted the recent-message future idea to active and parked new future ideas for user-message conversation records and context-build raw logs.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      The Notion Phase 1 roadmap calls for a minimal user turn loop where
+      <code>DecisionContext</code> starts with recent messages before broader state,
+      incidents, retrieval, tools, or Live2D behavior. MVP-003 completed the first
+      visible reply commit boundary, so the next narrow slice is to let the model
+      see a small recent visible message tail without adding concrete storage or
+      full orchestration.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/completed/mvp-003-minimal-visible-reply-commit.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-15/010-mvp-004-functional-spec.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>python3 -m html.parser docs/plan/active-slice.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/plan/completed/mvp-003-minimal-visible-reply-commit.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/plan/future-slices.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/plan/index.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/develop-journal/2026-05-15/010-mvp-004-functional-spec.html</code> - passed.</li>
+      <li><code>python3 -m html.parser docs/develop-journal/index.html</code> - passed.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 51 tests.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>The MVP-004 spec changes only model context shape and read-only context sourcing.</li>
+      <li>The spec explicitly excludes concrete conversation storage, user-message append behavior, retrieval, orchestration, state, incidents, tools, Live2D, and new model actions.</li>
+      <li>Existing role-model turn logs remain the audit path for rendered model input in this slice.</li>
+      <li>The future ideas parking lot captures storage and context-build logging work instead of pulling them into MVP-004.</li>
+    </ul>
+
+    <h2>Future Ideas Discovered</h2>
+    <p>
+      Conversation-log user-message records and dedicated context-build raw log
+      entries are recorded in <a href="../../plan/future-slices.html">future-slices.html</a>.
+    </p>
+
+    <h2>Next Action</h2>
+    <p>
+      Review the MVP-004 spec before writing tests or production code for the
+      recent visible message context tail.
+    </p>
+  </main>
+</body>
+</html>
