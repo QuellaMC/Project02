@@ -383,7 +383,7 @@ Sign every commit using the configured Git signing setup. Use signed flows such 
 
 All changes to `main` must go through a PR. Each PR should implement one active slice only, link the active slice spec, include tests, keep the diff small/reviewable, avoid speculative future modules, update the journal for non-trivial changes, update the Mermaid implementation graph in `docs/plan/index.html` after PR creation, and pass required CI checks.
 
-The CI/CD workflow is the PR quality gate and should run lint/readability checks, source compilation, unit tests, integration tests, and full test discovery for currently implemented behavior. Treat lint/readability failures as blockers.
+The `ci` workflow is the PR quality gate and should run lint/readability checks, type checks, source compilation, unit tests, integration tests, and full test discovery for currently implemented behavior. Treat lint/readability failures as blockers.
 
 Required checks:
 

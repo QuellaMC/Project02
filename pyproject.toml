@@ -10,3 +10,11 @@ select = [
   "I",
   "UP",
 ]
+
+[tool.mypy]
+python_version = "3.13"
+mypy_path = "src"
+files = ["src"]
+check_untyped_defs = true
+disallow_untyped_defs = true
+warn_unused_configs = true
