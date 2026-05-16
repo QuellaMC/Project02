@@ -162,6 +162,33 @@
       <dd>MVP-004 can rely on existing role-model turn logs to snapshot rendered model input after context is built.</dd>
     </dl>
 
+    <h2>Character State Engine Context Builder Boundary</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Move recent-message context building behind a proper Character State Engine/context-builder boundary once MVP-004 has a second context concern.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Notion assigns context building to the Character State Engine. MVP-004 keeps the minimal read-only recent-message path in <code>role_model.loop</code> only as a staging shortcut.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered during MVP-004 review of temporary context-builder ownership.</dd>
+
+      <dt>Dependency</dt>
+      <dd>One of state, incidents, retrieval, active threads, context-build raw logs, or another context source should enter scope first.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Character State Engine context builder v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Creating the boundary before a second context source exists could add framework shape without tested behavior; waiting too long could let Role Model Loop accumulate Character State Engine ownership.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely preserves the current <code>DecisionContext</code> shape while moving source reads, context-budget policy, and future context-build logs behind an explicit boundary.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active MVP-004 slice has only one read-only context source and no state, incidents, retrieval, active-thread, or context-build-log behavior.</dd>
+    </dl>
+
     <h2>Shared RecentVisibleMessage Contract</h2>
     <dl>
       <dt>Idea</dt>

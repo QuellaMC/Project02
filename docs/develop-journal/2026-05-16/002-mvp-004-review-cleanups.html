@@ -30,6 +30,8 @@
       <li>Added unit and integration regression coverage for future/equal timestamp records, duplicate recent-message identities, and the missing conversation-id render path.</li>
       <li>Updated the MVP-004 active spec to state the timestamp, duplicate identity, and conversation-id render validation rules.</li>
       <li>Updated the plan index Mermaid graph so MVP-004 recent-message context is shown as implemented for the pull request.</li>
+      <li>Documented that keeping the recent-message context path in <code>role_model.loop</code> is temporary ownership until a proper Character State Engine/context-builder boundary is justified.</li>
+      <li>Parked the Character State Engine context-builder boundary as a future slice triggered by state, incidents, retrieval, active threads, context-build logs, or another context source.</li>
       <li>Parked the shared <code>RecentVisibleMessage</code> contract idea for a later slice with a second consumer.</li>
     </ul>
 
@@ -74,6 +76,7 @@
     <ul>
       <li>The timestamp rule is strict: equal timestamps are rejected because the source request is explicitly <code>before_created_at</code>.</li>
       <li>Recent-message identity is fail-closed: repeated <code>message_id</code> or <code>source_event_id</code> values are rejected instead of deduplicated silently.</li>
+      <li>The <code>role_model.loop</code> context-building shortcut is not permanent ownership; future context expansion should move this behavior behind Character State Engine.</li>
       <li>Shared primitive validation now comes from <code>runtime.contracts</code>; the Role Model Loop still wraps contract errors as <code>RoleModelValidationError</code>, and Commit and Effects still wraps them as <code>CommitValidationError</code>.</li>
       <li>The recent-message shape stays local to <code>role_model.loop</code> for MVP-004. Shared contract extraction is recorded in <a href="../../plan/future-slices.html">future-slices.html</a>.</li>
       <li>No Commit and Effects behavior, storage, retrieval, orchestration, model-provider, or external side-effect behavior changed.</li>

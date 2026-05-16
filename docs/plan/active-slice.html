@@ -309,7 +309,8 @@
     <h2>Implementation Boundaries</h2>
     <ul>
       <li><code>Runtime Kernel</code> remains responsible for event intake and normalization only.</li>
-      <li><code>Character State Engine</code> owns the new recent-visible-message context source concept, but this slice should add only the minimal read-only behavior needed for context building.</li>
+      <li><code>Character State Engine</code> conceptually owns context building. MVP-004 temporarily keeps the minimal recent-message source path in <code>role_model.loop</code> to avoid a speculative Character State Engine package before there is a second context source.</li>
+      <li>This temporary ownership must end when state, incidents, retrieval, active threads, context-build raw logs, or another context source is added; that future slice should move recent-message context behind a proper Character State Engine/context-builder boundary.</li>
       <li><code>Role Model Loop</code> remains responsible for rendering model input, invoking the injected adapter, parsing visible-reply decisions, and logging model turns.</li>
       <li><code>Commit and Effects Engine</code> remains unchanged; MVP-003 continues to own visible output commit and commit/reject raw logs.</li>
       <li><code>RawEventLog</code> remains append-only. This slice relies on existing role-model turn logs to snapshot model input with recent messages.</li>
@@ -341,6 +342,7 @@
     <h2>Post-Code Review Notes</h2>
     <ul>
       <li>The implementation keeps MVP-004 inside <code>role_model.loop</code> instead of adding a speculative Character State Engine package before a second context source exists.</li>
+      <li>This is temporary ownership only: once state, incidents, retrieval, active threads, context-build logs, or another context source enters scope, the recent-message behavior should move behind a Character State Engine/context-builder boundary.</li>
       <li><code>build_decision_context()</code> now accepts an optional read-only <code>RecentVisibleMessagesSource</code>; existing callers without a source get a valid empty recent-message tail.</li>
       <li>Recent-message requests are deterministic and use <code>max_candidate_messages = 24</code>.</li>
       <li>Provider records are strictly validated for schema version, identity fields, matching <code>conversation_id</code>, supported role, valid timestamp before the current event, and non-empty text before model input rendering.</li>
@@ -411,7 +413,7 @@
     <h2>Notion Cross-Check</h2>
     <ul>
       <li><strong>Phase 1 alignment:</strong> MVP-004 satisfies the roadmap step that <code>DecisionContext</code> starts with recent messages before state, incidents, retrieval, tools, or Live2D are introduced.</li>
-      <li><strong>Boundary alignment:</strong> Runtime Kernel, Role Model Loop, and Commit and Effects responsibilities remain unchanged; this slice only adds a narrow Character State Engine context-source behavior.</li>
+      <li><strong>Boundary alignment:</strong> Runtime Kernel, Role Model Loop, and Commit and Effects responsibilities remain unchanged; this slice only adds a narrow Character State Engine context-source behavior as a temporary implementation shortcut inside <code>role_model.loop</code>.</li>
       <li><strong>Context model alignment:</strong> Current event data stays in <code>DecisionContext.event</code> and is not duplicated inside <code>recent_visible_messages</code>, matching the Role Model Loop rule that current event data lives outside the context snapshot.</li>
       <li><strong>Truth/retrieval alignment:</strong> MVP-004 keeps raw truth, retrieval, and model-facing context separate by using a read-only source and avoiding concrete storage, indexing, retrieval tools, and summaries.</li>
       <li><strong>Logging alignment:</strong> Existing role-model turn logs still snapshot rendered model input for this slice; richer context-build logs are explicitly deferred as a future logging/debug slice.</li>
@@ -422,6 +424,7 @@
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
       <li>Concrete append-only conversation storage for visible user and assistant messages.</li>
+      <li>Character State Engine/context-builder boundary once state, incidents, retrieval, active threads, context-build logs, or another context source is added.</li>
       <li>Dedicated context-build raw log entries after the context builder has more than one source.</li>
       <li>Full user-turn orchestrator that runs Runtime Kernel, Role Model Loop, and Commit and Effects as one tested flow.</li>
       <li>Recent message truncation or summarization when message text becomes too large for model input.</li>
