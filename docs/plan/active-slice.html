@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-005 - User Visible Message Projection</title>
+  <title>MVP-006 - Visible Conversation Recent Source</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,7 +27,7 @@
 </head>
 <body>
   <main>
-    <h1>MVP-005 - User Visible Message Projection</h1>
+    <h1>MVP-006 - Visible Conversation Recent Source</h1>
     <p><span class="status">Status: implemented and tested, pending review</span></p>
     <p class="meta">
       Created: 2026-05-16. Implemented: 2026-05-16. Active slice path:
@@ -41,144 +41,140 @@
       <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.
       The relevant source pages checked for this slice are
       <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
-      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>,
-      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>, and
       <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.
     </p>
     <blockquote>
-      ConversationLog is the visible user-facing interaction projection. RawEventLog
-      remains lossless internal truth. MVP-005 records the user side of that visible
-      projection without adding concrete storage or a full user-turn orchestrator.
+      Phase 1 calls for a minimal user turn loop where recent visible messages
+      feed <code>DecisionContext</code>, the Role Model Loop calls the model, Commit
+      and Effects stores the visible reply, and Raw Event Log records the turn.
     </blockquote>
     <p>
       Local implementation truth comes from
       <a href="completed/mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001</a>,
       <a href="completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html">MVP-002</a>,
-      <a href="completed/mvp-003-minimal-visible-reply-commit.html">MVP-003</a>, and
-      <a href="completed/mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004</a>.
-      MVP-004 can read a bounded recent visible message tail through an injected source,
-      but the runtime still has no committed visible user-message record that can later
-      feed that source.
+      <a href="completed/mvp-003-minimal-visible-reply-commit.html">MVP-003</a>,
+      <a href="completed/mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004</a>, and
+      <a href="completed/mvp-005-user-visible-message-projection.html">MVP-005</a>.
+      MVP-004 defined the read-side <code>RecentVisibleMessage</code> contract through
+      an injected source. MVP-005 added committed user visible records. The narrow
+      next step is to map committed visible conversation records into the existing
+      recent-message source contract without adding storage or orchestration.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Add the smallest Commit and Effects behavior after MVP-004: accept one normalized
-      <code>USER_MESSAGE</code>, build one user-visible conversation record from that
-      event, append one raw projection log entry through the existing raw-log boundary,
-      append the user-visible record through the existing injected
-      <code>VisibleConversationLog</code> boundary, and return a deterministic result.
-      This slice must not add a concrete database, a user-turn orchestrator, model calls,
-      retrieval, character state, new model actions, or assistant commit behavior changes.
+      Add the smallest read-side bridge from already committed visible conversation
+      records to the MVP-004 <code>RecentVisibleMessage</code> shape. MVP-006 should
+      implement an injected, read-only source adapter that can supply recent user
+      and assistant visible records to the existing Role Model Loop context builder.
+      This slice must not add a concrete database, full user-turn orchestrator,
+      new runtime event type, model provider, retrieval index, character state, or
+      new visible-message write behavior.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>One accepted source event type: normalized <code>USER_MESSAGE</code> with <code>schema_version = "0.1"</code>.</li>
-      <li>One new visible record kind: <code>user_visible_message</code>.</li>
-      <li>One visible role: <code>user</code>.</li>
-      <li>One new commit status: <code>user_visible_message_committed</code>.</li>
-      <li>One new reject status: <code>user_visible_message_rejected</code>.</li>
-      <li>One accepted raw log kind: <code>user_visible_message_committed</code>.</li>
-      <li>One rejected raw log kind: <code>user_visible_message_rejected</code>.</li>
-      <li>Reuse the existing injected append-only <code>VisibleConversationLog</code> protocol from MVP-003.</li>
-      <li>Reuse existing normalized <code>USER_MESSAGE</code> validation from <code>runtime.contracts</code>.</li>
-      <li>Implement beside the existing visible-reply commit code and reuse or minimally extract existing Commit and Effects helper behavior for trusted source identity, failure shaping, snapshot copying, and shared contract error wrapping; do not copy private helper logic into a parallel implementation.</li>
-      <li>If <code>VisibleConversationLog</code> typing is too assistant-output-specific for user visible messages, widen or rename the existing protocol in a behavior-preserving way instead of adding another append interface.</li>
-      <li>Deep-copy visible message and raw-log snapshots before returning or appending.</li>
-      <li>Focused unit and integration tests for valid projection, malformed inputs, append ordering, and failure behavior.</li>
+      <li>One existing read contract: <code>RecentVisibleMessagesSource.read_recent_visible_messages()</code>.</li>
+      <li>One new injected provider boundary: read committed visible conversation records for one conversation before the current event.</li>
+      <li>Two supported committed visible record kinds: <code>user_visible_message</code> from MVP-005 and <code>assistant_visible_reply</code> from MVP-003.</li>
+      <li>One mapping target: the existing MVP-004 <code>RecentVisibleMessage</code> shape.</li>
+      <li>Extra fields from committed visible records, including <code>kind</code>, <code>source</code>, <code>user_id</code>, and <code>output_id</code>, are not exposed in <code>DecisionContext</code>.</li>
+      <li>The existing Role Model Loop remains responsible for final recent-message validation, ordering, current-event exclusion, and budget selection.</li>
+      <li>The new adapter copies input and output snapshots so caller mutation cannot alter returned context records.</li>
+      <li>The adapter may live near the existing Role Model Loop source protocol for now; do not create a full Character State Engine package in this slice.</li>
+      <li>Focused tests cover mapping, validation failures, copy isolation, and integration with <code>build_decision_context()</code>.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No full user-turn orchestrator across Runtime Kernel, Role Model Loop, and Commit and Effects.</li>
-      <li>No changes to Runtime Kernel routing, model-needed policy, event priority, or interruption behavior.</li>
-      <li>No live model provider, fake model adapter, prompt rendering, model output parsing, or Role Model Loop behavior change.</li>
-      <li>No change to MVP-003 assistant visible-reply commit behavior or schema.</li>
-      <li>No concrete <code>ConversationLog</code> storage adapter, migrations, transactions, query API, pagination, or indexes.</li>
-      <li>No recent-message source implementation backed by committed visible records.</li>
-      <li>No retrieval index, embeddings, keyword search, active threads, summaries, compaction, or debug inspector.</li>
-      <li>No character state, living state, virtual body, incidents, scheduled directives, tools, Live2D, assets, scheduler, worker, external service, UI delivery, or notification path.</li>
-      <li>No deduplication policy beyond the single source event being projected by the caller once; durable idempotency remains future work.</li>
+      <li>No concrete <code>ConversationLog</code> storage adapter, file store, database, migration, transaction, index, or pagination API.</li>
+      <li>No writes to visible conversation records, raw logs, model I/O logs, state stores, or any external service.</li>
+      <li>No full user-turn orchestrator across Runtime Kernel, user projection, Role Model Loop, and assistant commit.</li>
+      <li>No change to MVP-001 event normalization, MVP-002 model adapter contract, MVP-003 assistant visible-reply commit behavior, MVP-004 context budget rules, or MVP-005 user projection behavior.</li>
+      <li>No new model actions, live provider calls, prompt semantics, streaming, retries, or provider configuration.</li>
+      <li>No retrieval index, embeddings, keyword search, summaries, compaction, replay UI, or exact source expansion.</li>
+      <li>No <code>CharacterRuntimeState</code>, living state, virtual body, incidents, scheduled directives, active threads, tools, Live2D, assets, permissions matrix, or confirmation policy.</li>
+      <li>No schema unification of user and assistant visible records beyond a read-side projection into <code>RecentVisibleMessage</code>.</li>
+      <li>No reconciliation for visible append failures and no idempotency policy for persistent stores.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
     <p>
-      These TypeScript-style shapes define the intended behavior contract. MVP-005
+      These TypeScript-style shapes define the intended behavior contract. MVP-006
       should implement the contract in Python 3 and test it with <code>unittest</code>.
     </p>
 
-    <h3>UserVisibleMessage</h3>
+    <h3>VisibleConversationRecordsRequest</h3>
+    <pre><code>type VisibleConversationRecordsRequest = {
+  schema_version: "0.1"
+  conversation_id: string
+  before_event_id: string
+  before_created_at: string
+  max_candidate_records: 24
+}</code></pre>
+
+    <h3>VisibleConversationRecordSource</h3>
+    <pre><code>interface VisibleConversationRecordSource {
+  read_visible_conversation_records(
+    request: VisibleConversationRecordsRequest
+  ): VisibleConversationRecord[]
+}</code></pre>
+    <p>
+      The source is injected and read-only. A test fake may return in-memory
+      records. Concrete storage remains a future slice.
+    </p>
+
+    <h3>UserVisibleMessage Input</h3>
     <pre><code>type UserVisibleMessage = {
+  schema_version: "0.1"
   message_id: string
   trace_id: string
   source_event_id: string
   kind: "user_visible_message"
   role: "user"
+  conversation_id: string
   created_at: string
-  schema_version: "0.1"
   text: string
+  source: { runtime_event_type: "USER_MESSAGE" }
   user_id?: string
-  conversation_id?: string
+}</code></pre>
+
+    <h3>AssistantVisibleReply Input</h3>
+    <pre><code>type AssistantVisibleReply = {
+  schema_version: "0.1"
+  output_id: string
+  trace_id: string
+  source_event_id: string
+  kind: "assistant_visible_reply"
+  conversation_id: string
+  created_at: string
+  text: string
   source: {
-    runtime_event_type: "USER_MESSAGE"
+    decision_action: "visible_reply"
+    role_model_status: "decision_ready_for_commit"
   }
+  user_id?: string
+}</code></pre>
+
+    <h3>RecentVisibleMessage Output</h3>
+    <pre><code>type RecentVisibleMessage = {
+  schema_version: "0.1"
+  message_id: string
+  trace_id: string
+  source_event_id: string
+  conversation_id: string
+  role: "user" | "assistant"
+  created_at: string
+  text: string
 }</code></pre>
     <p>
-      <code>created_at</code> is copied from the normalized source event so visible
-      transcript ordering follows event time. The raw log entry timestamp records when
-      projection was committed. Do not add a second visible-message timestamp in this slice.
+      User records copy <code>message_id</code>. Assistant records map
+      <code>output_id</code> to <code>message_id</code> and set <code>role</code> to
+      <code>assistant</code>. No other committed-record fields pass through to model
+      context.
     </p>
-
-    <h3>UserVisibleMessageCommittedLogEntry</h3>
-    <pre><code>type UserVisibleMessageCommittedLogEntry = {
-  kind: "user_visible_message_committed"
-  trace_id: string
-  event_id: string
-  schema_version: "0.1"
-  data: {
-    source_event: RuntimeEvent
-    message: UserVisibleMessage
-  }
-}</code></pre>
-
-    <h3>UserVisibleMessageRejectedLogEntry</h3>
-    <pre><code>type UserVisibleMessageRejectedLogEntry = {
-  kind: "user_visible_message_rejected"
-  trace_id: string
-  event_id: string
-  schema_version: "0.1"
-  data: {
-    source_event: unknown
-    failure: {
-      stage: "user_visible_message_validation"
-      code: string
-      message: string
-    }
-  }
-}</code></pre>
-
-    <h3>UserVisibleMessageCommitResult</h3>
-    <pre><code>type UserVisibleMessageCommitResult = {
-  trace_id: string
-  event_id: string
-  event_type: "USER_MESSAGE"
-  status: "user_visible_message_committed"
-  message: UserVisibleMessage
-}</code></pre>
-
-    <h3>UserVisibleMessageRejectResult</h3>
-    <pre><code>type UserVisibleMessageRejectResult = {
-  trace_id: string
-  event_id: string
-  event_type: "USER_MESSAGE"
-  status: "user_visible_message_rejected"
-  failure: {
-    stage: "user_visible_message_validation"
-    code: string
-    message: string
-  }
-}</code></pre>
 
     <h2>Functional Requirements</h2>
     <table>
@@ -191,158 +187,140 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>The projection helper accepts only a normalized <code>USER_MESSAGE</code> event with <code>schema_version = "0.1"</code>.</td>
+          <td>The adapter accepts the existing MVP-004 <code>RecentVisibleMessagesRequest</code> shape and validates <code>schema_version</code>, <code>conversation_id</code>, <code>before_event_id</code>, <code>before_created_at</code>, and <code>max_candidate_messages</code>.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>The helper builds exactly one <code>UserVisibleMessage</code> from the normalized event payload text and optional <code>user_id</code> / <code>conversation_id</code>.</td>
+          <td>For a valid request, the adapter calls the injected visible-record source exactly once with the same conversation, event, timestamp, and candidate limit.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>The helper generates exactly one <code>message_id</code> using the injected ID generator and does not reuse <code>event_id</code> as the visible message ID.</td>
+          <td>The injected visible-record source must return a list. Non-list results fail before any model input is rendered.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>The visible message <code>trace_id</code>, <code>source_event_id</code>, <code>created_at</code>, <code>schema_version</code>, and <code>text</code> are derived from the validated normalized event, not duplicated literals.</td>
+          <td>A <code>user_visible_message</code> record maps to <code>RecentVisibleMessage</code> with the same <code>message_id</code>, <code>trace_id</code>, <code>source_event_id</code>, <code>conversation_id</code>, <code>created_at</code>, and <code>text</code>, plus <code>role = "user"</code>.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>For a valid event, the helper appends one <code>user_visible_message_committed</code> raw log entry before appending the visible message record.</td>
+          <td>An <code>assistant_visible_reply</code> record maps to <code>RecentVisibleMessage</code> with <code>output_id</code> as <code>message_id</code>, the same <code>trace_id</code>, <code>source_event_id</code>, <code>conversation_id</code>, <code>created_at</code>, and <code>text</code>, plus <code>role = "assistant"</code>.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>If raw-log append fails, the helper propagates the error and does not append a visible message.</td>
+          <td>The adapter rejects unsupported <code>kind</code> values, missing required identity fields, wrong <code>schema_version</code>, missing or mismatched <code>conversation_id</code>, malformed timestamps, and empty text.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>If visible-message append fails after raw logging succeeds, the helper propagates the error and leaves the committed raw log available for reconciliation.</td>
+          <td>The adapter returns only the MVP-004 <code>RecentVisibleMessage</code> fields and strips committed-record implementation fields.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>If source-event validation fails after trusted <code>event_id</code>, <code>trace_id</code>, and <code>type</code> are present, the helper appends one <code>user_visible_message_rejected</code> raw log and returns a reject result with no visible append.</td>
+          <td>The adapter deep-copies the request sent to the source and the records it returns to callers.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>If trusted source identity is missing, the helper raises validation error without appending a rejection log, matching MVP-003 malformed-identity behavior.</td>
-        </tr>
-        <tr>
-          <td>FR-10</td>
-          <td>The raw committed/rejected log entries and returned result deep-copy snapshots so caller-side mutation cannot alter append-only truth.</td>
-        </tr>
-        <tr>
-          <td>FR-11</td>
-          <td>The implementation stays in the existing Commit and Effects boundary and does not introduce a new storage module or Character State Engine package.</td>
+          <td>When used with <code>build_decision_context()</code>, the existing Role Model Loop budget and ordering rules still determine the final <code>recent_visible_messages</code> list.</td>
         </tr>
       </tbody>
     </table>
 
     <h2>Non-Functional Requirements</h2>
     <ul>
-      <li>Keep behavior deterministic for the same normalized event, ID generator, and clock.</li>
-      <li>Preserve all MVP-001 through MVP-004 public contracts unless this spec explicitly adds the user visible projection path.</li>
-      <li>Do not rename or reshape MVP-003 assistant output records in this slice.</li>
-      <li>Reuse shared contract helpers instead of duplicating primitive validation.</li>
-      <li>Prefer small helper extraction in the existing Commit and Effects module when MVP-005 needs the same trusted-identity, failure, snapshot, or contract-wrapping behavior as MVP-003.</li>
-      <li>Any helper extraction or protocol widening must be covered by existing MVP-003 tests plus focused MVP-005 tests.</li>
-      <li>Keep constants for statuses, raw log kinds, and visible message kind local and explicit.</li>
-      <li>Do not add speculative adapters, empty folders, database dependencies, query helpers, replay helpers, or background workers.</li>
-      <li>Keep raw truth separate from the visible transcript projection.</li>
+      <li>Use only Python standard library behavior; do not add dependencies.</li>
+      <li>Keep runtime behavior deterministic and side-effect free.</li>
+      <li>Do not call clocks, ID generators, model providers, files, databases, network services, or shell commands from the adapter.</li>
+      <li>Keep validation errors explicit enough to identify the bad record or request shape in tests.</li>
+      <li>Keep implementation small and local; no broad refactor of Role Model Loop or Commit and Effects.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>A valid normalized <code>USER_MESSAGE</code> appends one <code>UserVisibleMessage</code> to an injected visible conversation log.</li>
-      <li>The same valid projection appends one <code>user_visible_message_committed</code> raw log entry before the visible append.</li>
-      <li>The visible message uses a generated <code>message_id</code>, source event timestamp, source event text, and optional source event <code>user_id</code> / <code>conversation_id</code>.</li>
-      <li>Unsupported event type, schema version, malformed timestamp, or empty text reject without visible append when trusted identity exists.</li>
-      <li>Missing trusted identity raises without a rejection log.</li>
-      <li>Raw-log append failure prevents visible append.</li>
-      <li>Visible append failure leaves the committed raw projection log for reconciliation.</li>
-      <li>Returned results and log entries are protected from caller mutation.</li>
-      <li>No model adapter, live provider, retrieval source, concrete storage adapter, external service, or UI delivery path is called.</li>
-      <li>Relevant unit and integration tests pass.</li>
-      <li>The development journal records files changed and tests run when the implementation is completed.</li>
+      <li>A valid mixed list of committed user and assistant visible records becomes valid <code>recent_visible_messages</code> in <code>DecisionContext</code>.</li>
+      <li>User records map by <code>message_id</code>; assistant records map by <code>output_id</code>.</li>
+      <li>The returned messages expose no <code>kind</code>, <code>source</code>, <code>user_id</code>, or <code>output_id</code>.</li>
+      <li>The injected visible-record source is called once with a copied request and the existing candidate limit.</li>
+      <li>Malformed request or malformed visible record fails with no fallback records.</li>
+      <li>Existing MVP-001 through MVP-005 tests pass without behavior changes.</li>
       <li>Future ideas discovered during planning are recorded in <a href="future-slices.html">future-slices.html</a>.</li>
+      <li>The development journal records files touched, tests run, review notes, and next action.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li>Builds a <code>UserVisibleMessage</code> from a normalized <code>USER_MESSAGE</code>.</li>
-      <li>Copies optional <code>user_id</code> and <code>conversation_id</code> only when present.</li>
-      <li>Rejects unsupported event type, unsupported schema version, malformed <code>created_at</code>, missing payload, and empty text.</li>
-      <li>Builds committed raw log entries with deep-copied source event and visible message snapshots.</li>
-      <li>Builds rejected raw log entries with deep-copied source event and failure snapshots.</li>
-      <li>Rejects unsupported failure codes for user-visible projection logs.</li>
+      <li>Maps one <code>user_visible_message</code> to the exact <code>RecentVisibleMessage</code> output shape.</li>
+      <li>Maps one <code>assistant_visible_reply</code> using <code>output_id</code> as <code>message_id</code> and <code>role = "assistant"</code>.</li>
+      <li>Strips implementation-only fields from returned recent messages.</li>
+      <li>Rejects unsupported record kind, missing required ID, wrong schema version, mismatched conversation, malformed timestamp, and empty text.</li>
+      <li>Rejects a non-list result from the injected visible-record source.</li>
+      <li>Copies request and result snapshots so source-side or caller-side mutation cannot change returned records.</li>
     </ul>
 
     <h3>Integration Tests</h3>
     <ul>
-      <li>Valid normalized <code>USER_MESSAGE</code> to raw projection log append, visible message append, and committed result.</li>
-      <li>Invalid source event with trusted identity to rejected raw log and no visible append.</li>
-      <li>Raw-log append failure blocks visible append.</li>
-      <li>Visible append failure preserves the committed raw projection log.</li>
-      <li>Existing MVP-003 visible-reply commit tests continue to pass unchanged.</li>
+      <li><code>build_decision_context()</code> with the new adapter includes mapped user and assistant records in <code>character_snapshot.recent_visible_messages</code>.</li>
+      <li><code>run_role_model_turn()</code> snapshots the rendered model input with mapped recent messages in the completed role-model raw log.</li>
+      <li>Existing recent-message ordering, current-event exclusion, duplicate detection, and budget tests continue to pass through the Role Model Loop.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li><code>Runtime Kernel</code> remains responsible for event intake and normalization only.</li>
-      <li><code>Commit and Effects Engine</code> owns this projection because it is a durable visible transcript append.</li>
-      <li><code>Role Model Loop</code> remains unchanged; it still renders context, invokes the injected adapter, parses visible-reply decisions, and logs model turns.</li>
-      <li><code>Character State Engine</code> remains unchanged; it still has no concrete package in this repo.</li>
-      <li><code>RawEventLog</code> remains append-only and separate from <code>ConversationLog</code>.</li>
-      <li><code>VisibleConversationLog</code> remains an injected append-only boundary; a concrete adapter is still future work.</li>
-      <li>Do not introduce a second append protocol for user visible messages; adjust the existing append boundary only if needed and only without changing runtime behavior.</li>
-      <li>No database, network client, model provider, renderer, scheduler, worker, retrieval index, or tool implementation is introduced.</li>
+      <li>The read adapter satisfies the existing <code>RecentVisibleMessagesSource</code> protocol.</li>
+      <li>The injected visible-record provider is read-only and has no append, update, delete, or transaction behavior.</li>
+      <li>Role Model Loop remains the only model-call boundary and still owns rendering and parsing.</li>
+      <li>Commit and Effects remains the only write-side visible transcript boundary.</li>
+      <li>Runtime Kernel remains unchanged.</li>
+      <li>Character State Engine extraction remains future work; this slice should not introduce broad state, incident, retrieval, or continuity modules.</li>
+      <li>Reuse existing validation helpers and constants where possible instead of retyping schema, timestamp, text, identity, or extra-key checks. In particular, prefer the shared <code>runtime.contracts</code> helpers such as <code>reject_extra_keys</code>, <code>require_equal</code>, <code>require_string</code>, and <code>validate_iso8601_timestamp</code>, plus existing Role Model Loop constants such as <code>RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES</code>. Because <code>_validate_recent_visible_message()</code> is currently private in <code>role_model.loop</code>, the implementation must either keep the adapter close to that module or extract the smallest shared helper. Do not call or copy that private validator from another module.</li>
     </ul>
 
-    <h2>Failure Behavior</h2>
+    <h2>Error And Fallback Behavior</h2>
     <ul>
-      <li>Invalid source event shape raises validation error before visible append.</li>
-      <li>If trusted identity exists, validation failure appends one rejection raw log and returns <code>user_visible_message_rejected</code>.</li>
-      <li>If trusted identity is missing, validation failure raises without raw or visible append because the rejection log cannot be safely addressed.</li>
-      <li>Raw-log append failure propagates and prevents visible append.</li>
-      <li>Visible append failure propagates after raw commit logging succeeds; reconciliation behavior is a future slice.</li>
-      <li>No retry, deduplication, transaction manager, or idempotency key is introduced.</li>
+      <li>Malformed adapter request raises a validation error before reading visible records.</li>
+      <li>Malformed visible source output raises a validation error before model input rendering.</li>
+      <li>Unsupported visible record kinds fail closed instead of being silently ignored.</li>
+      <li>No raw log is appended for source-read failures in this slice because context-build logging is still a future slice.</li>
+      <li>No user-visible fallback message is emitted by this adapter.</li>
     </ul>
 
     <h2>Implementation Results</h2>
     <ul>
-      <li>Implemented <code>commit_user_visible_message()</code> in <code>src/commit_effects/visible_reply.py</code> beside the existing assistant visible-reply commit path.</li>
-      <li>Added <code>UserVisibleMessage</code> builders and raw committed/rejected projection log helpers without changing the MVP-003 assistant output schema.</li>
-      <li>Widened the existing <code>VisibleConversationLog</code> protocol typing to accept visible conversation records while keeping one append boundary.</li>
-      <li>Reused shared normalized <code>USER_MESSAGE</code> validation, trusted source identity extraction, failure shaping, contract-error wrapping, and snapshot copying patterns.</li>
-      <li>Added unit tests for message construction, optional field handling, invalid source events, committed/rejected raw log snapshots, and unsupported projection failure codes.</li>
-      <li>Added integration tests for valid projection append order, trusted validation rejection, missing trusted identity, raw-log append failure, and visible append failure reconciliation surface.</li>
+      <li>Implemented <code>VisibleConversationRecentMessagesSource</code> in <code>src/role_model/loop.py</code> as a read-only adapter satisfying the existing <code>RecentVisibleMessagesSource</code> protocol.</li>
+      <li>Added an injected <code>VisibleConversationRecordSource</code> boundary that receives a copied request with <code>max_candidate_records</code> and returns committed visible conversation records.</li>
+      <li>Mapped <code>user_visible_message</code> records to <code>RecentVisibleMessage</code> by preserving <code>message_id</code> and <code>role = "user"</code>.</li>
+      <li>Mapped <code>assistant_visible_reply</code> records to <code>RecentVisibleMessage</code> by using <code>output_id</code> as <code>message_id</code> and <code>role = "assistant"</code>.</li>
+      <li>Validated request shape, visible record kinds, required identity fields, schema version, source metadata, conversation match, timestamps, text, and extra keys before returning mapped records.</li>
+      <li>Reused the existing Role Model Loop recent-message validator for the final mapped shape, keeping ordering, current-event exclusion, duplicate detection, and budget selection in the existing context path.</li>
+      <li>Added unit tests for mapping, malformed request rejection, malformed record rejection, non-list source output, stripped implementation-only fields, and copy isolation.</li>
+      <li>Added an integration test proving committed visible records flow through <code>run_role_model_turn()</code> into the rendered model input and completed raw log snapshot.</li>
+      <li>No concrete storage, write behavior, Runtime Kernel change, model provider, retrieval index, Character State Engine package, or user-turn orchestrator was added.</li>
       <li>Current verification: Ruff lint/format, mypy, compileall, unit tests, integration tests, full test discovery, HTML parser checks, and <code>git diff --check</code> passed.</li>
     </ul>
 
-    <h2>Pre-Code Review Notes</h2>
+    <h2>Review Notes</h2>
     <ul>
-      <li>The behavior does not already exist; MVP-003 commits assistant visible replies, while user messages exist only as raw normalized events.</li>
-      <li>The slice is smaller than a full user-turn orchestrator because it projects only the incoming user message into the visible transcript boundary.</li>
-      <li>The slice is smaller than concrete conversation storage because it reuses the injected append-only interface and in-memory test fakes.</li>
-      <li>The slice supports the MVP-004 recent-message contract by creating a future-compatible user-side visible record, but it does not implement the source that reads those records.</li>
-      <li>Implementation should avoid duplicating MVP-003 private helper logic. If the user visible projection needs the same behavior as <code>_extract_trusted_source_identity()</code>, <code>_build_failure()</code>, snapshot copying, or <code>_wrap_contract_error()</code>, extract the smallest shared helper and keep existing tests green.</li>
-      <li>The only schema expansion is the user visible message record plus committed/rejected raw projection log shapes.</li>
-      <li>Security risk stays low because the source is already user-visible input and no external side effects are introduced.</li>
+      <li>This spec intentionally chooses the read-side projection before the full user-turn orchestrator because MVP-004 and MVP-005 already define the two sides that need to connect.</li>
+      <li>The adapter maps committed record shapes into the existing recent-message shape rather than widening <code>DecisionContext</code>.</li>
+      <li>A concrete store would force persistence, ordering, and idempotency choices that are not needed to prove the mapping contract.</li>
+      <li>Do not hide ordering or budget policy in the adapter; keep those rules in the existing Role Model Loop path until a reviewed Character State Engine slice moves them.</li>
+      <li>Implementation should reuse or extract existing validators/constants for the overlapping <code>RecentVisibleMessage</code> and shared contract checks; duplicated timestamp, schema, empty-text, and extra-key validation would be review debt.</li>
+      <li>Residual implementation risk: <code>_validate_recent_visible_message()</code> is private today. MVP-006 should avoid cross-module private-helper coupling by colocating the adapter with the private validator or extracting a deliberately shared helper.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should assistant and user visible records later converge into one shared <code>VisibleConversationMessage</code> contract? Not in MVP-005; avoid reshaping MVP-003 before a second consumer needs it.</li>
-      <li>Should projection become idempotent by <code>source_event_id</code>? Not in MVP-005; durable deduplication needs a concrete store or transaction boundary.</li>
-      <li>Should the recent-message source read directly from the same visible log next? Likely yes, but that belongs in a later storage/source slice.</li>
+      <li>Should this adapter later move into a dedicated Character State Engine package? Likely yes, but not until a broader context-builder slice exists.</li>
+      <li>Should malformed historical visible records be skipped instead of failing the context build? MVP-006 should fail closed so bad committed records are visible during tests.</li>
+      <li>Should assistant and user visible records later share one durable schema? Not in MVP-006; this slice only maps both into the read-side context schema.</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Shared visible conversation message contract after assistant and user message records have a second consumer.</li>
-      <li>Concrete append-only <code>ConversationLog</code> storage adapter with source-event idempotency.</li>
-      <li>Recent-message source backed by committed visible conversation records.</li>
-      <li>Full user-turn orchestrator that runs Runtime Kernel, user visible projection, Role Model Loop, and Commit and Effects as one tested flow.</li>
-      <li>Conversation projection reconciliation for visible append failures after raw projection logs commit.</li>
+      <li>Concrete append-only <code>ConversationLog</code> storage with durable query semantics.</li>
+      <li>Full user-turn orchestrator after the visible recent source is proven.</li>
+      <li>Character State Engine context-builder extraction once there is more than one real context source.</li>
+      <li>Context-build raw logging that records source-read requests and selected message IDs.</li>
+      <li>Shared durable visible conversation message contract if storage or replay needs it.</li>
     </ul>
   </main>
 </body>

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal - MVP-006 Functional Spec</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 32px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-006 Functional Spec</h1>
+    <p><strong>Date:</strong> 2026-05-16</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Pulled <code>origin main</code> and created <code>feature/mvp-006-functional-spec</code>.</li>
+      <li>Archived MVP-005 as completed at <code>docs/plan/completed/mvp-005-user-visible-message-projection.html</code>.</li>
+      <li>Replaced <code>docs/plan/active-slice.html</code> with the active MVP-006 functional spec.</li>
+      <li>Kept MVP-006 narrow: an injected read-only source adapter that maps committed visible conversation records into the existing <code>RecentVisibleMessage</code> context shape.</li>
+      <li>Updated <code>docs/plan/future-slices.html</code> so MVP-005 is completed, MVP-006 is active, and outside-scope storage, orchestration, context-build logging, and schema-unification ideas stay parked.</li>
+      <li>Updated <code>docs/plan/index.html</code> so the active plan, completed plan list, and implementation graph reflect MVP-006.</li>
+      <li>Review cleanup: added Notion <code>06 - Character State Engine &amp; Retrieval Management</code> to the MVP-006 source list.</li>
+      <li>Review cleanup: added an implementation note to reuse or extract existing <code>RecentVisibleMessage</code> and shared contract validators/constants instead of duplicating schema, timestamp, text, identity, or extra-key checks.</li>
+      <li>Review cleanup: recorded the residual risk that <code>_validate_recent_visible_message()</code> is private in <code>role_model.loop</code>; MVP-006 implementation should colocate the adapter with that logic or extract a small shared helper, not call or copy the private validator across modules.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      MVP-004 can read a bounded recent visible message tail through an injected source, and MVP-005 creates
+      committed user-side visible records. The narrow next step is to prove the read-side projection from committed
+      user and assistant visible records into the existing context shape, not to build a database or full user-turn orchestrator.
+    </p>
+
+    <h2>Notion Sources Checked</h2>
+    <ul>
+      <li><a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a></li>
+      <li><a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a></li>
+      <li><a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a></li>
+      <li><a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a></li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/completed/mvp-005-user-visible-message-projection.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-16/006-mvp-006-functional-spec.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>python3 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-005-user-visible-message-projection.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-16/006-mvp-006-functional-spec.html</code> - passed.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>MVP-006 is a spec-only change in this branch so far; production code and tests remain future work under this active slice.</li>
+      <li>The active spec intentionally avoids concrete storage, writes, raw context-build logs, full user-turn orchestration, retrieval, character state, tools, Live2D, and external services.</li>
+      <li>The source adapter should map existing committed record shapes into the current <code>RecentVisibleMessage</code> schema instead of widening <code>DecisionContext</code>.</li>
+      <li>The existing Role Model Loop should keep final ordering, current-event exclusion, duplicate detection, and budget selection until a reviewed Character State Engine slice moves context building.</li>
+      <li>Implementation should reuse shared validators/constants from <code>runtime.contracts</code> and the existing Role Model Loop recent-message path, extracting a small shared helper if needed rather than copying private validation logic.</li>
+      <li>Do not import or call <code>_validate_recent_visible_message()</code> from another module; if the adapter is not colocated with <code>role_model.loop</code>, extract the minimum shared validation helper first.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Review the MVP-006 functional spec, then implement only the visible conversation recent source tests and smallest passing source adapter.
+    </p>
+  </main>
+</body>
+</html>
