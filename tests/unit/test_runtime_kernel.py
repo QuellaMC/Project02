@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from runtime.kernel import (  # noqa: E402
     RuntimeValidationError,
     build_raw_event_log_entry,
+    intake_runtime_event,
     normalize_runtime_event,
     route_runtime_event,
 )
@@ -24,6 +25,14 @@ class SequenceIdGenerator:
     def __call__(self, kind):
         self.calls.append(kind)
         return f"{kind}-generated-{len(self.calls)}"
+
+
+class RecordingRawEventLog:
+    def __init__(self):
+        self.entries = []
+
+    def append(self, entry):
+        self.entries.append(entry)
 
 
 class RuntimeEventNormalizationTests(unittest.TestCase):
@@ -139,7 +148,7 @@ class RuntimeEventNormalizationTests(unittest.TestCase):
                         clock=fixed_clock,
                     )
 
-    def test_returns_deterministic_logged_only_route(self):
+    def test_returns_deterministic_user_turn_route(self):
         event = {
             "event_id": "event-1",
             "trace_id": "trace-1",
@@ -157,10 +166,36 @@ class RuntimeEventNormalizationTests(unittest.TestCase):
                 "trace_id": "trace-1",
                 "event_id": "event-1",
                 "event_type": "USER_MESSAGE",
-                "model_needed": False,
-                "next_step": "logged_only",
+                "model_needed": True,
+                "next_step": "user_turn",
             },
         )
+
+    def test_shared_intake_appends_log_and_returns_normalized_event_with_route(self):
+        ids = SequenceIdGenerator()
+        raw_log = RecordingRawEventLog()
+
+        result = intake_runtime_event(
+            {"type": "USER_MESSAGE", "payload": {"text": "hello"}},
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["event"]["event_id"], "event-generated-1")
+        self.assertEqual(result["event"]["trace_id"], "trace-generated-2")
+        self.assertEqual(
+            result["route"],
+            {
+                "trace_id": "trace-generated-2",
+                "event_id": "event-generated-1",
+                "event_type": "USER_MESSAGE",
+                "model_needed": True,
+                "next_step": "user_turn",
+            },
+        )
+        self.assertEqual(len(raw_log.entries), 1)
+        self.assertEqual(raw_log.entries[0]["kind"], "runtime_event_received")
 
     def test_raw_event_log_entry_copies_event_snapshot(self):
         event = {

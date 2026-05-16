@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-006</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-007</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -213,13 +213,13 @@
       <dd>Likely moves existing validation into <code>runtime.contracts</code> without changing the current <code>DecisionContext</code> shape.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-004 still has only one production consumer, and MVP-005 should not add shared abstractions before they are needed.</dd>
+      <dd>The active MVP-007 slice should compose existing context behavior before promoting another shared contract surface.</dd>
     </dl>
 
-    <h2>Full User Turn Orchestrator</h2>
+    <h2>MVP-007 - Minimal User Turn Orchestrator</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Expose one tested flow that runs Runtime Kernel intake, Role Model Loop, and Commit and Effects for a user message.</dd>
+      <dd>Promoted to the active MVP-007 spec on 2026-05-16. See <a href="active-slice.html">active-slice.html</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>The Phase 1 roadmap wants a minimal user turn loop, but each boundary and visible projection needs to be proven separately first.</dd>
@@ -231,16 +231,70 @@
       <dd>MVP-003 visible reply commit, MVP-004 recent-message context, MVP-005 user visible projection, and MVP-006 visible recent source should work first.</dd>
 
       <dt>Possible Future Slice</dt>
-      <dd><code>Minimal user turn orchestrator v0.1</code>.</dd>
+      <dd><code>MVP-007 - Minimal User Turn Orchestrator</code>.</dd>
 
       <dt>Risk Or Unknown</dt>
       <dd>The orchestrator could blur boundary ownership if introduced before commit validation is tested.</dd>
 
       <dt>Schema Evolution Impact</dt>
-      <dd>Likely introduces a top-level turn result envelope without changing existing event, decision, or output records.</dd>
+      <dd>The active MVP-007 spec introduces a top-level turn result envelope while preserving existing event, decision, raw log, and visible output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-006 slice only maps committed visible records into the existing recent-message context source.</dd>
+      <dd>This item is no longer parked; it is the active MVP-007 spec.</dd>
+    </dl>
+
+    <h2>Richer Runtime Kernel Route Policy</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>After MVP-007 proves the authoritative <code>USER_MESSAGE</code> route, add richer Runtime Kernel route policy for priority, interruption, and later event families.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The long-term architecture says Runtime Kernel owns whether model judgment is needed and what boundary should run next.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while accepting the MVP-007 review finding that the user-turn route itself belongs in scope, while broader policy remains future work.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-007 should first prove the <code>USER_MESSAGE</code> route with <code>model_needed = true</code> and <code>next_step = "user_turn"</code>, plus the composed user-turn path.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Runtime Kernel priority and interruption policy v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Adding broad route policy before priority, interruption, or non-user-message behavior is specified could reopen the scope that MVP-007 is intentionally avoiding.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds tested route outputs for interruption, scheduling, and later event families while preserving the MVP-007 <code>USER_MESSAGE</code> route.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active MVP-007 slice changes only the <code>USER_MESSAGE</code> route needed for the minimal user-turn loop.</dd>
+    </dl>
+
+    <h2>Real RoleModelAdapter Provider</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a real provider-backed <code>RoleModelAdapter</code> after the fake-adapter orchestration path is stable.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The framework eventually needs live model calls, but tests and early runtime slices should stay deterministic.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while keeping MVP-007 limited to an injected fake model adapter.</dd>
+
+      <dt>Dependency</dt>
+      <dd>The minimal user-turn orchestrator should pass with fakes, and provider selection, timeout, retry, logging, and redaction policy should be specified separately.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Provider-backed RoleModelAdapter v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Adding a provider too early could make runtime tests nondeterministic and mix model configuration concerns into orchestration.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>May add provider metadata to model I/O logs without changing <code>CharacterDecision</code>.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-007 only needs an injected adapter boundary and deterministic fake outputs.</dd>
     </dl>
 
     <h2>Shared RoleModelTurnResult Validator</h2>
@@ -294,7 +348,7 @@
       <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-006 slice still uses injected read-only interfaces and no concrete database.</dd>
+      <dd>The active MVP-007 slice still uses injected fakes and existing interfaces, with no concrete database.</dd>
     </dl>
 
     <h2>Shared Visible Conversation Message Contract</h2>
@@ -321,13 +375,13 @@
       <dd>Likely adds a shared <code>role</code> / <code>message_id</code> visible transcript contract while preserving compatibility with existing assistant output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-006 slice only adds a read-side projection and explicitly preserves both committed record schemas.</dd>
+      <dd>The active MVP-007 slice composes existing user and assistant record paths without unifying their durable schemas.</dd>
     </dl>
 
     <h2>Recent Source Backed By Visible Conversation Records</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Promoted to the active MVP-006 spec on 2026-05-16. See <a href="active-slice.html">active-slice.html</a>.</dd>
+      <dd>Completed on 2026-05-16. See <a href="completed/mvp-006-visible-conversation-recent-source.html">completed MVP-006</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>MVP-004 defines the read-side context contract, and MVP-005 defines the user write-side projection. A later slice can connect them through a real source boundary.</dd>
@@ -346,10 +400,10 @@
       <dd>MVP-005 <code>UserVisibleMessage</code> records include <code>kind</code> and <code>source</code>, while the MVP-004 <code>RecentVisibleMessage</code> validator currently rejects extra fields and accepts only <code>schema_version</code>, <code>message_id</code>, <code>trace_id</code>, <code>source_event_id</code>, <code>conversation_id</code>, <code>role</code>, <code>created_at</code>, and <code>text</code>.</dd>
 
       <dt>Schema Evolution Impact</dt>
-      <dd>The active MVP-006 spec maps committed user and assistant records into the narrower <code>RecentVisibleMessage</code> shape before feeding Role Model Loop.</dd>
+      <dd>MVP-006 maps committed user and assistant records into the narrower <code>RecentVisibleMessage</code> shape before feeding Role Model Loop.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>This item is no longer parked; it is the active MVP-006 spec.</dd>
+      <dd>This item is no longer parked; it has been completed and recorded under completed plans.</dd>
     </dl>
 
     <h2>Conversation Projection Reconciliation</h2>
