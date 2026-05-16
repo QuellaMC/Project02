@@ -8,8 +8,12 @@ from math import ceil
 from typing import Any, Protocol
 
 from runtime.contracts import (
+    ASSISTANT_VISIBLE_REPLY_KIND,
+    ASSISTANT_VISIBLE_REPLY_ROLE,
     DECISION_READY_FOR_COMMIT_STATUS,
     USER_MESSAGE,
+    USER_VISIBLE_MESSAGE_KIND,
+    USER_VISIBLE_MESSAGE_ROLE,
     VISIBLE_REPLY_ACTION,
     ContractValidationError,
     RuntimeEvent,
@@ -49,6 +53,8 @@ ROLE_MODEL_INSTRUCTIONS = (
 DecisionContext = dict[str, Any]
 RecentVisibleMessage = dict[str, Any]
 RecentVisibleMessagesRequest = dict[str, Any]
+VisibleConversationRecord = dict[str, Any]
+VisibleConversationRecordsRequest = dict[str, Any]
 RoleModelInput = dict[str, Any]
 RoleModelAdapterOutput = dict[str, Any]
 CharacterDecision = dict[str, Any]
@@ -68,6 +74,44 @@ class RecentVisibleMessagesSource(Protocol):
         self,
         request: RecentVisibleMessagesRequest,
     ) -> list[RecentVisibleMessage]: ...
+
+
+class VisibleConversationRecordSource(Protocol):
+    def read_visible_conversation_records(
+        self,
+        request: VisibleConversationRecordsRequest,
+    ) -> list[VisibleConversationRecord]: ...
+
+
+class VisibleConversationRecentMessagesSource:
+    def __init__(self, visible_conversation_record_source: VisibleConversationRecordSource) -> None:
+        self._visible_conversation_record_source = visible_conversation_record_source
+
+    def read_recent_visible_messages(
+        self,
+        request: RecentVisibleMessagesRequest,
+    ) -> list[RecentVisibleMessage]:
+        validated_request = _validate_recent_visible_messages_request(request)
+        record_request = _build_visible_conversation_records_request(validated_request)
+        records = self._visible_conversation_record_source.read_visible_conversation_records(
+            deepcopy(record_request)
+        )
+        if not isinstance(records, list):
+            raise RoleModelValidationError("VisibleConversationRecordSource must return a list.")
+        if len(records) > validated_request["max_candidate_messages"]:
+            raise RoleModelValidationError(
+                "VisibleConversationRecordSource returned too many records."
+            )
+
+        return [
+            deepcopy(
+                _map_visible_conversation_record(
+                    record,
+                    conversation_id=validated_request["conversation_id"],
+                )
+            )
+            for record in records
+        ]
 
 
 def build_decision_context(
@@ -345,6 +389,246 @@ def _build_recent_visible_messages_request(
     }
 
 
+def _validate_recent_visible_messages_request(request: Any) -> RecentVisibleMessagesRequest:
+    if not isinstance(request, Mapping):
+        raise RoleModelValidationError("RecentVisibleMessagesRequest must be a mapping.")
+    _wrap_contract_error(
+        lambda: reject_extra_keys(
+            request,
+            {
+                "schema_version",
+                "conversation_id",
+                "before_event_id",
+                "before_created_at",
+                "max_candidate_messages",
+            },
+            "RecentVisibleMessagesRequest",
+        )
+    )
+    _wrap_contract_error(
+        lambda: require_equal(request.get("schema_version"), SCHEMA_VERSION, "schema_version")
+    )
+    max_candidate_messages = request.get("max_candidate_messages")
+    if (
+        not isinstance(max_candidate_messages, int)
+        or isinstance(max_candidate_messages, bool)
+        or max_candidate_messages < 1
+        or max_candidate_messages > RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES
+    ):
+        raise RoleModelValidationError(
+            "max_candidate_messages must be an integer from 1 to "
+            f"{RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES}."
+        )
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "conversation_id": _wrap_contract_error(
+            lambda: require_string(request.get("conversation_id"), "conversation_id")
+        ),
+        "before_event_id": _wrap_contract_error(
+            lambda: require_string(request.get("before_event_id"), "before_event_id")
+        ),
+        "before_created_at": _validate_timestamp(
+            request.get("before_created_at"),
+            "before_created_at",
+        ),
+        "max_candidate_messages": max_candidate_messages,
+    }
+
+
+def _build_visible_conversation_records_request(
+    request: RecentVisibleMessagesRequest,
+) -> VisibleConversationRecordsRequest:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "conversation_id": request["conversation_id"],
+        "before_event_id": request["before_event_id"],
+        "before_created_at": request["before_created_at"],
+        "max_candidate_records": request["max_candidate_messages"],
+    }
+
+
+def _map_visible_conversation_record(
+    record: Any,
+    *,
+    conversation_id: str,
+) -> RecentVisibleMessage:
+    if not isinstance(record, Mapping):
+        raise RoleModelValidationError("VisibleConversationRecord must be a mapping.")
+    kind = _wrap_contract_error(lambda: require_string(record.get("kind"), "kind"))
+    if kind == USER_VISIBLE_MESSAGE_KIND:
+        return _map_user_visible_message_record(record, conversation_id=conversation_id)
+    if kind == ASSISTANT_VISIBLE_REPLY_KIND:
+        return _map_assistant_visible_reply_record(record, conversation_id=conversation_id)
+    raise RoleModelValidationError(
+        "kind must be 'user_visible_message' or 'assistant_visible_reply'."
+    )
+
+
+def _map_user_visible_message_record(
+    record: Mapping[str, Any],
+    *,
+    conversation_id: str,
+) -> RecentVisibleMessage:
+    _wrap_contract_error(
+        lambda: reject_extra_keys(
+            record,
+            {
+                "schema_version",
+                "message_id",
+                "trace_id",
+                "source_event_id",
+                "kind",
+                "role",
+                "conversation_id",
+                "created_at",
+                "text",
+                "source",
+                "user_id",
+            },
+            "UserVisibleMessage",
+        )
+    )
+    _validate_user_visible_message_source(record.get("source"))
+    _wrap_contract_error(
+        lambda: require_equal(record.get("kind"), USER_VISIBLE_MESSAGE_KIND, "kind")
+    )
+    _wrap_contract_error(
+        lambda: require_equal(record.get("role"), USER_VISIBLE_MESSAGE_ROLE, "role")
+    )
+    _validate_hidden_optional_user_id(record)
+
+    return _validate_recent_visible_message(
+        {
+            "schema_version": _validated_schema_version(record),
+            "message_id": _wrap_contract_error(
+                lambda: require_string(record.get("message_id"), "message_id")
+            ),
+            "trace_id": _wrap_contract_error(
+                lambda: require_string(record.get("trace_id"), "trace_id")
+            ),
+            "source_event_id": _wrap_contract_error(
+                lambda: require_string(record.get("source_event_id"), "source_event_id")
+            ),
+            "conversation_id": _wrap_contract_error(
+                lambda: require_equal(
+                    record.get("conversation_id"), conversation_id, "conversation_id"
+                )
+            ),
+            "role": USER_VISIBLE_MESSAGE_ROLE,
+            "created_at": _validate_timestamp(record.get("created_at"), "created_at"),
+            "text": _wrap_contract_error(lambda: require_string(record.get("text"), "text")),
+        },
+        conversation_id=conversation_id,
+    )
+
+
+def _map_assistant_visible_reply_record(
+    record: Mapping[str, Any],
+    *,
+    conversation_id: str,
+) -> RecentVisibleMessage:
+    _wrap_contract_error(
+        lambda: reject_extra_keys(
+            record,
+            {
+                "schema_version",
+                "output_id",
+                "trace_id",
+                "source_event_id",
+                "kind",
+                "conversation_id",
+                "created_at",
+                "text",
+                "source",
+                "user_id",
+            },
+            "AssistantVisibleReply",
+        )
+    )
+    _validate_assistant_visible_reply_source(record.get("source"))
+    _wrap_contract_error(
+        lambda: require_equal(record.get("kind"), ASSISTANT_VISIBLE_REPLY_KIND, "kind")
+    )
+    _validate_hidden_optional_user_id(record)
+
+    return _validate_recent_visible_message(
+        {
+            "schema_version": _validated_schema_version(record),
+            "message_id": _wrap_contract_error(
+                lambda: require_string(record.get("output_id"), "output_id")
+            ),
+            "trace_id": _wrap_contract_error(
+                lambda: require_string(record.get("trace_id"), "trace_id")
+            ),
+            "source_event_id": _wrap_contract_error(
+                lambda: require_string(record.get("source_event_id"), "source_event_id")
+            ),
+            "conversation_id": _wrap_contract_error(
+                lambda: require_equal(
+                    record.get("conversation_id"), conversation_id, "conversation_id"
+                )
+            ),
+            "role": ASSISTANT_VISIBLE_REPLY_ROLE,
+            "created_at": _validate_timestamp(record.get("created_at"), "created_at"),
+            "text": _wrap_contract_error(lambda: require_string(record.get("text"), "text")),
+        },
+        conversation_id=conversation_id,
+    )
+
+
+def _validated_schema_version(record: Mapping[str, Any]) -> str:
+    _wrap_contract_error(
+        lambda: require_equal(record.get("schema_version"), SCHEMA_VERSION, "schema_version")
+    )
+    return SCHEMA_VERSION
+
+
+def _validate_user_visible_message_source(source: Any) -> None:
+    if not isinstance(source, Mapping):
+        raise RoleModelValidationError("source must be a mapping.")
+    _wrap_contract_error(
+        lambda: reject_extra_keys(source, {"runtime_event_type"}, "UserVisibleMessage.source")
+    )
+    _wrap_contract_error(
+        lambda: require_equal(
+            source.get("runtime_event_type"), USER_MESSAGE, "source.runtime_event_type"
+        )
+    )
+
+
+def _validate_assistant_visible_reply_source(source: Any) -> None:
+    if not isinstance(source, Mapping):
+        raise RoleModelValidationError("source must be a mapping.")
+    _wrap_contract_error(
+        lambda: reject_extra_keys(
+            source,
+            {"decision_action", "role_model_status"},
+            "AssistantVisibleReply.source",
+        )
+    )
+    _wrap_contract_error(
+        lambda: require_equal(
+            source.get("decision_action"),
+            VISIBLE_REPLY_ACTION,
+            "source.decision_action",
+        )
+    )
+    _wrap_contract_error(
+        lambda: require_equal(
+            source.get("role_model_status"),
+            DECISION_READY_FOR_COMMIT_STATUS,
+            "source.role_model_status",
+        )
+    )
+
+
+def _validate_hidden_optional_user_id(record: Mapping[str, Any]) -> None:
+    if "user_id" not in record:
+        return
+    _wrap_contract_error(lambda: require_optional_string(record["user_id"], "user_id"))
+
+
 def _validate_recent_visible_message(
     message: Any,
     *,
@@ -375,8 +659,10 @@ def _validate_recent_visible_message(
         lambda: require_equal(message.get("conversation_id"), conversation_id, "conversation_id")
     )
     role = _wrap_contract_error(lambda: require_string(message.get("role"), "role"))
-    if role not in {"user", "assistant"}:
-        raise RoleModelValidationError("role must be 'user' or 'assistant'.")
+    if role not in {USER_VISIBLE_MESSAGE_ROLE, ASSISTANT_VISIBLE_REPLY_ROLE}:
+        raise RoleModelValidationError(
+            f"role must be {USER_VISIBLE_MESSAGE_ROLE!r} or {ASSISTANT_VISIBLE_REPLY_ROLE!r}."
+        )
     text = _wrap_contract_error(lambda: require_string(message.get("text"), "text"))
 
     return {

@@ -5,8 +5,11 @@ from copy import deepcopy
 from typing import Any, Protocol
 
 from runtime.contracts import (
+    ASSISTANT_VISIBLE_REPLY_KIND,
     DECISION_READY_FOR_COMMIT_STATUS,
     USER_MESSAGE,
+    USER_VISIBLE_MESSAGE_KIND,
+    USER_VISIBLE_MESSAGE_ROLE,
     VISIBLE_REPLY_ACTION,
     RuntimeEvent,
     normalize_visible_reply_decision,
@@ -30,7 +33,6 @@ from runtime.logging import (
     generate_id,
 )
 
-VISIBLE_OUTPUT_KIND = "assistant_visible_reply"
 VISIBLE_REPLY_COMMITTED_STATUS = "visible_reply_committed"
 VISIBLE_REPLY_REJECTED_STATUS = "visible_reply_rejected"
 VISIBLE_REPLY_COMMITTED_KIND = "visible_reply_committed"
@@ -43,8 +45,6 @@ SUPPORTED_REJECTION_CODES = {
     "unsupported_action",
     "empty_reply_text",
 }
-USER_VISIBLE_MESSAGE_KIND = "user_visible_message"
-USER_VISIBLE_MESSAGE_ROLE = "user"
 USER_VISIBLE_MESSAGE_COMMITTED_STATUS = "user_visible_message_committed"
 USER_VISIBLE_MESSAGE_REJECTED_STATUS = "user_visible_message_rejected"
 USER_VISIBLE_MESSAGE_COMMITTED_KIND = "user_visible_message_committed"
@@ -197,7 +197,7 @@ def build_visible_conversation_output(
         "output_id": generate_id("output", id_generator),
         "trace_id": event["trace_id"],
         "source_event_id": event["event_id"],
-        "kind": VISIBLE_OUTPUT_KIND,
+        "kind": ASSISTANT_VISIBLE_REPLY_KIND,
         "created_at": clock_timestamp(clock),
         "schema_version": SCHEMA_VERSION,
         "text": decision["visible_reply"]["text"],
@@ -458,7 +458,7 @@ def _validate_visible_conversation_output(
             source_event["event_id"],
             "source_event_id",
         ),
-        "kind": _require_exact_string(output.get("kind"), VISIBLE_OUTPUT_KIND, "kind"),
+        "kind": _require_exact_string(output.get("kind"), ASSISTANT_VISIBLE_REPLY_KIND, "kind"),
         "created_at": _wrap_contract_error(
             lambda: require_string(output.get("created_at"), "created_at")
         ),

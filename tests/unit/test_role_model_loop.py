@@ -12,6 +12,7 @@ from role_model.loop import (  # noqa: E402
     RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS,
     ROLE_MODEL_INSTRUCTIONS,
     RoleModelValidationError,
+    VisibleConversationRecentMessagesSource,
     approximate_text_tokens,
     build_decision_context,
     build_role_model_turn_completed_log_entry,
@@ -94,6 +95,81 @@ class RecordingRecentMessagesSource:
     def read_recent_visible_messages(self, request):
         self.requests.append(request)
         return self.messages
+
+
+def recent_request():
+    return {
+        "schema_version": "0.1",
+        "conversation_id": "conversation-1",
+        "before_event_id": "event-1",
+        "before_created_at": "2026-05-14T11:30:00+00:00",
+        "max_candidate_messages": RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES,
+    }
+
+
+def user_visible_record(
+    message_id,
+    *,
+    conversation_id="conversation-1",
+    created_at="2026-05-14T11:20:00+00:00",
+    text="previous user message",
+):
+    return {
+        "schema_version": "0.1",
+        "message_id": message_id,
+        "trace_id": f"trace-{message_id}",
+        "source_event_id": f"event-{message_id}",
+        "kind": "user_visible_message",
+        "role": "user",
+        "conversation_id": conversation_id,
+        "created_at": created_at,
+        "text": text,
+        "user_id": "user-1",
+        "source": {"runtime_event_type": "USER_MESSAGE"},
+    }
+
+
+def assistant_visible_record(
+    output_id,
+    *,
+    conversation_id="conversation-1",
+    created_at="2026-05-14T11:21:00+00:00",
+    text="previous assistant reply",
+):
+    return {
+        "schema_version": "0.1",
+        "output_id": output_id,
+        "trace_id": f"trace-{output_id}",
+        "source_event_id": f"event-{output_id}",
+        "kind": "assistant_visible_reply",
+        "conversation_id": conversation_id,
+        "created_at": created_at,
+        "text": text,
+        "user_id": "user-1",
+        "source": {
+            "decision_action": "visible_reply",
+            "role_model_status": "decision_ready_for_commit",
+        },
+    }
+
+
+class RecordingVisibleConversationRecordSource:
+    def __init__(self, records):
+        self.records = records
+        self.requests = []
+
+    def read_visible_conversation_records(self, request):
+        self.requests.append(request)
+        return self.records
+
+
+class MutatingVisibleConversationRecordSource:
+    def __init__(self, records):
+        self.records = records
+
+    def read_visible_conversation_records(self, request):
+        request["conversation_id"] = "mutated-by-source"
+        return self.records
 
 
 class DecisionContextTests(unittest.TestCase):
@@ -489,6 +565,114 @@ class DecisionContextTests(unittest.TestCase):
 
                 with self.assertRaisesRegex(RoleModelValidationError, "event.conversation_id"):
                     render_role_model_input(context)
+
+
+class VisibleConversationRecentMessagesSourceTests(unittest.TestCase):
+    def test_maps_user_and_assistant_visible_records_to_recent_messages(self):
+        record_source = RecordingVisibleConversationRecordSource(
+            [
+                user_visible_record("message-1"),
+                assistant_visible_record("output-1"),
+            ]
+        )
+        source = VisibleConversationRecentMessagesSource(record_source)
+
+        messages = source.read_recent_visible_messages(recent_request())
+
+        self.assertEqual(
+            record_source.requests,
+            [
+                {
+                    "schema_version": "0.1",
+                    "conversation_id": "conversation-1",
+                    "before_event_id": "event-1",
+                    "before_created_at": "2026-05-14T11:30:00+00:00",
+                    "max_candidate_records": RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES,
+                }
+            ],
+        )
+        self.assertEqual(
+            messages,
+            [
+                {
+                    "schema_version": "0.1",
+                    "message_id": "message-1",
+                    "trace_id": "trace-message-1",
+                    "source_event_id": "event-message-1",
+                    "conversation_id": "conversation-1",
+                    "role": "user",
+                    "created_at": "2026-05-14T11:20:00+00:00",
+                    "text": "previous user message",
+                },
+                {
+                    "schema_version": "0.1",
+                    "message_id": "output-1",
+                    "trace_id": "trace-output-1",
+                    "source_event_id": "event-output-1",
+                    "conversation_id": "conversation-1",
+                    "role": "assistant",
+                    "created_at": "2026-05-14T11:21:00+00:00",
+                    "text": "previous assistant reply",
+                },
+            ],
+        )
+        self.assertNotIn("kind", messages[0])
+        self.assertNotIn("source", messages[0])
+        self.assertNotIn("user_id", messages[0])
+        self.assertNotIn("output_id", messages[1])
+
+    def test_rejects_malformed_recent_message_request(self):
+        cases = [
+            ({**recent_request(), "schema_version": "0.2"}, "schema_version"),
+            ({**recent_request(), "conversation_id": ""}, "conversation_id"),
+            ({**recent_request(), "before_event_id": ""}, "before_event_id"),
+            ({**recent_request(), "before_created_at": "2026-05-14"}, "before_created_at"),
+            ({**recent_request(), "max_candidate_messages": 0}, "max_candidate_messages"),
+            ({**recent_request(), "max_candidate_messages": True}, "max_candidate_messages"),
+            ({**recent_request(), "future_field": "nope"}, "future_field"),
+        ]
+
+        for request, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                source = VisibleConversationRecentMessagesSource(
+                    RecordingVisibleConversationRecordSource([])
+                )
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    source.read_recent_visible_messages(request)
+
+    def test_rejects_malformed_visible_conversation_records(self):
+        cases = [
+            ([{**user_visible_record("message-1"), "kind": "system_message"}], "kind"),
+            ([{**user_visible_record("message-1"), "schema_version": "0.2"}], "schema_version"),
+            ([{**user_visible_record("message-1"), "conversation_id": "other"}], "conversation_id"),
+            ([{**user_visible_record("message-1"), "message_id": ""}], "message_id"),
+            ([{**assistant_visible_record("output-1"), "output_id": ""}], "output_id"),
+            ([{**assistant_visible_record("output-1"), "created_at": "bad"}], "created_at"),
+            ([{**assistant_visible_record("output-1"), "text": "   "}], "text"),
+            ([{**user_visible_record("message-1"), "future_field": "nope"}], "future_field"),
+            ("not a list", "VisibleConversationRecordSource"),
+        ]
+
+        for records, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                source = VisibleConversationRecentMessagesSource(
+                    RecordingVisibleConversationRecordSource(records)
+                )
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    source.read_recent_visible_messages(recent_request())
+
+    def test_copies_request_and_returned_records(self):
+        request = recent_request()
+        records = [user_visible_record("message-1")]
+        source = VisibleConversationRecentMessagesSource(
+            MutatingVisibleConversationRecordSource(records)
+        )
+
+        messages = source.read_recent_visible_messages(request)
+        messages[0]["text"] = "mutated by caller"
+
+        self.assertEqual(request["conversation_id"], "conversation-1")
+        self.assertEqual(records[0]["text"], "previous user message")
 
 
 class RoleModelLogEntryTests(unittest.TestCase):

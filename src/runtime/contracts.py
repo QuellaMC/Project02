@@ -9,6 +9,10 @@ from runtime.logging import SCHEMA_VERSION
 USER_MESSAGE = "USER_MESSAGE"
 VISIBLE_REPLY_ACTION = "visible_reply"
 DECISION_READY_FOR_COMMIT_STATUS = "decision_ready_for_commit"
+ASSISTANT_VISIBLE_REPLY_KIND = "assistant_visible_reply"
+USER_VISIBLE_MESSAGE_KIND = "user_visible_message"
+ASSISTANT_VISIBLE_REPLY_ROLE = "assistant"
+USER_VISIBLE_MESSAGE_ROLE = "user"
 
 RuntimeEvent = dict[str, Any]
 CharacterDecision = dict[str, Any]
