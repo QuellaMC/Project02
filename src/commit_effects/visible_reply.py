@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import Any, Protocol
 
@@ -418,7 +418,7 @@ def _build_failure(code: str, message: str) -> dict[str, str]:
     }
 
 
-def _wrap_contract_error(callback):
+def _wrap_contract_error[T](callback: Callable[[], T]) -> T:
     try:
         return callback()
     except SharedContractValidationError as error:

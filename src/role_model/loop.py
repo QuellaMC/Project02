@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime
 from math import ceil
@@ -578,9 +578,10 @@ def _validate_decision_context(decision_context: Any) -> DecisionContext:
     }
     for field_name in ("user_id", "conversation_id"):
         if field_name in event:
+            value = event[field_name]
             event_context[field_name] = _wrap_contract_error(
-                lambda field_name=field_name: require_optional_string(
-                    event[field_name],
+                lambda: require_optional_string(
+                    value,
                     f"event.{field_name}",
                 )
             )
@@ -676,7 +677,7 @@ def _validate_character_decision(
     )
 
 
-def _wrap_contract_error(callback):
+def _wrap_contract_error[T](callback: Callable[[], T]) -> T:
     try:
         return callback()
     except ContractValidationError as error:
