@@ -11,6 +11,7 @@ from commit_effects.visible_reply import (  # noqa: E402
     build_visible_conversation_output,
 )
 from role_model.loop import (  # noqa: E402
+    RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES,
     RoleModelValidationError,
     VisibleConversationRecentMessagesSource,
     build_decision_context,
@@ -441,7 +442,7 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
                     "conversation_id": "conversation-1",
                     "before_event_id": "event-1",
                     "before_created_at": "2026-05-14T11:30:00+00:00",
-                    "max_candidate_records": 24,
+                    "max_candidate_records": RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES,
                 }
             ],
         )
