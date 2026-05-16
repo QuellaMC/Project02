@@ -274,6 +274,29 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
         self.assertEqual(adapter.inputs, [])
         self.assertEqual(raw_log.entries, [])
 
+    def test_duplicate_recent_message_identities_fail_before_adapter_invocation(self):
+        raw_log = RecordingRawEventLog()
+        adapter = BadShapeRoleModelAdapter()
+        source = FakeRecentMessagesSource(
+            [
+                recent_message("message-1", created_at="2026-05-14T11:21:00+00:00"),
+                recent_message("message-1", created_at="2026-05-14T11:22:00+00:00"),
+            ]
+        )
+
+        with self.assertRaisesRegex(RoleModelValidationError, "message_id"):
+            run_role_model_turn(
+                normalized_user_message_with_conversation(),
+                adapter=adapter,
+                raw_event_log=raw_log,
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+                recent_visible_messages_source=source,
+            )
+
+        self.assertEqual(adapter.inputs, [])
+        self.assertEqual(raw_log.entries, [])
+
     def test_result_event_type_is_derived_from_normalized_event(self):
         raw_log = RecordingRawEventLog()
         event = normalized_user_message_with_tracked_type()

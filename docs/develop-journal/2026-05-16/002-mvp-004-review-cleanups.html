@@ -25,9 +25,10 @@
     <ul>
       <li>Closed the recent-message time boundary: records with <code>created_at</code> greater than or equal to the current event timestamp now fail validation before adapter invocation.</li>
       <li>Made <code>render_role_model_input()</code> reject non-empty <code>recent_visible_messages</code> when the context event has no non-empty <code>conversation_id</code>.</li>
+      <li>Made duplicate recent-message <code>message_id</code> or <code>source_event_id</code> records fail validation before adapter invocation or render output.</li>
       <li>Replaced role-model and Commit and Effects local primitive validation helpers with the shared helpers from <code>runtime.contracts</code>, while keeping boundary-specific validation local.</li>
-      <li>Added unit and integration regression coverage for future/equal timestamp records and the missing conversation-id render path.</li>
-      <li>Updated the MVP-004 active spec to state the timestamp and conversation-id render validation rules.</li>
+      <li>Added unit and integration regression coverage for future/equal timestamp records, duplicate recent-message identities, and the missing conversation-id render path.</li>
+      <li>Updated the MVP-004 active spec to state the timestamp, duplicate identity, and conversation-id render validation rules.</li>
       <li>Updated the plan index Mermaid graph so MVP-004 recent-message context is shown as implemented for the pull request.</li>
       <li>Parked the shared <code>RecentVisibleMessage</code> contract idea for a later slice with a second consumer.</li>
     </ul>
@@ -55,9 +56,9 @@
 
     <h2>Tests Run</h2>
     <ul>
-      <li><code>python3 -m unittest tests.unit.test_role_model_loop tests.integration.test_role_model_loop</code> - passed, 30 tests.</li>
+      <li><code>python3 -m unittest tests.unit.test_role_model_loop tests.integration.test_role_model_loop</code> - passed, 32 tests.</li>
       <li><code>python3 -m unittest tests.unit.test_visible_reply_commit tests.integration.test_visible_reply_commit</code> - passed, 13 tests.</li>
-      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 62 tests.</li>
+      <li><code>python3 -m unittest discover -s tests -t .</code> - passed, 64 tests.</li>
       <li><code>python3 -m compileall src</code> - passed.</li>
       <li><code>python3 -m html.parser docs/plan/index.html</code> - passed.</li>
       <li><code>python3 -m html.parser docs/plan/active-slice.html</code> - passed.</li>
@@ -72,6 +73,7 @@
     <h2>Review Notes</h2>
     <ul>
       <li>The timestamp rule is strict: equal timestamps are rejected because the source request is explicitly <code>before_created_at</code>.</li>
+      <li>Recent-message identity is fail-closed: repeated <code>message_id</code> or <code>source_event_id</code> values are rejected instead of deduplicated silently.</li>
       <li>Shared primitive validation now comes from <code>runtime.contracts</code>; the Role Model Loop still wraps contract errors as <code>RoleModelValidationError</code>, and Commit and Effects still wraps them as <code>CommitValidationError</code>.</li>
       <li>The recent-message shape stays local to <code>role_model.loop</code> for MVP-004. Shared contract extraction is recorded in <a href="../../plan/future-slices.html">future-slices.html</a>.</li>
       <li>No Commit and Effects behavior, storage, retrieval, orchestration, model-provider, or external side-effect behavior changed.</li>

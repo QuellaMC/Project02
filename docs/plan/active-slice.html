@@ -220,30 +220,34 @@
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>The builder applies <code>RecentVisibleMessageBudget</code> after validation and current-event exclusion, selecting the newest accepted records that fit <code>max_messages = 6</code> and <code>max_text_tokens = 1200</code>. Messages that exceed the remaining token budget are skipped, not truncated.</td>
+          <td>Duplicate provider records with the same <code>message_id</code> or <code>source_event_id</code> fail context validation before adapter invocation.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>Approximate token count is calculated deterministically from message text with <code>ceil(len(text) / 4)</code>; no real tokenizer, model-specific counter, or external dependency is introduced.</td>
+          <td>The builder applies <code>RecentVisibleMessageBudget</code> after validation and current-event exclusion, selecting the newest accepted records that fit <code>max_messages = 6</code> and <code>max_text_tokens = 1200</code>. Messages that exceed the remaining token budget are skipped, not truncated.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>The selected messages are ordered oldest-to-newest in <code>DecisionContext</code>, regardless of provider return order.</td>
+          <td>Approximate token count is calculated deterministically from message text with <code>ceil(len(text) / 4)</code>; no real tokenizer, model-specific counter, or external dependency is introduced.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>Returned context and model input use deep-copied message snapshots so provider-side mutation cannot alter rendered model input or raw log snapshots.</td>
+          <td>The selected messages are ordered oldest-to-newest in <code>DecisionContext</code>, regardless of provider return order.</td>
         </tr>
         <tr>
           <td>FR-10</td>
-          <td><code>render_role_model_input()</code> validates the new <code>character_snapshot.recent_visible_messages</code> shape before rendering.</td>
+          <td>Returned context and model input use deep-copied message snapshots so provider-side mutation cannot alter rendered model input or raw log snapshots.</td>
         </tr>
         <tr>
           <td>FR-11</td>
-          <td><code>run_role_model_turn()</code> can receive an optional recent-message source and includes recent messages in the logged <code>model_input</code> when the turn succeeds or fails after rendering.</td>
+          <td><code>render_role_model_input()</code> validates the new <code>character_snapshot.recent_visible_messages</code> shape before rendering.</td>
         </tr>
         <tr>
           <td>FR-12</td>
+          <td><code>run_role_model_turn()</code> can receive an optional recent-message source and includes recent messages in the logged <code>model_input</code> when the turn succeeds or fails after rendering.</td>
+        </tr>
+        <tr>
+          <td>FR-13</td>
           <td>The Role Model Loop still calls at most one injected adapter and still returns <code>decision_ready_for_commit</code> for a valid visible-reply decision.</td>
         </tr>
       </tbody>
@@ -267,6 +271,7 @@
       <li>A normalized <code>USER_MESSAGE</code> without <code>conversation_id</code> builds a valid context with an empty recent-message tail and no source call.</li>
       <li>Malformed, mismatched, unsupported-role, or empty-text message records fail context validation before adapter invocation.</li>
       <li>Current-event duplicate records are excluded from the recent-message tail.</li>
+      <li>Duplicate recent-message <code>message_id</code> or <code>source_event_id</code> records fail context validation before adapter invocation.</li>
       <li>Records with <code>created_at</code> greater than or equal to the current event <code>created_at</code> fail context validation before adapter invocation.</li>
       <li>Selected messages fit both <code>max_messages = 6</code> and <code>max_text_tokens = 1200</code> under the approximate token counter.</li>
       <li>The rendered <code>RoleModelInput</code> includes <code>character_snapshot.recent_visible_messages</code>.</li>
@@ -288,6 +293,7 @@
       <li>Limits the context tail to 1200 approximate text tokens using <code>ceil(len(text) / 4)</code>.</li>
       <li>Skips messages that would exceed the remaining token budget without truncating message text.</li>
       <li>Excludes the current source event from the recent-message tail.</li>
+      <li>Rejects duplicate recent-message <code>message_id</code> and <code>source_event_id</code> values.</li>
       <li>Rejects source records with <code>created_at</code> equal to or later than the current event timestamp.</li>
       <li>Rejects malformed provider records, unsupported roles, mismatched conversation IDs, invalid timestamps, and empty text.</li>
       <li>Validates <code>character_snapshot.recent_visible_messages</code> during model input rendering, including the rule that non-empty recent messages require a non-empty context event <code>conversation_id</code>.</li>
@@ -316,6 +322,7 @@
       <li>Missing <code>conversation_id</code> is not an error; it produces an empty recent-message tail.</li>
       <li>Malformed provider request handling or provider exceptions propagate before adapter invocation. No retry policy is introduced.</li>
       <li>Malformed recent-message records fail context validation before adapter invocation so bad context is not sent to the model.</li>
+      <li>Duplicate recent-message identities fail context validation before adapter invocation so ambiguous records are not sent to the model.</li>
       <li>Over-returned source records at or after the current event timestamp fail context validation instead of being shown to the model.</li>
       <li>If adapter invocation succeeds but model output parsing fails, existing <code>role_model_turn_failed</code> logging captures the rendered model input with recent messages.</li>
       <li>No new raw log kind is added for context build failures; a future logging slice can add dedicated context-build logs if needed.</li>
@@ -338,6 +345,7 @@
       <li>Recent-message requests are deterministic and use <code>max_candidate_messages = 24</code>.</li>
       <li>Provider records are strictly validated for schema version, identity fields, matching <code>conversation_id</code>, supported role, valid timestamp before the current event, and non-empty text before model input rendering.</li>
       <li>The current event is excluded from <code>recent_visible_messages</code> by <code>message_id</code> or <code>source_event_id</code>.</li>
+      <li>Duplicate <code>message_id</code> or <code>source_event_id</code> values are rejected in source-built contexts and render-time validation.</li>
       <li><code>render_role_model_input()</code> rejects non-empty recent-message tails when the context event has no non-empty <code>conversation_id</code>.</li>
       <li>The selected tail uses the newest records that fit <code>max_messages = 6</code> and <code>max_text_tokens = 1200</code>, skips oversized messages without truncation, and renders oldest-to-newest.</li>
       <li><code>render_role_model_input()</code> validates the new <code>character_snapshot.recent_visible_messages</code> shape before adapter invocation.</li>

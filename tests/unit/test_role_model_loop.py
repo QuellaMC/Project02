@@ -284,6 +284,40 @@ class DecisionContextTests(unittest.TestCase):
                         recent_visible_messages_source=RecordingRecentMessagesSource([message]),
                     )
 
+    def test_rejects_duplicate_recent_message_identity_records(self):
+        cases = [
+            (
+                [
+                    recent_message("message-1", created_at="2026-05-14T11:21:00+00:00"),
+                    recent_message(
+                        "message-1",
+                        created_at="2026-05-14T11:22:00+00:00",
+                        source_event_id="event-message-2",
+                    ),
+                ],
+                "message_id",
+            ),
+            (
+                [
+                    recent_message("message-1", created_at="2026-05-14T11:21:00+00:00"),
+                    recent_message(
+                        "message-2",
+                        created_at="2026-05-14T11:22:00+00:00",
+                        source_event_id="event-message-1",
+                    ),
+                ],
+                "source_event_id",
+            ),
+        ]
+
+        for messages, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    build_decision_context(
+                        normalized_user_message(),
+                        recent_visible_messages_source=RecordingRecentMessagesSource(messages),
+                    )
+
     def test_rejects_malformed_recent_message_records(self):
         cases = [
             ([{"schema_version": "0.2"}], "schema_version"),
@@ -414,6 +448,32 @@ class DecisionContextTests(unittest.TestCase):
         ]
 
         with self.assertRaisesRegex(RoleModelValidationError, "before event.created_at"):
+            render_role_model_input(context)
+
+        context = build_decision_context(normalized_user_message())
+        context["character_snapshot"]["recent_visible_messages"] = [
+            recent_message("message-1", created_at="2026-05-14T11:21:00+00:00"),
+            recent_message(
+                "message-1",
+                created_at="2026-05-14T11:22:00+00:00",
+                source_event_id="event-message-2",
+            ),
+        ]
+
+        with self.assertRaisesRegex(RoleModelValidationError, "message_id"):
+            render_role_model_input(context)
+
+        context = build_decision_context(normalized_user_message())
+        context["character_snapshot"]["recent_visible_messages"] = [
+            recent_message("message-1", created_at="2026-05-14T11:21:00+00:00"),
+            recent_message(
+                "message-2",
+                created_at="2026-05-14T11:22:00+00:00",
+                source_event_id="event-message-1",
+            ),
+        ]
+
+        with self.assertRaisesRegex(RoleModelValidationError, "source_event_id"):
             render_role_model_input(context)
 
         for event_conversation_id in (None, ""):
