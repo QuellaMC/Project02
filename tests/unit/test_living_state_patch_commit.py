@@ -209,6 +209,30 @@ class LivingStatePatchCommitTests(unittest.TestCase):
         self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_rejected")
         self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
 
+    def test_commit_validation_rejection_logs_before_store_call(self):
+        raw_log = RecordingRawEventLog()
+        store = RecordingLivingStatePatchStore()
+        role_model_result = role_model_result_with_patch()
+        role_model_result["decision"]["state_patch"] = {"living_state": {}}
+
+        result = commit_living_state_patch(
+            normalized_user_message(),
+            role_model_result,
+            living_state_patch_store=store,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIVING_STATE_PATCH_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], "living_state_patch_commit_validation")
+        self.assertEqual(result["failure"]["code"], "malformed_commit_input")
+        self.assertEqual(store.requests, [])
+        self.assertEqual(len(raw_log.entries), 1)
+        self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_rejected")
+        self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
+        self.assertNotIn("patch_snapshot", raw_log.entries[0]["data"])
+
     def test_committed_log_entry_deep_copies_inputs(self):
         event = normalized_user_message()
         role_model_result = role_model_result_with_patch()

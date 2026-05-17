@@ -62,8 +62,11 @@
       <li><code>python3 -m unittest tests.unit.test_runtime_contracts tests.unit.test_role_model_loop tests.unit.test_living_state_patch_commit tests.unit.test_user_turn tests.integration.test_role_model_loop tests.integration.test_user_message_turn</code>: passed, 84 tests.</li>
       <li><code>python3 -m unittest discover</code>: passed, 133 tests.</li>
       <li><code>/private/tmp/project02-ruff/bin/ruff check .</code>: passed.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff format --check .</code>: passed.</li>
       <li><code>/private/tmp/project02-mypy/bin/mypy src</code>: passed.</li>
       <li><code>git diff --check</code>: passed.</li>
+      <li>Review follow-up: <code>python3 -m unittest tests.integration.test_user_message_turn tests.unit.test_living_state_patch_commit</code>: passed, 18 tests.</li>
+      <li>Review follow-up: <code>python3 -m unittest discover</code>: passed, 135 tests.</li>
     </ul>
 
     <h2>Review Notes</h2>
@@ -73,6 +76,12 @@
       <li>Runtime-owned <code>updated_at</code> and <code>source_event_ids</code> come from the injected fake commit boundary's committed snapshot, not from the model patch.</li>
       <li>Malformed model patches never produce <code>living_state_patch_rejected</code>; they stay under the existing <code>role_model_turn_failed</code> parse path.</li>
       <li>No concrete state store, body state, incidents, directives, retrieval, tools, Live2D, provider calls, scheduler, or new runtime event type was added.</li>
+    </ul>
+
+    <h2>PR Review Follow-Up</h2>
+    <ul>
+      <li>Added integration coverage for a state-enabled user turn where the model returns no <code>state_patch</code>; the test verifies <code>living_state_patch_skipped</code>, no patch-store call, no state patch raw log, and the MVP-008 visible reply log order.</li>
+      <li>Added Commit and Effects coverage for malformed normalized patch input rejecting before the patch store is called; the test verifies <code>living_state_patch_rejected</code>, <code>living_state_patch_commit_validation</code>, and no store request.</li>
     </ul>
 
     <h2>Next Action</h2>

@@ -401,6 +401,72 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             raw_log.entries[4]["data"]["role_model_result"]["decision"],
         )
 
+    def test_state_enabled_turn_without_patch_preserves_visible_reply_flow(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        current_state_source = RecordingCurrentStateSource(current_state_snapshot())
+        living_state_patch_store = RecordingLivingStatePatchStore()
+        adapter = RecordingAdapter()
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "hello now",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=current_state_source,
+            living_state_patch_store=living_state_patch_store,
+        )
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            adapter.calls[0]["decision_context"]["allowed_actions"],
+            ["visible_reply", "state_patch"],
+        )
+        self.assertEqual(
+            result["living_state_patch_result"]["status"],
+            "living_state_patch_skipped",
+        )
+        self.assertEqual(living_state_patch_store.requests, [])
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "visible_reply_committed",
+            ],
+        )
+        self.assertEqual(
+            [record["kind"] for record in visible_conversation.records],
+            [
+                "user_visible_message",
+                "user_visible_message",
+                "assistant_visible_reply",
+            ],
+        )
+        self.assertEqual(visible_conversation.records[-1]["text"], "hello back")
+        self.assertNotIn(
+            "living_state_patch_committed",
+            [entry["kind"] for entry in raw_log.entries],
+        )
+        self.assertNotIn(
+            "living_state_patch_rejected",
+            [entry["kind"] for entry in raw_log.entries],
+        )
+
     def test_state_patch_store_rejection_stops_before_assistant_reply(self):
         from commit_effects.living_state import LivingStatePatchStoreError
 
