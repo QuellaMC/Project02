@@ -76,6 +76,13 @@
       <li>Review follow-up 2: <code>/private/tmp/project02-mypy/bin/mypy src</code>: passed.</li>
       <li>Review follow-up 2: <code>git diff --check</code>: passed.</li>
       <li>Review follow-up 2: <code>python3 -m html.parser docs/plan/active-slice.html docs/plan/future-slices.html docs/develop-journal/2026-05-17/004-mvp-009-implementation.html</code>: passed.</li>
+      <li>Review follow-up 3: <code>python3 -m unittest tests.unit.test_runtime_contracts</code>: passed, 11 tests.</li>
+      <li>Review follow-up 3: <code>python3 -m unittest discover</code>: passed, 139 tests.</li>
+      <li>Review follow-up 3: <code>/private/tmp/project02-ruff/bin/ruff check .</code>: passed.</li>
+      <li>Review follow-up 3: <code>/private/tmp/project02-ruff/bin/ruff format --check .</code>: passed.</li>
+      <li>Review follow-up 3: <code>/private/tmp/project02-mypy/bin/mypy src</code>: passed.</li>
+      <li>Review follow-up 3: <code>git diff --check</code>: passed.</li>
+      <li>Review follow-up 3: <code>python3 -m html.parser docs/develop-journal/2026-05-17/004-mvp-009-implementation.html</code>: passed.</li>
     </ul>
 
     <h2>Review Notes</h2>
@@ -96,6 +103,7 @@
       <li>Added committed-snapshot consistency validation so shape-valid bad store results are rejected as <code>malformed_store_result</code> when they miss the current event ID, fail to apply a patched field, or return a stale/non-runtime <code>updated_at</code>.</li>
       <li>Added unit and integration coverage for bad store results stopping before assistant visible reply and appending <code>living_state_patch_rejected</code> without a <code>living_state_patch_committed</code> log.</li>
       <li>Parked the concrete durable <code>CharacterRuntimeStateStore</code> transaction requirement in <code>future-slices.html</code> as a blocker before real state storage.</li>
+      <li>Added a direct shared-contract regression for whitespace-only living-state patch values such as <code>mood = " "</code> and <code>current_activity = "\n"</code>.</li>
     </ul>
 
     <h2>Next Action</h2>

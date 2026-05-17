@@ -129,6 +129,17 @@ class RuntimeContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(ContractValidationError, error_pattern):
                     normalize_living_state_patch(patch)
 
+    def test_living_state_patch_rejects_whitespace_only_values(self):
+        cases = [
+            ({"living_state": {"mood": " "}}, "mood"),
+            ({"living_state": {"current_activity": "\n"}}, "current_activity"),
+        ]
+
+        for patch, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(ContractValidationError, error_pattern):
+                    normalize_living_state_patch(patch)
+
     def test_normalizes_visible_reply_with_optional_living_state_patch(self):
         decision = normalize_visible_reply_decision_with_optional_living_state_patch(
             {
