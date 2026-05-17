@@ -97,6 +97,54 @@ class RecordingRecentMessagesSource:
         return self.messages
 
 
+def current_state_snapshot():
+    return {
+        "schema_version": "0.1",
+        "character_id": "character-1",
+        "living_state": {
+            "current_activity": "writing notes",
+            "mood": "focused",
+            "toward_user": "warm",
+        },
+        "updated_at": "2026-05-14T11:29:00+00:00",
+        "source_event_ids": ["event-state-1"],
+    }
+
+
+def living_state_brief():
+    return {
+        "character_id": "character-1",
+        "current_activity": "writing notes",
+        "mood": "focused",
+        "toward_user": "warm",
+        "updated_at": "2026-05-14T11:29:00+00:00",
+        "source_event_ids": ["event-state-1"],
+    }
+
+
+class RecordingCurrentStateSource:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+        self.requests = []
+
+    def read_current_state(self, request):
+        self.requests.append(request)
+        return self.snapshot
+
+
+class MutatingCurrentStateSource:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+        self.requests = []
+
+    def read_current_state(self, request):
+        self.requests.append(request)
+        request["event_id"] = "mutated-by-source"
+        self.snapshot["living_state"]["mood"] = "mutated-by-source"
+        self.snapshot["source_event_ids"].append("mutated-by-source")
+        return self.snapshot
+
+
 def recent_request():
     return {
         "schema_version": "0.1",
@@ -246,6 +294,113 @@ class DecisionContextTests(unittest.TestCase):
         self.assertEqual(
             context["character_snapshot"]["recent_visible_messages"][0]["message_id"], "message-1"
         )
+
+    def test_reads_current_state_with_expected_request_and_living_state_brief(self):
+        source = RecordingCurrentStateSource(current_state_snapshot())
+
+        context = build_decision_context(
+            normalized_user_message(),
+            current_state_source=source,
+        )
+
+        self.assertEqual(
+            source.requests,
+            [
+                {
+                    "schema_version": "0.1",
+                    "trace_id": "trace-1",
+                    "event_id": "event-1",
+                    "event_type": "USER_MESSAGE",
+                    "user_id": "user-1",
+                    "conversation_id": "conversation-1",
+                }
+            ],
+        )
+        self.assertNotIn("character_id", source.requests[0])
+        self.assertEqual(
+            context["character_snapshot"]["living_state_brief"],
+            living_state_brief(),
+        )
+        self.assertEqual(context["allowed_actions"], ["visible_reply"])
+
+    def test_current_state_source_is_called_without_conversation_id(self):
+        event = normalized_user_message()
+        event["payload"].pop("conversation_id")
+        source = RecordingCurrentStateSource(current_state_snapshot())
+
+        context = build_decision_context(event, current_state_source=source)
+
+        self.assertEqual(
+            source.requests,
+            [
+                {
+                    "schema_version": "0.1",
+                    "trace_id": "trace-1",
+                    "event_id": "event-1",
+                    "event_type": "USER_MESSAGE",
+                    "user_id": "user-1",
+                }
+            ],
+        )
+        self.assertEqual(context["character_snapshot"]["recent_visible_messages"], [])
+        self.assertEqual(
+            context["character_snapshot"]["living_state_brief"],
+            living_state_brief(),
+        )
+
+    def test_rejects_malformed_current_state_source_response(self):
+        cases = [
+            ({**current_state_snapshot(), "schema_version": "0.2"}, "schema_version"),
+            ({**current_state_snapshot(), "character_id": ""}, "character_id"),
+            (
+                {
+                    **current_state_snapshot(),
+                    "living_state": {
+                        "current_activity": "writing notes",
+                        "mood": "",
+                        "toward_user": "warm",
+                    },
+                },
+                "mood",
+            ),
+            ({**current_state_snapshot(), "updated_at": "not-a-timestamp"}, "updated_at"),
+            ({**current_state_snapshot(), "source_event_ids": [123]}, "source_event_ids"),
+            ({**current_state_snapshot(), "future_field": "nope"}, "future_field"),
+            ("not a mapping", "CharacterRuntimeStateSnapshot"),
+        ]
+
+        for snapshot, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    build_decision_context(
+                        normalized_user_message(),
+                        current_state_source=RecordingCurrentStateSource(snapshot),
+                    )
+
+    def test_current_state_context_uses_copies(self):
+        snapshot = current_state_snapshot()
+        source = RecordingCurrentStateSource(snapshot)
+
+        context = build_decision_context(
+            normalized_user_message(),
+            current_state_source=source,
+        )
+
+        snapshot["living_state"]["mood"] = "mutated after context"
+        snapshot["source_event_ids"].append("mutated after context")
+        context["character_snapshot"]["living_state_brief"]["source_event_ids"].append("mutated")
+
+        self.assertEqual(context["character_snapshot"]["living_state_brief"]["mood"], "focused")
+        self.assertEqual(snapshot["source_event_ids"], ["event-state-1", "mutated after context"])
+
+    def test_current_state_source_receives_request_copy(self):
+        event = normalized_user_message()
+        source = MutatingCurrentStateSource(current_state_snapshot())
+
+        build_decision_context(event, current_state_source=source)
+
+        self.assertEqual(event["event_id"], "event-1")
+        self.assertEqual(source.requests[0]["event_id"], "mutated-by-source")
 
     def test_recent_messages_are_normalized_limited_and_ordered_oldest_to_newest(self):
         messages = [
@@ -599,6 +754,31 @@ class DecisionContextTests(unittest.TestCase):
 
                 with self.assertRaisesRegex(RoleModelValidationError, "event.conversation_id"):
                     render_role_model_input(context)
+
+    def test_render_accepts_and_validates_living_state_brief(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+        )
+
+        rendered = render_role_model_input(context)
+
+        self.assertEqual(
+            rendered["decision_context"]["character_snapshot"]["living_state_brief"],
+            living_state_brief(),
+        )
+
+        context["character_snapshot"]["living_state_brief"]["future_field"] = "not allowed yet"
+        with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
+            render_role_model_input(context)
+
+        context = build_decision_context(
+            normalized_user_message(),
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+        )
+        context["character_snapshot"]["living_state_brief"]["updated_at"] = "2026-05-14"
+        with self.assertRaisesRegex(RoleModelValidationError, "updated_at"):
+            render_role_model_input(context)
 
 
 class VisibleConversationRecentMessagesSourceTests(unittest.TestCase):

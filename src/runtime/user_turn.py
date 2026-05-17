@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Protocol
 
+from character.state.current import CurrentCharacterStateSource
 from commit_effects.visible_reply import (
     USER_VISIBLE_MESSAGE_COMMITTED_STATUS,
     VISIBLE_REPLY_COMMITTED_STATUS,
@@ -41,6 +42,7 @@ def run_user_message_turn(
     visible_conversation: VisibleConversationBoundary,
     id_generator: IdGenerator,
     clock: Clock,
+    current_state_source: CurrentCharacterStateSource | None = None,
 ) -> UserMessageTurnResult:
     intake_result = intake_runtime_event(
         event_input,
@@ -77,6 +79,7 @@ def run_user_message_turn(
         recent_visible_messages_source=VisibleConversationRecentMessagesSource(
             visible_conversation
         ),
+        current_state_source=current_state_source,
     )
 
     visible_reply_result = commit_visible_reply(
