@@ -55,8 +55,8 @@
       <a href="https://github.com/QuellaMC/Project02/pull/6">PR #6</a>.
       MVP-007 is tracked in
       <a href="https://github.com/QuellaMC/Project02/pull/7">PR #7</a>.
-      MVP-008 is implemented locally from the active functional spec in
-      <a href="active-slice.html">active-slice.html</a>.
+      MVP-008 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/8">PR #8</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -94,7 +94,7 @@ flowchart LR
     VisibleRecentSource["Visible conversation recent source&lt;br/&gt;maps committed records to context"]
   end
 
-  subgraph CharacterState["Character State Engine - MVP-008 implemented locally"]
+  subgraph CharacterState["Character State Engine - MVP-008 implemented in PR #8"]
     CurrentStateSource["Read-only current-state source&lt;br/&gt;injected fake"]
     LivingStateBrief["living_state_brief&lt;br/&gt;validated compact current reality"]
   end
@@ -140,7 +140,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">MVP-008 - Read-Only Living State Snapshot in DecisionContext</a></td>
-          <td>Implemented locally; pending review and PR</td>
+          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/8">PR #8</a> open</td>
           <td>Add one optional injected current-state source and one compact <code>living_state_brief</code> to <code>DecisionContext.character_snapshot</code> for <code>USER_MESSAGE</code> turns, without state mutation, concrete storage, body, incidents, retrieval, tools, Live2D, or new model actions.</td>
         </tr>
       </tbody>

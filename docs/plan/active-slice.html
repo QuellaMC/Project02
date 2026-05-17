@@ -28,7 +28,7 @@
 <body>
   <main>
     <h1>MVP-008 - Read-Only Living State Snapshot in DecisionContext</h1>
-    <p><span class="status">Status: implemented locally; pending review and PR</span></p>
+    <p><span class="status">Status: implemented and tested; PR #8 open</span></p>
     <p class="meta">
       Created: 2026-05-16. Active slice path:
       <code>docs/plan/active-slice.html</code>.
@@ -263,6 +263,7 @@
       <li>Added optional <code>current_state_source</code> plumbing to <code>build_decision_context()</code>, <code>run_role_model_turn()</code>, and <code>run_user_message_turn()</code>.</li>
       <li>Kept the MVP-007 turn order and result envelope unchanged; successful state-backed turns still append <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, then <code>visible_reply_committed</code>.</li>
       <li>Malformed current-state output fails before the adapter call and before assistant visible reply commit. No state store, state patch, virtual body, incident, retrieval, tool, Live2D, scheduler, or new model action was added.</li>
+      <li>Pull request: <a href="https://github.com/QuellaMC/Project02/pull/8">PR #8</a>.</li>
       <li>Implementation journal: <a href="../develop-journal/2026-05-17/002-mvp-008-implementation.html">2026-05-17 - MVP-008 implementation</a>.</li>
     </ul>
 

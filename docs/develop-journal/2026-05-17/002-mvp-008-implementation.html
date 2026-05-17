@@ -26,7 +26,7 @@
       <li>Added optional <code>current_state_source</code> support to <code>build_decision_context()</code>, <code>run_role_model_turn()</code>, and <code>run_user_message_turn()</code>.</li>
       <li>Extended role-model input validation so <code>DecisionContext.character_snapshot</code> allows only <code>recent_visible_messages</code> plus optional validated <code>living_state_brief</code>.</li>
       <li>Added unit and integration coverage for valid state-backed model input, malformed state output, request shape, no <code>character_id</code> lookup, copy isolation, and unchanged MVP-007 turn ordering.</li>
-      <li>Updated the active slice and plan index to show MVP-008 as implemented locally and still pending review/PR.</li>
+      <li>Opened <a href="https://github.com/QuellaMC/Project02/pull/8">PR #8</a> and updated the active slice and plan index with the PR link.</li>
     </ul>
 
     <h2>Why It Was Needed</h2>
@@ -80,8 +80,8 @@
 
     <h2>Next Action</h2>
     <p>
-      Review the MVP-008 implementation diff, then open the pull request. After PR
-      creation, update the implementation graph with the PR link if needed.
+      Watch PR #8 CI and review feedback. If the PR is approved and CI stays
+      green, merge it with the repository's squash-merge policy.
     </p>
   </main>
 </body>
