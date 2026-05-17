@@ -383,6 +383,8 @@ Sign every commit using the configured Git signing setup. Use signed flows such 
 
 All changes to `main` must go through a PR. Each PR should implement one active slice only, link the active slice spec, include tests, keep the diff small/reviewable, avoid speculative future modules, update the journal for non-trivial changes, update the Mermaid implementation graph in `docs/plan/index.html` after PR creation, and pass required CI checks.
 
+PR descriptions must be real multi-line Markdown, not a single squeezed paragraph. Prefer writing the body to a temporary file and using `gh pr create --body-file` or `gh pr edit --body-file`; include clear sections such as `## Summary` and `## Tests` with bullet lists.
+
 The `ci` workflow is the PR quality gate and should run lint/readability checks, type checks, source compilation, unit tests, integration tests, and full test discovery for currently implemented behavior. Treat lint/readability failures as blockers.
 
 Required checks:
