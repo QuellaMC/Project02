@@ -77,9 +77,7 @@ def run_user_message_turn(
             user_visible_message_result=user_visible_message_result,
         )
 
-    allow_state_patch = (
-        current_state_source is not None and living_state_patch_store is not None
-    )
+    allow_state_patch = current_state_source is not None and living_state_patch_store is not None
     role_model_result = run_role_model_turn(
         event,
         adapter=adapter,
@@ -115,9 +113,7 @@ def run_user_message_turn(
                 living_state_patch_result=living_state_patch_result,
             )
 
-    visible_reply_role_model_result = _project_visible_reply_role_model_result(
-        role_model_result
-    )
+    visible_reply_role_model_result = _project_visible_reply_role_model_result(role_model_result)
     visible_reply_result = commit_visible_reply(
         event,
         visible_reply_role_model_result,

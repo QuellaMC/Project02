@@ -204,9 +204,7 @@ def build_living_state_patch_committed_log_entry(
 ) -> RawEventLogEntry:
     event = _validate_source_event(source_event)
     result = _validate_role_model_result(role_model_result, source_event=event)
-    normalized_patch = _wrap_validation_contract_error(
-        lambda: normalize_living_state_patch(patch)
-    )
+    normalized_patch = _wrap_validation_contract_error(lambda: normalize_living_state_patch(patch))
     validated_snapshot = _wrap_validation_contract_error(
         lambda: validate_current_character_state_snapshot(committed_snapshot)
     )
