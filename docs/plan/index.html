@@ -57,7 +57,8 @@
       <a href="https://github.com/QuellaMC/Project02/pull/7">PR #7</a>.
       MVP-008 is recorded from
       <a href="https://github.com/QuellaMC/Project02/pull/8">PR #8</a>.
-      MVP-009 is implemented locally and pending PR creation.
+      MVP-009 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/9">PR #9</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -76,15 +77,15 @@ flowchart LR
     RoleLog["role_model_turn_completed&lt;br/&gt;role_model_turn_failed"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008 implemented; MVP-009 local"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008 implemented; MVP-009 in PR #9"]
     Context["DecisionContext builder&lt;br/&gt;current event + recent messages + living_state_brief"]
     Render["RoleModelInput renderer&lt;br/&gt;strict context validation"]
     Adapter["Injected fake RoleModelAdapter"]
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply only"]
-    StatePatchParse["Optional state_patch.living_state parser&lt;br/&gt;MVP-009 local"]
+    StatePatchParse["Optional state_patch.living_state parser&lt;br/&gt;MVP-009 in PR #9"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003 and MVP-005 implemented; MVP-009 local"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003 and MVP-005 implemented; MVP-009 in PR #9"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -148,7 +149,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">MVP-009 - Minimal Living State Patch Commit</a></td>
-          <td>Implemented locally; pending PR</td>
+          <td>Implemented and in review; <a href="https://github.com/QuellaMC/Project02/pull/9">PR #9</a></td>
           <td>Allow an opted-in <code>USER_MESSAGE</code> turn to parse one optional <code>state_patch.living_state</code> and commit it through an injected Commit and Effects state boundary, without concrete storage, body, incidents, retrieval, tools, Live2D, or new event types.</td>
         </tr>
       </tbody>
