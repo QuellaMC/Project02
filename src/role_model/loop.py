@@ -11,7 +11,7 @@ from character.state.current import (
     CurrentCharacterStateSource,
     build_current_character_state_request,
     build_living_state_brief,
-    validate_living_state_brief,
+    validate_living_state_brief_for_event,
 )
 from runtime.contracts import (
     ASSISTANT_VISIBLE_REPLY_KIND,
@@ -401,7 +401,13 @@ def _read_living_state_brief(
 
     request = _wrap_contract_error(lambda: build_current_character_state_request(event))
     snapshot = current_state_source.read_current_state(deepcopy(request))
-    return _wrap_contract_error(lambda: build_living_state_brief(snapshot))
+    living_state_brief = _wrap_contract_error(lambda: build_living_state_brief(snapshot))
+    return _wrap_contract_error(
+        lambda: validate_living_state_brief_for_event(
+            living_state_brief,
+            event_id=event["event_id"],
+        )
+    )
 
 
 def _build_recent_visible_messages_request(
@@ -939,7 +945,10 @@ def _validate_character_snapshot(
     normalized_snapshot: dict[str, Any] = {}
     if "living_state_brief" in character_snapshot:
         normalized_snapshot["living_state_brief"] = _wrap_contract_error(
-            lambda: validate_living_state_brief(character_snapshot["living_state_brief"])
+            lambda: validate_living_state_brief_for_event(
+                character_snapshot["living_state_brief"],
+                event_id=event_id,
+            )
         )
 
     recent_visible_messages = character_snapshot.get("recent_visible_messages")

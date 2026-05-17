@@ -9,6 +9,7 @@ from character.state.current import (
     validate_current_character_state_request,
     validate_current_character_state_snapshot,
     validate_living_state_brief,
+    validate_living_state_brief_for_event,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "validate_current_character_state_request",
     "validate_current_character_state_snapshot",
     "validate_living_state_brief",
+    "validate_living_state_brief_for_event",
 ]

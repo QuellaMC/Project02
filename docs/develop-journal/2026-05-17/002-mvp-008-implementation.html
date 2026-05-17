@@ -27,6 +27,7 @@
       <li>Extended role-model input validation so <code>DecisionContext.character_snapshot</code> allows only <code>recent_visible_messages</code> plus optional validated <code>living_state_brief</code>.</li>
       <li>Added unit and integration coverage for valid state-backed model input, malformed state output, request shape, no <code>character_id</code> lookup, copy isolation, and unchanged MVP-007 turn ordering.</li>
       <li>Opened <a href="https://github.com/QuellaMC/Project02/pull/8">PR #8</a> and updated the active slice and plan index with the PR link.</li>
+      <li>PR review follow-up: fixed archived MVP-007 relative links and rejected state snapshots whose <code>source_event_ids</code> include the current event ID.</li>
     </ul>
 
     <h2>Why It Was Needed</h2>
@@ -52,15 +53,16 @@
       <li><code>tests/integration/test_user_message_turn.py</code></li>
       <li><code>docs/plan/active-slice.html</code></li>
       <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/plan/completed/mvp-007-minimal-user-turn-orchestrator.html</code></li>
       <li><code>docs/develop-journal/index.html</code></li>
       <li><code>docs/develop-journal/2026-05-17/002-mvp-008-implementation.html</code></li>
     </ul>
 
     <h2>Checks Run</h2>
     <ul>
-      <li><code>python3.13 -m unittest discover -s tests/unit -t .</code>: passed, 69 tests.</li>
+      <li><code>python3.13 -m unittest discover -s tests/unit -t .</code>: passed, 70 tests.</li>
       <li><code>python3.13 -m unittest discover -s tests/integration -t .</code>: passed, 38 tests.</li>
-      <li><code>python3.13 -m unittest discover -s tests -t .</code>: passed, 107 tests.</li>
+      <li><code>python3.13 -m unittest discover -s tests -t .</code>: passed, 108 tests.</li>
       <li><code>python3.13 -m compileall src tests</code>: passed.</li>
       <li><code>/private/tmp/project02-ruff/bin/ruff check src tests</code>: passed.</li>
       <li><code>/private/tmp/project02-ruff/bin/ruff format --check src tests</code>: passed.</li>
@@ -73,6 +75,7 @@
     <h2>Review Notes</h2>
     <ul>
       <li>The current-state request is derived from the normalized event and intentionally omits <code>character_id</code>; the injected source remains caller-bound to the active character.</li>
+      <li>A living-state brief must not cite the current turn in <code>source_event_ids</code>; the current user message has not yet been interpreted or committed as living state when context is built.</li>
       <li>Missing <code>current_state_source</code> preserves the MVP-007 context shape and does not become an error.</li>
       <li>Malformed state-source output raises before the adapter call. In the full user-turn path, the already committed user visible message remains, and no assistant visible reply is appended.</li>
       <li>No new state storage, state patch action, state commit, virtual body, incident, scheduled directive, retrieval, tool, Live2D, scheduler, provider, or context-build raw log was added.</li>

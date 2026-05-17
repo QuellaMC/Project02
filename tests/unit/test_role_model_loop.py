@@ -365,6 +365,7 @@ class DecisionContextTests(unittest.TestCase):
             ),
             ({**current_state_snapshot(), "updated_at": "not-a-timestamp"}, "updated_at"),
             ({**current_state_snapshot(), "source_event_ids": [123]}, "source_event_ids"),
+            ({**current_state_snapshot(), "source_event_ids": ["event-1"]}, "current event_id"),
             ({**current_state_snapshot(), "future_field": "nope"}, "future_field"),
             ("not a mapping", "CharacterRuntimeStateSnapshot"),
         ]
@@ -778,6 +779,14 @@ class DecisionContextTests(unittest.TestCase):
         )
         context["character_snapshot"]["living_state_brief"]["updated_at"] = "2026-05-14"
         with self.assertRaisesRegex(RoleModelValidationError, "updated_at"):
+            render_role_model_input(context)
+
+        context = build_decision_context(
+            normalized_user_message(),
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+        )
+        context["character_snapshot"]["living_state_brief"]["source_event_ids"] = ["event-1"]
+        with self.assertRaisesRegex(RoleModelValidationError, "current event_id"):
             render_role_model_input(context)
 
 

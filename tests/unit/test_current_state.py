@@ -9,6 +9,7 @@ from character.state.current import (  # noqa: E402
     build_living_state_brief,
     validate_current_character_state_request,
     validate_current_character_state_snapshot,
+    validate_living_state_brief_for_event,
 )
 from runtime.contracts import ContractValidationError  # noqa: E402
 
@@ -114,6 +115,14 @@ class CurrentCharacterStateSnapshotTests(unittest.TestCase):
         validated["source_event_ids"].append("mutated")
 
         self.assertEqual(snapshot["source_event_ids"], ["event-prior-state"])
+
+    def test_rejects_living_state_brief_sourced_from_current_event(self):
+        brief = build_living_state_brief(
+            {**current_state_snapshot(), "source_event_ids": ["event-1"]}
+        )
+
+        with self.assertRaisesRegex(ContractValidationError, "current event_id"):
+            validate_living_state_brief_for_event(brief, event_id="event-1")
 
     def test_rejects_malformed_state_snapshots(self):
         cases = [

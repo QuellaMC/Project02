@@ -54,12 +54,12 @@
     </blockquote>
     <p>
       Local implementation truth comes from
-      <a href="completed/mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001</a>,
-      <a href="completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html">MVP-002</a>,
-      <a href="completed/mvp-003-minimal-visible-reply-commit.html">MVP-003</a>,
-      <a href="completed/mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004</a>,
-      <a href="completed/mvp-005-user-visible-message-projection.html">MVP-005</a>, and
-      <a href="completed/mvp-006-visible-conversation-recent-source.html">MVP-006</a>.
+      <a href="mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001</a>,
+      <a href="mvp-002-minimal-role-model-loop-with-fake-adapter.html">MVP-002</a>,
+      <a href="mvp-003-minimal-visible-reply-commit.html">MVP-003</a>,
+      <a href="mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004</a>,
+      <a href="mvp-005-user-visible-message-projection.html">MVP-005</a>, and
+      <a href="mvp-006-visible-conversation-recent-source.html">MVP-006</a>.
       The narrow next step is to prove one end-to-end composition of the
       existing boundaries for a single <code>USER_MESSAGE</code> turn.
     </p>
@@ -269,7 +269,7 @@
       <li>Malformed initial input stops before raw logs, visible appends, and model calls according to the existing Runtime Kernel validation behavior.</li>
       <li>Malformed model output appends the existing role-model failed log and does not append an assistant visible reply.</li>
       <li>No concrete storage, state engine, retrieval, tool, Live2D, scheduler, background worker, or external service is added.</li>
-      <li>Future ideas discovered during planning are recorded in <a href="future-slices.html">future-slices.html</a>.</li>
+      <li>Future ideas discovered during planning are recorded in <a href="../future-slices.html">future-slices.html</a>.</li>
       <li>The development journal records files touched, tests run, review notes, and next action.</li>
     </ul>
 

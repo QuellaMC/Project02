@@ -417,42 +417,50 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         )
 
     def test_malformed_current_state_stops_before_adapter_and_assistant_reply(self):
-        raw_log = RecordingRawEventLog()
-        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
-        adapter = RecordingAdapter()
-        current_state_source = RecordingCurrentStateSource(
-            {**current_state_snapshot(), "source_event_ids": [123]}
-        )
+        cases = [
+            ({**current_state_snapshot(), "source_event_ids": [123]}, "source_event_ids"),
+            (
+                {**current_state_snapshot(), "source_event_ids": ["event-current"]},
+                "current event_id",
+            ),
+        ]
 
-        with self.assertRaisesRegex(ValueError, "source_event_ids"):
-            run_user_message_turn(
-                {
-                    "event_id": "event-current",
-                    "trace_id": "trace-current",
-                    "type": "USER_MESSAGE",
-                    "created_at": "2026-05-14T11:30:00+00:00",
-                    "payload": {"text": "hello now", "conversation_id": "c-1"},
-                },
-                adapter=adapter,
-                raw_event_log=raw_log,
-                visible_conversation=visible_conversation,
-                id_generator=SequenceIdGenerator(),
-                clock=fixed_clock,
-                current_state_source=current_state_source,
-            )
+        for snapshot, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                raw_log = RecordingRawEventLog()
+                visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+                adapter = RecordingAdapter()
+                current_state_source = RecordingCurrentStateSource(snapshot)
 
-        self.assertEqual(adapter.calls, [])
-        self.assertEqual(
-            [entry["kind"] for entry in raw_log.entries],
-            [
-                "runtime_event_received",
-                "user_visible_message_committed",
-            ],
-        )
-        self.assertEqual(
-            [record["kind"] for record in visible_conversation.records],
-            ["user_visible_message", "user_visible_message"],
-        )
+                with self.assertRaisesRegex(ValueError, error_pattern):
+                    run_user_message_turn(
+                        {
+                            "event_id": "event-current",
+                            "trace_id": "trace-current",
+                            "type": "USER_MESSAGE",
+                            "created_at": "2026-05-14T11:30:00+00:00",
+                            "payload": {"text": "hello now", "conversation_id": "c-1"},
+                        },
+                        adapter=adapter,
+                        raw_event_log=raw_log,
+                        visible_conversation=visible_conversation,
+                        id_generator=SequenceIdGenerator(),
+                        clock=fixed_clock,
+                        current_state_source=current_state_source,
+                    )
+
+                self.assertEqual(adapter.calls, [])
+                self.assertEqual(
+                    [entry["kind"] for entry in raw_log.entries],
+                    [
+                        "runtime_event_received",
+                        "user_visible_message_committed",
+                    ],
+                )
+                self.assertEqual(
+                    [record["kind"] for record in visible_conversation.records],
+                    ["user_visible_message", "user_visible_message"],
+                )
 
 
 if __name__ == "__main__":

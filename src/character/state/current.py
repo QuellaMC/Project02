@@ -211,6 +211,20 @@ def validate_living_state_brief(brief: Any) -> LivingStateBrief:
     }
 
 
+def validate_living_state_brief_for_event(
+    brief: Any,
+    *,
+    event_id: str,
+) -> LivingStateBrief:
+    validated_brief = validate_living_state_brief(brief)
+    current_event_id = require_string(event_id, "event_id")
+    if current_event_id in validated_brief["source_event_ids"]:
+        raise ContractValidationError(
+            "living_state_brief.source_event_ids must not include current event_id."
+        )
+    return validated_brief
+
+
 def _validate_source_event_ids(value: Any, field_name: str) -> list[str]:
     if not isinstance(value, list):
         raise ContractValidationError(f"{field_name} must be a list.")

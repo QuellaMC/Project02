@@ -593,24 +593,29 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
         self.assertEqual(raw_log.entries, [])
 
     def test_malformed_current_state_fails_before_adapter_invocation(self):
-        raw_log = RecordingRawEventLog()
-        adapter = BadShapeRoleModelAdapter()
-        current_state_source = FakeCurrentStateSource(
-            {**current_state_snapshot(), "source_event_ids": [123]}
-        )
+        cases = [
+            ({**current_state_snapshot(), "source_event_ids": [123]}, "source_event_ids"),
+            ({**current_state_snapshot(), "source_event_ids": ["event-1"]}, "current event_id"),
+        ]
 
-        with self.assertRaisesRegex(RoleModelValidationError, "source_event_ids"):
-            run_role_model_turn(
-                normalized_user_message_with_conversation(),
-                adapter=adapter,
-                raw_event_log=raw_log,
-                id_generator=SequenceIdGenerator(),
-                clock=fixed_clock,
-                current_state_source=current_state_source,
-            )
+        for snapshot, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                raw_log = RecordingRawEventLog()
+                adapter = BadShapeRoleModelAdapter()
+                current_state_source = FakeCurrentStateSource(snapshot)
 
-        self.assertEqual(adapter.inputs, [])
-        self.assertEqual(raw_log.entries, [])
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    run_role_model_turn(
+                        normalized_user_message_with_conversation(),
+                        adapter=adapter,
+                        raw_event_log=raw_log,
+                        id_generator=SequenceIdGenerator(),
+                        clock=fixed_clock,
+                        current_state_source=current_state_source,
+                    )
+
+                self.assertEqual(adapter.inputs, [])
+                self.assertEqual(raw_log.entries, [])
 
     def test_future_recent_messages_fail_before_adapter_invocation(self):
         raw_log = RecordingRawEventLog()
