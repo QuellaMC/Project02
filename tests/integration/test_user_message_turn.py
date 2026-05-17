@@ -70,6 +70,41 @@ class InMemoryVisibleConversation:
         return deepcopy(records[-request["max_candidate_records"] :])
 
 
+def current_state_snapshot():
+    return {
+        "schema_version": "0.1",
+        "character_id": "character-1",
+        "living_state": {
+            "current_activity": "writing notes",
+            "mood": "focused",
+            "toward_user": "warm",
+        },
+        "updated_at": "2026-05-14T11:29:00+00:00",
+        "source_event_ids": ["event-state-1"],
+    }
+
+
+def living_state_brief():
+    return {
+        "character_id": "character-1",
+        "current_activity": "writing notes",
+        "mood": "focused",
+        "toward_user": "warm",
+        "updated_at": "2026-05-14T11:29:00+00:00",
+        "source_event_ids": ["event-state-1"],
+    }
+
+
+class RecordingCurrentStateSource:
+    def __init__(self, snapshot):
+        self.snapshot = deepcopy(snapshot)
+        self.requests = []
+
+    def read_current_state(self, request):
+        self.requests.append(deepcopy(request))
+        return deepcopy(self.snapshot)
+
+
 def prior_user_record():
     return {
         "schema_version": "0.1",
@@ -176,6 +211,69 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         result["visible_reply_result"]["output"]["text"] = "mutated"
         self.assertEqual(visible_conversation.records[1]["text"], "hello now")
         self.assertEqual(visible_conversation.records[2]["text"], "hello back")
+
+    def test_runs_one_user_turn_with_current_state_in_model_input(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter()
+        current_state_source = RecordingCurrentStateSource(current_state_snapshot())
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "hello now",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=current_state_source,
+        )
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            current_state_source.requests,
+            [
+                {
+                    "schema_version": "0.1",
+                    "trace_id": "trace-current",
+                    "event_id": "event-current",
+                    "event_type": "USER_MESSAGE",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                }
+            ],
+        )
+        character_snapshot = adapter.calls[0]["decision_context"]["character_snapshot"]
+        self.assertEqual(character_snapshot["living_state_brief"], living_state_brief())
+        self.assertEqual(
+            [message["message_id"] for message in character_snapshot["recent_visible_messages"]],
+            ["message-prior"],
+        )
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "visible_reply_committed",
+            ],
+        )
+        self.assertEqual(
+            raw_log.entries[2]["data"]["model_input"]["decision_context"]["character_snapshot"][
+                "living_state_brief"
+            ],
+            living_state_brief(),
+        )
 
     def test_second_turn_uses_completed_prior_turn_as_recent_context(self):
         raw_log = RecordingRawEventLog()
@@ -317,6 +415,52 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             [record["kind"] for record in visible_conversation.records],
             ["user_visible_message", "user_visible_message"],
         )
+
+    def test_malformed_current_state_stops_before_adapter_and_assistant_reply(self):
+        cases = [
+            ({**current_state_snapshot(), "source_event_ids": [123]}, "source_event_ids"),
+            (
+                {**current_state_snapshot(), "source_event_ids": ["event-current"]},
+                "current event_id",
+            ),
+        ]
+
+        for snapshot, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                raw_log = RecordingRawEventLog()
+                visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+                adapter = RecordingAdapter()
+                current_state_source = RecordingCurrentStateSource(snapshot)
+
+                with self.assertRaisesRegex(ValueError, error_pattern):
+                    run_user_message_turn(
+                        {
+                            "event_id": "event-current",
+                            "trace_id": "trace-current",
+                            "type": "USER_MESSAGE",
+                            "created_at": "2026-05-14T11:30:00+00:00",
+                            "payload": {"text": "hello now", "conversation_id": "c-1"},
+                        },
+                        adapter=adapter,
+                        raw_event_log=raw_log,
+                        visible_conversation=visible_conversation,
+                        id_generator=SequenceIdGenerator(),
+                        clock=fixed_clock,
+                        current_state_source=current_state_source,
+                    )
+
+                self.assertEqual(adapter.calls, [])
+                self.assertEqual(
+                    [entry["kind"] for entry in raw_log.entries],
+                    [
+                        "runtime_event_received",
+                        "user_visible_message_committed",
+                    ],
+                )
+                self.assertEqual(
+                    [record["kind"] for record in visible_conversation.records],
+                    ["user_visible_message", "user_visible_message"],
+                )
 
 
 if __name__ == "__main__":

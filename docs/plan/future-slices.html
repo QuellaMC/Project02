@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-007</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-008</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -147,25 +147,25 @@
       <dd>Discovered while defining MVP-004 failure behavior for malformed recent-message source output.</dd>
 
       <dt>Dependency</dt>
-      <dd>A second context source or debug-inspector slice should justify the extra log kind.</dd>
+      <dd>A debug/replay slice or formal Character State Engine context-builder slice should justify the extra log kind. A second context source by itself is not enough if the rendered role-model input snapshot already records the model-facing context for the active slice.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>DecisionContext build logging v0.1</code>.</dd>
 
       <dt>Risk Or Unknown</dt>
-      <dd>Adding context logs too early could create duplicate snapshots before the context boundary stabilizes.</dd>
+      <dd>Adding context logs too early could create duplicate snapshots before the context-builder boundary, source-request shape, and replay/debug needs stabilize.</dd>
 
       <dt>Schema Evolution Impact</dt>
       <dd>Likely adds a <code>decision_context_built</code> raw log kind without changing existing role-model turn logs.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-004 can rely on existing role-model turn logs to snapshot rendered model input after context is built.</dd>
+      <dd>MVP-008 still relies on existing role-model turn logs to snapshot rendered model input after context is built. Notion logging guidance remains directionally correct, but dedicated context-build logs are deferred until debug/replay or a formal context-builder slice needs source-request traces.</dd>
     </dl>
 
     <h2>Character State Engine Context Builder Boundary</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Move recent-message context building behind a proper Character State Engine/context-builder boundary once MVP-004 has a second context concern.</dd>
+      <dd>Move source orchestration and context building behind a proper Character State Engine/context-builder boundary after the MVP-008 current-state read contract is proven.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>Notion assigns context building to the Character State Engine. MVP-004 keeps the minimal read-only recent-message path in <code>role_model.loop</code> only as a staging shortcut.</dd>
@@ -174,7 +174,7 @@
       <dd>Discovered during MVP-004 review of temporary context-builder ownership.</dd>
 
       <dt>Dependency</dt>
-      <dd>One of state, incidents, retrieval, active threads, context-build raw logs, or another context source should enter scope first.</dd>
+      <dd>MVP-008 should first add only the tiny Character State Engine current-state read contract. A later slice should promote a full context builder when it needs to coordinate multiple sources, budget policy, retrieval, active threads, incidents, or context-build raw logs.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>Character State Engine context builder v0.1</code>.</dd>
@@ -186,7 +186,7 @@
       <dd>Likely preserves the current <code>DecisionContext</code> shape while moving source reads, context-budget policy, and future context-build logs behind an explicit boundary.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-004 completed with only one read-only context source, and MVP-005 does not add state, incidents, retrieval, active-thread, or context-build-log behavior.</dd>
+      <dd>MVP-008 chooses only a tiny Character State Engine read module for current-state request/response validation. It should not also move recent-message budgeting, visible-history mapping, or final <code>DecisionContext</code> assembly into a full context-builder boundary.</dd>
     </dl>
 
     <h2>Shared RecentVisibleMessage Contract</h2>
@@ -213,13 +213,13 @@
       <dd>Likely moves existing validation into <code>runtime.contracts</code> without changing the current <code>DecisionContext</code> shape.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-007 slice should compose existing context behavior before promoting another shared contract surface.</dd>
+      <dd>MVP-008 should add only a read-only living-state snapshot and should not promote another shared recent-message contract surface.</dd>
     </dl>
 
     <h2>MVP-007 - Minimal User Turn Orchestrator</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Promoted to the active MVP-007 spec on 2026-05-16. See <a href="active-slice.html">active-slice.html</a>.</dd>
+      <dd>Completed on 2026-05-16. See <a href="completed/mvp-007-minimal-user-turn-orchestrator.html">completed MVP-007</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>The Phase 1 roadmap wants a minimal user turn loop, but each boundary and visible projection needs to be proven separately first.</dd>
@@ -237,10 +237,37 @@
       <dd>The orchestrator could blur boundary ownership if introduced before commit validation is tested.</dd>
 
       <dt>Schema Evolution Impact</dt>
-      <dd>The active MVP-007 spec introduces a top-level turn result envelope while preserving existing event, decision, raw log, and visible output records.</dd>
+      <dd>MVP-007 introduced a top-level turn result envelope while preserving existing event, decision, raw log, and visible output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>This item is no longer parked; it is the active MVP-007 spec.</dd>
+      <dd>This item is no longer parked; it has been completed and recorded under completed plans.</dd>
+    </dl>
+
+    <h2>MVP-008 - Read-Only Living State Snapshot in DecisionContext</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Promoted to the active MVP-008 spec on 2026-05-16. See <a href="active-slice.html">active-slice.html</a>.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The Notion roadmap's Phase 2 starts CharacterRuntimeState by adding current state and a state snapshot in <code>DecisionContext</code>.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Promoted after MVP-007 proved one complete <code>USER_MESSAGE</code> turn with visible history, fake model output, and visible reply commit.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-007 user-turn orchestration should work first so the read-only state snapshot can enter the existing model call without changing commit behavior.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>MVP-008 - Read-Only Living State Snapshot in DecisionContext</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>The slice can become too broad if it adds state patches, durable state storage, virtual body, incidents, or a Character State Engine package before one read-side state contract is proven.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Adds an optional <code>living_state_brief</code> inside <code>DecisionContext.character_snapshot</code> and a minimal current-state source request/response contract.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>This item is no longer parked; it is the active MVP-008 spec.</dd>
     </dl>
 
     <h2>Richer Runtime Kernel Route Policy</h2>
@@ -267,7 +294,7 @@
       <dd>Likely adds tested route outputs for interruption, scheduling, and later event families while preserving the MVP-007 <code>USER_MESSAGE</code> route.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-007 slice changes only the <code>USER_MESSAGE</code> route needed for the minimal user-turn loop.</dd>
+      <dd>MVP-007 changed only the <code>USER_MESSAGE</code> route needed for the minimal user-turn loop; MVP-008 should not broaden route policy.</dd>
     </dl>
 
     <h2>Real RoleModelAdapter Provider</h2>
@@ -294,7 +321,7 @@
       <dd>May add provider metadata to model I/O logs without changing <code>CharacterDecision</code>.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-007 only needs an injected adapter boundary and deterministic fake outputs.</dd>
+      <dd>MVP-008 still uses injected fake adapter behavior and only adds read-only state context.</dd>
     </dl>
 
     <h2>Shared RoleModelTurnResult Validator</h2>
@@ -348,7 +375,7 @@
       <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-007 slice still uses injected fakes and existing interfaces, with no concrete database.</dd>
+      <dd>The active MVP-008 slice still uses injected fakes and existing interfaces, with no concrete database.</dd>
     </dl>
 
     <h2>Shared Visible Conversation Message Contract</h2>
@@ -375,7 +402,7 @@
       <dd>Likely adds a shared <code>role</code> / <code>message_id</code> visible transcript contract while preserving compatibility with existing assistant output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-007 slice composes existing user and assistant record paths without unifying their durable schemas.</dd>
+      <dd>The active MVP-008 slice should add read-only state context without unifying durable visible-message schemas.</dd>
     </dl>
 
     <h2>Recent Source Backed By Visible Conversation Records</h2>

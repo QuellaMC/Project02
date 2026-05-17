@@ -182,6 +182,41 @@ class FakeRecentMessagesSource:
         return self.messages
 
 
+def current_state_snapshot():
+    return {
+        "schema_version": "0.1",
+        "character_id": "character-1",
+        "living_state": {
+            "current_activity": "writing notes",
+            "mood": "focused",
+            "toward_user": "warm",
+        },
+        "updated_at": "2026-05-14T11:29:00+00:00",
+        "source_event_ids": ["event-state-1"],
+    }
+
+
+def living_state_brief():
+    return {
+        "character_id": "character-1",
+        "current_activity": "writing notes",
+        "mood": "focused",
+        "toward_user": "warm",
+        "updated_at": "2026-05-14T11:29:00+00:00",
+        "source_event_ids": ["event-state-1"],
+    }
+
+
+class FakeCurrentStateSource:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+        self.requests = []
+
+    def read_current_state(self, request):
+        self.requests.append(request)
+        return self.snapshot
+
+
 class FakeVisibleConversationRecordSource:
     def __init__(self, records):
         self.records = records
@@ -311,6 +346,60 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
                 "recent_visible_messages"
             ],
             recent_messages,
+        )
+
+    def test_current_state_flows_to_adapter_and_success_log(self):
+        raw_log = RecordingRawEventLog()
+        recent_source = FakeRecentMessagesSource(
+            [
+                recent_message("message-1", created_at="2026-05-14T11:21:00+00:00"),
+            ]
+        )
+        current_state_source = FakeCurrentStateSource(current_state_snapshot())
+        adapter = FakeRoleModelAdapter(
+            json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                }
+            )
+        )
+
+        run_role_model_turn(
+            normalized_user_message_with_conversation(),
+            adapter=adapter,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            recent_visible_messages_source=recent_source,
+            current_state_source=current_state_source,
+        )
+
+        self.assertEqual(
+            current_state_source.requests,
+            [
+                {
+                    "schema_version": "0.1",
+                    "trace_id": "trace-1",
+                    "event_id": "event-1",
+                    "event_type": "USER_MESSAGE",
+                    "conversation_id": "conversation-1",
+                }
+            ],
+        )
+        self.assertNotIn("character_id", current_state_source.requests[0])
+        character_snapshot = adapter.inputs[0]["decision_context"]["character_snapshot"]
+        self.assertEqual(
+            [message["message_id"] for message in character_snapshot["recent_visible_messages"]],
+            ["message-1"],
+        )
+        self.assertEqual(character_snapshot["living_state_brief"], living_state_brief())
+        self.assertEqual(
+            raw_log.entries[0]["data"]["model_input"]["decision_context"]["character_snapshot"][
+                "living_state_brief"
+            ],
+            living_state_brief(),
         )
 
     def test_commit_effects_visible_records_flow_to_context_and_success_log(self):
@@ -502,6 +591,31 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
 
         self.assertEqual(adapter.inputs, [])
         self.assertEqual(raw_log.entries, [])
+
+    def test_malformed_current_state_fails_before_adapter_invocation(self):
+        cases = [
+            ({**current_state_snapshot(), "source_event_ids": [123]}, "source_event_ids"),
+            ({**current_state_snapshot(), "source_event_ids": ["event-1"]}, "current event_id"),
+        ]
+
+        for snapshot, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                raw_log = RecordingRawEventLog()
+                adapter = BadShapeRoleModelAdapter()
+                current_state_source = FakeCurrentStateSource(snapshot)
+
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    run_role_model_turn(
+                        normalized_user_message_with_conversation(),
+                        adapter=adapter,
+                        raw_event_log=raw_log,
+                        id_generator=SequenceIdGenerator(),
+                        clock=fixed_clock,
+                        current_state_source=current_state_source,
+                    )
+
+                self.assertEqual(adapter.inputs, [])
+                self.assertEqual(raw_log.entries, [])
 
     def test_future_recent_messages_fail_before_adapter_invocation(self):
         raw_log = RecordingRawEventLog()

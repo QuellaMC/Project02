@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-17 - MVP-008 Spec Review Cleanup</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-17 - MVP-008 Spec Review Cleanup</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Tightened <a href="../../plan/active-slice.html">MVP-008 active spec</a> so current-state request/response validation belongs to a tiny Character State Engine read module.</li>
+      <li>Selected <code>src/character/state/current.py</code> as the expected production path when MVP-008 code is added.</li>
+      <li>Clarified that the Role Model Loop passes a normalized event into the Character State Engine read contract, while the CSE-owned request builder creates <code>CurrentCharacterStateRequest</code>.</li>
+      <li>Clarified that <code>CurrentCharacterStateRequest</code> intentionally omits <code>character_id</code> because the injected source is caller-bound to the active character.</li>
+      <li>Updated <a href="../../plan/future-slices.html">future-slices.html</a> so context-build logging remains deferred until debug/replay or a formal context-builder slice.</li>
+    </ul>
+
+    <h2>Why It Was Needed</h2>
+    <p>
+      Review found that MVP-008 adds a second context concern and should not let
+      <code>role_model.loop</code> accumulate Character State Engine ownership.
+      Review also found stale context-build logging rationale and an implicit
+      <code>character_id</code> binding assumption. The spec now makes those
+      decisions explicit before coding begins.
+    </p>
+
+    <h2>Source Context Checked</h2>
+    <ul>
+      <li>Notion 02 Runtime Architecture: Character State Engine owns current reality and compact <code>DecisionContext</code> building.</li>
+      <li>Notion 06 Character State Engine: <code>living_state_brief</code> belongs in <code>DecisionContext.character_snapshot</code>, with raw truth separate from model-facing context.</li>
+      <li>Notion 08 Runtime Logging: state/context inputs and <code>DecisionContext</code> snapshots should eventually be logged for replay/debug.</li>
+      <li>Local future-slices parking lot for context-builder and context-build logging follow-up items.</li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/develop-journal/2026-05-17/001-mvp-008-spec-review-cleanup.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>MVP-008 remains narrow: read-only state context only, no state store, state commits, state patches, virtual body, incidents, retrieval, tools, Live2D, or new model actions.</li>
+      <li>Request-builder ownership belongs with the tiny Character State Engine read module, not <code>role_model.loop</code>.</li>
+      <li>Dedicated context-build logs are not rejected permanently; they are parked until a slice needs debug/replay or formal context-builder source-request traces.</li>
+      <li>The implementation should avoid hidden global character lookup and should receive character binding through the injected current-state source.</li>
+    </ul>
+
+    <h2>Checks Run</h2>
+    <ul>
+      <li><code>python3 -c</code> HTML parser check for the updated plan and journal files: passed.</li>
+      <li><code>git diff --check</code>: passed.</li>
+      <li>No unit tests were run because this cleanup only changes planning docs.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Implement MVP-008 test-first using the tiny Character State Engine read
+      module and keep Role Model Loop changes limited to calling that contract
+      while assembling the existing model input.
+    </p>
+  </main>
+</body>
+</html>
