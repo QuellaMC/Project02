@@ -67,6 +67,15 @@
       <li><code>git diff --check</code>: passed.</li>
       <li>Review follow-up: <code>python3 -m unittest tests.integration.test_user_message_turn tests.unit.test_living_state_patch_commit</code>: passed, 18 tests.</li>
       <li>Review follow-up: <code>python3 -m unittest discover</code>: passed, 135 tests.</li>
+      <li>Review follow-up 2: <code>python3 -m unittest tests.unit.test_living_state_patch_commit tests.integration.test_user_message_turn</code>: passed, 21 tests.</li>
+      <li>Review follow-up 2: <code>/private/tmp/project02-ruff/bin/ruff check src/commit_effects/living_state.py tests/unit/test_living_state_patch_commit.py tests/integration/test_user_message_turn.py</code>: passed.</li>
+      <li>Review follow-up 2: <code>/private/tmp/project02-ruff/bin/ruff format --check src/commit_effects/living_state.py tests/unit/test_living_state_patch_commit.py tests/integration/test_user_message_turn.py</code>: passed.</li>
+      <li>Review follow-up 2: <code>python3 -m unittest discover</code>: passed, 138 tests.</li>
+      <li>Review follow-up 2: <code>/private/tmp/project02-ruff/bin/ruff check .</code>: passed.</li>
+      <li>Review follow-up 2: <code>/private/tmp/project02-ruff/bin/ruff format --check .</code>: passed.</li>
+      <li>Review follow-up 2: <code>/private/tmp/project02-mypy/bin/mypy src</code>: passed.</li>
+      <li>Review follow-up 2: <code>git diff --check</code>: passed.</li>
+      <li>Review follow-up 2: <code>python3 -m html.parser docs/plan/active-slice.html docs/plan/future-slices.html docs/develop-journal/2026-05-17/004-mvp-009-implementation.html</code>: passed.</li>
     </ul>
 
     <h2>Review Notes</h2>
@@ -82,6 +91,11 @@
     <ul>
       <li>Added integration coverage for a state-enabled user turn where the model returns no <code>state_patch</code>; the test verifies <code>living_state_patch_skipped</code>, no patch-store call, no state patch raw log, and the MVP-008 visible reply log order.</li>
       <li>Added Commit and Effects coverage for malformed normalized patch input rejecting before the patch store is called; the test verifies <code>living_state_patch_rejected</code>, <code>living_state_patch_commit_validation</code>, and no store request.</li>
+      <li>Constrained the MVP-009 injected living-state patch boundary to a pending, non-durable prepare step; <code>living_state_patch_committed</code> raw-log append is the commit point until a future durable store transaction slice exists.</li>
+      <li>Added a raw-log failure regression proving a fake store can prepare a valid snapshot without marking any durable state commit when raw-log append fails.</li>
+      <li>Added committed-snapshot consistency validation so shape-valid bad store results are rejected as <code>malformed_store_result</code> when they miss the current event ID, fail to apply a patched field, or return a stale/non-runtime <code>updated_at</code>.</li>
+      <li>Added unit and integration coverage for bad store results stopping before assistant visible reply and appending <code>living_state_patch_rejected</code> without a <code>living_state_patch_committed</code> log.</li>
+      <li>Parked the concrete durable <code>CharacterRuntimeStateStore</code> transaction requirement in <code>future-slices.html</code> as a blocker before real state storage.</li>
     </ul>
 
     <h2>Next Action</h2>

@@ -111,7 +111,7 @@ class RecordingLivingStatePatchStore:
         self.error = error
         self.requests = []
 
-    def commit_living_state_patch(self, request):
+    def prepare_living_state_patch_commit(self, request):
         self.requests.append(deepcopy(request))
         if self.error is not None:
             raise self.error
@@ -513,6 +513,62 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                 "role_model_turn_completed",
                 "living_state_patch_rejected",
             ],
+        )
+        self.assertEqual(
+            [record["kind"] for record in visible_conversation.records],
+            ["user_visible_message", "user_visible_message"],
+        )
+
+    def test_shape_valid_bad_store_result_stops_before_assistant_reply(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {"living_state": {"mood": "attentive"}},
+                }
+            )
+        )
+        living_state_patch_store = RecordingLivingStatePatchStore(
+            snapshot={**committed_snapshot(), "source_event_ids": ["event-state-1"]}
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            living_state_patch_store=living_state_patch_store,
+        )
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["stopped_at"], "living_state_patch_commit")
+        self.assertEqual(result["failure"]["stage"], "living_state_patch_store")
+        self.assertEqual(result["failure"]["code"], "malformed_store_result")
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "living_state_patch_rejected",
+            ],
+        )
+        self.assertNotIn(
+            "living_state_patch_committed",
+            [entry["kind"] for entry in raw_log.entries],
         )
         self.assertEqual(
             [record["kind"] for record in visible_conversation.records],

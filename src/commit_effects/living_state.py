@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from character.state.current import validate_current_character_state_snapshot
@@ -14,6 +15,7 @@ from runtime.contracts import (
     normalize_visible_reply_decision_with_optional_living_state_patch,
     reject_extra_keys,
     require_string,
+    validate_iso8601_timestamp,
     validate_normalized_user_message_event,
 )
 from runtime.contracts import (
@@ -26,6 +28,7 @@ from runtime.logging import (
     IdGenerator,
     RawEventLogEntry,
     build_raw_log_entry,
+    clock_timestamp,
 )
 
 LIVING_STATE_PATCH_COMMITTED_STATUS = "living_state_patch_committed"
@@ -71,7 +74,13 @@ class LivingStatePatchStoreError(ValueError):
 
 
 class LivingStatePatchStore(Protocol):
-    def commit_living_state_patch(
+    """MVP-009 pending patch boundary.
+
+    Implementations must not durably mutate character state here. A later concrete
+    storage slice must make state mutation and raw-log append one transaction.
+    """
+
+    def prepare_living_state_patch_commit(
         self,
         request: LivingStatePatchCommitRequest,
     ) -> dict[str, Any]: ...
@@ -113,6 +122,7 @@ def commit_living_state_patch(
 ) -> LivingStatePatchCommitResult:
     source_identity = _extract_trusted_source_identity(source_event)
     request: LivingStatePatchCommitRequest | None = None
+    commit_time: str | None = None
 
     try:
         request = build_living_state_patch_commit_request(source_event, role_model_result)
@@ -124,20 +134,20 @@ def commit_living_state_patch(
                 "event_type": USER_MESSAGE,
                 "status": LIVING_STATE_PATCH_SKIPPED_STATUS,
             }
+        commit_time = clock_timestamp(clock)
         try:
-            committed_snapshot = living_state_patch_store.commit_living_state_patch(
+            committed_snapshot = living_state_patch_store.prepare_living_state_patch_commit(
                 deepcopy(request)
             )
         except LivingStatePatchStoreError:
             raise
 
-        try:
-            validated_snapshot = validate_current_character_state_snapshot(committed_snapshot)
-        except SharedContractValidationError as error:
-            raise LivingStatePatchStoreError(
-                str(error),
-                code="malformed_store_result",
-            ) from error
+        validated_snapshot = validate_committed_living_state_patch(
+            source_event=source_event,
+            patch=request["patch"],
+            committed_snapshot=committed_snapshot,
+            commit_time=commit_time,
+        )
     except LivingStatePatchStoreError as error:
         failure = _build_failure(
             LIVING_STATE_PATCH_STORE_STAGE,
@@ -173,6 +183,7 @@ def commit_living_state_patch(
         )
         return _build_rejected_result(source_identity, failure)
 
+    assert commit_time is not None
     raw_event_log.append(
         build_living_state_patch_committed_log_entry(
             source_event,
@@ -180,7 +191,7 @@ def commit_living_state_patch(
             request["patch"],
             validated_snapshot,
             id_generator=id_generator,
-            clock=clock,
+            clock=_clock_at(commit_time),
         )
     )
     return {
@@ -191,6 +202,35 @@ def commit_living_state_patch(
         "status": LIVING_STATE_PATCH_COMMITTED_STATUS,
         "committed_snapshot": deepcopy(validated_snapshot),
     }
+
+
+def validate_committed_living_state_patch(
+    *,
+    source_event: RuntimeEvent,
+    patch: Mapping[str, Any],
+    committed_snapshot: Mapping[str, Any],
+    commit_time: str,
+) -> dict[str, Any]:
+    event = _validate_source_event(source_event)
+    normalized_patch = _wrap_validation_contract_error(lambda: normalize_living_state_patch(patch))
+    try:
+        validated_snapshot = validate_current_character_state_snapshot(committed_snapshot)
+    except SharedContractValidationError as error:
+        raise LivingStatePatchStoreError(
+            str(error),
+            code="malformed_store_result",
+        ) from error
+
+    validated_commit_time = _wrap_validation_contract_error(
+        lambda: validate_iso8601_timestamp(commit_time, "commit_time")
+    )
+    _validate_committed_snapshot_consistency(
+        event=event,
+        patch=normalized_patch,
+        committed_snapshot=validated_snapshot,
+        commit_time=validated_commit_time,
+    )
+    return validated_snapshot
 
 
 def build_living_state_patch_committed_log_entry(
@@ -349,6 +389,54 @@ def _build_failure(stage: str, code: str, message: str) -> dict[str, str]:
             else "malformed_commit_input"
         )
     return {"stage": stage, "code": code, "message": message}
+
+
+def _validate_committed_snapshot_consistency(
+    *,
+    event: RuntimeEvent,
+    patch: Mapping[str, Mapping[str, str]],
+    committed_snapshot: Mapping[str, Any],
+    commit_time: str,
+) -> None:
+    if event["event_id"] not in committed_snapshot["source_event_ids"]:
+        raise LivingStatePatchStoreError(
+            "committed_snapshot.source_event_ids must include source_event.event_id.",
+            code="malformed_store_result",
+        )
+
+    for field_name, patch_value in patch["living_state"].items():
+        if committed_snapshot["living_state"].get(field_name) != patch_value:
+            raise LivingStatePatchStoreError(
+                (
+                    f"committed_snapshot.living_state.{field_name} must match "
+                    f"patch.living_state.{field_name}."
+                ),
+                code="malformed_store_result",
+            )
+
+    updated_at = committed_snapshot["updated_at"]
+    if _parse_iso8601_timestamp(updated_at) < _parse_iso8601_timestamp(event["created_at"]):
+        raise LivingStatePatchStoreError(
+            "committed_snapshot.updated_at must not be older than source_event.created_at.",
+            code="malformed_store_result",
+        )
+    if updated_at != commit_time:
+        raise LivingStatePatchStoreError(
+            "committed_snapshot.updated_at must match the runtime commit timestamp.",
+            code="malformed_store_result",
+        )
+
+
+def _parse_iso8601_timestamp(value: str) -> datetime:
+    timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=UTC)
+    return timestamp
+
+
+def _clock_at(timestamp: str) -> Clock:
+    parsed_timestamp = _parse_iso8601_timestamp(timestamp)
+    return lambda: parsed_timestamp
 
 
 def _wrap_validation_contract_error[T](callback: Callable[[], T]) -> T:

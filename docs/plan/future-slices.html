@@ -297,6 +297,33 @@
       <dd>This item is no longer parked; it is the active MVP-009 spec.</dd>
     </dl>
 
+    <h2>Durable Character State Store Transaction</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a concrete <code>CharacterRuntimeStateStore</code> only with transaction semantics that commit state mutation and the <code>living_state_patch_committed</code> raw log atomically.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Once state is durable, the runtime must not be able to mutate character state without a lossless raw-log audit record for the same commit.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered during MVP-009 review of the injected living-state patch boundary's audit-log ordering.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-009 should first prove patch validation, pending fake-store prepare, committed-snapshot consistency checks, and state patch commit/reject logs.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>CharacterRuntimeStateStore durable transaction v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>A concrete store that mutates before raw-log durability could leave committed state without audit truth; a raw-log-first approach without transaction policy could log state that did not commit.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds concrete storage keys, transaction or unit-of-work APIs, idempotency keys, and possibly a state version while preserving existing patch and raw-log record meanings.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-009 intentionally keeps the injected patch boundary non-durable and prepare-only; no concrete database, transaction manager, or replay/reconciliation worker exists yet.</dd>
+    </dl>
+
     <h2>Richer Runtime Kernel Route Policy</h2>
     <dl>
       <dt>Idea</dt>

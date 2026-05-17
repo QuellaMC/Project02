@@ -39,13 +39,24 @@ class RecordingRawEventLog:
         self.entries.append(deepcopy(entry))
 
 
+class FailingRawEventLog:
+    def __init__(self):
+        self.entries = []
+        self.attempted_entries = []
+
+    def append(self, entry):
+        self.attempted_entries.append(deepcopy(entry))
+        raise RuntimeError("raw log unavailable")
+
+
 class RecordingLivingStatePatchStore:
     def __init__(self, snapshot=None, error=None):
         self.snapshot = snapshot or committed_snapshot()
         self.error = error
         self.requests = []
+        self.durable_commits = []
 
-    def commit_living_state_patch(self, request):
+    def prepare_living_state_patch_commit(self, request):
         self.requests.append(deepcopy(request))
         if self.error is not None:
             raise self.error
@@ -188,6 +199,25 @@ class LivingStatePatchCommitTests(unittest.TestCase):
             ["event-state-1", "event-1"],
         )
 
+    def test_raw_log_failure_after_store_prepare_does_not_mark_durable_commit(self):
+        raw_log = FailingRawEventLog()
+        store = RecordingLivingStatePatchStore()
+
+        with self.assertRaisesRegex(RuntimeError, "raw log unavailable"):
+            commit_living_state_patch(
+                normalized_user_message(),
+                role_model_result_with_patch(),
+                living_state_patch_store=store,
+                raw_event_log=raw_log,
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+            )
+
+        self.assertEqual(len(store.requests), 1)
+        self.assertEqual(store.durable_commits, [])
+        self.assertEqual(raw_log.entries, [])
+        self.assertEqual(raw_log.attempted_entries[0]["kind"], "living_state_patch_committed")
+
     def test_store_rejection_appends_rejected_log_and_returns_failure(self):
         raw_log = RecordingRawEventLog()
         store = RecordingLivingStatePatchStore(
@@ -232,6 +262,51 @@ class LivingStatePatchCommitTests(unittest.TestCase):
         self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_rejected")
         self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
         self.assertNotIn("patch_snapshot", raw_log.entries[0]["data"])
+
+    def test_shape_valid_but_inconsistent_store_result_rejects_as_malformed_store_result(self):
+        cases = [
+            (
+                {**committed_snapshot(), "source_event_ids": ["event-state-1"]},
+                "source_event_ids",
+            ),
+            (
+                {
+                    **committed_snapshot(),
+                    "living_state": {
+                        **committed_snapshot()["living_state"],
+                        "mood": "focused",
+                    },
+                },
+                "living_state.mood",
+            ),
+            (
+                {**committed_snapshot(), "updated_at": "2026-05-17T08:58:00+00:00"},
+                "updated_at",
+            ),
+        ]
+
+        for snapshot, message_pattern in cases:
+            with self.subTest(message_pattern=message_pattern):
+                raw_log = RecordingRawEventLog()
+                store = RecordingLivingStatePatchStore(snapshot=snapshot)
+
+                result = commit_living_state_patch(
+                    normalized_user_message(),
+                    role_model_result_with_patch(),
+                    living_state_patch_store=store,
+                    raw_event_log=raw_log,
+                    id_generator=SequenceIdGenerator(),
+                    clock=fixed_clock,
+                )
+
+                self.assertEqual(result["status"], LIVING_STATE_PATCH_REJECTED_STATUS)
+                self.assertEqual(result["failure"]["stage"], "living_state_patch_store")
+                self.assertEqual(result["failure"]["code"], "malformed_store_result")
+                self.assertRegex(result["failure"]["message"], message_pattern)
+                self.assertEqual(len(store.requests), 1)
+                self.assertEqual(len(raw_log.entries), 1)
+                self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_rejected")
+                self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
 
     def test_committed_log_entry_deep_copies_inputs(self):
         event = normalized_user_message()
