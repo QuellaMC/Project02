@@ -46,6 +46,7 @@ class UserTurnStopTests(unittest.TestCase):
         raw_log = RecordingRawEventLog()
         visible_conversation = RecordingVisibleConversation()
         adapter = Mock()
+        current_state_source = object()
         rejected_result = {
             "trace_id": "trace-1",
             "event_id": "event-1",
@@ -78,6 +79,7 @@ class UserTurnStopTests(unittest.TestCase):
                 visible_conversation=visible_conversation,
                 id_generator=SequenceIdGenerator(),
                 clock=fixed_clock,
+                current_state_source=current_state_source,
             )
 
         self.assertEqual(result["status"], "user_turn_stopped")
@@ -95,6 +97,7 @@ class UserTurnStopTests(unittest.TestCase):
         raw_log = RecordingRawEventLog()
         visible_conversation = RecordingVisibleConversation()
         adapter = Mock()
+        current_state_source = object()
         user_commit_result = {
             "trace_id": "trace-1",
             "event_id": "event-1",
@@ -155,6 +158,7 @@ class UserTurnStopTests(unittest.TestCase):
                 visible_conversation=visible_conversation,
                 id_generator=SequenceIdGenerator(),
                 clock=fixed_clock,
+                current_state_source=current_state_source,
             )
 
         self.assertEqual(result["status"], "user_turn_stopped")
@@ -164,6 +168,10 @@ class UserTurnStopTests(unittest.TestCase):
         self.assertEqual(result["role_model_result"], role_model_result)
         self.assertEqual(result["visible_reply_result"], visible_reply_result)
         role_model_turn.assert_called_once()
+        self.assertIs(
+            role_model_turn.call_args.kwargs["current_state_source"],
+            current_state_source,
+        )
         commit_reply.assert_called_once()
 
 

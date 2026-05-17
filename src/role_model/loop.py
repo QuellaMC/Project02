@@ -7,6 +7,12 @@ from datetime import UTC, datetime
 from math import ceil
 from typing import Any, Protocol
 
+from character.state.current import (
+    CurrentCharacterStateSource,
+    build_current_character_state_request,
+    build_living_state_brief,
+    validate_living_state_brief_for_event,
+)
 from runtime.contracts import (
     ASSISTANT_VISIBLE_REPLY_KIND,
     ASSISTANT_VISIBLE_REPLY_ROLE,
@@ -118,6 +124,7 @@ def build_decision_context(
     event: RuntimeEvent,
     *,
     recent_visible_messages_source: RecentVisibleMessagesSource | None = None,
+    current_state_source: CurrentCharacterStateSource | None = None,
 ) -> DecisionContext:
     normalized_event = _wrap_contract_error(
         lambda: validate_normalized_user_message_event(event, source_name="event")
@@ -136,6 +143,15 @@ def build_decision_context(
         normalized_event,
         recent_visible_messages_source=recent_visible_messages_source,
     )
+    living_state_brief = _read_living_state_brief(
+        normalized_event,
+        current_state_source=current_state_source,
+    )
+    character_snapshot: dict[str, Any] = {
+        "recent_visible_messages": recent_visible_messages,
+    }
+    if living_state_brief is not None:
+        character_snapshot["living_state_brief"] = living_state_brief
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -143,9 +159,7 @@ def build_decision_context(
         "event_id": normalized_event["event_id"],
         "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
         "event": event_context,
-        "character_snapshot": {
-            "recent_visible_messages": recent_visible_messages,
-        },
+        "character_snapshot": character_snapshot,
         "allowed_actions": [VISIBLE_REPLY_ACTION],
     }
 
@@ -195,10 +209,12 @@ def run_role_model_turn(
     id_generator: IdGenerator,
     clock: Clock,
     recent_visible_messages_source: RecentVisibleMessagesSource | None = None,
+    current_state_source: CurrentCharacterStateSource | None = None,
 ) -> RoleModelTurnResult:
     decision_context = build_decision_context(
         event,
         recent_visible_messages_source=recent_visible_messages_source,
+        current_state_source=current_state_source,
     )
     model_input = render_role_model_input(decision_context)
 
@@ -373,6 +389,25 @@ def _read_recent_visible_messages(
             )
         )
     return _select_recent_visible_messages(normalized_messages)
+
+
+def _read_living_state_brief(
+    event: RuntimeEvent,
+    *,
+    current_state_source: CurrentCharacterStateSource | None,
+) -> dict[str, Any] | None:
+    if current_state_source is None:
+        return None
+
+    request = _wrap_contract_error(lambda: build_current_character_state_request(event))
+    snapshot = current_state_source.read_current_state(deepcopy(request))
+    living_state_brief = _wrap_contract_error(lambda: build_living_state_brief(snapshot))
+    return _wrap_contract_error(
+        lambda: validate_living_state_brief_for_event(
+            living_state_brief,
+            event_id=event["event_id"],
+        )
+    )
 
 
 def _build_recent_visible_messages_request(
@@ -903,10 +938,19 @@ def _validate_character_snapshot(
     _wrap_contract_error(
         lambda: reject_extra_keys(
             character_snapshot,
-            {"recent_visible_messages"},
+            {"recent_visible_messages", "living_state_brief"},
             "DecisionContext.character_snapshot",
         )
     )
+    normalized_snapshot: dict[str, Any] = {}
+    if "living_state_brief" in character_snapshot:
+        normalized_snapshot["living_state_brief"] = _wrap_contract_error(
+            lambda: validate_living_state_brief_for_event(
+                character_snapshot["living_state_brief"],
+                event_id=event_id,
+            )
+        )
+
     recent_visible_messages = character_snapshot.get("recent_visible_messages")
     if not isinstance(recent_visible_messages, list):
         raise RoleModelValidationError("recent_visible_messages must be a list.")
@@ -915,7 +959,7 @@ def _validate_character_snapshot(
             raise RoleModelValidationError(
                 "recent_visible_messages require a non-empty event.conversation_id."
             )
-        return {"recent_visible_messages": []}
+        return {"recent_visible_messages": [], **normalized_snapshot}
 
     event_timestamp = _parse_sortable_timestamp(event_created_at)
     normalized_messages: list[tuple[datetime, RecentVisibleMessage]] = []
@@ -946,7 +990,7 @@ def _validate_character_snapshot(
     selected_messages = _select_recent_visible_messages(normalized_messages)
     if len(selected_messages) != len(recent_visible_messages):
         raise RoleModelValidationError("recent_visible_messages must fit the active budget.")
-    return {"recent_visible_messages": selected_messages}
+    return {"recent_visible_messages": selected_messages, **normalized_snapshot}
 
 
 def _validate_character_decision(

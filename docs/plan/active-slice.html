@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-007 - Minimal User Turn Orchestrator</title>
+  <title>MVP-008 - Read-Only Living State Snapshot in DecisionContext</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,19 +27,20 @@
 </head>
 <body>
   <main>
-    <h1>MVP-007 - Minimal User Turn Orchestrator</h1>
-    <p><span class="status">Status: implemented and tested locally, pending review</span></p>
+    <h1>MVP-008 - Read-Only Living State Snapshot in DecisionContext</h1>
+    <p><span class="status">Status: implemented and tested; PR #8 open</span></p>
     <p class="meta">
-      Created: 2026-05-16. Implemented: 2026-05-16. Active slice path:
+      Created: 2026-05-16. Active slice path:
       <code>docs/plan/active-slice.html</code>.
       Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
+      Branch: <code>feature/mvp-008-current-state-snapshot</code>.
     </p>
 
     <h2>Source Context</h2>
     <p>
       Product direction comes from the Notion project hub
       <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.
-      The relevant source pages checked for this slice are
+      The source pages checked for this slice are
       <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>,
       <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
       <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
@@ -47,10 +48,10 @@
       <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
     </p>
     <blockquote>
-      Phase 1 calls for a minimal user turn loop where a <code>USER_MESSAGE</code>
-      enters the Runtime Kernel, recent visible messages feed
-      <code>DecisionContext</code>, the Role Model Loop calls the model, Commit
-      and Effects stores the visible reply, and Raw Event Log records the turn.
+      Phase 2 starts CharacterRuntimeState by adding current state, a state store,
+      and a state snapshot in <code>DecisionContext</code>. MVP-008 takes only the
+      read-side foothold: a current living-state snapshot can be included in the
+      model input, but no state mutation is accepted or committed yet.
     </blockquote>
     <p>
       Local implementation truth comes from
@@ -58,125 +59,108 @@
       <a href="completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html">MVP-002</a>,
       <a href="completed/mvp-003-minimal-visible-reply-commit.html">MVP-003</a>,
       <a href="completed/mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004</a>,
-      <a href="completed/mvp-005-user-visible-message-projection.html">MVP-005</a>, and
-      <a href="completed/mvp-006-visible-conversation-recent-source.html">MVP-006</a>.
-      The narrow next step is to prove one end-to-end composition of the
-      existing boundaries for a single <code>USER_MESSAGE</code> turn.
+      <a href="completed/mvp-005-user-visible-message-projection.html">MVP-005</a>,
+      <a href="completed/mvp-006-visible-conversation-recent-source.html">MVP-006</a>, and
+      <a href="completed/mvp-007-minimal-user-turn-orchestrator.html">MVP-007</a>.
+      The current runtime can complete one <code>USER_MESSAGE</code> turn with
+      visible history and a fake model; the narrow next step is to give that
+      model call a small read-only character-state view.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Add the smallest orchestrator that composes the already implemented pieces
-      for one user message: Runtime Kernel intake and raw logging, user visible
-      message projection, recent visible context reading, Role Model Loop
-      execution through an injected fake adapter, and assistant visible reply
-      commit. MVP-007 should prove boundary order, trace continuity, and the
-      smallest authoritative <code>USER_MESSAGE</code> route update without adding
-      concrete storage, character state, retrieval, tools, scheduling, a live
-      model provider, or a new runtime event family.
+      Add the smallest Character State Engine read boundary needed for Phase 2:
+      an injected current-state source can provide a validated living-state
+      snapshot to <code>DecisionContext.character_snapshot</code> for a
+      <code>USER_MESSAGE</code> turn. The slice must preserve the MVP-007 user
+      turn flow, keep <code>visible_reply</code> as the only allowed model action,
+      and avoid state commits, state patches, virtual body, incidents,
+      scheduled directives, retrieval, tools, Live2D, concrete storage, and live
+      model providers.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>One supported input event type: <code>USER_MESSAGE</code>.</li>
-      <li>One orchestration entry point for a single user turn, named by implementation review.</li>
-      <li>One injected <code>RoleModelAdapter</code>; tests use a fake adapter only.</li>
-      <li>One injected raw event log used by all participating boundaries.</li>
-      <li>One injected visible conversation boundary that can append visible records and read existing visible records through the MVP-006 source adapter in tests.</li>
-      <li>One success result envelope that reports the existing nested boundary results and committed visible record IDs.</li>
-      <li>Existing record shapes remain authoritative: normalized <code>RuntimeEvent</code>, <code>UserVisibleMessage</code>, <code>RoleModelTurnResult</code>, <code>VisibleConversationOutput</code>, and existing raw log entries.</li>
-      <li>The orchestrator copies returned snapshots so caller mutation cannot alter stored records or result details.</li>
-      <li>Focused integration tests cover successful composition, current-message exclusion from recent context, malformed input, malformed model output, and visible commit stop behavior.</li>
+      <li>One supported event type remains <code>USER_MESSAGE</code>.</li>
+      <li>One optional injected read-only current-state source for tests and callers that have state available.</li>
+      <li>One current-state request built from the normalized runtime event: schema version, trace ID, event ID, event type, optional user ID, and optional conversation ID.</li>
+      <li>One minimal living-state snapshot shape with <code>character_id</code>, <code>current_activity</code>, <code>mood</code>, <code>toward_user</code>, <code>updated_at</code>, and <code>source_event_ids</code>.</li>
+      <li>One optional <code>living_state_brief</code> field inside <code>DecisionContext.character_snapshot</code> when a source returns a snapshot.</li>
+      <li>Existing <code>recent_visible_messages</code> behavior, ordering, budgeting, and current-message exclusion remain authoritative.</li>
+      <li>Existing callers that do not provide a current-state source continue to produce the MVP-007 context shape with only <code>recent_visible_messages</code>.</li>
+      <li><code>run_user_message_turn()</code> passes the optional state source through to <code>run_role_model_turn()</code>; orchestration order otherwise stays unchanged.</li>
+      <li>Tests use fakes only; no database, file, network, clock, or model provider is introduced.</li>
+      <li>Returned context and result snapshots must preserve copy isolation from source and caller mutation.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No concrete database, file store, migration, transaction manager, idempotency key store, pagination API, or persistent conversation log.</li>
-      <li>No new <code>RuntimeEvent</code> type beyond <code>USER_MESSAGE</code>.</li>
-      <li>No live model provider call, provider configuration, streaming, retry, timeout policy, or prompt expansion.</li>
-      <li>No new model action beyond the existing <code>visible_reply</code> action.</li>
-      <li>No Character State Engine package extraction, living state, virtual body, incidents, scheduled directives, active threads, retrieval index, keyword search, summaries, compaction, or replay UI.</li>
-      <li>No tool execution, permission matrix, user confirmation flow, Live2D status, assets, proactive message, scheduler, or background worker.</li>
-      <li>No rollback or reconciliation if a later boundary fails after an earlier append succeeds.</li>
-      <li>No broad Runtime Kernel route-policy rewrite. MVP-007 includes only one tested route update: <code>USER_MESSAGE</code> routes to <code>model_needed = true</code> and <code>next_step = "user_turn"</code>.</li>
-      <li>No schema unification of user and assistant visible records; MVP-006 remains the read-side projection layer.</li>
+      <li>No state mutation, state patch parsing, state commit, state rejection log, state migration, or persistence adapter.</li>
+      <li>No new <code>CharacterDecision</code> action and no change to <code>allowed_actions</code>; it remains <code>["visible_reply"]</code>.</li>
+      <li>No virtual body fields, body drift, need threshold event, active incident, incident queue, scheduled directive, active thread, retrieval index, summaries, compaction, replay UI, tools, Live2D, or assets.</li>
+      <li>No concrete <code>CharacterRuntimeStateStore</code>, database schema, transaction behavior, idempotency policy, or background worker.</li>
+      <li>No live model provider, provider metadata, streaming, retry, timeout, or prompt expansion beyond including the validated snapshot in the existing rendered input.</li>
+      <li>No dedicated context-build raw log entry. The existing role-model turn logs remain the audit record for the rendered model input in this slice.</li>
+      <li>No broad Character State Engine extraction. MVP-008 may add one tiny non-empty Character State Engine read module only for the current-state source protocol, request builder, response validator, and brief mapper required by active tests.</li>
+      <li>No changes to Runtime Kernel route policy beyond preserving the existing MVP-007 <code>USER_MESSAGE</code> route.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
     <p>
-      These TypeScript-style shapes define the intended behavior contract. MVP-007
+      These TypeScript-style shapes define the intended behavior contract. MVP-008
       should implement the contract in Python 3 and test it with <code>unittest</code>.
     </p>
 
-    <h3>UserMessageTurnInput</h3>
-    <pre><code>type UserMessageTurnInput = {
-  schema_version?: "0.1"
-  type: "USER_MESSAGE"
-  event_id?: string
-  trace_id?: string
-  created_at?: string
-  payload: {
-    text: string
-    user_id?: string
-    conversation_id?: string
-  }
-}</code></pre>
-
-    <h3>UserMessageTurnCommittedResult</h3>
-    <pre><code>type UserMessageTurnCommittedResult = {
+    <h3>CurrentCharacterStateRequest</h3>
+    <pre><code>type CurrentCharacterStateRequest = {
   schema_version: "0.1"
   trace_id: string
   event_id: string
   event_type: "USER_MESSAGE"
-  status: "user_turn_committed"
-  kernel_route: RuntimeRouteResult
-  user_visible_message_result: UserVisibleMessageCommitResult
-  role_model_result: RoleModelTurnResult
-  visible_reply_result: VisibleReplyCommitResult
-  visible_record_ids: {
-    user_message_id: string
-    assistant_output_id: string
-  }
-}</code></pre>
-
-    <h3>MVP007 RuntimeRouteResult</h3>
-    <pre><code>type RuntimeRouteResult = {
-  trace_id: string
-  event_id: string
-  event_type: "USER_MESSAGE"
-  model_needed: true
-  next_step: "user_turn"
+  user_id?: string
+  conversation_id?: string
 }</code></pre>
     <p>
-      This route is authoritative for MVP-007. The orchestrator may call the
-      Role Model Loop only after Runtime Kernel intake returns this route.
+      The request intentionally omits <code>character_id</code>. In MVP-008 the
+      injected current-state source is caller-bound to the active character and
+      returns that character's <code>character_id</code> in the snapshot. The
+      implementation must not perform a hidden global character lookup or
+      hard-code a default character ID.
     </p>
 
-    <h3>UserMessageTurnStoppedResult</h3>
-    <pre><code>type UserMessageTurnStoppedResult = {
+    <h3>CharacterRuntimeStateSnapshot</h3>
+    <pre><code>type CharacterRuntimeStateSnapshot = {
+  schema_version: "0.1"
+  character_id: string
+  living_state: {
+    current_activity: string
+    mood: string
+    toward_user: string
+  }
+  updated_at: string
+  source_event_ids: string[]
+}</code></pre>
+
+    <h3>MVP008 DecisionContext Excerpt</h3>
+    <pre><code>type DecisionContext = {
   schema_version: "0.1"
   trace_id: string
   event_id: string
-  event_type: "USER_MESSAGE"
-  status: "user_turn_stopped"
-  stopped_at:
-    | "user_visible_message_commit"
-    | "visible_reply_commit"
-  kernel_route: RuntimeRouteResult
-  user_visible_message_result?: UserVisibleMessageCommitResult | UserVisibleMessageRejectResult
-  role_model_result?: RoleModelTurnResult
-  visible_reply_result?: VisibleReplyCommitResult | VisibleReplyRejectResult
-  failure: {
-    code: string
-    message: string
+  call_type: "user_message_visible_reply"
+  event: UserMessageEventContext
+  character_snapshot: {
+    recent_visible_messages: RecentVisibleMessage[]
+    living_state_brief?: {
+      character_id: string
+      current_activity: string
+      mood: string
+      toward_user: string
+      updated_at: string
+      source_event_ids: string[]
+    }
   }
+  allowed_actions: ["visible_reply"]
 }</code></pre>
-    <p>
-      Adapter-call and model-output parsing failures should keep the existing Role
-      Model Loop behavior: append the existing <code>role_model_turn_failed</code>
-      raw log entry and propagate the exception. MVP-007 should not invent a
-      second model-failure envelope.
-    </p>
 
     <h2>Functional Requirements</h2>
     <table>
@@ -189,59 +173,59 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>The orchestrator accepts one <code>UserMessageTurnInput</code> and validates it through a shared Runtime Kernel intake path that also powers <code>RuntimeKernel.handle_event()</code>.</td>
+          <td><code>build_decision_context()</code> accepts an optional current-state source in addition to the existing recent visible message source.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>The orchestrator appends exactly one <code>runtime_event_received</code> raw log entry for the normalized event before any visible conversation append or model adapter call, using the same raw-log append code path as <code>RuntimeKernel.handle_event()</code>.</td>
+          <td>If no current-state source is provided, <code>build_decision_context()</code>, <code>render_role_model_input()</code>, <code>run_role_model_turn()</code>, and <code>run_user_message_turn()</code> preserve the MVP-007 behavior and context shape.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>Runtime Kernel returns the authoritative MVP-007 <code>USER_MESSAGE</code> route: <code>model_needed = true</code> and <code>next_step = "user_turn"</code>. The orchestrator includes this route as <code>kernel_route</code> and does not treat a logged-only route as compatible with a model call.</td>
+          <td>If a source is provided, the Role Model Loop passes the already normalized <code>USER_MESSAGE</code> event into the Character State Engine read contract after <code>validate_normalized_user_message_event()</code> succeeds, and the CSE-owned request builder creates one <code>CurrentCharacterStateRequest</code>.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>The orchestrator preserves one <code>trace_id</code> and one <code>event_id</code> across the normalized event, user visible projection, Role Model Loop result, assistant visible reply commit, raw log entries, and final result envelope.</td>
+          <td>The source is called at most once per role-model turn and before the model adapter receives input.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>After successful intake, the orchestrator calls the existing user visible message commit path exactly once before calling the model.</td>
+          <td>The source response is validated by the tiny Character State Engine read module into the minimal <code>CharacterRuntimeStateSnapshot</code> shape and mapped to <code>DecisionContext.character_snapshot.living_state_brief</code>.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>If user visible message commit returns a rejected result, the orchestrator stops before the Role Model Loop and returns <code>user_turn_stopped</code>.</td>
+          <td>The living-state brief preserves <code>trace_id</code> and <code>event_id</code> only through the surrounding <code>DecisionContext</code>; the state snapshot itself must not claim to be the current event.</td>
+        </tr>
+        <tr>
+          <td>FR-6a</td>
+          <td>The current-state source is bound by the caller to the active character. The Role Model Loop and user-turn orchestrator must not infer, hard-code, or globally look up <code>character_id</code>.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>For a valid projected user message, the orchestrator calls <code>run_role_model_turn()</code> exactly once with the normalized event, injected fake adapter, same raw event log, same clock, same ID generator, and a recent visible message source backed by visible conversation records.</td>
+          <td><code>render_role_model_input()</code> validates and preserves <code>living_state_brief</code> when present, and still rejects unknown fields in <code>DecisionContext</code> and <code>character_snapshot</code>.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>The current user message may already be present in the visible conversation log before context is built, but it must not be duplicated into <code>recent_visible_messages</code>; the existing current-event exclusion rules remain authoritative.</td>
+          <td><code>run_role_model_turn()</code> passes the optional current-state source into context building without changing model adapter semantics, failure logging, or parsed decision behavior.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>Malformed model output or adapter exceptions keep the existing Role Model Loop failure behavior and must not append an assistant visible reply.</td>
+          <td><code>run_user_message_turn()</code> accepts the optional current-state source and passes it through to the Role Model Loop without changing Runtime Kernel intake, user visible projection, recent visible source construction, or visible reply commit ordering.</td>
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>When the Role Model Loop returns <code>decision_ready_for_commit</code>, the orchestrator calls the existing assistant visible reply commit path exactly once.</td>
+          <td>Malformed source requests, malformed source responses, unsupported extra fields, empty strings where required, invalid timestamps, or invalid <code>source_event_ids</code> fail before the adapter is called.</td>
         </tr>
         <tr>
           <td>FR-11</td>
-          <td>If assistant visible reply commit returns a rejected result, the orchestrator returns <code>user_turn_stopped</code> and does not emit a fallback message.</td>
+          <td>A state-source validation failure does not append a dedicated raw log entry in this slice and does not append an assistant visible reply.</td>
         </tr>
         <tr>
           <td>FR-12</td>
-          <td>On success, the raw log append order is deterministic for this slice: <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>visible_reply_committed</code>.</td>
+          <td>Successful user turns with a state source keep the MVP-007 raw log order: <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>visible_reply_committed</code>.</td>
         </tr>
         <tr>
           <td>FR-13</td>
-          <td>On success, visible conversation append order is deterministic: committed user visible message first, committed assistant visible reply second.</td>
-        </tr>
-        <tr>
-          <td>FR-14</td>
-          <td>The final success result returns copied nested result snapshots and the committed <code>message_id</code> / <code>output_id</code> pair.</td>
+          <td>The final <code>UserMessageTurnResult</code> envelope remains unchanged except that nested role-model input snapshots in raw logs and adapter calls include the living-state brief.</td>
         </tr>
       </tbody>
     </table>
@@ -249,110 +233,102 @@
     <h2>Non-Functional Requirements</h2>
     <ul>
       <li>Use only Python standard library behavior; do not add dependencies.</li>
-      <li>Keep runtime behavior deterministic under injected clock, ID generator, fake model adapter, raw log, and visible conversation fake.</li>
-      <li>Do not call files, databases, network services, shell commands, live model providers, or system clocks from tests.</li>
-      <li>Keep implementation small and local; add at most one orchestration module plus the smallest Runtime Kernel intake helper needed to share normalized intake.</li>
-      <li>Do not duplicate Runtime Kernel normalize, append, or route code in the orchestrator. Extract or reuse a shared helper so <code>RuntimeKernel.handle_event()</code> and the orchestrator cannot drift.</li>
-      <li>Reuse existing boundary functions and validators instead of copying their validation logic into the orchestrator.</li>
-      <li>Keep failure behavior explicit and testable; do not hide runtime failures behind character language.</li>
+      <li>Keep all tests deterministic under injected fake source, fake model adapter, fake raw log, fake visible conversation, fake clock, and fake ID generator.</li>
+      <li>Reuse existing validation helpers from <code>runtime.contracts</code>: <code>reject_extra_keys</code>, <code>require_equal</code>, <code>require_string</code>, <code>require_optional_string</code>, and <code>validate_iso8601_timestamp</code>.</li>
+      <li>Reuse existing constants and behavior from <code>role_model.loop</code>, including <code>USER_MESSAGE_VISIBLE_REPLY_CALL</code>, <code>ROLE_MODEL_INSTRUCTIONS</code>, <code>RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES</code>, <code>RECENT_VISIBLE_MESSAGES_MAX_MESSAGES</code>, and <code>RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS</code>.</li>
+      <li>Do not duplicate Runtime Kernel normalization, route, or raw-log append logic.</li>
+      <li>Keep implementation small and local; add only the Character State Engine read contract plus the optional Role Model Loop and user-turn plumbing required by tests.</li>
+      <li>Copy source-provided snapshots before storing them in context and copy rendered model input before handing it to the adapter, preserving existing mutation isolation expectations.</li>
+      <li>Keep error behavior explicit and testable; do not hide validation failures behind character language.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>A valid <code>USER_MESSAGE</code> turn with a fake adapter returns <code>user_turn_committed</code>.</li>
-      <li>Runtime Kernel route semantics for <code>USER_MESSAGE</code> are updated to <code>model_needed = true</code> and <code>next_step = "user_turn"</code> through a tested shared route path.</li>
-      <li>The final result carries one stable <code>trace_id</code> and <code>event_id</code> through all nested results.</li>
-      <li>The raw log records one runtime intake, one user visible message commit, one role-model turn completion, and one assistant visible reply commit in order.</li>
-      <li>The visible conversation fake receives exactly two appends in order: user message, assistant reply.</li>
-      <li>Existing prior visible records flow into the Role Model Loop through <code>VisibleConversationRecentMessagesSource</code>.</li>
-      <li>The current user message is not duplicated in <code>recent_visible_messages</code> because it remains the current event.</li>
-      <li>Malformed initial input stops before raw logs, visible appends, and model calls according to the existing Runtime Kernel validation behavior.</li>
-      <li>Malformed model output appends the existing role-model failed log and does not append an assistant visible reply.</li>
-      <li>No concrete storage, state engine, retrieval, tool, Live2D, scheduler, background worker, or external service is added.</li>
+      <li>Existing MVP-001 through MVP-007 tests continue to pass without requiring a current-state source.</li>
+      <li>A valid <code>USER_MESSAGE</code> role-model turn with a fake current-state source includes <code>living_state_brief</code> in the rendered model input.</li>
+      <li>The fake source receives exactly one request with schema version, trace ID, event ID, event type, optional user ID, and optional conversation ID, and no <code>character_id</code>.</li>
+      <li>The spec is enforced without hidden global character lookup or hard-coded character ID behavior.</li>
+      <li>A valid user turn still commits one user visible message and one assistant visible reply in the MVP-007 order.</li>
+      <li><code>allowed_actions</code> remains exactly <code>["visible_reply"]</code>.</li>
+      <li>Malformed current-state source output raises a validation error before adapter call and before assistant visible reply commit.</li>
+      <li>Rendered input validation rejects extra fields in the living-state brief and character snapshot.</li>
+      <li>No concrete state storage, state commit, state patch action, virtual body, incidents, scheduled directives, retrieval, tools, Live2D, scheduler, or external service is added.</li>
       <li>Future ideas discovered during planning are recorded in <a href="future-slices.html">future-slices.html</a>.</li>
-      <li>The development journal records files touched, tests run, review notes, and next action.</li>
+      <li>The development journal records files touched, checks run, review notes, and next action.</li>
+    </ul>
+
+    <h2>Implementation Notes</h2>
+    <ul>
+      <li>Implemented a tiny Character State Engine read contract in <code>src/character/state/current.py</code> for <code>CurrentCharacterStateRequest</code>, <code>CharacterRuntimeStateSnapshot</code>, and <code>living_state_brief</code> validation.</li>
+      <li>Added optional <code>current_state_source</code> plumbing to <code>build_decision_context()</code>, <code>run_role_model_turn()</code>, and <code>run_user_message_turn()</code>.</li>
+      <li>Kept the MVP-007 turn order and result envelope unchanged; successful state-backed turns still append <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, then <code>visible_reply_committed</code>.</li>
+      <li>Malformed current-state output fails before the adapter call and before assistant visible reply commit. No state store, state patch, virtual body, incident, retrieval, tool, Live2D, scheduler, or new model action was added.</li>
+      <li>Pull request: <a href="https://github.com/QuellaMC/Project02/pull/8">PR #8</a>.</li>
+      <li>Implementation journal: <a href="../develop-journal/2026-05-17/002-mvp-008-implementation.html">2026-05-17 - MVP-008 implementation</a>.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li>Builds a success result envelope with copied nested results and stable IDs.</li>
-      <li>Stops before the model when user visible message commit returns a rejected result.</li>
-      <li>Stops after role-model success when assistant visible reply commit returns a rejected result.</li>
-      <li>Rejects or propagates malformed event input through the existing Runtime Kernel validation path.</li>
-      <li>Preserves copy isolation for visible record snapshots and returned result details.</li>
+      <li><code>build_decision_context()</code> without a current-state source preserves the exact MVP-007 minimal context.</li>
+      <li><code>build_decision_context()</code> with a fake source sends the expected <code>CurrentCharacterStateRequest</code>.</li>
+      <li><code>build_decision_context()</code> includes a normalized <code>living_state_brief</code> when the fake source returns a valid snapshot.</li>
+      <li><code>render_role_model_input()</code> accepts the valid living-state brief and rejects extra or malformed fields.</li>
+      <li>Malformed snapshot cases cover missing required fields, empty strings, invalid <code>updated_at</code>, non-list <code>source_event_ids</code>, and non-string source event IDs.</li>
+      <li>Copy isolation: mutating the source response or rendered result after context construction cannot change stored context snapshots.</li>
     </ul>
 
     <h3>Integration Tests</h3>
     <ul>
-      <li>Runs one full user turn with in-memory raw log, in-memory visible conversation fake, deterministic IDs, deterministic clock, and fake model adapter.</li>
-      <li>Verifies <code>RuntimeKernel.handle_event()</code> and the orchestrator use the same intake helper and return the same MVP-007 route semantics for <code>USER_MESSAGE</code>.</li>
-      <li>Asserts raw log kind order: <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>visible_reply_committed</code>.</li>
-      <li>Asserts visible conversation append order and output IDs.</li>
-      <li>Seeds prior visible conversation records and verifies they appear in the rendered model input snapshot.</li>
-      <li>Verifies the current user message is excluded from <code>recent_visible_messages</code> even though it has already been projected to the visible conversation fake.</li>
-      <li>Verifies malformed model output appends <code>role_model_turn_failed</code> and no assistant visible reply.</li>
-      <li>Runs existing unit and integration tests for MVP-001 through MVP-006.</li>
+      <li>Run one full user turn with fake current-state source, fake recent visible conversation, fake adapter, fake raw log, deterministic IDs, and deterministic clock.</li>
+      <li>Assert the adapter receives <code>living_state_brief</code> and <code>recent_visible_messages</code> in the same <code>character_snapshot</code>.</li>
+      <li>Assert raw log order remains the MVP-007 order and includes the rendered model input snapshot with the living-state brief.</li>
+      <li>Assert malformed state-source output stops before adapter call and assistant visible reply append.</li>
+      <li>Run full unittest discovery for existing unit and integration tests.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li>Runtime Kernel owns event normalization, ID assignment, and the first raw event log append.</li>
-      <li>Commit and Effects remains the only boundary that appends visible user and assistant records.</li>
-      <li>Role Model Loop remains the only boundary that renders model input, calls the adapter, parses output, and logs model success/failure.</li>
-      <li>The MVP-006 visible recent source remains the only bridge from committed visible records to <code>RecentVisibleMessage</code>.</li>
-      <li>The orchestrator owns only the order of existing boundary calls and the top-level result envelope.</li>
-      <li>Add a shared Runtime Kernel intake helper only if needed to expose the normalized event and route; <code>RuntimeKernel.handle_event()</code> must call the same helper rather than keeping a parallel normalize/append/route path.</li>
-      <li>The only route-policy behavior change in this slice is the <code>USER_MESSAGE</code> route from logged-only foundation behavior to <code>model_needed = true</code> and <code>next_step = "user_turn"</code>.</li>
-      <li>Do not move existing context-building logic into a Character State Engine package in this slice.</li>
-      <li>Do not add a concrete combined read/write visible conversation store; tests can use a narrow fake that implements only the interfaces this slice already needs.</li>
-    </ul>
-
-    <h2>Implementation Results</h2>
-    <ul>
-      <li>Added a shared Runtime Kernel intake helper, <code>intake_runtime_event()</code>, that normalizes the event, appends the first raw log entry, routes the event, and is now used by <code>RuntimeKernel.handle_event()</code>.</li>
-      <li>Updated the authoritative <code>USER_MESSAGE</code> route to <code>model_needed = true</code> and <code>next_step = "user_turn"</code>; tests no longer assert the old MVP-001 <code>logged_only</code> route.</li>
-      <li>Added <code>runtime.user_turn.run_user_message_turn()</code> as the thin orchestrator that composes existing Runtime Kernel, user visible projection, MVP-006 recent visible source, Role Model Loop, and assistant visible reply commit boundaries.</li>
-      <li>Preserved existing boundary ownership: Commit and Effects still appends visible user and assistant records, Role Model Loop still calls/parses the fake adapter, and Runtime Kernel still owns intake and route policy.</li>
-      <li>Added unit tests for stop envelopes when user visible projection or assistant visible reply commit returns a rejected result.</li>
-      <li>Added integration tests for successful end-to-end composition, shared route semantics with <code>RuntimeKernel.handle_event()</code>, malformed input, malformed model output, raw log order, visible append order, copy isolation, and current-message exclusion from <code>recent_visible_messages</code>.</li>
-      <li>PR review fix: recent visible context now allows a completed prior turn to contribute both its user message and assistant reply even though they share the same <code>source_event_id</code>; duplicate protection is now based on <code>message_id</code> plus the <code>source_event_id</code> / <code>role</code> pair.</li>
-      <li>No concrete storage, live model provider, Character State Engine package, retrieval index, tool execution, Live2D behavior, scheduler, rollback, or reconciliation was added.</li>
-      <li>Current verification: Ruff lint and format checks, mypy, compileall, full unittest discovery, HTML parser checks, and <code>git diff --check</code> passed after implementation.</li>
+      <li>Runtime Kernel remains unchanged except for existing event intake behavior used by MVP-007.</li>
+      <li>Character State Engine ownership is represented by one tiny read module for the current-state source contract; expected path is <code>src/character/state/current.py</code> when production code is added. No durable state store is implemented in this slice.</li>
+      <li>The Role Model Loop may call the Character State Engine read contract while it still assembles the final <code>DecisionContext</code>, but it must not own or duplicate current-state request/response validation.</li>
+      <li>Commit and Effects Engine remains unchanged and continues to accept only the existing <code>visible_reply</code> decision path.</li>
+      <li>The user-turn orchestrator owns only optional dependency plumbing and must not inspect or mutate the state snapshot.</li>
+      <li>Raw Event Log behavior remains unchanged; rendered model input in <code>role_model_turn_completed</code> is enough audit evidence for this slice. Dedicated context-build logging is deferred until a debug/replay or formal context-builder slice.</li>
     </ul>
 
     <h2>Error And Fallback Behavior</h2>
     <ul>
-      <li>Malformed event input raises the existing Runtime Kernel validation error before any append.</li>
-      <li>User visible message commit rejection returns <code>user_turn_stopped</code> and skips model work.</li>
-      <li>Adapter exceptions and malformed model output use the existing Role Model Loop failed-log behavior and propagate the existing exception.</li>
-      <li>Assistant visible reply rejection returns <code>user_turn_stopped</code> after the rejection raw log is appended.</li>
+      <li>Missing current-state source is not an error; MVP-007 behavior remains valid for callers that do not have state yet.</li>
+      <li>Malformed current-state source output raises the existing role-model validation error type before adapter call.</li>
+      <li>Current-state source exceptions propagate and do not emit fallback character language.</li>
+      <li>Validation failures do not append assistant visible replies, state commits, or repair records.</li>
       <li>No rollback, retry, reconciliation, or user-visible fallback is added.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>MVP-007 is intentionally an orchestration slice with one route-policy correction, not a storage or state slice.</li>
-      <li>The sequence should prove that the MVP-001 through MVP-006 contracts already compose before expanding into Phase 2 character state.</li>
-      <li>Current-message exclusion is an important regression target because the user message is projected before the model sees recent conversation history.</li>
-      <li>Do not broaden this into route priority, interruption policy, real provider integration, context-build logging, or transaction semantics.</li>
-      <li>If implementation exposes a small kernel intake helper, document why the existing public API was insufficient, keep the helper specific to normalized intake plus route, and route <code>RuntimeKernel.handle_event()</code> through it.</li>
+      <li>MVP-008 is a read-only context slice, not a state mutation slice.</li>
+      <li>The slice intentionally chooses <code>living_state_brief</code> instead of a full <code>CharacterRuntimeState</code> object because the model needs compact current reality, not the source-of-truth record.</li>
+      <li>The only reason to touch <code>run_user_message_turn()</code> is optional dependency plumbing; orchestration order and result shape should stay stable.</li>
+      <li>The implementation should choose one tiny non-empty Character State Engine read module for state-source request/response validation and avoid creating empty future folders.</li>
+      <li>Do not broaden this into state patches, body drift, incident interruption, scheduled directives, retrieval, or debug/replay logging.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should the orchestrator eventually live under Runtime Kernel or a thin application service layer? MVP-007 should choose the smallest local placement and avoid package expansion until implementation pressure is real.</li>
-      <li>Should boundary failures eventually return one unified turn-failure envelope? Not in MVP-007; existing boundary failure behavior remains authoritative.</li>
+      <li>Should absent state eventually produce an explicit default state snapshot? Not in MVP-008; no source keeps the current context shape unchanged.</li>
+      <li>Should the tiny read module later grow into a full context builder? Not in MVP-008; promote that only when a formal context-builder slice owns source orchestration and context-build logging.</li>
+      <li>Should future state snapshots include a <code>state_version</code> separate from <code>schema_version</code>? Park until durable state storage exists.</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Richer Runtime Kernel route policy for priority, interruption, and non-user-message event families after the MVP-007 user-turn route is proven.</li>
-      <li>Concrete append-only <code>ConversationLog</code> storage with read/write semantics and idempotency keys.</li>
-      <li>Transaction or reconciliation handling for partial visible projection failures.</li>
-      <li>Character State Engine context-builder extraction after another context source or state slice exists.</li>
-      <li>Context-build raw logging once debug or replay needs source-read traces.</li>
-      <li>Real provider integration behind the existing <code>RoleModelAdapter</code> after the fake-adapter flow is stable.</li>
+      <li>Concrete <code>CharacterRuntimeStateStore</code> with durable snapshots and state versioning.</li>
+      <li>Model-proposed <code>state_patch</code> parsing and Commit and Effects validation.</li>
+      <li>Dedicated raw log entries for state snapshot reads and context-build decisions once replay/debug needs them.</li>
+      <li>Virtual body fields and deterministic body drift after living-state snapshot and commit behavior are proven.</li>
+      <li>Incident-aware context with active or interrupted incident briefs after the state read path is stable.</li>
     </ul>
   </main>
 </body>
