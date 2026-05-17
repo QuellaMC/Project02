@@ -83,6 +83,13 @@
       <li>Review follow-up 3: <code>/private/tmp/project02-mypy/bin/mypy src</code>: passed.</li>
       <li>Review follow-up 3: <code>git diff --check</code>: passed.</li>
       <li>Review follow-up 3: <code>python3 -m html.parser docs/develop-journal/2026-05-17/004-mvp-009-implementation.html</code>: passed.</li>
+      <li>Review follow-up 4: <code>python3 -m unittest tests.unit.test_living_state_patch_commit tests.integration.test_user_message_turn</code>: passed, 21 tests.</li>
+      <li>Review follow-up 4: <code>python3 -m unittest discover</code>: passed, 139 tests.</li>
+      <li>Review follow-up 4: <code>/private/tmp/project02-ruff/bin/ruff check .</code>: passed.</li>
+      <li>Review follow-up 4: <code>/private/tmp/project02-ruff/bin/ruff format --check .</code>: passed.</li>
+      <li>Review follow-up 4: <code>/private/tmp/project02-mypy/bin/mypy src</code>: passed.</li>
+      <li>Review follow-up 4: <code>git diff --check</code>: passed.</li>
+      <li>Review follow-up 4: <code>python3 -m html.parser docs/plan/active-slice.html docs/develop-journal/2026-05-17/004-mvp-009-implementation.html</code>: passed.</li>
     </ul>
 
     <h2>Review Notes</h2>
@@ -104,6 +111,7 @@
       <li>Added unit and integration coverage for bad store results stopping before assistant visible reply and appending <code>living_state_patch_rejected</code> without a <code>living_state_patch_committed</code> log.</li>
       <li>Parked the concrete durable <code>CharacterRuntimeStateStore</code> transaction requirement in <code>future-slices.html</code> as a blocker before real state storage.</li>
       <li>Added a direct shared-contract regression for whitespace-only living-state patch values such as <code>mood = " "</code> and <code>current_activity = "\n"</code>.</li>
+      <li>Added runtime-owned <code>commit_time</code> to the living-state patch prepare request so the fake store can build a snapshot with the exact timestamp later required by committed-snapshot consistency validation.</li>
     </ul>
 
     <h2>Next Action</h2>

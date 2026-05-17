@@ -368,6 +368,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                 "trace_id": "trace-current",
                 "event_id": "event-current",
                 "event_type": "USER_MESSAGE",
+                "commit_time": "2026-05-14T11:30:00+00:00",
                 "decision_action": "visible_reply",
                 "patch": {
                     "living_state": {

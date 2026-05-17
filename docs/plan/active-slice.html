@@ -185,6 +185,7 @@
   trace_id: string
   event_id: string
   event_type: "USER_MESSAGE"
+  commit_time: string
   decision_action: "visible_reply"
   patch: {
     living_state: {
@@ -266,7 +267,7 @@
         </tr>
         <tr>
           <td>FR-8a</td>
-          <td>The patch request must not accept model-authored <code>updated_at</code> or <code>source_event_ids</code>. The fake prepare boundary used in tests must return a committed snapshot candidate with deterministic runtime-owned <code>updated_at</code> and <code>source_event_ids</code> values derived from the injected test boundary and source event, not from the model patch. Commit and Effects must reject a shape-valid store result as <code>malformed_store_result</code> when the current <code>event_id</code> is absent from <code>source_event_ids</code>, any patched living-state field differs in the returned snapshot, or <code>updated_at</code> does not match the runtime commit timestamp / is older than the source event.</td>
+          <td>The patch request must not accept model-authored <code>updated_at</code> or <code>source_event_ids</code>. Commit and Effects adds a runtime-owned <code>commit_time</code> to the prepare request before calling the fake store so the returned snapshot can use the exact timestamp that will be validated and logged. The fake prepare boundary used in tests must return a committed snapshot candidate with deterministic runtime-owned <code>updated_at</code> and <code>source_event_ids</code> values derived from the injected test boundary and source event, not from the model patch. Commit and Effects must reject a shape-valid store result as <code>malformed_store_result</code> when the current <code>event_id</code> is absent from <code>source_event_ids</code>, any patched living-state field differs in the returned snapshot, or <code>updated_at</code> does not match the runtime commit timestamp / is older than the source event.</td>
         </tr>
         <tr>
           <td>FR-9</td>
@@ -306,7 +307,7 @@
       <li>Do not change <code>normalize_visible_reply_decision()</code> or <code>commit_visible_reply()</code> to accept <code>state_patch</code>. Use a visible-reply-only projection for the existing visible reply commit path.</li>
       <li>Render conditional role-model instructions: non-opted-in calls keep the existing visible-reply-only contract, while opted-in calls explicitly allow optional <code>state_patch.living_state</code> and forbid all other extra fields.</li>
       <li>Reuse MVP-008 state snapshot validation from <code>character.state.current</code> for committed snapshot validation instead of duplicating the snapshot contract.</li>
-      <li>Validate committed snapshot consistency after the fake prepare boundary returns: current event ID must be present, patched fields must match, and <code>updated_at</code> must be the runtime commit timestamp and not older than the source event.</li>
+      <li>Validate committed snapshot consistency after the fake prepare boundary returns: current event ID must be present, patched fields must match, and <code>updated_at</code> must be the runtime <code>commit_time</code> passed in the prepare request and not older than the source event.</li>
       <li>Keep state-patch commit code in the Commit and Effects boundary. The Role Model Loop may parse the proposed patch, but it must not commit it.</li>
       <li>Do not introduce a durable state store in MVP-009. A future concrete store must make state mutation and raw-log append one transaction or otherwise prove equivalent atomicity.</li>
       <li>Keep Runtime Kernel unchanged except for existing <code>USER_MESSAGE</code> route behavior.</li>
@@ -351,7 +352,7 @@
     <h3>Integration Tests</h3>
     <ul>
       <li>Run one full user turn with fake current-state source, fake living-state patch store, fake visible conversation, fake adapter, fake raw log, deterministic IDs, and deterministic clock.</li>
-      <li>Assert the fake prepare boundary receives exactly one patch request and that the nested patch does not include model-authored <code>character_id</code>, <code>updated_at</code>, or <code>source_event_ids</code>.</li>
+      <li>Assert the fake prepare boundary receives exactly one patch request with runtime-owned <code>commit_time</code> and that the nested patch does not include model-authored <code>character_id</code>, <code>updated_at</code>, or <code>source_event_ids</code>.</li>
       <li>Assert the fake prepare boundary returns a committed snapshot candidate with deterministic runtime-owned <code>updated_at</code> and <code>source_event_ids</code> derived from the test boundary and source event, and that those values are preserved in <code>living_state_patch_committed</code>.</li>
       <li>Assert a shape-valid but semantically inconsistent committed snapshot candidate stops before assistant visible reply, appends <code>living_state_patch_rejected</code>, and appends no <code>living_state_patch_committed</code> log.</li>
       <li>Assert raw log order for patch success is <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>living_state_patch_committed</code>, <code>visible_reply_committed</code>.</li>
@@ -375,7 +376,7 @@
     <ul>
       <li><code>runtime.contracts</code> now owns <code>normalize_living_state_patch()</code>, <code>normalize_role_model_turn_result()</code>, and the optional living-state patch decision normalizer.</li>
       <li><code>role_model.loop</code> now advertises <code>["visible_reply", "state_patch"]</code> only when explicitly opted in with a current-state source, renders conditional state-patch instructions, and rejects disallowed or malformed patch output as role-model parse failures.</li>
-      <li><code>commit_effects.living_state</code> adds the injected Commit and Effects patch boundary, patch request construction, committed/rejected raw logs, store rejection handling, committed snapshot validation through the MVP-008 state snapshot contract, and post-store consistency validation for source event IDs, patched fields, and runtime-owned timestamps.</li>
+      <li><code>commit_effects.living_state</code> adds the injected Commit and Effects patch boundary, patch request construction with runtime-owned <code>commit_time</code>, committed/rejected raw logs, store rejection handling, committed snapshot validation through the MVP-008 state snapshot contract, and post-store consistency validation for source event IDs, patched fields, and runtime-owned timestamps.</li>
       <li><code>runtime.user_turn</code> opts in only when both current-state read and living-state patch write boundaries are present, stops before assistant visible reply on patch rejection, and projects a visible-reply-only result before calling <code>commit_visible_reply()</code>.</li>
       <li><code>commit_visible_reply()</code> remains strict and does not accept <code>state_patch</code>.</li>
       <li>Runtime Kernel, concrete storage, body state, incidents, scheduled directives, retrieval, tools, Live2D, provider calls, and new event types remain unchanged.</li>

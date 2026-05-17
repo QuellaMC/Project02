@@ -187,6 +187,7 @@ class LivingStatePatchCommitTests(unittest.TestCase):
         store.requests[0]["patch"]["living_state"]["mood"] = "mutated request"
 
         self.assertEqual(result["status"], LIVING_STATE_PATCH_COMMITTED_STATUS)
+        self.assertEqual(store.requests[0]["commit_time"], "2026-05-17T09:00:00+00:00")
         self.assertEqual(
             store.requests[0]["patch"]["living_state"]["current_activity"],
             "answering the user",

@@ -135,6 +135,7 @@ def commit_living_state_patch(
                 "status": LIVING_STATE_PATCH_SKIPPED_STATUS,
             }
         commit_time = clock_timestamp(clock)
+        request["commit_time"] = commit_time
         try:
             committed_snapshot = living_state_patch_store.prepare_living_state_patch_commit(
                 deepcopy(request)
