@@ -12,10 +12,10 @@ from runtime.contracts import (
     USER_VISIBLE_MESSAGE_ROLE,
     VISIBLE_REPLY_ACTION,
     RuntimeEvent,
+    normalize_role_model_turn_result,
     normalize_visible_reply_decision,
     reject_extra_keys,
     require_equal,
-    require_matching_identity,
     require_string,
     validate_normalized_user_message_event,
 )
@@ -362,62 +362,17 @@ def _validate_role_model_result(
     *,
     source_event: RuntimeEvent,
 ) -> RoleModelTurnResult:
-    if not isinstance(role_model_result, Mapping):
-        raise CommitValidationError("role_model_result must be a mapping.")
-    _wrap_contract_error(
-        lambda: reject_extra_keys(
-            role_model_result,
-            {"trace_id", "event_id", "event_type", "model_called", "status", "decision"},
-            "RoleModelTurnResult",
-        )
-    )
-    _wrap_contract_error(
-        lambda: require_matching_identity(
-            role_model_result.get("trace_id"),
-            source_event["trace_id"],
-            "trace_id",
-        )
-    )
-    _wrap_contract_error(
-        lambda: require_matching_identity(
-            role_model_result.get("event_id"),
-            source_event["event_id"],
-            "event_id",
-        )
-    )
-    _wrap_contract_error(
-        lambda: require_equal(role_model_result.get("event_type"), USER_MESSAGE, "event_type")
-    )
-    if role_model_result.get("model_called") is not True:
-        raise CommitValidationError(
-            "model_called must be True.",
-            code="unsupported_result_status",
-        )
-    if role_model_result.get("status") != DECISION_READY_FOR_COMMIT_STATUS:
-        raise CommitValidationError(
-            f"status must be {DECISION_READY_FOR_COMMIT_STATUS!r}.",
-            code="unsupported_result_status",
-        )
-    decision = _validate_decision(role_model_result.get("decision"), source_event=source_event)
-
-    return {
-        "trace_id": source_event["trace_id"],
-        "event_id": source_event["event_id"],
-        "event_type": USER_MESSAGE,
-        "model_called": True,
-        "status": DECISION_READY_FOR_COMMIT_STATUS,
-        "decision": decision,
-    }
-
-
-def _validate_decision(decision: Any, *, source_event: RuntimeEvent) -> dict[str, Any]:
     return _wrap_contract_error(
-        lambda: normalize_visible_reply_decision(
-            decision,
-            trace_id=source_event["trace_id"],
-            event_id=source_event["event_id"],
-            require_attached_ids=True,
-            source_name="CharacterDecision",
+        lambda: normalize_role_model_turn_result(
+            role_model_result,
+            source_event=source_event,
+            decision_normalizer=lambda decision: normalize_visible_reply_decision(
+                decision,
+                trace_id=source_event["trace_id"],
+                event_id=source_event["event_id"],
+                require_attached_ids=True,
+                source_name="CharacterDecision",
+            ),
         )
     )
 

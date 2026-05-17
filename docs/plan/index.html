@@ -55,8 +55,9 @@
       <a href="https://github.com/QuellaMC/Project02/pull/6">PR #6</a>.
       MVP-007 is tracked in
       <a href="https://github.com/QuellaMC/Project02/pull/7">PR #7</a>.
-      MVP-008 is tracked in
+      MVP-008 is recorded from
       <a href="https://github.com/QuellaMC/Project02/pull/8">PR #8</a>.
+      MVP-009 is implemented locally and pending PR creation.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -75,18 +76,21 @@ flowchart LR
     RoleLog["role_model_turn_completed&lt;br/&gt;role_model_turn_failed"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, and MVP-008 integrated"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008 implemented; MVP-009 local"]
     Context["DecisionContext builder&lt;br/&gt;current event + recent messages + living_state_brief"]
     Render["RoleModelInput renderer&lt;br/&gt;strict context validation"]
     Adapter["Injected fake RoleModelAdapter"]
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply only"]
+    StatePatchParse["Optional state_patch.living_state parser&lt;br/&gt;MVP-009 local"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003 and MVP-005 implemented in PR #5"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003 and MVP-005 implemented; MVP-009 local"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
     UserProjection["User visible message projection&lt;br/&gt;raw log then visible transcript"]
+    StatePatchCommit["Living state patch commit/reject&lt;br/&gt;injected fake store"]
+    PatchStore["Injected living-state patch sink&lt;br/&gt;Commit and Effects-owned fake boundary"]
   end
 
   subgraph RecentContext["Context Source - MVP-004 and MVP-006 implemented"]
@@ -107,11 +111,14 @@ flowchart LR
   UserMessage --> Normalize --> SharedIntake --> RouteUpdate
   SharedIntake --> LogHelper --> RuntimeLog
   Normalize --> Context --> Render --> Adapter --> Parse
+  Parse --> StatePatchParse
   Normalize --> UserProjection
   UserProjection --> Conversation
   UserProjection --> CommitLog
   Conversation --> VisibleRecentSource --> RecentMessages --> Context
   CurrentStateSource --> LivingStateBrief --> Context
+  StatePatchParse --> StatePatchCommit --> PatchStore
+  StatePatchCommit --> LogHelper
   Parse --> LogHelper --> RoleLog
   Parse --> Commit --> Conversation
   Commit --> CommitLog
@@ -125,6 +132,7 @@ flowchart LR
   classDef implemented fill:#e7f1e9,stroke:#5c8a65,color:#172026;
   classDef active fill:#fff8e6,stroke:#b7832f,color:#172026;
   class Normalize,SharedIntake,RouteUpdate,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages,UserProjection,VisibleRecentSource,CurrentStateSource,LivingStateBrief,Turn,TurnResult implemented;
+  class StatePatchParse,StatePatchCommit,PatchStore active;
       </pre>
     </div>
 
@@ -139,9 +147,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-008 - Read-Only Living State Snapshot in DecisionContext</a></td>
-          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/8">PR #8</a> open</td>
-          <td>Add one optional injected current-state source and one compact <code>living_state_brief</code> to <code>DecisionContext.character_snapshot</code> for <code>USER_MESSAGE</code> turns, without state mutation, concrete storage, body, incidents, retrieval, tools, Live2D, or new model actions.</td>
+          <td><a href="active-slice.html">MVP-009 - Minimal Living State Patch Commit</a></td>
+          <td>Implemented locally; pending PR</td>
+          <td>Allow an opted-in <code>USER_MESSAGE</code> turn to parse one optional <code>state_patch.living_state</code> and commit it through an injected Commit and Effects state boundary, without concrete storage, body, incidents, retrieval, tools, Live2D, or new event types.</td>
         </tr>
       </tbody>
     </table>
@@ -156,6 +164,11 @@ flowchart LR
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td><a href="completed/mvp-008-read-only-living-state-snapshot-in-decisioncontext.html">MVP-008 - Read-Only Living State Snapshot in DecisionContext</a></td>
+          <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/8">PR #8</a></td>
+          <td>Add one optional injected current-state source and one compact <code>living_state_brief</code> to <code>DecisionContext.character_snapshot</code> for <code>USER_MESSAGE</code> turns, without state mutation, concrete storage, body, incidents, retrieval, tools, Live2D, or new model actions.</td>
+        </tr>
         <tr>
           <td><a href="completed/mvp-007-minimal-user-turn-orchestrator.html">MVP-007 - Minimal User Turn Orchestrator</a></td>
           <td>Implemented and tested; <a href="https://github.com/QuellaMC/Project02/pull/7">PR #7</a></td>
@@ -201,7 +214,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active MVP-008 read-only living-state snapshot slice are parked in
+      Ideas beyond the active MVP-009 living-state patch commit slice are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 

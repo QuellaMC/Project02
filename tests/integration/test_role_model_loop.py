@@ -402,6 +402,53 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
             living_state_brief(),
         )
 
+    def test_state_patch_opt_in_flows_to_adapter_result_and_success_log(self):
+        raw_log = RecordingRawEventLog()
+        current_state_source = FakeCurrentStateSource(current_state_snapshot())
+        adapter = FakeRoleModelAdapter(
+            json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {
+                        "living_state": {
+                            "current_activity": "answering the user",
+                            "mood": "attentive",
+                        }
+                    },
+                }
+            )
+        )
+
+        result = run_role_model_turn(
+            normalized_user_message_with_conversation(),
+            adapter=adapter,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=current_state_source,
+            allow_state_patch=True,
+        )
+
+        self.assertEqual(
+            adapter.inputs[0]["decision_context"]["allowed_actions"],
+            ["visible_reply", "state_patch"],
+        )
+        self.assertEqual(
+            result["decision"]["state_patch"],
+            {
+                "living_state": {
+                    "current_activity": "answering the user",
+                    "mood": "attentive",
+                }
+            },
+        )
+        self.assertEqual(
+            raw_log.entries[0]["data"]["decision"]["state_patch"],
+            result["decision"]["state_patch"],
+        )
+
     def test_commit_effects_visible_records_flow_to_context_and_success_log(self):
         raw_log = RecordingRawEventLog()
         user_event = prior_visible_source_event(

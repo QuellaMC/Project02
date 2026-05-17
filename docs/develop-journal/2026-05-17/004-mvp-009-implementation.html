@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-17 - MVP-009 Implementation</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-17 - MVP-009 Implementation</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Added shared runtime contract helpers for <code>normalize_living_state_patch()</code>, <code>normalize_role_model_turn_result()</code>, and visible replies with an optional living-state patch.</li>
+      <li>Extended the Role Model Loop so state-patch support is opt-in, state-aware instructions render only for opted-in calls, and malformed or disallowed patches fail as model-output parse errors.</li>
+      <li>Added <code>commit_effects.living_state</code> as the MVP-009 Commit and Effects boundary for injected living-state patch commits, skips, rejections, and raw log entries.</li>
+      <li>Wired <code>run_user_message_turn()</code> to opt in only when both current-state read and patch-write boundaries are present, stop on patch rejection, and project a visible-reply-only result before assistant reply commit.</li>
+      <li>Kept <code>commit_visible_reply()</code> strict by moving only the shared envelope validation into <code>runtime.contracts</code>; it still rejects decisions carrying <code>state_patch</code> unless user-turn projection strips the patch first.</li>
+    </ul>
+
+    <h2>Why It Was Needed</h2>
+    <p>
+      MVP-008 proved the read-only <code>living_state_brief</code> in
+      <code>DecisionContext</code>. MVP-009 takes the next narrow Phase 2 step:
+      the model may propose one optional <code>state_patch.living_state</code>,
+      while Commit and Effects owns validation, runtime-owned metadata, raw logs,
+      and the injected write boundary.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>src/runtime/contracts.py</code></li>
+      <li><code>src/role_model/loop.py</code></li>
+      <li><code>src/commit_effects/living_state.py</code></li>
+      <li><code>src/commit_effects/visible_reply.py</code></li>
+      <li><code>src/runtime/user_turn.py</code></li>
+      <li><code>tests/unit/test_runtime_contracts.py</code></li>
+      <li><code>tests/unit/test_role_model_loop.py</code></li>
+      <li><code>tests/unit/test_living_state_patch_commit.py</code></li>
+      <li><code>tests/unit/test_user_turn.py</code></li>
+      <li><code>tests/integration/test_role_model_loop.py</code></li>
+      <li><code>tests/integration/test_user_message_turn.py</code></li>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Tests And Checks Run</h2>
+    <ul>
+      <li><code>python3 -m unittest tests.unit.test_runtime_contracts tests.unit.test_role_model_loop tests.unit.test_living_state_patch_commit tests.unit.test_user_turn tests.integration.test_role_model_loop tests.integration.test_user_message_turn</code>: passed, 84 tests.</li>
+      <li><code>python3 -m unittest discover</code>: passed, 133 tests.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff check .</code>: passed.</li>
+      <li><code>/private/tmp/project02-mypy/bin/mypy src</code>: passed.</li>
+      <li><code>git diff --check</code>: passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>State patch opt-in requires both a current-state source and a living-state patch store; existing callers keep <code>allowed_actions = ["visible_reply"]</code>.</li>
+      <li>Patch validation is shared between Role Model Loop parsing and Commit and Effects validation through <code>runtime.contracts.normalize_living_state_patch()</code>.</li>
+      <li>Runtime-owned <code>updated_at</code> and <code>source_event_ids</code> come from the injected fake commit boundary's committed snapshot, not from the model patch.</li>
+      <li>Malformed model patches never produce <code>living_state_patch_rejected</code>; they stay under the existing <code>role_model_turn_failed</code> parse path.</li>
+      <li>No concrete state store, body state, incidents, directives, retrieval, tools, Live2D, provider calls, scheduler, or new runtime event type was added.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Create the MVP-009 pull request and then update the implementation graph
+      with the PR link.
+    </p>
+  </main>
+</body>
+</html>
