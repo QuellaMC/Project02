@@ -4,6 +4,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
+from character.state import (  # noqa: E402
+    CharacterRuntimeStateSnapshot as ExportedCharacterRuntimeStateSnapshot,
+)
+from character.state import __all__ as character_state_public_contracts  # noqa: E402
 from character.state.current import (  # noqa: E402
     build_current_character_state_request,
     build_living_state_brief,
@@ -41,6 +45,12 @@ def current_state_snapshot():
         "updated_at": "2026-05-14T11:29:00+00:00",
         "source_event_ids": ["event-prior-state"],
     }
+
+
+class PublicContractExportTests(unittest.TestCase):
+    def test_reexports_character_runtime_state_snapshot_contract(self):
+        self.assertIn("CharacterRuntimeStateSnapshot", character_state_public_contracts)
+        self.assertIsNotNone(ExportedCharacterRuntimeStateSnapshot)
 
 
 class CurrentCharacterStateRequestTests(unittest.TestCase):

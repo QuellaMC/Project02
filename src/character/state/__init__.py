@@ -1,6 +1,7 @@
 """Read contracts for the Character State Engine."""
 
 from character.state.current import (
+    CharacterRuntimeStateSnapshot,
     CurrentCharacterStateRequest,
     CurrentCharacterStateSource,
     LivingStateBrief,
@@ -13,6 +14,7 @@ from character.state.current import (
 )
 
 __all__ = [
+    "CharacterRuntimeStateSnapshot",
     "CurrentCharacterStateRequest",
     "CurrentCharacterStateSource",
     "LivingStateBrief",
