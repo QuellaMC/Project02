@@ -11,6 +11,7 @@ from role_model.loop import (  # noqa: E402
     RECENT_VISIBLE_MESSAGES_MAX_MESSAGES,
     RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS,
     ROLE_MODEL_INSTRUCTIONS,
+    STATE_PATCH_ROLE_MODEL_INSTRUCTIONS,
     RoleModelValidationError,
     VisibleConversationRecentMessagesSource,
     approximate_text_tokens,
@@ -322,6 +323,25 @@ class DecisionContextTests(unittest.TestCase):
             living_state_brief(),
         )
         self.assertEqual(context["allowed_actions"], ["visible_reply"])
+
+    def test_state_patch_opt_in_requires_and_advertises_current_state(self):
+        source = RecordingCurrentStateSource(current_state_snapshot())
+
+        context = build_decision_context(
+            normalized_user_message(),
+            current_state_source=source,
+            allow_state_patch=True,
+        )
+
+        self.assertEqual(context["allowed_actions"], ["visible_reply", "state_patch"])
+        self.assertEqual(
+            context["character_snapshot"]["living_state_brief"],
+            living_state_brief(),
+        )
+
+    def test_state_patch_opt_in_requires_current_state_source(self):
+        with self.assertRaisesRegex(RoleModelValidationError, "current_state_source"):
+            build_decision_context(normalized_user_message(), allow_state_patch=True)
 
     def test_current_state_source_is_called_without_conversation_id(self):
         event = normalized_user_message()
@@ -648,6 +668,22 @@ class DecisionContextTests(unittest.TestCase):
         )
         context["event"]["text"] = "mutated after render"
         self.assertEqual(first_input["decision_context"]["event"]["text"], "hello")
+
+    def test_renders_state_patch_output_contract_only_for_opted_in_context(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            allow_state_patch=True,
+        )
+
+        model_input = render_role_model_input(context)
+
+        self.assertEqual(model_input["instructions"], STATE_PATCH_ROLE_MODEL_INSTRUCTIONS)
+        self.assertIn("state_patch.living_state", model_input["instructions"])
+        self.assertEqual(
+            model_input["decision_context"]["allowed_actions"],
+            ["visible_reply", "state_patch"],
+        )
 
     def test_render_rejects_malformed_nested_decision_context_event(self):
         cases = [
@@ -1014,6 +1050,99 @@ class CharacterDecisionParserTests(unittest.TestCase):
                 "visible_reply": {"text": "Hi there."},
             },
         )
+
+    def test_parses_valid_visible_reply_with_allowed_living_state_patch(self):
+        model_input = render_role_model_input(
+            build_decision_context(
+                normalized_user_message(),
+                current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+                allow_state_patch=True,
+            )
+        )
+
+        decision = parse_character_decision(
+            model_input,
+            adapter_output(
+                json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": " Hi there. "},
+                        "state_patch": {
+                            "living_state": {
+                                "current_activity": " answering the user ",
+                                "mood": " attentive ",
+                            }
+                        },
+                    }
+                )
+            ),
+        )
+
+        self.assertEqual(
+            decision,
+            {
+                "schema_version": "0.1",
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "action": "visible_reply",
+                "visible_reply": {"text": "Hi there."},
+                "state_patch": {
+                    "living_state": {
+                        "current_activity": "answering the user",
+                        "mood": "attentive",
+                    }
+                },
+            },
+        )
+
+    def test_rejects_state_patch_when_model_input_did_not_allow_it(self):
+        with self.assertRaisesRegex(RoleModelValidationError, "state_patch"):
+            parse_character_decision(
+                role_model_input(),
+                adapter_output(
+                    json.dumps(
+                        {
+                            "schema_version": "0.1",
+                            "action": "visible_reply",
+                            "visible_reply": {"text": "hello"},
+                            "state_patch": {"living_state": {"mood": "focused"}},
+                        }
+                    )
+                ),
+            )
+
+    def test_rejects_malformed_allowed_living_state_patch(self):
+        model_input = render_role_model_input(
+            build_decision_context(
+                normalized_user_message(),
+                current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+                allow_state_patch=True,
+            )
+        )
+        cases = [
+            ({"living_state": {}}, "at least one"),
+            ({"living_state": {"mood": "   "}}, "mood"),
+            ({"living_state": {"body_state": "awake"}}, "body_state"),
+            ({"body_state": {"fatigue": "low"}}, "body_state"),
+        ]
+
+        for patch, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    parse_character_decision(
+                        model_input,
+                        adapter_output(
+                            json.dumps(
+                                {
+                                    "schema_version": "0.1",
+                                    "action": "visible_reply",
+                                    "visible_reply": {"text": "hello"},
+                                    "state_patch": patch,
+                                }
+                            )
+                        ),
+                    )
 
     def test_rejects_malformed_model_output(self):
         cases = [

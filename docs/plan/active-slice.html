@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-008 - Read-Only Living State Snapshot in DecisionContext</title>
+  <title>MVP-009 - Minimal Living State Patch Commit</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,13 +27,13 @@
 </head>
 <body>
   <main>
-    <h1>MVP-008 - Read-Only Living State Snapshot in DecisionContext</h1>
-    <p><span class="status">Status: implemented and tested; PR #8 open</span></p>
+    <h1>MVP-009 - Minimal Living State Patch Commit</h1>
+    <p><span class="status">Status: implemented and in review; PR #9</span></p>
     <p class="meta">
-      Created: 2026-05-16. Active slice path:
+      Created: 2026-05-17. Active slice path:
       <code>docs/plan/active-slice.html</code>.
       Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
-      Branch: <code>feature/mvp-008-current-state-snapshot</code>.
+      Branch: <code>feature/mvp-009-functional-spec</code>.
     </p>
 
     <h2>Source Context</h2>
@@ -44,14 +44,16 @@
       <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>,
       <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
       <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
+      <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>,
       <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>, and
       <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
     </p>
     <blockquote>
-      Phase 2 starts CharacterRuntimeState by adding current state, a state store,
-      and a state snapshot in <code>DecisionContext</code>. MVP-008 takes only the
-      read-side foothold: a current living-state snapshot can be included in the
-      model input, but no state mutation is accepted or committed yet.
+      Phase 2 adds CharacterRuntimeState, a state snapshot in
+      <code>DecisionContext</code>, and state patch validation and commit.
+      MVP-008 finished only the read-side snapshot. MVP-009 takes the next
+      smallest write-side step: one optional model-proposed living-state patch
+      can be validated and committed through Commit and Effects.
     </blockquote>
     <p>
       Local implementation truth comes from
@@ -60,88 +62,59 @@
       <a href="completed/mvp-003-minimal-visible-reply-commit.html">MVP-003</a>,
       <a href="completed/mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004</a>,
       <a href="completed/mvp-005-user-visible-message-projection.html">MVP-005</a>,
-      <a href="completed/mvp-006-visible-conversation-recent-source.html">MVP-006</a>, and
-      <a href="completed/mvp-007-minimal-user-turn-orchestrator.html">MVP-007</a>.
+      <a href="completed/mvp-006-visible-conversation-recent-source.html">MVP-006</a>,
+      <a href="completed/mvp-007-minimal-user-turn-orchestrator.html">MVP-007</a>, and
+      <a href="completed/mvp-008-read-only-living-state-snapshot-in-decisioncontext.html">MVP-008</a>.
       The current runtime can complete one <code>USER_MESSAGE</code> turn with
-      visible history and a fake model; the narrow next step is to give that
-      model call a small read-only character-state view.
+      visible history, a fake model, a visible reply commit, and an optional
+      read-only <code>living_state_brief</code>.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Add the smallest Character State Engine read boundary needed for Phase 2:
-      an injected current-state source can provide a validated living-state
-      snapshot to <code>DecisionContext.character_snapshot</code> for a
-      <code>USER_MESSAGE</code> turn. The slice must preserve the MVP-007 user
-      turn flow, keep <code>visible_reply</code> as the only allowed model action,
-      and avoid state commits, state patches, virtual body, incidents,
-      scheduled directives, retrieval, tools, Live2D, concrete storage, and live
-      model providers.
+      Extend the state-enabled <code>USER_MESSAGE</code> turn by allowing the
+      fake role model to return one optional <code>state_patch.living_state</code>
+      alongside the existing required <code>visible_reply</code>. The runtime
+      must validate the patch, commit it through an injected Commit and Effects
+      state boundary, append an auditable raw log entry, and preserve the
+      existing visible reply flow. This slice must not add concrete storage,
+      body state, incidents, scheduled directives, retrieval, tools, Live2D,
+      a live model provider, or a new runtime event family.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
       <li>One supported event type remains <code>USER_MESSAGE</code>.</li>
-      <li>One optional injected read-only current-state source for tests and callers that have state available.</li>
-      <li>One current-state request built from the normalized runtime event: schema version, trace ID, event ID, event type, optional user ID, and optional conversation ID.</li>
-      <li>One minimal living-state snapshot shape with <code>character_id</code>, <code>current_activity</code>, <code>mood</code>, <code>toward_user</code>, <code>updated_at</code>, and <code>source_event_ids</code>.</li>
-      <li>One optional <code>living_state_brief</code> field inside <code>DecisionContext.character_snapshot</code> when a source returns a snapshot.</li>
-      <li>Existing <code>recent_visible_messages</code> behavior, ordering, budgeting, and current-message exclusion remain authoritative.</li>
-      <li>Existing callers that do not provide a current-state source continue to produce the MVP-007 context shape with only <code>recent_visible_messages</code>.</li>
-      <li><code>run_user_message_turn()</code> passes the optional state source through to <code>run_role_model_turn()</code>; orchestration order otherwise stays unchanged.</li>
-      <li>Tests use fakes only; no database, file, network, clock, or model provider is introduced.</li>
-      <li>Returned context and result snapshots must preserve copy isolation from source and caller mutation.</li>
+      <li>One optional state-patch capability, enabled only when the caller provides both a current-state source and a living-state patch commit store.</li>
+      <li>One optional <code>state_patch.living_state</code> sibling on the existing visible-reply model decision.</li>
+      <li>One tiny living-state patch shape with only <code>current_activity</code>, <code>mood</code>, and <code>toward_user</code>; at least one field must be present.</li>
+      <li>One injected commit store or sink bound by the caller to the active character; runtime code must not infer or hard-code <code>character_id</code>.</li>
+      <li>One Commit and Effects state commit path that validates the patch and appends either <code>living_state_patch_committed</code> or <code>living_state_patch_rejected</code>.</li>
+      <li>Existing visible reply parsing, recent visible messages, current-state read, and user-turn orchestration remain authoritative.</li>
+      <li>Existing callers that do not opt into living-state patch commits continue to see MVP-008 behavior and <code>allowed_actions = ["visible_reply"]</code>.</li>
+      <li>Tests use fakes only; no database, file, network, live model provider, scheduler, or clock side effect is introduced beyond the existing injected clock.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No state mutation, state patch parsing, state commit, state rejection log, state migration, or persistence adapter.</li>
-      <li>No new <code>CharacterDecision</code> action and no change to <code>allowed_actions</code>; it remains <code>["visible_reply"]</code>.</li>
-      <li>No virtual body fields, body drift, need threshold event, active incident, incident queue, scheduled directive, active thread, retrieval index, summaries, compaction, replay UI, tools, Live2D, or assets.</li>
-      <li>No concrete <code>CharacterRuntimeStateStore</code>, database schema, transaction behavior, idempotency policy, or background worker.</li>
-      <li>No live model provider, provider metadata, streaming, retry, timeout, or prompt expansion beyond including the validated snapshot in the existing rendered input.</li>
-      <li>No dedicated context-build raw log entry. The existing role-model turn logs remain the audit record for the rendered model input in this slice.</li>
-      <li>No broad Character State Engine extraction. MVP-008 may add one tiny non-empty Character State Engine read module only for the current-state source protocol, request builder, response validator, and brief mapper required by active tests.</li>
-      <li>No changes to Runtime Kernel route policy beyond preserving the existing MVP-007 <code>USER_MESSAGE</code> route.</li>
+      <li>No concrete <code>CharacterRuntimeStateStore</code>, database schema, migration, transaction manager, idempotency key store, or persistence adapter.</li>
+      <li>No full <code>CharacterRuntimeState</code> expansion beyond the already proven living-state brief fields.</li>
+      <li>No model-proposed <code>body_state</code>, virtual body drift, need thresholds, active incident, incident queue, scheduled directive, active thread, retrieval, continuity write, tool request, Live2D status, asset, proactive message, scheduler, or background worker.</li>
+      <li>No standalone state-only model call and no <code>action = "state_patch"</code> output. The user-turn model decision still requires <code>action = "visible_reply"</code> and a valid visible reply.</li>
+      <li>No automatic default state creation when a state source is absent.</li>
+      <li>No rollback or reconciliation if the user visible message was already committed before a later state patch rejection.</li>
+      <li>No dedicated context-build log. The new raw logs cover only the state patch commit or rejection once the model has proposed a patch.</li>
+      <li>No broad Character State Engine context-builder extraction and no broad Role Model Loop output-contract redesign.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
     <p>
-      These TypeScript-style shapes define the intended behavior contract. MVP-008
-      should implement the contract in Python 3 and test it with <code>unittest</code>.
+      These TypeScript-style shapes define the intended behavior contract. MVP-009
+      should implement the contract in Python 3 and test it with
+      <code>unittest</code>.
     </p>
 
-    <h3>CurrentCharacterStateRequest</h3>
-    <pre><code>type CurrentCharacterStateRequest = {
-  schema_version: "0.1"
-  trace_id: string
-  event_id: string
-  event_type: "USER_MESSAGE"
-  user_id?: string
-  conversation_id?: string
-}</code></pre>
-    <p>
-      The request intentionally omits <code>character_id</code>. In MVP-008 the
-      injected current-state source is caller-bound to the active character and
-      returns that character's <code>character_id</code> in the snapshot. The
-      implementation must not perform a hidden global character lookup or
-      hard-code a default character ID.
-    </p>
-
-    <h3>CharacterRuntimeStateSnapshot</h3>
-    <pre><code>type CharacterRuntimeStateSnapshot = {
-  schema_version: "0.1"
-  character_id: string
-  living_state: {
-    current_activity: string
-    mood: string
-    toward_user: string
-  }
-  updated_at: string
-  source_event_ids: string[]
-}</code></pre>
-
-    <h3>MVP008 DecisionContext Excerpt</h3>
+    <h3>MVP009 DecisionContext Excerpt</h3>
     <pre><code>type DecisionContext = {
   schema_version: "0.1"
   trace_id: string
@@ -150,16 +123,97 @@
   event: UserMessageEventContext
   character_snapshot: {
     recent_visible_messages: RecentVisibleMessage[]
-    living_state_brief?: {
-      character_id: string
-      current_activity: string
-      mood: string
-      toward_user: string
-      updated_at: string
-      source_event_ids: string[]
+    living_state_brief?: LivingStateBrief
+  }
+  allowed_actions:
+    | ["visible_reply"]
+    | ["visible_reply", "state_patch"]
+}</code></pre>
+    <p>
+      The wider allowed-action list is available only for state-enabled calls.
+      A normal caller with no state commit boundary keeps the MVP-008
+      <code>["visible_reply"]</code> contract.
+    </p>
+
+    <h3>MVP009 CharacterDecision Excerpt</h3>
+    <pre><code>type CharacterDecision = {
+  schema_version: "0.1"
+  action: "visible_reply"
+  visible_reply: {
+    text: string
+  }
+  state_patch?: {
+    living_state: {
+      current_activity?: string
+      mood?: string
+      toward_user?: string
     }
   }
-  allowed_actions: ["visible_reply"]
+}</code></pre>
+    <p>
+      The model may not set <code>character_id</code>, <code>updated_at</code>,
+      <code>source_event_ids</code>, <code>body_state</code>, or any durable
+      store field. Commit and Effects owns timestamps, source event IDs, and the
+      committed record. The Role Model Loop must normalize this shape through a
+      shared <code>runtime.contracts</code> helper, not through ad hoc patch
+      validation local to the loop.
+    </p>
+
+    <h3>VisibleReplyCommitProjection</h3>
+    <pre><code>type VisibleReplyCommitProjection = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  action: "visible_reply"
+  visible_reply: {
+    text: string
+  }
+}</code></pre>
+    <p>
+      <code>commit_visible_reply()</code> keeps its existing strict
+      visible-reply-only contract. If the parsed decision contains
+      <code>state_patch</code>, the user-turn orchestrator or Commit and Effects
+      handoff must pass a visible-reply-only projection to the existing visible
+      reply commit path after the state patch commit succeeds. Do not broaden
+      <code>commit_visible_reply()</code> to accept state patch fields in this
+      slice.
+    </p>
+
+    <h3>LivingStatePatchCommitRequest</h3>
+    <pre><code>type LivingStatePatchCommitRequest = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  event_type: "USER_MESSAGE"
+  commit_time: string
+  decision_action: "visible_reply"
+  patch: {
+    living_state: {
+      current_activity?: string
+      mood?: string
+      toward_user?: string
+    }
+  }
+  user_id?: string
+  conversation_id?: string
+}</code></pre>
+
+    <h3>LivingStatePatchCommitResult</h3>
+    <pre><code>type LivingStatePatchCommitResult = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  event_type: "USER_MESSAGE"
+  status:
+    | "living_state_patch_committed"
+    | "living_state_patch_skipped"
+    | "living_state_patch_rejected"
+  committed_snapshot?: CharacterRuntimeStateSnapshot
+  failure?: {
+    stage: "living_state_patch_commit_validation" | "living_state_patch_store"
+    code: string
+    message: string
+  }
 }</code></pre>
 
     <h2>Functional Requirements</h2>
@@ -173,59 +227,71 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td><code>build_decision_context()</code> accepts an optional current-state source in addition to the existing recent visible message source.</td>
+          <td>Without state-patch opt-in, <code>build_decision_context()</code>, <code>render_role_model_input()</code>, <code>parse_character_decision()</code>, <code>run_role_model_turn()</code>, and <code>run_user_message_turn()</code> preserve MVP-008 behavior and accept only <code>visible_reply</code>.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>If no current-state source is provided, <code>build_decision_context()</code>, <code>render_role_model_input()</code>, <code>run_role_model_turn()</code>, and <code>run_user_message_turn()</code> preserve the MVP-007 behavior and context shape.</td>
+          <td>State-patch opt-in requires a current-state source for the model-facing <code>living_state_brief</code> and a separate injected commit store for the write. If either is absent, the user-turn path must not advertise <code>state_patch</code> as allowed.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>If a source is provided, the Role Model Loop passes the already normalized <code>USER_MESSAGE</code> event into the Character State Engine read contract after <code>validate_normalized_user_message_event()</code> succeeds, and the CSE-owned request builder creates one <code>CurrentCharacterStateRequest</code>.</td>
+          <td>For an opted-in call, <code>DecisionContext.allowed_actions</code> is exactly <code>["visible_reply", "state_patch"]</code>, and the rendered model input includes the MVP-008 <code>living_state_brief</code>.</td>
+        </tr>
+        <tr>
+          <td>FR-3a</td>
+          <td>For an opted-in call, <code>render_role_model_input()</code> uses a conditional output contract that explicitly permits optional <code>state_patch.living_state</code> with only <code>current_activity</code>, <code>mood</code>, and <code>toward_user</code>. The existing visible-reply-only instructions remain unchanged for non-opted-in calls.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>The source is called at most once per role-model turn and before the model adapter receives input.</td>
+          <td>The Role Model Loop still requires <code>action = "visible_reply"</code> and a non-empty <code>visible_reply.text</code>. A standalone <code>action = "state_patch"</code> remains invalid.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>The source response is validated by the tiny Character State Engine read module into the minimal <code>CharacterRuntimeStateSnapshot</code> shape and mapped to <code>DecisionContext.character_snapshot.living_state_brief</code>.</td>
+          <td>When <code>state_patch</code> is present and allowed, parsing accepts only <code>state_patch.living_state.current_activity</code>, <code>mood</code>, and <code>toward_user</code> as non-empty strings, with at least one field present, by reusing a shared <code>runtime.contracts.normalize_living_state_patch()</code> helper.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>The living-state brief preserves <code>trace_id</code> and <code>event_id</code> only through the surrounding <code>DecisionContext</code>; the state snapshot itself must not claim to be the current event.</td>
-        </tr>
-        <tr>
-          <td>FR-6a</td>
-          <td>The current-state source is bound by the caller to the active character. The Role Model Loop and user-turn orchestrator must not infer, hard-code, or globally look up <code>character_id</code>.</td>
+          <td>Parsing rejects malformed model output before any state commit path runs: <code>state_patch</code> when not allowed, unknown state-patch fields, empty strings, empty living-state patches, <code>body_state</code>, and future state families all produce the existing <code>role_model_turn_failed</code> parse behavior.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td><code>render_role_model_input()</code> validates and preserves <code>living_state_brief</code> when present, and still rejects unknown fields in <code>DecisionContext</code> and <code>character_snapshot</code>.</td>
+          <td>Commit and Effects validates the normalized <code>USER_MESSAGE</code> source event, role-model result status, trace ID, event ID, decision action, and already-normalized patch before calling the injected commit store. It must reuse <code>runtime.contracts.normalize_role_model_turn_result()</code> for the shared envelope and <code>runtime.contracts.normalize_living_state_patch()</code> for defensive patch validation rather than duplicating schema logic.</td>
+        </tr>
+        <tr>
+          <td>FR-7a</td>
+          <td>Before calling the existing <code>commit_visible_reply()</code> path for a decision that also contains <code>state_patch</code>, the user-turn path must build a <code>VisibleReplyCommitProjection</code> and validate it through the existing visible-reply-only contract.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td><code>run_role_model_turn()</code> passes the optional current-state source into context building without changing model adapter semantics, failure logging, or parsed decision behavior.</td>
+          <td>The injected MVP-009 patch boundary is a pending, non-durable prepare boundary called at most once per user turn with a deep-copied <code>LivingStatePatchCommitRequest</code>. Caller mutation after the call must not alter raw log snapshots or returned results.</td>
+        </tr>
+        <tr>
+          <td>FR-8a</td>
+          <td>The patch request must not accept model-authored <code>updated_at</code> or <code>source_event_ids</code>. Commit and Effects adds a runtime-owned <code>commit_time</code> to the prepare request before calling the fake store so the returned snapshot can use the exact timestamp that will be validated and logged. The fake prepare boundary used in tests must return a committed snapshot candidate with deterministic runtime-owned <code>updated_at</code> and <code>source_event_ids</code> values derived from the injected test boundary and source event, not from the model patch. Commit and Effects must reject a shape-valid store result as <code>malformed_store_result</code> when the current <code>event_id</code> is absent from <code>source_event_ids</code>, any patched living-state field differs in the returned snapshot, or <code>updated_at</code> does not match the runtime commit timestamp / is older than the source event.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td><code>run_user_message_turn()</code> accepts the optional current-state source and passes it through to the Role Model Loop without changing Runtime Kernel intake, user visible projection, recent visible source construction, or visible reply commit ordering.</td>
+          <td>On successful state patch commit, Commit and Effects appends one <code>living_state_patch_committed</code> raw log entry containing the source event, role-model result snapshot, normalized patch, and validated committed state snapshot returned by the fake prepare boundary. In MVP-009, the raw-log append is the commit point; the injected patch boundary must not durably mutate state before that append succeeds.</td>
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>Malformed source requests, malformed source responses, unsupported extra fields, empty strings where required, invalid timestamps, or invalid <code>source_event_ids</code> fail before the adapter is called.</td>
+          <td>If the model returns no state patch, the state commit path returns <code>living_state_patch_skipped</code>, does not call the commit store, and appends no state patch raw log entry.</td>
         </tr>
         <tr>
           <td>FR-11</td>
-          <td>A state-source validation failure does not append a dedicated raw log entry in this slice and does not append an assistant visible reply.</td>
+          <td>If normalized patch commit validation, the injected store, or committed-snapshot consistency validation rejects the patch, Commit and Effects appends one <code>living_state_patch_rejected</code> raw log entry and the user-turn orchestrator stops before assistant visible reply commit. Malformed model output is not logged as <code>living_state_patch_rejected</code>; it remains a Role Model Loop parse failure.</td>
         </tr>
         <tr>
           <td>FR-12</td>
-          <td>Successful user turns with a state source keep the MVP-007 raw log order: <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>visible_reply_committed</code>.</td>
+          <td>A successful opted-in user turn with a state patch appends raw logs in this deterministic order: <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>living_state_patch_committed</code>, <code>visible_reply_committed</code>.</td>
         </tr>
         <tr>
           <td>FR-13</td>
-          <td>The final <code>UserMessageTurnResult</code> envelope remains unchanged except that nested role-model input snapshots in raw logs and adapter calls include the living-state brief.</td>
+          <td>A successful opted-in user turn without a state patch preserves the MVP-008 raw log order and visible record order.</td>
+        </tr>
+        <tr>
+          <td>FR-14</td>
+          <td>The final <code>UserMessageTurnResult</code> may include <code>living_state_patch_result</code> when the commit path runs, but the existing nested boundary results and visible record IDs remain unchanged.</td>
         </tr>
       </tbody>
     </table>
@@ -233,103 +299,149 @@
     <h2>Non-Functional Requirements</h2>
     <ul>
       <li>Use only Python standard library behavior; do not add dependencies.</li>
-      <li>Keep all tests deterministic under injected fake source, fake model adapter, fake raw log, fake visible conversation, fake clock, and fake ID generator.</li>
-      <li>Reuse existing validation helpers from <code>runtime.contracts</code>: <code>reject_extra_keys</code>, <code>require_equal</code>, <code>require_string</code>, <code>require_optional_string</code>, and <code>validate_iso8601_timestamp</code>.</li>
-      <li>Reuse existing constants and behavior from <code>role_model.loop</code>, including <code>USER_MESSAGE_VISIBLE_REPLY_CALL</code>, <code>ROLE_MODEL_INSTRUCTIONS</code>, <code>RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES</code>, <code>RECENT_VISIBLE_MESSAGES_MAX_MESSAGES</code>, and <code>RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS</code>.</li>
-      <li>Do not duplicate Runtime Kernel normalization, route, or raw-log append logic.</li>
-      <li>Keep implementation small and local; add only the Character State Engine read contract plus the optional Role Model Loop and user-turn plumbing required by tests.</li>
-      <li>Copy source-provided snapshots before storing them in context and copy rendered model input before handing it to the adapter, preserving existing mutation isolation expectations.</li>
-      <li>Keep error behavior explicit and testable; do not hide validation failures behind character language.</li>
+      <li>Keep tests deterministic under injected fake adapter, fake raw log, fake visible conversation, fake current-state source, fake living-state patch store, fake clock, and fake ID generator.</li>
+      <li>Reuse existing shared validators from <code>runtime.contracts</code>, including <code>reject_extra_keys</code>, <code>require_equal</code>, <code>require_string</code>, <code>require_optional_string</code>, <code>require_matching_identity</code>, and <code>validate_normalized_user_message_event</code>.</li>
+      <li>Promote the current private <code>RoleModelTurnResult</code> envelope validation into <code>runtime.contracts.normalize_role_model_turn_result()</code> and reuse it from both the existing visible reply commit path and the new living-state patch commit path.</li>
+      <li>The shared <code>RoleModelTurnResult</code> normalizer must not broaden visible reply decision validation. It should validate envelope fields and identity while letting each consumer provide or select the appropriate decision normalizer: visible-reply-only projection for <code>commit_visible_reply()</code>, and visible reply plus optional patch for the state patch commit path.</li>
+      <li>Add one shared <code>runtime.contracts.normalize_living_state_patch()</code> helper for the MVP-009 patch shape and reuse it from both Role Model Loop parsing and Commit and Effects validation.</li>
+      <li>Do not change <code>normalize_visible_reply_decision()</code> or <code>commit_visible_reply()</code> to accept <code>state_patch</code>. Use a visible-reply-only projection for the existing visible reply commit path.</li>
+      <li>Render conditional role-model instructions: non-opted-in calls keep the existing visible-reply-only contract, while opted-in calls explicitly allow optional <code>state_patch.living_state</code> and forbid all other extra fields.</li>
+      <li>Reuse MVP-008 state snapshot validation from <code>character.state.current</code> for committed snapshot validation instead of duplicating the snapshot contract.</li>
+      <li>Validate committed snapshot consistency after the fake prepare boundary returns: current event ID must be present, patched fields must match, and <code>updated_at</code> must be the runtime <code>commit_time</code> passed in the prepare request and not older than the source event.</li>
+      <li>Keep state-patch commit code in the Commit and Effects boundary. The Role Model Loop may parse the proposed patch, but it must not commit it.</li>
+      <li>Do not introduce a durable state store in MVP-009. A future concrete store must make state mutation and raw-log append one transaction or otherwise prove equivalent atomicity.</li>
+      <li>Keep Runtime Kernel unchanged except for existing <code>USER_MESSAGE</code> route behavior.</li>
+      <li>Keep implementation small and local; add no placeholder modules, empty future folders, or speculative adapter layers.</li>
+      <li>Keep error behavior explicit and testable; do not hide validation failures behind character language or fallback replies.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>Existing MVP-001 through MVP-007 tests continue to pass without requiring a current-state source.</li>
-      <li>A valid <code>USER_MESSAGE</code> role-model turn with a fake current-state source includes <code>living_state_brief</code> in the rendered model input.</li>
-      <li>The fake source receives exactly one request with schema version, trace ID, event ID, event type, optional user ID, and optional conversation ID, and no <code>character_id</code>.</li>
-      <li>The spec is enforced without hidden global character lookup or hard-coded character ID behavior.</li>
-      <li>A valid user turn still commits one user visible message and one assistant visible reply in the MVP-007 order.</li>
-      <li><code>allowed_actions</code> remains exactly <code>["visible_reply"]</code>.</li>
-      <li>Malformed current-state source output raises a validation error before adapter call and before assistant visible reply commit.</li>
-      <li>Rendered input validation rejects extra fields in the living-state brief and character snapshot.</li>
-      <li>No concrete state storage, state commit, state patch action, virtual body, incidents, scheduled directives, retrieval, tools, Live2D, scheduler, or external service is added.</li>
+      <li>Existing MVP-001 through MVP-008 tests continue to pass without opting into state-patch commits.</li>
+      <li>A state-enabled fake model input advertises exactly <code>["visible_reply", "state_patch"]</code> and includes the read-only <code>living_state_brief</code>.</li>
+      <li>A state-enabled fake model input renders instructions that permit optional <code>state_patch.living_state</code>; non-state-enabled input keeps the visible-reply-only instructions.</li>
+      <li>A fake model output with valid visible reply plus valid living-state patch parses into one normalized <code>CharacterDecision</code>.</li>
+      <li>A model output state patch with future fields, empty values, missing living-state fields, or <code>body_state</code> is rejected as malformed model output before Commit and Effects runs.</li>
+      <li>The fake prepare boundary proves ownership of committed snapshot metadata by returning deterministic <code>updated_at</code> and <code>source_event_ids</code> values that were not present in the model patch, and Commit and Effects rejects shape-valid but semantically inconsistent snapshots.</li>
+      <li>A successful user turn with a patch calls the fake commit store once, appends <code>living_state_patch_committed</code>, then commits the assistant visible reply through a visible-reply-only projection.</li>
+      <li>A normalized patch commit/store rejection appends <code>living_state_patch_rejected</code>, returns a stopped user-turn result, and appends no assistant visible reply.</li>
+      <li>If raw-log append fails after the fake boundary prepares a valid snapshot, no durable state mutation has happened because MVP-009 exposes only a pending prepare boundary.</li>
+      <li>A user turn with no state patch remains compatible with the MVP-008 visible reply flow and raw log order.</li>
+      <li>No concrete storage, state versioning, body state, incidents, scheduled directives, retrieval, tools, Live2D, scheduler, live provider, or new event type is added.</li>
       <li>Future ideas discovered during planning are recorded in <a href="future-slices.html">future-slices.html</a>.</li>
       <li>The development journal records files touched, checks run, review notes, and next action.</li>
-    </ul>
-
-    <h2>Implementation Notes</h2>
-    <ul>
-      <li>Implemented a tiny Character State Engine read contract in <code>src/character/state/current.py</code> for <code>CurrentCharacterStateRequest</code>, <code>CharacterRuntimeStateSnapshot</code>, and <code>living_state_brief</code> validation.</li>
-      <li>Added optional <code>current_state_source</code> plumbing to <code>build_decision_context()</code>, <code>run_role_model_turn()</code>, and <code>run_user_message_turn()</code>.</li>
-      <li>Kept the MVP-007 turn order and result envelope unchanged; successful state-backed turns still append <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, then <code>visible_reply_committed</code>.</li>
-      <li>Malformed current-state output fails before the adapter call and before assistant visible reply commit. No state store, state patch, virtual body, incident, retrieval, tool, Live2D, scheduler, or new model action was added.</li>
-      <li>Pull request: <a href="https://github.com/QuellaMC/Project02/pull/8">PR #8</a>.</li>
-      <li>Implementation journal: <a href="../develop-journal/2026-05-17/002-mvp-008-implementation.html">2026-05-17 - MVP-008 implementation</a>.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li><code>build_decision_context()</code> without a current-state source preserves the exact MVP-007 minimal context.</li>
-      <li><code>build_decision_context()</code> with a fake source sends the expected <code>CurrentCharacterStateRequest</code>.</li>
-      <li><code>build_decision_context()</code> includes a normalized <code>living_state_brief</code> when the fake source returns a valid snapshot.</li>
-      <li><code>render_role_model_input()</code> accepts the valid living-state brief and rejects extra or malformed fields.</li>
-      <li>Malformed snapshot cases cover missing required fields, empty strings, invalid <code>updated_at</code>, non-list <code>source_event_ids</code>, and non-string source event IDs.</li>
-      <li>Copy isolation: mutating the source response or rendered result after context construction cannot change stored context snapshots.</li>
+      <li><code>build_decision_context()</code> without state-patch opt-in preserves the exact MVP-008 allowed actions.</li>
+      <li><code>build_decision_context()</code> with state-patch opt-in emits <code>["visible_reply", "state_patch"]</code> and still validates <code>living_state_brief</code>.</li>
+      <li><code>render_role_model_input()</code> uses visible-reply-only instructions without state-patch opt-in and state-aware instructions with opt-in.</li>
+      <li><code>parse_character_decision()</code> accepts visible reply plus valid living-state patch only when the rendered input allowed it.</li>
+      <li><code>parse_character_decision()</code> rejects standalone <code>state_patch</code>, disallowed patch output, extra fields, empty strings, empty patches, and <code>body_state</code>.</li>
+      <li><code>runtime.contracts.normalize_role_model_turn_result()</code> is covered directly and reused by the visible reply commit tests and living-state patch commit tests, proving the envelope validation is not copied.</li>
+      <li><code>runtime.contracts.normalize_living_state_patch()</code> is covered directly and reused by Role Model Loop and Commit and Effects tests.</li>
+      <li><code>commit_living_state_patch()</code> validates source event, role-model result identity, decision status, and patch shape before calling the fake prepare boundary.</li>
+      <li><code>commit_living_state_patch()</code> rejects shape-valid but inconsistent store results as <code>malformed_store_result</code> when source event IDs, patched fields, or runtime-owned timestamps do not line up.</li>
+      <li><code>commit_living_state_patch()</code> treats raw-log append as the MVP-009 commit point; a regression covers raw-log append failure after fake-store prepare.</li>
+      <li>A visible-reply-only projection from a decision containing <code>state_patch</code> still passes the existing <code>normalize_visible_reply_decision()</code> and <code>commit_visible_reply()</code> validation path.</li>
+      <li>Committed and rejected state patch raw log builders deep-copy source event, role-model result, patch, committed snapshot, and failure data.</li>
     </ul>
 
     <h3>Integration Tests</h3>
     <ul>
-      <li>Run one full user turn with fake current-state source, fake recent visible conversation, fake adapter, fake raw log, deterministic IDs, and deterministic clock.</li>
-      <li>Assert the adapter receives <code>living_state_brief</code> and <code>recent_visible_messages</code> in the same <code>character_snapshot</code>.</li>
-      <li>Assert raw log order remains the MVP-007 order and includes the rendered model input snapshot with the living-state brief.</li>
-      <li>Assert malformed state-source output stops before adapter call and assistant visible reply append.</li>
+      <li>Run one full user turn with fake current-state source, fake living-state patch store, fake visible conversation, fake adapter, fake raw log, deterministic IDs, and deterministic clock.</li>
+      <li>Assert the fake prepare boundary receives exactly one patch request with runtime-owned <code>commit_time</code> and that the nested patch does not include model-authored <code>character_id</code>, <code>updated_at</code>, or <code>source_event_ids</code>.</li>
+      <li>Assert the fake prepare boundary returns a committed snapshot candidate with deterministic runtime-owned <code>updated_at</code> and <code>source_event_ids</code> derived from the test boundary and source event, and that those values are preserved in <code>living_state_patch_committed</code>.</li>
+      <li>Assert a shape-valid but semantically inconsistent committed snapshot candidate stops before assistant visible reply, appends <code>living_state_patch_rejected</code>, and appends no <code>living_state_patch_committed</code> log.</li>
+      <li>Assert raw log order for patch success is <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>living_state_patch_committed</code>, <code>visible_reply_committed</code>.</li>
+      <li>Assert malformed model-output patch fields produce the existing <code>role_model_turn_failed</code> parse log and no <code>living_state_patch_rejected</code> log.</li>
+      <li>Assert a normalized patch store rejection stops before assistant visible reply append and appends <code>living_state_patch_rejected</code>.</li>
+      <li>Assert a no-patch model decision with state opt-in still commits the visible reply and appends no state patch log.</li>
       <li>Run full unittest discovery for existing unit and integration tests.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li>Runtime Kernel remains unchanged except for existing event intake behavior used by MVP-007.</li>
-      <li>Character State Engine ownership is represented by one tiny read module for the current-state source contract; expected path is <code>src/character/state/current.py</code> when production code is added. No durable state store is implemented in this slice.</li>
-      <li>The Role Model Loop may call the Character State Engine read contract while it still assembles the final <code>DecisionContext</code>, but it must not own or duplicate current-state request/response validation.</li>
-      <li>Commit and Effects Engine remains unchanged and continues to accept only the existing <code>visible_reply</code> decision path.</li>
-      <li>The user-turn orchestrator owns only optional dependency plumbing and must not inspect or mutate the state snapshot.</li>
-      <li>Raw Event Log behavior remains unchanged; rendered model input in <code>role_model_turn_completed</code> is enough audit evidence for this slice. Dedicated context-build logging is deferred until a debug/replay or formal context-builder slice.</li>
+      <li>Runtime Kernel remains unchanged; it still only routes <code>USER_MESSAGE</code> to the existing user-turn path.</li>
+      <li>Character State Engine remains read-side for this slice. It may continue to own current-state request and snapshot validation, but it must not commit durable state.</li>
+      <li>Role Model Loop may add opt-in allowed-action rendering and parser support for optional <code>state_patch.living_state</code>. It must not call a state store or mutate state.</li>
+      <li>Commit and Effects owns the new living-state patch validation, commit request construction, fake-store prepare call, committed-snapshot consistency validation, committed/rejected raw log entries, and returned commit result.</li>
+      <li>User-turn orchestration may pass the optional state patch capability through, call the state commit path after the role-model turn, then pass a visible-reply-only projection into assistant visible reply commit.</li>
+      <li>Raw Event Log adds only state patch commit/reject entries when a patch is proposed or rejected. No context-build or state-read log kind is added.</li>
+    </ul>
+
+    <h2>Implementation Notes</h2>
+    <ul>
+      <li><code>runtime.contracts</code> now owns <code>normalize_living_state_patch()</code>, <code>normalize_role_model_turn_result()</code>, and the optional living-state patch decision normalizer.</li>
+      <li><code>role_model.loop</code> now advertises <code>["visible_reply", "state_patch"]</code> only when explicitly opted in with a current-state source, renders conditional state-patch instructions, and rejects disallowed or malformed patch output as role-model parse failures.</li>
+      <li><code>commit_effects.living_state</code> adds the injected Commit and Effects patch boundary, patch request construction with runtime-owned <code>commit_time</code>, committed/rejected raw logs, store rejection handling, committed snapshot validation through the MVP-008 state snapshot contract, and post-store consistency validation for source event IDs, patched fields, and runtime-owned timestamps.</li>
+      <li><code>runtime.user_turn</code> opts in only when both current-state read and living-state patch write boundaries are present, stops before assistant visible reply on patch rejection, and projects a visible-reply-only result before calling <code>commit_visible_reply()</code>.</li>
+      <li><code>commit_visible_reply()</code> remains strict and does not accept <code>state_patch</code>.</li>
+      <li>Runtime Kernel, concrete storage, body state, incidents, scheduled directives, retrieval, tools, Live2D, provider calls, and new event types remain unchanged.</li>
+    </ul>
+
+    <h2>Checks Run</h2>
+    <ul>
+      <li><code>python3 -m unittest tests.unit.test_runtime_contracts tests.unit.test_role_model_loop tests.unit.test_living_state_patch_commit tests.unit.test_user_turn tests.integration.test_role_model_loop tests.integration.test_user_message_turn</code>: passed, 84 tests.</li>
+      <li><code>python3 -m unittest discover</code>: passed, 133 tests.</li>
+      <li><code>/private/tmp/project02-ruff/bin/ruff check .</code>: passed.</li>
+      <li><code>/private/tmp/project02-mypy/bin/mypy src</code>: passed.</li>
+      <li><code>git diff --check</code>: passed.</li>
     </ul>
 
     <h2>Error And Fallback Behavior</h2>
     <ul>
-      <li>Missing current-state source is not an error; MVP-007 behavior remains valid for callers that do not have state yet.</li>
-      <li>Malformed current-state source output raises the existing role-model validation error type before adapter call.</li>
-      <li>Current-state source exceptions propagate and do not emit fallback character language.</li>
-      <li>Validation failures do not append assistant visible replies, state commits, or repair records.</li>
-      <li>No rollback, retry, reconciliation, or user-visible fallback is added.</li>
+      <li>Missing state-patch opt-in is not an error; MVP-008 visible reply behavior remains valid.</li>
+      <li>A model-proposed state patch when <code>state_patch</code> was not allowed raises the existing role-model validation error before any commit path runs.</li>
+      <li>Malformed patch output fails in Role Model Loop parsing, appends the existing <code>role_model_turn_failed</code> log, and never calls the injected commit store.</li>
+      <li>Normalized patch commit validation or injected store rejection returns <code>living_state_patch_rejected</code> and appends a rejection log; the user-turn path stops before assistant visible reply commit.</li>
+      <li>No rollback, retry, repair, reconciliation, or user-visible fallback message is added.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>MVP-008 is a read-only context slice, not a state mutation slice.</li>
-      <li>The slice intentionally chooses <code>living_state_brief</code> instead of a full <code>CharacterRuntimeState</code> object because the model needs compact current reality, not the source-of-truth record.</li>
-      <li>The only reason to touch <code>run_user_message_turn()</code> is optional dependency plumbing; orchestration order and result shape should stay stable.</li>
-      <li>The implementation should choose one tiny non-empty Character State Engine read module for state-source request/response validation and avoid creating empty future folders.</li>
-      <li>Do not broaden this into state patches, body drift, incident interruption, scheduled directives, retrieval, or debug/replay logging.</li>
+      <li>MVP-009 is the first write-side CharacterRuntimeState slice, but it is still an injected-boundary slice, not a concrete storage slice.</li>
+      <li>The model may propose only semantic living-state fields already visible in MVP-008. The runtime owns timestamps, source IDs, validation, and persistence.</li>
+      <li>Implementation tests should make timestamp and source-event ownership concrete through the fake prepare boundary: model output supplies only the patch fields, while the committed snapshot supplies runtime-owned <code>updated_at</code> and <code>source_event_ids</code>.</li>
+      <li>MVP-009's injected state boundary is intentionally non-durable until the raw log append succeeds. A future durable store slice must not reuse this as a concrete persistence transaction without adding atomic state+raw-log semantics.</li>
+      <li>Keep the existing visible reply action required so the user-turn output contract does not become a broad multi-action redesign.</li>
+      <li>Keep <code>commit_visible_reply()</code> strict and visible-reply-only; a projection is the compatibility boundary for decisions that also carry <code>state_patch</code>.</li>
+      <li>Extract shared <code>RoleModelTurnResult</code> envelope validation before adding the second Commit and Effects consumer so the living-state patch commit path does not copy the private validator from <code>visible_reply.py</code>.</li>
+      <li>Do not duplicate living-state patch validation between Role Model Loop and Commit and Effects; share the small helper in <code>runtime.contracts</code>.</li>
+      <li>If implementation pressure suggests adding state versions, transaction semantics, body state, incidents, or a concrete store, split those into future slices instead.</li>
+    </ul>
+
+    <h2>Residual Implementation Risks</h2>
+    <ul>
+      <li>Do not broaden <code>normalize_visible_reply_decision()</code> or <code>commit_visible_reply()</code> to accept <code>state_patch</code>. MVP-009 must use the visible-reply-only projection required above before the existing assistant visible reply commit path runs.</li>
+      <li>Do not copy the private <code>RoleModelTurnResult</code> validation from <code>commit_effects.visible_reply</code> into the state patch path. MVP-009 must extract and reuse a shared <code>runtime.contracts.normalize_role_model_turn_result()</code> helper first.</li>
+      <li>Do not implement separate living-state patch validators in <code>role_model.loop</code> and Commit and Effects. MVP-009 must put the patch shape in one shared <code>runtime.contracts.normalize_living_state_patch()</code> helper and reuse it from both boundaries.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should absent state eventually produce an explicit default state snapshot? Not in MVP-008; no source keeps the current context shape unchanged.</li>
-      <li>Should the tiny read module later grow into a full context builder? Not in MVP-008; promote that only when a formal context-builder slice owns source orchestration and context-build logging.</li>
-      <li>Should future state snapshots include a <code>state_version</code> separate from <code>schema_version</code>? Park until durable state storage exists.</li>
+      <li>Should the eventual durable store maintain a separate <code>state_version</code>? Not in MVP-009; fake store returns the MVP-008 snapshot shape only.</li>
+      <li>Should state patch commit and visible reply commit become one transaction? Not in MVP-009; no concrete store or transaction manager exists.</li>
+      <li>Should concrete state mutation and <code>living_state_patch_committed</code> raw-log append be one transaction? Yes, before any durable state store is introduced; MVP-009 explicitly defers this with a non-durable prepare boundary.</li>
+      <li>Should state patch be allowed without a visible reply in private calls? Not in MVP-009; that belongs to a later private life-event slice.</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Concrete <code>CharacterRuntimeStateStore</code> with durable snapshots and state versioning.</li>
-      <li>Model-proposed <code>state_patch</code> parsing and Commit and Effects validation.</li>
-      <li>Dedicated raw log entries for state snapshot reads and context-build decisions once replay/debug needs them.</li>
-      <li>Virtual body fields and deterministic body drift after living-state snapshot and commit behavior are proven.</li>
-      <li>Incident-aware context with active or interrupted incident briefs after the state read path is stable.</li>
+      <li>Concrete <code>CharacterRuntimeStateStore</code> with durable snapshots, state versioning, and transaction behavior.</li>
+      <li>Broader <code>LivingStateCurrent</code> fields such as <code>current_scene</code>, <code>energy</code>, <code>current_focus</code>, and <code>last_meaningful_change_at</code>.</li>
+      <li>State patch support for <code>body_state</code> after lazy virtual body is specified.</li>
+      <li>Private state-only calls for incident completion, need thresholds, and scheduled directives.</li>
+      <li>State patch replay and reconciliation once concrete stores and debug inspector exist.</li>
     </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Follow <a href="https://github.com/QuellaMC/Project02/pull/9">PR #9</a>
+      through CI and review.
+    </p>
   </main>
 </body>
 </html>

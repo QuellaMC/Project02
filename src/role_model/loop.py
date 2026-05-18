@@ -17,13 +17,14 @@ from runtime.contracts import (
     ASSISTANT_VISIBLE_REPLY_KIND,
     ASSISTANT_VISIBLE_REPLY_ROLE,
     DECISION_READY_FOR_COMMIT_STATUS,
+    STATE_PATCH_ACTION,
     USER_MESSAGE,
     USER_VISIBLE_MESSAGE_KIND,
     USER_VISIBLE_MESSAGE_ROLE,
     VISIBLE_REPLY_ACTION,
     ContractValidationError,
     RuntimeEvent,
-    normalize_visible_reply_decision,
+    normalize_visible_reply_decision_with_optional_living_state_patch,
     reject_extra_keys,
     require_equal,
     require_optional_string,
@@ -53,6 +54,13 @@ FAILURE_CODES_BY_STAGE = {
 ROLE_MODEL_INSTRUCTIONS = (
     "Return one JSON object only. The object must contain schema_version='0.1', "
     "action='visible_reply', and visible_reply.text as a non-empty string. "
+    "Do not include extra fields."
+)
+STATE_PATCH_ROLE_MODEL_INSTRUCTIONS = (
+    "Return one JSON object only. The object must contain schema_version='0.1', "
+    "action='visible_reply', and visible_reply.text as a non-empty string. "
+    "It may also include optional state_patch.living_state with only "
+    "current_activity, mood, and toward_user as non-empty strings. "
     "Do not include extra fields."
 )
 
@@ -125,10 +133,13 @@ def build_decision_context(
     *,
     recent_visible_messages_source: RecentVisibleMessagesSource | None = None,
     current_state_source: CurrentCharacterStateSource | None = None,
+    allow_state_patch: bool = False,
 ) -> DecisionContext:
     normalized_event = _wrap_contract_error(
         lambda: validate_normalized_user_message_event(event, source_name="event")
     )
+    if allow_state_patch and current_state_source is None:
+        raise RoleModelValidationError("allow_state_patch requires current_state_source.")
     payload = normalized_event["payload"]
 
     event_context = {
@@ -153,6 +164,10 @@ def build_decision_context(
     if living_state_brief is not None:
         character_snapshot["living_state_brief"] = living_state_brief
 
+    allowed_actions = [VISIBLE_REPLY_ACTION]
+    if allow_state_patch:
+        allowed_actions.append(STATE_PATCH_ACTION)
+
     return {
         "schema_version": SCHEMA_VERSION,
         "trace_id": normalized_event["trace_id"],
@@ -160,7 +175,7 @@ def build_decision_context(
         "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
         "event": event_context,
         "character_snapshot": character_snapshot,
-        "allowed_actions": [VISIBLE_REPLY_ACTION],
+        "allowed_actions": allowed_actions,
     }
 
 
@@ -171,7 +186,7 @@ def render_role_model_input(decision_context: DecisionContext) -> RoleModelInput
         "schema_version": SCHEMA_VERSION,
         "trace_id": validated_context["trace_id"],
         "event_id": validated_context["event_id"],
-        "instructions": ROLE_MODEL_INSTRUCTIONS,
+        "instructions": _instructions_for_allowed_actions(validated_context["allowed_actions"]),
         "decision_context": validated_context,
     }
 
@@ -191,11 +206,14 @@ def parse_character_decision(
         raise RoleModelValidationError("raw_text must contain a JSON object.")
 
     return _wrap_contract_error(
-        lambda: normalize_visible_reply_decision(
+        lambda: normalize_visible_reply_decision_with_optional_living_state_patch(
             parsed,
             trace_id=validated_model_input["trace_id"],
             event_id=validated_model_input["event_id"],
             require_attached_ids=False,
+            allow_state_patch=_state_patch_allowed(
+                validated_model_input["decision_context"]["allowed_actions"]
+            ),
             source_name="model output",
         )
     )
@@ -210,11 +228,13 @@ def run_role_model_turn(
     clock: Clock,
     recent_visible_messages_source: RecentVisibleMessagesSource | None = None,
     current_state_source: CurrentCharacterStateSource | None = None,
+    allow_state_patch: bool = False,
 ) -> RoleModelTurnResult:
     decision_context = build_decision_context(
         event,
         recent_visible_messages_source=recent_visible_messages_source,
         current_state_source=current_state_source,
+        allow_state_patch=allow_state_patch,
     )
     model_input = render_role_model_input(decision_context)
 
@@ -816,14 +836,14 @@ def _validate_role_model_input(model_input: RoleModelInput) -> RoleModelInput:
     _wrap_contract_error(
         lambda: require_equal(model_input.get("schema_version"), SCHEMA_VERSION, "schema_version")
     )
-    _wrap_contract_error(
+    decision_context = _validate_decision_context(model_input.get("decision_context"))
+    instructions = _wrap_contract_error(
         lambda: require_equal(
             model_input.get("instructions"),
-            ROLE_MODEL_INSTRUCTIONS,
+            _instructions_for_allowed_actions(decision_context["allowed_actions"]),
             "instructions",
         )
     )
-    decision_context = _validate_decision_context(model_input.get("decision_context"))
 
     trace_id = _wrap_contract_error(lambda: require_string(model_input.get("trace_id"), "trace_id"))
     event_id = _wrap_contract_error(lambda: require_string(model_input.get("event_id"), "event_id"))
@@ -834,7 +854,7 @@ def _validate_role_model_input(model_input: RoleModelInput) -> RoleModelInput:
         "schema_version": SCHEMA_VERSION,
         "trace_id": trace_id,
         "event_id": event_id,
-        "instructions": ROLE_MODEL_INSTRUCTIONS,
+        "instructions": instructions,
         "decision_context": decision_context,
     }
 
@@ -877,8 +897,7 @@ def _validate_decision_context(decision_context: Any) -> DecisionContext:
             "call_type",
         )
     )
-    if decision_context.get("allowed_actions") != [VISIBLE_REPLY_ACTION]:
-        raise RoleModelValidationError("allowed_actions must be ['visible_reply'].")
+    allowed_actions = _validate_allowed_actions(decision_context.get("allowed_actions"))
 
     event = decision_context.get("event")
     if not isinstance(event, Mapping):
@@ -914,6 +933,10 @@ def _validate_decision_context(decision_context: Any) -> DecisionContext:
         event_created_at=event_context["created_at"],
         event_id=event_id,
     )
+    if _state_patch_allowed(allowed_actions) and "living_state_brief" not in character_snapshot:
+        raise RoleModelValidationError(
+            "allowed state_patch requires character_snapshot.living_state_brief."
+        )
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -922,7 +945,7 @@ def _validate_decision_context(decision_context: Any) -> DecisionContext:
         "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
         "event": event_context,
         "character_snapshot": character_snapshot,
-        "allowed_actions": [VISIBLE_REPLY_ACTION],
+        "allowed_actions": allowed_actions,
     }
 
 
@@ -999,14 +1022,37 @@ def _validate_character_decision(
     model_input: RoleModelInput,
 ) -> CharacterDecision:
     return _wrap_contract_error(
-        lambda: normalize_visible_reply_decision(
+        lambda: normalize_visible_reply_decision_with_optional_living_state_patch(
             decision,
             trace_id=model_input["trace_id"],
             event_id=model_input["event_id"],
             require_attached_ids=True,
+            allow_state_patch=_state_patch_allowed(
+                model_input["decision_context"]["allowed_actions"]
+            ),
             source_name="CharacterDecision",
         )
     )
+
+
+def _validate_allowed_actions(value: Any) -> list[str]:
+    if value == [VISIBLE_REPLY_ACTION]:
+        return [VISIBLE_REPLY_ACTION]
+    if value == [VISIBLE_REPLY_ACTION, STATE_PATCH_ACTION]:
+        return [VISIBLE_REPLY_ACTION, STATE_PATCH_ACTION]
+    raise RoleModelValidationError(
+        "allowed_actions must be ['visible_reply'] or ['visible_reply', 'state_patch']."
+    )
+
+
+def _state_patch_allowed(allowed_actions: list[str]) -> bool:
+    return allowed_actions == [VISIBLE_REPLY_ACTION, STATE_PATCH_ACTION]
+
+
+def _instructions_for_allowed_actions(allowed_actions: list[str]) -> str:
+    if _state_patch_allowed(allowed_actions):
+        return STATE_PATCH_ROLE_MODEL_INSTRUCTIONS
+    return ROLE_MODEL_INSTRUCTIONS
 
 
 def _wrap_contract_error[T](callback: Callable[[], T]) -> T:

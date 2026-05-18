@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-008</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-009</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -159,7 +159,7 @@
       <dd>Likely adds a <code>decision_context_built</code> raw log kind without changing existing role-model turn logs.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-008 still relies on existing role-model turn logs to snapshot rendered model input after context is built. Notion logging guidance remains directionally correct, but dedicated context-build logs are deferred until debug/replay or a formal context-builder slice needs source-request traces.</dd>
+      <dd>MVP-009 adds only state patch commit/reject logs. Notion logging guidance remains directionally correct, but dedicated context-build logs are deferred until debug/replay or a formal context-builder slice needs source-request traces.</dd>
     </dl>
 
     <h2>Character State Engine Context Builder Boundary</h2>
@@ -213,7 +213,7 @@
       <dd>Likely moves existing validation into <code>runtime.contracts</code> without changing the current <code>DecisionContext</code> shape.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-008 should add only a read-only living-state snapshot and should not promote another shared recent-message contract surface.</dd>
+      <dd>MVP-009 should add only a minimal living-state patch commit and should not promote another shared recent-message contract surface.</dd>
     </dl>
 
     <h2>MVP-007 - Minimal User Turn Orchestrator</h2>
@@ -246,7 +246,7 @@
     <h2>MVP-008 - Read-Only Living State Snapshot in DecisionContext</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Promoted to the active MVP-008 spec on 2026-05-16. See <a href="active-slice.html">active-slice.html</a>.</dd>
+      <dd>Completed on 2026-05-17. See <a href="completed/mvp-008-read-only-living-state-snapshot-in-decisioncontext.html">completed MVP-008</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>The Notion roadmap's Phase 2 starts CharacterRuntimeState by adding current state and a state snapshot in <code>DecisionContext</code>.</dd>
@@ -267,7 +267,61 @@
       <dd>Adds an optional <code>living_state_brief</code> inside <code>DecisionContext.character_snapshot</code> and a minimal current-state source request/response contract.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>This item is no longer parked; it is the active MVP-008 spec.</dd>
+      <dd>This item is no longer parked; it has been completed and recorded under completed plans.</dd>
+    </dl>
+
+    <h2>MVP-009 - Minimal Living State Patch Commit</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Promoted to the active MVP-009 spec on 2026-05-17. See <a href="active-slice.html">active-slice.html</a>.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>After MVP-008 gives the model a read-only living-state brief, Phase 2 needs the runtime to validate and commit a tiny model-proposed living-state change.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Promoted after MVP-008 proved a caller-bound current-state source and compact <code>living_state_brief</code> in <code>DecisionContext</code>.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-008 read-only state context must work first so the model can propose a patch against current character reality.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>MVP-009 - Minimal Living State Patch Commit</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>The slice can become too broad if it adds concrete storage, state versions, body state, incidents, scheduled directives, retrieval, tools, or a general multi-action decision redesign.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Adds an optional <code>state_patch.living_state</code> to a visible-reply decision only when state patching is opted in, plus state patch commit/reject raw log entries.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>This item is no longer parked; it is the active MVP-009 spec.</dd>
+    </dl>
+
+    <h2>Durable Character State Store Transaction</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a concrete <code>CharacterRuntimeStateStore</code> only with transaction semantics that commit state mutation and the <code>living_state_patch_committed</code> raw log atomically.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Once state is durable, the runtime must not be able to mutate character state without a lossless raw-log audit record for the same commit.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered during MVP-009 review of the injected living-state patch boundary's audit-log ordering.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-009 should first prove patch validation, pending fake-store prepare, committed-snapshot consistency checks, and state patch commit/reject logs.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>CharacterRuntimeStateStore durable transaction v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>A concrete store that mutates before raw-log durability could leave committed state without audit truth; a raw-log-first approach without transaction policy could log state that did not commit.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds concrete storage keys, transaction or unit-of-work APIs, idempotency keys, and possibly a state version while preserving existing patch and raw-log record meanings.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-009 intentionally keeps the injected patch boundary non-durable and prepare-only; no concrete database, transaction manager, or replay/reconciliation worker exists yet.</dd>
     </dl>
 
     <h2>Richer Runtime Kernel Route Policy</h2>
@@ -294,7 +348,7 @@
       <dd>Likely adds tested route outputs for interruption, scheduling, and later event families while preserving the MVP-007 <code>USER_MESSAGE</code> route.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-007 changed only the <code>USER_MESSAGE</code> route needed for the minimal user-turn loop; MVP-008 should not broaden route policy.</dd>
+      <dd>MVP-007 changed only the <code>USER_MESSAGE</code> route needed for the minimal user-turn loop; MVP-009 should not broaden route policy.</dd>
     </dl>
 
     <h2>Real RoleModelAdapter Provider</h2>
@@ -321,13 +375,13 @@
       <dd>May add provider metadata to model I/O logs without changing <code>CharacterDecision</code>.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-008 still uses injected fake adapter behavior and only adds read-only state context.</dd>
+      <dd>MVP-009 still uses injected fake adapter behavior and only adds a minimal living-state patch commit path.</dd>
     </dl>
 
     <h2>Shared RoleModelTurnResult Validator</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Add a shared validator or normalizer for the <code>RoleModelTurnResult</code> envelope after a second commit path or orchestrator needs it.</dd>
+      <dd>Implemented in MVP-009. The living-state patch commit path became the second Commit and Effects consumer of the <code>RoleModelTurnResult</code> envelope.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>Role Model Loop produces <code>decision_ready_for_commit</code> results and Commit and Effects validates the same envelope before committing visible output.</dd>
@@ -336,7 +390,7 @@
       <dd>Discovered during MVP-003 review of cross-boundary result-status drift.</dd>
 
       <dt>Dependency</dt>
-      <dd>MVP-003 should first finish with only the shared status constant and visible-reply decision contract.</dd>
+      <dd>MVP-003 already proved the visible reply commit path. MVP-009 must extract the shared envelope normalizer before adding the state patch commit path, while keeping visible reply decision validation strict through projection.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>RoleModelTurnResult contract helper v0.1</code>.</dd>
@@ -348,7 +402,7 @@
       <dd>Would likely promote the turn-result envelope fields into <code>runtime.contracts</code> without changing persisted raw logs.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-003 only needs one status constant and the visible-reply commit input; a full envelope validator would be speculative until another consumer exists.</dd>
+      <dd>This item is no longer parked; MVP-009 implemented <code>runtime.contracts.normalize_role_model_turn_result()</code> before adding the state patch commit path.</dd>
     </dl>
 
     <h2>Concrete Conversation Storage</h2>
@@ -375,7 +429,7 @@
       <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-008 slice still uses injected fakes and existing interfaces, with no concrete database.</dd>
+      <dd>The active MVP-009 slice still uses injected fakes and existing interfaces, with no concrete database.</dd>
     </dl>
 
     <h2>Shared Visible Conversation Message Contract</h2>
@@ -402,7 +456,7 @@
       <dd>Likely adds a shared <code>role</code> / <code>message_id</code> visible transcript contract while preserving compatibility with existing assistant output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-008 slice should add read-only state context without unifying durable visible-message schemas.</dd>
+      <dd>The active MVP-009 slice should add a minimal living-state patch commit without unifying durable visible-message schemas.</dd>
     </dl>
 
     <h2>Recent Source Backed By Visible Conversation Records</h2>
