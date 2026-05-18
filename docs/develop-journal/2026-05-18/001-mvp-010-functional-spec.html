@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-18 - MVP-010 Functional Spec</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-18 - MVP-010 Functional Spec</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Pulled <code>origin/main</code> with a fast-forward update to <code>7b00d2e</code>, which includes MVP-009.</li>
+      <li>Created short-lived branch <code>feature/mvp-010-functional-spec</code>.</li>
+      <li>Archived MVP-009 as <a href="../../plan/completed/mvp-009-minimal-living-state-patch-commit.html">completed MVP-009</a>.</li>
+      <li>Replaced <a href="../../plan/active-slice.html">active-slice.html</a> with <code>MVP-010 - Atomic Living State Patch Commit Boundary</code>.</li>
+      <li>Updated <a href="../../plan/future-slices.html">future-slices.html</a> and <a href="../../plan/index.html">plan index</a> so MVP-010 is the only active implementation slice.</li>
+    </ul>
+
+    <h2>Why It Was Needed</h2>
+    <p>
+      MVP-009 proved optional living-state patch validation and commit/reject
+      logging, but intentionally kept the fake patch boundary non-durable and
+      prepare-only. MVP-010 keeps the next step narrow by specifying only the
+      atomic state-plus-log success boundary, without choosing concrete storage.
+    </p>
+
+    <h2>Source Context Checked</h2>
+    <ul>
+      <li>Notion project hub: Live Character Framework.</li>
+      <li>Notion page 09 for Phase 2 CharacterRuntimeState and state patch direction.</li>
+      <li>Notion pages 03, 05, 06, and 08 for model decision ownership, living-state ownership, state engine scope, and logging requirements.</li>
+      <li>Local completed specs for MVP-001 through MVP-009.</li>
+      <li>Local future-slices entry for durable CharacterRuntimeStateStore transaction risk.</li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/completed/mvp-009-minimal-living-state-patch-commit.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-18/001-mvp-010-functional-spec.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>MVP-010 is planning only so far; no runtime source or tests were changed.</li>
+      <li>The active spec does not add a database, state version, idempotency policy, body state, incidents, retrieval, tools, Live2D, provider calls, scheduler, or new event type.</li>
+      <li>The only intended behavior change is all-or-nothing visibility for one committed living-state snapshot and its matching <code>living_state_patch_committed</code> raw log entry.</li>
+      <li>Review fix: the spec now reuses the MVP-009 prepare/snapshot-candidate path before finalization, so MVP-010 does not add duplicate snapshot-building code.</li>
+      <li>Review fix: the spec now makes Commit and Effects the owner of validation, accepting the validated snapshot candidate as the <code>committed_snapshot</code>, and committed log-entry construction; the finalizer only atomically exposes those already built artifacts.</li>
+      <li>Review fix: the fake atomic finalizer must expose separate durable state and durable success-log lists so tests can prove all-or-nothing success visibility independently from ordinary rejection logs.</li>
+      <li>Review fix: <code>living_state_patch_finalize</code> must be added to the failure-stage taxonomy in one implementation location only, and tests should reuse that constant instead of scattering string literals.</li>
+      <li>Review fix: the new MVP-010 boundary uses finalizer/finalize naming, not the MVP-009 <code>LivingStatePatchStore</code> / <code>prepare_living_state_patch_commit()</code> naming.</li>
+      <li>Concrete storage, state revisions, idempotency, and reconciliation are parked for future slices.</li>
+    </ul>
+
+    <h2>Checks Run</h2>
+    <ul>
+      <li><code>python3 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-009-minimal-living-state-patch-commit.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/2026-05-18/001-mvp-010-functional-spec.html docs/develop-journal/index.html</code>: passed.</li>
+      <li><code>git diff --check</code>: passed.</li>
+      <li>No unit tests are expected for this docs-only spec promotion, but full discovery should run during MVP-010 implementation.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Review the MVP-010 spec for scope, then implement the smallest test-first
+      atomic living-state patch commit boundary.
+    </p>
+  </main>
+</body>
+</html>

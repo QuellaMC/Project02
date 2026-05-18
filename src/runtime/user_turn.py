@@ -7,6 +7,7 @@ from typing import Any, Protocol
 from character.state.current import CurrentCharacterStateSource
 from commit_effects.living_state import (
     LIVING_STATE_PATCH_REJECTED_STATUS,
+    LivingStatePatchFinalizer,
     LivingStatePatchStore,
     commit_living_state_patch,
 )
@@ -50,6 +51,7 @@ def run_user_message_turn(
     clock: Clock,
     current_state_source: CurrentCharacterStateSource | None = None,
     living_state_patch_store: LivingStatePatchStore | None = None,
+    living_state_patch_finalizer: LivingStatePatchFinalizer | None = None,
 ) -> UserMessageTurnResult:
     intake_result = intake_runtime_event(
         event_input,
@@ -77,7 +79,11 @@ def run_user_message_turn(
             user_visible_message_result=user_visible_message_result,
         )
 
-    allow_state_patch = current_state_source is not None and living_state_patch_store is not None
+    allow_state_patch = (
+        current_state_source is not None
+        and living_state_patch_store is not None
+        and living_state_patch_finalizer is not None
+    )
     role_model_result = run_role_model_turn(
         event,
         adapter=adapter,
@@ -94,10 +100,12 @@ def run_user_message_turn(
     living_state_patch_result: Mapping[str, Any] | None = None
     if allow_state_patch:
         assert living_state_patch_store is not None
+        assert living_state_patch_finalizer is not None
         living_state_patch_result = commit_living_state_patch(
             event,
             role_model_result,
             living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
             raw_event_log=raw_event_log,
             id_generator=id_generator,
             clock=clock,

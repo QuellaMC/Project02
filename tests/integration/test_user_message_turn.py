@@ -7,6 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
+from commit_effects.living_state import (  # noqa: E402
+    LIVING_STATE_PATCH_FINALIZE_STAGE,
+    LivingStatePatchFinalizerError,
+)
 from runtime.kernel import RuntimeKernel, RuntimeValidationError  # noqa: E402
 from runtime.user_turn import run_user_message_turn  # noqa: E402
 
@@ -25,11 +29,13 @@ class SequenceIdGenerator:
 
 
 class RecordingRawEventLog:
-    def __init__(self):
+    def __init__(self, operations=None):
         self.entries = []
+        self.operations = operations if operations is not None else []
 
     def append(self, entry):
         self.entries.append(deepcopy(entry))
+        self.operations.append(("raw_log", entry["kind"]))
 
 
 class RecordingAdapter:
@@ -116,6 +122,30 @@ class RecordingLivingStatePatchStore:
         if self.error is not None:
             raise self.error
         return deepcopy(self.snapshot)
+
+
+class RecordingLivingStatePatchFinalizer:
+    def __init__(self, error=None, operations=None):
+        self.error = error
+        self.operations = operations if operations is not None else []
+        self.requests = []
+        self.durable_state_snapshots = []
+        self.durable_success_logs = []
+
+    def finalize_living_state_patch_commit(self, request):
+        self.requests.append(deepcopy(request))
+        if self.error is not None:
+            raise self.error
+        self.durable_state_snapshots.append(deepcopy(request["committed_snapshot"]))
+        self.durable_success_logs.append(deepcopy(request["committed_log_entry"]))
+        self.operations.append(("atomic_finalizer", request["committed_log_entry"]["kind"]))
+        return {
+            "schema_version": "0.1",
+            "trace_id": request["trace_id"],
+            "event_id": request["event_id"],
+            "event_type": request["event_type"],
+            "committed_log_entry_id": request["committed_log_entry"]["log_id"],
+        }
 
 
 def prior_user_record():
@@ -303,10 +333,12 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         )
 
     def test_state_enabled_turn_commits_living_state_patch_before_assistant_reply(self):
-        raw_log = RecordingRawEventLog()
+        operations = []
+        raw_log = RecordingRawEventLog(operations=operations)
         visible_conversation = InMemoryVisibleConversation([prior_user_record()])
         current_state_source = RecordingCurrentStateSource(current_state_snapshot())
         living_state_patch_store = RecordingLivingStatePatchStore()
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer(operations=operations)
         adapter = RecordingAdapter(
             raw_text=json.dumps(
                 {
@@ -343,6 +375,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             clock=fixed_clock,
             current_state_source=current_state_source,
             living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
         )
 
         self.assertEqual(result["status"], "user_turn_committed")
@@ -351,7 +384,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             ["visible_reply", "state_patch"],
         )
         self.assertEqual(
-            [entry["kind"] for entry in raw_log.entries],
+            [kind for _source, kind in operations],
             [
                 "runtime_event_received",
                 "user_visible_message_committed",
@@ -361,6 +394,9 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             ],
         )
         self.assertEqual(len(living_state_patch_store.requests), 1)
+        self.assertEqual(len(living_state_patch_finalizer.requests), 1)
+        self.assertEqual(len(living_state_patch_finalizer.durable_state_snapshots), 1)
+        self.assertEqual(len(living_state_patch_finalizer.durable_success_logs), 1)
         self.assertEqual(
             living_state_patch_store.requests[0],
             {
@@ -393,13 +429,19 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             committed_snapshot(),
         )
         self.assertEqual(
-            raw_log.entries[3]["data"]["committed_snapshot"]["updated_at"],
+            result["living_state_patch_result"]["committed_log_entry_id"],
+            living_state_patch_finalizer.durable_success_logs[0]["log_id"],
+        )
+        self.assertEqual(
+            living_state_patch_finalizer.durable_success_logs[0]["data"]["committed_snapshot"][
+                "updated_at"
+            ],
             "2026-05-14T11:30:00+00:00",
         )
         self.assertEqual(visible_conversation.records[-1]["text"], "hello back")
         self.assertNotIn(
             "state_patch",
-            raw_log.entries[4]["data"]["role_model_result"]["decision"],
+            raw_log.entries[3]["data"]["role_model_result"]["decision"],
         )
 
     def test_state_enabled_turn_without_patch_preserves_visible_reply_flow(self):
@@ -407,6 +449,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         visible_conversation = InMemoryVisibleConversation([prior_user_record()])
         current_state_source = RecordingCurrentStateSource(current_state_snapshot())
         living_state_patch_store = RecordingLivingStatePatchStore()
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer()
         adapter = RecordingAdapter()
 
         result = run_user_message_turn(
@@ -429,6 +472,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             clock=fixed_clock,
             current_state_source=current_state_source,
             living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
         )
 
         self.assertEqual(result["status"], "user_turn_committed")
@@ -441,6 +485,9 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             "living_state_patch_skipped",
         )
         self.assertEqual(living_state_patch_store.requests, [])
+        self.assertEqual(living_state_patch_finalizer.requests, [])
+        self.assertEqual(living_state_patch_finalizer.durable_state_snapshots, [])
+        self.assertEqual(living_state_patch_finalizer.durable_success_logs, [])
         self.assertEqual(
             [entry["kind"] for entry in raw_log.entries],
             [
@@ -486,6 +533,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         living_state_patch_store = RecordingLivingStatePatchStore(
             error=LivingStatePatchStoreError("store rejected", code="store_rejected")
         )
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer()
 
         result = run_user_message_turn(
             {
@@ -502,6 +550,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             clock=fixed_clock,
             current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
             living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
         )
 
         self.assertEqual(result["status"], "user_turn_stopped")
@@ -519,8 +568,11 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             [record["kind"] for record in visible_conversation.records],
             ["user_visible_message", "user_visible_message"],
         )
+        self.assertEqual(living_state_patch_finalizer.requests, [])
+        self.assertEqual(living_state_patch_finalizer.durable_state_snapshots, [])
+        self.assertEqual(living_state_patch_finalizer.durable_success_logs, [])
 
-    def test_shape_valid_bad_store_result_stops_before_assistant_reply(self):
+    def test_state_patch_finalizer_rejection_stops_before_assistant_reply(self):
         raw_log = RecordingRawEventLog()
         visible_conversation = InMemoryVisibleConversation([prior_user_record()])
         adapter = RecordingAdapter(
@@ -533,8 +585,12 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                 }
             )
         )
-        living_state_patch_store = RecordingLivingStatePatchStore(
-            snapshot={**committed_snapshot(), "source_event_ids": ["event-state-1"]}
+        living_state_patch_store = RecordingLivingStatePatchStore()
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer(
+            error=LivingStatePatchFinalizerError(
+                "finalize rejected",
+                code="finalize_rejected",
+            )
         )
 
         result = run_user_message_turn(
@@ -552,6 +608,64 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             clock=fixed_clock,
             current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
             living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
+        )
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["stopped_at"], "living_state_patch_commit")
+        self.assertEqual(result["failure"]["stage"], LIVING_STATE_PATCH_FINALIZE_STAGE)
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "living_state_patch_rejected",
+            ],
+        )
+        self.assertEqual(
+            [record["kind"] for record in visible_conversation.records],
+            ["user_visible_message", "user_visible_message"],
+        )
+        self.assertEqual(len(living_state_patch_store.requests), 1)
+        self.assertEqual(len(living_state_patch_finalizer.requests), 1)
+        self.assertEqual(living_state_patch_finalizer.durable_state_snapshots, [])
+        self.assertEqual(living_state_patch_finalizer.durable_success_logs, [])
+
+    def test_shape_valid_bad_store_result_stops_before_assistant_reply(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {"living_state": {"mood": "attentive"}},
+                }
+            )
+        )
+        living_state_patch_store = RecordingLivingStatePatchStore(
+            snapshot={**committed_snapshot(), "source_event_ids": ["event-state-1"]}
+        )
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer()
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
         )
 
         self.assertEqual(result["status"], "user_turn_stopped")
@@ -575,6 +689,9 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             [record["kind"] for record in visible_conversation.records],
             ["user_visible_message", "user_visible_message"],
         )
+        self.assertEqual(living_state_patch_finalizer.requests, [])
+        self.assertEqual(living_state_patch_finalizer.durable_state_snapshots, [])
+        self.assertEqual(living_state_patch_finalizer.durable_success_logs, [])
 
     def test_state_patch_without_write_opt_in_is_malformed_model_output(self):
         raw_log = RecordingRawEventLog()
