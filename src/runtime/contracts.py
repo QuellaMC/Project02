@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
 
@@ -8,6 +8,7 @@ from runtime.logging import SCHEMA_VERSION
 
 USER_MESSAGE = "USER_MESSAGE"
 VISIBLE_REPLY_ACTION = "visible_reply"
+STATE_PATCH_ACTION = "state_patch"
 DECISION_READY_FOR_COMMIT_STATUS = "decision_ready_for_commit"
 ASSISTANT_VISIBLE_REPLY_KIND = "assistant_visible_reply"
 USER_VISIBLE_MESSAGE_KIND = "user_visible_message"
@@ -16,6 +17,7 @@ USER_VISIBLE_MESSAGE_ROLE = "user"
 
 RuntimeEvent = dict[str, Any]
 CharacterDecision = dict[str, Any]
+RoleModelTurnResult = dict[str, Any]
 
 
 class ContractValidationError(ValueError):
@@ -109,6 +111,131 @@ def normalize_visible_reply_decision(
         "event_id": event_id,
         "action": VISIBLE_REPLY_ACTION,
         "visible_reply": {"text": reply_text.strip()},
+    }
+
+
+def normalize_visible_reply_decision_with_optional_living_state_patch(
+    decision: Any,
+    *,
+    trace_id: str,
+    event_id: str,
+    require_attached_ids: bool,
+    allow_state_patch: bool,
+    source_name: str = "CharacterDecision",
+) -> CharacterDecision:
+    if not allow_state_patch:
+        return normalize_visible_reply_decision(
+            decision,
+            trace_id=trace_id,
+            event_id=event_id,
+            require_attached_ids=require_attached_ids,
+            source_name=source_name,
+        )
+    if not isinstance(decision, Mapping):
+        raise ContractValidationError(f"{source_name} must be a mapping.")
+
+    allowed_keys = {"schema_version", "action", "visible_reply", "state_patch"}
+    if require_attached_ids:
+        allowed_keys |= {"trace_id", "event_id"}
+    reject_extra_keys(decision, allowed_keys, source_name)
+
+    visible_reply_decision = {
+        "schema_version": decision.get("schema_version"),
+        "action": decision.get("action"),
+        "visible_reply": decision.get("visible_reply"),
+    }
+    if require_attached_ids:
+        visible_reply_decision["trace_id"] = decision.get("trace_id")
+        visible_reply_decision["event_id"] = decision.get("event_id")
+
+    normalized = normalize_visible_reply_decision(
+        visible_reply_decision,
+        trace_id=trace_id,
+        event_id=event_id,
+        require_attached_ids=require_attached_ids,
+        source_name=source_name,
+    )
+    if "state_patch" in decision:
+        normalized["state_patch"] = normalize_living_state_patch(
+            decision["state_patch"],
+            source_name=f"{source_name}.state_patch",
+        )
+    return normalized
+
+
+def normalize_living_state_patch(
+    patch: Any,
+    *,
+    source_name: str = "state_patch",
+) -> dict[str, dict[str, str]]:
+    if not isinstance(patch, Mapping):
+        raise ContractValidationError(f"{source_name} must be a mapping.")
+    reject_extra_keys(patch, {"living_state"}, source_name)
+
+    living_state = patch.get("living_state")
+    if not isinstance(living_state, Mapping):
+        raise ContractValidationError(f"{source_name}.living_state must be a mapping.")
+    reject_extra_keys(
+        living_state,
+        {"current_activity", "mood", "toward_user"},
+        f"{source_name}.living_state",
+    )
+    if not living_state:
+        raise ContractValidationError(
+            f"{source_name}.living_state must include at least one field."
+        )
+
+    normalized_living_state: dict[str, str] = {}
+    for field_name in ("current_activity", "mood", "toward_user"):
+        if field_name in living_state:
+            normalized_living_state[field_name] = require_string(
+                living_state[field_name],
+                f"{source_name}.living_state.{field_name}",
+            ).strip()
+
+    if not normalized_living_state:
+        raise ContractValidationError(
+            f"{source_name}.living_state must include at least one field."
+        )
+    return {"living_state": normalized_living_state}
+
+
+def normalize_role_model_turn_result(
+    role_model_result: Any,
+    *,
+    source_event: RuntimeEvent,
+    decision_normalizer: Callable[[Any], CharacterDecision],
+    source_name: str = "RoleModelTurnResult",
+) -> RoleModelTurnResult:
+    event = validate_normalized_user_message_event(source_event, source_name="source_event")
+    if not isinstance(role_model_result, Mapping):
+        raise ContractValidationError(f"{source_name} must be a mapping.")
+    reject_extra_keys(
+        role_model_result,
+        {"trace_id", "event_id", "event_type", "model_called", "status", "decision"},
+        source_name,
+    )
+    require_matching_identity(role_model_result.get("trace_id"), event["trace_id"], "trace_id")
+    require_matching_identity(role_model_result.get("event_id"), event["event_id"], "event_id")
+    event_type = require_equal(role_model_result.get("event_type"), USER_MESSAGE, "event_type")
+    if role_model_result.get("model_called") is not True:
+        raise ContractValidationError(
+            "model_called must be True.",
+            code="unsupported_result_status",
+        )
+    if role_model_result.get("status") != DECISION_READY_FOR_COMMIT_STATUS:
+        raise ContractValidationError(
+            f"status must be {DECISION_READY_FOR_COMMIT_STATUS!r}.",
+            code="unsupported_result_status",
+        )
+
+    return {
+        "trace_id": event["trace_id"],
+        "event_id": event["event_id"],
+        "event_type": event_type,
+        "model_called": True,
+        "status": DECISION_READY_FOR_COMMIT_STATUS,
+        "decision": decision_normalizer(role_model_result.get("decision")),
     }
 
 

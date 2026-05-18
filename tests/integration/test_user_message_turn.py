@@ -105,6 +105,19 @@ class RecordingCurrentStateSource:
         return deepcopy(self.snapshot)
 
 
+class RecordingLivingStatePatchStore:
+    def __init__(self, snapshot=None, error=None):
+        self.snapshot = deepcopy(snapshot or committed_snapshot())
+        self.error = error
+        self.requests = []
+
+    def prepare_living_state_patch_commit(self, request):
+        self.requests.append(deepcopy(request))
+        if self.error is not None:
+            raise self.error
+        return deepcopy(self.snapshot)
+
+
 def prior_user_record():
     return {
         "schema_version": "0.1",
@@ -117,6 +130,20 @@ def prior_user_record():
         "created_at": "2026-05-14T11:00:00+00:00",
         "text": "prior hello",
         "source": {"runtime_event_type": "USER_MESSAGE"},
+    }
+
+
+def committed_snapshot():
+    return {
+        "schema_version": "0.1",
+        "character_id": "character-1",
+        "living_state": {
+            "current_activity": "answering the user",
+            "mood": "attentive",
+            "toward_user": "warm",
+        },
+        "updated_at": "2026-05-14T11:30:00+00:00",
+        "source_event_ids": ["event-state-1", "event-current"],
     }
 
 
@@ -273,6 +300,324 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                 "living_state_brief"
             ],
             living_state_brief(),
+        )
+
+    def test_state_enabled_turn_commits_living_state_patch_before_assistant_reply(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        current_state_source = RecordingCurrentStateSource(current_state_snapshot())
+        living_state_patch_store = RecordingLivingStatePatchStore()
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {
+                        "living_state": {
+                            "current_activity": "answering the user",
+                            "mood": "attentive",
+                        }
+                    },
+                }
+            )
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "hello now",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=current_state_source,
+            living_state_patch_store=living_state_patch_store,
+        )
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            adapter.calls[0]["decision_context"]["allowed_actions"],
+            ["visible_reply", "state_patch"],
+        )
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "living_state_patch_committed",
+                "visible_reply_committed",
+            ],
+        )
+        self.assertEqual(len(living_state_patch_store.requests), 1)
+        self.assertEqual(
+            living_state_patch_store.requests[0],
+            {
+                "schema_version": "0.1",
+                "trace_id": "trace-current",
+                "event_id": "event-current",
+                "event_type": "USER_MESSAGE",
+                "commit_time": "2026-05-14T11:30:00+00:00",
+                "decision_action": "visible_reply",
+                "patch": {
+                    "living_state": {
+                        "current_activity": "answering the user",
+                        "mood": "attentive",
+                    }
+                },
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        )
+        self.assertNotIn(
+            "updated_at",
+            living_state_patch_store.requests[0]["patch"]["living_state"],
+        )
+        self.assertNotIn(
+            "source_event_ids",
+            living_state_patch_store.requests[0]["patch"]["living_state"],
+        )
+        self.assertEqual(
+            result["living_state_patch_result"]["committed_snapshot"],
+            committed_snapshot(),
+        )
+        self.assertEqual(
+            raw_log.entries[3]["data"]["committed_snapshot"]["updated_at"],
+            "2026-05-14T11:30:00+00:00",
+        )
+        self.assertEqual(visible_conversation.records[-1]["text"], "hello back")
+        self.assertNotIn(
+            "state_patch",
+            raw_log.entries[4]["data"]["role_model_result"]["decision"],
+        )
+
+    def test_state_enabled_turn_without_patch_preserves_visible_reply_flow(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        current_state_source = RecordingCurrentStateSource(current_state_snapshot())
+        living_state_patch_store = RecordingLivingStatePatchStore()
+        adapter = RecordingAdapter()
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "hello now",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=current_state_source,
+            living_state_patch_store=living_state_patch_store,
+        )
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            adapter.calls[0]["decision_context"]["allowed_actions"],
+            ["visible_reply", "state_patch"],
+        )
+        self.assertEqual(
+            result["living_state_patch_result"]["status"],
+            "living_state_patch_skipped",
+        )
+        self.assertEqual(living_state_patch_store.requests, [])
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "visible_reply_committed",
+            ],
+        )
+        self.assertEqual(
+            [record["kind"] for record in visible_conversation.records],
+            [
+                "user_visible_message",
+                "user_visible_message",
+                "assistant_visible_reply",
+            ],
+        )
+        self.assertEqual(visible_conversation.records[-1]["text"], "hello back")
+        self.assertNotIn(
+            "living_state_patch_committed",
+            [entry["kind"] for entry in raw_log.entries],
+        )
+        self.assertNotIn(
+            "living_state_patch_rejected",
+            [entry["kind"] for entry in raw_log.entries],
+        )
+
+    def test_state_patch_store_rejection_stops_before_assistant_reply(self):
+        from commit_effects.living_state import LivingStatePatchStoreError
+
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {"living_state": {"mood": "attentive"}},
+                }
+            )
+        )
+        living_state_patch_store = RecordingLivingStatePatchStore(
+            error=LivingStatePatchStoreError("store rejected", code="store_rejected")
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            living_state_patch_store=living_state_patch_store,
+        )
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["stopped_at"], "living_state_patch_commit")
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "living_state_patch_rejected",
+            ],
+        )
+        self.assertEqual(
+            [record["kind"] for record in visible_conversation.records],
+            ["user_visible_message", "user_visible_message"],
+        )
+
+    def test_shape_valid_bad_store_result_stops_before_assistant_reply(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {"living_state": {"mood": "attentive"}},
+                }
+            )
+        )
+        living_state_patch_store = RecordingLivingStatePatchStore(
+            snapshot={**committed_snapshot(), "source_event_ids": ["event-state-1"]}
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            living_state_patch_store=living_state_patch_store,
+        )
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["stopped_at"], "living_state_patch_commit")
+        self.assertEqual(result["failure"]["stage"], "living_state_patch_store")
+        self.assertEqual(result["failure"]["code"], "malformed_store_result")
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "living_state_patch_rejected",
+            ],
+        )
+        self.assertNotIn(
+            "living_state_patch_committed",
+            [entry["kind"] for entry in raw_log.entries],
+        )
+        self.assertEqual(
+            [record["kind"] for record in visible_conversation.records],
+            ["user_visible_message", "user_visible_message"],
+        )
+
+    def test_state_patch_without_write_opt_in_is_malformed_model_output(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {"living_state": {"mood": "attentive"}},
+                }
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "state_patch"):
+            run_user_message_turn(
+                {
+                    "event_id": "event-current",
+                    "trace_id": "trace-current",
+                    "type": "USER_MESSAGE",
+                    "created_at": "2026-05-14T11:30:00+00:00",
+                    "payload": {"text": "hello now", "conversation_id": "c-1"},
+                },
+                adapter=adapter,
+                raw_event_log=raw_log,
+                visible_conversation=visible_conversation,
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+                current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            )
+
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_failed",
+            ],
+        )
+        self.assertNotIn(
+            "living_state_patch_rejected",
+            [entry["kind"] for entry in raw_log.entries],
         )
 
     def test_second_turn_uses_completed_prior_turn_as_recent_context(self):
