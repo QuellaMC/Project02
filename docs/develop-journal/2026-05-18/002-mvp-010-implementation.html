@@ -84,6 +84,8 @@
       <li>Review follow-up 4: <code>/private/tmp/project02-ruff/bin/ruff format --check .</code>: passed.</li>
       <li>Review follow-up 4: <code>/private/tmp/project02-mypy/bin/mypy src</code>: passed.</li>
       <li>Review follow-up 4: <code>git diff --check</code>: passed.</li>
+      <li>Follow-up PR: <code>python3.13 -m html.parser docs/plan/index.html docs/develop-journal/2026-05-18/002-mvp-010-implementation.html</code>: passed.</li>
+      <li>Follow-up PR: <code>git diff --check</code>: passed.</li>
     </ul>
 
     <h2>Review Notes</h2>
@@ -99,6 +101,7 @@
       <li>Review follow-up 3: the <code>LivingStatePatchFinalizer</code> protocol now states that implementations must validate any backing-store acknowledgment before making state/log records visible.</li>
       <li>Review follow-up 3: added a user-turn regression proving <code>current_state_source</code> plus <code>living_state_patch_store</code> without <code>living_state_patch_finalizer</code> does not opt into state-patch writes.</li>
       <li>Review follow-up 4: the finalizer protocol and malformed-result unit test now explicitly state that a malformed finalize result means no durable state/log visibility occurred, because the caller cannot roll back an already exposed pair.</li>
+      <li>Follow-up PR: because <a href="https://github.com/QuellaMC/Project02/pull/10">PR #10</a> merged before these review fixes landed, the local follow-up commit was moved onto <code>fix/mvp-010-finalizer-followups</code> and opened as <a href="https://github.com/QuellaMC/Project02/pull/11">PR #11</a>.</li>
       <li>No database, migration, state version, idempotency policy, body state, incidents, scheduled directives, retrieval, tools, Live2D, provider call, scheduler, or new event type was added.</li>
     </ul>
 
