@@ -123,6 +123,36 @@ def living_state_brief():
     }
 
 
+def active_incident_snapshot():
+    return {
+        "schema_version": "0.1",
+        "incident_id": "incident-1",
+        "type": "eat",
+        "status": "active",
+        "title": "Eating lunch",
+        "started_at": "2026-05-14T11:00:00+00:00",
+        "expected_end_at": "2026-05-14T11:40:00+00:00",
+        "remaining_seconds": 600,
+        "interrupt_policy": "interruptible",
+        "resume_policy": "resume",
+        "source_event_ids": ["event-incident-started"],
+    }
+
+
+def active_incident_brief():
+    return {
+        "incident_id": "incident-1",
+        "type": "eat",
+        "title": "Eating lunch",
+        "started_at": "2026-05-14T11:00:00+00:00",
+        "expected_end_at": "2026-05-14T11:40:00+00:00",
+        "remaining_seconds": 600,
+        "interrupt_policy": "interruptible",
+        "resume_policy": "resume",
+        "source_event_ids": ["event-incident-started"],
+    }
+
+
 class RecordingCurrentStateSource:
     def __init__(self, snapshot):
         self.snapshot = snapshot
@@ -142,6 +172,29 @@ class MutatingCurrentStateSource:
         self.requests.append(request)
         request["event_id"] = "mutated-by-source"
         self.snapshot["living_state"]["mood"] = "mutated-by-source"
+        self.snapshot["source_event_ids"].append("mutated-by-source")
+        return self.snapshot
+
+
+class RecordingActiveIncidentSource:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+        self.requests = []
+
+    def read_active_incident(self, request):
+        self.requests.append(request)
+        return self.snapshot
+
+
+class MutatingActiveIncidentSource:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+        self.requests = []
+
+    def read_active_incident(self, request):
+        self.requests.append(request)
+        request["event_id"] = "mutated-by-source"
+        self.snapshot["title"] = "mutated-by-source"
         self.snapshot["source_event_ids"].append("mutated-by-source")
         return self.snapshot
 
@@ -419,6 +472,92 @@ class DecisionContextTests(unittest.TestCase):
         source = MutatingCurrentStateSource(current_state_snapshot())
 
         build_decision_context(event, current_state_source=source)
+
+        self.assertEqual(event["event_id"], "event-1")
+        self.assertEqual(source.requests[0]["event_id"], "mutated-by-source")
+
+    def test_reads_active_incident_with_expected_request_and_brief(self):
+        source = RecordingActiveIncidentSource(active_incident_snapshot())
+
+        context = build_decision_context(
+            normalized_user_message(),
+            active_incident_source=source,
+        )
+
+        self.assertEqual(
+            source.requests,
+            [
+                {
+                    "schema_version": "0.1",
+                    "trace_id": "trace-1",
+                    "event_id": "event-1",
+                    "event_type": "USER_MESSAGE",
+                    "user_id": "user-1",
+                    "conversation_id": "conversation-1",
+                }
+            ],
+        )
+        self.assertEqual(
+            context["character_snapshot"]["active_incident"],
+            active_incident_brief(),
+        )
+        self.assertEqual(context["allowed_actions"], ["visible_reply"])
+
+    def test_active_incident_source_none_omits_context_field(self):
+        source = RecordingActiveIncidentSource(None)
+
+        context = build_decision_context(
+            normalized_user_message(),
+            active_incident_source=source,
+        )
+
+        self.assertNotIn("active_incident", context["character_snapshot"])
+        self.assertEqual(source.requests[0]["event_id"], "event-1")
+
+    def test_rejects_malformed_active_incident_source_response(self):
+        cases = [
+            ({**active_incident_snapshot(), "type": "dance"}, "type"),
+            ({**active_incident_snapshot(), "status": "completed"}, "status"),
+            ({**active_incident_snapshot(), "started_at": "bad"}, "started_at"),
+            ({**active_incident_snapshot(), "remaining_seconds": -1}, "remaining_seconds"),
+            ({**active_incident_snapshot(), "source_event_ids": []}, "source_event_ids"),
+            ({**active_incident_snapshot(), "source_event_ids": ["event-1"]}, "current event_id"),
+            ({**active_incident_snapshot(), "future_field": "nope"}, "future_field"),
+            ("not a mapping", "ActiveIncidentSnapshot"),
+        ]
+
+        for snapshot, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    build_decision_context(
+                        normalized_user_message(),
+                        active_incident_source=RecordingActiveIncidentSource(snapshot),
+                    )
+
+    def test_active_incident_context_uses_copies(self):
+        snapshot = active_incident_snapshot()
+        source = RecordingActiveIncidentSource(snapshot)
+
+        context = build_decision_context(
+            normalized_user_message(),
+            active_incident_source=source,
+        )
+
+        snapshot["title"] = "mutated after context"
+        snapshot["source_event_ids"].append("mutated after context")
+        context["character_snapshot"]["active_incident"]["source_event_ids"].append("mutated")
+
+        self.assertEqual(context["character_snapshot"]["active_incident"]["title"], "Eating lunch")
+        self.assertEqual(
+            snapshot["source_event_ids"],
+            ["event-incident-started", "mutated after context"],
+        )
+
+    def test_active_incident_source_receives_request_copy(self):
+        event = normalized_user_message()
+        source = MutatingActiveIncidentSource(active_incident_snapshot())
+
+        build_decision_context(event, active_incident_source=source)
 
         self.assertEqual(event["event_id"], "event-1")
         self.assertEqual(source.requests[0]["event_id"], "mutated-by-source")
@@ -824,6 +963,41 @@ class DecisionContextTests(unittest.TestCase):
         context["character_snapshot"]["living_state_brief"]["source_event_ids"] = ["event-1"]
         with self.assertRaisesRegex(RoleModelValidationError, "current event_id"):
             render_role_model_input(context)
+
+    def test_render_accepts_and_validates_active_incident(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
+        )
+
+        rendered = render_role_model_input(context)
+
+        self.assertEqual(
+            rendered["decision_context"]["character_snapshot"]["active_incident"],
+            active_incident_brief(),
+        )
+
+        context["character_snapshot"]["active_incident"]["future_field"] = "not allowed yet"
+        with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
+            render_role_model_input(context)
+
+        context = build_decision_context(
+            normalized_user_message(),
+            active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
+        )
+        context["character_snapshot"]["active_incident"]["source_event_ids"] = ["event-1"]
+        with self.assertRaisesRegex(RoleModelValidationError, "current event_id"):
+            render_role_model_input(context)
+
+    def test_active_incident_does_not_change_allowed_actions(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
+        )
+        model_input = render_role_model_input(context)
+
+        self.assertEqual(context["allowed_actions"], ["visible_reply"])
+        self.assertEqual(model_input["instructions"], ROLE_MODEL_INSTRUCTIONS)
 
 
 class VisibleConversationRecentMessagesSourceTests(unittest.TestCase):

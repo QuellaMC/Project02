@@ -98,6 +98,7 @@ class UserTurnStopTests(unittest.TestCase):
         visible_conversation = RecordingVisibleConversation()
         adapter = Mock()
         current_state_source = object()
+        active_incident_source = object()
         user_commit_result = {
             "trace_id": "trace-1",
             "event_id": "event-1",
@@ -159,6 +160,7 @@ class UserTurnStopTests(unittest.TestCase):
                 id_generator=SequenceIdGenerator(),
                 clock=fixed_clock,
                 current_state_source=current_state_source,
+                active_incident_source=active_incident_source,
             )
 
         self.assertEqual(result["status"], "user_turn_stopped")
@@ -171,6 +173,10 @@ class UserTurnStopTests(unittest.TestCase):
         self.assertIs(
             role_model_turn.call_args.kwargs["current_state_source"],
             current_state_source,
+        )
+        self.assertIs(
+            role_model_turn.call_args.kwargs["active_incident_source"],
+            active_incident_source,
         )
         self.assertIs(role_model_turn.call_args.kwargs["allow_state_patch"], False)
         commit_reply.assert_called_once()
@@ -280,6 +286,7 @@ class UserTurnStopTests(unittest.TestCase):
         visible_conversation = RecordingVisibleConversation()
         adapter = Mock()
         current_state_source = object()
+        active_incident_source = object()
         living_state_patch_store = object()
         user_commit_result = {
             "trace_id": "trace-1",
@@ -339,6 +346,7 @@ class UserTurnStopTests(unittest.TestCase):
                 id_generator=SequenceIdGenerator(),
                 clock=fixed_clock,
                 current_state_source=current_state_source,
+                active_incident_source=active_incident_source,
                 living_state_patch_store=living_state_patch_store,
             )
 
@@ -347,6 +355,10 @@ class UserTurnStopTests(unittest.TestCase):
         self.assertIs(
             role_model_turn.call_args.kwargs["current_state_source"],
             current_state_source,
+        )
+        self.assertIs(
+            role_model_turn.call_args.kwargs["active_incident_source"],
+            active_incident_source,
         )
         self.assertNotIn("living_state_patch_result", result)
         commit_patch.assert_not_called()

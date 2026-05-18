@@ -101,12 +101,52 @@ def living_state_brief():
     }
 
 
+def active_incident_snapshot():
+    return {
+        "schema_version": "0.1",
+        "incident_id": "incident-1",
+        "type": "eat",
+        "status": "active",
+        "title": "Eating lunch",
+        "started_at": "2026-05-14T11:00:00+00:00",
+        "expected_end_at": "2026-05-14T11:40:00+00:00",
+        "remaining_seconds": 600,
+        "interrupt_policy": "interruptible",
+        "resume_policy": "resume",
+        "source_event_ids": ["event-incident-started"],
+    }
+
+
+def active_incident_brief():
+    return {
+        "incident_id": "incident-1",
+        "type": "eat",
+        "title": "Eating lunch",
+        "started_at": "2026-05-14T11:00:00+00:00",
+        "expected_end_at": "2026-05-14T11:40:00+00:00",
+        "remaining_seconds": 600,
+        "interrupt_policy": "interruptible",
+        "resume_policy": "resume",
+        "source_event_ids": ["event-incident-started"],
+    }
+
+
 class RecordingCurrentStateSource:
     def __init__(self, snapshot):
         self.snapshot = deepcopy(snapshot)
         self.requests = []
 
     def read_current_state(self, request):
+        self.requests.append(deepcopy(request))
+        return deepcopy(self.snapshot)
+
+
+class RecordingActiveIncidentSource:
+    def __init__(self, snapshot):
+        self.snapshot = deepcopy(snapshot)
+        self.requests = []
+
+    def read_active_incident(self, request):
         self.requests.append(deepcopy(request))
         return deepcopy(self.snapshot)
 
@@ -332,11 +372,101 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             living_state_brief(),
         )
 
+    def test_runs_one_user_turn_with_active_incident_in_model_input_and_raw_log(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter()
+        active_incident_source = RecordingActiveIncidentSource(active_incident_snapshot())
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "hello now",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            active_incident_source=active_incident_source,
+        )
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            active_incident_source.requests,
+            [
+                {
+                    "schema_version": "0.1",
+                    "trace_id": "trace-current",
+                    "event_id": "event-current",
+                    "event_type": "USER_MESSAGE",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                }
+            ],
+        )
+        character_snapshot = adapter.calls[0]["decision_context"]["character_snapshot"]
+        self.assertEqual(character_snapshot["active_incident"], active_incident_brief())
+        self.assertNotIn("life_action", adapter.calls[0]["decision_context"]["allowed_actions"])
+        self.assertEqual(
+            raw_log.entries[2]["data"]["model_input"]["decision_context"]["character_snapshot"][
+                "active_incident"
+            ],
+            active_incident_brief(),
+        )
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "visible_reply_committed",
+            ],
+        )
+
+    def test_active_incident_source_none_preserves_visible_reply_flow(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter()
+        active_incident_source = RecordingActiveIncidentSource(None)
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            active_incident_source=active_incident_source,
+        )
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertNotIn(
+            "active_incident",
+            adapter.calls[0]["decision_context"]["character_snapshot"],
+        )
+        self.assertEqual(visible_conversation.records[-1]["text"], "hello back")
+
     def test_state_enabled_turn_commits_living_state_patch_before_assistant_reply(self):
         operations = []
         raw_log = RecordingRawEventLog(operations=operations)
         visible_conversation = InMemoryVisibleConversation([prior_user_record()])
         current_state_source = RecordingCurrentStateSource(current_state_snapshot())
+        active_incident_source = RecordingActiveIncidentSource(active_incident_snapshot())
         living_state_patch_store = RecordingLivingStatePatchStore()
         living_state_patch_finalizer = RecordingLivingStatePatchFinalizer(operations=operations)
         adapter = RecordingAdapter(
@@ -374,6 +504,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             id_generator=SequenceIdGenerator(),
             clock=fixed_clock,
             current_state_source=current_state_source,
+            active_incident_source=active_incident_source,
             living_state_patch_store=living_state_patch_store,
             living_state_patch_finalizer=living_state_patch_finalizer,
         )
@@ -382,6 +513,10 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         self.assertEqual(
             adapter.calls[0]["decision_context"]["allowed_actions"],
             ["visible_reply", "state_patch"],
+        )
+        self.assertEqual(
+            adapter.calls[0]["decision_context"]["character_snapshot"]["active_incident"],
+            active_incident_brief(),
         )
         self.assertEqual(
             [kind for _source, kind in operations],
@@ -918,6 +1053,56 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                         "runtime_event_received",
                         "user_visible_message_committed",
                     ],
+                )
+                self.assertEqual(
+                    [record["kind"] for record in visible_conversation.records],
+                    ["user_visible_message", "user_visible_message"],
+                )
+
+    def test_malformed_active_incident_stops_before_adapter_and_assistant_reply(self):
+        cases = [
+            ({**active_incident_snapshot(), "status": "completed"}, "status"),
+            (
+                {**active_incident_snapshot(), "source_event_ids": ["event-current"]},
+                "current event_id",
+            ),
+        ]
+
+        for snapshot, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                raw_log = RecordingRawEventLog()
+                visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+                adapter = RecordingAdapter()
+                active_incident_source = RecordingActiveIncidentSource(snapshot)
+
+                with self.assertRaisesRegex(ValueError, error_pattern):
+                    run_user_message_turn(
+                        {
+                            "event_id": "event-current",
+                            "trace_id": "trace-current",
+                            "type": "USER_MESSAGE",
+                            "created_at": "2026-05-14T11:30:00+00:00",
+                            "payload": {"text": "hello now", "conversation_id": "c-1"},
+                        },
+                        adapter=adapter,
+                        raw_event_log=raw_log,
+                        visible_conversation=visible_conversation,
+                        id_generator=SequenceIdGenerator(),
+                        clock=fixed_clock,
+                        active_incident_source=active_incident_source,
+                    )
+
+                self.assertEqual(adapter.calls, [])
+                self.assertEqual(
+                    [entry["kind"] for entry in raw_log.entries],
+                    [
+                        "runtime_event_received",
+                        "user_visible_message_committed",
+                    ],
+                )
+                self.assertNotIn(
+                    "living_state_patch_rejected",
+                    [entry["kind"] for entry in raw_log.entries],
                 )
                 self.assertEqual(
                     [record["kind"] for record in visible_conversation.records],

@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MVP-010 - Atomic Living State Patch Commit Boundary</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    h3 { margin-top: 22px; font-size: 1rem; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul, ol { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    pre { overflow-x: auto; background: #202923; color: #f3f7f1; border-radius: 8px; padding: 16px; }
+    pre code { background: transparent; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; }
+    th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #edf1eb; }
+    blockquote { border-left: 4px solid #b9c6bd; margin: 16px 0; padding: 8px 14px; background: #fff; color: #34413d; }
+    .status { display: inline-block; border: 1px solid #aebbad; border-radius: 999px; padding: 2px 10px; background: #fff; font-size: 0.9rem; }
+    .meta { color: #4a5651; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-010 - Atomic Living State Patch Commit Boundary</h1>
+    <p><span class="status">Status: completed and archived; PR #10 with follow-up PR #11</span></p>
+    <p class="meta">
+      Created: 2026-05-18. Archived from active slice on 2026-05-18.
+      Completed slice path:
+      <code>docs/plan/completed/mvp-010-atomic-living-state-patch-commit-boundary.html</code>.
+      Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
+      Branches: <code>feature/mvp-010-functional-spec</code>,
+      <code>fix/mvp-010-finalizer-followups</code>.
+    </p>
+
+    <h2>Source Context</h2>
+    <p>
+      Product direction comes from the Notion project hub
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.
+      The source pages checked for this slice are
+      <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>,
+      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
+      <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>,
+      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
+    </p>
+    <blockquote>
+      Phase 2 needs CharacterRuntimeState writes, but MVP-009 deliberately used
+      a non-durable prepare boundary and treated the raw-log append as the
+      commit point. MVP-010 proves only the next missing runtime contract:
+      a living-state patch success must commit the validated state snapshot and
+      its <code>living_state_patch_committed</code> raw log entry atomically.
+    </blockquote>
+    <p>
+      Local implementation truth comes from completed
+      <a href="mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001</a>,
+      <a href="mvp-002-minimal-role-model-loop-with-fake-adapter.html">MVP-002</a>,
+      <a href="mvp-003-minimal-visible-reply-commit.html">MVP-003</a>,
+      <a href="mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004</a>,
+      <a href="mvp-005-user-visible-message-projection.html">MVP-005</a>,
+      <a href="mvp-006-visible-conversation-recent-source.html">MVP-006</a>,
+      <a href="mvp-007-minimal-user-turn-orchestrator.html">MVP-007</a>,
+      <a href="mvp-008-read-only-living-state-snapshot-in-decisioncontext.html">MVP-008</a>, and
+      <a href="mvp-009-minimal-living-state-patch-commit.html">MVP-009</a>.
+    </p>
+
+    <h2>Goal</h2>
+    <p>
+      Replace the MVP-009 prepare-only living-state patch success path with one
+      injected atomic commit boundary. A successful state patch must make both
+      facts visible together: the committed <code>CharacterRuntimeStateSnapshot</code>
+      and the matching <code>living_state_patch_committed</code> raw log entry.
+      This slice keeps the existing user-turn, role-model, patch-shape, and
+      visible-reply behavior intact.
+    </p>
+
+    <h2>Current Scope</h2>
+    <ul>
+      <li>One event type remains in scope: <code>USER_MESSAGE</code>.</li>
+      <li>One state family remains in scope: <code>state_patch.living_state</code> with only <code>current_activity</code>, <code>mood</code>, and <code>toward_user</code>.</li>
+      <li>One success-path boundary changes: the existing MVP-009 prepare/snapshot-candidate path remains the single candidate producer, and its validated candidate is finalized by an injected atomic state-plus-log boundary before assistant visible reply commit.</li>
+      <li>The atomic boundary is still fake/injected for tests. It may be in-memory, but it must model all-or-nothing state and raw-log visibility.</li>
+      <li>The existing committed snapshot validation stays authoritative: source event ID is present, patched fields match, and <code>updated_at</code> equals the runtime-owned commit timestamp.</li>
+      <li>Existing no-patch, malformed-model-output, validation-rejection, store-rejection, and visible-reply-only paths stay behavior-compatible with MVP-009.</li>
+      <li>Tests must prove the assistant visible reply is committed only after the atomic state-plus-log commit succeeds.</li>
+    </ul>
+
+    <h2>Explicit Non-Goals</h2>
+    <ul>
+      <li>No database, filesystem store, migration, ORM, queue, background worker, scheduler, replay worker, or production persistence adapter.</li>
+      <li>No concrete multi-character lookup and no runtime-inferred <code>character_id</code>; the injected boundary remains caller-bound to the active character.</li>
+      <li>No broad <code>CharacterRuntimeState</code> expansion, <code>state_version</code>, optimistic locking, idempotency key, reconciliation job, or cross-turn deduplication policy.</li>
+      <li>No body state, body drift, need thresholds, active incident, incident queue, scheduled directive, retrieval, continuity write, tool request, Live2D status, asset behavior, proactive message, or new runtime event family.</li>
+      <li>No new Role Model action. The model still returns required <code>action = "visible_reply"</code> and may include only the optional MVP-009 living-state patch when state patching is allowed.</li>
+      <li>No transaction between user visible message projection, state patch commit, and assistant visible reply commit. MVP-010 only atomizes state snapshot plus state-patch raw log.</li>
+      <li>No dedicated context-build log or debug inspector. Existing role-model and state-patch logs remain the audit surface.</li>
+    </ul>
+
+    <h2>Minimal Schema</h2>
+    <h3>Snapshot Candidate Path</h3>
+    <p>
+      MVP-010 reuses the existing MVP-009
+      <code>LivingStatePatchStore.prepare_living_state_patch_commit()</code>
+      path only as the snapshot-candidate producer before finalization. Commit
+      and Effects must not duplicate snapshot construction by independently
+      applying the patch to state in a second code path. If implementation
+      extracts a helper for readability, that helper must be the one shared path
+      used to obtain the candidate snapshot before validation and finalization,
+      not a parallel builder.
+    </p>
+    <p>
+      The MVP-010 finalizer is a new boundary after that candidate path. It
+      atomically exposes the already validated <code>committed_snapshot</code>
+      and <code>committed_log_entry</code>; it does not create either artifact.
+    </p>
+
+    <h3>LivingStatePatchFinalizer</h3>
+    <pre><code>type LivingStatePatchFinalizer = {
+  finalize_living_state_patch_commit(
+    request: LivingStatePatchFinalizeRequest
+  ): LivingStatePatchFinalizeResult
+}</code></pre>
+    <p>
+      The MVP-010 finalization boundary must use finalizer/finalize naming.
+      Do not name the new atomic boundary <code>LivingStatePatchStore</code> or
+      call the final step <code>prepare_living_state_patch_commit()</code>. Those
+      names belong to the MVP-009 prepare-only boundary and would blur future
+      concrete persistence ownership.
+    </p>
+
+    <h3>LivingStatePatchFinalizeRequest</h3>
+    <pre><code>type LivingStatePatchFinalizeRequest = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  event_type: "USER_MESSAGE"
+  decision_action: "visible_reply"
+  commit_time: string
+  patch: {
+    living_state: {
+      current_activity?: string
+      mood?: string
+      toward_user?: string
+    }
+  }
+  committed_snapshot: CharacterRuntimeStateSnapshot
+  committed_log_entry: RawEventLogEntry &amp; {
+    kind: "living_state_patch_committed"
+  }
+  user_id?: string
+  conversation_id?: string
+}</code></pre>
+
+    <h3>LivingStatePatchFinalizeResult</h3>
+    <pre><code>type LivingStatePatchFinalizeResult = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  event_type: "USER_MESSAGE"
+  committed_log_entry_id: string
+}</code></pre>
+
+    <h3>LivingStatePatchAtomicCommitResult</h3>
+    <pre><code>type LivingStatePatchAtomicCommitResult = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  event_type: "USER_MESSAGE"
+  status:
+    | "living_state_patch_committed"
+    | "living_state_patch_skipped"
+    | "living_state_patch_rejected"
+  committed_snapshot?: CharacterRuntimeStateSnapshot
+  committed_log_entry_id?: string
+  failure?: {
+    stage:
+      | "living_state_patch_commit_validation"
+      | "living_state_patch_store"
+      | "living_state_patch_finalize"
+    code: string
+    message: string
+  }
+}</code></pre>
+
+    <h2>Functional Requirements</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Requirement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>FR-1</td>
+          <td>Without state-patch opt-in, all MVP-009 visible-reply behavior remains unchanged.</td>
+        </tr>
+        <tr>
+          <td>FR-2</td>
+          <td>With state-patch opt-in and no model patch, the runtime returns <code>living_state_patch_skipped</code>, appends no state patch raw log, and commits the assistant visible reply as in MVP-009.</td>
+        </tr>
+        <tr>
+          <td>FR-3</td>
+          <td>Malformed model-output patches continue to fail in Role Model Loop parsing before any state commit boundary runs.</td>
+        </tr>
+        <tr>
+          <td>FR-4</td>
+          <td>Commit and Effects still validates the normalized source event, role-model result envelope, living-state patch, committed snapshot candidate shape, source event IDs, patched fields, and runtime-owned timestamp before finalization. The snapshot candidate comes from the existing MVP-009 prepare path or one extracted helper around that same path.</td>
+        </tr>
+        <tr>
+          <td>FR-5</td>
+          <td>On success, Commit and Effects turns the validated snapshot candidate into the <code>committed_snapshot</code>, builds the exact <code>living_state_patch_committed</code> raw log entry, and places both in one <code>LivingStatePatchFinalizeRequest</code>. The finalizer must not revalidate the whole role-model result, rebuild the committed snapshot, or construct the committed log entry.</td>
+        </tr>
+        <tr>
+          <td>FR-6</td>
+          <td>The injected finalizer is the success commit point. It receives already validated commit artifacts and must expose neither the committed snapshot nor the committed raw log entry unless both commit together.</td>
+        </tr>
+        <tr>
+          <td>FR-7</td>
+          <td>If finalization fails, the result is <code>living_state_patch_rejected</code> with failure stage <code>living_state_patch_finalize</code>, one rejection raw log is appended through the existing rejection path, no assistant visible reply is committed, and tests prove no state-plus-success-log pair became visible.</td>
+        </tr>
+        <tr>
+          <td>FR-8</td>
+          <td>The success raw log order remains deterministic from the caller's view: <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>living_state_patch_committed</code>, <code>visible_reply_committed</code>.</td>
+        </tr>
+        <tr>
+          <td>FR-9</td>
+          <td>The final <code>UserMessageTurnResult</code> keeps the MVP-009 nested results and may include the atomic commit result, but it must not add new model-facing behavior.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Non-Functional Requirements</h2>
+    <ul>
+      <li>Use only Python standard library behavior; do not add dependencies.</li>
+      <li>Use fakes for the atomic boundary, raw logs, visible conversation, current-state source, role-model adapter, clock, and IDs.</li>
+      <li>Reuse existing <code>runtime.contracts</code> validators and the MVP-008 <code>validate_current_character_state_snapshot()</code> contract.</li>
+      <li>Reuse the MVP-009 prepare/snapshot-candidate path before finalization. Do not add another snapshot builder that applies the living-state patch separately.</li>
+      <li>Keep transaction semantics local to the living-state patch success path; do not introduce a generic transaction framework.</li>
+      <li>Deep-copy all finalized request, snapshot, log, result, and failure data so caller mutation cannot alter audit snapshots.</li>
+      <li>Add <code>living_state_patch_finalize</code> to the supported failure-stage taxonomy in one implementation location only, alongside the existing living-state patch failure stages. Tests should import or derive that stage constant instead of scattering raw string literals.</li>
+      <li>The fake atomic finalizer must expose separate visible lists for durable state snapshots and durable success raw logs. Ordinary rejection logs remain on the existing raw-log fake and must not be used to prove success atomicity.</li>
+      <li>Keep Runtime Kernel and Role Model Loop behavior unchanged except for any adapter type names required to pass the atomic boundary through existing user-turn orchestration.</li>
+    </ul>
+
+    <h2>Acceptance Criteria</h2>
+    <ul>
+      <li>Existing MVP-001 through MVP-009 tests continue to pass.</li>
+      <li>A successful patch records exactly one atomic finalization and exposes both the committed snapshot and the <code>living_state_patch_committed</code> raw log entry together.</li>
+      <li>A finalization failure exposes neither durable state nor the committed success raw log entry, appends a rejection raw log, and stops before assistant visible reply commit.</li>
+      <li>Validation failures before finalization continue to produce <code>living_state_patch_rejected</code> without calling the finalize boundary.</li>
+      <li>No concrete storage, state versioning, body state, incidents, scheduled directives, retrieval, tools, Live2D, provider calls, scheduler, or new event type is added.</li>
+      <li>The development journal records source context, files touched, checks run, review notes, and next action.</li>
+      <li>Future ideas discovered during planning are recorded in <a href="future-slices.html">future-slices.html</a>.</li>
+    </ul>
+
+    <h2>Test Plan</h2>
+    <h3>Unit Tests</h3>
+    <ul>
+      <li>Commit and Effects builds a <code>LivingStatePatchFinalizeRequest</code> from already validated artifacts and deep-copies source event, role-model result, patch, committed snapshot, and committed raw log entry before handing it to the finalizer.</li>
+      <li>The snapshot-candidate producer is called once for a patch success; the finalizer receives the same validated snapshot, not a separately reconstructed one.</li>
+      <li>Success calls <code>finalize_living_state_patch_commit()</code> on the fake finalizer once and returns <code>living_state_patch_committed</code> with a copied committed snapshot and committed log entry ID.</li>
+      <li>The fake finalizer records successful commits in separate <code>durable_state_snapshots</code> and <code>durable_success_logs</code> lists so tests can assert all-or-nothing visibility independently of rejection logs.</li>
+      <li>Finalizer failure returns <code>living_state_patch_rejected</code> with the centralized finalize failure-stage constant, appends one rejection log, and leaves the fake finalizer's durable state/success-log lists empty.</li>
+      <li>Malformed committed snapshot candidates are rejected before finalization.</li>
+      <li>No-patch decisions skip finalization and append no state patch log.</li>
+    </ul>
+
+    <h3>Integration Tests</h3>
+    <ul>
+      <li>Run one state-enabled user turn with fake current-state source, fake atomic finalizer, fake visible conversation, fake adapter, fake raw log, deterministic IDs, and deterministic clock.</li>
+      <li>Assert the success log order includes one atomically committed <code>living_state_patch_committed</code> entry before assistant visible reply commit, and assert that the fake finalizer exposes exactly one durable state snapshot and one durable success log.</li>
+      <li>Assert a finalization failure stops before assistant visible reply append, appends one rejection log through the ordinary raw-log fake, and leaves the fake finalizer's durable state/success-log lists empty.</li>
+      <li>Assert non-state-enabled and state-enabled no-patch user turns preserve MVP-009 visible reply behavior.</li>
+      <li>Run full unittest discovery.</li>
+    </ul>
+
+    <h2>Implementation Boundaries</h2>
+    <ul>
+      <li>Runtime Kernel remains unchanged.</li>
+      <li>Character State Engine remains the read-side state snapshot validator/source boundary; it does not finalize commits.</li>
+      <li>Role Model Loop remains the model-call and parse boundary; it does not learn about atomic persistence.</li>
+      <li>Commit and Effects owns validation, accepting the validated snapshot candidate as the <code>committed_snapshot</code>, committed-log-entry construction, finalize request construction, finalization failure handling, and user-turn stop behavior.</li>
+      <li>The existing MVP-009 prepare path owns snapshot candidate production until a later concrete persistence slice replaces it with a durable state store contract.</li>
+      <li>The finalizer owns only atomic visibility of the already built committed snapshot and committed success log entry.</li>
+      <li>User-turn orchestration may pass the atomic finalizer through and must keep assistant visible reply commit after state patch finalization.</li>
+      <li>Raw Event Log behavior changes only for the successful living-state patch entry: that entry is committed through the atomic state-plus-log boundary instead of a separate success append.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>MVP-010 is not a storage/database slice. It proves the transaction contract before choosing a concrete persistence technology.</li>
+      <li>The smallest useful behavior is all-or-nothing visibility for one state snapshot and one committed raw log entry.</li>
+      <li>MVP-010 should not introduce duplicate snapshot-building code. It should reuse the MVP-009 candidate path and only add finalization after validation.</li>
+      <li>State patch validation, snapshot validation, and visible reply projection remain the MVP-009 contracts; this slice should not reopen them unless tests expose a defect.</li>
+      <li>If implementation pressure suggests state versions, idempotency, replay, or concrete database APIs, park those as future slices.</li>
+    </ul>
+
+    <h2>Open Questions</h2>
+    <ul>
+      <li>Should the eventual concrete store use optimistic locking or append-only snapshot revisions? Not in MVP-010.</li>
+      <li>Should user visible message projection and assistant visible reply commit share the same transaction later? Not in MVP-010.</li>
+      <li>Should finalization failure emit its rejection log through the same atomic boundary? Not in MVP-010; no state mutation has committed, so the existing rejection-log path is sufficient.</li>
+    </ul>
+
+    <h2>Future Ideas Discovered During Planning</h2>
+    <ul>
+      <li>Concrete database-backed <code>CharacterRuntimeStateStore</code> once the atomic boundary contract is proven.</li>
+      <li>State revision or optimistic locking for concurrent state updates.</li>
+      <li>Idempotency keys and retry/reconciliation behavior for state patch commits.</li>
+      <li>Atomic grouping across user visible projection, state patch commit, and assistant visible reply commit.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      MVP-010 is archived as completed. Continue with the active MVP-011
+      read-only active-incident context slice.
+    </p>
+  </main>
+</body>
+</html>

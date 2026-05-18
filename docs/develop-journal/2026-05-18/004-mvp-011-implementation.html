@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-18 - MVP-011 Implementation</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-18 - MVP-011 Implementation</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Implemented <a href="../../plan/active-slice.html">MVP-011 - Read-Only Active Incident Brief in DecisionContext</a>.</li>
+      <li>Added active-incident read contracts to the Character State Engine: request, snapshot, brief, source protocol, validation, and snapshot-to-brief mapping.</li>
+      <li>Threaded an optional active-incident source through Role Model Loop context building and user-turn orchestration.</li>
+      <li>Kept the model-facing shape to one optional <code>character_snapshot.active_incident</code> brief.</li>
+      <li>Added tests for valid context, absent context, malformed source output, render-time validation, source/request copying, raw-log model-input snapshots, and composition with living-state patch commits.</li>
+    </ul>
+
+    <h2>Why It Was Needed</h2>
+    <p>
+      Notion Phase 3 moves next toward the Basic Incident System, but the active
+      slice deliberately starts with read-only context. The role model can now
+      see a compact active incident during an existing <code>USER_MESSAGE</code>
+      turn without authorizing incident lifecycle decisions, interruption
+      policy, new event types, concrete storage, tools, body state, retrieval,
+      Live2D, or scheduler behavior.
+    </p>
+
+    <h2>Source Context Checked</h2>
+    <ul>
+      <li>Notion project hub: Live Character Framework.</li>
+      <li>Notion page 09 for the Phase 3 Basic Incident System direction.</li>
+      <li>Notion page 02 for ownership of Runtime Kernel, Character State Engine, Role Model Loop, and Commit and Effects.</li>
+      <li>Notion page 03 for compact <code>DecisionContext</code>, active incident context, and scoped model actions.</li>
+      <li>Notion page 06 for Character State Engine context-building ownership and raw truth store boundaries.</li>
+      <li>Local active slice and completed MVP-001 through MVP-010 specs.</li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>src/character/state/current.py</code></li>
+      <li><code>src/character/state/__init__.py</code></li>
+      <li><code>src/role_model/loop.py</code></li>
+      <li><code>src/runtime/user_turn.py</code></li>
+      <li><code>tests/unit/test_current_state.py</code></li>
+      <li><code>tests/unit/test_role_model_loop.py</code></li>
+      <li><code>tests/unit/test_user_turn.py</code></li>
+      <li><code>tests/integration/test_user_message_turn.py</code></li>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/develop-journal/2026-05-18/004-mvp-011-implementation.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>No Runtime Kernel route, priority, or interruption behavior changed.</li>
+      <li>No Commit and Effects incident lifecycle action, rejection log, store, scheduler, or new event type was added.</li>
+      <li>Allowed actions remain <code>visible_reply</code> or <code>visible_reply</code> plus <code>state_patch</code> only when existing living-state write boundaries are fully opted in.</li>
+      <li>Malformed active-incident source output fails after the existing user visible message projection may have committed, but before adapter invocation, living-state patch commit, assistant visible reply commit, and any incident mutation.</li>
+      <li>The existing <code>role_model_turn_completed</code> raw log remains the audit surface for the rendered model input. No context-build log kind was added.</li>
+      <li>No new future ideas were discovered beyond the incident lifecycle, interruption, concrete store, <code>INCIDENT_COMPLETION</code>, and debug/replay ideas already parked in <a href="../../plan/future-slices.html">future-slices.html</a>.</li>
+    </ul>
+
+    <h2>Checks Run</h2>
+    <ul>
+      <li><code>python3.13 -m unittest tests.unit.test_current_state tests.unit.test_role_model_loop tests.unit.test_user_turn tests.integration.test_user_message_turn</code>: passed, 81 tests.</li>
+      <li><code>python3.13 -m compileall src tests</code>: passed.</li>
+      <li><code>python3.13 -m unittest discover -s tests/unit -t .</code>: passed, 111 tests.</li>
+      <li><code>python3.13 -m unittest discover -s tests/integration -t .</code>: passed, 48 tests.</li>
+      <li><code>python3.13 -m unittest discover -s tests -t .</code>: passed, 159 tests.</li>
+      <li><code>/private/tmp/project02-tools/bin/ruff check .</code>: passed after applying one import-order fix in <code>tests/unit/test_current_state.py</code>.</li>
+      <li><code>/private/tmp/project02-tools/bin/ruff format --check .</code>: passed.</li>
+      <li><code>PYTHONPATH=/private/tmp/project02-tools python3.13 -m mypy src</code>: passed.</li>
+      <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-010-atomic-living-state-patch-commit-boundary.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/2026-05-18/003-mvp-011-functional-spec.html docs/develop-journal/2026-05-18/004-mvp-011-implementation.html docs/develop-journal/index.html</code>: passed.</li>
+      <li><code>git diff --check</code>: passed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Run the full local quality gate, commit the MVP-011 implementation, open
+      a pull request, then update the implementation graph with the PR link.
+    </p>
+  </main>
+</body>
+</html>
