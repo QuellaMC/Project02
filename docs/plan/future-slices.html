@@ -330,7 +330,7 @@
       <dd>Add a database-backed or otherwise durable <code>CharacterRuntimeStateStore</code> after MVP-010 proves the atomic state-plus-log commit contract with fakes.</dd>
 
       <dt>Why It May Matter</dt>
-      <dd>The runtime eventually needs character state to survive process restarts and support audit/replay against raw logs.</dd>
+      <dd>The runtime eventually needs character state to survive process restarts and support audit/replay against raw logs. A concrete finalizer must make the success log queryable through the system's Raw Event Log surface, not only through a private state-store side list.</dd>
 
       <dt>Source Or Trigger</dt>
       <dd>Discovered while promoting MVP-010 and keeping it away from concrete storage choices.</dd>
@@ -342,10 +342,10 @@
       <dd><code>CharacterRuntimeStateStore concrete adapter v0.1</code>.</dd>
 
       <dt>Risk Or Unknown</dt>
-      <dd>Choosing storage before the atomic boundary is proven could mix persistence technology, migrations, retries, and locking into the current narrow state patch contract.</dd>
+      <dd>Choosing storage before the atomic boundary is proven could mix persistence technology, migrations, retries, and locking into the current narrow state patch contract. A concrete finalizer must also guarantee it does not make state or success-log records visible unless it can return a valid finalization result; otherwise a malformed return after a real commit could look like a rejection to the caller. The concrete adapter must not become a hidden second log that bypasses Raw Event Log retrieval, debug inspection, or replay.</dd>
 
       <dt>Schema Evolution Impact</dt>
-      <dd>Likely adds storage keys, snapshot revision metadata, idempotency keys, and compatibility handling for persisted state records.</dd>
+      <dd>Likely adds storage keys, snapshot revision metadata, finalization result guarantees, Raw Event Log query/replay integration for committed success logs, idempotency keys, and compatibility handling for persisted state records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
       <dd>MVP-010 is only the fake/injected atomic boundary. It must not add a database, migration, concrete adapter, or state revision policy.</dd>
