@@ -14,6 +14,7 @@ from runtime.contracts import (
     normalize_role_model_turn_result,
     normalize_visible_reply_decision_with_optional_living_state_patch,
     reject_extra_keys,
+    require_equal,
     require_string,
     validate_iso8601_timestamp,
     validate_normalized_user_message_event,
@@ -38,6 +39,7 @@ LIVING_STATE_PATCH_COMMITTED_KIND = "living_state_patch_committed"
 LIVING_STATE_PATCH_REJECTED_KIND = "living_state_patch_rejected"
 LIVING_STATE_PATCH_COMMIT_VALIDATION_STAGE = "living_state_patch_commit_validation"
 LIVING_STATE_PATCH_STORE_STAGE = "living_state_patch_store"
+LIVING_STATE_PATCH_FINALIZE_STAGE = "living_state_patch_finalize"
 SUPPORTED_FAILURE_CODES_BY_STAGE = {
     LIVING_STATE_PATCH_COMMIT_VALIDATION_STAGE: {
         "malformed_commit_input",
@@ -50,10 +52,16 @@ SUPPORTED_FAILURE_CODES_BY_STAGE = {
         "store_rejected",
         "malformed_store_result",
     },
+    LIVING_STATE_PATCH_FINALIZE_STAGE: {
+        "finalize_rejected",
+        "malformed_finalize_result",
+    },
 }
 
 RoleModelTurnResult = dict[str, Any]
 LivingStatePatchCommitRequest = dict[str, Any]
+LivingStatePatchFinalizeRequest = dict[str, Any]
+LivingStatePatchFinalizeResult = dict[str, Any]
 LivingStatePatchCommitResult = dict[str, Any]
 
 
@@ -73,6 +81,14 @@ class LivingStatePatchStoreError(ValueError):
         self.code = code
 
 
+class LivingStatePatchFinalizerError(ValueError):
+    """Raised by an injected atomic finalizer when it rejects a commit."""
+
+    def __init__(self, message: str, *, code: str = "finalize_rejected") -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class LivingStatePatchStore(Protocol):
     """MVP-009 pending patch boundary.
 
@@ -83,6 +99,15 @@ class LivingStatePatchStore(Protocol):
     def prepare_living_state_patch_commit(
         self,
         request: LivingStatePatchCommitRequest,
+    ) -> dict[str, Any]: ...
+
+
+class LivingStatePatchFinalizer(Protocol):
+    """MVP-010 atomic state-plus-log finalization boundary."""
+
+    def finalize_living_state_patch_commit(
+        self,
+        request: LivingStatePatchFinalizeRequest,
     ) -> dict[str, Any]: ...
 
 
@@ -116,6 +141,7 @@ def commit_living_state_patch(
     role_model_result: RoleModelTurnResult,
     *,
     living_state_patch_store: LivingStatePatchStore,
+    living_state_patch_finalizer: LivingStatePatchFinalizer,
     raw_event_log: RawEventLog,
     id_generator: IdGenerator,
     clock: Clock,
@@ -149,6 +175,44 @@ def commit_living_state_patch(
             committed_snapshot=committed_snapshot,
             commit_time=commit_time,
         )
+        committed_log_entry = build_living_state_patch_committed_log_entry(
+            source_event,
+            role_model_result,
+            request["patch"],
+            validated_snapshot,
+            id_generator=id_generator,
+            clock=_clock_at(commit_time),
+        )
+        finalize_request = build_living_state_patch_finalize_request(
+            request,
+            committed_snapshot=validated_snapshot,
+            committed_log_entry=committed_log_entry,
+        )
+        finalize_result = living_state_patch_finalizer.finalize_living_state_patch_commit(
+            deepcopy(finalize_request)
+        )
+        validated_finalize_result = validate_living_state_patch_finalize_result(
+            finalize_result,
+            source_identity=source_identity,
+            committed_log_entry=committed_log_entry,
+        )
+    except LivingStatePatchFinalizerError as error:
+        failure = _build_failure(
+            LIVING_STATE_PATCH_FINALIZE_STAGE,
+            error.code,
+            str(error),
+        )
+        raw_event_log.append(
+            build_living_state_patch_rejected_log_entry(
+                source_event,
+                role_model_result_snapshot=role_model_result,
+                patch_snapshot=request["patch"] if request is not None else None,
+                failure=failure,
+                id_generator=id_generator,
+                clock=clock,
+            )
+        )
+        return _build_rejected_result(source_identity, failure)
     except LivingStatePatchStoreError as error:
         failure = _build_failure(
             LIVING_STATE_PATCH_STORE_STAGE,
@@ -184,17 +248,6 @@ def commit_living_state_patch(
         )
         return _build_rejected_result(source_identity, failure)
 
-    assert commit_time is not None
-    raw_event_log.append(
-        build_living_state_patch_committed_log_entry(
-            source_event,
-            role_model_result,
-            request["patch"],
-            validated_snapshot,
-            id_generator=id_generator,
-            clock=_clock_at(commit_time),
-        )
-    )
     return {
         "schema_version": SCHEMA_VERSION,
         "trace_id": source_identity["trace_id"],
@@ -202,6 +255,7 @@ def commit_living_state_patch(
         "event_type": USER_MESSAGE,
         "status": LIVING_STATE_PATCH_COMMITTED_STATUS,
         "committed_snapshot": deepcopy(validated_snapshot),
+        "committed_log_entry_id": validated_finalize_result["committed_log_entry_id"],
     }
 
 
@@ -263,6 +317,114 @@ def build_living_state_patch_committed_log_entry(
         id_generator=id_generator,
         clock=clock,
     )
+
+
+def build_living_state_patch_finalize_request(
+    commit_request: Mapping[str, Any],
+    *,
+    committed_snapshot: Mapping[str, Any],
+    committed_log_entry: Mapping[str, Any],
+) -> LivingStatePatchFinalizeRequest:
+    if not isinstance(commit_request, Mapping):
+        raise LivingStatePatchCommitValidationError("commit_request must be a mapping.")
+    finalized_request = deepcopy(dict(commit_request))
+    finalized_request["committed_snapshot"] = deepcopy(dict(committed_snapshot))
+    finalized_request["committed_log_entry"] = deepcopy(dict(committed_log_entry))
+    return finalized_request
+
+
+def validate_living_state_patch_finalize_result(
+    finalize_result: Any,
+    *,
+    source_identity: Mapping[str, str],
+    committed_log_entry: Mapping[str, Any],
+) -> LivingStatePatchFinalizeResult:
+    if not isinstance(finalize_result, Mapping):
+        raise LivingStatePatchFinalizerError(
+            "LivingStatePatchFinalizeResult must be a mapping.",
+            code="malformed_finalize_result",
+        )
+    try:
+        reject_extra_keys(
+            finalize_result,
+            {
+                "schema_version",
+                "trace_id",
+                "event_id",
+                "event_type",
+                "committed_log_entry_id",
+            },
+            "LivingStatePatchFinalizeResult",
+        )
+        schema_version = require_equal(
+            finalize_result.get("schema_version"),
+            SCHEMA_VERSION,
+            "LivingStatePatchFinalizeResult.schema_version",
+        )
+        trace_id = require_string(
+            finalize_result.get("trace_id"),
+            "LivingStatePatchFinalizeResult.trace_id",
+        )
+        event_id = require_string(
+            finalize_result.get("event_id"),
+            "LivingStatePatchFinalizeResult.event_id",
+        )
+        event_type = require_equal(
+            finalize_result.get("event_type"),
+            USER_MESSAGE,
+            "LivingStatePatchFinalizeResult.event_type",
+        )
+        committed_log_entry_id = require_string(
+            finalize_result.get("committed_log_entry_id"),
+            "LivingStatePatchFinalizeResult.committed_log_entry_id",
+        )
+    except SharedContractValidationError as error:
+        raise LivingStatePatchFinalizerError(
+            str(error),
+            code="malformed_finalize_result",
+        ) from error
+
+    if trace_id != source_identity["trace_id"]:
+        raise LivingStatePatchFinalizerError(
+            "LivingStatePatchFinalizeResult.trace_id must match source_event.trace_id.",
+            code="malformed_finalize_result",
+        )
+    if event_id != source_identity["event_id"]:
+        raise LivingStatePatchFinalizerError(
+            "LivingStatePatchFinalizeResult.event_id must match source_event.event_id.",
+            code="malformed_finalize_result",
+        )
+    if not isinstance(committed_log_entry, Mapping):
+        raise LivingStatePatchFinalizerError(
+            "committed_log_entry must be a mapping.",
+            code="malformed_finalize_result",
+        )
+    try:
+        expected_log_id = require_string(
+            committed_log_entry.get("log_id"),
+            "committed_log_entry.log_id",
+        )
+    except SharedContractValidationError as error:
+        raise LivingStatePatchFinalizerError(
+            str(error),
+            code="malformed_finalize_result",
+        ) from error
+    if committed_log_entry_id != expected_log_id:
+        raise LivingStatePatchFinalizerError(
+            (
+                "LivingStatePatchFinalizeResult.committed_log_entry_id must match "
+                "committed_log_entry.log_id."
+            ),
+            code="malformed_finalize_result",
+        )
+
+    return {
+        "schema_version": schema_version,
+        "trace_id": trace_id,
+        "event_id": event_id,
+        "event_type": event_type,
+        "committed_log_entry_id": committed_log_entry_id,
+    }
 
 
 def build_living_state_patch_rejected_log_entry(
@@ -384,11 +546,12 @@ def _validate_failure(failure: Mapping[str, Any]) -> dict[str, str]:
 def _build_failure(stage: str, code: str, message: str) -> dict[str, str]:
     supported_codes = SUPPORTED_FAILURE_CODES_BY_STAGE[stage]
     if code not in supported_codes:
-        code = (
-            "malformed_store_result"
-            if stage == LIVING_STATE_PATCH_STORE_STAGE
-            else "malformed_commit_input"
-        )
+        if stage == LIVING_STATE_PATCH_STORE_STAGE:
+            code = "malformed_store_result"
+        elif stage == LIVING_STATE_PATCH_FINALIZE_STAGE:
+            code = "malformed_finalize_result"
+        else:
+            code = "malformed_commit_input"
     return {"stage": stage, "code": code, "message": message}
 
 

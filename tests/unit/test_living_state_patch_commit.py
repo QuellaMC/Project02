@@ -8,8 +8,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from commit_effects.living_state import (  # noqa: E402
     LIVING_STATE_PATCH_COMMITTED_STATUS,
+    LIVING_STATE_PATCH_FINALIZE_STAGE,
     LIVING_STATE_PATCH_REJECTED_STATUS,
     LIVING_STATE_PATCH_SKIPPED_STATUS,
+    LivingStatePatchFinalizerError,
     LivingStatePatchStoreError,
     build_living_state_patch_commit_request,
     build_living_state_patch_committed_log_entry,
@@ -39,16 +41,6 @@ class RecordingRawEventLog:
         self.entries.append(deepcopy(entry))
 
 
-class FailingRawEventLog:
-    def __init__(self):
-        self.entries = []
-        self.attempted_entries = []
-
-    def append(self, entry):
-        self.attempted_entries.append(deepcopy(entry))
-        raise RuntimeError("raw log unavailable")
-
-
 class RecordingLivingStatePatchStore:
     def __init__(self, snapshot=None, error=None):
         self.snapshot = snapshot or committed_snapshot()
@@ -61,6 +53,31 @@ class RecordingLivingStatePatchStore:
         if self.error is not None:
             raise self.error
         return deepcopy(self.snapshot)
+
+
+class RecordingLivingStatePatchFinalizer:
+    def __init__(self, error=None, result_override=None):
+        self.error = error
+        self.result_override = deepcopy(result_override)
+        self.requests = []
+        self.durable_state_snapshots = []
+        self.durable_success_logs = []
+
+    def finalize_living_state_patch_commit(self, request):
+        self.requests.append(deepcopy(request))
+        if self.error is not None:
+            raise self.error
+        if self.result_override is not None:
+            return deepcopy(self.result_override)
+        self.durable_state_snapshots.append(deepcopy(request["committed_snapshot"]))
+        self.durable_success_logs.append(deepcopy(request["committed_log_entry"]))
+        return {
+            "schema_version": "0.1",
+            "trace_id": request["trace_id"],
+            "event_id": request["event_id"],
+            "event_type": request["event_type"],
+            "committed_log_entry_id": request["committed_log_entry"]["log_id"],
+        }
 
 
 def normalized_user_message():
@@ -152,11 +169,13 @@ class LivingStatePatchCommitTests(unittest.TestCase):
     def test_returns_skipped_without_log_or_store_call_when_decision_has_no_patch(self):
         raw_log = RecordingRawEventLog()
         store = RecordingLivingStatePatchStore()
+        finalizer = RecordingLivingStatePatchFinalizer()
 
         result = commit_living_state_patch(
             normalized_user_message(),
             role_model_result_without_patch(),
             living_state_patch_store=store,
+            living_state_patch_finalizer=finalizer,
             raw_event_log=raw_log,
             id_generator=SequenceIdGenerator(),
             clock=fixed_clock,
@@ -164,11 +183,13 @@ class LivingStatePatchCommitTests(unittest.TestCase):
 
         self.assertEqual(result["status"], LIVING_STATE_PATCH_SKIPPED_STATUS)
         self.assertEqual(store.requests, [])
+        self.assertEqual(finalizer.requests, [])
         self.assertEqual(raw_log.entries, [])
 
-    def test_commits_patch_logs_snapshot_and_uses_copies(self):
+    def test_commits_patch_through_atomic_finalizer_and_uses_copies(self):
         raw_log = RecordingRawEventLog()
         store = RecordingLivingStatePatchStore()
+        finalizer = RecordingLivingStatePatchFinalizer()
         event = normalized_user_message()
         role_model_result = role_model_result_with_patch()
 
@@ -176,6 +197,7 @@ class LivingStatePatchCommitTests(unittest.TestCase):
             event,
             role_model_result,
             living_state_patch_store=store,
+            living_state_patch_finalizer=finalizer,
             raw_event_log=raw_log,
             id_generator=SequenceIdGenerator(),
             clock=fixed_clock,
@@ -185,50 +207,121 @@ class LivingStatePatchCommitTests(unittest.TestCase):
         role_model_result["decision"]["state_patch"]["living_state"]["mood"] = "mutated"
         result["committed_snapshot"]["living_state"]["mood"] = "mutated result"
         store.requests[0]["patch"]["living_state"]["mood"] = "mutated request"
+        finalizer.requests[0]["committed_snapshot"]["living_state"]["mood"] = (
+            "mutated finalizer request"
+        )
+        finalizer.requests[0]["committed_log_entry"]["data"]["source_event"]["payload"]["text"] = (
+            "mutated finalizer request"
+        )
 
         self.assertEqual(result["status"], LIVING_STATE_PATCH_COMMITTED_STATUS)
+        self.assertEqual(
+            result["committed_log_entry_id"],
+            finalizer.durable_success_logs[0]["log_id"],
+        )
         self.assertEqual(store.requests[0]["commit_time"], "2026-05-17T09:00:00+00:00")
         self.assertEqual(
             store.requests[0]["patch"]["living_state"]["current_activity"],
             "answering the user",
         )
-        self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_committed")
-        self.assertEqual(raw_log.entries[0]["data"]["source_event"]["payload"]["text"], "hello")
-        self.assertEqual(raw_log.entries[0]["data"]["patch"]["living_state"]["mood"], "attentive")
+        self.assertEqual(len(store.requests), 1)
+        self.assertEqual(len(finalizer.requests), 1)
+        self.assertEqual(raw_log.entries, [])
+        self.assertEqual(finalizer.durable_success_logs[0]["kind"], "living_state_patch_committed")
         self.assertEqual(
-            raw_log.entries[0]["data"]["committed_snapshot"]["source_event_ids"],
+            finalizer.requests[0]["committed_snapshot"]["source_event_ids"],
+            ["event-state-1", "event-1"],
+        )
+        self.assertEqual(
+            finalizer.durable_state_snapshots[0]["living_state"]["mood"],
+            "attentive",
+        )
+        self.assertEqual(
+            finalizer.durable_success_logs[0]["data"]["source_event"]["payload"]["text"],
+            "hello",
+        )
+        self.assertEqual(
+            finalizer.durable_success_logs[0]["data"]["patch"]["living_state"]["mood"],
+            "attentive",
+        )
+        self.assertEqual(
+            finalizer.durable_success_logs[0]["data"]["committed_snapshot"]["source_event_ids"],
             ["event-state-1", "event-1"],
         )
 
-    def test_raw_log_failure_after_store_prepare_does_not_mark_durable_commit(self):
-        raw_log = FailingRawEventLog()
-        store = RecordingLivingStatePatchStore()
-
-        with self.assertRaisesRegex(RuntimeError, "raw log unavailable"):
-            commit_living_state_patch(
-                normalized_user_message(),
-                role_model_result_with_patch(),
-                living_state_patch_store=store,
-                raw_event_log=raw_log,
-                id_generator=SequenceIdGenerator(),
-                clock=fixed_clock,
-            )
-
-        self.assertEqual(len(store.requests), 1)
-        self.assertEqual(store.durable_commits, [])
-        self.assertEqual(raw_log.entries, [])
-        self.assertEqual(raw_log.attempted_entries[0]["kind"], "living_state_patch_committed")
-
-    def test_store_rejection_appends_rejected_log_and_returns_failure(self):
+    def test_finalizer_failure_rejects_without_durable_state_or_success_log(self):
         raw_log = RecordingRawEventLog()
-        store = RecordingLivingStatePatchStore(
-            error=LivingStatePatchStoreError("store rejected", code="store_rejected")
+        store = RecordingLivingStatePatchStore()
+        finalizer = RecordingLivingStatePatchFinalizer(
+            error=LivingStatePatchFinalizerError(
+                "finalize rejected",
+                code="finalize_rejected",
+            )
         )
 
         result = commit_living_state_patch(
             normalized_user_message(),
             role_model_result_with_patch(),
             living_state_patch_store=store,
+            living_state_patch_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIVING_STATE_PATCH_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], LIVING_STATE_PATCH_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertEqual(len(store.requests), 1)
+        self.assertEqual(len(finalizer.requests), 1)
+        self.assertEqual(finalizer.durable_state_snapshots, [])
+        self.assertEqual(finalizer.durable_success_logs, [])
+        self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_rejected")
+        self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
+
+    def test_malformed_finalizer_result_rejects_without_durable_state_or_success_log(self):
+        raw_log = RecordingRawEventLog()
+        store = RecordingLivingStatePatchStore()
+        finalizer = RecordingLivingStatePatchFinalizer(
+            result_override={
+                "schema_version": "0.1",
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "event_type": "USER_MESSAGE",
+                "committed_log_entry_id": "wrong-log-id",
+            }
+        )
+
+        result = commit_living_state_patch(
+            normalized_user_message(),
+            role_model_result_with_patch(),
+            living_state_patch_store=store,
+            living_state_patch_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIVING_STATE_PATCH_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], LIVING_STATE_PATCH_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertEqual(len(finalizer.requests), 1)
+        self.assertEqual(finalizer.durable_state_snapshots, [])
+        self.assertEqual(finalizer.durable_success_logs, [])
+        self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_rejected")
+
+    def test_store_rejection_appends_rejected_log_and_returns_failure(self):
+        raw_log = RecordingRawEventLog()
+        store = RecordingLivingStatePatchStore(
+            error=LivingStatePatchStoreError("store rejected", code="store_rejected")
+        )
+        finalizer = RecordingLivingStatePatchFinalizer()
+
+        result = commit_living_state_patch(
+            normalized_user_message(),
+            role_model_result_with_patch(),
+            living_state_patch_store=store,
+            living_state_patch_finalizer=finalizer,
             raw_event_log=raw_log,
             id_generator=SequenceIdGenerator(),
             clock=fixed_clock,
@@ -237,12 +330,14 @@ class LivingStatePatchCommitTests(unittest.TestCase):
         self.assertEqual(result["status"], LIVING_STATE_PATCH_REJECTED_STATUS)
         self.assertEqual(result["failure"]["stage"], "living_state_patch_store")
         self.assertEqual(result["failure"]["code"], "store_rejected")
+        self.assertEqual(finalizer.requests, [])
         self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_rejected")
         self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
 
     def test_commit_validation_rejection_logs_before_store_call(self):
         raw_log = RecordingRawEventLog()
         store = RecordingLivingStatePatchStore()
+        finalizer = RecordingLivingStatePatchFinalizer()
         role_model_result = role_model_result_with_patch()
         role_model_result["decision"]["state_patch"] = {"living_state": {}}
 
@@ -250,6 +345,7 @@ class LivingStatePatchCommitTests(unittest.TestCase):
             normalized_user_message(),
             role_model_result,
             living_state_patch_store=store,
+            living_state_patch_finalizer=finalizer,
             raw_event_log=raw_log,
             id_generator=SequenceIdGenerator(),
             clock=fixed_clock,
@@ -259,6 +355,7 @@ class LivingStatePatchCommitTests(unittest.TestCase):
         self.assertEqual(result["failure"]["stage"], "living_state_patch_commit_validation")
         self.assertEqual(result["failure"]["code"], "malformed_commit_input")
         self.assertEqual(store.requests, [])
+        self.assertEqual(finalizer.requests, [])
         self.assertEqual(len(raw_log.entries), 1)
         self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_rejected")
         self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
@@ -290,11 +387,13 @@ class LivingStatePatchCommitTests(unittest.TestCase):
             with self.subTest(message_pattern=message_pattern):
                 raw_log = RecordingRawEventLog()
                 store = RecordingLivingStatePatchStore(snapshot=snapshot)
+                finalizer = RecordingLivingStatePatchFinalizer()
 
                 result = commit_living_state_patch(
                     normalized_user_message(),
                     role_model_result_with_patch(),
                     living_state_patch_store=store,
+                    living_state_patch_finalizer=finalizer,
                     raw_event_log=raw_log,
                     id_generator=SequenceIdGenerator(),
                     clock=fixed_clock,
@@ -305,6 +404,7 @@ class LivingStatePatchCommitTests(unittest.TestCase):
                 self.assertEqual(result["failure"]["code"], "malformed_store_result")
                 self.assertRegex(result["failure"]["message"], message_pattern)
                 self.assertEqual(len(store.requests), 1)
+                self.assertEqual(finalizer.requests, [])
                 self.assertEqual(len(raw_log.entries), 1)
                 self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_rejected")
                 self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])

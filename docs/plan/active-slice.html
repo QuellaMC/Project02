@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-009 - Minimal Living State Patch Commit</title>
+  <title>MVP-010 - Atomic Living State Patch Commit Boundary</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,13 +27,13 @@
 </head>
 <body>
   <main>
-    <h1>MVP-009 - Minimal Living State Patch Commit</h1>
-    <p><span class="status">Status: implemented and in review; PR #9</span></p>
+    <h1>MVP-010 - Atomic Living State Patch Commit Boundary</h1>
+    <p><span class="status">Status: implemented and in review; PR #10</span></p>
     <p class="meta">
-      Created: 2026-05-17. Active slice path:
+      Created: 2026-05-18. Active slice path:
       <code>docs/plan/active-slice.html</code>.
       Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
-      Branch: <code>feature/mvp-009-functional-spec</code>.
+      Branch: <code>feature/mvp-010-functional-spec</code>.
     </p>
 
     <h2>Source Context</h2>
@@ -49,144 +49,97 @@
       <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
     </p>
     <blockquote>
-      Phase 2 adds CharacterRuntimeState, a state snapshot in
-      <code>DecisionContext</code>, and state patch validation and commit.
-      MVP-008 finished only the read-side snapshot. MVP-009 takes the next
-      smallest write-side step: one optional model-proposed living-state patch
-      can be validated and committed through Commit and Effects.
+      Phase 2 needs CharacterRuntimeState writes, but MVP-009 deliberately used
+      a non-durable prepare boundary and treated the raw-log append as the
+      commit point. MVP-010 proves only the next missing runtime contract:
+      a living-state patch success must commit the validated state snapshot and
+      its <code>living_state_patch_committed</code> raw log entry atomically.
     </blockquote>
     <p>
-      Local implementation truth comes from
+      Local implementation truth comes from completed
       <a href="completed/mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001</a>,
       <a href="completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html">MVP-002</a>,
       <a href="completed/mvp-003-minimal-visible-reply-commit.html">MVP-003</a>,
       <a href="completed/mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004</a>,
       <a href="completed/mvp-005-user-visible-message-projection.html">MVP-005</a>,
       <a href="completed/mvp-006-visible-conversation-recent-source.html">MVP-006</a>,
-      <a href="completed/mvp-007-minimal-user-turn-orchestrator.html">MVP-007</a>, and
-      <a href="completed/mvp-008-read-only-living-state-snapshot-in-decisioncontext.html">MVP-008</a>.
-      The current runtime can complete one <code>USER_MESSAGE</code> turn with
-      visible history, a fake model, a visible reply commit, and an optional
-      read-only <code>living_state_brief</code>.
+      <a href="completed/mvp-007-minimal-user-turn-orchestrator.html">MVP-007</a>,
+      <a href="completed/mvp-008-read-only-living-state-snapshot-in-decisioncontext.html">MVP-008</a>, and
+      <a href="completed/mvp-009-minimal-living-state-patch-commit.html">MVP-009</a>.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Extend the state-enabled <code>USER_MESSAGE</code> turn by allowing the
-      fake role model to return one optional <code>state_patch.living_state</code>
-      alongside the existing required <code>visible_reply</code>. The runtime
-      must validate the patch, commit it through an injected Commit and Effects
-      state boundary, append an auditable raw log entry, and preserve the
-      existing visible reply flow. This slice must not add concrete storage,
-      body state, incidents, scheduled directives, retrieval, tools, Live2D,
-      a live model provider, or a new runtime event family.
+      Replace the MVP-009 prepare-only living-state patch success path with one
+      injected atomic commit boundary. A successful state patch must make both
+      facts visible together: the committed <code>CharacterRuntimeStateSnapshot</code>
+      and the matching <code>living_state_patch_committed</code> raw log entry.
+      This slice keeps the existing user-turn, role-model, patch-shape, and
+      visible-reply behavior intact.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>One supported event type remains <code>USER_MESSAGE</code>.</li>
-      <li>One optional state-patch capability, enabled only when the caller provides both a current-state source and a living-state patch commit store.</li>
-      <li>One optional <code>state_patch.living_state</code> sibling on the existing visible-reply model decision.</li>
-      <li>One tiny living-state patch shape with only <code>current_activity</code>, <code>mood</code>, and <code>toward_user</code>; at least one field must be present.</li>
-      <li>One injected commit store or sink bound by the caller to the active character; runtime code must not infer or hard-code <code>character_id</code>.</li>
-      <li>One Commit and Effects state commit path that validates the patch and appends either <code>living_state_patch_committed</code> or <code>living_state_patch_rejected</code>.</li>
-      <li>Existing visible reply parsing, recent visible messages, current-state read, and user-turn orchestration remain authoritative.</li>
-      <li>Existing callers that do not opt into living-state patch commits continue to see MVP-008 behavior and <code>allowed_actions = ["visible_reply"]</code>.</li>
-      <li>Tests use fakes only; no database, file, network, live model provider, scheduler, or clock side effect is introduced beyond the existing injected clock.</li>
+      <li>One event type remains in scope: <code>USER_MESSAGE</code>.</li>
+      <li>One state family remains in scope: <code>state_patch.living_state</code> with only <code>current_activity</code>, <code>mood</code>, and <code>toward_user</code>.</li>
+      <li>One success-path boundary changes: the existing MVP-009 prepare/snapshot-candidate path remains the single candidate producer, and its validated candidate is finalized by an injected atomic state-plus-log boundary before assistant visible reply commit.</li>
+      <li>The atomic boundary is still fake/injected for tests. It may be in-memory, but it must model all-or-nothing state and raw-log visibility.</li>
+      <li>The existing committed snapshot validation stays authoritative: source event ID is present, patched fields match, and <code>updated_at</code> equals the runtime-owned commit timestamp.</li>
+      <li>Existing no-patch, malformed-model-output, validation-rejection, store-rejection, and visible-reply-only paths stay behavior-compatible with MVP-009.</li>
+      <li>Tests must prove the assistant visible reply is committed only after the atomic state-plus-log commit succeeds.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No concrete <code>CharacterRuntimeStateStore</code>, database schema, migration, transaction manager, idempotency key store, or persistence adapter.</li>
-      <li>No full <code>CharacterRuntimeState</code> expansion beyond the already proven living-state brief fields.</li>
-      <li>No model-proposed <code>body_state</code>, virtual body drift, need thresholds, active incident, incident queue, scheduled directive, active thread, retrieval, continuity write, tool request, Live2D status, asset, proactive message, scheduler, or background worker.</li>
-      <li>No standalone state-only model call and no <code>action = "state_patch"</code> output. The user-turn model decision still requires <code>action = "visible_reply"</code> and a valid visible reply.</li>
-      <li>No automatic default state creation when a state source is absent.</li>
-      <li>No rollback or reconciliation if the user visible message was already committed before a later state patch rejection.</li>
-      <li>No dedicated context-build log. The new raw logs cover only the state patch commit or rejection once the model has proposed a patch.</li>
-      <li>No broad Character State Engine context-builder extraction and no broad Role Model Loop output-contract redesign.</li>
+      <li>No database, filesystem store, migration, ORM, queue, background worker, scheduler, replay worker, or production persistence adapter.</li>
+      <li>No concrete multi-character lookup and no runtime-inferred <code>character_id</code>; the injected boundary remains caller-bound to the active character.</li>
+      <li>No broad <code>CharacterRuntimeState</code> expansion, <code>state_version</code>, optimistic locking, idempotency key, reconciliation job, or cross-turn deduplication policy.</li>
+      <li>No body state, body drift, need thresholds, active incident, incident queue, scheduled directive, retrieval, continuity write, tool request, Live2D status, asset behavior, proactive message, or new runtime event family.</li>
+      <li>No new Role Model action. The model still returns required <code>action = "visible_reply"</code> and may include only the optional MVP-009 living-state patch when state patching is allowed.</li>
+      <li>No transaction between user visible message projection, state patch commit, and assistant visible reply commit. MVP-010 only atomizes state snapshot plus state-patch raw log.</li>
+      <li>No dedicated context-build log or debug inspector. Existing role-model and state-patch logs remain the audit surface.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
+    <h3>Snapshot Candidate Path</h3>
     <p>
-      These TypeScript-style shapes define the intended behavior contract. MVP-009
-      should implement the contract in Python 3 and test it with
-      <code>unittest</code>.
+      MVP-010 reuses the existing MVP-009
+      <code>LivingStatePatchStore.prepare_living_state_patch_commit()</code>
+      path only as the snapshot-candidate producer before finalization. Commit
+      and Effects must not duplicate snapshot construction by independently
+      applying the patch to state in a second code path. If implementation
+      extracts a helper for readability, that helper must be the one shared path
+      used to obtain the candidate snapshot before validation and finalization,
+      not a parallel builder.
+    </p>
+    <p>
+      The MVP-010 finalizer is a new boundary after that candidate path. It
+      atomically exposes the already validated <code>committed_snapshot</code>
+      and <code>committed_log_entry</code>; it does not create either artifact.
     </p>
 
-    <h3>MVP009 DecisionContext Excerpt</h3>
-    <pre><code>type DecisionContext = {
-  schema_version: "0.1"
-  trace_id: string
-  event_id: string
-  call_type: "user_message_visible_reply"
-  event: UserMessageEventContext
-  character_snapshot: {
-    recent_visible_messages: RecentVisibleMessage[]
-    living_state_brief?: LivingStateBrief
-  }
-  allowed_actions:
-    | ["visible_reply"]
-    | ["visible_reply", "state_patch"]
+    <h3>LivingStatePatchFinalizer</h3>
+    <pre><code>type LivingStatePatchFinalizer = {
+  finalize_living_state_patch_commit(
+    request: LivingStatePatchFinalizeRequest
+  ): LivingStatePatchFinalizeResult
 }</code></pre>
     <p>
-      The wider allowed-action list is available only for state-enabled calls.
-      A normal caller with no state commit boundary keeps the MVP-008
-      <code>["visible_reply"]</code> contract.
+      The MVP-010 finalization boundary must use finalizer/finalize naming.
+      Do not name the new atomic boundary <code>LivingStatePatchStore</code> or
+      call the final step <code>prepare_living_state_patch_commit()</code>. Those
+      names belong to the MVP-009 prepare-only boundary and would blur future
+      concrete persistence ownership.
     </p>
 
-    <h3>MVP009 CharacterDecision Excerpt</h3>
-    <pre><code>type CharacterDecision = {
-  schema_version: "0.1"
-  action: "visible_reply"
-  visible_reply: {
-    text: string
-  }
-  state_patch?: {
-    living_state: {
-      current_activity?: string
-      mood?: string
-      toward_user?: string
-    }
-  }
-}</code></pre>
-    <p>
-      The model may not set <code>character_id</code>, <code>updated_at</code>,
-      <code>source_event_ids</code>, <code>body_state</code>, or any durable
-      store field. Commit and Effects owns timestamps, source event IDs, and the
-      committed record. The Role Model Loop must normalize this shape through a
-      shared <code>runtime.contracts</code> helper, not through ad hoc patch
-      validation local to the loop.
-    </p>
-
-    <h3>VisibleReplyCommitProjection</h3>
-    <pre><code>type VisibleReplyCommitProjection = {
-  schema_version: "0.1"
-  trace_id: string
-  event_id: string
-  action: "visible_reply"
-  visible_reply: {
-    text: string
-  }
-}</code></pre>
-    <p>
-      <code>commit_visible_reply()</code> keeps its existing strict
-      visible-reply-only contract. If the parsed decision contains
-      <code>state_patch</code>, the user-turn orchestrator or Commit and Effects
-      handoff must pass a visible-reply-only projection to the existing visible
-      reply commit path after the state patch commit succeeds. Do not broaden
-      <code>commit_visible_reply()</code> to accept state patch fields in this
-      slice.
-    </p>
-
-    <h3>LivingStatePatchCommitRequest</h3>
-    <pre><code>type LivingStatePatchCommitRequest = {
+    <h3>LivingStatePatchFinalizeRequest</h3>
+    <pre><code>type LivingStatePatchFinalizeRequest = {
   schema_version: "0.1"
   trace_id: string
   event_id: string
   event_type: "USER_MESSAGE"
-  commit_time: string
   decision_action: "visible_reply"
+  commit_time: string
   patch: {
     living_state: {
       current_activity?: string
@@ -194,12 +147,25 @@
       toward_user?: string
     }
   }
+  committed_snapshot: CharacterRuntimeStateSnapshot
+  committed_log_entry: RawEventLogEntry &amp; {
+    kind: "living_state_patch_committed"
+  }
   user_id?: string
   conversation_id?: string
 }</code></pre>
 
-    <h3>LivingStatePatchCommitResult</h3>
-    <pre><code>type LivingStatePatchCommitResult = {
+    <h3>LivingStatePatchFinalizeResult</h3>
+    <pre><code>type LivingStatePatchFinalizeResult = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  event_type: "USER_MESSAGE"
+  committed_log_entry_id: string
+}</code></pre>
+
+    <h3>LivingStatePatchAtomicCommitResult</h3>
+    <pre><code>type LivingStatePatchAtomicCommitResult = {
   schema_version: "0.1"
   trace_id: string
   event_id: string
@@ -209,8 +175,12 @@
     | "living_state_patch_skipped"
     | "living_state_patch_rejected"
   committed_snapshot?: CharacterRuntimeStateSnapshot
+  committed_log_entry_id?: string
   failure?: {
-    stage: "living_state_patch_commit_validation" | "living_state_patch_store"
+    stage:
+      | "living_state_patch_commit_validation"
+      | "living_state_patch_store"
+      | "living_state_patch_finalize"
     code: string
     message: string
   }
@@ -227,71 +197,39 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>Without state-patch opt-in, <code>build_decision_context()</code>, <code>render_role_model_input()</code>, <code>parse_character_decision()</code>, <code>run_role_model_turn()</code>, and <code>run_user_message_turn()</code> preserve MVP-008 behavior and accept only <code>visible_reply</code>.</td>
+          <td>Without state-patch opt-in, all MVP-009 visible-reply behavior remains unchanged.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>State-patch opt-in requires a current-state source for the model-facing <code>living_state_brief</code> and a separate injected commit store for the write. If either is absent, the user-turn path must not advertise <code>state_patch</code> as allowed.</td>
+          <td>With state-patch opt-in and no model patch, the runtime returns <code>living_state_patch_skipped</code>, appends no state patch raw log, and commits the assistant visible reply as in MVP-009.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>For an opted-in call, <code>DecisionContext.allowed_actions</code> is exactly <code>["visible_reply", "state_patch"]</code>, and the rendered model input includes the MVP-008 <code>living_state_brief</code>.</td>
-        </tr>
-        <tr>
-          <td>FR-3a</td>
-          <td>For an opted-in call, <code>render_role_model_input()</code> uses a conditional output contract that explicitly permits optional <code>state_patch.living_state</code> with only <code>current_activity</code>, <code>mood</code>, and <code>toward_user</code>. The existing visible-reply-only instructions remain unchanged for non-opted-in calls.</td>
+          <td>Malformed model-output patches continue to fail in Role Model Loop parsing before any state commit boundary runs.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>The Role Model Loop still requires <code>action = "visible_reply"</code> and a non-empty <code>visible_reply.text</code>. A standalone <code>action = "state_patch"</code> remains invalid.</td>
+          <td>Commit and Effects still validates the normalized source event, role-model result envelope, living-state patch, committed snapshot candidate shape, source event IDs, patched fields, and runtime-owned timestamp before finalization. The snapshot candidate comes from the existing MVP-009 prepare path or one extracted helper around that same path.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>When <code>state_patch</code> is present and allowed, parsing accepts only <code>state_patch.living_state.current_activity</code>, <code>mood</code>, and <code>toward_user</code> as non-empty strings, with at least one field present, by reusing a shared <code>runtime.contracts.normalize_living_state_patch()</code> helper.</td>
+          <td>On success, Commit and Effects turns the validated snapshot candidate into the <code>committed_snapshot</code>, builds the exact <code>living_state_patch_committed</code> raw log entry, and places both in one <code>LivingStatePatchFinalizeRequest</code>. The finalizer must not revalidate the whole role-model result, rebuild the committed snapshot, or construct the committed log entry.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>Parsing rejects malformed model output before any state commit path runs: <code>state_patch</code> when not allowed, unknown state-patch fields, empty strings, empty living-state patches, <code>body_state</code>, and future state families all produce the existing <code>role_model_turn_failed</code> parse behavior.</td>
+          <td>The injected finalizer is the success commit point. It receives already validated commit artifacts and must expose neither the committed snapshot nor the committed raw log entry unless both commit together.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>Commit and Effects validates the normalized <code>USER_MESSAGE</code> source event, role-model result status, trace ID, event ID, decision action, and already-normalized patch before calling the injected commit store. It must reuse <code>runtime.contracts.normalize_role_model_turn_result()</code> for the shared envelope and <code>runtime.contracts.normalize_living_state_patch()</code> for defensive patch validation rather than duplicating schema logic.</td>
-        </tr>
-        <tr>
-          <td>FR-7a</td>
-          <td>Before calling the existing <code>commit_visible_reply()</code> path for a decision that also contains <code>state_patch</code>, the user-turn path must build a <code>VisibleReplyCommitProjection</code> and validate it through the existing visible-reply-only contract.</td>
+          <td>If finalization fails, the result is <code>living_state_patch_rejected</code> with failure stage <code>living_state_patch_finalize</code>, one rejection raw log is appended through the existing rejection path, no assistant visible reply is committed, and tests prove no state-plus-success-log pair became visible.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>The injected MVP-009 patch boundary is a pending, non-durable prepare boundary called at most once per user turn with a deep-copied <code>LivingStatePatchCommitRequest</code>. Caller mutation after the call must not alter raw log snapshots or returned results.</td>
-        </tr>
-        <tr>
-          <td>FR-8a</td>
-          <td>The patch request must not accept model-authored <code>updated_at</code> or <code>source_event_ids</code>. Commit and Effects adds a runtime-owned <code>commit_time</code> to the prepare request before calling the fake store so the returned snapshot can use the exact timestamp that will be validated and logged. The fake prepare boundary used in tests must return a committed snapshot candidate with deterministic runtime-owned <code>updated_at</code> and <code>source_event_ids</code> values derived from the injected test boundary and source event, not from the model patch. Commit and Effects must reject a shape-valid store result as <code>malformed_store_result</code> when the current <code>event_id</code> is absent from <code>source_event_ids</code>, any patched living-state field differs in the returned snapshot, or <code>updated_at</code> does not match the runtime commit timestamp / is older than the source event.</td>
+          <td>The success raw log order remains deterministic from the caller's view: <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>living_state_patch_committed</code>, <code>visible_reply_committed</code>.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>On successful state patch commit, Commit and Effects appends one <code>living_state_patch_committed</code> raw log entry containing the source event, role-model result snapshot, normalized patch, and validated committed state snapshot returned by the fake prepare boundary. In MVP-009, the raw-log append is the commit point; the injected patch boundary must not durably mutate state before that append succeeds.</td>
-        </tr>
-        <tr>
-          <td>FR-10</td>
-          <td>If the model returns no state patch, the state commit path returns <code>living_state_patch_skipped</code>, does not call the commit store, and appends no state patch raw log entry.</td>
-        </tr>
-        <tr>
-          <td>FR-11</td>
-          <td>If normalized patch commit validation, the injected store, or committed-snapshot consistency validation rejects the patch, Commit and Effects appends one <code>living_state_patch_rejected</code> raw log entry and the user-turn orchestrator stops before assistant visible reply commit. Malformed model output is not logged as <code>living_state_patch_rejected</code>; it remains a Role Model Loop parse failure.</td>
-        </tr>
-        <tr>
-          <td>FR-12</td>
-          <td>A successful opted-in user turn with a state patch appends raw logs in this deterministic order: <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>living_state_patch_committed</code>, <code>visible_reply_committed</code>.</td>
-        </tr>
-        <tr>
-          <td>FR-13</td>
-          <td>A successful opted-in user turn without a state patch preserves the MVP-008 raw log order and visible record order.</td>
-        </tr>
-        <tr>
-          <td>FR-14</td>
-          <td>The final <code>UserMessageTurnResult</code> may include <code>living_state_patch_result</code> when the commit path runs, but the existing nested boundary results and visible record IDs remain unchanged.</td>
+          <td>The final <code>UserMessageTurnResult</code> keeps the MVP-009 nested results and may include the atomic commit result, but it must not add new model-facing behavior.</td>
         </tr>
       </tbody>
     </table>
@@ -299,147 +237,87 @@
     <h2>Non-Functional Requirements</h2>
     <ul>
       <li>Use only Python standard library behavior; do not add dependencies.</li>
-      <li>Keep tests deterministic under injected fake adapter, fake raw log, fake visible conversation, fake current-state source, fake living-state patch store, fake clock, and fake ID generator.</li>
-      <li>Reuse existing shared validators from <code>runtime.contracts</code>, including <code>reject_extra_keys</code>, <code>require_equal</code>, <code>require_string</code>, <code>require_optional_string</code>, <code>require_matching_identity</code>, and <code>validate_normalized_user_message_event</code>.</li>
-      <li>Promote the current private <code>RoleModelTurnResult</code> envelope validation into <code>runtime.contracts.normalize_role_model_turn_result()</code> and reuse it from both the existing visible reply commit path and the new living-state patch commit path.</li>
-      <li>The shared <code>RoleModelTurnResult</code> normalizer must not broaden visible reply decision validation. It should validate envelope fields and identity while letting each consumer provide or select the appropriate decision normalizer: visible-reply-only projection for <code>commit_visible_reply()</code>, and visible reply plus optional patch for the state patch commit path.</li>
-      <li>Add one shared <code>runtime.contracts.normalize_living_state_patch()</code> helper for the MVP-009 patch shape and reuse it from both Role Model Loop parsing and Commit and Effects validation.</li>
-      <li>Do not change <code>normalize_visible_reply_decision()</code> or <code>commit_visible_reply()</code> to accept <code>state_patch</code>. Use a visible-reply-only projection for the existing visible reply commit path.</li>
-      <li>Render conditional role-model instructions: non-opted-in calls keep the existing visible-reply-only contract, while opted-in calls explicitly allow optional <code>state_patch.living_state</code> and forbid all other extra fields.</li>
-      <li>Reuse MVP-008 state snapshot validation from <code>character.state.current</code> for committed snapshot validation instead of duplicating the snapshot contract.</li>
-      <li>Validate committed snapshot consistency after the fake prepare boundary returns: current event ID must be present, patched fields must match, and <code>updated_at</code> must be the runtime <code>commit_time</code> passed in the prepare request and not older than the source event.</li>
-      <li>Keep state-patch commit code in the Commit and Effects boundary. The Role Model Loop may parse the proposed patch, but it must not commit it.</li>
-      <li>Do not introduce a durable state store in MVP-009. A future concrete store must make state mutation and raw-log append one transaction or otherwise prove equivalent atomicity.</li>
-      <li>Keep Runtime Kernel unchanged except for existing <code>USER_MESSAGE</code> route behavior.</li>
-      <li>Keep implementation small and local; add no placeholder modules, empty future folders, or speculative adapter layers.</li>
-      <li>Keep error behavior explicit and testable; do not hide validation failures behind character language or fallback replies.</li>
+      <li>Use fakes for the atomic boundary, raw logs, visible conversation, current-state source, role-model adapter, clock, and IDs.</li>
+      <li>Reuse existing <code>runtime.contracts</code> validators and the MVP-008 <code>validate_current_character_state_snapshot()</code> contract.</li>
+      <li>Reuse the MVP-009 prepare/snapshot-candidate path before finalization. Do not add another snapshot builder that applies the living-state patch separately.</li>
+      <li>Keep transaction semantics local to the living-state patch success path; do not introduce a generic transaction framework.</li>
+      <li>Deep-copy all finalized request, snapshot, log, result, and failure data so caller mutation cannot alter audit snapshots.</li>
+      <li>Add <code>living_state_patch_finalize</code> to the supported failure-stage taxonomy in one implementation location only, alongside the existing living-state patch failure stages. Tests should import or derive that stage constant instead of scattering raw string literals.</li>
+      <li>The fake atomic finalizer must expose separate visible lists for durable state snapshots and durable success raw logs. Ordinary rejection logs remain on the existing raw-log fake and must not be used to prove success atomicity.</li>
+      <li>Keep Runtime Kernel and Role Model Loop behavior unchanged except for any adapter type names required to pass the atomic boundary through existing user-turn orchestration.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>Existing MVP-001 through MVP-008 tests continue to pass without opting into state-patch commits.</li>
-      <li>A state-enabled fake model input advertises exactly <code>["visible_reply", "state_patch"]</code> and includes the read-only <code>living_state_brief</code>.</li>
-      <li>A state-enabled fake model input renders instructions that permit optional <code>state_patch.living_state</code>; non-state-enabled input keeps the visible-reply-only instructions.</li>
-      <li>A fake model output with valid visible reply plus valid living-state patch parses into one normalized <code>CharacterDecision</code>.</li>
-      <li>A model output state patch with future fields, empty values, missing living-state fields, or <code>body_state</code> is rejected as malformed model output before Commit and Effects runs.</li>
-      <li>The fake prepare boundary proves ownership of committed snapshot metadata by returning deterministic <code>updated_at</code> and <code>source_event_ids</code> values that were not present in the model patch, and Commit and Effects rejects shape-valid but semantically inconsistent snapshots.</li>
-      <li>A successful user turn with a patch calls the fake commit store once, appends <code>living_state_patch_committed</code>, then commits the assistant visible reply through a visible-reply-only projection.</li>
-      <li>A normalized patch commit/store rejection appends <code>living_state_patch_rejected</code>, returns a stopped user-turn result, and appends no assistant visible reply.</li>
-      <li>If raw-log append fails after the fake boundary prepares a valid snapshot, no durable state mutation has happened because MVP-009 exposes only a pending prepare boundary.</li>
-      <li>A user turn with no state patch remains compatible with the MVP-008 visible reply flow and raw log order.</li>
-      <li>No concrete storage, state versioning, body state, incidents, scheduled directives, retrieval, tools, Live2D, scheduler, live provider, or new event type is added.</li>
+      <li>Existing MVP-001 through MVP-009 tests continue to pass.</li>
+      <li>A successful patch records exactly one atomic finalization and exposes both the committed snapshot and the <code>living_state_patch_committed</code> raw log entry together.</li>
+      <li>A finalization failure exposes neither durable state nor the committed success raw log entry, appends a rejection raw log, and stops before assistant visible reply commit.</li>
+      <li>Validation failures before finalization continue to produce <code>living_state_patch_rejected</code> without calling the finalize boundary.</li>
+      <li>No concrete storage, state versioning, body state, incidents, scheduled directives, retrieval, tools, Live2D, provider calls, scheduler, or new event type is added.</li>
+      <li>The development journal records source context, files touched, checks run, review notes, and next action.</li>
       <li>Future ideas discovered during planning are recorded in <a href="future-slices.html">future-slices.html</a>.</li>
-      <li>The development journal records files touched, checks run, review notes, and next action.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li><code>build_decision_context()</code> without state-patch opt-in preserves the exact MVP-008 allowed actions.</li>
-      <li><code>build_decision_context()</code> with state-patch opt-in emits <code>["visible_reply", "state_patch"]</code> and still validates <code>living_state_brief</code>.</li>
-      <li><code>render_role_model_input()</code> uses visible-reply-only instructions without state-patch opt-in and state-aware instructions with opt-in.</li>
-      <li><code>parse_character_decision()</code> accepts visible reply plus valid living-state patch only when the rendered input allowed it.</li>
-      <li><code>parse_character_decision()</code> rejects standalone <code>state_patch</code>, disallowed patch output, extra fields, empty strings, empty patches, and <code>body_state</code>.</li>
-      <li><code>runtime.contracts.normalize_role_model_turn_result()</code> is covered directly and reused by the visible reply commit tests and living-state patch commit tests, proving the envelope validation is not copied.</li>
-      <li><code>runtime.contracts.normalize_living_state_patch()</code> is covered directly and reused by Role Model Loop and Commit and Effects tests.</li>
-      <li><code>commit_living_state_patch()</code> validates source event, role-model result identity, decision status, and patch shape before calling the fake prepare boundary.</li>
-      <li><code>commit_living_state_patch()</code> rejects shape-valid but inconsistent store results as <code>malformed_store_result</code> when source event IDs, patched fields, or runtime-owned timestamps do not line up.</li>
-      <li><code>commit_living_state_patch()</code> treats raw-log append as the MVP-009 commit point; a regression covers raw-log append failure after fake-store prepare.</li>
-      <li>A visible-reply-only projection from a decision containing <code>state_patch</code> still passes the existing <code>normalize_visible_reply_decision()</code> and <code>commit_visible_reply()</code> validation path.</li>
-      <li>Committed and rejected state patch raw log builders deep-copy source event, role-model result, patch, committed snapshot, and failure data.</li>
+      <li>Commit and Effects builds a <code>LivingStatePatchFinalizeRequest</code> from already validated artifacts and deep-copies source event, role-model result, patch, committed snapshot, and committed raw log entry before handing it to the finalizer.</li>
+      <li>The snapshot-candidate producer is called once for a patch success; the finalizer receives the same validated snapshot, not a separately reconstructed one.</li>
+      <li>Success calls <code>finalize_living_state_patch_commit()</code> on the fake finalizer once and returns <code>living_state_patch_committed</code> with a copied committed snapshot and committed log entry ID.</li>
+      <li>The fake finalizer records successful commits in separate <code>durable_state_snapshots</code> and <code>durable_success_logs</code> lists so tests can assert all-or-nothing visibility independently of rejection logs.</li>
+      <li>Finalizer failure returns <code>living_state_patch_rejected</code> with the centralized finalize failure-stage constant, appends one rejection log, and leaves the fake finalizer's durable state/success-log lists empty.</li>
+      <li>Malformed committed snapshot candidates are rejected before finalization.</li>
+      <li>No-patch decisions skip finalization and append no state patch log.</li>
     </ul>
 
     <h3>Integration Tests</h3>
     <ul>
-      <li>Run one full user turn with fake current-state source, fake living-state patch store, fake visible conversation, fake adapter, fake raw log, deterministic IDs, and deterministic clock.</li>
-      <li>Assert the fake prepare boundary receives exactly one patch request with runtime-owned <code>commit_time</code> and that the nested patch does not include model-authored <code>character_id</code>, <code>updated_at</code>, or <code>source_event_ids</code>.</li>
-      <li>Assert the fake prepare boundary returns a committed snapshot candidate with deterministic runtime-owned <code>updated_at</code> and <code>source_event_ids</code> derived from the test boundary and source event, and that those values are preserved in <code>living_state_patch_committed</code>.</li>
-      <li>Assert a shape-valid but semantically inconsistent committed snapshot candidate stops before assistant visible reply, appends <code>living_state_patch_rejected</code>, and appends no <code>living_state_patch_committed</code> log.</li>
-      <li>Assert raw log order for patch success is <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>living_state_patch_committed</code>, <code>visible_reply_committed</code>.</li>
-      <li>Assert malformed model-output patch fields produce the existing <code>role_model_turn_failed</code> parse log and no <code>living_state_patch_rejected</code> log.</li>
-      <li>Assert a normalized patch store rejection stops before assistant visible reply append and appends <code>living_state_patch_rejected</code>.</li>
-      <li>Assert a no-patch model decision with state opt-in still commits the visible reply and appends no state patch log.</li>
-      <li>Run full unittest discovery for existing unit and integration tests.</li>
+      <li>Run one state-enabled user turn with fake current-state source, fake atomic finalizer, fake visible conversation, fake adapter, fake raw log, deterministic IDs, and deterministic clock.</li>
+      <li>Assert the success log order includes one atomically committed <code>living_state_patch_committed</code> entry before assistant visible reply commit, and assert that the fake finalizer exposes exactly one durable state snapshot and one durable success log.</li>
+      <li>Assert a finalization failure stops before assistant visible reply append, appends one rejection log through the ordinary raw-log fake, and leaves the fake finalizer's durable state/success-log lists empty.</li>
+      <li>Assert non-state-enabled and state-enabled no-patch user turns preserve MVP-009 visible reply behavior.</li>
+      <li>Run full unittest discovery.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li>Runtime Kernel remains unchanged; it still only routes <code>USER_MESSAGE</code> to the existing user-turn path.</li>
-      <li>Character State Engine remains read-side for this slice. It may continue to own current-state request and snapshot validation, but it must not commit durable state.</li>
-      <li>Role Model Loop may add opt-in allowed-action rendering and parser support for optional <code>state_patch.living_state</code>. It must not call a state store or mutate state.</li>
-      <li>Commit and Effects owns the new living-state patch validation, commit request construction, fake-store prepare call, committed-snapshot consistency validation, committed/rejected raw log entries, and returned commit result.</li>
-      <li>User-turn orchestration may pass the optional state patch capability through, call the state commit path after the role-model turn, then pass a visible-reply-only projection into assistant visible reply commit.</li>
-      <li>Raw Event Log adds only state patch commit/reject entries when a patch is proposed or rejected. No context-build or state-read log kind is added.</li>
-    </ul>
-
-    <h2>Implementation Notes</h2>
-    <ul>
-      <li><code>runtime.contracts</code> now owns <code>normalize_living_state_patch()</code>, <code>normalize_role_model_turn_result()</code>, and the optional living-state patch decision normalizer.</li>
-      <li><code>role_model.loop</code> now advertises <code>["visible_reply", "state_patch"]</code> only when explicitly opted in with a current-state source, renders conditional state-patch instructions, and rejects disallowed or malformed patch output as role-model parse failures.</li>
-      <li><code>commit_effects.living_state</code> adds the injected Commit and Effects patch boundary, patch request construction with runtime-owned <code>commit_time</code>, committed/rejected raw logs, store rejection handling, committed snapshot validation through the MVP-008 state snapshot contract, and post-store consistency validation for source event IDs, patched fields, and runtime-owned timestamps.</li>
-      <li><code>runtime.user_turn</code> opts in only when both current-state read and living-state patch write boundaries are present, stops before assistant visible reply on patch rejection, and projects a visible-reply-only result before calling <code>commit_visible_reply()</code>.</li>
-      <li><code>commit_visible_reply()</code> remains strict and does not accept <code>state_patch</code>.</li>
-      <li>Runtime Kernel, concrete storage, body state, incidents, scheduled directives, retrieval, tools, Live2D, provider calls, and new event types remain unchanged.</li>
-    </ul>
-
-    <h2>Checks Run</h2>
-    <ul>
-      <li><code>python3 -m unittest tests.unit.test_runtime_contracts tests.unit.test_role_model_loop tests.unit.test_living_state_patch_commit tests.unit.test_user_turn tests.integration.test_role_model_loop tests.integration.test_user_message_turn</code>: passed, 84 tests.</li>
-      <li><code>python3 -m unittest discover</code>: passed, 133 tests.</li>
-      <li><code>/private/tmp/project02-ruff/bin/ruff check .</code>: passed.</li>
-      <li><code>/private/tmp/project02-mypy/bin/mypy src</code>: passed.</li>
-      <li><code>git diff --check</code>: passed.</li>
-    </ul>
-
-    <h2>Error And Fallback Behavior</h2>
-    <ul>
-      <li>Missing state-patch opt-in is not an error; MVP-008 visible reply behavior remains valid.</li>
-      <li>A model-proposed state patch when <code>state_patch</code> was not allowed raises the existing role-model validation error before any commit path runs.</li>
-      <li>Malformed patch output fails in Role Model Loop parsing, appends the existing <code>role_model_turn_failed</code> log, and never calls the injected commit store.</li>
-      <li>Normalized patch commit validation or injected store rejection returns <code>living_state_patch_rejected</code> and appends a rejection log; the user-turn path stops before assistant visible reply commit.</li>
-      <li>No rollback, retry, repair, reconciliation, or user-visible fallback message is added.</li>
+      <li>Runtime Kernel remains unchanged.</li>
+      <li>Character State Engine remains the read-side state snapshot validator/source boundary; it does not finalize commits.</li>
+      <li>Role Model Loop remains the model-call and parse boundary; it does not learn about atomic persistence.</li>
+      <li>Commit and Effects owns validation, accepting the validated snapshot candidate as the <code>committed_snapshot</code>, committed-log-entry construction, finalize request construction, finalization failure handling, and user-turn stop behavior.</li>
+      <li>The existing MVP-009 prepare path owns snapshot candidate production until a later concrete persistence slice replaces it with a durable state store contract.</li>
+      <li>The finalizer owns only atomic visibility of the already built committed snapshot and committed success log entry.</li>
+      <li>User-turn orchestration may pass the atomic finalizer through and must keep assistant visible reply commit after state patch finalization.</li>
+      <li>Raw Event Log behavior changes only for the successful living-state patch entry: that entry is committed through the atomic state-plus-log boundary instead of a separate success append.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>MVP-009 is the first write-side CharacterRuntimeState slice, but it is still an injected-boundary slice, not a concrete storage slice.</li>
-      <li>The model may propose only semantic living-state fields already visible in MVP-008. The runtime owns timestamps, source IDs, validation, and persistence.</li>
-      <li>Implementation tests should make timestamp and source-event ownership concrete through the fake prepare boundary: model output supplies only the patch fields, while the committed snapshot supplies runtime-owned <code>updated_at</code> and <code>source_event_ids</code>.</li>
-      <li>MVP-009's injected state boundary is intentionally non-durable until the raw log append succeeds. A future durable store slice must not reuse this as a concrete persistence transaction without adding atomic state+raw-log semantics.</li>
-      <li>Keep the existing visible reply action required so the user-turn output contract does not become a broad multi-action redesign.</li>
-      <li>Keep <code>commit_visible_reply()</code> strict and visible-reply-only; a projection is the compatibility boundary for decisions that also carry <code>state_patch</code>.</li>
-      <li>Extract shared <code>RoleModelTurnResult</code> envelope validation before adding the second Commit and Effects consumer so the living-state patch commit path does not copy the private validator from <code>visible_reply.py</code>.</li>
-      <li>Do not duplicate living-state patch validation between Role Model Loop and Commit and Effects; share the small helper in <code>runtime.contracts</code>.</li>
-      <li>If implementation pressure suggests adding state versions, transaction semantics, body state, incidents, or a concrete store, split those into future slices instead.</li>
-    </ul>
-
-    <h2>Residual Implementation Risks</h2>
-    <ul>
-      <li>Do not broaden <code>normalize_visible_reply_decision()</code> or <code>commit_visible_reply()</code> to accept <code>state_patch</code>. MVP-009 must use the visible-reply-only projection required above before the existing assistant visible reply commit path runs.</li>
-      <li>Do not copy the private <code>RoleModelTurnResult</code> validation from <code>commit_effects.visible_reply</code> into the state patch path. MVP-009 must extract and reuse a shared <code>runtime.contracts.normalize_role_model_turn_result()</code> helper first.</li>
-      <li>Do not implement separate living-state patch validators in <code>role_model.loop</code> and Commit and Effects. MVP-009 must put the patch shape in one shared <code>runtime.contracts.normalize_living_state_patch()</code> helper and reuse it from both boundaries.</li>
+      <li>MVP-010 is not a storage/database slice. It proves the transaction contract before choosing a concrete persistence technology.</li>
+      <li>The smallest useful behavior is all-or-nothing visibility for one state snapshot and one committed raw log entry.</li>
+      <li>MVP-010 should not introduce duplicate snapshot-building code. It should reuse the MVP-009 candidate path and only add finalization after validation.</li>
+      <li>State patch validation, snapshot validation, and visible reply projection remain the MVP-009 contracts; this slice should not reopen them unless tests expose a defect.</li>
+      <li>If implementation pressure suggests state versions, idempotency, replay, or concrete database APIs, park those as future slices.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should the eventual durable store maintain a separate <code>state_version</code>? Not in MVP-009; fake store returns the MVP-008 snapshot shape only.</li>
-      <li>Should state patch commit and visible reply commit become one transaction? Not in MVP-009; no concrete store or transaction manager exists.</li>
-      <li>Should concrete state mutation and <code>living_state_patch_committed</code> raw-log append be one transaction? Yes, before any durable state store is introduced; MVP-009 explicitly defers this with a non-durable prepare boundary.</li>
-      <li>Should state patch be allowed without a visible reply in private calls? Not in MVP-009; that belongs to a later private life-event slice.</li>
+      <li>Should the eventual concrete store use optimistic locking or append-only snapshot revisions? Not in MVP-010.</li>
+      <li>Should user visible message projection and assistant visible reply commit share the same transaction later? Not in MVP-010.</li>
+      <li>Should finalization failure emit its rejection log through the same atomic boundary? Not in MVP-010; no state mutation has committed, so the existing rejection-log path is sufficient.</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Concrete <code>CharacterRuntimeStateStore</code> with durable snapshots, state versioning, and transaction behavior.</li>
-      <li>Broader <code>LivingStateCurrent</code> fields such as <code>current_scene</code>, <code>energy</code>, <code>current_focus</code>, and <code>last_meaningful_change_at</code>.</li>
-      <li>State patch support for <code>body_state</code> after lazy virtual body is specified.</li>
-      <li>Private state-only calls for incident completion, need thresholds, and scheduled directives.</li>
-      <li>State patch replay and reconciliation once concrete stores and debug inspector exist.</li>
+      <li>Concrete database-backed <code>CharacterRuntimeStateStore</code> once the atomic boundary contract is proven.</li>
+      <li>State revision or optimistic locking for concurrent state updates.</li>
+      <li>Idempotency keys and retry/reconciliation behavior for state patch commits.</li>
+      <li>Atomic grouping across user visible projection, state patch commit, and assistant visible reply commit.</li>
     </ul>
 
     <h2>Next Action</h2>
     <p>
-      Follow <a href="https://github.com/QuellaMC/Project02/pull/9">PR #9</a>
+      Follow <a href="https://github.com/QuellaMC/Project02/pull/10">PR #10</a>
       through CI and review.
     </p>
   </main>
