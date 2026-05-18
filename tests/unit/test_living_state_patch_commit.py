@@ -68,6 +68,8 @@ class RecordingLivingStatePatchFinalizer:
         if self.error is not None:
             raise self.error
         if self.result_override is not None:
+            # A malformed finalize result is only allowed before durable visibility.
+            # The caller cannot roll back state/logs already exposed by this boundary.
             return deepcopy(self.result_override)
         self.durable_state_snapshots.append(deepcopy(request["committed_snapshot"]))
         self.durable_success_logs.append(deepcopy(request["committed_log_entry"]))
@@ -279,7 +281,7 @@ class LivingStatePatchCommitTests(unittest.TestCase):
         self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_rejected")
         self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
 
-    def test_malformed_finalizer_result_rejects_without_durable_state_or_success_log(self):
+    def test_malformed_finalizer_result_means_no_durable_visibility_occurred(self):
         raw_log = RecordingRawEventLog()
         store = RecordingLivingStatePatchStore()
         finalizer = RecordingLivingStatePatchFinalizer(
@@ -306,6 +308,8 @@ class LivingStatePatchCommitTests(unittest.TestCase):
         self.assertEqual(result["failure"]["stage"], LIVING_STATE_PATCH_FINALIZE_STAGE)
         self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
         self.assertEqual(len(finalizer.requests), 1)
+        # Contract guard: caller-side validation runs after finalizer return,
+        # so a malformed result must imply this boundary exposed nothing durable.
         self.assertEqual(finalizer.durable_state_snapshots, [])
         self.assertEqual(finalizer.durable_success_logs, [])
         self.assertEqual(raw_log.entries[0]["kind"], "living_state_patch_rejected")

@@ -60,7 +60,9 @@
       MVP-009 is recorded from
       <a href="https://github.com/QuellaMC/Project02/pull/9">PR #9</a>.
       MVP-010 is tracked in
-      <a href="https://github.com/QuellaMC/Project02/pull/10">PR #10</a>.
+      <a href="https://github.com/QuellaMC/Project02/pull/10">PR #10</a>,
+      with follow-up review fixes in
+      <a href="https://github.com/QuellaMC/Project02/pull/11">PR #11</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -87,14 +89,14 @@ flowchart LR
     StatePatchParse["Optional state_patch.living_state parser&lt;br/&gt;MVP-009 implemented"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009 implemented; MVP-010 in review"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009 implemented; MVP-010 merged with follow-up PR"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
     UserProjection["User visible message projection&lt;br/&gt;raw log then visible transcript"]
     StatePatchCommit["Living state patch commit/reject&lt;br/&gt;injected fake store"]
     PatchStore["Injected living-state patch sink&lt;br/&gt;MVP-009 prepare boundary"]
-    AtomicFinalize["Atomic state-plus-log finalize&lt;br/&gt;MVP-010 in PR #10"]
+    AtomicFinalize["Atomic state-plus-log finalize&lt;br/&gt;MVP-010 PR #10 + follow-up PR #11"]
   end
 
   subgraph RecentContext["Context Source - MVP-004 and MVP-006 implemented"]
@@ -153,7 +155,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">MVP-010 - Atomic Living State Patch Commit Boundary</a></td>
-          <td>Implemented and in review; <a href="https://github.com/QuellaMC/Project02/pull/10">PR #10</a></td>
+          <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/10">PR #10</a>. Follow-up review fixes in <a href="https://github.com/QuellaMC/Project02/pull/11">PR #11</a>.</td>
           <td>Atomize the successful living-state patch path so the validated state snapshot and matching <code>living_state_patch_committed</code> raw log entry become visible together through one injected fake boundary, without concrete storage, state versions, body, incidents, retrieval, tools, Live2D, or new event types.</td>
         </tr>
       </tbody>
