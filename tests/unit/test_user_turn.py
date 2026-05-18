@@ -181,6 +181,7 @@ class UserTurnStopTests(unittest.TestCase):
         adapter = Mock()
         current_state_source = object()
         living_state_patch_store = object()
+        living_state_patch_finalizer = object()
         user_commit_result = {
             "trace_id": "trace-1",
             "event_id": "event-1",
@@ -252,6 +253,7 @@ class UserTurnStopTests(unittest.TestCase):
                 clock=fixed_clock,
                 current_state_source=current_state_source,
                 living_state_patch_store=living_state_patch_store,
+                living_state_patch_finalizer=living_state_patch_finalizer,
             )
 
         self.assertEqual(result["status"], "user_turn_committed")
@@ -264,6 +266,10 @@ class UserTurnStopTests(unittest.TestCase):
         self.assertIs(
             commit_patch.call_args.kwargs["living_state_patch_store"],
             living_state_patch_store,
+        )
+        self.assertIs(
+            commit_patch.call_args.kwargs["living_state_patch_finalizer"],
+            living_state_patch_finalizer,
         )
         commit_reply.assert_called_once()
         projected_result = commit_reply.call_args.args[1]
@@ -338,6 +344,7 @@ class UserTurnStopTests(unittest.TestCase):
                 clock=fixed_clock,
                 current_state_source=object(),
                 living_state_patch_store=object(),
+                living_state_patch_finalizer=object(),
             )
 
         self.assertEqual(result["status"], "user_turn_stopped")
