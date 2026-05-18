@@ -92,8 +92,9 @@ class LivingStatePatchFinalizerError(ValueError):
 class LivingStatePatchStore(Protocol):
     """MVP-009 pending patch boundary.
 
-    Implementations must not durably mutate character state here. A later concrete
-    storage slice must make state mutation and raw-log append one transaction.
+    Implementations must not durably mutate character state here. This boundary
+    only prepares the snapshot candidate; the finalizer or a later concrete
+    adapter owns atomic state-plus-log visibility.
     """
 
     def prepare_living_state_patch_commit(
@@ -103,7 +104,16 @@ class LivingStatePatchStore(Protocol):
 
 
 class LivingStatePatchFinalizer(Protocol):
-    """MVP-010 atomic state-plus-log finalization boundary."""
+    """MVP-010 atomic state-plus-log finalization boundary.
+
+    A successful return is the Commit and Effects success signal. The caller
+    cannot roll back artifacts once this boundary exposes them, so a malformed
+    or invalid finalize result must mean no durable state/log visibility occurred.
+    Implementations must validate any backing-store acknowledgment before making
+    state/log records visible; if they cannot return a valid result, they must
+    raise without exposing either artifact. Later concrete adapters must expose
+    success logs through the Raw Event Log retrieval/debug/replay surface.
+    """
 
     def finalize_living_state_patch_commit(
         self,
