@@ -63,7 +63,9 @@
       <a href="https://github.com/QuellaMC/Project02/pull/10">PR #10</a>,
       with follow-up review fixes in
       <a href="https://github.com/QuellaMC/Project02/pull/11">PR #11</a>.
-      MVP-011 is active on branch <code>feature/mvp-011-functional-spec</code>.
+      MVP-011 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/12">PR #12</a>
+      from branch <code>feature/mvp-011-functional-spec</code>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -82,7 +84,7 @@ flowchart LR
     RoleLog["role_model_turn_completed&lt;br/&gt;role_model_turn_failed"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009 implemented; MVP-011 active"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009 implemented; MVP-011 in PR #12"]
     Context["DecisionContext builder&lt;br/&gt;current event + recent messages + living_state_brief + active_incident"]
     Render["RoleModelInput renderer&lt;br/&gt;strict context validation"]
     Adapter["Injected fake RoleModelAdapter"]
@@ -105,10 +107,10 @@ flowchart LR
     VisibleRecentSource["Visible conversation recent source&lt;br/&gt;maps committed records to context"]
   end
 
-  subgraph CharacterState["Character State Engine - MVP-008 implemented; MVP-011 active"]
+  subgraph CharacterState["Character State Engine - MVP-008 implemented; MVP-011 in PR #12"]
     CurrentStateSource["Read-only current-state source&lt;br/&gt;injected fake"]
     LivingStateBrief["living_state_brief&lt;br/&gt;validated compact current reality"]
-    ActiveIncidentSource["Read-only active-incident source&lt;br/&gt;MVP-011 active target"]
+    ActiveIncidentSource["Read-only active-incident source&lt;br/&gt;MVP-011 PR #12 target"]
     ActiveIncidentBrief["active_incident brief&lt;br/&gt;validated compact incident context"]
   end
 
@@ -159,7 +161,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">MVP-011 - Read-Only Active Incident Brief in DecisionContext</a></td>
-          <td>Active functional spec on <code>feature/mvp-011-functional-spec</code>.</td>
+          <td>Open <a href="https://github.com/QuellaMC/Project02/pull/12">PR #12</a> on <code>feature/mvp-011-functional-spec</code>.</td>
           <td>Add one optional injected active-incident source and one compact <code>character_snapshot.active_incident</code> brief to the existing <code>USER_MESSAGE</code> role-model context, without lifecycle writes, interruption policy, queues, body, retrieval, tools, Live2D, or new event types.</td>
         </tr>
       </tbody>
