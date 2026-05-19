@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-19 - MVP-012 Parser Matrix Coverage</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-19 - MVP-012 Parser Matrix Coverage</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Expanded the Role Model parser test table for <code>life_action.start_incident</code> malformed draft output.</li>
+      <li>Added parser-level coverage for unsupported incident type, unsupported interrupt policy, unsupported resume policy, empty title, negative <code>remaining_seconds</code>, and missing required draft fields.</li>
+      <li>Opened <a href="https://github.com/QuellaMC/Project02/pull/14">PR #14</a> as a follow-up after MVP-012 merged in <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>.</li>
+      <li>Updated the <a href="../../plan/index.html">plan index</a> so the implementation graph records MVP-012 as merged and tracks PR #14 as test-only parser coverage.</li>
+      <li>Kept the change test-only; shared validators and runtime behavior were unchanged.</li>
+    </ul>
+
+    <h2>Why It Was Needed</h2>
+    <p>
+      FR-6 already required these malformed draft outputs to be rejected, and the
+      shared validators enforced them. The added tests make the Role Model parser
+      acceptance coverage explicit for the model-output path.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>tests/unit/test_role_model_loop.py</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-19/006-mvp-012-parser-matrix-coverage.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>No production code, schema, prompt text, action type, commit boundary, or raw-log behavior changed.</li>
+      <li>The parser test now mirrors the FR-6 malformed incident-draft matrix more directly while still relying on shared contract validators.</li>
+    </ul>
+
+    <h2>Checks Run</h2>
+    <ul>
+      <li><code>python3.13 -m unittest tests.unit.test_role_model_loop</code>: passed, 52 tests.</li>
+      <li><code>python3.13 -m unittest discover -s tests -t .</code>: passed.</li>
+      <li><code>/private/tmp/project02-tools/bin/ruff check .</code>: passed.</li>
+      <li><code>/private/tmp/project02-tools/bin/ruff format --check .</code>: passed.</li>
+      <li><code>PYTHONPATH=/private/tmp/project02-tools python3.13 -m mypy src</code>: passed.</li>
+      <li><code>python3.13 -m html.parser docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-19/006-mvp-012-parser-matrix-coverage.html</code>: passed.</li>
+      <li><code>git diff --check</code>: passed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Verify <a href="https://github.com/QuellaMC/Project02/pull/14">PR #14</a>
+      CI and merge after checks pass.
+    </p>
+  </main>
+</body>
+</html>
