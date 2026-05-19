@@ -26,6 +26,7 @@
       <li>Added optional <code>life_action.start_incident</code> parsing behind explicit Role Model Loop opt-in.</li>
       <li>Added a narrow <code>commit_effects.incident_start</code> boundary with an injected <code>LifeIncidentStartFinalizer</code> for atomic started-incident plus success-log visibility.</li>
       <li>Wired <code>run_user_message_turn()</code> so incident start commit runs after the role-model turn and before assistant visible reply commit.</li>
+      <li>Opened <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a> for the MVP-012 implementation.</li>
       <li>Updated <a href="../../plan/index.html">plan index</a>, <a href="../../plan/future-slices.html">future slices</a>, and the active slice implementation results.</li>
     </ul>
 
@@ -87,8 +88,8 @@
 
     <h2>Next Action</h2>
     <p>
-      Review the local diff, commit MVP-012, open a PR, then update the plan
-      index graph with the PR number after PR creation.
+      Verify <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>
+      CI and review feedback, then merge after required checks and approval.
     </p>
   </main>
 </body>

@@ -65,8 +65,9 @@
       <a href="https://github.com/QuellaMC/Project02/pull/11">PR #11</a>.
       MVP-011 is recorded from
       <a href="https://github.com/QuellaMC/Project02/pull/12">PR #12</a>.
-      MVP-012 is implemented locally on branch
-      <code>feature/mvp-012-functional-spec</code>.
+      MVP-012 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>
+      from branch <code>feature/mvp-012-functional-spec</code>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -85,16 +86,16 @@ flowchart LR
     RoleLog["role_model_turn_completed&lt;br/&gt;role_model_turn_failed"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011 implemented; MVP-012 implemented locally"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011 implemented; MVP-012 in PR #13"]
     Context["DecisionContext builder&lt;br/&gt;current event + recent messages + living_state_brief + active_incident"]
     Render["RoleModelInput renderer&lt;br/&gt;strict context validation"]
     Adapter["Injected fake RoleModelAdapter"]
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply required"]
     StatePatchParse["Optional state_patch.living_state parser&lt;br/&gt;MVP-009 implemented"]
-    LifeActionParse["Optional life_action.start_incident parser&lt;br/&gt;MVP-012 implemented locally"]
+    LifeActionParse["Optional life_action.start_incident parser&lt;br/&gt;MVP-012 PR #13"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010 implemented; MVP-012 implemented locally"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010 implemented; MVP-012 in PR #13"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -102,7 +103,7 @@ flowchart LR
     StatePatchCommit["Living state patch commit/reject&lt;br/&gt;injected fake store"]
     PatchStore["Injected living-state patch sink&lt;br/&gt;MVP-009 prepare boundary"]
     AtomicFinalize["Atomic state-plus-log finalize&lt;br/&gt;MVP-010 PR #10 + follow-up PR #11"]
-    IncidentStartCommit["Start incident commit/reject&lt;br/&gt;MVP-012 implemented locally"]
+    IncidentStartCommit["Start incident commit/reject&lt;br/&gt;MVP-012 PR #13"]
     IncidentStartFinalize["Injected incident-start finalizer&lt;br/&gt;atomic incident + log visibility"]
   end
 
@@ -168,7 +169,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">MVP-012 - Minimal Start Incident Commit Boundary</a></td>
-          <td>Implemented locally on <code>feature/mvp-012-functional-spec</code>; no PR yet.</td>
+          <td>Open <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a> on <code>feature/mvp-012-functional-spec</code>.</td>
           <td>Allow an opted-in <code>USER_MESSAGE</code> turn to parse and commit one optional <code>life_action.start_incident</code> through an injected fake finalizer, without complete/cancel/resume, interruption policy, concrete incident storage, body, retrieval, tools, Live2D, or new event types.</td>
         </tr>
       </tbody>
