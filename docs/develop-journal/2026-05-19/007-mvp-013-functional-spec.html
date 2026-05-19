@@ -31,6 +31,7 @@
       <li>Added focused unit and integration coverage for ordinary append-path logs, finalizer-exposed success logs, filtering, order, copy safety, duplicate prevention, and rejection visibility.</li>
       <li>Opened <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a> for MVP-013 and updated the plan graph with the PR link.</li>
       <li>Addressed review feedback by adding query-level malformed-finalizer coverage for both living-state patch and incident-start success logs.</li>
+      <li>Addressed the unresolved PR review thread by changing committed-success query visibility to stage finalizer-exposed entries first, then confirm them only after caller-side finalizer-result validation.</li>
     </ul>
 
     <h2>Why It Changed</h2>
@@ -70,6 +71,7 @@
       <li>The active spec requires query results to reuse the existing <code>RawEventLogEntry</code> shape and avoid finalizer-only persisted fields.</li>
       <li>The spec keeps Commit and Effects responsible for committed success log construction and finalizers responsible only for atomic exposure of already-built artifacts.</li>
       <li>The implementation keeps finalizer visibility opt-in through the test/debug Raw Event Log helper; Commit and Effects modules still do not rebuild query entries or append success logs through the ordinary append path.</li>
+      <li>Review fix: staged success entries are discarded on malformed finalizer output, preventing a trace query from showing both <code>*_committed</code> and <code>*_rejected</code> for the same rejected commit.</li>
       <li>Future ideas for concrete storage, debug UI, replay execution, pagination, redaction, and retention remain parked in <code>future-slices.html</code>.</li>
     </ul>
 
@@ -78,13 +80,16 @@
       <li><code>python3.13 -m unittest tests.unit.test_raw_event_log_query</code>: passed.</li>
       <li><code>python3.13 -m unittest tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_returns_ordinary_turn_logs tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_includes_living_state_success_log_in_order tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_includes_incident_start_success_log_in_order tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_excludes_incident_success_log_on_finalizer_rejection tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_excludes_state_success_log_on_finalizer_rejection</code>: passed.</li>
       <li><code>python3.13 -m unittest tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_excludes_incident_success_log_on_finalizer_rejection tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_excludes_incident_success_log_on_malformed_finalize tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_excludes_state_success_log_on_finalizer_rejection tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_excludes_state_success_log_on_malformed_finalize</code>: passed.</li>
-      <li><code>python3.13 -m unittest discover</code>: passed, 197 tests.</li>
+      <li><code>python3.13 -m unittest tests.unit.test_raw_event_log_query</code>: passed after staged/confirmed visibility review fix.</li>
+      <li><code>python3.13 -m unittest tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_includes_living_state_success_log_in_order tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_excludes_state_success_log_on_malformed_finalize tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_includes_incident_start_success_log_in_order tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_excludes_incident_success_log_on_malformed_finalize</code>: passed after staged/confirmed visibility review fix.</li>
+      <li><code>python3.13 -m unittest tests.unit.test_living_state_patch_commit tests.unit.test_incident_start_commit</code>: passed after staged/confirmed visibility review fix.</li>
+      <li><code>python3.13 -m unittest discover</code>: passed, 198 tests.</li>
       <li><code>python3.13 -m compileall src tests</code>: passed.</li>
       <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-010-atomic-living-state-patch-commit-boundary.html docs/plan/completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html docs/plan/completed/mvp-012-minimal-start-incident-commit-boundary.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-19/007-mvp-013-functional-spec.html</code>: passed.</li>
       <li><code>uvx ruff format --check .</code>: passed after formatting the two files reported by CI.</li>
       <li><code>uvx ruff check .</code>: passed.</li>
       <li><code>git diff --check</code>: passed.</li>
-      <li><code>mypy</code>: not run locally because the command is not installed in this environment; PR CI typecheck passed.</li>
+      <li><code>/private/tmp/project02-mypy/bin/mypy src</code>: passed.</li>
       <li><code>gh pr create --base main --head feature/mvp-013-raw-log-replay-visibility --title "Implement MVP-013 raw log query visibility" --body-file /private/tmp/mvp013-pr-body.md</code>: created <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>.</li>
       <li><a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a> CI: <code>lint</code>, <code>typecheck</code>, <code>test</code>, and <code>pull-request-gate</code> passed.</li>
     </ul>

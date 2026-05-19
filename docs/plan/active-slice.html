@@ -214,6 +214,7 @@
       <li>Role Model Loop remains unchanged except for tests proving its ordinary logs are visible through the query surface.</li>
       <li>Commit and Effects remains the owner of committed success log entry construction for living-state patches and incident starts.</li>
       <li>Atomic finalizer fakes may expose committed success entries to the same queryable log store, but they must not rebuild or reinterpret those entries.</li>
+      <li>The query/debug helper must not make a finalizer success entry queryable until the caller has validated the finalizer result.</li>
       <li>User-turn orchestration ordering remains unchanged.</li>
     </ul>
 
@@ -222,6 +223,7 @@
       <li>MVP-013 is a visibility proof, not a persistence slice.</li>
       <li>The risk being closed is specific: MVP-010 and MVP-012 success logs bypass ordinary <code>raw_event_log.append()</code>, so a later debug/replay surface could miss them if the finalizer keeps them in a private list.</li>
       <li>The right proof is a shared read surface over the same <code>RawEventLogEntry</code> shape, not a second copy of committed success logs.</li>
+      <li>Review fix: test/debug finalizer visibility is staged first, then confirmed only after finalizer-result validation, so malformed finalizer output cannot leave both success and rejection visible.</li>
       <li>If implementation pressure suggests storage engines, replay execution, reconciliation, or UI, park those as future slices.</li>
     </ul>
 

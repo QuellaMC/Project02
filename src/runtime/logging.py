@@ -21,20 +21,49 @@ class RawEventLogQueryValidationError(ValueError):
 class InMemoryRawEventLog:
     """Small queryable Raw Event Log helper for tests and debug visibility.
 
-    Commit finalizers can expose already-built success entries through
-    expose_committed_success_entry() so query results see the same entry shape
-    as ordinary append-path logs without rebuilding or duplicating records.
+    Commit finalizers can stage already-built success entries through
+    expose_committed_success_entry(). The commit caller confirms visibility only
+    after validating the finalizer result, so malformed finalizer output cannot
+    leave a rejected success entry queryable.
     """
 
     def __init__(self) -> None:
         self._entry_order: list[str] = []
         self._entries_by_log_id: dict[str, RawEventLogEntry] = {}
+        self._pending_success_by_log_id: dict[str, RawEventLogEntry] = {}
 
     def append(self, entry: RawEventLogEntry) -> None:
         self._record_entry(entry)
 
     def expose_committed_success_entry(self, entry: RawEventLogEntry) -> None:
-        self._record_entry(entry)
+        normalized_entry = validate_raw_event_log_entry(entry)
+        log_id = normalized_entry["log_id"]
+        committed_entry = self._entries_by_log_id.get(log_id)
+        if committed_entry is not None:
+            if committed_entry != normalized_entry:
+                raise RawEventLogQueryValidationError(
+                    "RawEventLogEntry.log_id already exists with different data."
+                )
+            return
+        existing_entry = self._pending_success_by_log_id.get(log_id)
+        if existing_entry is not None and existing_entry != normalized_entry:
+            raise RawEventLogQueryValidationError(
+                "Pending RawEventLogEntry.log_id already exists with different data."
+            )
+        self._pending_success_by_log_id[log_id] = normalized_entry
+
+    def confirm_committed_success_entry(self, entry: RawEventLogEntry) -> None:
+        normalized_entry = validate_raw_event_log_entry(entry)
+        pending_entry = self._pending_success_by_log_id.pop(normalized_entry["log_id"], None)
+        if pending_entry is not None and pending_entry != normalized_entry:
+            raise RawEventLogQueryValidationError(
+                "Confirmed RawEventLogEntry does not match pending success data."
+            )
+        self._record_entry(normalized_entry)
+
+    def discard_committed_success_entry(self, entry: RawEventLogEntry) -> None:
+        normalized_entry = validate_raw_event_log_entry(entry)
+        self._pending_success_by_log_id.pop(normalized_entry["log_id"], None)
 
     def query(self, query: Mapping[str, Any]) -> RawEventLogQueryResult:
         return query_raw_event_log_entries(self._entries(), query)
@@ -107,6 +136,26 @@ def query_raw_event_log_entries(
         "trace_id": normalized_query["trace_id"],
         "entries": deepcopy(queried_entries),
     }
+
+
+def confirm_committed_success_entry_visibility(
+    raw_event_log: Any,
+    entry: Mapping[str, Any],
+) -> None:
+    confirm = getattr(raw_event_log, "confirm_committed_success_entry", None)
+    if callable(confirm):
+        confirm(entry)
+
+
+def discard_committed_success_entry_visibility(
+    raw_event_log: Any,
+    entry: Mapping[str, Any] | None,
+) -> None:
+    if entry is None:
+        return
+    discard = getattr(raw_event_log, "discard_committed_success_entry", None)
+    if callable(discard):
+        discard(entry)
 
 
 def validate_raw_event_log_query(query: Mapping[str, Any]) -> RawEventLogQuery:

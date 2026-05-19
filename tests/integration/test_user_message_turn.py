@@ -179,11 +179,19 @@ class RecordingLivingStatePatchStore:
 
 
 class RecordingLivingStatePatchFinalizer:
-    def __init__(self, error=None, result_override=None, operations=None, raw_log_visibility=None):
+    def __init__(
+        self,
+        error=None,
+        result_override=None,
+        operations=None,
+        raw_log_visibility=None,
+        expose_before_result_override=False,
+    ):
         self.error = error
         self.result_override = deepcopy(result_override)
         self.operations = operations if operations is not None else []
         self.raw_log_visibility = raw_log_visibility
+        self.expose_before_result_override = expose_before_result_override
         self.requests = []
         self.durable_state_snapshots = []
         self.durable_success_logs = []
@@ -193,6 +201,10 @@ class RecordingLivingStatePatchFinalizer:
         if self.error is not None:
             raise self.error
         if self.result_override is not None:
+            if self.raw_log_visibility is not None and self.expose_before_result_override:
+                self.raw_log_visibility.expose_committed_success_entry(
+                    request["committed_log_entry"]
+                )
             return deepcopy(self.result_override)
         self.durable_state_snapshots.append(deepcopy(request["committed_snapshot"]))
         self.durable_success_logs.append(deepcopy(request["committed_log_entry"]))
@@ -209,11 +221,19 @@ class RecordingLivingStatePatchFinalizer:
 
 
 class RecordingLifeIncidentStartFinalizer:
-    def __init__(self, error=None, result_override=None, operations=None, raw_log_visibility=None):
+    def __init__(
+        self,
+        error=None,
+        result_override=None,
+        operations=None,
+        raw_log_visibility=None,
+        expose_before_result_override=False,
+    ):
         self.error = error
         self.result_override = deepcopy(result_override)
         self.operations = operations if operations is not None else []
         self.raw_log_visibility = raw_log_visibility
+        self.expose_before_result_override = expose_before_result_override
         self.requests = []
         self.durable_started_incidents = []
         self.durable_raw_event_log_entries = []
@@ -223,6 +243,10 @@ class RecordingLifeIncidentStartFinalizer:
         if self.error is not None:
             raise self.error
         if self.result_override is not None:
+            if self.raw_log_visibility is not None and self.expose_before_result_override:
+                self.raw_log_visibility.expose_committed_success_entry(
+                    request["committed_log_entry"]
+                )
             return deepcopy(self.result_override)
         self.durable_started_incidents.append(deepcopy(request["started_incident"]))
         self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
@@ -956,6 +980,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                 "committed_log_entry_id": "wrong-log-id",
             },
             raw_log_visibility=raw_log,
+            expose_before_result_override=True,
         )
         adapter = RecordingAdapter(
             raw_text=json.dumps(
@@ -1520,6 +1545,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                 "committed_log_entry_id": "wrong-log-id",
             },
             raw_log_visibility=raw_log,
+            expose_before_result_override=True,
         )
 
         result = run_user_message_turn(

@@ -30,6 +30,8 @@ from runtime.logging import (
     RawEventLogEntry,
     build_raw_log_entry,
     clock_timestamp,
+    confirm_committed_success_entry_visibility,
+    discard_committed_success_entry_visibility,
 )
 
 LIVING_STATE_PATCH_COMMITTED_STATUS = "living_state_patch_committed"
@@ -159,6 +161,7 @@ def commit_living_state_patch(
     source_identity = _extract_trusted_source_identity(source_event)
     request: LivingStatePatchCommitRequest | None = None
     commit_time: str | None = None
+    committed_log_entry: RawEventLogEntry | None = None
 
     try:
         request = build_living_state_patch_commit_request(source_event, role_model_result)
@@ -206,7 +209,9 @@ def commit_living_state_patch(
             source_identity=source_identity,
             committed_log_entry=committed_log_entry,
         )
+        confirm_committed_success_entry_visibility(raw_event_log, committed_log_entry)
     except LivingStatePatchFinalizerError as error:
+        discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
         failure = _build_failure(
             LIVING_STATE_PATCH_FINALIZE_STAGE,
             error.code,

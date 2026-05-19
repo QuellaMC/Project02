@@ -61,7 +61,9 @@ class RawEventLogQueryTests(unittest.TestCase):
         ids = SequenceIdGenerator()
         store = InMemoryRawEventLog()
         store.append(raw_entry(ids, kind="runtime_event_received"))
-        store.expose_committed_success_entry(raw_entry(ids, kind="living_state_patch_committed"))
+        success_entry = raw_entry(ids, kind="living_state_patch_committed")
+        store.expose_committed_success_entry(success_entry)
+        store.confirm_committed_success_entry(success_entry)
         store.append(
             raw_entry(
                 ids,
@@ -97,9 +99,12 @@ class RawEventLogQueryTests(unittest.TestCase):
         incident_entry = raw_entry(ids, kind="life_incident_started")
 
         store.expose_committed_success_entry(patch_entry)
+        store.confirm_committed_success_entry(patch_entry)
         store.expose_committed_success_entry(patch_entry)
+        store.confirm_committed_success_entry(patch_entry)
         store.append(patch_entry)
         store.expose_committed_success_entry(incident_entry)
+        store.confirm_committed_success_entry(incident_entry)
 
         result = store.query(
             {
@@ -112,6 +117,20 @@ class RawEventLogQueryTests(unittest.TestCase):
             [entry["kind"] for entry in result["entries"]],
             ["living_state_patch_committed", "life_incident_started"],
         )
+
+    def test_unconfirmed_success_entries_are_not_queryable_and_can_be_discarded(self):
+        ids = SequenceIdGenerator()
+        store = InMemoryRawEventLog()
+        success_entry = raw_entry(ids, kind="living_state_patch_committed")
+
+        store.expose_committed_success_entry(success_entry)
+        staged_result = store.query({"trace_id": "trace-1"})
+
+        store.discard_committed_success_entry(success_entry)
+        discarded_result = store.query({"trace_id": "trace-1"})
+
+        self.assertEqual(staged_result["entries"], [])
+        self.assertEqual(discarded_result["entries"], [])
 
     def test_rejects_malformed_queries_without_mutating_entries(self):
         ids = SequenceIdGenerator()

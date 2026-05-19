@@ -31,6 +31,8 @@ from runtime.logging import (
     RawEventLogEntry,
     build_raw_log_entry,
     clock_timestamp,
+    confirm_committed_success_entry_visibility,
+    discard_committed_success_entry_visibility,
     generate_id,
 )
 
@@ -133,6 +135,7 @@ def commit_life_incident_start(
     source_identity = _extract_trusted_source_identity(source_event)
     request: LifeIncidentStartCommitRequest | None = None
     started_incident: Mapping[str, Any] | None = None
+    committed_log_entry: RawEventLogEntry | None = None
 
     try:
         request = build_life_incident_start_commit_request(source_event, role_model_result)
@@ -173,7 +176,9 @@ def commit_life_incident_start(
             source_identity=source_identity,
             committed_log_entry=committed_log_entry,
         )
+        confirm_committed_success_entry_visibility(raw_event_log, committed_log_entry)
     except LifeIncidentStartFinalizerError as error:
+        discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
         failure = _build_failure(
             LIFE_INCIDENT_START_FINALIZE_STAGE,
             error.code,
