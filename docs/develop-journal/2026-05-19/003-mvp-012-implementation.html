@@ -24,7 +24,7 @@
     <ul>
       <li>Implemented <a href="../../plan/active-slice.html">MVP-012 - Minimal Start Incident Commit Boundary</a>.</li>
       <li>Added optional <code>life_action.start_incident</code> parsing behind explicit Role Model Loop opt-in.</li>
-      <li>Added a narrow <code>commit_effects.incident_start</code> boundary with an injected <code>LifeIncidentStartFinalizer</code> for atomic started-incident plus success-log visibility.</li>
+      <li>Added a narrow <code>commit_effects.incident_start</code> boundary with an injected <code>LifeIncidentStartFinalizer</code> for atomic started-incident plus <code>life_incident_started</code> <code>RawEventLogEntry</code> visibility.</li>
       <li>Wired <code>run_user_message_turn()</code> so incident start commit runs after the role-model turn and before assistant visible reply commit.</li>
       <li>Opened <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a> for the MVP-012 implementation.</li>
       <li>Updated <a href="../../plan/index.html">plan index</a>, <a href="../../plan/future-slices.html">future slices</a>, and the active slice implementation results.</li>
@@ -69,7 +69,7 @@
     <h2>Review Notes</h2>
     <ul>
       <li>The model can only propose a draft. The runtime generates <code>incident_id</code>, <code>status = "active"</code>, <code>started_at</code>, and <code>source_event_ids</code>.</li>
-      <li>Success does not append directly to the ordinary raw-log fake; the injected finalizer receives the started incident and matching <code>life_incident_started</code> raw log together, following the MVP-010 atomic finalizer pattern.</li>
+      <li>Success does not append directly through ordinary <code>raw_event_log.append()</code>; the injected finalizer durably exposes both the started incident and matching <code>life_incident_started</code> <code>RawEventLogEntry</code> together, following the MVP-010 atomic finalizer pattern.</li>
       <li>Finalizer rejection or malformed finalizer output appends <code>life_incident_start_rejected</code> and stops before assistant visible reply commit.</li>
       <li><code>state_patch</code> and <code>life_action</code> composition remains out of scope and fails before adapter invocation.</li>
       <li>No concrete incident store, complete/cancel/resume behavior, interruption policy, new RuntimeEvent type, body effects, Live2D, tools, retrieval, or scheduler behavior was added.</li>

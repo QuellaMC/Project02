@@ -207,14 +207,14 @@ class RecordingLifeIncidentStartFinalizer:
         self.operations = operations if operations is not None else []
         self.requests = []
         self.durable_started_incidents = []
-        self.durable_success_logs = []
+        self.durable_raw_event_log_entries = []
 
     def finalize_life_incident_start(self, request):
         self.requests.append(deepcopy(request))
         if self.error is not None:
             raise self.error
         self.durable_started_incidents.append(deepcopy(request["started_incident"]))
-        self.durable_success_logs.append(deepcopy(request["committed_log_entry"]))
+        self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
         self.operations.append(("atomic_finalizer", request["committed_log_entry"]["kind"]))
         return {
             "schema_version": "0.1",
@@ -561,7 +561,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(len(life_incident_start_finalizer.requests), 1)
         self.assertEqual(len(life_incident_start_finalizer.durable_started_incidents), 1)
-        self.assertEqual(len(life_incident_start_finalizer.durable_success_logs), 1)
+        self.assertEqual(len(life_incident_start_finalizer.durable_raw_event_log_entries), 1)
         self.assertEqual(
             life_incident_start_finalizer.durable_started_incidents[0],
             {
@@ -579,7 +579,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(
             result["life_incident_start_result"]["committed_log_entry_id"],
-            life_incident_start_finalizer.durable_success_logs[0]["log_id"],
+            life_incident_start_finalizer.durable_raw_event_log_entries[0]["log_id"],
         )
         self.assertNotIn(
             "life_action",
@@ -621,7 +621,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(life_incident_start_finalizer.requests, [])
         self.assertEqual(life_incident_start_finalizer.durable_started_incidents, [])
-        self.assertEqual(life_incident_start_finalizer.durable_success_logs, [])
+        self.assertEqual(life_incident_start_finalizer.durable_raw_event_log_entries, [])
         self.assertEqual(
             [entry["kind"] for entry in raw_log.entries],
             [
@@ -751,7 +751,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(len(life_incident_start_finalizer.requests), 1)
         self.assertEqual(life_incident_start_finalizer.durable_started_incidents, [])
-        self.assertEqual(life_incident_start_finalizer.durable_success_logs, [])
+        self.assertEqual(life_incident_start_finalizer.durable_raw_event_log_entries, [])
 
     def test_state_enabled_turn_commits_living_state_patch_before_assistant_reply(self):
         operations = []

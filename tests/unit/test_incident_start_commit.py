@@ -48,7 +48,7 @@ class RecordingLifeIncidentStartFinalizer:
         self.result_override = deepcopy(result_override)
         self.requests = []
         self.durable_started_incidents = []
-        self.durable_success_logs = []
+        self.durable_raw_event_log_entries = []
 
     def finalize_life_incident_start(self, request):
         self.requests.append(deepcopy(request))
@@ -57,7 +57,7 @@ class RecordingLifeIncidentStartFinalizer:
         if self.result_override is not None:
             return deepcopy(self.result_override)
         self.durable_started_incidents.append(deepcopy(request["started_incident"]))
-        self.durable_success_logs.append(deepcopy(request["committed_log_entry"]))
+        self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
         return {
             "schema_version": "0.1",
             "trace_id": request["trace_id"],
@@ -171,7 +171,7 @@ class IncidentStartCommitTests(unittest.TestCase):
         self.assertEqual(finalizer.requests, [])
         self.assertEqual(raw_log.entries, [])
 
-    def test_commits_started_incident_through_atomic_finalizer_and_uses_copies(self):
+    def test_finalizer_durably_exposes_started_incident_and_started_raw_log_entry(self):
         raw_log = RecordingRawEventLog()
         finalizer = RecordingLifeIncidentStartFinalizer()
         event = normalized_user_message()
@@ -197,7 +197,7 @@ class IncidentStartCommitTests(unittest.TestCase):
         self.assertEqual(result["status"], LIFE_INCIDENT_STARTED_STATUS)
         self.assertEqual(
             result["committed_log_entry_id"],
-            finalizer.durable_success_logs[0]["log_id"],
+            finalizer.durable_raw_event_log_entries[0]["log_id"],
         )
         self.assertEqual(raw_log.entries, [])
         self.assertEqual(len(finalizer.requests), 1)
@@ -217,17 +217,20 @@ class IncidentStartCommitTests(unittest.TestCase):
                 "source_event_ids": ["event-1"],
             },
         )
-        self.assertEqual(finalizer.durable_success_logs[0]["kind"], "life_incident_started")
         self.assertEqual(
-            finalizer.durable_success_logs[0]["data"]["source_event"]["payload"]["text"],
+            finalizer.durable_raw_event_log_entries[0]["kind"],
+            "life_incident_started",
+        )
+        self.assertEqual(
+            finalizer.durable_raw_event_log_entries[0]["data"]["source_event"]["payload"]["text"],
             "hello",
         )
         self.assertEqual(
-            finalizer.durable_success_logs[0]["data"]["draft"]["title"],
+            finalizer.durable_raw_event_log_entries[0]["data"]["draft"]["title"],
             "thinking through the plan",
         )
 
-    def test_finalizer_failure_rejects_without_durable_incident_or_success_log(self):
+    def test_finalizer_failure_rejects_without_durable_incident_or_raw_log_entry(self):
         raw_log = RecordingRawEventLog()
         finalizer = RecordingLifeIncidentStartFinalizer(
             error=LifeIncidentStartFinalizerError(
@@ -249,7 +252,7 @@ class IncidentStartCommitTests(unittest.TestCase):
         self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_START_FINALIZE_STAGE)
         self.assertEqual(result["failure"]["code"], "finalize_rejected")
         self.assertEqual(finalizer.durable_started_incidents, [])
-        self.assertEqual(finalizer.durable_success_logs, [])
+        self.assertEqual(finalizer.durable_raw_event_log_entries, [])
         self.assertEqual(raw_log.entries[0]["kind"], "life_incident_start_rejected")
         self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
 
@@ -278,7 +281,7 @@ class IncidentStartCommitTests(unittest.TestCase):
         self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_START_FINALIZE_STAGE)
         self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
         self.assertEqual(finalizer.durable_started_incidents, [])
-        self.assertEqual(finalizer.durable_success_logs, [])
+        self.assertEqual(finalizer.durable_raw_event_log_entries, [])
         self.assertEqual(raw_log.entries[0]["kind"], "life_incident_start_rejected")
 
     def test_started_incident_snapshot_reuses_active_incident_validation(self):

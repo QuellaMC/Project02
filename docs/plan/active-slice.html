@@ -84,7 +84,7 @@
       <li>One life action type is in scope: <code>start_incident</code>.</li>
       <li>The required top-level decision action remains <code>visible_reply</code>; <code>life_action</code> is only an optional sibling when explicitly enabled.</li>
       <li>The Role Model Loop may include <code>life_action</code> in <code>allowed_actions</code> only when the caller opts into MVP-012 incident-start behavior.</li>
-      <li>The incident commit path uses an injected fake <code>LifeIncidentStartFinalizer</code> that exposes the started incident and matching raw log atomically.</li>
+      <li>The incident commit path uses an injected fake <code>LifeIncidentStartFinalizer</code> that durably exposes the started incident and matching <code>life_incident_started</code> <code>RawEventLogEntry</code> atomically.</li>
       <li>If no <code>life_action</code> is present, the user turn skips incident commit and continues to the existing assistant visible reply commit.</li>
       <li>MVP-012 does not compose incident starts with living-state patches in the same turn. A later reviewed slice may define that ordering.</li>
     </ul>
@@ -192,7 +192,7 @@
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>With incident-start opt-in, Role Model Loop renders <code>allowed_actions = ["visible_reply", "life_action"]</code> and instructions that permit only optional <code>life_action.type = "start_incident"</code>.</td>
+          <td>With incident-start opt-in, Role Model Loop renders <code>allowed_actions = ["visible_reply", "life_action"]</code> and instructions that permit only optional <code>life_action.type = "start_incident"</code>, including the allowed <code>incident.type</code>, <code>interrupt_policy</code>, and <code>resume_policy</code> enum values enforced by the parser.</td>
         </tr>
         <tr>
           <td>FR-3</td>
@@ -224,7 +224,7 @@
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>The successful incident-start path builds a <code>life_incident_started</code> raw log entry and passes both the started incident and that log entry to the injected finalizer for atomic visibility.</td>
+          <td>The successful incident-start path builds a <code>life_incident_started</code> <code>RawEventLogEntry</code> and passes both the started incident and that log entry to the injected finalizer for atomic durable visibility instead of using the ordinary <code>raw_event_log.append()</code> path.</td>
         </tr>
         <tr>
           <td>FR-11</td>
@@ -302,8 +302,8 @@
     <ul>
       <li>Added shared incident constants and <code>normalize_start_incident_life_action()</code> in <code>runtime.contracts</code>, while keeping the base visible-reply decision validation shared with prior slices.</li>
       <li>Reused the shared incident type, policy, and <code>remaining_seconds</code> validators from <code>runtime.contracts</code> inside <code>character.state.current</code> so active-incident read validation and start-draft validation cannot drift.</li>
-      <li>Extended Role Model Loop with explicit <code>allow_incident_start</code> opt-in, <code>["visible_reply", "life_action"]</code> allowed actions, incident-start instructions, and malformed <code>life_action</code> parse failures through the existing <code>role_model_turn_failed</code> raw log.</li>
-      <li>Added <code>commit_effects.incident_start</code> as the narrow Commit and Effects boundary for building runtime-owned active incident snapshots, constructing <code>life_incident_started</code> success logs, validating finalizer success, and appending <code>life_incident_start_rejected</code> logs on rejection.</li>
+      <li>Extended Role Model Loop with explicit <code>allow_incident_start</code> opt-in, <code>["visible_reply", "life_action"]</code> allowed actions, incident-start instructions that enumerate the parser-enforced incident type and policy values, and malformed <code>life_action</code> parse failures through the existing <code>role_model_turn_failed</code> raw log.</li>
+      <li>Added <code>commit_effects.incident_start</code> as the narrow Commit and Effects boundary for building runtime-owned active incident snapshots, constructing <code>life_incident_started</code> success <code>RawEventLogEntry</code> records, validating finalizer success, and appending <code>life_incident_start_rejected</code> logs on rejection.</li>
       <li>Wired <code>run_user_message_turn()</code> so an injected <code>LifeIncidentStartFinalizer</code> opts into the incident-start path after the role-model turn and before assistant visible reply commit.</li>
       <li>Kept living-state patch and incident-start composition rejected for MVP-012; the user turn can opt into one write-side model action family at a time.</li>
       <li>Added focused unit and integration coverage for parsing, malformed drafts, allowed-action scoping, atomic finalizer success, finalizer rejection, skipped starts, deep-copy audit data, and user-turn ordering.</li>
@@ -313,7 +313,7 @@
     <ul>
       <li>MVP-012 is the incident equivalent of the first living-state write slice, but narrower: start only, no complete/cancel/resume, and no composition with state patches yet.</li>
       <li>The model proposes a draft; the runtime generates committed identity, timestamps, status, and source IDs.</li>
-      <li>The finalizer is the only boundary allowed to expose a started incident and its success raw log. A malformed success result must mean no durable incident/log visibility occurred.</li>
+      <li>The finalizer is the only boundary allowed to durably expose a started incident and its matching <code>life_incident_started</code> <code>RawEventLogEntry</code>; success logs are not appended through ordinary <code>raw_event_log.append()</code>. A malformed success result must mean no durable incident/log visibility occurred.</li>
       <li>If implementation pressure suggests concrete storage, interruption, body effects, Live2D, or completion events, park those as future slices.</li>
     </ul>
 

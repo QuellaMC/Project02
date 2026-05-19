@@ -81,9 +81,12 @@ class LifeIncidentStartFinalizerError(ValueError):
 class LifeIncidentStartFinalizer(Protocol):
     """MVP-012 atomic incident-plus-log finalization boundary.
 
-    A successful return is the Commit and Effects success signal. The finalizer
-    must expose the started incident and matching success log together, or raise
-    before exposing either artifact.
+    A successful return means this boundary has durably exposed both the started
+    active incident and matching life_incident_started RawEventLogEntry. The
+    ordinary raw_event_log.append() path is not used for this success log; the
+    finalizer is the Raw Event Log visibility boundary for the success record.
+    If it cannot expose both artifacts together, it must raise before exposing
+    either artifact.
     """
 
     def finalize_life_incident_start(

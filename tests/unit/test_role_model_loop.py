@@ -837,6 +837,19 @@ class DecisionContextTests(unittest.TestCase):
         self.assertEqual(model_input["instructions"], INCIDENT_START_ROLE_MODEL_INSTRUCTIONS)
         self.assertIn("life_action", model_input["instructions"])
         self.assertIn("start_incident", model_input["instructions"])
+        self.assertIn(
+            "incident.type must be one of: 'custom', 'drink', 'eat', 'idle', "
+            "'rest', 'sleep', 'think', 'wait', 'work'",
+            model_input["instructions"],
+        )
+        self.assertIn(
+            "interrupt_policy must be one of: 'background', 'interruptible', 'protected'",
+            model_input["instructions"],
+        )
+        self.assertIn(
+            "resume_policy must be one of: 'ask_model', 'cancel', 'resume'",
+            model_input["instructions"],
+        )
         self.assertEqual(
             model_input["decision_context"]["allowed_actions"],
             ["visible_reply", "life_action"],

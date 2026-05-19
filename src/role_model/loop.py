@@ -18,6 +18,9 @@ from character.state.current import (
     validate_living_state_brief_for_event,
 )
 from runtime.contracts import (
+    ACTIVE_INCIDENT_INTERRUPT_POLICIES,
+    ACTIVE_INCIDENT_RESUME_POLICIES,
+    ACTIVE_INCIDENT_TYPES,
     ASSISTANT_VISIBLE_REPLY_KIND,
     ASSISTANT_VISIBLE_REPLY_ROLE,
     DECISION_READY_FOR_COMMIT_STATUS,
@@ -57,6 +60,20 @@ FAILURE_CODES_BY_STAGE = {
     "adapter_call": {"adapter_exception"},
     "parse_output": {"malformed_model_output"},
 }
+
+
+def _format_allowed_contract_values(values: set[str]) -> str:
+    return ", ".join(f"'{value}'" for value in sorted(values))
+
+
+INCIDENT_TYPE_CONTRACT_VALUES = _format_allowed_contract_values(ACTIVE_INCIDENT_TYPES)
+INCIDENT_INTERRUPT_POLICY_CONTRACT_VALUES = _format_allowed_contract_values(
+    ACTIVE_INCIDENT_INTERRUPT_POLICIES
+)
+INCIDENT_RESUME_POLICY_CONTRACT_VALUES = _format_allowed_contract_values(
+    ACTIVE_INCIDENT_RESUME_POLICIES
+)
+
 ROLE_MODEL_INSTRUCTIONS = (
     "Return one JSON object only. The object must contain schema_version='0.1', "
     "action='visible_reply', and visible_reply.text as a non-empty string. "
@@ -74,8 +91,11 @@ INCIDENT_START_ROLE_MODEL_INSTRUCTIONS = (
     "action='visible_reply', and visible_reply.text as a non-empty string. "
     "It may also include optional life_action with type='start_incident' and "
     "incident containing only type, title, optional remaining_seconds, "
-    "interrupt_policy, and resume_policy. Do not include committed incident "
-    "fields or extra fields."
+    "interrupt_policy, and resume_policy. incident.type must be one of: "
+    f"{INCIDENT_TYPE_CONTRACT_VALUES}. interrupt_policy must be one of: "
+    f"{INCIDENT_INTERRUPT_POLICY_CONTRACT_VALUES}. resume_policy must be one "
+    f"of: {INCIDENT_RESUME_POLICY_CONTRACT_VALUES}. Do not include committed "
+    "incident fields or extra fields."
 )
 
 DecisionContext = dict[str, Any]
