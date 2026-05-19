@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Protocol
 
-from character.state.current import CurrentCharacterStateSource
+from character.state.current import ActiveIncidentSource, CurrentCharacterStateSource
 from commit_effects.living_state import (
     LIVING_STATE_PATCH_REJECTED_STATUS,
     LivingStatePatchFinalizer,
@@ -50,6 +50,7 @@ def run_user_message_turn(
     id_generator: IdGenerator,
     clock: Clock,
     current_state_source: CurrentCharacterStateSource | None = None,
+    active_incident_source: ActiveIncidentSource | None = None,
     living_state_patch_store: LivingStatePatchStore | None = None,
     living_state_patch_finalizer: LivingStatePatchFinalizer | None = None,
 ) -> UserMessageTurnResult:
@@ -94,6 +95,7 @@ def run_user_message_turn(
             visible_conversation
         ),
         current_state_source=current_state_source,
+        active_incident_source=active_incident_source,
         allow_state_patch=allow_state_patch,
     )
 

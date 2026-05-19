@@ -49,6 +49,19 @@ class RecordingRawEventLog:
         self.entries.append(entry)
 
 
+def assert_context_build_failure_log(test_case, raw_log, *, message_fragment):
+    test_case.assertEqual(len(raw_log.entries), 1)
+    entry = raw_log.entries[0]
+    test_case.assertEqual(entry["kind"], "role_model_turn_failed")
+    test_case.assertEqual(entry["trace_id"], "trace-1")
+    test_case.assertEqual(entry["event_id"], "event-1")
+    test_case.assertEqual(entry["data"]["event"]["event_id"], "event-1")
+    test_case.assertNotIn("model_input", entry["data"])
+    test_case.assertEqual(entry["data"]["failure"]["stage"], "context_build")
+    test_case.assertEqual(entry["data"]["failure"]["code"], "malformed_context")
+    test_case.assertIn(message_fragment, entry["data"]["failure"]["message"])
+
+
 class FakeRoleModelAdapter:
     def __init__(self, raw_text):
         self.raw_text = raw_text
@@ -637,7 +650,7 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
             )
 
         self.assertEqual(adapter.inputs, [])
-        self.assertEqual(raw_log.entries, [])
+        assert_context_build_failure_log(self, raw_log, message_fragment="role")
 
     def test_malformed_current_state_fails_before_adapter_invocation(self):
         cases = [
@@ -662,7 +675,11 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
                     )
 
                 self.assertEqual(adapter.inputs, [])
-                self.assertEqual(raw_log.entries, [])
+                assert_context_build_failure_log(
+                    self,
+                    raw_log,
+                    message_fragment=error_pattern,
+                )
 
     def test_future_recent_messages_fail_before_adapter_invocation(self):
         raw_log = RecordingRawEventLog()
@@ -682,7 +699,11 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
             )
 
         self.assertEqual(adapter.inputs, [])
-        self.assertEqual(raw_log.entries, [])
+        assert_context_build_failure_log(
+            self,
+            raw_log,
+            message_fragment="before event.created_at",
+        )
 
     def test_duplicate_recent_message_identities_fail_before_adapter_invocation(self):
         raw_log = RecordingRawEventLog()
@@ -705,7 +726,7 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
             )
 
         self.assertEqual(adapter.inputs, [])
-        self.assertEqual(raw_log.entries, [])
+        assert_context_build_failure_log(self, raw_log, message_fragment="message_id")
 
     def test_result_event_type_is_derived_from_normalized_event(self):
         raw_log = RecordingRawEventLog()

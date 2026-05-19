@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from math import isfinite
 from typing import Any, Protocol
 
 from runtime.contracts import (
@@ -19,6 +20,23 @@ from runtime.logging import SCHEMA_VERSION
 CurrentCharacterStateRequest = dict[str, Any]
 CharacterRuntimeStateSnapshot = dict[str, Any]
 LivingStateBrief = dict[str, Any]
+ActiveIncidentRequest = dict[str, Any]
+ActiveIncidentSnapshot = dict[str, Any]
+ActiveIncidentBrief = dict[str, Any]
+
+ACTIVE_INCIDENT_TYPES = {
+    "idle",
+    "eat",
+    "drink",
+    "sleep",
+    "rest",
+    "work",
+    "think",
+    "wait",
+    "custom",
+}
+ACTIVE_INCIDENT_INTERRUPT_POLICIES = {"interruptible", "background", "protected"}
+ACTIVE_INCIDENT_RESUME_POLICIES = {"resume", "ask_model", "cancel"}
 
 
 class CurrentCharacterStateSource(Protocol):
@@ -28,68 +46,41 @@ class CurrentCharacterStateSource(Protocol):
     ) -> CharacterRuntimeStateSnapshot: ...
 
 
+class ActiveIncidentSource(Protocol):
+    def read_active_incident(
+        self,
+        request: ActiveIncidentRequest,
+    ) -> ActiveIncidentSnapshot | None: ...
+
+
 def build_current_character_state_request(event: RuntimeEvent) -> CurrentCharacterStateRequest:
-    normalized_event = validate_normalized_user_message_event(
+    return _build_user_message_read_request(
         event,
-        source_name="CurrentCharacterStateRequest.event",
+        request_name="CurrentCharacterStateRequest",
     )
-    payload = normalized_event["payload"]
-    request: CurrentCharacterStateRequest = {
-        "schema_version": SCHEMA_VERSION,
-        "trace_id": normalized_event["trace_id"],
-        "event_id": normalized_event["event_id"],
-        "event_type": normalized_event["type"],
-    }
-    for field_name in ("user_id", "conversation_id"):
-        if field_name in payload:
-            request[field_name] = payload[field_name]
-    return validate_current_character_state_request(request)
 
 
 def validate_current_character_state_request(
     request: Any,
 ) -> CurrentCharacterStateRequest:
-    if not isinstance(request, Mapping):
-        raise ContractValidationError("CurrentCharacterStateRequest must be a mapping.")
-    reject_extra_keys(
+    return _validate_user_message_read_request(
         request,
-        {
-            "schema_version",
-            "trace_id",
-            "event_id",
-            "event_type",
-            "user_id",
-            "conversation_id",
-        },
-        "CurrentCharacterStateRequest",
+        request_name="CurrentCharacterStateRequest",
     )
-    normalized_request: CurrentCharacterStateRequest = {
-        "schema_version": require_equal(
-            request.get("schema_version"),
-            SCHEMA_VERSION,
-            "CurrentCharacterStateRequest.schema_version",
-        ),
-        "trace_id": require_string(
-            request.get("trace_id"),
-            "CurrentCharacterStateRequest.trace_id",
-        ),
-        "event_id": require_string(
-            request.get("event_id"),
-            "CurrentCharacterStateRequest.event_id",
-        ),
-        "event_type": require_equal(
-            request.get("event_type"),
-            USER_MESSAGE,
-            "CurrentCharacterStateRequest.event_type",
-        ),
-    }
-    for field_name in ("user_id", "conversation_id"):
-        if field_name in request:
-            normalized_request[field_name] = require_optional_string(
-                request[field_name],
-                f"CurrentCharacterStateRequest.{field_name}",
-            )
-    return normalized_request
+
+
+def build_active_incident_request(event: RuntimeEvent) -> ActiveIncidentRequest:
+    return _build_user_message_read_request(
+        event,
+        request_name="ActiveIncidentRequest",
+    )
+
+
+def validate_active_incident_request(request: Any) -> ActiveIncidentRequest:
+    return _validate_user_message_read_request(
+        request,
+        request_name="ActiveIncidentRequest",
+    )
 
 
 def build_living_state_brief(snapshot: Any) -> LivingStateBrief:
@@ -225,6 +216,240 @@ def validate_living_state_brief_for_event(
     return validated_brief
 
 
+def build_active_incident_brief(snapshot: Any) -> ActiveIncidentBrief:
+    validated_snapshot = validate_active_incident_snapshot(snapshot)
+    brief: ActiveIncidentBrief = {
+        "incident_id": validated_snapshot["incident_id"],
+        "type": validated_snapshot["type"],
+        "title": validated_snapshot["title"],
+        "interrupt_policy": validated_snapshot["interrupt_policy"],
+        "resume_policy": validated_snapshot["resume_policy"],
+        "source_event_ids": list(validated_snapshot["source_event_ids"]),
+    }
+    for field_name in ("started_at", "expected_end_at", "remaining_seconds"):
+        if field_name in validated_snapshot:
+            brief[field_name] = validated_snapshot[field_name]
+    return validate_active_incident_brief(brief)
+
+
+def validate_active_incident_snapshot(snapshot: Any) -> ActiveIncidentSnapshot:
+    if not isinstance(snapshot, Mapping):
+        raise ContractValidationError("ActiveIncidentSnapshot must be a mapping.")
+    reject_extra_keys(
+        snapshot,
+        {
+            "schema_version",
+            "incident_id",
+            "type",
+            "status",
+            "title",
+            "started_at",
+            "expected_end_at",
+            "remaining_seconds",
+            "interrupt_policy",
+            "resume_policy",
+            "source_event_ids",
+        },
+        "ActiveIncidentSnapshot",
+    )
+    normalized_snapshot: ActiveIncidentSnapshot = {
+        "schema_version": require_equal(
+            snapshot.get("schema_version"),
+            SCHEMA_VERSION,
+            "ActiveIncidentSnapshot.schema_version",
+        ),
+        "incident_id": require_string(
+            snapshot.get("incident_id"),
+            "ActiveIncidentSnapshot.incident_id",
+        ),
+        "type": _require_supported_value(
+            snapshot.get("type"),
+            ACTIVE_INCIDENT_TYPES,
+            "ActiveIncidentSnapshot.type",
+        ),
+        "status": require_equal(
+            snapshot.get("status"),
+            "active",
+            "ActiveIncidentSnapshot.status",
+        ),
+        "title": require_string(
+            snapshot.get("title"),
+            "ActiveIncidentSnapshot.title",
+        ),
+        "interrupt_policy": _require_supported_value(
+            snapshot.get("interrupt_policy"),
+            ACTIVE_INCIDENT_INTERRUPT_POLICIES,
+            "ActiveIncidentSnapshot.interrupt_policy",
+        ),
+        "resume_policy": _require_supported_value(
+            snapshot.get("resume_policy"),
+            ACTIVE_INCIDENT_RESUME_POLICIES,
+            "ActiveIncidentSnapshot.resume_policy",
+        ),
+        "source_event_ids": _validate_non_empty_source_event_ids(
+            snapshot.get("source_event_ids"),
+            "ActiveIncidentSnapshot.source_event_ids",
+        ),
+    }
+    for field_name in ("started_at", "expected_end_at"):
+        if field_name in snapshot:
+            normalized_snapshot[field_name] = validate_iso8601_timestamp(
+                snapshot[field_name],
+                f"ActiveIncidentSnapshot.{field_name}",
+            )
+    if "remaining_seconds" in snapshot:
+        normalized_snapshot["remaining_seconds"] = _validate_remaining_seconds(
+            snapshot["remaining_seconds"],
+            "ActiveIncidentSnapshot.remaining_seconds",
+        )
+    return normalized_snapshot
+
+
+def validate_active_incident_brief(brief: Any) -> ActiveIncidentBrief:
+    if not isinstance(brief, Mapping):
+        raise ContractValidationError("active_incident must be a mapping.")
+    reject_extra_keys(
+        brief,
+        {
+            "incident_id",
+            "type",
+            "title",
+            "started_at",
+            "expected_end_at",
+            "remaining_seconds",
+            "interrupt_policy",
+            "resume_policy",
+            "source_event_ids",
+        },
+        "active_incident",
+    )
+    normalized_brief: ActiveIncidentBrief = {
+        "incident_id": require_string(
+            brief.get("incident_id"),
+            "active_incident.incident_id",
+        ),
+        "type": _require_supported_value(
+            brief.get("type"),
+            ACTIVE_INCIDENT_TYPES,
+            "active_incident.type",
+        ),
+        "title": require_string(
+            brief.get("title"),
+            "active_incident.title",
+        ),
+        "interrupt_policy": _require_supported_value(
+            brief.get("interrupt_policy"),
+            ACTIVE_INCIDENT_INTERRUPT_POLICIES,
+            "active_incident.interrupt_policy",
+        ),
+        "resume_policy": _require_supported_value(
+            brief.get("resume_policy"),
+            ACTIVE_INCIDENT_RESUME_POLICIES,
+            "active_incident.resume_policy",
+        ),
+        "source_event_ids": _validate_non_empty_source_event_ids(
+            brief.get("source_event_ids"),
+            "active_incident.source_event_ids",
+        ),
+    }
+    for field_name in ("started_at", "expected_end_at"):
+        if field_name in brief:
+            normalized_brief[field_name] = validate_iso8601_timestamp(
+                brief[field_name],
+                f"active_incident.{field_name}",
+            )
+    if "remaining_seconds" in brief:
+        normalized_brief["remaining_seconds"] = _validate_remaining_seconds(
+            brief["remaining_seconds"],
+            "active_incident.remaining_seconds",
+        )
+    return normalized_brief
+
+
+def validate_active_incident_brief_for_event(
+    brief: Any,
+    *,
+    event_id: str,
+) -> ActiveIncidentBrief:
+    validated_brief = validate_active_incident_brief(brief)
+    current_event_id = require_string(event_id, "event_id")
+    if current_event_id in validated_brief["source_event_ids"]:
+        raise ContractValidationError(
+            "active_incident.source_event_ids must not include current event_id."
+        )
+    return validated_brief
+
+
+def _build_user_message_read_request(
+    event: RuntimeEvent,
+    *,
+    request_name: str,
+) -> dict[str, Any]:
+    normalized_event = validate_normalized_user_message_event(
+        event,
+        source_name=f"{request_name}.event",
+    )
+    payload = normalized_event["payload"]
+    request: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "trace_id": normalized_event["trace_id"],
+        "event_id": normalized_event["event_id"],
+        "event_type": normalized_event["type"],
+    }
+    for field_name in ("user_id", "conversation_id"):
+        if field_name in payload:
+            request[field_name] = payload[field_name]
+    return _validate_user_message_read_request(request, request_name=request_name)
+
+
+def _validate_user_message_read_request(
+    request: Any,
+    *,
+    request_name: str,
+) -> dict[str, Any]:
+    if not isinstance(request, Mapping):
+        raise ContractValidationError(f"{request_name} must be a mapping.")
+    reject_extra_keys(
+        request,
+        {
+            "schema_version",
+            "trace_id",
+            "event_id",
+            "event_type",
+            "user_id",
+            "conversation_id",
+        },
+        request_name,
+    )
+    normalized_request: dict[str, Any] = {
+        "schema_version": require_equal(
+            request.get("schema_version"),
+            SCHEMA_VERSION,
+            f"{request_name}.schema_version",
+        ),
+        "trace_id": require_string(
+            request.get("trace_id"),
+            f"{request_name}.trace_id",
+        ),
+        "event_id": require_string(
+            request.get("event_id"),
+            f"{request_name}.event_id",
+        ),
+        "event_type": require_equal(
+            request.get("event_type"),
+            USER_MESSAGE,
+            f"{request_name}.event_type",
+        ),
+    }
+    for field_name in ("user_id", "conversation_id"):
+        if field_name in request:
+            normalized_request[field_name] = require_optional_string(
+                request[field_name],
+                f"{request_name}.{field_name}",
+            )
+    return normalized_request
+
+
 def _validate_source_event_ids(value: Any, field_name: str) -> list[str]:
     if not isinstance(value, list):
         raise ContractValidationError(f"{field_name} must be a list.")
@@ -237,3 +462,29 @@ def _validate_source_event_ids(value: Any, field_name: str) -> list[str]:
             )
         )
     return source_event_ids
+
+
+def _validate_non_empty_source_event_ids(value: Any, field_name: str) -> list[str]:
+    source_event_ids = _validate_source_event_ids(value, field_name)
+    if not source_event_ids:
+        raise ContractValidationError(f"{field_name} must include at least one source event ID.")
+    return source_event_ids
+
+
+def _require_supported_value(value: Any, allowed_values: set[str], field_name: str) -> str:
+    normalized_value = require_string(value, field_name)
+    if normalized_value not in allowed_values:
+        formatted = ", ".join(sorted(allowed_values))
+        raise ContractValidationError(f"{field_name} must be one of: {formatted}.")
+    return normalized_value
+
+
+def _validate_remaining_seconds(value: Any, field_name: str) -> int | float:
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not isfinite(value)
+        or value < 0
+    ):
+        raise ContractValidationError(f"{field_name} must be a non-negative number.")
+    return value

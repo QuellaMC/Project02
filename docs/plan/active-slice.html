@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-010 - Atomic Living State Patch Commit Boundary</title>
+  <title>MVP-011 - Read-Only Active Incident Brief in DecisionContext</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,13 +27,13 @@
 </head>
 <body>
   <main>
-    <h1>MVP-010 - Atomic Living State Patch Commit Boundary</h1>
-    <p><span class="status">Status: implemented and in review; PR #10</span></p>
+    <h1>MVP-011 - Read-Only Active Incident Brief in DecisionContext</h1>
+    <p><span class="status">Status: implemented; PR #12 in review</span></p>
     <p class="meta">
       Created: 2026-05-18. Active slice path:
       <code>docs/plan/active-slice.html</code>.
       Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
-      Branch: <code>feature/mvp-010-functional-spec</code>.
+      Branch: <code>feature/mvp-011-functional-spec</code>.
     </p>
 
     <h2>Source Context</h2>
@@ -49,11 +49,10 @@
       <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
     </p>
     <blockquote>
-      Phase 2 needs CharacterRuntimeState writes, but MVP-009 deliberately used
-      a non-durable prepare boundary and treated the raw-log append as the
-      commit point. MVP-010 proves only the next missing runtime contract:
-      a living-state patch success must commit the validated state snapshot and
-      its <code>living_state_patch_committed</code> raw log entry atomically.
+      Phase 3 starts the Basic Incident System, but the first useful slice
+      should not create or mutate incidents. MVP-011 only lets the existing
+      <code>USER_MESSAGE</code> model call see one compact read-only active
+      incident brief when an injected Character State Engine source provides it.
     </blockquote>
     <p>
       Local implementation truth comes from completed
@@ -64,126 +63,92 @@
       <a href="completed/mvp-005-user-visible-message-projection.html">MVP-005</a>,
       <a href="completed/mvp-006-visible-conversation-recent-source.html">MVP-006</a>,
       <a href="completed/mvp-007-minimal-user-turn-orchestrator.html">MVP-007</a>,
-      <a href="completed/mvp-008-read-only-living-state-snapshot-in-decisioncontext.html">MVP-008</a>, and
-      <a href="completed/mvp-009-minimal-living-state-patch-commit.html">MVP-009</a>.
+      <a href="completed/mvp-008-read-only-living-state-snapshot-in-decisioncontext.html">MVP-008</a>,
+      <a href="completed/mvp-009-minimal-living-state-patch-commit.html">MVP-009</a>, and
+      <a href="completed/mvp-010-atomic-living-state-patch-commit-boundary.html">MVP-010</a>.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Replace the MVP-009 prepare-only living-state patch success path with one
-      injected atomic commit boundary. A successful state patch must make both
-      facts visible together: the committed <code>CharacterRuntimeStateSnapshot</code>
-      and the matching <code>living_state_patch_committed</code> raw log entry.
-      This slice keeps the existing user-turn, role-model, patch-shape, and
-      visible-reply behavior intact.
+      Add the smallest read-side incident context needed for Phase 3: an
+      optional injected active-incident source that maps one active incident
+      into <code>DecisionContext.character_snapshot.active_incident</code> for
+      the existing <code>USER_MESSAGE</code> role-model call. The slice must
+      preserve current visible-reply and living-state patch behavior.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
       <li>One event type remains in scope: <code>USER_MESSAGE</code>.</li>
-      <li>One state family remains in scope: <code>state_patch.living_state</code> with only <code>current_activity</code>, <code>mood</code>, and <code>toward_user</code>.</li>
-      <li>One success-path boundary changes: the existing MVP-009 prepare/snapshot-candidate path remains the single candidate producer, and its validated candidate is finalized by an injected atomic state-plus-log boundary before assistant visible reply commit.</li>
-      <li>The atomic boundary is still fake/injected for tests. It may be in-memory, but it must model all-or-nothing state and raw-log visibility.</li>
-      <li>The existing committed snapshot validation stays authoritative: source event ID is present, patched fields match, and <code>updated_at</code> equals the runtime-owned commit timestamp.</li>
-      <li>Existing no-patch, malformed-model-output, validation-rejection, store-rejection, and visible-reply-only paths stay behavior-compatible with MVP-009.</li>
-      <li>Tests must prove the assistant visible reply is committed only after the atomic state-plus-log commit succeeds.</li>
+      <li>One new read-side source is in scope: <code>ActiveIncidentSource</code>, injected by the caller.</li>
+      <li>One compact model-facing view is in scope: <code>character_snapshot.active_incident</code>.</li>
+      <li>The source may report no active incident; in that case the current <code>DecisionContext</code> shape is unchanged except for validation support.</li>
+      <li>The active incident view is read-only. It is not committed, resumed, cancelled, completed, queued, interrupted, scheduled, or persisted by this slice.</li>
+      <li>The existing recent-visible-message and living-state brief sources continue to compose into the same <code>character_snapshot</code>.</li>
+      <li>The existing allowed actions remain <code>visible_reply</code> or <code>visible_reply</code> plus <code>state_patch</code> when the living-state write boundaries are fully opted in. MVP-011 does not expose <code>life_action</code>.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No database, filesystem store, migration, ORM, queue, background worker, scheduler, replay worker, or production persistence adapter.</li>
-      <li>No concrete multi-character lookup and no runtime-inferred <code>character_id</code>; the injected boundary remains caller-bound to the active character.</li>
-      <li>No broad <code>CharacterRuntimeState</code> expansion, <code>state_version</code>, optimistic locking, idempotency key, reconciliation job, or cross-turn deduplication policy.</li>
-      <li>No body state, body drift, need thresholds, active incident, incident queue, scheduled directive, retrieval, continuity write, tool request, Live2D status, asset behavior, proactive message, or new runtime event family.</li>
-      <li>No new Role Model action. The model still returns required <code>action = "visible_reply"</code> and may include only the optional MVP-009 living-state patch when state patching is allowed.</li>
-      <li>No transaction between user visible message projection, state patch commit, and assistant visible reply commit. MVP-010 only atomizes state snapshot plus state-patch raw log.</li>
-      <li>No dedicated context-build log or debug inspector. Existing role-model and state-patch logs remain the audit surface.</li>
+      <li>No concrete <code>LifeIncidentStore</code>, database, migration, filesystem store, queue, background worker, scheduler, replay worker, or production persistence adapter.</li>
+      <li>No incident creation, start, complete, cancel, resume, interruption, backgrounding, replacement, deduplication, or reconciliation behavior.</li>
+      <li>No <code>INCIDENT_COMPLETION</code>, <code>TIMER</code>, <code>NEED_THRESHOLD</code>, scheduled directive, tool result, asset result, or maintenance event type.</li>
+      <li>No <code>interrupted_incident</code>, completed incident brief, incident queue, active thread, retrieval result, body state, body drift, Live2D status, proactive message, scheduled directive action, tool request, continuity write, or asset behavior.</li>
+      <li>No new model output action. The model still returns required <code>action = "visible_reply"</code> and may include only the existing optional living-state patch when state patching is allowed.</li>
+      <li>No Runtime Kernel priority or interruption policy changes.</li>
+      <li>No new raw log kind for context building. The existing <code>role_model_turn_failed</code> kind records context-build validation failures; dedicated context-build log kinds stay parked for a later debug/replay slice.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
-    <h3>Snapshot Candidate Path</h3>
-    <p>
-      MVP-010 reuses the existing MVP-009
-      <code>LivingStatePatchStore.prepare_living_state_patch_commit()</code>
-      path only as the snapshot-candidate producer before finalization. Commit
-      and Effects must not duplicate snapshot construction by independently
-      applying the patch to state in a second code path. If implementation
-      extracts a helper for readability, that helper must be the one shared path
-      used to obtain the candidate snapshot before validation and finalization,
-      not a parallel builder.
-    </p>
-    <p>
-      The MVP-010 finalizer is a new boundary after that candidate path. It
-      atomically exposes the already validated <code>committed_snapshot</code>
-      and <code>committed_log_entry</code>; it does not create either artifact.
-    </p>
-
-    <h3>LivingStatePatchFinalizer</h3>
-    <pre><code>type LivingStatePatchFinalizer = {
-  finalize_living_state_patch_commit(
-    request: LivingStatePatchFinalizeRequest
-  ): LivingStatePatchFinalizeResult
-}</code></pre>
-    <p>
-      The MVP-010 finalization boundary must use finalizer/finalize naming.
-      Do not name the new atomic boundary <code>LivingStatePatchStore</code> or
-      call the final step <code>prepare_living_state_patch_commit()</code>. Those
-      names belong to the MVP-009 prepare-only boundary and would blur future
-      concrete persistence ownership.
-    </p>
-
-    <h3>LivingStatePatchFinalizeRequest</h3>
-    <pre><code>type LivingStatePatchFinalizeRequest = {
+    <h3>ActiveIncidentRequest</h3>
+    <pre><code>type ActiveIncidentRequest = {
   schema_version: "0.1"
   trace_id: string
   event_id: string
   event_type: "USER_MESSAGE"
-  decision_action: "visible_reply"
-  commit_time: string
-  patch: {
-    living_state: {
-      current_activity?: string
-      mood?: string
-      toward_user?: string
-    }
-  }
-  committed_snapshot: CharacterRuntimeStateSnapshot
-  committed_log_entry: RawEventLogEntry &amp; {
-    kind: "living_state_patch_committed"
-  }
   user_id?: string
   conversation_id?: string
 }</code></pre>
 
-    <h3>LivingStatePatchFinalizeResult</h3>
-    <pre><code>type LivingStatePatchFinalizeResult = {
+    <h3>ActiveIncidentSnapshot</h3>
+    <pre><code>type ActiveIncidentSnapshot = {
   schema_version: "0.1"
-  trace_id: string
-  event_id: string
-  event_type: "USER_MESSAGE"
-  committed_log_entry_id: string
+  incident_id: string
+  type: "idle" | "eat" | "drink" | "sleep" | "rest" | "work" | "think" | "wait" | "custom"
+  status: "active"
+  title: string
+  started_at?: string
+  expected_end_at?: string
+  remaining_seconds?: number
+  interrupt_policy: "interruptible" | "background" | "protected"
+  resume_policy: "resume" | "ask_model" | "cancel"
+  source_event_ids: string[]
 }</code></pre>
 
-    <h3>LivingStatePatchAtomicCommitResult</h3>
-    <pre><code>type LivingStatePatchAtomicCommitResult = {
-  schema_version: "0.1"
-  trace_id: string
-  event_id: string
-  event_type: "USER_MESSAGE"
-  status:
-    | "living_state_patch_committed"
-    | "living_state_patch_skipped"
-    | "living_state_patch_rejected"
-  committed_snapshot?: CharacterRuntimeStateSnapshot
-  committed_log_entry_id?: string
-  failure?: {
-    stage:
-      | "living_state_patch_commit_validation"
-      | "living_state_patch_store"
-      | "living_state_patch_finalize"
-    code: string
-    message: string
-  }
+    <h3>ActiveIncidentBrief</h3>
+    <pre><code>type ActiveIncidentBrief = {
+  incident_id: string
+  type: "idle" | "eat" | "drink" | "sleep" | "rest" | "work" | "think" | "wait" | "custom"
+  title: string
+  started_at?: string
+  expected_end_at?: string
+  remaining_seconds?: number
+  interrupt_policy: "interruptible" | "background" | "protected"
+  resume_policy: "resume" | "ask_model" | "cancel"
+  source_event_ids: string[]
+}</code></pre>
+    <p>
+      The model-facing brief intentionally omits <code>status</code> because the
+      field name <code>active_incident</code> already carries that meaning. The
+      source snapshot still requires <code>status = "active"</code> so future
+      completed, interrupted, or queued records cannot silently enter this view.
+    </p>
+
+    <h3>DecisionContext Addition</h3>
+    <pre><code>type DecisionContext.character_snapshot = {
+  recent_visible_messages: RecentVisibleMessage[]
+  living_state_brief?: LivingStateBrief
+  active_incident?: ActiveIncidentBrief
 }</code></pre>
 
     <h2>Functional Requirements</h2>
@@ -197,39 +162,39 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>Without state-patch opt-in, all MVP-009 visible-reply behavior remains unchanged.</td>
+          <td>Without an <code>active_incident_source</code>, existing MVP-010 behavior and tests remain unchanged.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>With state-patch opt-in and no model patch, the runtime returns <code>living_state_patch_skipped</code>, appends no state patch raw log, and commits the assistant visible reply as in MVP-009.</td>
+          <td>When an <code>active_incident_source</code> is provided, Role Model Loop builds an <code>ActiveIncidentRequest</code> from the normalized <code>USER_MESSAGE</code> event, including optional <code>user_id</code> and <code>conversation_id</code>.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>Malformed model-output patches continue to fail in Role Model Loop parsing before any state commit boundary runs.</td>
+          <td>If the source returns <code>None</code>, the decision context omits <code>character_snapshot.active_incident</code> and continues the normal visible-reply flow.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>Commit and Effects still validates the normalized source event, role-model result envelope, living-state patch, committed snapshot candidate shape, source event IDs, patched fields, and runtime-owned timestamp before finalization. The snapshot candidate comes from the existing MVP-009 prepare path or one extracted helper around that same path.</td>
+          <td>If the source returns one valid active incident snapshot, Role Model Loop maps it to <code>ActiveIncidentBrief</code>, deep-copies it, and places it under <code>character_snapshot.active_incident</code>.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>On success, Commit and Effects turns the validated snapshot candidate into the <code>committed_snapshot</code>, builds the exact <code>living_state_patch_committed</code> raw log entry, and places both in one <code>LivingStatePatchFinalizeRequest</code>. The finalizer must not revalidate the whole role-model result, rebuild the committed snapshot, or construct the committed log entry.</td>
+          <td>Incident validation rejects extra fields, unsupported incident types, non-<code>active</code> status, invalid timestamps, negative <code>remaining_seconds</code>, unsupported policies, missing source IDs, and any <code>source_event_ids</code> containing the current event ID.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>The injected finalizer is the success commit point. It receives already validated commit artifacts and must expose neither the committed snapshot nor the committed raw log entry unless both commit together.</td>
+          <td><code>render_role_model_input()</code> validates <code>active_incident</code> in the same pass as existing <code>recent_visible_messages</code> and <code>living_state_brief</code>.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>If finalization fails, the result is <code>living_state_patch_rejected</code> with failure stage <code>living_state_patch_finalize</code>, one rejection raw log is appended through the existing rejection path, no assistant visible reply is committed, and tests prove no state-plus-success-log pair became visible.</td>
+          <td>The existing <code>role_model_turn_completed</code> raw log includes the rendered model input with the active incident brief when present. If context build or render validation fails before a model input exists, the existing <code>role_model_turn_failed</code> kind records <code>stage = "context_build"</code> and <code>code = "malformed_context"</code>.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>The success raw log order remains deterministic from the caller's view: <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>living_state_patch_committed</code>, <code>visible_reply_committed</code>.</td>
+          <td>User-turn orchestration may pass the optional active-incident source through to Role Model Loop, but it must not change state-patch opt-in rules or visible reply commit ordering.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>The final <code>UserMessageTurnResult</code> keeps the MVP-009 nested results and may include the atomic commit result, but it must not add new model-facing behavior.</td>
+          <td>Malformed active-incident source output fails before the adapter is called and before downstream living-state patch commit, incident lifecycle commit, and assistant visible-reply commit. The already-committed user visible message projection remains unchanged. The failure appends a <code>role_model_turn_failed</code> raw log with <code>stage = "context_build"</code>, but must not append any incident commit, rejection, or lifecycle log because no incident mutation is attempted.</td>
         </tr>
       </tbody>
     </table>
@@ -237,23 +202,23 @@
     <h2>Non-Functional Requirements</h2>
     <ul>
       <li>Use only Python standard library behavior; do not add dependencies.</li>
-      <li>Use fakes for the atomic boundary, raw logs, visible conversation, current-state source, role-model adapter, clock, and IDs.</li>
-      <li>Reuse existing <code>runtime.contracts</code> validators and the MVP-008 <code>validate_current_character_state_snapshot()</code> contract.</li>
-      <li>Reuse the MVP-009 prepare/snapshot-candidate path before finalization. Do not add another snapshot builder that applies the living-state patch separately.</li>
-      <li>Keep transaction semantics local to the living-state patch success path; do not introduce a generic transaction framework.</li>
-      <li>Deep-copy all finalized request, snapshot, log, result, and failure data so caller mutation cannot alter audit snapshots.</li>
-      <li>Add <code>living_state_patch_finalize</code> to the supported failure-stage taxonomy in one implementation location only, alongside the existing living-state patch failure stages. Tests should import or derive that stage constant instead of scattering raw string literals.</li>
-      <li>The fake atomic finalizer must expose separate visible lists for durable state snapshots and durable success raw logs. Ordinary rejection logs remain on the existing raw-log fake and must not be used to prove success atomicity.</li>
-      <li>Keep Runtime Kernel and Role Model Loop behavior unchanged except for any adapter type names required to pass the atomic boundary through existing user-turn orchestration.</li>
+      <li>Use fakes for the active-incident source, raw log, visible conversation, current-state source, role-model adapter, clock, and IDs.</li>
+      <li>Follow the existing <code>character.state.current</code> request/build/validate pattern for the new active-incident read helper.</li>
+      <li>Keep incident validation explicit and local to the Character State Engine read-side helper. Do not hide it in prompt text.</li>
+      <li>Do not add a new shared contract module unless implementation shows two real production consumers in this slice.</li>
+      <li>Deep-copy source output, context entries, rendered model input, and raw-log model-input snapshots so caller mutation cannot alter audit data.</li>
+      <li>Keep Runtime Kernel and Commit and Effects behavior unchanged.</li>
+      <li>Keep Role Model Loop output parsing unchanged: active-incident context may inform the fake adapter, but it does not authorize <code>life_action</code>.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>Existing MVP-001 through MVP-009 tests continue to pass.</li>
-      <li>A successful patch records exactly one atomic finalization and exposes both the committed snapshot and the <code>living_state_patch_committed</code> raw log entry together.</li>
-      <li>A finalization failure exposes neither durable state nor the committed success raw log entry, appends a rejection raw log, and stops before assistant visible reply commit.</li>
-      <li>Validation failures before finalization continue to produce <code>living_state_patch_rejected</code> without calling the finalize boundary.</li>
-      <li>No concrete storage, state versioning, body state, incidents, scheduled directives, retrieval, tools, Live2D, provider calls, scheduler, or new event type is added.</li>
+      <li>Existing MVP-001 through MVP-010 tests continue to pass.</li>
+      <li>A user turn with a valid active-incident source renders <code>character_snapshot.active_incident</code> to the adapter and records it in the existing role-model turn log.</li>
+      <li>A user turn with no active incident preserves current behavior and omits the field.</li>
+      <li>Malformed incident source output fails before model adapter invocation and appends a <code>role_model_turn_failed</code> raw log with <code>stage = "context_build"</code>.</li>
+      <li>State-patch-enabled turns still require the current-state source, prepare store, and atomic finalizer; adding an incident source alone does not opt into state writes.</li>
+      <li>No concrete incident store, incident lifecycle transition, interruption policy, new event type, body state, retrieval, tool, Live2D, scheduler, provider call, or new model action is added.</li>
       <li>The development journal records source context, files touched, checks run, review notes, and next action.</li>
       <li>Future ideas discovered during planning are recorded in <a href="future-slices.html">future-slices.html</a>.</li>
     </ul>
@@ -261,64 +226,74 @@
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li>Commit and Effects builds a <code>LivingStatePatchFinalizeRequest</code> from already validated artifacts and deep-copies source event, role-model result, patch, committed snapshot, and committed raw log entry before handing it to the finalizer.</li>
-      <li>The snapshot-candidate producer is called once for a patch success; the finalizer receives the same validated snapshot, not a separately reconstructed one.</li>
-      <li>Success calls <code>finalize_living_state_patch_commit()</code> on the fake finalizer once and returns <code>living_state_patch_committed</code> with a copied committed snapshot and committed log entry ID.</li>
-      <li>The fake finalizer records successful commits in separate <code>durable_state_snapshots</code> and <code>durable_success_logs</code> lists so tests can assert all-or-nothing visibility independently of rejection logs.</li>
-      <li>Finalizer failure returns <code>living_state_patch_rejected</code> with the centralized finalize failure-stage constant, appends one rejection log, and leaves the fake finalizer's durable state/success-log lists empty.</li>
-      <li>Malformed committed snapshot candidates are rejected before finalization.</li>
-      <li>No-patch decisions skip finalization and append no state patch log.</li>
+      <li>Build and validate <code>ActiveIncidentRequest</code> from a normalized <code>USER_MESSAGE</code>, including optional user and conversation IDs.</li>
+      <li>Map a valid <code>ActiveIncidentSnapshot</code> to <code>ActiveIncidentBrief</code> and verify deep-copy behavior.</li>
+      <li>Reject malformed snapshots for extra fields, unsupported types, non-active status, bad timestamps, bad policies, negative remaining seconds, missing source IDs, and current-event source IDs.</li>
+      <li>Build <code>DecisionContext</code> with no source, source returning <code>None</code>, source returning a valid active incident, and source returning malformed output.</li>
+      <li>Render role-model input with <code>active_incident</code> and reject manually mutated future fields under <code>character_snapshot.active_incident</code>.</li>
+      <li>Build a context-failure raw log entry that records the normalized event and failure details without claiming a model input exists.</li>
+      <li>Assert allowed actions are unchanged by active-incident context.</li>
     </ul>
 
     <h3>Integration Tests</h3>
     <ul>
-      <li>Run one state-enabled user turn with fake current-state source, fake atomic finalizer, fake visible conversation, fake adapter, fake raw log, deterministic IDs, and deterministic clock.</li>
-      <li>Assert the success log order includes one atomically committed <code>living_state_patch_committed</code> entry before assistant visible reply commit, and assert that the fake finalizer exposes exactly one durable state snapshot and one durable success log.</li>
-      <li>Assert a finalization failure stops before assistant visible reply append, appends one rejection log through the ordinary raw-log fake, and leaves the fake finalizer's durable state/success-log lists empty.</li>
-      <li>Assert non-state-enabled and state-enabled no-patch user turns preserve MVP-009 visible reply behavior.</li>
+      <li>Run one user turn with a fake active-incident source and assert the adapter sees the brief under <code>character_snapshot.active_incident</code>.</li>
+      <li>Assert the <code>role_model_turn_completed</code> raw log stores the same active incident brief in the rendered model input.</li>
+      <li>Assert malformed current-state and active-incident context failures append <code>role_model_turn_failed</code> with <code>stage = "context_build"</code> while preserving the already committed user visible message and skipping the adapter and assistant reply.</li>
+      <li>Run one user turn with the source returning <code>None</code> and assert current visible reply behavior is preserved.</li>
+      <li>Run one state-patch-enabled user turn with both current state and active incident sources to prove the two read-side context entries compose without changing commit order.</li>
       <li>Run full unittest discovery.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
       <li>Runtime Kernel remains unchanged.</li>
-      <li>Character State Engine remains the read-side state snapshot validator/source boundary; it does not finalize commits.</li>
-      <li>Role Model Loop remains the model-call and parse boundary; it does not learn about atomic persistence.</li>
-      <li>Commit and Effects owns validation, accepting the validated snapshot candidate as the <code>committed_snapshot</code>, committed-log-entry construction, finalize request construction, finalization failure handling, and user-turn stop behavior.</li>
-      <li>The existing MVP-009 prepare path owns snapshot candidate production until a later concrete persistence slice replaces it with a durable state store contract.</li>
-      <li>The finalizer owns only atomic visibility of the already built committed snapshot and committed success log entry.</li>
-      <li>User-turn orchestration may pass the atomic finalizer through and must keep assistant visible reply commit after state patch finalization.</li>
-      <li>Raw Event Log behavior changes only for the successful living-state patch entry: that entry is committed through the atomic state-plus-log boundary instead of a separate success append.</li>
+      <li>Character State Engine owns the new active-incident request, snapshot validation, and brief-building helper.</li>
+      <li>Role Model Loop owns placing the validated brief into <code>DecisionContext</code>, rendering it, and logging success or validation failure through existing role-model turn log kinds.</li>
+      <li>User-turn orchestration may pass the optional active-incident source through to Role Model Loop.</li>
+      <li>Commit and Effects remains unchanged because no incident decision is accepted or committed.</li>
+      <li>Raw Event Log behavior changes only insofar as existing role-model turn logs may contain the new context field or a <code>context_build</code> failure for malformed context inputs.</li>
+    </ul>
+
+    <h2>Implementation Results</h2>
+    <ul>
+      <li>Added <code>ActiveIncidentRequest</code>, <code>ActiveIncidentSnapshot</code>, <code>ActiveIncidentBrief</code>, and <code>ActiveIncidentSource</code> to the Character State Engine read contracts in <code>src/character/state/current.py</code>.</li>
+      <li>Reused one private <code>USER_MESSAGE</code> read-request envelope helper for both current-state and active-incident sources, so optional <code>user_id</code> and <code>conversation_id</code> are derived consistently from the normalized event.</li>
+      <li>Mapped valid active incident snapshots into model-facing briefs and rejected extra fields, unsupported types, non-active status, invalid timestamps, negative or boolean <code>remaining_seconds</code>, unsupported policies, missing source IDs, and current-event source IDs.</li>
+      <li>Threaded the optional active-incident source through <code>build_decision_context()</code>, <code>run_role_model_turn()</code>, and <code>run_user_message_turn()</code> without changing Runtime Kernel, Commit and Effects, allowed actions, state-patch opt-in, visible reply commit ordering, or model output parsing.</li>
+      <li>Kept success logging on the existing <code>role_model_turn_completed</code> raw log by validating and rendering <code>character_snapshot.active_incident</code> inside the role-model input snapshot.</li>
+      <li>Added <code>role_model_turn_failed</code> logging for malformed context-build/render failures before adapter invocation, using <code>stage = "context_build"</code> and <code>code = "malformed_context"</code>.</li>
+      <li>Added unit and integration coverage for valid active incident context, absent active incidents, malformed source output before adapter invocation, context-build failure logging, render-time validation, deep-copy behavior, pass-through from user-turn orchestration, and composition with living-state patch commits.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>MVP-010 is not a storage/database slice. It proves the transaction contract before choosing a concrete persistence technology.</li>
-      <li>The smallest useful behavior is all-or-nothing visibility for one state snapshot and one committed raw log entry.</li>
-      <li>MVP-010 should not introduce duplicate snapshot-building code. It should reuse the MVP-009 candidate path and only add finalization after validation.</li>
-      <li>State patch validation, snapshot validation, and visible reply projection remain the MVP-009 contracts; this slice should not reopen them unless tests expose a defect.</li>
-      <li>If implementation pressure suggests state versions, idempotency, replay, or concrete database APIs, park those as future slices.</li>
+      <li>MVP-011 is the read-side incident equivalent of MVP-008, not the incident lifecycle implementation.</li>
+      <li>The field name should stay aligned with Notion's compact context shape: <code>character_snapshot.active_incident</code>.</li>
+      <li>If implementation pressure suggests <code>interrupted_incident</code>, <code>life_action</code>, event priority, or lifecycle commits, park those as future slices.</li>
+      <li>The source snapshot's <code>status = "active"</code> guard is the compatibility boundary that prevents queued, interrupted, completed, or cancelled records from leaking into this MVP's model-facing view.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should the eventual concrete store use optimistic locking or append-only snapshot revisions? Not in MVP-010.</li>
-      <li>Should user visible message projection and assistant visible reply commit share the same transaction later? Not in MVP-010.</li>
-      <li>Should finalization failure emit its rejection log through the same atomic boundary? Not in MVP-010; no state mutation has committed, so the existing rejection-log path is sufficient.</li>
+      <li>Should the eventual concrete incident store use append-only lifecycle records or mutable current rows? Not in MVP-011.</li>
+      <li>Should user messages convert <code>active_incident</code> into <code>interrupted_incident</code> before the model call? Not in MVP-011.</li>
+      <li>Should active incidents affect allowed actions by exposing <code>life_action</code>? Not in MVP-011.</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Concrete database-backed <code>CharacterRuntimeStateStore</code> once the atomic boundary contract is proven.</li>
-      <li>State revision or optimistic locking for concurrent state updates.</li>
-      <li>Idempotency keys and retry/reconciliation behavior for state patch commits.</li>
-      <li>Atomic grouping across user visible projection, state patch commit, and assistant visible reply commit.</li>
+      <li>Concrete <code>LifeIncidentStore</code> adapter after the read-only active-incident context contract is proven.</li>
+      <li>Incident lifecycle commit boundary for start, complete, cancel, resume, and go-idle decisions.</li>
+      <li>Runtime Kernel interruption policy that turns an active incident into an interrupted/background incident for a user turn.</li>
+      <li><code>INCIDENT_COMPLETION</code> event handling after one active incident lifecycle works.</li>
+      <li>Dedicated context-build raw logs for debug/replay when context building has multiple state sources.</li>
     </ul>
 
     <h2>Next Action</h2>
     <p>
-      Follow <a href="https://github.com/QuellaMC/Project02/pull/10">PR #10</a>
-      through CI and review.
+      Finish PR #12 review fixes, rerun the local quality gate, push the review
+      fix commit, then merge after required CI and review requirements pass.
     </p>
   </main>
 </body>
