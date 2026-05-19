@@ -70,7 +70,7 @@
       <li>No Commit and Effects incident lifecycle action, rejection log, store, scheduler, or new event type was added.</li>
       <li>Allowed actions remain <code>visible_reply</code> or <code>visible_reply</code> plus <code>state_patch</code> only when existing living-state write boundaries are fully opted in.</li>
       <li>Malformed active-incident source output fails after the existing user visible message projection may have committed, but before adapter invocation, living-state patch commit, assistant visible reply commit, and any incident mutation.</li>
-      <li>The existing <code>role_model_turn_completed</code> raw log remains the audit surface for the rendered model input. No context-build log kind was added.</li>
+      <li>The existing <code>role_model_turn_completed</code> raw log remains the audit surface for successful rendered model input. Review follow-up added <code>role_model_turn_failed</code> with <code>stage = "context_build"</code> for malformed context inputs before adapter invocation; no dedicated context-build log kind was added.</li>
       <li>No new future ideas were discovered beyond the incident lifecycle, interruption, concrete store, <code>INCIDENT_COMPLETION</code>, and debug/replay ideas already parked in <a href="../../plan/future-slices.html">future-slices.html</a>.</li>
     </ul>
 
@@ -90,8 +90,8 @@
 
     <h2>Next Action</h2>
     <p>
-      Run the full local quality gate, commit the MVP-011 implementation, open
-      a pull request, then update the implementation graph with the PR link.
+      Finish PR #12 review fixes, rerun the local quality gate, and merge after
+      required CI and review requirements pass.
     </p>
   </main>
 </body>

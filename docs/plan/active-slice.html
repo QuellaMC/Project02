@@ -28,7 +28,7 @@
 <body>
   <main>
     <h1>MVP-011 - Read-Only Active Incident Brief in DecisionContext</h1>
-    <p><span class="status">Status: implemented locally; PR pending</span></p>
+    <p><span class="status">Status: implemented; PR #12 in review</span></p>
     <p class="meta">
       Created: 2026-05-18. Active slice path:
       <code>docs/plan/active-slice.html</code>.
@@ -96,7 +96,7 @@
       <li>No <code>interrupted_incident</code>, completed incident brief, incident queue, active thread, retrieval result, body state, body drift, Live2D status, proactive message, scheduled directive action, tool request, continuity write, or asset behavior.</li>
       <li>No new model output action. The model still returns required <code>action = "visible_reply"</code> and may include only the existing optional living-state patch when state patching is allowed.</li>
       <li>No Runtime Kernel priority or interruption policy changes.</li>
-      <li>No new raw log kind for context building. The existing role-model turn log remains the model-input audit surface; dedicated context-build logs stay parked for a later debug/replay slice.</li>
+      <li>No new raw log kind for context building. The existing <code>role_model_turn_failed</code> kind records context-build validation failures; dedicated context-build log kinds stay parked for a later debug/replay slice.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
@@ -186,7 +186,7 @@
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>The existing <code>role_model_turn_completed</code> raw log includes the rendered model input with the active incident brief when present. No separate context-build log is added.</td>
+          <td>The existing <code>role_model_turn_completed</code> raw log includes the rendered model input with the active incident brief when present. If context build or render validation fails before a model input exists, the existing <code>role_model_turn_failed</code> kind records <code>stage = "context_build"</code> and <code>code = "malformed_context"</code>.</td>
         </tr>
         <tr>
           <td>FR-8</td>
@@ -194,7 +194,7 @@
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>Malformed active-incident source output fails before the adapter is called and before downstream living-state patch commit, incident lifecycle commit, and assistant visible-reply commit. The already-committed user visible message projection remains unchanged. The failure must not append any incident commit, rejection, or lifecycle log because no incident mutation is attempted.</td>
+          <td>Malformed active-incident source output fails before the adapter is called and before downstream living-state patch commit, incident lifecycle commit, and assistant visible-reply commit. The already-committed user visible message projection remains unchanged. The failure appends a <code>role_model_turn_failed</code> raw log with <code>stage = "context_build"</code>, but must not append any incident commit, rejection, or lifecycle log because no incident mutation is attempted.</td>
         </tr>
       </tbody>
     </table>
@@ -216,7 +216,7 @@
       <li>Existing MVP-001 through MVP-010 tests continue to pass.</li>
       <li>A user turn with a valid active-incident source renders <code>character_snapshot.active_incident</code> to the adapter and records it in the existing role-model turn log.</li>
       <li>A user turn with no active incident preserves current behavior and omits the field.</li>
-      <li>Malformed incident source output fails before model adapter invocation.</li>
+      <li>Malformed incident source output fails before model adapter invocation and appends a <code>role_model_turn_failed</code> raw log with <code>stage = "context_build"</code>.</li>
       <li>State-patch-enabled turns still require the current-state source, prepare store, and atomic finalizer; adding an incident source alone does not opt into state writes.</li>
       <li>No concrete incident store, incident lifecycle transition, interruption policy, new event type, body state, retrieval, tool, Live2D, scheduler, provider call, or new model action is added.</li>
       <li>The development journal records source context, files touched, checks run, review notes, and next action.</li>
@@ -231,6 +231,7 @@
       <li>Reject malformed snapshots for extra fields, unsupported types, non-active status, bad timestamps, bad policies, negative remaining seconds, missing source IDs, and current-event source IDs.</li>
       <li>Build <code>DecisionContext</code> with no source, source returning <code>None</code>, source returning a valid active incident, and source returning malformed output.</li>
       <li>Render role-model input with <code>active_incident</code> and reject manually mutated future fields under <code>character_snapshot.active_incident</code>.</li>
+      <li>Build a context-failure raw log entry that records the normalized event and failure details without claiming a model input exists.</li>
       <li>Assert allowed actions are unchanged by active-incident context.</li>
     </ul>
 
@@ -238,6 +239,7 @@
     <ul>
       <li>Run one user turn with a fake active-incident source and assert the adapter sees the brief under <code>character_snapshot.active_incident</code>.</li>
       <li>Assert the <code>role_model_turn_completed</code> raw log stores the same active incident brief in the rendered model input.</li>
+      <li>Assert malformed current-state and active-incident context failures append <code>role_model_turn_failed</code> with <code>stage = "context_build"</code> while preserving the already committed user visible message and skipping the adapter and assistant reply.</li>
       <li>Run one user turn with the source returning <code>None</code> and assert current visible reply behavior is preserved.</li>
       <li>Run one state-patch-enabled user turn with both current state and active incident sources to prove the two read-side context entries compose without changing commit order.</li>
       <li>Run full unittest discovery.</li>
@@ -247,10 +249,10 @@
     <ul>
       <li>Runtime Kernel remains unchanged.</li>
       <li>Character State Engine owns the new active-incident request, snapshot validation, and brief-building helper.</li>
-      <li>Role Model Loop owns placing the validated brief into <code>DecisionContext</code>, rendering it, and logging it through the existing role-model turn log.</li>
+      <li>Role Model Loop owns placing the validated brief into <code>DecisionContext</code>, rendering it, and logging success or validation failure through existing role-model turn log kinds.</li>
       <li>User-turn orchestration may pass the optional active-incident source through to Role Model Loop.</li>
       <li>Commit and Effects remains unchanged because no incident decision is accepted or committed.</li>
-      <li>Raw Event Log behavior changes only insofar as existing role-model turn logs may contain the new context field.</li>
+      <li>Raw Event Log behavior changes only insofar as existing role-model turn logs may contain the new context field or a <code>context_build</code> failure for malformed context inputs.</li>
     </ul>
 
     <h2>Implementation Results</h2>
@@ -259,8 +261,9 @@
       <li>Reused one private <code>USER_MESSAGE</code> read-request envelope helper for both current-state and active-incident sources, so optional <code>user_id</code> and <code>conversation_id</code> are derived consistently from the normalized event.</li>
       <li>Mapped valid active incident snapshots into model-facing briefs and rejected extra fields, unsupported types, non-active status, invalid timestamps, negative or boolean <code>remaining_seconds</code>, unsupported policies, missing source IDs, and current-event source IDs.</li>
       <li>Threaded the optional active-incident source through <code>build_decision_context()</code>, <code>run_role_model_turn()</code>, and <code>run_user_message_turn()</code> without changing Runtime Kernel, Commit and Effects, allowed actions, state-patch opt-in, visible reply commit ordering, or model output parsing.</li>
-      <li>Kept logging on the existing <code>role_model_turn_completed</code> raw log by validating and rendering <code>character_snapshot.active_incident</code> inside the role-model input snapshot.</li>
-      <li>Added unit and integration coverage for valid active incident context, absent active incidents, malformed source output before adapter invocation, render-time validation, deep-copy behavior, pass-through from user-turn orchestration, and composition with living-state patch commits.</li>
+      <li>Kept success logging on the existing <code>role_model_turn_completed</code> raw log by validating and rendering <code>character_snapshot.active_incident</code> inside the role-model input snapshot.</li>
+      <li>Added <code>role_model_turn_failed</code> logging for malformed context-build/render failures before adapter invocation, using <code>stage = "context_build"</code> and <code>code = "malformed_context"</code>.</li>
+      <li>Added unit and integration coverage for valid active incident context, absent active incidents, malformed source output before adapter invocation, context-build failure logging, render-time validation, deep-copy behavior, pass-through from user-turn orchestration, and composition with living-state patch commits.</li>
     </ul>
 
     <h2>Review Notes</h2>
@@ -289,8 +292,8 @@
 
     <h2>Next Action</h2>
     <p>
-      Run the full local quality gate, commit the MVP-011 implementation, open
-      a pull request, then update the implementation graph with the PR link.
+      Finish PR #12 review fixes, rerun the local quality gate, push the review
+      fix commit, then merge after required CI and review requirements pass.
     </p>
   </main>
 </body>

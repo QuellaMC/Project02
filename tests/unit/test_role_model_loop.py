@@ -16,6 +16,7 @@ from role_model.loop import (  # noqa: E402
     VisibleConversationRecentMessagesSource,
     approximate_text_tokens,
     build_decision_context,
+    build_role_model_context_failed_log_entry,
     build_role_model_turn_completed_log_entry,
     build_role_model_turn_failed_log_entry,
     parse_character_decision,
@@ -1109,6 +1110,30 @@ class VisibleConversationRecentMessagesSourceTests(unittest.TestCase):
 
 
 class RoleModelLogEntryTests(unittest.TestCase):
+    def test_context_failed_log_entry_records_event_and_failure_without_model_input(self):
+        entry = build_role_model_context_failed_log_entry(
+            normalized_user_message(),
+            stage="context_build",
+            code="malformed_context",
+            message="active_incident.status must be active",
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(entry["kind"], "role_model_turn_failed")
+        self.assertEqual(entry["trace_id"], "trace-1")
+        self.assertEqual(entry["event_id"], "event-1")
+        self.assertEqual(entry["data"]["event"]["event_id"], "event-1")
+        self.assertNotIn("model_input", entry["data"])
+        self.assertEqual(
+            entry["data"]["failure"],
+            {
+                "stage": "context_build",
+                "code": "malformed_context",
+                "message": "active_incident.status must be active",
+            },
+        )
+
     def test_completed_log_entry_deep_copies_snapshots(self):
         model_input = role_model_input()
         model_output = adapter_output(

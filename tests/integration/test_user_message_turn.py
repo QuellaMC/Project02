@@ -38,6 +38,18 @@ class RecordingRawEventLog:
         self.operations.append(("raw_log", entry["kind"]))
 
 
+def assert_context_build_failure_log(test_case, raw_log, *, message_fragment):
+    entry = raw_log.entries[-1]
+    test_case.assertEqual(entry["kind"], "role_model_turn_failed")
+    test_case.assertEqual(entry["trace_id"], "trace-current")
+    test_case.assertEqual(entry["event_id"], "event-current")
+    test_case.assertEqual(entry["data"]["event"]["event_id"], "event-current")
+    test_case.assertNotIn("model_input", entry["data"])
+    test_case.assertEqual(entry["data"]["failure"]["stage"], "context_build")
+    test_case.assertEqual(entry["data"]["failure"]["code"], "malformed_context")
+    test_case.assertIn(message_fragment, entry["data"]["failure"]["message"])
+
+
 class RecordingAdapter:
     def __init__(self, raw_text=None):
         self.calls = []
@@ -1052,7 +1064,13 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                     [
                         "runtime_event_received",
                         "user_visible_message_committed",
+                        "role_model_turn_failed",
                     ],
+                )
+                assert_context_build_failure_log(
+                    self,
+                    raw_log,
+                    message_fragment=error_pattern,
                 )
                 self.assertEqual(
                     [record["kind"] for record in visible_conversation.records],
@@ -1098,7 +1116,13 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                     [
                         "runtime_event_received",
                         "user_visible_message_committed",
+                        "role_model_turn_failed",
                     ],
+                )
+                assert_context_build_failure_log(
+                    self,
+                    raw_log,
+                    message_fragment=error_pattern,
                 )
                 self.assertNotIn(
                     "living_state_patch_rejected",
