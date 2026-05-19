@@ -79,8 +79,10 @@
       <li><code>python3.13 -m unittest discover</code>: passed, 195 tests.</li>
       <li><code>python3.13 -m compileall src tests</code>: passed.</li>
       <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-010-atomic-living-state-patch-commit-boundary.html docs/plan/completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html docs/plan/completed/mvp-012-minimal-start-incident-commit-boundary.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-19/007-mvp-013-functional-spec.html</code>: passed.</li>
+      <li><code>uvx ruff format --check .</code>: passed after formatting the two files reported by CI.</li>
+      <li><code>uvx ruff check .</code>: passed.</li>
       <li><code>git diff --check</code>: passed.</li>
-      <li><code>ruff check src tests</code>, <code>ruff format --check src tests</code>, and <code>mypy</code>: not run locally because the commands are not installed in this environment.</li>
+      <li><code>mypy</code>: not run locally because the command is not installed in this environment; PR CI typecheck passed before the formatting follow-up and will rerun after the push.</li>
       <li><code>gh pr create --base main --head feature/mvp-013-raw-log-replay-visibility --title "Implement MVP-013 raw log query visibility" --body-file /private/tmp/mvp013-pr-body.md</code>: created <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>.</li>
     </ul>
 

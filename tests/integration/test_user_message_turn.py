@@ -194,9 +194,7 @@ class RecordingLivingStatePatchFinalizer:
         self.durable_state_snapshots.append(deepcopy(request["committed_snapshot"]))
         self.durable_success_logs.append(deepcopy(request["committed_log_entry"]))
         if self.raw_log_visibility is not None:
-            self.raw_log_visibility.expose_committed_success_entry(
-                request["committed_log_entry"]
-            )
+            self.raw_log_visibility.expose_committed_success_entry(request["committed_log_entry"])
         self.operations.append(("atomic_finalizer", request["committed_log_entry"]["kind"]))
         return {
             "schema_version": "0.1",
@@ -223,9 +221,7 @@ class RecordingLifeIncidentStartFinalizer:
         self.durable_started_incidents.append(deepcopy(request["started_incident"]))
         self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
         if self.raw_log_visibility is not None:
-            self.raw_log_visibility.expose_committed_success_entry(
-                request["committed_log_entry"]
-            )
+            self.raw_log_visibility.expose_committed_success_entry(request["committed_log_entry"])
         self.operations.append(("atomic_finalizer", request["committed_log_entry"]["kind"]))
         return {
             "schema_version": "0.1",

@@ -61,9 +61,7 @@ class RawEventLogQueryTests(unittest.TestCase):
         ids = SequenceIdGenerator()
         store = InMemoryRawEventLog()
         store.append(raw_entry(ids, kind="runtime_event_received"))
-        store.expose_committed_success_entry(
-            raw_entry(ids, kind="living_state_patch_committed")
-        )
+        store.expose_committed_success_entry(raw_entry(ids, kind="living_state_patch_committed"))
         store.append(
             raw_entry(
                 ids,
