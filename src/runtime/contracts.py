@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from datetime import datetime
+from math import isfinite
 from typing import Any
 
 from runtime.logging import SCHEMA_VERSION
@@ -9,11 +10,26 @@ from runtime.logging import SCHEMA_VERSION
 USER_MESSAGE = "USER_MESSAGE"
 VISIBLE_REPLY_ACTION = "visible_reply"
 STATE_PATCH_ACTION = "state_patch"
+LIFE_ACTION = "life_action"
+START_INCIDENT_ACTION = "start_incident"
 DECISION_READY_FOR_COMMIT_STATUS = "decision_ready_for_commit"
 ASSISTANT_VISIBLE_REPLY_KIND = "assistant_visible_reply"
 USER_VISIBLE_MESSAGE_KIND = "user_visible_message"
 ASSISTANT_VISIBLE_REPLY_ROLE = "assistant"
 USER_VISIBLE_MESSAGE_ROLE = "user"
+ACTIVE_INCIDENT_TYPES = {
+    "idle",
+    "eat",
+    "drink",
+    "sleep",
+    "rest",
+    "work",
+    "think",
+    "wait",
+    "custom",
+}
+ACTIVE_INCIDENT_INTERRUPT_POLICIES = {"interruptible", "background", "protected"}
+ACTIVE_INCIDENT_RESUME_POLICIES = {"resume", "ask_model", "cancel"}
 
 RuntimeEvent = dict[str, Any]
 CharacterDecision = dict[str, Any]
@@ -121,9 +137,55 @@ def normalize_visible_reply_decision_with_optional_living_state_patch(
     event_id: str,
     require_attached_ids: bool,
     allow_state_patch: bool,
+    allow_life_action: bool = False,
     source_name: str = "CharacterDecision",
 ) -> CharacterDecision:
-    if not allow_state_patch:
+    return _normalize_visible_reply_decision_with_optional_extensions(
+        decision,
+        trace_id=trace_id,
+        event_id=event_id,
+        require_attached_ids=require_attached_ids,
+        allow_state_patch=allow_state_patch,
+        allow_life_action=allow_life_action,
+        source_name=source_name,
+    )
+
+
+def normalize_visible_reply_decision_with_optional_life_action(
+    decision: Any,
+    *,
+    trace_id: str,
+    event_id: str,
+    require_attached_ids: bool,
+    allow_life_action: bool,
+    source_name: str = "CharacterDecision",
+) -> CharacterDecision:
+    return _normalize_visible_reply_decision_with_optional_extensions(
+        decision,
+        trace_id=trace_id,
+        event_id=event_id,
+        require_attached_ids=require_attached_ids,
+        allow_state_patch=False,
+        allow_life_action=allow_life_action,
+        source_name=source_name,
+    )
+
+
+def _normalize_visible_reply_decision_with_optional_extensions(
+    decision: Any,
+    *,
+    trace_id: str,
+    event_id: str,
+    require_attached_ids: bool,
+    allow_state_patch: bool,
+    allow_life_action: bool,
+    source_name: str,
+) -> CharacterDecision:
+    if allow_state_patch and allow_life_action:
+        raise ContractValidationError(
+            "state_patch and life_action cannot both be allowed in this contract."
+        )
+    if not allow_state_patch and not allow_life_action:
         return normalize_visible_reply_decision(
             decision,
             trace_id=trace_id,
@@ -134,7 +196,11 @@ def normalize_visible_reply_decision_with_optional_living_state_patch(
     if not isinstance(decision, Mapping):
         raise ContractValidationError(f"{source_name} must be a mapping.")
 
-    allowed_keys = {"schema_version", "action", "visible_reply", "state_patch"}
+    allowed_keys = {"schema_version", "action", "visible_reply"}
+    if allow_state_patch:
+        allowed_keys.add("state_patch")
+    if allow_life_action:
+        allowed_keys.add("life_action")
     if require_attached_ids:
         allowed_keys |= {"trace_id", "event_id"}
     reject_extra_keys(decision, allowed_keys, source_name)
@@ -160,7 +226,67 @@ def normalize_visible_reply_decision_with_optional_living_state_patch(
             decision["state_patch"],
             source_name=f"{source_name}.state_patch",
         )
+    if "life_action" in decision:
+        normalized["life_action"] = normalize_start_incident_life_action(
+            decision["life_action"],
+            source_name=f"{source_name}.life_action",
+        )
     return normalized
+
+
+def normalize_start_incident_life_action(
+    life_action: Any,
+    *,
+    source_name: str = "life_action",
+) -> dict[str, Any]:
+    if not isinstance(life_action, Mapping):
+        raise ContractValidationError(f"{source_name} must be a mapping.")
+    reject_extra_keys(life_action, {"type", "incident"}, source_name)
+    action_type = require_equal(
+        life_action.get("type"),
+        START_INCIDENT_ACTION,
+        f"{source_name}.type",
+    )
+    incident = life_action.get("incident")
+    if not isinstance(incident, Mapping):
+        raise ContractValidationError(f"{source_name}.incident must be a mapping.")
+    reject_extra_keys(
+        incident,
+        {"type", "title", "remaining_seconds", "interrupt_policy", "resume_policy"},
+        f"{source_name}.incident",
+    )
+
+    normalized_incident: dict[str, Any] = {
+        "type": require_supported_value(
+            incident.get("type"),
+            ACTIVE_INCIDENT_TYPES,
+            f"{source_name}.incident.type",
+        ),
+        "title": require_string(
+            incident.get("title"),
+            f"{source_name}.incident.title",
+        ).strip(),
+        "interrupt_policy": require_supported_value(
+            incident.get("interrupt_policy"),
+            ACTIVE_INCIDENT_INTERRUPT_POLICIES,
+            f"{source_name}.incident.interrupt_policy",
+        ),
+        "resume_policy": require_supported_value(
+            incident.get("resume_policy"),
+            ACTIVE_INCIDENT_RESUME_POLICIES,
+            f"{source_name}.incident.resume_policy",
+        ),
+    }
+    if "remaining_seconds" in incident:
+        normalized_incident["remaining_seconds"] = validate_remaining_seconds(
+            incident["remaining_seconds"],
+            f"{source_name}.incident.remaining_seconds",
+        )
+
+    return {
+        "type": action_type,
+        "incident": normalized_incident,
+    }
 
 
 def normalize_living_state_patch(
@@ -268,6 +394,25 @@ def require_optional_string(value: Any, field_name: str) -> str:
 def require_equal(value: Any, expected: str, field_name: str) -> Any:
     if value != expected:
         raise ContractValidationError(f"{field_name} must be {expected!r}.")
+    return value
+
+
+def require_supported_value(value: Any, allowed_values: set[str], field_name: str) -> str:
+    normalized_value = require_string(value, field_name)
+    if normalized_value not in allowed_values:
+        formatted = ", ".join(sorted(allowed_values))
+        raise ContractValidationError(f"{field_name} must be one of: {formatted}.")
+    return normalized_value
+
+
+def validate_remaining_seconds(value: Any, field_name: str) -> int | float:
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not isfinite(value)
+        or value < 0
+    ):
+        raise ContractValidationError(f"{field_name} must be a non-negative number.")
     return value
 
 

@@ -11,7 +11,9 @@ from runtime.contracts import (  # noqa: E402
     ContractValidationError,
     normalize_living_state_patch,
     normalize_role_model_turn_result,
+    normalize_start_incident_life_action,
     normalize_visible_reply_decision,
+    normalize_visible_reply_decision_with_optional_life_action,
     normalize_visible_reply_decision_with_optional_living_state_patch,
     validate_normalized_user_message_event,
 )
@@ -185,6 +187,181 @@ class RuntimeContractTests(unittest.TestCase):
                 event_id="event-1",
                 require_attached_ids=False,
                 allow_state_patch=False,
+            )
+
+    def test_normalizes_visible_reply_with_optional_start_incident_life_action(self):
+        decision = normalize_visible_reply_decision_with_optional_life_action(
+            {
+                "schema_version": "0.1",
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "action": "visible_reply",
+                "visible_reply": {"text": " hello back "},
+                "life_action": {
+                    "type": "start_incident",
+                    "incident": {
+                        "type": "think",
+                        "title": " Thinking through the plan ",
+                        "remaining_seconds": 300,
+                        "interrupt_policy": "interruptible",
+                        "resume_policy": "ask_model",
+                    },
+                },
+            },
+            trace_id="trace-1",
+            event_id="event-1",
+            require_attached_ids=True,
+            allow_life_action=True,
+        )
+
+        self.assertEqual(decision["visible_reply"]["text"], "hello back")
+        self.assertEqual(
+            decision["life_action"],
+            {
+                "type": "start_incident",
+                "incident": {
+                    "type": "think",
+                    "title": "Thinking through the plan",
+                    "remaining_seconds": 300,
+                    "interrupt_policy": "interruptible",
+                    "resume_policy": "ask_model",
+                },
+            },
+        )
+
+    def test_rejects_life_action_when_not_allowed(self):
+        with self.assertRaisesRegex(ContractValidationError, "life_action"):
+            normalize_visible_reply_decision_with_optional_life_action(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello"},
+                    "life_action": {
+                        "type": "start_incident",
+                        "incident": {
+                            "type": "think",
+                            "title": "Think",
+                            "interrupt_policy": "interruptible",
+                            "resume_policy": "ask_model",
+                        },
+                    },
+                },
+                trace_id="trace-1",
+                event_id="event-1",
+                require_attached_ids=False,
+                allow_life_action=False,
+            )
+
+    def test_start_incident_life_action_rejects_future_and_committed_fields(self):
+        cases = [
+            ({"type": "resume_incident", "incident": {}}, "start_incident"),
+            (
+                {
+                    "type": "start_incident",
+                    "incident": {
+                        "type": "dance",
+                        "title": "Dance",
+                        "interrupt_policy": "interruptible",
+                        "resume_policy": "resume",
+                    },
+                },
+                "type",
+            ),
+            (
+                {
+                    "type": "start_incident",
+                    "incident": {
+                        "type": "think",
+                        "title": " ",
+                        "interrupt_policy": "interruptible",
+                        "resume_policy": "resume",
+                    },
+                },
+                "title",
+            ),
+            (
+                {
+                    "type": "start_incident",
+                    "incident": {
+                        "type": "think",
+                        "title": "Think",
+                        "remaining_seconds": -1,
+                        "interrupt_policy": "interruptible",
+                        "resume_policy": "resume",
+                    },
+                },
+                "remaining_seconds",
+            ),
+            (
+                {
+                    "type": "start_incident",
+                    "incident": {
+                        "type": "think",
+                        "title": "Think",
+                        "interrupt_policy": "force",
+                        "resume_policy": "resume",
+                    },
+                },
+                "interrupt_policy",
+            ),
+            (
+                {
+                    "type": "start_incident",
+                    "incident": {
+                        "type": "think",
+                        "title": "Think",
+                        "interrupt_policy": "interruptible",
+                        "resume_policy": "ignore",
+                    },
+                },
+                "resume_policy",
+            ),
+            (
+                {
+                    "type": "start_incident",
+                    "incident": {
+                        "type": "think",
+                        "title": "Think",
+                        "incident_id": "model-authored",
+                        "interrupt_policy": "interruptible",
+                        "resume_policy": "resume",
+                    },
+                },
+                "incident_id",
+            ),
+            (
+                {
+                    "type": "start_incident",
+                    "incident": {
+                        "type": "think",
+                        "title": "Think",
+                        "status": "active",
+                        "interrupt_policy": "interruptible",
+                        "resume_policy": "resume",
+                    },
+                },
+                "status",
+            ),
+        ]
+
+        for life_action, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(ContractValidationError, error_pattern):
+                    normalize_start_incident_life_action(life_action)
+
+    def test_rejects_life_action_and_state_patch_composition(self):
+        with self.assertRaisesRegex(ContractValidationError, "state_patch and life_action"):
+            normalize_visible_reply_decision_with_optional_living_state_patch(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello"},
+                },
+                trace_id="trace-1",
+                event_id="event-1",
+                require_attached_ids=False,
+                allow_state_patch=True,
+                allow_life_action=True,
             )
 
     def test_normalizes_role_model_turn_result_with_supplied_decision_normalizer(self):
