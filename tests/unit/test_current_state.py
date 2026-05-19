@@ -5,12 +5,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from character.state import (  # noqa: E402
+    ActiveIncidentSnapshot as ExportedActiveIncidentSnapshot,
+)
+from character.state import (
     CharacterRuntimeStateSnapshot as ExportedCharacterRuntimeStateSnapshot,
 )
 from character.state import __all__ as character_state_public_contracts  # noqa: E402
 from character.state.current import (  # noqa: E402
+    build_active_incident_brief,
+    build_active_incident_request,
     build_current_character_state_request,
     build_living_state_brief,
+    validate_active_incident_brief_for_event,
+    validate_active_incident_request,
+    validate_active_incident_snapshot,
     validate_current_character_state_request,
     validate_current_character_state_snapshot,
     validate_living_state_brief_for_event,
@@ -47,10 +55,28 @@ def current_state_snapshot():
     }
 
 
+def active_incident_snapshot():
+    return {
+        "schema_version": "0.1",
+        "incident_id": "incident-1",
+        "type": "eat",
+        "status": "active",
+        "title": "Eating lunch",
+        "started_at": "2026-05-14T11:00:00+00:00",
+        "expected_end_at": "2026-05-14T11:40:00+00:00",
+        "remaining_seconds": 600,
+        "interrupt_policy": "interruptible",
+        "resume_policy": "resume",
+        "source_event_ids": ["event-incident-started"],
+    }
+
+
 class PublicContractExportTests(unittest.TestCase):
-    def test_reexports_character_runtime_state_snapshot_contract(self):
+    def test_reexports_character_state_read_contracts(self):
         self.assertIn("CharacterRuntimeStateSnapshot", character_state_public_contracts)
+        self.assertIn("ActiveIncidentSnapshot", character_state_public_contracts)
         self.assertIsNotNone(ExportedCharacterRuntimeStateSnapshot)
+        self.assertIsNotNone(ExportedActiveIncidentSnapshot)
 
 
 class CurrentCharacterStateRequestTests(unittest.TestCase):
@@ -172,6 +198,115 @@ class CurrentCharacterStateSnapshotTests(unittest.TestCase):
             with self.subTest(error_pattern=error_pattern):
                 with self.assertRaisesRegex(ContractValidationError, error_pattern):
                     validate_current_character_state_snapshot(snapshot)
+
+
+class ActiveIncidentRequestTests(unittest.TestCase):
+    def test_builds_request_from_normalized_user_message(self):
+        request = build_active_incident_request(normalized_user_message())
+
+        self.assertEqual(
+            request,
+            {
+                "schema_version": "0.1",
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "event_type": "USER_MESSAGE",
+                "user_id": "user-1",
+                "conversation_id": "conversation-1",
+            },
+        )
+
+    def test_request_preserves_empty_optional_ids_when_event_contains_them(self):
+        event = normalized_user_message()
+        event["payload"]["user_id"] = ""
+        event["payload"]["conversation_id"] = ""
+
+        request = build_active_incident_request(event)
+
+        self.assertEqual(request["user_id"], "")
+        self.assertEqual(request["conversation_id"], "")
+
+    def test_rejects_request_extra_fields_and_wrong_event_type(self):
+        with self.assertRaisesRegex(ContractValidationError, "character_id"):
+            validate_active_incident_request(
+                {
+                    "schema_version": "0.1",
+                    "trace_id": "trace-1",
+                    "event_id": "event-1",
+                    "event_type": "USER_MESSAGE",
+                    "character_id": "character-1",
+                }
+            )
+
+        with self.assertRaisesRegex(ContractValidationError, "USER_MESSAGE"):
+            validate_active_incident_request(
+                {
+                    "schema_version": "0.1",
+                    "trace_id": "trace-1",
+                    "event_id": "event-1",
+                    "event_type": "TIMER",
+                }
+            )
+
+
+class ActiveIncidentSnapshotTests(unittest.TestCase):
+    def test_maps_valid_snapshot_to_active_incident_brief(self):
+        brief = build_active_incident_brief(active_incident_snapshot())
+
+        self.assertEqual(
+            brief,
+            {
+                "incident_id": "incident-1",
+                "type": "eat",
+                "title": "Eating lunch",
+                "started_at": "2026-05-14T11:00:00+00:00",
+                "expected_end_at": "2026-05-14T11:40:00+00:00",
+                "remaining_seconds": 600,
+                "interrupt_policy": "interruptible",
+                "resume_policy": "resume",
+                "source_event_ids": ["event-incident-started"],
+            },
+        )
+        self.assertNotIn("status", brief)
+
+    def test_snapshot_validation_copies_source_event_ids(self):
+        snapshot = active_incident_snapshot()
+        validated = validate_active_incident_snapshot(snapshot)
+        validated["source_event_ids"].append("mutated")
+
+        self.assertEqual(snapshot["source_event_ids"], ["event-incident-started"])
+
+    def test_rejects_active_incident_sourced_from_current_event(self):
+        brief = build_active_incident_brief(
+            {**active_incident_snapshot(), "source_event_ids": ["event-1"]}
+        )
+
+        with self.assertRaisesRegex(ContractValidationError, "current event_id"):
+            validate_active_incident_brief_for_event(brief, event_id="event-1")
+
+    def test_rejects_malformed_active_incident_snapshots(self):
+        cases = [
+            ({**active_incident_snapshot(), "schema_version": "0.2"}, "schema_version"),
+            ({**active_incident_snapshot(), "incident_id": ""}, "incident_id"),
+            ({**active_incident_snapshot(), "type": "dance"}, "type"),
+            ({**active_incident_snapshot(), "status": "completed"}, "status"),
+            ({**active_incident_snapshot(), "title": ""}, "title"),
+            ({**active_incident_snapshot(), "started_at": "2026-05-14"}, "started_at"),
+            ({**active_incident_snapshot(), "expected_end_at": "bad"}, "expected_end_at"),
+            ({**active_incident_snapshot(), "remaining_seconds": -1}, "remaining_seconds"),
+            ({**active_incident_snapshot(), "remaining_seconds": True}, "remaining_seconds"),
+            ({**active_incident_snapshot(), "interrupt_policy": "force"}, "interrupt_policy"),
+            ({**active_incident_snapshot(), "resume_policy": "ignore"}, "resume_policy"),
+            ({**active_incident_snapshot(), "source_event_ids": []}, "source_event_ids"),
+            ({**active_incident_snapshot(), "source_event_ids": [""]}, "source_event_ids"),
+            ({**active_incident_snapshot(), "future_field": "nope"}, "future_field"),
+            ("not a mapping", "ActiveIncidentSnapshot"),
+        ]
+
+        for snapshot, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(ContractValidationError, error_pattern):
+                    validate_active_incident_snapshot(snapshot)
 
 
 if __name__ == "__main__":

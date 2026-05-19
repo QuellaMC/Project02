@@ -8,9 +8,13 @@ from math import ceil
 from typing import Any, Protocol
 
 from character.state.current import (
+    ActiveIncidentSource,
     CurrentCharacterStateSource,
+    build_active_incident_brief,
+    build_active_incident_request,
     build_current_character_state_request,
     build_living_state_brief,
+    validate_active_incident_brief_for_event,
     validate_living_state_brief_for_event,
 )
 from runtime.contracts import (
@@ -48,6 +52,7 @@ RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS = 1200
 ROLE_MODEL_TURN_COMPLETED_KIND = "role_model_turn_completed"
 ROLE_MODEL_TURN_FAILED_KIND = "role_model_turn_failed"
 FAILURE_CODES_BY_STAGE = {
+    "context_build": {"malformed_context"},
     "adapter_call": {"adapter_exception"},
     "parse_output": {"malformed_model_output"},
 }
@@ -133,6 +138,7 @@ def build_decision_context(
     *,
     recent_visible_messages_source: RecentVisibleMessagesSource | None = None,
     current_state_source: CurrentCharacterStateSource | None = None,
+    active_incident_source: ActiveIncidentSource | None = None,
     allow_state_patch: bool = False,
 ) -> DecisionContext:
     normalized_event = _wrap_contract_error(
@@ -158,11 +164,17 @@ def build_decision_context(
         normalized_event,
         current_state_source=current_state_source,
     )
+    active_incident_brief = _read_active_incident_brief(
+        normalized_event,
+        active_incident_source=active_incident_source,
+    )
     character_snapshot: dict[str, Any] = {
         "recent_visible_messages": recent_visible_messages,
     }
     if living_state_brief is not None:
         character_snapshot["living_state_brief"] = living_state_brief
+    if active_incident_brief is not None:
+        character_snapshot["active_incident"] = active_incident_brief
 
     allowed_actions = [VISIBLE_REPLY_ACTION]
     if allow_state_patch:
@@ -228,15 +240,30 @@ def run_role_model_turn(
     clock: Clock,
     recent_visible_messages_source: RecentVisibleMessagesSource | None = None,
     current_state_source: CurrentCharacterStateSource | None = None,
+    active_incident_source: ActiveIncidentSource | None = None,
     allow_state_patch: bool = False,
 ) -> RoleModelTurnResult:
-    decision_context = build_decision_context(
-        event,
-        recent_visible_messages_source=recent_visible_messages_source,
-        current_state_source=current_state_source,
-        allow_state_patch=allow_state_patch,
-    )
-    model_input = render_role_model_input(decision_context)
+    try:
+        decision_context = build_decision_context(
+            event,
+            recent_visible_messages_source=recent_visible_messages_source,
+            current_state_source=current_state_source,
+            active_incident_source=active_incident_source,
+            allow_state_patch=allow_state_patch,
+        )
+        model_input = render_role_model_input(decision_context)
+    except RoleModelValidationError as error:
+        raw_event_log.append(
+            build_role_model_context_failed_log_entry(
+                event,
+                stage="context_build",
+                code="malformed_context",
+                message=str(error),
+                id_generator=id_generator,
+                clock=clock,
+            )
+        )
+        raise
 
     try:
         model_output = adapter.generate(deepcopy(model_input))
@@ -287,6 +314,33 @@ def run_role_model_turn(
         "status": DECISION_READY_FOR_COMMIT_STATUS,
         "decision": decision,
     }
+
+
+def build_role_model_context_failed_log_entry(
+    event: RuntimeEvent,
+    *,
+    stage: str,
+    code: str,
+    message: str,
+    id_generator: IdGenerator,
+    clock: Clock,
+) -> RawEventLogEntry:
+    normalized_event = _wrap_contract_error(
+        lambda: validate_normalized_user_message_event(event, source_name="event")
+    )
+    validated_failure = _validate_failure(stage=stage, code=code, message=message)
+
+    return build_raw_log_entry(
+        trace_id=normalized_event["trace_id"],
+        event_id=normalized_event["event_id"],
+        kind=ROLE_MODEL_TURN_FAILED_KIND,
+        data={
+            "event": normalized_event,
+            "failure": validated_failure,
+        },
+        id_generator=id_generator,
+        clock=clock,
+    )
 
 
 def build_role_model_turn_completed_log_entry(
@@ -425,6 +479,27 @@ def _read_living_state_brief(
     return _wrap_contract_error(
         lambda: validate_living_state_brief_for_event(
             living_state_brief,
+            event_id=event["event_id"],
+        )
+    )
+
+
+def _read_active_incident_brief(
+    event: RuntimeEvent,
+    *,
+    active_incident_source: ActiveIncidentSource | None,
+) -> dict[str, Any] | None:
+    if active_incident_source is None:
+        return None
+
+    request = _wrap_contract_error(lambda: build_active_incident_request(event))
+    snapshot = active_incident_source.read_active_incident(deepcopy(request))
+    if snapshot is None:
+        return None
+    active_incident_brief = _wrap_contract_error(lambda: build_active_incident_brief(snapshot))
+    return _wrap_contract_error(
+        lambda: validate_active_incident_brief_for_event(
+            active_incident_brief,
             event_id=event["event_id"],
         )
     )
@@ -961,7 +1036,7 @@ def _validate_character_snapshot(
     _wrap_contract_error(
         lambda: reject_extra_keys(
             character_snapshot,
-            {"recent_visible_messages", "living_state_brief"},
+            {"recent_visible_messages", "living_state_brief", "active_incident"},
             "DecisionContext.character_snapshot",
         )
     )
@@ -970,6 +1045,13 @@ def _validate_character_snapshot(
         normalized_snapshot["living_state_brief"] = _wrap_contract_error(
             lambda: validate_living_state_brief_for_event(
                 character_snapshot["living_state_brief"],
+                event_id=event_id,
+            )
+        )
+    if "active_incident" in character_snapshot:
+        normalized_snapshot["active_incident"] = _wrap_contract_error(
+            lambda: validate_active_incident_brief_for_event(
+                character_snapshot["active_incident"],
                 event_id=event_id,
             )
         )

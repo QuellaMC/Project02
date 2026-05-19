@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-010</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-011</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -213,7 +213,7 @@
       <dd>Likely moves existing validation into <code>runtime.contracts</code> without changing the current <code>DecisionContext</code> shape.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-010 should only atomize the living-state patch state-plus-log success path and should not promote another shared recent-message contract surface.</dd>
+      <dd>MVP-011 should only add read-only active-incident context and should not promote another shared recent-message contract surface.</dd>
     </dl>
 
     <h2>MVP-007 - Minimal User Turn Orchestrator</h2>
@@ -300,7 +300,7 @@
     <h2>Durable Character State Store Transaction</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Promoted to the active MVP-010 spec on 2026-05-18. Prove one injected atomic state-plus-log commit boundary before choosing concrete storage.</dd>
+      <dd>Completed on 2026-05-18. See <a href="completed/mvp-010-atomic-living-state-patch-commit-boundary.html">completed MVP-010</a>.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>Once state is durable, the runtime must not be able to mutate character state without a lossless raw-log audit record for the same commit.</dd>
@@ -321,7 +321,142 @@
       <dd>Likely adds one finalization request/result shape while preserving existing patch and raw-log record meanings. Concrete storage keys, idempotency keys, and state versions remain future work.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>This item is no longer parked; it is the active MVP-010 spec. Concrete database storage, state versions, idempotency, and replay/reconciliation remain out of scope.</dd>
+      <dd>This item is no longer parked; it has been completed and recorded under completed plans. Concrete database storage, state versions, idempotency, and replay/reconciliation remain out of scope.</dd>
+    </dl>
+
+    <h2>MVP-011 - Read-Only Active Incident Brief in DecisionContext</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Promoted to the active MVP-011 spec on 2026-05-18. Add one optional read-only active-incident brief to the existing <code>USER_MESSAGE</code> DecisionContext.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Phase 3 starts the Basic Incident System, and the role model eventually needs compact current incident context before the runtime accepts incident lifecycle decisions.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Promoted after MVP-010 completed the Phase 2 living-state patch atomic commit boundary.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-010 completed the state-patch commit ordering needed for active-incident context to compose with existing living-state context without changing commits.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>MVP-011 - Read-Only Active Incident Brief in DecisionContext</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>The slice can become too broad if it adds incident lifecycle writes, interruption policy, <code>life_action</code>, queues, body effects, Live2D status, or an <code>INCIDENT_COMPLETION</code> event.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Adds an optional <code>active_incident</code> brief under <code>DecisionContext.character_snapshot</code> and a minimal active-incident source request/snapshot contract.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>This item is the active MVP-011 spec. Implement only after review, and keep lifecycle writes, interruption, and incident completion parked.</dd>
+    </dl>
+
+    <h2>Concrete LifeIncidentStore</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a concrete or durable <code>LifeIncidentStore</code> after the active-incident read contract is proven with an injected source.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Incident history must eventually survive process restarts and remain auditable through raw logs and retrieval/debug surfaces.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while narrowing MVP-011 away from incident persistence.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-011 should first prove the compact active incident brief and source request shape.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>LifeIncidentStore concrete adapter v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Choosing storage before the read contract is stable could mix migrations, lifecycle transition rules, and retrieval indexing into one slice.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds storage keys, lifecycle record identity, query semantics, and raw-log traceability for incident records.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-011 needs only an injected read-side source and no durable incident writes.</dd>
+    </dl>
+
+    <h2>Incident Lifecycle Commit Boundary</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Validate and commit model-proposed incident lifecycle actions such as start, complete, cancel, resume, and go idle.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The Basic Incident System eventually needs Commit and Effects to own accepted lifecycle transitions instead of letting the model mutate incidents directly.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while keeping MVP-011 read-only and avoiding <code>life_action</code>.</dd>
+
+      <dt>Dependency</dt>
+      <dd>The runtime should first expose active incident context, then define a narrow allowed action and commit/reject log contract.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Minimal incident lifecycle commit v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>The slice can become too broad if it includes queues, body effects, Live2D, scheduling, interruption, and completion events together.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds a narrow <code>life_action</code> decision subset and incident commit/reject raw log entries.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-011 does not expose <code>life_action</code> or mutate incidents.</dd>
+    </dl>
+
+    <h2>User Interruption Incident Policy</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Let Runtime Kernel detect an active incident during a <code>USER_MESSAGE</code> turn and expose an <code>interrupted_incident</code> or background incident view according to policy.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>User interruption is central to the live-character behavior, but it needs a proven active incident view first.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while reviewing Notion Phase 4 and deliberately leaving interruption out of MVP-011.</dd>
+
+      <dt>Dependency</dt>
+      <dd>Active incident context should work first; lifecycle commit behavior may be needed before interruption can be durably recorded.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>User interruption policy v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Adding interruption too early could change route policy, incident status, allowed actions, and commit behavior in one pass.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds <code>interrupted_incident</code> context, interruption status transitions, and a post-turn life action contract.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-011 only reads an already active incident and does not decide or commit interruption.</dd>
+    </dl>
+
+    <h2>INCIDENT_COMPLETION RuntimeEvent</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add an <code>INCIDENT_COMPLETION</code> event family after one active incident lifecycle exists.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Completed incidents should eventually trigger deterministic effects and optional model judgment.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while checking Notion Phase 3 and keeping MVP-011 on the existing <code>USER_MESSAGE</code> path.</dd>
+
+      <dt>Dependency</dt>
+      <dd>A minimal active incident lifecycle should exist before completion events can be meaningful.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>INCIDENT_COMPLETION event intake v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Completion events may pull in scheduling, body effects, proactive output, and follow-up incident chains if not sliced narrowly.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds a new <code>RuntimeEvent</code> type, route policy, completed incident context, and completion commit logs.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-011 keeps the single implemented event family as <code>USER_MESSAGE</code>.</dd>
     </dl>
 
     <h2>Concrete CharacterRuntimeStateStore</h2>
@@ -348,7 +483,7 @@
       <dd>Likely adds storage keys, snapshot revision metadata, finalization result guarantees, Raw Event Log query/replay integration for committed success logs, idempotency keys, and compatibility handling for persisted state records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-010 is only the fake/injected atomic boundary. It must not add a database, migration, concrete adapter, or state revision policy.</dd>
+      <dd>MVP-010 was only the fake/injected atomic boundary. It did not add a database, migration, concrete adapter, or state revision policy.</dd>
     </dl>
 
     <h2>State Patch Idempotency And Reconciliation</h2>
@@ -375,7 +510,7 @@
       <dd>Likely adds idempotency keys, retry status, and reconciliation records without changing the meaning of existing patch fields.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-010 has no concrete storage or retry loop; it only proves the atomic success boundary.</dd>
+      <dd>MVP-010 had no concrete storage or retry loop; it only proved the atomic success boundary.</dd>
     </dl>
 
     <h2>Richer Runtime Kernel Route Policy</h2>
@@ -402,7 +537,7 @@
       <dd>Likely adds tested route outputs for interruption, scheduling, and later event families while preserving the MVP-007 <code>USER_MESSAGE</code> route.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-007 changed only the <code>USER_MESSAGE</code> route needed for the minimal user-turn loop; MVP-010 should not broaden route policy.</dd>
+      <dd>MVP-007 changed only the <code>USER_MESSAGE</code> route needed for the minimal user-turn loop; MVP-011 should not broaden route policy.</dd>
     </dl>
 
     <h2>Real RoleModelAdapter Provider</h2>
@@ -429,7 +564,7 @@
       <dd>May add provider metadata to model I/O logs without changing <code>CharacterDecision</code>.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-010 still uses injected fake adapter behavior and only atomizes the existing living-state patch commit success path.</dd>
+      <dd>MVP-011 still uses injected fake adapter behavior and only adds read-only active-incident context.</dd>
     </dl>
 
     <h2>Shared RoleModelTurnResult Validator</h2>
@@ -483,7 +618,7 @@
       <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-010 slice still uses injected fakes and existing interfaces, with no concrete database.</dd>
+      <dd>The active MVP-011 slice still uses injected fakes and existing interfaces, with no concrete database.</dd>
     </dl>
 
     <h2>Shared Visible Conversation Message Contract</h2>
@@ -510,7 +645,7 @@
       <dd>Likely adds a shared <code>role</code> / <code>message_id</code> visible transcript contract while preserving compatibility with existing assistant output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-010 slice should only atomize the living-state patch state-plus-log commit without unifying durable visible-message schemas.</dd>
+      <dd>The active MVP-011 slice should only add read-only active-incident context without unifying durable visible-message schemas.</dd>
     </dl>
 
     <h2>Recent Source Backed By Visible Conversation Records</h2>
