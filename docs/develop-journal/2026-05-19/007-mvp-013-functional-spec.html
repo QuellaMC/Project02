@@ -82,8 +82,9 @@
       <li><code>uvx ruff format --check .</code>: passed after formatting the two files reported by CI.</li>
       <li><code>uvx ruff check .</code>: passed.</li>
       <li><code>git diff --check</code>: passed.</li>
-      <li><code>mypy</code>: not run locally because the command is not installed in this environment; PR CI typecheck passed before the formatting follow-up and will rerun after the push.</li>
+      <li><code>mypy</code>: not run locally because the command is not installed in this environment; PR CI typecheck passed.</li>
       <li><code>gh pr create --base main --head feature/mvp-013-raw-log-replay-visibility --title "Implement MVP-013 raw log query visibility" --body-file /private/tmp/mvp013-pr-body.md</code>: created <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>.</li>
+      <li><a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a> CI: <code>lint</code>, <code>typecheck</code>, <code>test</code>, and <code>pull-request-gate</code> passed.</li>
     </ul>
 
     <h2>Next Action</h2>
