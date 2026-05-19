@@ -196,7 +196,7 @@
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>Incident-start opt-in and living-state patch opt-in are mutually exclusive in MVP-012; asking for both must fail before the adapter is called.</td>
+          <td>Incident-start opt-in and living-state patch opt-in are mutually exclusive in MVP-012; asking for both must return a structured user-turn preflight stop before user-visible message commit or adapter invocation.</td>
         </tr>
         <tr>
           <td>FR-4</td>
@@ -257,6 +257,7 @@
       <li>An incident-start-enabled user turn renders <code>life_action</code> as an allowed action and accepts one valid <code>start_incident</code> decision.</li>
       <li>A valid <code>start_incident</code> decision commits one active incident and one matching <code>life_incident_started</code> raw log through the injected finalizer before the assistant reply is committed.</li>
       <li>A valid decision with no <code>life_action</code> skips the incident finalizer and preserves the existing visible reply flow.</li>
+      <li>If living-state patch and incident-start write dependencies are both wired, the user turn returns <code>user_turn_stopped</code> at <code>user_turn_preflight</code> after intake and before any visible conversation append, model call, write commit, or assistant reply commit.</li>
       <li>Malformed life action output fails before incident commit and visible reply commit.</li>
       <li>Finalizer rejection or malformed finalizer output appends a <code>life_incident_start_rejected</code> raw log and stops before assistant visible reply commit.</li>
       <li>No concrete incident store, complete/cancel/resume action, interruption policy, new RuntimeEvent type, body state, retrieval, tool, Live2D, scheduler, provider call, or additional model action is added.</li>
@@ -283,6 +284,7 @@
       <li>Run one incident-start-enabled user turn with a fake finalizer and assert raw log order: <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>life_incident_started</code>, <code>visible_reply_committed</code>.</li>
       <li>Assert the fake finalizer receives the started incident and the same committed raw log entry ID returned by the user-turn result.</li>
       <li>Run one incident-start-enabled user turn where the model omits <code>life_action</code> and assert the finalizer is not called.</li>
+      <li>Run one user turn with both living-state patch and incident-start write dependencies wired and assert it stops at <code>user_turn_preflight</code> after <code>runtime_event_received</code>, with no user-visible append, model call, write finalizer call, or assistant reply commit.</li>
       <li>Run one malformed life-action model output and assert the adapter result is logged as <code>role_model_turn_failed</code> with no incident or assistant reply commit.</li>
       <li>Run one finalizer rejection and assert user-turn result stops at <code>life_incident_start_commit</code> before assistant visible reply commit.</li>
       <li>Run full unittest discovery.</li>
@@ -294,7 +296,7 @@
       <li>Character State Engine remains read-only in this slice; it only supplies reusable incident constants and the already implemented active-incident context shape.</li>
       <li>Role Model Loop owns rendering the opt-in allowed action, parsing optional <code>life_action.start_incident</code>, and logging malformed model output through existing role-model failure logs.</li>
       <li>Commit and Effects owns incident-start validation, started incident snapshot construction, commit/reject raw log construction, and finalizer result validation.</li>
-      <li>User-turn orchestration owns opt-in wiring and stops before assistant visible reply if incident start commit rejects.</li>
+      <li>User-turn orchestration owns opt-in wiring, rejects mutually enabled write action families before user-visible message commit, and stops before assistant visible reply if incident start commit rejects.</li>
       <li>Raw Event Log behavior changes only by adding the incident-start commit/reject raw log kinds needed for this write boundary.</li>
     </ul>
 
@@ -305,7 +307,7 @@
       <li>Extended Role Model Loop with explicit <code>allow_incident_start</code> opt-in, <code>["visible_reply", "life_action"]</code> allowed actions, incident-start instructions that enumerate the parser-enforced incident type and policy values, and malformed <code>life_action</code> parse failures through the existing <code>role_model_turn_failed</code> raw log.</li>
       <li>Added <code>commit_effects.incident_start</code> as the narrow Commit and Effects boundary for building runtime-owned active incident snapshots, constructing <code>life_incident_started</code> success <code>RawEventLogEntry</code> records, validating finalizer success, and appending <code>life_incident_start_rejected</code> logs on rejection.</li>
       <li>Wired <code>run_user_message_turn()</code> so an injected <code>LifeIncidentStartFinalizer</code> opts into the incident-start path after the role-model turn and before assistant visible reply commit.</li>
-      <li>Kept living-state patch and incident-start composition rejected for MVP-012; the user turn can opt into one write-side model action family at a time.</li>
+      <li>Kept living-state patch and incident-start composition rejected for MVP-012; the user turn can opt into one write-side model action family at a time, and the mutually enabled configuration now stops during preflight before user-visible message commit.</li>
       <li>Added focused unit and integration coverage for parsing, malformed drafts, allowed-action scoping, atomic finalizer success, finalizer rejection, skipped starts, deep-copy audit data, and user-turn ordering.</li>
     </ul>
 

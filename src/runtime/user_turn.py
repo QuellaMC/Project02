@@ -34,11 +34,13 @@ from runtime.logging import SCHEMA_VERSION, Clock, IdGenerator
 
 USER_TURN_COMMITTED_STATUS = "user_turn_committed"
 USER_TURN_STOPPED_STATUS = "user_turn_stopped"
+USER_TURN_PREFLIGHT_STOP = "user_turn_preflight"
 USER_VISIBLE_MESSAGE_COMMIT_STOP = "user_visible_message_commit"
 LIVING_STATE_PATCH_COMMIT_STOP = "living_state_patch_commit"
 LIFE_INCIDENT_START_COMMIT_STOP = "life_incident_start_commit"
 VISIBLE_REPLY_COMMIT_STOP = "visible_reply_commit"
 USER_TURN_NEXT_STEP = "user_turn"
+CONFLICTING_WRITE_ACTION_OPT_IN_CODE = "conflicting_write_action_opt_in"
 
 UserMessageTurnResult = dict[str, Any]
 
@@ -71,6 +73,24 @@ def run_user_message_turn(
     route = intake_result["route"]
     _require_user_turn_route(route)
 
+    allow_state_patch = _state_patch_allowed(
+        current_state_source=current_state_source,
+        living_state_patch_store=living_state_patch_store,
+        living_state_patch_finalizer=living_state_patch_finalizer,
+    )
+    allow_incident_start = life_incident_start_finalizer is not None
+    if allow_state_patch and allow_incident_start:
+        return _build_stopped_result(
+            event,
+            route,
+            stopped_at=USER_TURN_PREFLIGHT_STOP,
+            failure={
+                "stage": USER_TURN_PREFLIGHT_STOP,
+                "code": CONFLICTING_WRITE_ACTION_OPT_IN_CODE,
+                "message": "state_patch and life_action cannot both be allowed in MVP-012.",
+            },
+        )
+
     user_visible_message_result = commit_user_visible_message(
         event,
         visible_conversation_log=visible_conversation,
@@ -87,12 +107,6 @@ def run_user_message_turn(
             user_visible_message_result=user_visible_message_result,
         )
 
-    allow_state_patch = (
-        current_state_source is not None
-        and living_state_patch_store is not None
-        and living_state_patch_finalizer is not None
-    )
-    allow_incident_start = life_incident_start_finalizer is not None
     role_model_result = run_role_model_turn(
         event,
         adapter=adapter,
@@ -208,6 +222,19 @@ def _require_user_turn_route(route: Mapping[str, Any]) -> None:
         raise RuntimeValidationError(
             "USER_MESSAGE route must require model work with next_step 'user_turn'."
         )
+
+
+def _state_patch_allowed(
+    *,
+    current_state_source: CurrentCharacterStateSource | None,
+    living_state_patch_store: LivingStatePatchStore | None,
+    living_state_patch_finalizer: LivingStatePatchFinalizer | None,
+) -> bool:
+    return (
+        current_state_source is not None
+        and living_state_patch_store is not None
+        and living_state_patch_finalizer is not None
+    )
 
 
 def _build_stopped_result(

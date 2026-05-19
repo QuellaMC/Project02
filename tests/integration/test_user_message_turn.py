@@ -753,6 +753,58 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         self.assertEqual(life_incident_start_finalizer.durable_started_incidents, [])
         self.assertEqual(life_incident_start_finalizer.durable_raw_event_log_entries, [])
 
+    def test_conflicting_write_opt_ins_stop_before_user_visible_message_commit(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter()
+        current_state_source = RecordingCurrentStateSource(current_state_snapshot())
+        living_state_patch_store = RecordingLivingStatePatchStore()
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer()
+        life_incident_start_finalizer = RecordingLifeIncidentStartFinalizer()
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "hello now",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=current_state_source,
+            living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
+            life_incident_start_finalizer=life_incident_start_finalizer,
+        )
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["stopped_at"], "user_turn_preflight")
+        self.assertEqual(result["failure"]["stage"], "user_turn_preflight")
+        self.assertEqual(result["failure"]["code"], "conflicting_write_action_opt_in")
+        self.assertIn("state_patch and life_action", result["failure"]["message"])
+        self.assertNotIn("user_visible_message_result", result)
+        self.assertNotIn("role_model_result", result)
+        self.assertNotIn("visible_reply_result", result)
+        self.assertEqual([entry["kind"] for entry in raw_log.entries], ["runtime_event_received"])
+        self.assertEqual(visible_conversation.records, [prior_user_record()])
+        self.assertEqual(visible_conversation.read_requests, [])
+        self.assertEqual(adapter.calls, [])
+        self.assertEqual(current_state_source.requests, [])
+        self.assertEqual(living_state_patch_store.requests, [])
+        self.assertEqual(living_state_patch_finalizer.requests, [])
+        self.assertEqual(life_incident_start_finalizer.requests, [])
+        self.assertEqual(life_incident_start_finalizer.durable_started_incidents, [])
+        self.assertEqual(life_incident_start_finalizer.durable_raw_event_log_entries, [])
+
     def test_state_enabled_turn_commits_living_state_patch_before_assistant_reply(self):
         operations = []
         raw_log = RecordingRawEventLog(operations=operations)
