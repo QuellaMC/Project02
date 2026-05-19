@@ -5,6 +5,11 @@ from copy import deepcopy
 from typing import Any, Protocol
 
 from character.state.current import ActiveIncidentSource, CurrentCharacterStateSource
+from commit_effects.incident_start import (
+    LIFE_INCIDENT_START_REJECTED_STATUS,
+    LifeIncidentStartFinalizer,
+    commit_life_incident_start,
+)
 from commit_effects.living_state import (
     LIVING_STATE_PATCH_REJECTED_STATUS,
     LivingStatePatchFinalizer,
@@ -29,10 +34,13 @@ from runtime.logging import SCHEMA_VERSION, Clock, IdGenerator
 
 USER_TURN_COMMITTED_STATUS = "user_turn_committed"
 USER_TURN_STOPPED_STATUS = "user_turn_stopped"
+USER_TURN_PREFLIGHT_STOP = "user_turn_preflight"
 USER_VISIBLE_MESSAGE_COMMIT_STOP = "user_visible_message_commit"
 LIVING_STATE_PATCH_COMMIT_STOP = "living_state_patch_commit"
+LIFE_INCIDENT_START_COMMIT_STOP = "life_incident_start_commit"
 VISIBLE_REPLY_COMMIT_STOP = "visible_reply_commit"
 USER_TURN_NEXT_STEP = "user_turn"
+CONFLICTING_WRITE_ACTION_OPT_IN_CODE = "conflicting_write_action_opt_in"
 
 UserMessageTurnResult = dict[str, Any]
 
@@ -53,6 +61,7 @@ def run_user_message_turn(
     active_incident_source: ActiveIncidentSource | None = None,
     living_state_patch_store: LivingStatePatchStore | None = None,
     living_state_patch_finalizer: LivingStatePatchFinalizer | None = None,
+    life_incident_start_finalizer: LifeIncidentStartFinalizer | None = None,
 ) -> UserMessageTurnResult:
     intake_result = intake_runtime_event(
         event_input,
@@ -63,6 +72,24 @@ def run_user_message_turn(
     event = intake_result["event"]
     route = intake_result["route"]
     _require_user_turn_route(route)
+
+    allow_state_patch = _state_patch_allowed(
+        current_state_source=current_state_source,
+        living_state_patch_store=living_state_patch_store,
+        living_state_patch_finalizer=living_state_patch_finalizer,
+    )
+    allow_incident_start = life_incident_start_finalizer is not None
+    if allow_state_patch and allow_incident_start:
+        return _build_stopped_result(
+            event,
+            route,
+            stopped_at=USER_TURN_PREFLIGHT_STOP,
+            failure={
+                "stage": USER_TURN_PREFLIGHT_STOP,
+                "code": CONFLICTING_WRITE_ACTION_OPT_IN_CODE,
+                "message": "state_patch and life_action cannot both be allowed in MVP-012.",
+            },
+        )
 
     user_visible_message_result = commit_user_visible_message(
         event,
@@ -80,11 +107,6 @@ def run_user_message_turn(
             user_visible_message_result=user_visible_message_result,
         )
 
-    allow_state_patch = (
-        current_state_source is not None
-        and living_state_patch_store is not None
-        and living_state_patch_finalizer is not None
-    )
     role_model_result = run_role_model_turn(
         event,
         adapter=adapter,
@@ -97,6 +119,7 @@ def run_user_message_turn(
         current_state_source=current_state_source,
         active_incident_source=active_incident_source,
         allow_state_patch=allow_state_patch,
+        allow_incident_start=allow_incident_start,
     )
 
     living_state_patch_result: Mapping[str, Any] | None = None
@@ -123,6 +146,29 @@ def run_user_message_turn(
                 living_state_patch_result=living_state_patch_result,
             )
 
+    life_incident_start_result: Mapping[str, Any] | None = None
+    if allow_incident_start:
+        assert life_incident_start_finalizer is not None
+        life_incident_start_result = commit_life_incident_start(
+            event,
+            role_model_result,
+            life_incident_start_finalizer=life_incident_start_finalizer,
+            raw_event_log=raw_event_log,
+            id_generator=id_generator,
+            clock=clock,
+        )
+        if life_incident_start_result["status"] == LIFE_INCIDENT_START_REJECTED_STATUS:
+            return _build_stopped_result(
+                event,
+                route,
+                stopped_at=LIFE_INCIDENT_START_COMMIT_STOP,
+                failure=life_incident_start_result["failure"],
+                user_visible_message_result=user_visible_message_result,
+                role_model_result=role_model_result,
+                living_state_patch_result=living_state_patch_result,
+                life_incident_start_result=life_incident_start_result,
+            )
+
     visible_reply_role_model_result = _project_visible_reply_role_model_result(role_model_result)
     visible_reply_result = commit_visible_reply(
         event,
@@ -141,6 +187,7 @@ def run_user_message_turn(
             user_visible_message_result=user_visible_message_result,
             role_model_result=role_model_result,
             living_state_patch_result=living_state_patch_result,
+            life_incident_start_result=life_incident_start_result,
             visible_reply_result=visible_reply_result,
         )
 
@@ -161,6 +208,8 @@ def run_user_message_turn(
     }
     if living_state_patch_result is not None:
         result["living_state_patch_result"] = deepcopy(dict(living_state_patch_result))
+    if life_incident_start_result is not None:
+        result["life_incident_start_result"] = deepcopy(dict(life_incident_start_result))
     return result
 
 
@@ -175,6 +224,19 @@ def _require_user_turn_route(route: Mapping[str, Any]) -> None:
         )
 
 
+def _state_patch_allowed(
+    *,
+    current_state_source: CurrentCharacterStateSource | None,
+    living_state_patch_store: LivingStatePatchStore | None,
+    living_state_patch_finalizer: LivingStatePatchFinalizer | None,
+) -> bool:
+    return (
+        current_state_source is not None
+        and living_state_patch_store is not None
+        and living_state_patch_finalizer is not None
+    )
+
+
 def _build_stopped_result(
     event: Mapping[str, Any],
     route: Mapping[str, Any],
@@ -184,6 +246,7 @@ def _build_stopped_result(
     user_visible_message_result: Mapping[str, Any] | None = None,
     role_model_result: Mapping[str, Any] | None = None,
     living_state_patch_result: Mapping[str, Any] | None = None,
+    life_incident_start_result: Mapping[str, Any] | None = None,
     visible_reply_result: Mapping[str, Any] | None = None,
 ) -> UserMessageTurnResult:
     result: UserMessageTurnResult = {
@@ -202,6 +265,8 @@ def _build_stopped_result(
         result["role_model_result"] = deepcopy(dict(role_model_result))
     if living_state_patch_result is not None:
         result["living_state_patch_result"] = deepcopy(dict(living_state_patch_result))
+    if life_incident_start_result is not None:
+        result["life_incident_start_result"] = deepcopy(dict(life_incident_start_result))
     if visible_reply_result is not None:
         result["visible_reply_result"] = deepcopy(dict(visible_reply_result))
     return result

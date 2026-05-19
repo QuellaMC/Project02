@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from role_model.loop import (  # noqa: E402
+    INCIDENT_START_ROLE_MODEL_INSTRUCTIONS,
     RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES,
     RECENT_VISIBLE_MESSAGES_MAX_MESSAGES,
     RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS,
@@ -825,6 +826,44 @@ class DecisionContextTests(unittest.TestCase):
             ["visible_reply", "state_patch"],
         )
 
+    def test_renders_life_action_output_contract_only_for_incident_start_opt_in(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            allow_incident_start=True,
+        )
+
+        model_input = render_role_model_input(context)
+
+        self.assertEqual(model_input["instructions"], INCIDENT_START_ROLE_MODEL_INSTRUCTIONS)
+        self.assertIn("life_action", model_input["instructions"])
+        self.assertIn("start_incident", model_input["instructions"])
+        self.assertIn(
+            "incident.type must be one of: 'custom', 'drink', 'eat', 'idle', "
+            "'rest', 'sleep', 'think', 'wait', 'work'",
+            model_input["instructions"],
+        )
+        self.assertIn(
+            "interrupt_policy must be one of: 'background', 'interruptible', 'protected'",
+            model_input["instructions"],
+        )
+        self.assertIn(
+            "resume_policy must be one of: 'ask_model', 'cancel', 'resume'",
+            model_input["instructions"],
+        )
+        self.assertEqual(
+            model_input["decision_context"]["allowed_actions"],
+            ["visible_reply", "life_action"],
+        )
+
+    def test_rejects_state_patch_and_life_action_composition_before_render(self):
+        with self.assertRaisesRegex(RoleModelValidationError, "state_patch and life_action"):
+            build_decision_context(
+                normalized_user_message(),
+                current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+                allow_state_patch=True,
+                allow_incident_start=True,
+            )
+
     def test_render_rejects_malformed_nested_decision_context_event(self):
         cases = [
             ({}, "event"),
@@ -999,6 +1038,17 @@ class DecisionContextTests(unittest.TestCase):
 
         self.assertEqual(context["allowed_actions"], ["visible_reply"])
         self.assertEqual(model_input["instructions"], ROLE_MODEL_INSTRUCTIONS)
+
+    def test_render_rejects_manually_composed_state_patch_and_life_action(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            allow_state_patch=True,
+        )
+        context["allowed_actions"] = ["visible_reply", "state_patch", "life_action"]
+
+        with self.assertRaisesRegex(RoleModelValidationError, "allowed_actions"):
+            render_role_model_input(context)
 
 
 class VisibleConversationRecentMessagesSourceTests(unittest.TestCase):
@@ -1294,6 +1344,136 @@ class CharacterDecisionParserTests(unittest.TestCase):
                 },
             },
         )
+
+    def test_parses_valid_visible_reply_with_allowed_start_incident_life_action(self):
+        model_input = render_role_model_input(
+            build_decision_context(
+                normalized_user_message(),
+                allow_incident_start=True,
+            )
+        )
+
+        decision = parse_character_decision(
+            model_input,
+            adapter_output(
+                json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": " Hi there. "},
+                        "life_action": {
+                            "type": "start_incident",
+                            "incident": {
+                                "type": "think",
+                                "title": " Thinking ",
+                                "remaining_seconds": 120,
+                                "interrupt_policy": "interruptible",
+                                "resume_policy": "ask_model",
+                            },
+                        },
+                    }
+                )
+            ),
+        )
+
+        self.assertEqual(
+            decision,
+            {
+                "schema_version": "0.1",
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "action": "visible_reply",
+                "visible_reply": {"text": "Hi there."},
+                "life_action": {
+                    "type": "start_incident",
+                    "incident": {
+                        "type": "think",
+                        "title": "Thinking",
+                        "remaining_seconds": 120,
+                        "interrupt_policy": "interruptible",
+                        "resume_policy": "ask_model",
+                    },
+                },
+            },
+        )
+
+    def test_rejects_life_action_when_model_input_did_not_allow_it(self):
+        with self.assertRaisesRegex(RoleModelValidationError, "life_action"):
+            parse_character_decision(
+                role_model_input(),
+                adapter_output(
+                    json.dumps(
+                        {
+                            "schema_version": "0.1",
+                            "action": "visible_reply",
+                            "visible_reply": {"text": "hello"},
+                            "life_action": {
+                                "type": "start_incident",
+                                "incident": {
+                                    "type": "think",
+                                    "title": "Think",
+                                    "interrupt_policy": "interruptible",
+                                    "resume_policy": "resume",
+                                },
+                            },
+                        }
+                    )
+                ),
+            )
+
+    def test_rejects_malformed_allowed_start_incident_life_action(self):
+        model_input = render_role_model_input(
+            build_decision_context(
+                normalized_user_message(),
+                allow_incident_start=True,
+            )
+        )
+        cases = [
+            ({"type": "resume_incident", "incident": {}}, "start_incident"),
+            (
+                {
+                    "type": "start_incident",
+                    "incident": {
+                        "type": "think",
+                        "title": "Think",
+                        "remaining_seconds": True,
+                        "interrupt_policy": "interruptible",
+                        "resume_policy": "resume",
+                    },
+                },
+                "remaining_seconds",
+            ),
+            (
+                {
+                    "type": "start_incident",
+                    "incident": {
+                        "type": "think",
+                        "title": "Think",
+                        "started_at": "2026-05-14T11:31:00+00:00",
+                        "interrupt_policy": "interruptible",
+                        "resume_policy": "resume",
+                    },
+                },
+                "started_at",
+            ),
+        ]
+
+        for life_action, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    parse_character_decision(
+                        model_input,
+                        adapter_output(
+                            json.dumps(
+                                {
+                                    "schema_version": "0.1",
+                                    "action": "visible_reply",
+                                    "visible_reply": {"text": "hello"},
+                                    "life_action": life_action,
+                                }
+                            )
+                        ),
+                    )
 
     def test_rejects_state_patch_when_model_input_did_not_allow_it(self):
         with self.assertRaisesRegex(RoleModelValidationError, "state_patch"):

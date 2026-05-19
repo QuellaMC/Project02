@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-011 - Read-Only Active Incident Brief in DecisionContext</title>
+  <title>MVP-012 - Minimal Start Incident Commit Boundary</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,13 +27,13 @@
 </head>
 <body>
   <main>
-    <h1>MVP-011 - Read-Only Active Incident Brief in DecisionContext</h1>
-    <p><span class="status">Status: implemented; PR #12 in review</span></p>
+    <h1>MVP-012 - Minimal Start Incident Commit Boundary</h1>
+    <p><span class="status">Status: implemented locally; PR #13 open</span></p>
     <p class="meta">
-      Created: 2026-05-18. Active slice path:
+      Created: 2026-05-19. Active slice path:
       <code>docs/plan/active-slice.html</code>.
       Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
-      Branch: <code>feature/mvp-011-functional-spec</code>.
+      Branch: <code>feature/mvp-012-functional-spec</code>.
     </p>
 
     <h2>Source Context</h2>
@@ -44,15 +44,14 @@
       <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>,
       <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
       <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
-      <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>,
-      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>, and
       <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
     </p>
     <blockquote>
-      Phase 3 starts the Basic Incident System, but the first useful slice
-      should not create or mutate incidents. MVP-011 only lets the existing
-      <code>USER_MESSAGE</code> model call see one compact read-only active
-      incident brief when an injected Character State Engine source provides it.
+      Phase 3 eventually needs a Basic Incident System, but MVP-012 should not
+      implement the whole lifecycle. It proves only one write-side action:
+      an opted-in <code>USER_MESSAGE</code> turn may commit a model-proposed
+      <code>start_incident</code> through an injected Commit and Effects boundary.
     </blockquote>
     <p>
       Local implementation truth comes from completed
@@ -64,92 +63,119 @@
       <a href="completed/mvp-006-visible-conversation-recent-source.html">MVP-006</a>,
       <a href="completed/mvp-007-minimal-user-turn-orchestrator.html">MVP-007</a>,
       <a href="completed/mvp-008-read-only-living-state-snapshot-in-decisioncontext.html">MVP-008</a>,
-      <a href="completed/mvp-009-minimal-living-state-patch-commit.html">MVP-009</a>, and
-      <a href="completed/mvp-010-atomic-living-state-patch-commit-boundary.html">MVP-010</a>.
+      <a href="completed/mvp-009-minimal-living-state-patch-commit.html">MVP-009</a>,
+      <a href="completed/mvp-010-atomic-living-state-patch-commit-boundary.html">MVP-010</a>, and
+      <a href="completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html">MVP-011</a>.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Add the smallest read-side incident context needed for Phase 3: an
-      optional injected active-incident source that maps one active incident
-      into <code>DecisionContext.character_snapshot.active_incident</code> for
-      the existing <code>USER_MESSAGE</code> role-model call. The slice must
-      preserve current visible-reply and living-state patch behavior.
+      Add the smallest incident write path after the read-only active incident
+      context: parse one optional <code>life_action.start_incident</code> from
+      a role-model decision and commit one active incident plus its raw audit
+      log through an injected fake finalizer. Preserve the existing visible
+      reply flow when no incident action is proposed.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
       <li>One event type remains in scope: <code>USER_MESSAGE</code>.</li>
-      <li>One new read-side source is in scope: <code>ActiveIncidentSource</code>, injected by the caller.</li>
-      <li>One compact model-facing view is in scope: <code>character_snapshot.active_incident</code>.</li>
-      <li>The source may report no active incident; in that case the current <code>DecisionContext</code> shape is unchanged except for validation support.</li>
-      <li>The active incident view is read-only. It is not committed, resumed, cancelled, completed, queued, interrupted, scheduled, or persisted by this slice.</li>
-      <li>The existing recent-visible-message and living-state brief sources continue to compose into the same <code>character_snapshot</code>.</li>
-      <li>The existing allowed actions remain <code>visible_reply</code> or <code>visible_reply</code> plus <code>state_patch</code> when the living-state write boundaries are fully opted in. MVP-011 does not expose <code>life_action</code>.</li>
+      <li>One optional model decision field is in scope: <code>life_action</code>.</li>
+      <li>One life action type is in scope: <code>start_incident</code>.</li>
+      <li>The required top-level decision action remains <code>visible_reply</code>; <code>life_action</code> is only an optional sibling when explicitly enabled.</li>
+      <li>The Role Model Loop may include <code>life_action</code> in <code>allowed_actions</code> only when the caller opts into MVP-012 incident-start behavior.</li>
+      <li>The incident commit path uses an injected fake <code>LifeIncidentStartFinalizer</code> that durably exposes the started incident and matching <code>life_incident_started</code> <code>RawEventLogEntry</code> atomically.</li>
+      <li>If no <code>life_action</code> is present, the user turn skips incident commit and continues to the existing assistant visible reply commit.</li>
+      <li>MVP-012 does not compose incident starts with living-state patches in the same turn. A later reviewed slice may define that ordering.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
       <li>No concrete <code>LifeIncidentStore</code>, database, migration, filesystem store, queue, background worker, scheduler, replay worker, or production persistence adapter.</li>
-      <li>No incident creation, start, complete, cancel, resume, interruption, backgrounding, replacement, deduplication, or reconciliation behavior.</li>
+      <li>No <code>complete_incident</code>, <code>cancel_incident</code>, <code>resume_incident</code>, <code>go_idle</code>, <code>no_change</code>, replacement, interruption, backgrounding, deduplication, reconciliation, or incident queue behavior.</li>
       <li>No <code>INCIDENT_COMPLETION</code>, <code>TIMER</code>, <code>NEED_THRESHOLD</code>, scheduled directive, tool result, asset result, or maintenance event type.</li>
-      <li>No <code>interrupted_incident</code>, completed incident brief, incident queue, active thread, retrieval result, body state, body drift, Live2D status, proactive message, scheduled directive action, tool request, continuity write, or asset behavior.</li>
-      <li>No new model output action. The model still returns required <code>action = "visible_reply"</code> and may include only the existing optional living-state patch when state patching is allowed.</li>
-      <li>No Runtime Kernel priority or interruption policy changes.</li>
-      <li>No new raw log kind for context building. The existing <code>role_model_turn_failed</code> kind records context-build validation failures; dedicated context-build log kinds stay parked for a later debug/replay slice.</li>
+      <li>No concrete active-incident conflict resolution. The injected finalizer may reject an attempted start, but MVP-012 does not decide how to replace, interrupt, or cancel an existing incident.</li>
+      <li>No body effects, virtual body drift, Live2D status, asset lookup, proactive message, retrieval, continuity write, active thread, scheduled directive, productivity tool, or permission matrix.</li>
+      <li>No live model provider and no external service calls.</li>
+      <li>No Runtime Kernel route, priority, scheduling, or interruption policy changes.</li>
+      <li>No durable state mutation outside the injected incident-start finalizer.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
-    <h3>ActiveIncidentRequest</h3>
-    <pre><code>type ActiveIncidentRequest = {
+    <h3>CharacterDecision Addition</h3>
+    <pre><code>type CharacterDecision = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  action: "visible_reply"
+  visible_reply: { text: string }
+  life_action?: StartIncidentLifeAction
+}</code></pre>
+
+    <h3>StartIncidentLifeAction</h3>
+    <pre><code>type StartIncidentLifeAction = {
+  type: "start_incident"
+  incident: LifeIncidentStartDraft
+}</code></pre>
+
+    <h3>LifeIncidentStartDraft</h3>
+    <pre><code>type LifeIncidentStartDraft = {
+  type: "idle" | "eat" | "drink" | "sleep" | "rest" | "work" | "think" | "wait" | "custom"
+  title: string
+  remaining_seconds?: number
+  interrupt_policy: "interruptible" | "background" | "protected"
+  resume_policy: "resume" | "ask_model" | "cancel"
+}</code></pre>
+    <p>
+      The model does not provide <code>incident_id</code>, <code>status</code>,
+      <code>started_at</code>, <code>expected_end_at</code>,
+      <code>source_event_ids</code>, effects, or Live2D hints in MVP-012. The
+      runtime and injected finalizer own committed identity, timestamps, and
+      audit visibility.
+    </p>
+
+    <h3>LifeIncidentStartFinalizeRequest</h3>
+    <pre><code>type LifeIncidentStartFinalizeRequest = {
   schema_version: "0.1"
   trace_id: string
   event_id: string
   event_type: "USER_MESSAGE"
+  decision_action: "visible_reply"
+  life_action_type: "start_incident"
+  commit_time: string
+  draft: LifeIncidentStartDraft
+  started_incident: ActiveIncidentSnapshot
+  committed_log_entry: RawEventLogEntry
   user_id?: string
   conversation_id?: string
 }</code></pre>
 
-    <h3>ActiveIncidentSnapshot</h3>
-    <pre><code>type ActiveIncidentSnapshot = {
-  schema_version: "0.1"
-  incident_id: string
-  type: "idle" | "eat" | "drink" | "sleep" | "rest" | "work" | "think" | "wait" | "custom"
-  status: "active"
-  title: string
-  started_at?: string
-  expected_end_at?: string
-  remaining_seconds?: number
-  interrupt_policy: "interruptible" | "background" | "protected"
-  resume_policy: "resume" | "ask_model" | "cancel"
-  source_event_ids: string[]
-}</code></pre>
-
-    <h3>ActiveIncidentBrief</h3>
-    <pre><code>type ActiveIncidentBrief = {
-  incident_id: string
-  type: "idle" | "eat" | "drink" | "sleep" | "rest" | "work" | "think" | "wait" | "custom"
-  title: string
-  started_at?: string
-  expected_end_at?: string
-  remaining_seconds?: number
-  interrupt_policy: "interruptible" | "background" | "protected"
-  resume_policy: "resume" | "ask_model" | "cancel"
-  source_event_ids: string[]
-}</code></pre>
-    <p>
-      The model-facing brief intentionally omits <code>status</code> because the
-      field name <code>active_incident</code> already carries that meaning. The
-      source snapshot still requires <code>status = "active"</code> so future
-      completed, interrupted, or queued records cannot silently enter this view.
-    </p>
-
-    <h3>DecisionContext Addition</h3>
-    <pre><code>type DecisionContext.character_snapshot = {
-  recent_visible_messages: RecentVisibleMessage[]
-  living_state_brief?: LivingStateBrief
-  active_incident?: ActiveIncidentBrief
-}</code></pre>
+    <h3>LifeIncidentStartCommitResult</h3>
+    <pre><code>type LifeIncidentStartCommitResult =
+  | {
+      schema_version: "0.1"
+      trace_id: string
+      event_id: string
+      event_type: "USER_MESSAGE"
+      status: "life_incident_start_skipped"
+    }
+  | {
+      schema_version: "0.1"
+      trace_id: string
+      event_id: string
+      event_type: "USER_MESSAGE"
+      status: "life_incident_started"
+      started_incident: ActiveIncidentSnapshot
+      committed_log_entry_id: string
+    }
+  | {
+      schema_version: "0.1"
+      trace_id: string
+      event_id: string
+      event_type: "USER_MESSAGE"
+      status: "life_incident_start_rejected"
+      failure: { stage: string; code: string; message: string }
+    }</code></pre>
 
     <h2>Functional Requirements</h2>
     <table>
@@ -162,39 +188,51 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>Without an <code>active_incident_source</code>, existing MVP-010 behavior and tests remain unchanged.</td>
+          <td>Without explicit incident-start opt-in, existing MVP-011 behavior and tests remain unchanged, and <code>allowed_actions</code> must not include <code>life_action</code>.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>When an <code>active_incident_source</code> is provided, Role Model Loop builds an <code>ActiveIncidentRequest</code> from the normalized <code>USER_MESSAGE</code> event, including optional <code>user_id</code> and <code>conversation_id</code>.</td>
+          <td>With incident-start opt-in, Role Model Loop renders <code>allowed_actions = ["visible_reply", "life_action"]</code> and instructions that permit only optional <code>life_action.type = "start_incident"</code>, including the allowed <code>incident.type</code>, <code>interrupt_policy</code>, and <code>resume_policy</code> enum values enforced by the parser.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>If the source returns <code>None</code>, the decision context omits <code>character_snapshot.active_incident</code> and continues the normal visible-reply flow.</td>
+          <td>Incident-start opt-in and living-state patch opt-in are mutually exclusive in MVP-012; asking for both must return a structured user-turn preflight stop before user-visible message commit or adapter invocation.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>If the source returns one valid active incident snapshot, Role Model Loop maps it to <code>ActiveIncidentBrief</code>, deep-copies it, and places it under <code>character_snapshot.active_incident</code>.</td>
+          <td>Parsing accepts a valid visible reply with no <code>life_action</code> and returns the same visible-reply decision shape as today.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>Incident validation rejects extra fields, unsupported incident types, non-<code>active</code> status, invalid timestamps, negative <code>remaining_seconds</code>, unsupported policies, missing source IDs, and any <code>source_event_ids</code> containing the current event ID.</td>
+          <td>Parsing accepts a valid <code>life_action.start_incident</code> sibling and attaches trusted <code>trace_id</code> and <code>event_id</code> from the model input.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td><code>render_role_model_input()</code> validates <code>active_incident</code> in the same pass as existing <code>recent_visible_messages</code> and <code>living_state_brief</code>.</td>
+          <td>Parsing rejects unsupported life action types, extra fields, missing incident draft fields, unsupported incident types or policies, empty titles, non-numeric or negative <code>remaining_seconds</code>, and any model-provided committed-only fields such as <code>incident_id</code>, <code>status</code>, <code>started_at</code>, <code>source_event_ids</code>, effects, or Live2D hints.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>The existing <code>role_model_turn_completed</code> raw log includes the rendered model input with the active incident brief when present. If context build or render validation fails before a model input exists, the existing <code>role_model_turn_failed</code> kind records <code>stage = "context_build"</code> and <code>code = "malformed_context"</code>.</td>
+          <td>A malformed <code>life_action</code> output appends the existing <code>role_model_turn_failed</code> raw log with <code>stage = "parse_output"</code> and must not append incident commit or visible reply commit logs.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>User-turn orchestration may pass the optional active-incident source through to Role Model Loop, but it must not change state-patch opt-in rules or visible reply commit ordering.</td>
+          <td>If a parsed decision has no <code>life_action</code>, Commit and Effects returns <code>life_incident_start_skipped</code> without calling the incident finalizer and the user turn proceeds to assistant visible reply commit.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>Malformed active-incident source output fails before the adapter is called and before downstream living-state patch commit, incident lifecycle commit, and assistant visible-reply commit. The already-committed user visible message projection remains unchanged. The failure appends a <code>role_model_turn_failed</code> raw log with <code>stage = "context_build"</code>, but must not append any incident commit, rejection, or lifecycle log because no incident mutation is attempted.</td>
+          <td>If a parsed decision has <code>start_incident</code>, Commit and Effects builds a started active incident snapshot with runtime-generated <code>incident_id</code>, <code>status = "active"</code>, <code>started_at = commit_time</code>, and <code>source_event_ids = [event_id]</code>, then validates that snapshot through <code>character.state.current.validate_active_incident_snapshot()</code>.</td>
+        </tr>
+        <tr>
+          <td>FR-10</td>
+          <td>The successful incident-start path builds a <code>life_incident_started</code> <code>RawEventLogEntry</code> and passes both the started incident and that log entry to the injected finalizer for atomic durable visibility instead of using the ordinary <code>raw_event_log.append()</code> path.</td>
+        </tr>
+        <tr>
+          <td>FR-11</td>
+          <td>If the injected finalizer rejects the start or returns a malformed result, Commit and Effects appends <code>life_incident_start_rejected</code>, returns <code>life_incident_start_rejected</code>, and user-turn orchestration stops before assistant visible reply commit. The already committed user visible message and role-model turn log remain intact.</td>
+        </tr>
+        <tr>
+          <td>FR-12</td>
+          <td>User-turn orchestration wires the optional incident-start finalizer through after the role-model turn and before assistant visible reply commit, without changing Runtime Kernel intake, recent-message projection, active-incident context reading, or visible reply commit validation.</td>
         </tr>
       </tbody>
     </table>
@@ -202,23 +240,27 @@
     <h2>Non-Functional Requirements</h2>
     <ul>
       <li>Use only Python standard library behavior; do not add dependencies.</li>
-      <li>Use fakes for the active-incident source, raw log, visible conversation, current-state source, role-model adapter, clock, and IDs.</li>
-      <li>Follow the existing <code>character.state.current</code> request/build/validate pattern for the new active-incident read helper.</li>
-      <li>Keep incident validation explicit and local to the Character State Engine read-side helper. Do not hide it in prompt text.</li>
-      <li>Do not add a new shared contract module unless implementation shows two real production consumers in this slice.</li>
-      <li>Deep-copy source output, context entries, rendered model input, and raw-log model-input snapshots so caller mutation cannot alter audit data.</li>
-      <li>Keep Runtime Kernel and Commit and Effects behavior unchanged.</li>
-      <li>Keep Role Model Loop output parsing unchanged: active-incident context may inform the fake adapter, but it does not authorize <code>life_action</code>.</li>
+      <li>Use fakes for the incident finalizer, raw log, visible conversation, role-model adapter, clock, and IDs.</li>
+      <li>Reuse existing active-incident validation from <code>character.state.current</code>. The committed started incident snapshot must pass <code>validate_active_incident_snapshot()</code>; do not duplicate the type, policy, timestamp, remaining-seconds, or source-ID checks in the incident-start commit path.</li>
+      <li>Reuse or extend the existing visible-reply decision normalizers in <code>runtime.contracts</code> for the base <code>schema_version</code>, <code>action</code>, and <code>visible_reply</code> checks. The new life-action parser must add only the optional <code>life_action.start_incident</code> validation instead of revalidating the visible-reply decision shape separately inside Role Model Loop.</li>
+      <li>Reuse <code>runtime.contracts.normalize_role_model_turn_result()</code> for commit-boundary result validation.</li>
+      <li>Deep-copy model decisions, drafts, started incident snapshots, finalize requests, raw logs, and returned results so caller mutation cannot alter audit data.</li>
+      <li>Keep Runtime Kernel and Character State Engine read behavior unchanged.</li>
+      <li>Keep the user turn ordering explicit: user visible message commit, role model turn, optional incident start commit, assistant visible reply commit.</li>
+      <li>Do not add a general incident package or store abstraction beyond the one finalizer protocol needed by this slice.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>Existing MVP-001 through MVP-010 tests continue to pass.</li>
-      <li>A user turn with a valid active-incident source renders <code>character_snapshot.active_incident</code> to the adapter and records it in the existing role-model turn log.</li>
-      <li>A user turn with no active incident preserves current behavior and omits the field.</li>
-      <li>Malformed incident source output fails before model adapter invocation and appends a <code>role_model_turn_failed</code> raw log with <code>stage = "context_build"</code>.</li>
-      <li>State-patch-enabled turns still require the current-state source, prepare store, and atomic finalizer; adding an incident source alone does not opt into state writes.</li>
-      <li>No concrete incident store, incident lifecycle transition, interruption policy, new event type, body state, retrieval, tool, Live2D, scheduler, provider call, or new model action is added.</li>
+      <li>Existing MVP-001 through MVP-011 tests continue to pass.</li>
+      <li>A default user turn still renders no <code>life_action</code> allowed action and commits the visible reply as before.</li>
+      <li>An incident-start-enabled user turn renders <code>life_action</code> as an allowed action and accepts one valid <code>start_incident</code> decision.</li>
+      <li>A valid <code>start_incident</code> decision commits one active incident and one matching <code>life_incident_started</code> raw log through the injected finalizer before the assistant reply is committed.</li>
+      <li>A valid decision with no <code>life_action</code> skips the incident finalizer and preserves the existing visible reply flow.</li>
+      <li>If living-state patch and incident-start write dependencies are both wired, the user turn returns <code>user_turn_stopped</code> at <code>user_turn_preflight</code> after intake and before any visible conversation append, model call, write commit, or assistant reply commit.</li>
+      <li>Malformed life action output fails before incident commit and visible reply commit.</li>
+      <li>Finalizer rejection or malformed finalizer output appends a <code>life_incident_start_rejected</code> raw log and stops before assistant visible reply commit.</li>
+      <li>No concrete incident store, complete/cancel/resume action, interruption policy, new RuntimeEvent type, body state, retrieval, tool, Live2D, scheduler, provider call, or additional model action is added.</li>
       <li>The development journal records source context, files touched, checks run, review notes, and next action.</li>
       <li>Future ideas discovered during planning are recorded in <a href="future-slices.html">future-slices.html</a>.</li>
     </ul>
@@ -226,74 +268,79 @@
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li>Build and validate <code>ActiveIncidentRequest</code> from a normalized <code>USER_MESSAGE</code>, including optional user and conversation IDs.</li>
-      <li>Map a valid <code>ActiveIncidentSnapshot</code> to <code>ActiveIncidentBrief</code> and verify deep-copy behavior.</li>
-      <li>Reject malformed snapshots for extra fields, unsupported types, non-active status, bad timestamps, bad policies, negative remaining seconds, missing source IDs, and current-event source IDs.</li>
-      <li>Build <code>DecisionContext</code> with no source, source returning <code>None</code>, source returning a valid active incident, and source returning malformed output.</li>
-      <li>Render role-model input with <code>active_incident</code> and reject manually mutated future fields under <code>character_snapshot.active_incident</code>.</li>
-      <li>Build a context-failure raw log entry that records the normalized event and failure details without claiming a model input exists.</li>
-      <li>Assert allowed actions are unchanged by active-incident context.</li>
+      <li>Normalize visible-reply decisions with incident-start opt-in disabled, enabled with no <code>life_action</code>, and enabled with a valid <code>start_incident</code>, proving the incident parser reuses or extends the existing <code>runtime.contracts</code> visible-reply normalizer for base decision validation.</li>
+      <li>Reject malformed <code>life_action</code> values for unsupported action types, extra fields, missing draft fields, unsupported policies, empty title, invalid <code>remaining_seconds</code>, and committed-only draft fields.</li>
+      <li>Validate <code>allowed_actions</code> for <code>["visible_reply"]</code>, <code>["visible_reply", "state_patch"]</code>, and <code>["visible_reply", "life_action"]</code>, while rejecting state-patch plus life-action composition.</li>
+      <li>Build and validate a <code>LifeIncidentStartFinalizeRequest</code> from a normalized <code>USER_MESSAGE</code> and parsed role-model result.</li>
+      <li>Assert the started incident snapshot is accepted and normalized through <code>validate_active_incident_snapshot()</code>, including rejection of malformed finalizer/store-like outputs that violate the shared active-incident snapshot contract.</li>
+      <li>Build <code>life_incident_started</code> and <code>life_incident_start_rejected</code> raw log entries with deep-copy assertions.</li>
+      <li>Validate finalizer success identity, committed log ID matching, and malformed finalizer rejection.</li>
+      <li>Assert skipped, committed, and rejected incident-start commit results.</li>
     </ul>
 
     <h3>Integration Tests</h3>
     <ul>
-      <li>Run one user turn with a fake active-incident source and assert the adapter sees the brief under <code>character_snapshot.active_incident</code>.</li>
-      <li>Assert the <code>role_model_turn_completed</code> raw log stores the same active incident brief in the rendered model input.</li>
-      <li>Assert malformed current-state and active-incident context failures append <code>role_model_turn_failed</code> with <code>stage = "context_build"</code> while preserving the already committed user visible message and skipping the adapter and assistant reply.</li>
-      <li>Run one user turn with the source returning <code>None</code> and assert current visible reply behavior is preserved.</li>
-      <li>Run one state-patch-enabled user turn with both current state and active incident sources to prove the two read-side context entries compose without changing commit order.</li>
+      <li>Run one default user turn and assert <code>life_action</code> is not allowed and the visible reply flow is unchanged.</li>
+      <li>Run one incident-start-enabled user turn with a fake finalizer and assert raw log order: <code>runtime_event_received</code>, <code>user_visible_message_committed</code>, <code>role_model_turn_completed</code>, <code>life_incident_started</code>, <code>visible_reply_committed</code>.</li>
+      <li>Assert the fake finalizer receives the started incident and the same committed raw log entry ID returned by the user-turn result.</li>
+      <li>Run one incident-start-enabled user turn where the model omits <code>life_action</code> and assert the finalizer is not called.</li>
+      <li>Run one user turn with both living-state patch and incident-start write dependencies wired and assert it stops at <code>user_turn_preflight</code> after <code>runtime_event_received</code>, with no user-visible append, model call, write finalizer call, or assistant reply commit.</li>
+      <li>Run one malformed life-action model output and assert the adapter result is logged as <code>role_model_turn_failed</code> with no incident or assistant reply commit.</li>
+      <li>Run one finalizer rejection and assert user-turn result stops at <code>life_incident_start_commit</code> before assistant visible reply commit.</li>
       <li>Run full unittest discovery.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
       <li>Runtime Kernel remains unchanged.</li>
-      <li>Character State Engine owns the new active-incident request, snapshot validation, and brief-building helper.</li>
-      <li>Role Model Loop owns placing the validated brief into <code>DecisionContext</code>, rendering it, and logging success or validation failure through existing role-model turn log kinds.</li>
-      <li>User-turn orchestration may pass the optional active-incident source through to Role Model Loop.</li>
-      <li>Commit and Effects remains unchanged because no incident decision is accepted or committed.</li>
-      <li>Raw Event Log behavior changes only insofar as existing role-model turn logs may contain the new context field or a <code>context_build</code> failure for malformed context inputs.</li>
+      <li>Character State Engine remains read-only in this slice; it only supplies reusable incident constants and the already implemented active-incident context shape.</li>
+      <li>Role Model Loop owns rendering the opt-in allowed action, parsing optional <code>life_action.start_incident</code>, and logging malformed model output through existing role-model failure logs.</li>
+      <li>Commit and Effects owns incident-start validation, started incident snapshot construction, commit/reject raw log construction, and finalizer result validation.</li>
+      <li>User-turn orchestration owns opt-in wiring, rejects mutually enabled write action families before user-visible message commit, and stops before assistant visible reply if incident start commit rejects.</li>
+      <li>Raw Event Log behavior changes only by adding the incident-start commit/reject raw log kinds needed for this write boundary.</li>
     </ul>
 
     <h2>Implementation Results</h2>
     <ul>
-      <li>Added <code>ActiveIncidentRequest</code>, <code>ActiveIncidentSnapshot</code>, <code>ActiveIncidentBrief</code>, and <code>ActiveIncidentSource</code> to the Character State Engine read contracts in <code>src/character/state/current.py</code>.</li>
-      <li>Reused one private <code>USER_MESSAGE</code> read-request envelope helper for both current-state and active-incident sources, so optional <code>user_id</code> and <code>conversation_id</code> are derived consistently from the normalized event.</li>
-      <li>Mapped valid active incident snapshots into model-facing briefs and rejected extra fields, unsupported types, non-active status, invalid timestamps, negative or boolean <code>remaining_seconds</code>, unsupported policies, missing source IDs, and current-event source IDs.</li>
-      <li>Threaded the optional active-incident source through <code>build_decision_context()</code>, <code>run_role_model_turn()</code>, and <code>run_user_message_turn()</code> without changing Runtime Kernel, Commit and Effects, allowed actions, state-patch opt-in, visible reply commit ordering, or model output parsing.</li>
-      <li>Kept success logging on the existing <code>role_model_turn_completed</code> raw log by validating and rendering <code>character_snapshot.active_incident</code> inside the role-model input snapshot.</li>
-      <li>Added <code>role_model_turn_failed</code> logging for malformed context-build/render failures before adapter invocation, using <code>stage = "context_build"</code> and <code>code = "malformed_context"</code>.</li>
-      <li>Added unit and integration coverage for valid active incident context, absent active incidents, malformed source output before adapter invocation, context-build failure logging, render-time validation, deep-copy behavior, pass-through from user-turn orchestration, and composition with living-state patch commits.</li>
+      <li>Added shared incident constants and <code>normalize_start_incident_life_action()</code> in <code>runtime.contracts</code>, while keeping the base visible-reply decision validation shared with prior slices.</li>
+      <li>Reused the shared incident type, policy, and <code>remaining_seconds</code> validators from <code>runtime.contracts</code> inside <code>character.state.current</code> so active-incident read validation and start-draft validation cannot drift.</li>
+      <li>Extended Role Model Loop with explicit <code>allow_incident_start</code> opt-in, <code>["visible_reply", "life_action"]</code> allowed actions, incident-start instructions that enumerate the parser-enforced incident type and policy values, and malformed <code>life_action</code> parse failures through the existing <code>role_model_turn_failed</code> raw log.</li>
+      <li>Added <code>commit_effects.incident_start</code> as the narrow Commit and Effects boundary for building runtime-owned active incident snapshots, constructing <code>life_incident_started</code> success <code>RawEventLogEntry</code> records, validating finalizer success, and appending <code>life_incident_start_rejected</code> logs on rejection.</li>
+      <li>Wired <code>run_user_message_turn()</code> so an injected <code>LifeIncidentStartFinalizer</code> opts into the incident-start path after the role-model turn and before assistant visible reply commit.</li>
+      <li>Kept living-state patch and incident-start composition rejected for MVP-012; the user turn can opt into one write-side model action family at a time, and the mutually enabled configuration now stops during preflight before user-visible message commit.</li>
+      <li>Added focused unit and integration coverage for parsing, malformed drafts, allowed-action scoping, atomic finalizer success, finalizer rejection, skipped starts, deep-copy audit data, and user-turn ordering.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>MVP-011 is the read-side incident equivalent of MVP-008, not the incident lifecycle implementation.</li>
-      <li>The field name should stay aligned with Notion's compact context shape: <code>character_snapshot.active_incident</code>.</li>
-      <li>If implementation pressure suggests <code>interrupted_incident</code>, <code>life_action</code>, event priority, or lifecycle commits, park those as future slices.</li>
-      <li>The source snapshot's <code>status = "active"</code> guard is the compatibility boundary that prevents queued, interrupted, completed, or cancelled records from leaking into this MVP's model-facing view.</li>
+      <li>MVP-012 is the incident equivalent of the first living-state write slice, but narrower: start only, no complete/cancel/resume, and no composition with state patches yet.</li>
+      <li>The model proposes a draft; the runtime generates committed identity, timestamps, status, and source IDs.</li>
+      <li>The finalizer is the only boundary allowed to durably expose a started incident and its matching <code>life_incident_started</code> <code>RawEventLogEntry</code>; success logs are not appended through ordinary <code>raw_event_log.append()</code>. A malformed success result must mean no durable incident/log visibility occurred.</li>
+      <li>If implementation pressure suggests concrete storage, interruption, body effects, Live2D, or completion events, park those as future slices.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should the eventual concrete incident store use append-only lifecycle records or mutable current rows? Not in MVP-011.</li>
-      <li>Should user messages convert <code>active_incident</code> into <code>interrupted_incident</code> before the model call? Not in MVP-011.</li>
-      <li>Should active incidents affect allowed actions by exposing <code>life_action</code>? Not in MVP-011.</li>
+      <li>Should later incident starts require an active-incident source that proves no current active incident exists, or should the concrete store own that conflict check? Not in MVP-012.</li>
+      <li>Should <code>remaining_seconds</code> become <code>expected_end_at</code> at commit time or stay as a duration hint until a scheduler slice exists? MVP-012 records only the minimal fields tests require.</li>
+      <li>Should a future slice allow <code>state_patch</code> and <code>life_action</code> in the same decision? Not until ordering and rejection behavior are specified.</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Concrete <code>LifeIncidentStore</code> adapter after the read-only active-incident context contract is proven.</li>
-      <li>Incident lifecycle commit boundary for start, complete, cancel, resume, and go-idle decisions.</li>
-      <li>Runtime Kernel interruption policy that turns an active incident into an interrupted/background incident for a user turn.</li>
-      <li><code>INCIDENT_COMPLETION</code> event handling after one active incident lifecycle works.</li>
-      <li>Dedicated context-build raw logs for debug/replay when context building has multiple state sources.</li>
+      <li>Complete, cancel, resume, go-idle, and no-change incident actions after start commits are proven.</li>
+      <li>Concrete <code>LifeIncidentStore</code> adapter and active-incident conflict checks after the finalizer contract is stable.</li>
+      <li>State patch and incident action composition in one user turn.</li>
+      <li>User interruption policy that converts an active incident into interrupted or background context.</li>
+      <li><code>INCIDENT_COMPLETION</code> event intake and completion commit behavior.</li>
+      <li>Body effects and Live2D semantic status driven by committed incidents.</li>
+      <li>Incident start idempotency and replay/reconciliation after concrete storage exists.</li>
     </ul>
 
     <h2>Next Action</h2>
     <p>
-      Finish PR #12 review fixes, rerun the local quality gate, push the review
-      fix commit, then merge after required CI and review requirements pass.
+      Verify <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>
+      CI and review feedback, then merge after required checks and approval.
     </p>
   </main>
 </body>
