@@ -65,9 +65,11 @@
       <a href="https://github.com/QuellaMC/Project02/pull/11">PR #11</a>.
       MVP-011 is recorded from
       <a href="https://github.com/QuellaMC/Project02/pull/12">PR #12</a>.
-      MVP-012 is tracked in
-      <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>
-      from branch <code>feature/mvp-012-functional-spec</code>.
+      MVP-012 is recorded from
+      <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>.
+      Parser rejection matrix coverage is tracked as a follow-up in
+      <a href="https://github.com/QuellaMC/Project02/pull/14">PR #14</a>
+      from branch <code>feature/mvp-012-parser-coverage</code>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -86,16 +88,16 @@ flowchart LR
     RoleLog["role_model_turn_completed&lt;br/&gt;role_model_turn_failed"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011 implemented; MVP-012 in PR #13"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012 implemented; parser coverage in PR #14"]
     Context["DecisionContext builder&lt;br/&gt;current event + recent messages + living_state_brief + active_incident"]
     Render["RoleModelInput renderer&lt;br/&gt;strict context validation"]
     Adapter["Injected fake RoleModelAdapter"]
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply required"]
     StatePatchParse["Optional state_patch.living_state parser&lt;br/&gt;MVP-009 implemented"]
-    LifeActionParse["Optional life_action.start_incident parser&lt;br/&gt;MVP-012 PR #13"]
+    LifeActionParse["Optional life_action.start_incident parser&lt;br/&gt;MVP-012 implemented&lt;br/&gt;FR-6 parser coverage PR #14"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010 implemented; MVP-012 in PR #13"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012 implemented"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -103,7 +105,7 @@ flowchart LR
     StatePatchCommit["Living state patch commit/reject&lt;br/&gt;injected fake store"]
     PatchStore["Injected living-state patch sink&lt;br/&gt;MVP-009 prepare boundary"]
     AtomicFinalize["Atomic state-plus-log finalize&lt;br/&gt;MVP-010 PR #10 + follow-up PR #11"]
-    IncidentStartCommit["Start incident commit/reject&lt;br/&gt;MVP-012 PR #13"]
+    IncidentStartCommit["Start incident commit/reject&lt;br/&gt;MVP-012 implemented"]
     IncidentStartFinalize["Injected incident-start finalizer&lt;br/&gt;atomic incident + log visibility"]
   end
 
@@ -153,7 +155,7 @@ flowchart LR
   classDef active fill:#fff8e6,stroke:#b7832f,color:#172026;
   class Normalize,SharedIntake,RouteUpdate,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages,UserProjection,VisibleRecentSource,CurrentStateSource,LivingStateBrief,ActiveIncidentSource,ActiveIncidentBrief,Turn,TurnResult implemented;
   class StatePatchParse,StatePatchCommit,PatchStore,AtomicFinalize implemented;
-  class LifeActionParse,IncidentStartCommit,IncidentStartFinalize active;
+  class LifeActionParse,IncidentStartCommit,IncidentStartFinalize implemented;
       </pre>
     </div>
 
@@ -168,9 +170,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-012 - Minimal Start Incident Commit Boundary</a></td>
-          <td>Open <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a> on <code>feature/mvp-012-functional-spec</code>.</td>
-          <td>Allow an opted-in <code>USER_MESSAGE</code> turn to parse and commit one optional <code>life_action.start_incident</code> through an injected fake finalizer, without complete/cancel/resume, interruption policy, concrete incident storage, body, retrieval, tools, Live2D, or new event types.</td>
+          <td>MVP-012 parser rejection coverage follow-up</td>
+          <td>Open <a href="https://github.com/QuellaMC/Project02/pull/14">PR #14</a> on <code>feature/mvp-012-parser-coverage</code>.</td>
+          <td>Add parser-level tests for the FR-6 malformed <code>life_action.start_incident</code> draft matrix, without changing runtime behavior, schemas, prompts, or commit boundaries.</td>
         </tr>
       </tbody>
     </table>
@@ -185,6 +187,11 @@ flowchart LR
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td><a href="active-slice.html">MVP-012 - Minimal Start Incident Commit Boundary</a></td>
+          <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>. Parser coverage follow-up in <a href="https://github.com/QuellaMC/Project02/pull/14">PR #14</a>.</td>
+          <td>Allow an opted-in <code>USER_MESSAGE</code> turn to parse and commit one optional <code>life_action.start_incident</code> through an injected fake finalizer, without complete/cancel/resume, interruption policy, concrete incident storage, body, retrieval, tools, Live2D, or new event types.</td>
+        </tr>
         <tr>
           <td><a href="completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html">MVP-011 - Read-Only Active Incident Brief in DecisionContext</a></td>
           <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/12">PR #12</a>.</td>
