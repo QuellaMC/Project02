@@ -33,6 +33,7 @@
       <li>Addressed review feedback by adding query-level malformed-finalizer coverage for both living-state patch and incident-start success logs.</li>
       <li>Addressed the unresolved PR review thread by changing committed-success query visibility to stage finalizer-exposed entries first, then confirm them only after caller-side finalizer-result validation.</li>
       <li>Closed the blocking review follow-up by requiring confirmed success entries to already be committed or previously staged by finalizer visibility; caller-built success entries can no longer create first query visibility.</li>
+      <li>Addressed the remaining PR review thread by converting committed-success visibility confirmation failures into normal finalizer rejection results with query-visible rejection logs.</li>
     </ul>
 
     <h2>Why It Changed</h2>
@@ -62,6 +63,8 @@
       <li><code>docs/develop-journal/2026-05-19/007-mvp-013-functional-spec.html</code></li>
       <li><code>docs/develop-journal/index.html</code></li>
       <li><code>src/runtime/logging.py</code></li>
+      <li><code>src/commit_effects/living_state.py</code></li>
+      <li><code>src/commit_effects/incident_start.py</code></li>
       <li><code>tests/unit/test_raw_event_log_query.py</code></li>
       <li><code>tests/integration/test_user_message_turn.py</code></li>
     </ul>
@@ -73,6 +76,7 @@
       <li>The spec keeps Commit and Effects responsible for committed success log construction and finalizers responsible only for atomic exposure of already-built artifacts.</li>
       <li>The implementation keeps finalizer visibility opt-in through the test/debug Raw Event Log helper; Commit and Effects modules still do not rebuild query entries or append success logs through the ordinary append path.</li>
       <li>Review fix: staged success entries are discarded on malformed finalizer output, preventing a trace query from showing both <code>*_committed</code> and <code>*_rejected</code> for the same rejected commit.</li>
+      <li>Review fix: if a successful finalizer result did not stage a matching success entry in the queryable log, the commit path now records a <code>malformed_finalize_result</code> rejection instead of raising out of the user turn.</li>
       <li>Future ideas for concrete storage, debug UI, replay execution, pagination, redaction, and retention remain parked in <code>future-slices.html</code>.</li>
     </ul>
 
@@ -84,7 +88,8 @@
       <li><code>python3.13 -m unittest tests.unit.test_raw_event_log_query</code>: passed after staged/confirmed visibility review fix.</li>
       <li><code>python3.13 -m unittest tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_includes_living_state_success_log_in_order tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_excludes_state_success_log_on_malformed_finalize tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_includes_incident_start_success_log_in_order tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_excludes_incident_success_log_on_malformed_finalize</code>: passed after staged/confirmed visibility review fix.</li>
       <li><code>python3.13 -m unittest tests.unit.test_living_state_patch_commit tests.unit.test_incident_start_commit</code>: passed after staged/confirmed visibility review fix.</li>
-      <li><code>python3.13 -m unittest discover</code>: passed, 199 tests.</li>
+      <li><code>python3.13 -m unittest tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_rejects_incident_success_when_finalizer_does_not_stage tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_rejects_state_success_when_finalizer_does_not_stage</code>: passed after confirmation-failure rejection review fix.</li>
+      <li><code>python3.13 -m unittest discover</code>: passed, 201 tests.</li>
       <li><code>python3.13 -m compileall src tests</code>: passed.</li>
       <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-010-atomic-living-state-patch-commit-boundary.html docs/plan/completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html docs/plan/completed/mvp-012-minimal-start-incident-commit-boundary.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-19/007-mvp-013-functional-spec.html</code>: passed.</li>
       <li><code>uvx ruff format --check .</code>: passed after formatting the two files reported by CI.</li>

@@ -29,6 +29,7 @@ from runtime.logging import (
     Clock,
     IdGenerator,
     RawEventLogEntry,
+    RawEventLogQueryValidationError,
     build_raw_log_entry,
     clock_timestamp,
     confirm_committed_success_entry_visibility,
@@ -176,7 +177,13 @@ def commit_life_incident_start(
             source_identity=source_identity,
             committed_log_entry=committed_log_entry,
         )
-        confirm_committed_success_entry_visibility(raw_event_log, committed_log_entry)
+        try:
+            confirm_committed_success_entry_visibility(raw_event_log, committed_log_entry)
+        except RawEventLogQueryValidationError as error:
+            raise LifeIncidentStartFinalizerError(
+                str(error),
+                code="malformed_finalize_result",
+            ) from error
     except LifeIncidentStartFinalizerError as error:
         discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
         failure = _build_failure(
