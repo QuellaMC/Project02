@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-012</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-013</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -213,7 +213,7 @@
       <dd>Likely moves existing validation into <code>runtime.contracts</code> without changing the current <code>DecisionContext</code> shape.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-012 should only add the minimal incident-start commit boundary and should not promote another shared recent-message contract surface.</dd>
+      <dd>MVP-013 should only prove Raw Event Log query visibility for committed success logs and should not promote another shared recent-message contract surface.</dd>
     </dl>
 
     <h2>MVP-007 - Minimal User Turn Orchestrator</h2>
@@ -354,7 +354,7 @@
     <h2>MVP-012 - Minimal Start Incident Commit Boundary</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Implemented locally on 2026-05-19. Let an opted-in <code>USER_MESSAGE</code> turn commit one model-proposed <code>life_action.start_incident</code> through an injected fake finalizer.</dd>
+      <dd>Completed on 2026-05-19. See <a href="completed/mvp-012-minimal-start-incident-commit-boundary.html">completed MVP-012</a>. Let an opted-in <code>USER_MESSAGE</code> turn commit one model-proposed <code>life_action.start_incident</code> through an injected fake finalizer.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>After MVP-011 gives the model compact active-incident context, Phase 3 needs the first write-side incident boundary before broader lifecycle, interruption, and completion behavior can be trusted.</dd>
@@ -375,7 +375,34 @@
       <dd>Adds an optional <code>life_action.start_incident</code> decision field, a start draft, an incident-start finalize request/result, and <code>life_incident_started</code>/<code>life_incident_start_rejected</code> raw log kinds.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>This item is no longer parked; it remains the active PR slice until <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a> is merged.</dd>
+      <dd>This item is no longer parked; it has been completed and recorded under completed plans. Parser coverage follow-up <a href="https://github.com/QuellaMC/Project02/pull/14">PR #14</a> has also merged.</dd>
+    </dl>
+
+    <h2>MVP-013 - Raw Event Log Query/Replay Visibility for Committed Success Logs</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Prove that committed success logs exposed through atomic finalizers are visible through the same Raw Event Log query/debug surface as ordinary appended logs.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>MVP-010 and MVP-012 intentionally route successful commit logs through atomic finalizers instead of ordinary <code>raw_event_log.append()</code>. The debug/replay foundation must not miss those success records or treat them as hidden second logs.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Promoted after MVP-012 and its parser coverage follow-up merged, based on the hidden-risk note from the MVP-010 and MVP-012 atomic finalizer contracts.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-010 and MVP-012 must first provide finalizer-exposed success entries for living-state patch commits and incident-start commits.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>MVP-013 - Raw Event Log Query/Replay Visibility for Committed Success Logs</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>The slice can become too broad if it adds concrete storage, replay execution, debug UI, pagination, retention, redaction, retrieval indexing, or new runtime behavior.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds only a small query shape over existing <code>RawEventLogEntry</code> records. It should not add persisted finalizer-only fields or a parallel log record type.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>This item is no longer parked; it is the active slice in <a href="active-slice.html">MVP-013</a>.</dd>
     </dl>
 
     <h2>Concrete LifeIncidentStore</h2>
@@ -390,7 +417,7 @@
       <dd>Discovered while narrowing MVP-011 away from incident persistence.</dd>
 
       <dt>Dependency</dt>
-      <dd>MVP-012 should first prove the injected incident-start finalizer contract before a concrete store takes over durability.</dd>
+      <dd>MVP-012 has proven the injected incident-start finalizer contract. MVP-013 should first prove finalizer success logs are visible through the Raw Event Log query/debug surface before a concrete store takes over durability.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>LifeIncidentStore concrete adapter v0.1</code>.</dd>
@@ -402,7 +429,7 @@
       <dd>Likely adds storage keys, lifecycle record identity, query semantics, and raw-log traceability for incident records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-012 uses an injected fake finalizer and does not choose concrete storage, migrations, or query semantics.</dd>
+      <dd>MVP-013 still avoids concrete storage, migrations, and durable incident query semantics while it proves Raw Event Log visibility for committed success logs.</dd>
     </dl>
 
     <h2>Remaining Incident Lifecycle Actions</h2>
@@ -417,7 +444,7 @@
       <dd>Discovered while keeping MVP-011 read-only and avoiding <code>life_action</code>.</dd>
 
       <dt>Dependency</dt>
-      <dd>MVP-012 should first prove one narrow allowed action and commit/reject log contract for starting an incident.</dd>
+      <dd>MVP-012 has proven one narrow allowed action and commit/reject log contract for starting an incident. MVP-013 is now focused on Raw Event Log visibility, not new lifecycle actions.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>Minimal incident lifecycle follow-up actions v0.1</code>.</dd>
@@ -429,7 +456,7 @@
       <dd>Likely extends the <code>life_action</code> decision subset and incident commit/reject raw log entries introduced by MVP-012.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-012 exposes only <code>start_incident</code>; the remaining lifecycle actions need separate ordering, conflict, and failure contracts.</dd>
+      <dd>MVP-013 should not add lifecycle actions. The remaining actions need separate ordering, conflict, and failure contracts.</dd>
     </dl>
 
     <h2>User Interruption Incident Policy</h2>
@@ -456,7 +483,7 @@
       <dd>Likely adds <code>interrupted_incident</code> context, interruption status transitions, and a post-turn life action contract.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-012 starts one incident only and does not decide or commit interruption.</dd>
+      <dd>MVP-013 does not decide or commit interruption; it only proves Raw Event Log visibility for existing committed success logs.</dd>
     </dl>
 
     <h2>INCIDENT_COMPLETION RuntimeEvent</h2>
@@ -483,7 +510,7 @@
       <dd>Likely adds a new <code>RuntimeEvent</code> type, route policy, completed incident context, and completion commit logs.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-012 keeps the single implemented event family as <code>USER_MESSAGE</code> and only adds an optional start action inside that turn.</dd>
+      <dd>MVP-013 keeps the single implemented event family as <code>USER_MESSAGE</code> and does not add completion events.</dd>
     </dl>
 
     <h2>Concrete CharacterRuntimeStateStore</h2>
@@ -564,7 +591,7 @@
       <dd>Likely adds tested route outputs for interruption, scheduling, and later event families while preserving the MVP-007 <code>USER_MESSAGE</code> route.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-012 should not broaden Runtime Kernel route policy while adding one Commit and Effects incident-start boundary.</dd>
+      <dd>MVP-013 should not broaden Runtime Kernel route policy while adding a narrow Raw Event Log query/debug visibility proof.</dd>
     </dl>
 
     <h2>Real RoleModelAdapter Provider</h2>
@@ -591,7 +618,7 @@
       <dd>May add provider metadata to model I/O logs without changing <code>CharacterDecision</code>.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-012 still uses injected fake adapter behavior and only extends the parsed decision contract for one optional incident-start action.</dd>
+      <dd>MVP-013 still uses injected fake behavior and should not introduce a real provider while proving Raw Event Log visibility.</dd>
     </dl>
 
     <h2>Shared RoleModelTurnResult Validator</h2>
@@ -645,7 +672,7 @@
       <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-012 slice still uses injected fakes and existing interfaces, with no concrete database.</dd>
+      <dd>The active MVP-013 slice still uses injected fakes and existing interfaces, with no concrete database.</dd>
     </dl>
 
     <h2>Shared Visible Conversation Message Contract</h2>
@@ -672,7 +699,7 @@
       <dd>Likely adds a shared <code>role</code> / <code>message_id</code> visible transcript contract while preserving compatibility with existing assistant output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-012 slice should only add the incident-start commit boundary without unifying durable visible-message schemas.</dd>
+      <dd>The active MVP-013 slice should only prove Raw Event Log visibility without unifying durable visible-message schemas.</dd>
     </dl>
 
     <h2>Recent Source Backed By Visible Conversation Records</h2>
