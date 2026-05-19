@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from math import isfinite
 from typing import Any, Protocol
 
 from runtime.contracts import (
+    ACTIVE_INCIDENT_INTERRUPT_POLICIES,
+    ACTIVE_INCIDENT_RESUME_POLICIES,
+    ACTIVE_INCIDENT_TYPES,
     USER_MESSAGE,
     ContractValidationError,
     RuntimeEvent,
@@ -12,8 +14,10 @@ from runtime.contracts import (
     require_equal,
     require_optional_string,
     require_string,
+    require_supported_value,
     validate_iso8601_timestamp,
     validate_normalized_user_message_event,
+    validate_remaining_seconds,
 )
 from runtime.logging import SCHEMA_VERSION
 
@@ -23,20 +27,6 @@ LivingStateBrief = dict[str, Any]
 ActiveIncidentRequest = dict[str, Any]
 ActiveIncidentSnapshot = dict[str, Any]
 ActiveIncidentBrief = dict[str, Any]
-
-ACTIVE_INCIDENT_TYPES = {
-    "idle",
-    "eat",
-    "drink",
-    "sleep",
-    "rest",
-    "work",
-    "think",
-    "wait",
-    "custom",
-}
-ACTIVE_INCIDENT_INTERRUPT_POLICIES = {"interruptible", "background", "protected"}
-ACTIVE_INCIDENT_RESUME_POLICIES = {"resume", "ask_model", "cancel"}
 
 
 class CurrentCharacterStateSource(Protocol):
@@ -262,7 +252,7 @@ def validate_active_incident_snapshot(snapshot: Any) -> ActiveIncidentSnapshot:
             snapshot.get("incident_id"),
             "ActiveIncidentSnapshot.incident_id",
         ),
-        "type": _require_supported_value(
+        "type": require_supported_value(
             snapshot.get("type"),
             ACTIVE_INCIDENT_TYPES,
             "ActiveIncidentSnapshot.type",
@@ -276,12 +266,12 @@ def validate_active_incident_snapshot(snapshot: Any) -> ActiveIncidentSnapshot:
             snapshot.get("title"),
             "ActiveIncidentSnapshot.title",
         ),
-        "interrupt_policy": _require_supported_value(
+        "interrupt_policy": require_supported_value(
             snapshot.get("interrupt_policy"),
             ACTIVE_INCIDENT_INTERRUPT_POLICIES,
             "ActiveIncidentSnapshot.interrupt_policy",
         ),
-        "resume_policy": _require_supported_value(
+        "resume_policy": require_supported_value(
             snapshot.get("resume_policy"),
             ACTIVE_INCIDENT_RESUME_POLICIES,
             "ActiveIncidentSnapshot.resume_policy",
@@ -298,7 +288,7 @@ def validate_active_incident_snapshot(snapshot: Any) -> ActiveIncidentSnapshot:
                 f"ActiveIncidentSnapshot.{field_name}",
             )
     if "remaining_seconds" in snapshot:
-        normalized_snapshot["remaining_seconds"] = _validate_remaining_seconds(
+        normalized_snapshot["remaining_seconds"] = validate_remaining_seconds(
             snapshot["remaining_seconds"],
             "ActiveIncidentSnapshot.remaining_seconds",
         )
@@ -328,7 +318,7 @@ def validate_active_incident_brief(brief: Any) -> ActiveIncidentBrief:
             brief.get("incident_id"),
             "active_incident.incident_id",
         ),
-        "type": _require_supported_value(
+        "type": require_supported_value(
             brief.get("type"),
             ACTIVE_INCIDENT_TYPES,
             "active_incident.type",
@@ -337,12 +327,12 @@ def validate_active_incident_brief(brief: Any) -> ActiveIncidentBrief:
             brief.get("title"),
             "active_incident.title",
         ),
-        "interrupt_policy": _require_supported_value(
+        "interrupt_policy": require_supported_value(
             brief.get("interrupt_policy"),
             ACTIVE_INCIDENT_INTERRUPT_POLICIES,
             "active_incident.interrupt_policy",
         ),
-        "resume_policy": _require_supported_value(
+        "resume_policy": require_supported_value(
             brief.get("resume_policy"),
             ACTIVE_INCIDENT_RESUME_POLICIES,
             "active_incident.resume_policy",
@@ -359,7 +349,7 @@ def validate_active_incident_brief(brief: Any) -> ActiveIncidentBrief:
                 f"active_incident.{field_name}",
             )
     if "remaining_seconds" in brief:
-        normalized_brief["remaining_seconds"] = _validate_remaining_seconds(
+        normalized_brief["remaining_seconds"] = validate_remaining_seconds(
             brief["remaining_seconds"],
             "active_incident.remaining_seconds",
         )
@@ -469,22 +459,3 @@ def _validate_non_empty_source_event_ids(value: Any, field_name: str) -> list[st
     if not source_event_ids:
         raise ContractValidationError(f"{field_name} must include at least one source event ID.")
     return source_event_ids
-
-
-def _require_supported_value(value: Any, allowed_values: set[str], field_name: str) -> str:
-    normalized_value = require_string(value, field_name)
-    if normalized_value not in allowed_values:
-        formatted = ", ".join(sorted(allowed_values))
-        raise ContractValidationError(f"{field_name} must be one of: {formatted}.")
-    return normalized_value
-
-
-def _validate_remaining_seconds(value: Any, field_name: str) -> int | float:
-    if (
-        not isinstance(value, (int, float))
-        or isinstance(value, bool)
-        or not isfinite(value)
-        or value < 0
-    ):
-        raise ContractValidationError(f"{field_name} must be a non-negative number.")
-    return value

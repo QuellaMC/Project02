@@ -63,9 +63,11 @@
       <a href="https://github.com/QuellaMC/Project02/pull/10">PR #10</a>,
       with follow-up review fixes in
       <a href="https://github.com/QuellaMC/Project02/pull/11">PR #11</a>.
-      MVP-011 is tracked in
-      <a href="https://github.com/QuellaMC/Project02/pull/12">PR #12</a>
-      from branch <code>feature/mvp-011-functional-spec</code>.
+      MVP-011 is recorded from
+      <a href="https://github.com/QuellaMC/Project02/pull/12">PR #12</a>.
+      MVP-012 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>
+      from branch <code>feature/mvp-012-functional-spec</code>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -84,15 +86,16 @@ flowchart LR
     RoleLog["role_model_turn_completed&lt;br/&gt;role_model_turn_failed"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009 implemented; MVP-011 in PR #12"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011 implemented; MVP-012 in PR #13"]
     Context["DecisionContext builder&lt;br/&gt;current event + recent messages + living_state_brief + active_incident"]
     Render["RoleModelInput renderer&lt;br/&gt;strict context validation"]
     Adapter["Injected fake RoleModelAdapter"]
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply required"]
     StatePatchParse["Optional state_patch.living_state parser&lt;br/&gt;MVP-009 implemented"]
+    LifeActionParse["Optional life_action.start_incident parser&lt;br/&gt;MVP-012 PR #13"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010 implemented"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010 implemented; MVP-012 in PR #13"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -100,6 +103,8 @@ flowchart LR
     StatePatchCommit["Living state patch commit/reject&lt;br/&gt;injected fake store"]
     PatchStore["Injected living-state patch sink&lt;br/&gt;MVP-009 prepare boundary"]
     AtomicFinalize["Atomic state-plus-log finalize&lt;br/&gt;MVP-010 PR #10 + follow-up PR #11"]
+    IncidentStartCommit["Start incident commit/reject&lt;br/&gt;MVP-012 PR #13"]
+    IncidentStartFinalize["Injected incident-start finalizer&lt;br/&gt;atomic incident + log visibility"]
   end
 
   subgraph RecentContext["Context Source - MVP-004 and MVP-006 implemented"]
@@ -107,10 +112,10 @@ flowchart LR
     VisibleRecentSource["Visible conversation recent source&lt;br/&gt;maps committed records to context"]
   end
 
-  subgraph CharacterState["Character State Engine - MVP-008 implemented; MVP-011 in PR #12"]
+  subgraph CharacterState["Character State Engine - MVP-008 and MVP-011 implemented"]
     CurrentStateSource["Read-only current-state source&lt;br/&gt;injected fake"]
     LivingStateBrief["living_state_brief&lt;br/&gt;validated compact current reality"]
-    ActiveIncidentSource["Read-only active-incident source&lt;br/&gt;MVP-011 PR #12 target"]
+    ActiveIncidentSource["Read-only active-incident source&lt;br/&gt;MVP-011 PR #12 implemented"]
     ActiveIncidentBrief["active_incident brief&lt;br/&gt;validated compact incident context"]
   end
 
@@ -123,6 +128,7 @@ flowchart LR
   SharedIntake --> LogHelper --> RuntimeLog
   Normalize --> Context --> Render --> Adapter --> Parse
   Parse --> StatePatchParse
+  Parse --> LifeActionParse
   Normalize --> UserProjection
   UserProjection --> Conversation
   UserProjection --> CommitLog
@@ -131,6 +137,8 @@ flowchart LR
   ActiveIncidentSource --> ActiveIncidentBrief --> Context
   StatePatchParse --> StatePatchCommit --> PatchStore --> AtomicFinalize
   StatePatchCommit --> LogHelper
+  LifeActionParse --> IncidentStartCommit --> IncidentStartFinalize
+  IncidentStartCommit --> LogHelper
   Parse --> LogHelper --> RoleLog
   Parse --> Commit --> Conversation
   Commit --> CommitLog
@@ -143,9 +151,9 @@ flowchart LR
 
   classDef implemented fill:#e7f1e9,stroke:#5c8a65,color:#172026;
   classDef active fill:#fff8e6,stroke:#b7832f,color:#172026;
-  class Normalize,SharedIntake,RouteUpdate,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages,UserProjection,VisibleRecentSource,CurrentStateSource,LivingStateBrief,Turn,TurnResult implemented;
+  class Normalize,SharedIntake,RouteUpdate,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages,UserProjection,VisibleRecentSource,CurrentStateSource,LivingStateBrief,ActiveIncidentSource,ActiveIncidentBrief,Turn,TurnResult implemented;
   class StatePatchParse,StatePatchCommit,PatchStore,AtomicFinalize implemented;
-  class ActiveIncidentSource,ActiveIncidentBrief active;
+  class LifeActionParse,IncidentStartCommit,IncidentStartFinalize active;
       </pre>
     </div>
 
@@ -160,9 +168,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-011 - Read-Only Active Incident Brief in DecisionContext</a></td>
-          <td>Open <a href="https://github.com/QuellaMC/Project02/pull/12">PR #12</a> on <code>feature/mvp-011-functional-spec</code>.</td>
-          <td>Add one optional injected active-incident source and one compact <code>character_snapshot.active_incident</code> brief to the existing <code>USER_MESSAGE</code> role-model context, without lifecycle writes, interruption policy, queues, body, retrieval, tools, Live2D, or new event types.</td>
+          <td><a href="active-slice.html">MVP-012 - Minimal Start Incident Commit Boundary</a></td>
+          <td>Open <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a> on <code>feature/mvp-012-functional-spec</code>.</td>
+          <td>Allow an opted-in <code>USER_MESSAGE</code> turn to parse and commit one optional <code>life_action.start_incident</code> through an injected fake finalizer, without complete/cancel/resume, interruption policy, concrete incident storage, body, retrieval, tools, Live2D, or new event types.</td>
         </tr>
       </tbody>
     </table>
@@ -177,6 +185,11 @@ flowchart LR
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td><a href="completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html">MVP-011 - Read-Only Active Incident Brief in DecisionContext</a></td>
+          <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/12">PR #12</a>.</td>
+          <td>Add one optional injected active-incident source and one compact <code>character_snapshot.active_incident</code> brief to the existing <code>USER_MESSAGE</code> role-model context, without lifecycle writes, interruption policy, queues, body, retrieval, tools, Live2D, or new event types.</td>
+        </tr>
         <tr>
           <td><a href="completed/mvp-010-atomic-living-state-patch-commit-boundary.html">MVP-010 - Atomic Living State Patch Commit Boundary</a></td>
           <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/10">PR #10</a>. Follow-up review fixes in <a href="https://github.com/QuellaMC/Project02/pull/11">PR #11</a>.</td>
@@ -237,7 +250,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active MVP-011 active-incident read context boundary are parked in
+      Ideas beyond the active MVP-012 incident-start commit boundary are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 

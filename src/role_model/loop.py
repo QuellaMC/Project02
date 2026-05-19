@@ -18,9 +18,13 @@ from character.state.current import (
     validate_living_state_brief_for_event,
 )
 from runtime.contracts import (
+    ACTIVE_INCIDENT_INTERRUPT_POLICIES,
+    ACTIVE_INCIDENT_RESUME_POLICIES,
+    ACTIVE_INCIDENT_TYPES,
     ASSISTANT_VISIBLE_REPLY_KIND,
     ASSISTANT_VISIBLE_REPLY_ROLE,
     DECISION_READY_FOR_COMMIT_STATUS,
+    LIFE_ACTION,
     STATE_PATCH_ACTION,
     USER_MESSAGE,
     USER_VISIBLE_MESSAGE_KIND,
@@ -56,6 +60,20 @@ FAILURE_CODES_BY_STAGE = {
     "adapter_call": {"adapter_exception"},
     "parse_output": {"malformed_model_output"},
 }
+
+
+def _format_allowed_contract_values(values: set[str]) -> str:
+    return ", ".join(f"'{value}'" for value in sorted(values))
+
+
+INCIDENT_TYPE_CONTRACT_VALUES = _format_allowed_contract_values(ACTIVE_INCIDENT_TYPES)
+INCIDENT_INTERRUPT_POLICY_CONTRACT_VALUES = _format_allowed_contract_values(
+    ACTIVE_INCIDENT_INTERRUPT_POLICIES
+)
+INCIDENT_RESUME_POLICY_CONTRACT_VALUES = _format_allowed_contract_values(
+    ACTIVE_INCIDENT_RESUME_POLICIES
+)
+
 ROLE_MODEL_INSTRUCTIONS = (
     "Return one JSON object only. The object must contain schema_version='0.1', "
     "action='visible_reply', and visible_reply.text as a non-empty string. "
@@ -67,6 +85,17 @@ STATE_PATCH_ROLE_MODEL_INSTRUCTIONS = (
     "It may also include optional state_patch.living_state with only "
     "current_activity, mood, and toward_user as non-empty strings. "
     "Do not include extra fields."
+)
+INCIDENT_START_ROLE_MODEL_INSTRUCTIONS = (
+    "Return one JSON object only. The object must contain schema_version='0.1', "
+    "action='visible_reply', and visible_reply.text as a non-empty string. "
+    "It may also include optional life_action with type='start_incident' and "
+    "incident containing only type, title, optional remaining_seconds, "
+    "interrupt_policy, and resume_policy. incident.type must be one of: "
+    f"{INCIDENT_TYPE_CONTRACT_VALUES}. interrupt_policy must be one of: "
+    f"{INCIDENT_INTERRUPT_POLICY_CONTRACT_VALUES}. resume_policy must be one "
+    f"of: {INCIDENT_RESUME_POLICY_CONTRACT_VALUES}. Do not include committed "
+    "incident fields or extra fields."
 )
 
 DecisionContext = dict[str, Any]
@@ -140,10 +169,15 @@ def build_decision_context(
     current_state_source: CurrentCharacterStateSource | None = None,
     active_incident_source: ActiveIncidentSource | None = None,
     allow_state_patch: bool = False,
+    allow_incident_start: bool = False,
 ) -> DecisionContext:
     normalized_event = _wrap_contract_error(
         lambda: validate_normalized_user_message_event(event, source_name="event")
     )
+    if allow_state_patch and allow_incident_start:
+        raise RoleModelValidationError(
+            "state_patch and life_action cannot both be allowed in MVP-012."
+        )
     if allow_state_patch and current_state_source is None:
         raise RoleModelValidationError("allow_state_patch requires current_state_source.")
     payload = normalized_event["payload"]
@@ -179,6 +213,8 @@ def build_decision_context(
     allowed_actions = [VISIBLE_REPLY_ACTION]
     if allow_state_patch:
         allowed_actions.append(STATE_PATCH_ACTION)
+    if allow_incident_start:
+        allowed_actions.append(LIFE_ACTION)
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -226,6 +262,9 @@ def parse_character_decision(
             allow_state_patch=_state_patch_allowed(
                 validated_model_input["decision_context"]["allowed_actions"]
             ),
+            allow_life_action=_life_action_allowed(
+                validated_model_input["decision_context"]["allowed_actions"]
+            ),
             source_name="model output",
         )
     )
@@ -242,6 +281,7 @@ def run_role_model_turn(
     current_state_source: CurrentCharacterStateSource | None = None,
     active_incident_source: ActiveIncidentSource | None = None,
     allow_state_patch: bool = False,
+    allow_incident_start: bool = False,
 ) -> RoleModelTurnResult:
     try:
         decision_context = build_decision_context(
@@ -250,6 +290,7 @@ def run_role_model_turn(
             current_state_source=current_state_source,
             active_incident_source=active_incident_source,
             allow_state_patch=allow_state_patch,
+            allow_incident_start=allow_incident_start,
         )
         model_input = render_role_model_input(decision_context)
     except RoleModelValidationError as error:
@@ -1112,6 +1153,9 @@ def _validate_character_decision(
             allow_state_patch=_state_patch_allowed(
                 model_input["decision_context"]["allowed_actions"]
             ),
+            allow_life_action=_life_action_allowed(
+                model_input["decision_context"]["allowed_actions"]
+            ),
             source_name="CharacterDecision",
         )
     )
@@ -1122,8 +1166,11 @@ def _validate_allowed_actions(value: Any) -> list[str]:
         return [VISIBLE_REPLY_ACTION]
     if value == [VISIBLE_REPLY_ACTION, STATE_PATCH_ACTION]:
         return [VISIBLE_REPLY_ACTION, STATE_PATCH_ACTION]
+    if value == [VISIBLE_REPLY_ACTION, LIFE_ACTION]:
+        return [VISIBLE_REPLY_ACTION, LIFE_ACTION]
     raise RoleModelValidationError(
-        "allowed_actions must be ['visible_reply'] or ['visible_reply', 'state_patch']."
+        "allowed_actions must be ['visible_reply'], ['visible_reply', 'state_patch'], "
+        "or ['visible_reply', 'life_action']."
     )
 
 
@@ -1131,9 +1178,15 @@ def _state_patch_allowed(allowed_actions: list[str]) -> bool:
     return allowed_actions == [VISIBLE_REPLY_ACTION, STATE_PATCH_ACTION]
 
 
+def _life_action_allowed(allowed_actions: list[str]) -> bool:
+    return allowed_actions == [VISIBLE_REPLY_ACTION, LIFE_ACTION]
+
+
 def _instructions_for_allowed_actions(allowed_actions: list[str]) -> str:
     if _state_patch_allowed(allowed_actions):
         return STATE_PATCH_ROLE_MODEL_INSTRUCTIONS
+    if _life_action_allowed(allowed_actions):
+        return INCIDENT_START_ROLE_MODEL_INSTRUCTIONS
     return ROLE_MODEL_INSTRUCTIONS
 
 

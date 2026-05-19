@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-19 - MVP-012 Review Fixes</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-19 - MVP-012 Review Fixes</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Updated the incident-start Role Model Loop instructions to enumerate the parser-enforced <code>incident.type</code>, <code>interrupt_policy</code>, and <code>resume_policy</code> values.</li>
+      <li>Derived those prompt enum lists from the shared constants in <code>runtime.contracts</code> so the parser and prompt contract stay aligned.</li>
+      <li>Tightened the <code>LifeIncidentStartFinalizer</code> protocol comment and incident-start fake/test names to state that the finalizer durably exposes both the started incident and matching <code>life_incident_started</code> <code>RawEventLogEntry</code>.</li>
+      <li>Updated the active slice and prior implementation journal note to make explicit that the success log is not appended through ordinary <code>raw_event_log.append()</code>.</li>
+    </ul>
+
+    <h2>Why It Was Needed</h2>
+    <p>
+      PR review identified two clarity gaps: the parser enforced incident draft
+      enums that the prompt did not list, and the finalizer contract needed to
+      say where the successful <code>life_incident_started</code> raw log becomes
+      durable when it does not go through the ordinary raw-log append path.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>src/role_model/loop.py</code></li>
+      <li><code>src/commit_effects/incident_start.py</code></li>
+      <li><code>tests/unit/test_role_model_loop.py</code></li>
+      <li><code>tests/unit/test_incident_start_commit.py</code></li>
+      <li><code>tests/integration/test_user_message_turn.py</code></li>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/develop-journal/2026-05-19/003-mvp-012-implementation.html</code></li>
+      <li><code>docs/develop-journal/2026-05-19/004-mvp-012-review-fixes.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>This does not add a new incident type, policy, action, store, persistence adapter, model call, or runtime event.</li>
+      <li>The finalizer remains the narrow Commit and Effects boundary for atomic started-incident plus <code>life_incident_started</code> raw-log visibility.</li>
+      <li>Malformed finalizer output still means no durable started incident or durable success raw-log entry should be visible.</li>
+    </ul>
+
+    <h2>Checks Run</h2>
+    <ul>
+      <li><code>python3.13 -m unittest tests.unit.test_role_model_loop tests.unit.test_incident_start_commit tests.integration.test_user_message_turn</code>: passed, 79 tests.</li>
+      <li><code>python3.13 -m unittest discover -s tests -t .</code>: passed, 183 tests.</li>
+      <li><code>/private/tmp/project02-tools/bin/ruff check .</code>: passed.</li>
+      <li><code>/private/tmp/project02-tools/bin/ruff format --check .</code>: passed.</li>
+      <li><code>PYTHONPATH=/private/tmp/project02-tools python3.13 -m mypy src</code>: passed.</li>
+      <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/develop-journal/index.html docs/develop-journal/2026-05-19/003-mvp-012-implementation.html docs/develop-journal/2026-05-19/004-mvp-012-review-fixes.html</code>: passed.</li>
+      <li><code>git diff --check</code>: passed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Push the review-fix commit to <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>
+      and verify CI.
+    </p>
+  </main>
+</body>
+</html>
