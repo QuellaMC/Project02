@@ -1428,32 +1428,57 @@ class CharacterDecisionParserTests(unittest.TestCase):
                 allow_incident_start=True,
             )
         )
+
+        def incident_draft(**overrides):
+            draft = {
+                "type": "think",
+                "title": "Think",
+                "interrupt_policy": "interruptible",
+                "resume_policy": "resume",
+            }
+            draft.update(overrides)
+            return draft
+
+        def start_incident_action(draft):
+            return {"type": "start_incident", "incident": draft}
+
+        def start_incident_missing(field_name):
+            draft = incident_draft()
+            del draft[field_name]
+            return start_incident_action(draft)
+
         cases = [
             ({"type": "resume_incident", "incident": {}}, "start_incident"),
             (
-                {
-                    "type": "start_incident",
-                    "incident": {
-                        "type": "think",
-                        "title": "Think",
-                        "remaining_seconds": True,
-                        "interrupt_policy": "interruptible",
-                        "resume_policy": "resume",
-                    },
-                },
+                start_incident_action(incident_draft(type="dance")),
+                "incident.type",
+            ),
+            (
+                start_incident_action(incident_draft(title=" ")),
+                "incident.title",
+            ),
+            (
+                start_incident_action(incident_draft(remaining_seconds=-1)),
+                "incident.remaining_seconds",
+            ),
+            (
+                start_incident_action(incident_draft(remaining_seconds=True)),
                 "remaining_seconds",
             ),
             (
-                {
-                    "type": "start_incident",
-                    "incident": {
-                        "type": "think",
-                        "title": "Think",
-                        "started_at": "2026-05-14T11:31:00+00:00",
-                        "interrupt_policy": "interruptible",
-                        "resume_policy": "resume",
-                    },
-                },
+                start_incident_action(incident_draft(interrupt_policy="force")),
+                "incident.interrupt_policy",
+            ),
+            (
+                start_incident_action(incident_draft(resume_policy="ignore")),
+                "incident.resume_policy",
+            ),
+            (start_incident_missing("type"), "incident.type"),
+            (start_incident_missing("title"), "incident.title"),
+            (start_incident_missing("interrupt_policy"), "incident.interrupt_policy"),
+            (start_incident_missing("resume_policy"), "incident.resume_policy"),
+            (
+                start_incident_action(incident_draft(started_at="2026-05-14T11:31:00+00:00")),
                 "started_at",
             ),
         ]
