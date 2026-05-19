@@ -6,6 +6,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 SCHEMA_VERSION = "0.1"
+ATOMIC_FINALIZER_SUCCESS_KINDS = frozenset(
+    {
+        "living_state_patch_committed",
+        "life_incident_started",
+    }
+)
 
 RawEventLogEntry = dict[str, Any]
 RawEventLogQuery = dict[str, Any]
@@ -33,7 +39,19 @@ class InMemoryRawEventLog:
         self._pending_success_by_log_id: dict[str, RawEventLogEntry] = {}
 
     def append(self, entry: RawEventLogEntry) -> None:
-        self._record_entry(entry)
+        normalized_entry = validate_raw_event_log_entry(entry)
+        if normalized_entry["kind"] in ATOMIC_FINALIZER_SUCCESS_KINDS:
+            committed_entry = self._entries_by_log_id.get(normalized_entry["log_id"])
+            if committed_entry is not None:
+                if committed_entry != normalized_entry:
+                    raise RawEventLogQueryValidationError(
+                        "RawEventLogEntry.log_id already exists with different data."
+                    )
+                return
+            raise RawEventLogQueryValidationError(
+                "Atomic finalizer success entries must be exposed and confirmed before append."
+            )
+        self._record_entry(normalized_entry)
 
     def expose_committed_success_entry(self, entry: RawEventLogEntry) -> None:
         normalized_entry = validate_raw_event_log_entry(entry)

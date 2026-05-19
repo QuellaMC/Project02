@@ -105,6 +105,7 @@ class RawEventLogQueryTests(unittest.TestCase):
         store.append(patch_entry)
         store.expose_committed_success_entry(incident_entry)
         store.confirm_committed_success_entry(incident_entry)
+        store.append(incident_entry)
 
         result = store.query(
             {
@@ -117,6 +118,21 @@ class RawEventLogQueryTests(unittest.TestCase):
             [entry["kind"] for entry in result["entries"]],
             ["living_state_patch_committed", "life_incident_started"],
         )
+
+    def test_append_rejects_atomic_success_entries_before_confirmation(self):
+        for kind in ("living_state_patch_committed", "life_incident_started"):
+            with self.subTest(kind=kind):
+                ids = SequenceIdGenerator()
+                store = InMemoryRawEventLog()
+                success_entry = raw_entry(ids, kind=kind)
+
+                with self.assertRaisesRegex(
+                    RawEventLogQueryValidationError,
+                    "must be exposed and confirmed before append",
+                ):
+                    store.append(success_entry)
+
+                self.assertEqual(store.query({"trace_id": "trace-1"})["entries"], [])
 
     def test_unconfirmed_success_entries_are_not_queryable_and_can_be_discarded(self):
         ids = SequenceIdGenerator()

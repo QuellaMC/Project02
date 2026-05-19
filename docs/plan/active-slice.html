@@ -224,6 +224,7 @@
       <li>The risk being closed is specific: MVP-010 and MVP-012 success logs bypass ordinary <code>raw_event_log.append()</code>, so a later debug/replay surface could miss them if the finalizer keeps them in a private list.</li>
       <li>The right proof is a shared read surface over the same <code>RawEventLogEntry</code> shape, not a second copy of committed success logs.</li>
       <li>Review fix: test/debug finalizer visibility is staged first, then confirmed only after finalizer-result validation, so malformed finalizer output cannot leave both success and rejection visible.</li>
+      <li>Review fix: atomic finalizer success kinds are rejected on the ordinary append path before confirmation, and visibility-store failures raised inside finalizers become ordinary rejection logs.</li>
       <li>If implementation pressure suggests storage engines, replay execution, reconciliation, or UI, park those as future slices.</li>
     </ul>
 

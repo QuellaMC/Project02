@@ -202,9 +202,15 @@ def commit_living_state_patch(
             committed_snapshot=validated_snapshot,
             committed_log_entry=committed_log_entry,
         )
-        finalize_result = living_state_patch_finalizer.finalize_living_state_patch_commit(
-            deepcopy(finalize_request)
-        )
+        try:
+            finalize_result = living_state_patch_finalizer.finalize_living_state_patch_commit(
+                deepcopy(finalize_request)
+            )
+        except RawEventLogQueryValidationError as error:
+            raise LivingStatePatchFinalizerError(
+                str(error),
+                code="malformed_finalize_result",
+            ) from error
         validated_finalize_result = validate_living_state_patch_finalize_result(
             finalize_result,
             source_identity=source_identity,

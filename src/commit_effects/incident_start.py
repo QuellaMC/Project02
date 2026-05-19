@@ -169,9 +169,15 @@ def commit_life_incident_start(
             started_incident=started_incident,
             committed_log_entry=committed_log_entry,
         )
-        finalize_result = life_incident_start_finalizer.finalize_life_incident_start(
-            deepcopy(finalize_request)
-        )
+        try:
+            finalize_result = life_incident_start_finalizer.finalize_life_incident_start(
+                deepcopy(finalize_request)
+            )
+        except RawEventLogQueryValidationError as error:
+            raise LifeIncidentStartFinalizerError(
+                str(error),
+                code="malformed_finalize_result",
+            ) from error
         validated_finalize_result = validate_life_incident_start_finalize_result(
             finalize_result,
             source_identity=source_identity,
