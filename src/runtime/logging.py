@@ -54,8 +54,22 @@ class InMemoryRawEventLog:
 
     def confirm_committed_success_entry(self, entry: RawEventLogEntry) -> None:
         normalized_entry = validate_raw_event_log_entry(entry)
-        pending_entry = self._pending_success_by_log_id.pop(normalized_entry["log_id"], None)
-        if pending_entry is not None and pending_entry != normalized_entry:
+        log_id = normalized_entry["log_id"]
+
+        committed_entry = self._entries_by_log_id.get(log_id)
+        if committed_entry is not None:
+            if committed_entry != normalized_entry:
+                raise RawEventLogQueryValidationError(
+                    "Confirmed RawEventLogEntry.log_id already exists with different data."
+                )
+            return
+
+        pending_entry = self._pending_success_by_log_id.pop(log_id, None)
+        if pending_entry is None:
+            raise RawEventLogQueryValidationError(
+                "Confirmed RawEventLogEntry was not staged by finalizer visibility."
+            )
+        if pending_entry != normalized_entry:
             raise RawEventLogQueryValidationError(
                 "Confirmed RawEventLogEntry does not match pending success data."
             )

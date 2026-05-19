@@ -132,6 +132,19 @@ class RawEventLogQueryTests(unittest.TestCase):
         self.assertEqual(staged_result["entries"], [])
         self.assertEqual(discarded_result["entries"], [])
 
+    def test_confirm_rejects_success_entry_that_was_not_staged_by_finalizer(self):
+        ids = SequenceIdGenerator()
+        store = InMemoryRawEventLog()
+        success_entry = raw_entry(ids, kind="living_state_patch_committed")
+
+        with self.assertRaisesRegex(
+            RawEventLogQueryValidationError,
+            "not staged by finalizer visibility",
+        ):
+            store.confirm_committed_success_entry(success_entry)
+
+        self.assertEqual(store.query({"trace_id": "trace-1"})["entries"], [])
+
     def test_rejects_malformed_queries_without_mutating_entries(self):
         ids = SequenceIdGenerator()
         store = InMemoryRawEventLog()
