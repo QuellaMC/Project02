@@ -69,8 +69,8 @@
       <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>,
       with parser rejection matrix coverage in
       <a href="https://github.com/QuellaMC/Project02/pull/14">PR #14</a>.
-      MVP-013 is active locally on
-      <code>feature/mvp-013-raw-log-replay-visibility</code>.
+      MVP-013 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -83,11 +83,11 @@ flowchart LR
     RouteUpdate["USER_MESSAGE route&lt;br/&gt;model_needed = true&lt;br/&gt;next_step = user_turn"]
   end
 
-  subgraph RawLogging["Raw Event Logging - implemented; MVP-013 visibility active"]
+  subgraph RawLogging["Raw Event Logging - implemented; MVP-013 visibility in PR #15"]
     LogHelper["runtime.logging&lt;br/&gt;shared raw-log envelope"]
     RuntimeLog["runtime_event_received"]
     RoleLog["role_model_turn_completed&lt;br/&gt;role_model_turn_failed"]
-    RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 active"]
+    RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 PR #15"]
   end
 
   subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012 implemented; parser coverage in PR #14"]
@@ -179,7 +179,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">MVP-013 - Raw Event Log Query/Replay Visibility for Committed Success Logs</a></td>
-          <td>Active locally on <code>feature/mvp-013-raw-log-replay-visibility</code>.</td>
+          <td>Open <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a> on <code>feature/mvp-013-raw-log-replay-visibility</code>.</td>
           <td>Prove success logs exposed through MVP-010 and MVP-012 atomic finalizers are visible through the same Raw Event Log query/debug surface as ordinary appended logs, without adding concrete storage, replay execution, debug UI, or new runtime behavior.</td>
         </tr>
       </tbody>

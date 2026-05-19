@@ -29,6 +29,7 @@
       <li>Updated <a href="../../plan/index.html">plan index</a> and <a href="../../plan/future-slices.html">future slices</a> so MVP-013 is the only active implementation slice.</li>
       <li>Implemented a minimal queryable in-memory Raw Event Log helper in <code>runtime.logging</code> with trace, event ID, and kind filters.</li>
       <li>Added focused unit and integration coverage for ordinary append-path logs, finalizer-exposed success logs, filtering, order, copy safety, duplicate prevention, and rejection visibility.</li>
+      <li>Opened <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a> for MVP-013 and updated the plan graph with the PR link.</li>
     </ul>
 
     <h2>Why It Changed</h2>
@@ -80,12 +81,13 @@
       <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-010-atomic-living-state-patch-commit-boundary.html docs/plan/completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html docs/plan/completed/mvp-012-minimal-start-incident-commit-boundary.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-19/007-mvp-013-functional-spec.html</code>: passed.</li>
       <li><code>git diff --check</code>: passed.</li>
       <li><code>ruff check src tests</code>, <code>ruff format --check src tests</code>, and <code>mypy</code>: not run locally because the commands are not installed in this environment.</li>
+      <li><code>gh pr create --base main --head feature/mvp-013-raw-log-replay-visibility --title "Implement MVP-013 raw log query visibility" --body-file /private/tmp/mvp013-pr-body.md</code>: created <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>.</li>
     </ul>
 
     <h2>Next Action</h2>
     <p>
-      Review the MVP-013 implementation diff, then commit and open the pull
-      request when the branch is ready for CI.
+      Watch <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>
+      for CI and review feedback, then merge after required checks and approval.
     </p>
   </main>
 </body>
