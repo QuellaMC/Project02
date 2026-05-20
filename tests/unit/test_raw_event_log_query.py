@@ -192,6 +192,46 @@ class RawEventLogQueryTests(unittest.TestCase):
 
         self.assertEqual(store.query({"trace_id": "trace-1"})["entries"], [])
 
+    def test_confirm_mismatch_does_not_remove_staged_success_entry(self):
+        ids = SequenceIdGenerator()
+        store = InMemoryRawEventLog()
+        success_entry = raw_entry(ids, kind="living_state_patch_committed")
+        conflicting_entry = deepcopy(success_entry)
+        conflicting_entry["data"]["payload"]["value"] = "conflicting"
+
+        store.expose_committed_success_entry(success_entry)
+        with self.assertRaisesRegex(
+            RawEventLogQueryValidationError,
+            "does not match pending success data",
+        ):
+            store.confirm_committed_success_entry(conflicting_entry)
+        store.confirm_committed_success_entry(success_entry)
+
+        self.assertEqual(
+            [entry["kind"] for entry in store.query({"trace_id": "trace-1"})["entries"]],
+            ["living_state_patch_committed"],
+        )
+
+    def test_discard_rejects_non_atomic_success_entries_without_mutating_pending_entry(self):
+        ids = SequenceIdGenerator()
+        store = InMemoryRawEventLog()
+        success_entry = raw_entry(ids, kind="living_state_patch_committed")
+        forged_entry = deepcopy(success_entry)
+        forged_entry["kind"] = "visible_reply_committed"
+
+        store.expose_committed_success_entry(success_entry)
+        with self.assertRaisesRegex(
+            RawEventLogQueryValidationError,
+            "atomic finalizer success kind",
+        ):
+            store.discard_committed_success_entry(forged_entry)
+        store.confirm_committed_success_entry(success_entry)
+
+        self.assertEqual(
+            [entry["kind"] for entry in store.query({"trace_id": "trace-1"})["entries"]],
+            ["living_state_patch_committed"],
+        )
+
     def test_rejects_malformed_queries_without_mutating_entries(self):
         ids = SequenceIdGenerator()
         store = InMemoryRawEventLog()

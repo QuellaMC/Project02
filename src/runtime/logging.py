@@ -82,7 +82,7 @@ class InMemoryRawEventLog:
                 )
             return
 
-        pending_entry = self._pending_success_by_log_id.pop(log_id, None)
+        pending_entry = self._pending_success_by_log_id.get(log_id)
         if pending_entry is None:
             raise RawEventLogQueryValidationError(
                 "Confirmed RawEventLogEntry was not staged by finalizer visibility."
@@ -91,10 +91,11 @@ class InMemoryRawEventLog:
             raise RawEventLogQueryValidationError(
                 "Confirmed RawEventLogEntry does not match pending success data."
             )
+        self._pending_success_by_log_id.pop(log_id)
         self._record_entry(normalized_entry)
 
     def discard_committed_success_entry(self, entry: RawEventLogEntry) -> None:
-        normalized_entry = validate_raw_event_log_entry(entry)
+        normalized_entry = _validate_atomic_finalizer_success_entry(entry)
         self._pending_success_by_log_id.pop(normalized_entry["log_id"], None)
 
     def query(self, query: Mapping[str, Any]) -> RawEventLogQueryResult:

@@ -36,6 +36,7 @@
       <li>Addressed the remaining PR review thread by converting committed-success visibility confirmation failures into normal finalizer rejection results with query-visible rejection logs.</li>
       <li>Addressed follow-up blocking review feedback by converting staging-time visibility failures raised inside finalizers into rejection logs and by preventing ordinary append-path publication of atomic success entries before confirmation.</li>
       <li>Hardened the finalizer visibility helper contract so staging and confirmation only accept the two implemented atomic success kinds.</li>
+      <li>Addressed review feedback by keeping pending finalizer success entries intact on confirmation mismatch and by applying the same atomic-kind guard to discard.</li>
     </ul>
 
     <h2>Why It Changed</h2>
@@ -81,6 +82,7 @@
       <li>Review fix: if a successful finalizer result did not stage a matching success entry in the queryable log, the commit path now records a <code>malformed_finalize_result</code> rejection instead of raising out of the user turn.</li>
       <li>Review fix: finalizer-time query visibility errors and accidental append-path success publication are both treated as malformed finalizer visibility, leaving only the ordinary rejection log queryable.</li>
       <li>Review fix: <code>expose_committed_success_entry()</code> and <code>confirm_committed_success_entry()</code> reject non-atomic log kinds instead of accepting any valid <code>RawEventLogEntry</code>.</li>
+      <li>Review fix: confirmation mismatch no longer mutates pending visibility state, so callers can retry or discard the original staged success entry explicitly.</li>
       <li>Future ideas for concrete storage, debug UI, replay execution, pagination, redaction, and retention remain parked in <code>future-slices.html</code>.</li>
     </ul>
 
@@ -95,7 +97,8 @@
       <li><code>python3.13 -m unittest tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_rejects_incident_success_when_finalizer_does_not_stage tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_rejects_state_success_when_finalizer_does_not_stage</code>: passed after confirmation-failure rejection review fix.</li>
       <li><code>python3.13 -m unittest tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_rejects_incident_staging_visibility_failure tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_rejects_incident_success_accidentally_appended tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_rejects_state_staging_visibility_failure tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_rejects_state_success_accidentally_appended</code>: passed after append-path and staging-time visibility review fix.</li>
       <li><code>python3.13 -m unittest tests.unit.test_raw_event_log_query</code>: passed after finalizer visibility kind-guard follow-up.</li>
-      <li><code>python3.13 -m unittest discover</code>: passed, 208 tests.</li>
+      <li><code>python3.13 -m unittest tests.unit.test_raw_event_log_query</code>: passed after pending-confirmation and discard-kind-guard review fixes.</li>
+      <li><code>python3.13 -m unittest discover</code>: passed, 210 tests.</li>
       <li><code>python3.13 -m compileall src tests</code>: passed.</li>
       <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-010-atomic-living-state-patch-commit-boundary.html docs/plan/completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html docs/plan/completed/mvp-012-minimal-start-incident-commit-boundary.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-19/007-mvp-013-functional-spec.html</code>: passed.</li>
       <li><code>uvx ruff format --check .</code>: passed after formatting the two files reported by CI.</li>
