@@ -11,6 +11,11 @@ from character.state.incidents import InMemoryLifeIncidentStore  # noqa: E402
 from commit_effects.incident_start import (  # noqa: E402
     LIFE_INCIDENT_START_REJECTED_STATUS,
     LIFE_INCIDENT_STARTED_STATUS,
+    LifeIncidentStartFinalizerError,
+    build_life_incident_start_commit_request,
+    build_life_incident_start_finalize_request,
+    build_life_incident_started_log_entry,
+    build_started_life_incident_snapshot,
     commit_life_incident_start,
 )
 from runtime.logging import InMemoryRawEventLog, RawEventLogQueryValidationError  # noqa: E402
@@ -34,18 +39,25 @@ class RejectingRawEventLog(InMemoryRawEventLog):
         raise RawEventLogQueryValidationError("visibility staging failed")
 
 
-def normalized_user_message(*, event_id="event-1", trace_id="trace-1"):
+def normalized_user_message(
+    *,
+    event_id="event-1",
+    trace_id="trace-1",
+    user_id="user-1",
+    conversation_id="conversation-1",
+):
+    payload = {"text": "hello"}
+    if user_id is not None:
+        payload["user_id"] = user_id
+    if conversation_id is not None:
+        payload["conversation_id"] = conversation_id
     return {
         "event_id": event_id,
         "trace_id": trace_id,
         "type": "USER_MESSAGE",
         "created_at": "2026-05-20T08:59:00+00:00",
         "schema_version": "0.1",
-        "payload": {
-            "text": "hello",
-            "user_id": "user-1",
-            "conversation_id": "conversation-1",
-        },
+        "payload": payload,
     }
 
 
@@ -74,6 +86,31 @@ def role_model_result_with_incident(*, event_id="event-1", trace_id="trace-1", t
             },
         },
     }
+
+
+def finalize_request_for(event, role_model_result):
+    ids = SequenceIdGenerator()
+    commit_request = build_life_incident_start_commit_request(event, role_model_result)
+    commit_request["commit_time"] = fixed_clock().isoformat()
+    started_incident = build_started_life_incident_snapshot(
+        event,
+        commit_request["draft"],
+        commit_time=commit_request["commit_time"],
+        id_generator=ids,
+    )
+    committed_log_entry = build_life_incident_started_log_entry(
+        event,
+        role_model_result,
+        commit_request["draft"],
+        started_incident,
+        id_generator=ids,
+        clock=fixed_clock,
+    )
+    return build_life_incident_start_finalize_request(
+        commit_request,
+        started_incident=started_incident,
+        committed_log_entry=committed_log_entry,
+    )
 
 
 class InMemoryLifeIncidentStoreTests(unittest.TestCase):
@@ -150,7 +187,7 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
             [],
         )
 
-    def test_second_start_fails_closed_without_overwriting_active_incident(self):
+    def test_same_scope_second_start_fails_closed_without_overwriting_active_incident(self):
         raw_log = InMemoryRawEventLog()
         store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
         first_event = normalized_user_message(event_id="event-1", trace_id="trace-1")
@@ -197,6 +234,190 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
             ]["data"]["started_incident"],
             first_incident,
         )
+
+    def test_different_scope_starts_both_succeed(self):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        first_event = normalized_user_message(
+            event_id="event-1",
+            trace_id="trace-1",
+            user_id="user-1",
+            conversation_id="conversation-1",
+        )
+        second_event = normalized_user_message(
+            event_id="event-2",
+            trace_id="trace-2",
+            user_id="user-2",
+            conversation_id="conversation-1",
+        )
+
+        first_result = commit_life_incident_start(
+            first_event,
+            role_model_result_with_incident(event_id="event-1", trace_id="trace-1"),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+        second_result = commit_life_incident_start(
+            second_event,
+            role_model_result_with_incident(
+                event_id="event-2",
+                trace_id="trace-2",
+                title="second user's incident",
+            ),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(first_result["status"], LIFE_INCIDENT_STARTED_STATUS)
+        self.assertEqual(second_result["status"], LIFE_INCIDENT_STARTED_STATUS)
+        self.assertEqual(
+            store.read_active_incident(build_active_incident_request(first_event))["title"],
+            "thinking through the plan",
+        )
+        self.assertEqual(
+            store.read_active_incident(build_active_incident_request(second_event))["title"],
+            "second user's incident",
+        )
+        self.assertEqual(
+            len(
+                raw_log.query({"trace_id": "trace-1", "kinds": ["life_incident_started"]})[
+                    "entries"
+                ]
+            ),
+            1,
+        )
+        self.assertEqual(
+            len(
+                raw_log.query({"trace_id": "trace-2", "kinds": ["life_incident_started"]})[
+                    "entries"
+                ]
+            ),
+            1,
+        )
+
+    def test_reads_are_isolated_by_scope(self):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        first_event = normalized_user_message(
+            event_id="event-1",
+            trace_id="trace-1",
+            user_id="user-1",
+            conversation_id="conversation-1",
+        )
+        second_event = normalized_user_message(
+            event_id="event-2",
+            trace_id="trace-2",
+            user_id="user-1",
+            conversation_id="conversation-2",
+        )
+        empty_scope_event = normalized_user_message(
+            event_id="event-3",
+            trace_id="trace-3",
+            user_id="user-3",
+            conversation_id="conversation-3",
+        )
+
+        commit_life_incident_start(
+            first_event,
+            role_model_result_with_incident(event_id="event-1", trace_id="trace-1"),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+        commit_life_incident_start(
+            second_event,
+            role_model_result_with_incident(
+                event_id="event-2",
+                trace_id="trace-2",
+                title="second conversation incident",
+            ),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(
+            store.read_active_incident(build_active_incident_request(first_event))["title"],
+            "thinking through the plan",
+        )
+        self.assertEqual(
+            store.read_active_incident(build_active_incident_request(second_event))["title"],
+            "second conversation incident",
+        )
+        self.assertIsNone(
+            store.read_active_incident(build_active_incident_request(empty_scope_event))
+        )
+
+    def test_default_single_user_self_use_scope_behaves_like_current_mvp(self):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        first_event = normalized_user_message(
+            event_id="event-1",
+            trace_id="trace-1",
+            user_id=None,
+            conversation_id=None,
+        )
+        second_event = normalized_user_message(
+            event_id="event-2",
+            trace_id="trace-2",
+            user_id=None,
+            conversation_id=None,
+        )
+
+        first_result = commit_life_incident_start(
+            first_event,
+            role_model_result_with_incident(event_id="event-1", trace_id="trace-1"),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+        first_incident = deepcopy(
+            store.read_active_incident(build_active_incident_request(first_event))
+        )
+        second_result = commit_life_incident_start(
+            second_event,
+            role_model_result_with_incident(
+                event_id="event-2",
+                trace_id="trace-2",
+                title="second self-use incident",
+            ),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(first_result["status"], LIFE_INCIDENT_STARTED_STATUS)
+        self.assertEqual(second_result["status"], LIFE_INCIDENT_START_REJECTED_STATUS)
+        self.assertEqual(
+            store.read_active_incident(build_active_incident_request(second_event)),
+            first_incident,
+        )
+        self.assertEqual(
+            raw_log.query({"trace_id": "trace-2", "kinds": ["life_incident_started"]})["entries"],
+            [],
+        )
+
+    def test_malformed_committed_log_entry_raises_finalizer_error(self):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        event = normalized_user_message()
+        request = finalize_request_for(event, role_model_result_with_incident())
+        request["committed_log_entry"] = "not a raw log entry"
+
+        with self.assertRaises(LifeIncidentStartFinalizerError) as context:
+            store.finalize_life_incident_start(request)
+
+        self.assertEqual(context.exception.code, "malformed_finalize_result")
 
 
 if __name__ == "__main__":

@@ -450,10 +450,10 @@
       <dd><code>MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</code>.</dd>
 
       <dt>Risk Or Unknown</dt>
-      <dd>The slice can become too broad if it adds database persistence, migrations, lifecycle transition rules, replacement policy, queues, retrieval indexing, or multi-user isolation policy.</dd>
+      <dd>The slice can become too broad if it adds database persistence, migrations, lifecycle transition rules, replacement policy, queues, retrieval indexing, auth, locks, or production multi-user isolation policy.</dd>
 
       <dt>Schema Evolution Impact</dt>
-      <dd>Likely reuses the existing active incident snapshot and <code>life_incident_started</code> <code>RawEventLogEntry</code> shapes while adding only an in-memory store read surface. Durable follow-up storage must re-check whether active incidents are keyed by <code>user_id</code>, <code>conversation_id</code>, character identity, or another scoped owner.</dd>
+      <dd>Reuses the existing active incident snapshot and <code>life_incident_started</code> <code>RawEventLogEntry</code> shapes while adding only a scoped in-memory store read surface with a reserved single-user self-use default scope. Durable follow-up storage must re-check auth, locks, migrations, process-restart durability, and whether active incidents are keyed by <code>user_id</code>, <code>conversation_id</code>, character identity, or another scoped owner.</dd>
 
       <dt>Do Not Implement Now Because</dt>
       <dd>This item is no longer parked; it is the active slice in <a href="active-slice.html">MVP-014</a>. Persistent storage, migrations, and full lifecycle query semantics remain parked.</dd>

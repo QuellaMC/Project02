@@ -25,8 +25,10 @@
       <li>Added <code>src/character/state/incidents.py</code> with <code>InMemoryLifeIncidentStore</code>.</li>
       <li>The store implements the existing MVP-012 <code>finalize_life_incident_start()</code> finalizer contract.</li>
       <li>The same store implements the MVP-011 <code>read_active_incident(request)</code> contract and validates <code>ActiveIncidentRequest</code>.</li>
-      <li>Successful starts stage the already-built <code>life_incident_started</code> entry through <code>InMemoryRawEventLog.expose_committed_success_entry()</code> before storing the active incident.</li>
-      <li>Added targeted unit tests for successful finalize/read behavior, copy safety, raw-log staging failure, and second-start rejection.</li>
+      <li>Successful starts stage the already-built <code>life_incident_started</code> entry through <code>InMemoryRawEventLog.expose_committed_success_entry()</code> before storing the active incident for the validated scope.</li>
+      <li>Updated the store from one global active-incident slot to scoped in-memory storage keyed by validated request identity.</li>
+      <li>Added an explicit reserved <code>IncidentScope(mode="single_user_self_use")</code> for self-use mode when both <code>user_id</code> and <code>conversation_id</code> are absent.</li>
+      <li>Added targeted unit tests for successful finalize/read behavior, copy safety, raw-log staging failure, same-scope second-start rejection, different-scope starts, isolated reads, default self-use scope behavior, and malformed raw-log entry validation.</li>
       <li>Added an integration test that runs a <code>USER_MESSAGE</code> turn with the concrete store adapter and verifies the active incident plus query-visible success log.</li>
       <li>Opened <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a> and updated the active plan plus implementation graph with the PR reference.</li>
     </ul>
@@ -46,6 +48,7 @@
       <li><code>tests/unit/test_life_incident_store.py</code></li>
       <li><code>tests/integration/test_user_message_turn.py</code></li>
       <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
       <li><code>docs/plan/index.html</code></li>
       <li><code>docs/develop-journal/2026-05-20/002-mvp-014-implementation.html</code></li>
       <li><code>docs/develop-journal/index.html</code></li>
@@ -55,16 +58,18 @@
     <ul>
       <li>No new RuntimeEvent type, lifecycle action, database adapter, queue, interruption policy, Role Model Loop behavior, or default active-incident source wiring was added.</li>
       <li>The Commit and Effects Engine still builds and validates the started incident snapshot and committed success log entry before the store finalizes anything.</li>
-      <li>The store stages raw-log success visibility before storing the active incident, so raw-log staging failure leaves no active incident.</li>
-      <li>Second starts fail closed with a rejected commit result and do not overwrite the stored active incident.</li>
+      <li>The store stages raw-log success visibility before storing the active incident for a scope, so raw-log staging failure leaves no active incident.</li>
+      <li>Second starts fail closed only for the same incident scope and do not overwrite the stored active incident.</li>
+      <li>Different identified <code>user_id</code> / <code>conversation_id</code> scopes can hold separate active incidents, and reads are isolated by matching scope.</li>
       <li>Returned active incidents and Raw Event Log query results are copy-safe.</li>
-      <li>Residual risk: the store is object-lifetime in-memory storage for one active incident. It validates optional <code>user_id</code> and <code>conversation_id</code> fields on read requests but does not use them for multi-user or multi-conversation isolation; durable storage should re-check that scope first.</li>
+      <li>Residual risk: the store is scoped object-lifetime in-memory storage with a single-user self-use default scope. It is multi-user-shaped but still not production multi-user persistence with auth, locks, migrations, or process-restart durability.</li>
     </ul>
 
     <h2>Checks</h2>
     <ul>
-      <li><code>python3.13 -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_incident_start_turn_with_concrete_store_reads_incident_and_query_success_log</code>: failed before implementation because <code>character.state.incidents</code> did not exist; passed after implementation, 4 tests.</li>
-      <li><code>python3.13 -m unittest discover</code>: passed, 214 tests.</li>
+      <li><code>python3.13 -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_incident_start_turn_with_concrete_store_reads_incident_and_query_success_log</code>: passed after scoped storage update, 8 tests.</li>
+      <li><code>python3.13 -m unittest discover</code>: passed, 218 tests.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code>: passed.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code>: passed.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/mypy</code>: passed.</li>
       <li><code>git diff --check</code>: passed.</li>

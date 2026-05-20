@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from character.state.current import (
@@ -25,37 +26,55 @@ from runtime.contracts import (
     require_string,
     validate_iso8601_timestamp,
 )
-from runtime.logging import SCHEMA_VERSION, RawEventLogEntry, validate_raw_event_log_entry
+from runtime.logging import (
+    SCHEMA_VERSION,
+    RawEventLogEntry,
+    RawEventLogQueryValidationError,
+    validate_raw_event_log_entry,
+)
 
 LifeIncidentStartFinalizeRequest = dict[str, Any]
 LifeIncidentStartFinalizeResult = dict[str, Any]
+IDENTIFIED_SCOPE_MODE = "identified"
+SINGLE_USER_SELF_USE_SCOPE_MODE = "single_user_self_use"
 
 
 class CommittedSuccessRawEventLog(Protocol):
     def expose_committed_success_entry(self, entry: RawEventLogEntry) -> None: ...
 
 
+@dataclass(frozen=True)
+class IncidentScope:
+    mode: str
+    user_id: str | None = None
+    conversation_id: str | None = None
+
+
+SINGLE_USER_SELF_USE_SCOPE = IncidentScope(mode=SINGLE_USER_SELF_USE_SCOPE_MODE)
+
+
 class InMemoryLifeIncidentStore:
-    """In-memory LifeIncidentStore for the single active incident MVP slice."""
+    """Scoped in-memory LifeIncidentStore for the active incident MVP slice."""
 
     def __init__(self, *, raw_event_log: CommittedSuccessRawEventLog) -> None:
         self._raw_event_log = raw_event_log
-        self._active_incident: ActiveIncidentSnapshot | None = None
+        self._active_incidents_by_scope: dict[IncidentScope, ActiveIncidentSnapshot] = {}
 
     def finalize_life_incident_start(
         self,
         request: LifeIncidentStartFinalizeRequest,
     ) -> LifeIncidentStartFinalizeResult:
         validated_request = _validate_life_incident_start_finalize_request(request)
-        if self._active_incident is not None:
+        scope = _incident_scope_from_request(validated_request)
+        if scope in self._active_incidents_by_scope:
             raise LifeIncidentStartFinalizerError(
-                "Active incident already exists.",
+                "Active incident already exists for this scope.",
                 code="finalize_rejected",
             )
 
         committed_log_entry = validated_request["committed_log_entry"]
         self._raw_event_log.expose_committed_success_entry(committed_log_entry)
-        self._active_incident = deepcopy(validated_request["started_incident"])
+        self._active_incidents_by_scope[scope] = deepcopy(validated_request["started_incident"])
 
         return {
             "schema_version": SCHEMA_VERSION,
@@ -69,10 +88,13 @@ class InMemoryLifeIncidentStore:
         self,
         request: ActiveIncidentRequest,
     ) -> ActiveIncidentSnapshot | None:
-        validate_active_incident_request(request)
-        if self._active_incident is None:
+        validated_request = validate_active_incident_request(request)
+        incident = self._active_incidents_by_scope.get(
+            _incident_scope_from_request(validated_request)
+        )
+        if incident is None:
             return None
-        return deepcopy(self._active_incident)
+        return deepcopy(incident)
 
 
 def _validate_life_incident_start_finalize_request(
@@ -144,7 +166,7 @@ def _validate_life_incident_start_finalize_request(
             started_incident=started_incident,
         )
         optional_ids = _validate_optional_ids(request)
-    except ContractValidationError as error:
+    except (ContractValidationError, RawEventLogQueryValidationError) as error:
         raise LifeIncidentStartFinalizerError(
             str(error),
             code="malformed_finalize_result",
@@ -213,6 +235,18 @@ def _validate_optional_ids(request: Mapping[str, Any]) -> dict[str, str]:
                 f"LifeIncidentStartFinalizeRequest.{field_name}",
             )
     return optional_ids
+
+
+def _incident_scope_from_request(request: Mapping[str, Any]) -> IncidentScope:
+    has_user_id = "user_id" in request
+    has_conversation_id = "conversation_id" in request
+    if not has_user_id and not has_conversation_id:
+        return SINGLE_USER_SELF_USE_SCOPE
+    return IncidentScope(
+        mode=IDENTIFIED_SCOPE_MODE,
+        user_id=request["user_id"] if has_user_id else None,
+        conversation_id=request["conversation_id"] if has_conversation_id else None,
+    )
 
 
 def _require_mapping(value: Any, field_name: str) -> Mapping[str, Any]:

@@ -78,12 +78,12 @@
     <ul>
       <li>One event type remains in scope: <code>USER_MESSAGE</code>.</li>
       <li>One life action remains in scope: <code>life_action.type = "start_incident"</code>.</li>
-      <li>One concrete in-memory incident store is in scope for the started active incident record.</li>
+      <li>One concrete scoped in-memory incident store is in scope for started active incident records.</li>
       <li>One adapter is in scope: it implements the existing <code>LifeIncidentStartFinalizer</code> protocol used by MVP-012.</li>
       <li>The same store must implement the existing <code>ActiveIncidentSource.read_active_incident(request)</code> contract with <code>ActiveIncidentRequest</code> so it reuses the shared MVP-011 read boundary.</li>
       <li>The adapter must stage the already-built <code>life_incident_started</code> entry through the MVP-013 <code>InMemoryRawEventLog</code> committed-success visibility path.</li>
       <li>The successful user-turn path should expose the started active incident from the store and expose the matching raw log entry through <code>raw_log.query()</code>.</li>
-      <li>The adapter may reject a start when an active incident is already stored, but it must not replace, interrupt, queue, complete, cancel, or resume incidents.</li>
+      <li>The adapter may reject a start when an active incident is already stored for the same scope, but it must not replace, interrupt, queue, complete, cancel, or resume incidents.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
@@ -181,7 +181,7 @@
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>On a valid finalize request, the adapter stores one active incident snapshot and stages the matching already-built <code>life_incident_started</code> <code>RawEventLogEntry</code> through the MVP-013 committed-success visibility helper.</td>
+          <td>On a valid finalize request, the adapter stores one active incident snapshot for the validated incident scope and stages the matching already-built <code>life_incident_started</code> <code>RawEventLogEntry</code> through the MVP-013 committed-success visibility helper.</td>
         </tr>
         <tr>
           <td>FR-4</td>
@@ -201,14 +201,22 @@
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>If an active incident is already present, another start request must fail closed without overwriting the active incident, appending a success log, or adding lifecycle behavior.</td>
+          <td>If an active incident is already present for the same scope, another start request must fail closed without overwriting the active incident, appending a success log, or adding lifecycle behavior.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>When no <code>life_action</code> is present, existing MVP-012 skipped behavior remains unchanged and the store adapter is not called.</td>
+          <td>Different validated <code>user_id</code> / <code>conversation_id</code> scopes may each hold one active incident, and <code>read_active_incident(request)</code> must return only the incident for the matching scope.</td>
         </tr>
         <tr>
           <td>FR-10</td>
+          <td>When both <code>user_id</code> and <code>conversation_id</code> are absent, the store must use an explicit reserved internal self-use scope such as <code>IncidentScope(mode="single_user_self_use")</code>, not a fake user ID or a normal-looking global owner.</td>
+        </tr>
+        <tr>
+          <td>FR-11</td>
+          <td>When no <code>life_action</code> is present, existing MVP-012 skipped behavior remains unchanged and the store adapter is not called.</td>
+        </tr>
+        <tr>
+          <td>FR-12</td>
           <td>Existing MVP-013 rejection behavior remains unchanged: rejected or malformed finalize paths leave no query-visible <code>life_incident_started</code> entry.</td>
         </tr>
       </tbody>
@@ -221,7 +229,7 @@
       <li>Reuse existing <code>ActiveIncidentSnapshot</code>, <code>RawEventLogEntry</code>, <code>SCHEMA_VERSION</code>, and MVP-012 finalize-result validation instead of creating parallel schemas.</li>
       <li>Keep the implementation future-compatible by naming the store boundary clearly, but do not add database abstractions, migrations, or unused interfaces.</li>
       <li>Do not duplicate Raw Event Log entries. The success log must appear through the MVP-013 committed-success visibility path, not through ordinary <code>raw_event_log.append()</code>.</li>
-      <li>Keep in-memory durability scoped to the store object's lifetime; do not imply process-restart durability.</li>
+      <li>Keep in-memory durability scoped to the store object's lifetime; do not imply process-restart durability or production multi-user persistence.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
@@ -229,6 +237,7 @@
       <li>MVP-013 is recorded under <a href="completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html">completed plans</a>, and this file is the only active implementation slice.</li>
       <li>A user turn with a valid <code>life_action.start_incident</code> can use the concrete in-memory store adapter instead of the MVP-012 recording fake.</li>
       <li>The store exposes the started incident through the existing <code>ActiveIncidentSource.read_active_incident(request)</code> contract after successful finalization.</li>
+      <li>The store uses scoped in-memory storage: same-scope second starts reject, different identified scopes can start separately, and missing IDs use the reserved single-user self-use scope.</li>
       <li>The same turn exposes the matching <code>life_incident_started</code> entry through the MVP-013 Raw Event Log query surface.</li>
       <li>Rejected starts and visibility-staging failures leave no active incident and no success log query result.</li>
       <li>The adapter does not add complete/cancel/resume/interruption/queue behavior or any new RuntimeEvent family.</li>
@@ -242,7 +251,9 @@
       <li>Finalize a valid incident-start request with the concrete in-memory store adapter and assert <code>read_active_incident(request)</code> returns the expected copy-safe active incident through a validated <code>ActiveIncidentRequest</code>.</li>
       <li>Assert the adapter stages the exact <code>committed_log_entry</code> so <code>commit_life_incident_start()</code> can confirm it and make it query-visible.</li>
       <li>Assert staging failure prevents an active incident from being stored.</li>
-      <li>Assert a second start while an active incident exists is rejected without overwriting the stored incident.</li>
+      <li>Assert a second start while an active incident exists in the same scope is rejected without overwriting the stored incident.</li>
+      <li>Assert different identified scopes can store separate active incidents and reads are isolated by matching scope.</li>
+      <li>Assert the reserved single-user self-use scope preserves the current missing-ID behavior without using a fake user ID.</li>
       <li>Assert returned incidents and query results are deep copies.</li>
     </ul>
 
@@ -271,10 +282,10 @@
       <li>The main risk is accidentally creating a hidden second truth: the in-memory store must not keep a started incident without the matching Raw Event Log success entry becoming query-visible.</li>
       <li>The active-incident read surface must reuse the MVP-011 <code>ActiveIncidentSource</code> contract so MVP-014 does not create duplicate Character State Engine read APIs.</li>
       <li>The adapter should reuse the existing staging/confirmation contract from MVP-013 rather than appending atomic success logs through the ordinary append path.</li>
-      <li>Implementation note: <code>src/character/state/incidents.py</code> adds one in-memory store that implements the existing incident-start finalizer and <code>ActiveIncidentSource</code> read contracts.</li>
-      <li>Implementation note: targeted unit and integration tests prove successful starts, query-visible <code>life_incident_started</code> logs, copy safety, staging failure rejection, and second-start rejection.</li>
+      <li>Implementation note: <code>src/character/state/incidents.py</code> adds one scoped in-memory store that implements the existing incident-start finalizer and <code>ActiveIncidentSource</code> read contracts.</li>
+      <li>Implementation note: targeted unit and integration tests prove successful starts, query-visible <code>life_incident_started</code> logs, copy safety, staging failure rejection, same-scope second-start rejection, different-scope starts, isolated reads, and the reserved self-use default scope.</li>
       <li>The store should prove copy safety now so later persistent stores do not depend on mutable caller-owned dictionaries.</li>
-      <li>Residual risk: the store is a single in-memory active-incident store scoped to object lifetime. It validates <code>user_id</code> and <code>conversation_id</code> when present in requests, but it does not use them for multi-conversation or multi-user isolation.</li>
+      <li>Residual risk: the store is scoped in-memory storage with a single-user self-use default scope, not production multi-user persistence with auth, locks, migrations, or process-restart durability.</li>
       <li>If implementation pressure suggests persistent databases, queues, active-incident interruption, or completion events, park those as future slices.</li>
     </ul>
 
@@ -289,7 +300,7 @@
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
       <li>Persistent <code>LifeIncidentStore</code> backed by a database or append-only incident transition table.</li>
-      <li>Multi-conversation and multi-user incident isolation for durable storage.</li>
+      <li>Production multi-conversation and multi-user incident isolation for durable storage.</li>
       <li>Minimal incident lifecycle follow-up actions: complete, cancel, resume, go idle, and no change.</li>
       <li>Runtime Kernel user-interruption policy that marks active incidents interrupted or backgrounded.</li>
       <li><code>INCIDENT_COMPLETION</code> RuntimeEvent handling after active incident lifecycle commits exist.</li>
