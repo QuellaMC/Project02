@@ -227,6 +227,7 @@
       <li>Review fix: atomic finalizer success kinds are rejected on the ordinary append path before confirmation, and visibility-store failures raised inside finalizers become ordinary rejection logs.</li>
       <li>Review fix: staging and confirmation helpers accept only the two implemented atomic finalizer success kinds: <code>living_state_patch_committed</code> and <code>life_incident_started</code>.</li>
       <li>Review fix: failed confirmation validation does not remove the staged success entry, and discard uses the same atomic-kind guard as staging and confirmation.</li>
+      <li>Review fix: integration finalizer fakes stage query visibility before recording fake durable success artifacts, matching the intended atomic sequence.</li>
       <li>If implementation pressure suggests storage engines, replay execution, reconciliation, or UI, park those as future slices.</li>
     </ul>
 

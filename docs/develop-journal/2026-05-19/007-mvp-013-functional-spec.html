@@ -38,6 +38,7 @@
       <li>Hardened the finalizer visibility helper contract so staging and confirmation only accept the two implemented atomic success kinds.</li>
       <li>Addressed review feedback by keeping pending finalizer success entries intact on confirmation mismatch and by applying the same atomic-kind guard to discard.</li>
       <li>Parked future <code>Raw Event Log query audit entries</code> so broader read/retrieval audit guidance stays visible without widening MVP-013.</li>
+      <li>Aligned integration finalizer fakes with the intended atomic sequence by staging query visibility before recording fake durable success artifacts.</li>
     </ul>
 
     <h2>Why It Changed</h2>
@@ -85,6 +86,7 @@
       <li>Review fix: <code>expose_committed_success_entry()</code> and <code>confirm_committed_success_entry()</code> reject non-atomic log kinds instead of accepting any valid <code>RawEventLogEntry</code>.</li>
       <li>Review fix: confirmation mismatch no longer mutates pending visibility state, so callers can retry or discard the original staged success entry explicitly.</li>
       <li>Review note: MVP-013 still does not log query invocations or returned record IDs; that broader audit behavior is now parked as a later debug/replay slice.</li>
+      <li>Review fix: test finalizers now stage success visibility before recording fake durable artifacts, so visibility-staging failures leave no fake durable success lists behind.</li>
       <li>Future ideas for concrete storage, debug UI, replay execution, pagination, redaction, and retention remain parked in <code>future-slices.html</code>.</li>
     </ul>
 
@@ -102,6 +104,7 @@
       <li><code>python3.13 -m unittest tests.unit.test_raw_event_log_query</code>: passed after pending-confirmation and discard-kind-guard review fixes.</li>
       <li><code>python3.13 -m unittest discover</code>: passed, 210 tests.</li>
       <li><code>python3.13 -m html.parser docs/plan/future-slices.html docs/develop-journal/2026-05-19/007-mvp-013-functional-spec.html</code>: passed after parking the query-audit future slice.</li>
+      <li><code>python3.13 -m unittest tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_rejects_incident_staging_visibility_failure tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_rejects_state_staging_visibility_failure tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_includes_living_state_success_log_in_order tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_raw_log_query_surface_includes_incident_start_success_log_in_order</code>: passed after staging-before-fake-durable review fix.</li>
       <li><code>python3.13 -m compileall src tests</code>: passed.</li>
       <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-010-atomic-living-state-patch-commit-boundary.html docs/plan/completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html docs/plan/completed/mvp-012-minimal-start-incident-commit-boundary.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-19/007-mvp-013-functional-spec.html</code>: passed.</li>
       <li><code>uvx ruff format --check .</code>: passed after formatting the two files reported by CI.</li>

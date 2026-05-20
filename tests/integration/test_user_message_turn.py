@@ -220,10 +220,10 @@ class RecordingLivingStatePatchFinalizer:
                     request["committed_log_entry"]
                 )
             return deepcopy(self.result_override)
-        self.durable_state_snapshots.append(deepcopy(request["committed_snapshot"]))
-        self.durable_success_logs.append(deepcopy(request["committed_log_entry"]))
         if self.raw_log_visibility is not None:
             self.raw_log_visibility.expose_committed_success_entry(request["committed_log_entry"])
+        self.durable_state_snapshots.append(deepcopy(request["committed_snapshot"]))
+        self.durable_success_logs.append(deepcopy(request["committed_log_entry"]))
         self.operations.append(("atomic_finalizer", request["committed_log_entry"]["kind"]))
         return {
             "schema_version": "0.1",
@@ -273,10 +273,10 @@ class RecordingLifeIncidentStartFinalizer:
                     request["committed_log_entry"]
                 )
             return deepcopy(self.result_override)
-        self.durable_started_incidents.append(deepcopy(request["started_incident"]))
-        self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
         if self.raw_log_visibility is not None:
             self.raw_log_visibility.expose_committed_success_entry(request["committed_log_entry"])
+        self.durable_started_incidents.append(deepcopy(request["started_incident"]))
+        self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
         self.operations.append(("atomic_finalizer", request["committed_log_entry"]["kind"]))
         return {
             "schema_version": "0.1",
@@ -1124,6 +1124,8 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             ],
         )
         self.assertEqual(success_entries, [])
+        self.assertEqual(life_incident_start_finalizer.durable_started_incidents, [])
+        self.assertEqual(life_incident_start_finalizer.durable_raw_event_log_entries, [])
 
     def test_raw_log_query_surface_rejects_incident_success_accidentally_appended(self):
         raw_log = InMemoryRawEventLog()
@@ -1858,6 +1860,8 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             ],
         )
         self.assertEqual(success_entries, [])
+        self.assertEqual(living_state_patch_finalizer.durable_state_snapshots, [])
+        self.assertEqual(living_state_patch_finalizer.durable_success_logs, [])
 
     def test_raw_log_query_surface_rejects_state_success_accidentally_appended(self):
         raw_log = InMemoryRawEventLog()
