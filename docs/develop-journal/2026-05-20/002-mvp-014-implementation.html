@@ -58,6 +58,7 @@
       <li>The store stages raw-log success visibility before storing the active incident, so raw-log staging failure leaves no active incident.</li>
       <li>Second starts fail closed with a rejected commit result and do not overwrite the stored active incident.</li>
       <li>Returned active incidents and Raw Event Log query results are copy-safe.</li>
+      <li>Residual risk: the store is object-lifetime in-memory storage for one active incident. It validates optional <code>user_id</code> and <code>conversation_id</code> fields on read requests but does not use them for multi-user or multi-conversation isolation; durable storage should re-check that scope first.</li>
     </ul>
 
     <h2>Checks</h2>

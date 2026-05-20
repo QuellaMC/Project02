@@ -274,6 +274,7 @@
       <li>Implementation note: <code>src/character/state/incidents.py</code> adds one in-memory store that implements the existing incident-start finalizer and <code>ActiveIncidentSource</code> read contracts.</li>
       <li>Implementation note: targeted unit and integration tests prove successful starts, query-visible <code>life_incident_started</code> logs, copy safety, staging failure rejection, and second-start rejection.</li>
       <li>The store should prove copy safety now so later persistent stores do not depend on mutable caller-owned dictionaries.</li>
+      <li>Residual risk: the store is a single in-memory active-incident store scoped to object lifetime. It validates <code>user_id</code> and <code>conversation_id</code> when present in requests, but it does not use them for multi-conversation or multi-user isolation.</li>
       <li>If implementation pressure suggests persistent databases, queues, active-incident interruption, or completion events, park those as future slices.</li>
     </ul>
 
@@ -281,12 +282,14 @@
     <ul>
       <li>Should the eventual persistent <code>LifeIncidentStore</code> expose a richer query API beyond the existing <code>ActiveIncidentSource</code> current-active read? Not in MVP-014.</li>
       <li>Should the store become the default active-incident source for following turns? Not in MVP-014; this slice only proves contract compatibility and targeted injection.</li>
+      <li>How should durable or multi-user incident storage key active incidents by <code>user_id</code>, <code>conversation_id</code>, or character identity? Not in MVP-014.</li>
       <li>How should a durable database transaction coordinate incident writes with Raw Event Log writes? Not in MVP-014.</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
       <li>Persistent <code>LifeIncidentStore</code> backed by a database or append-only incident transition table.</li>
+      <li>Multi-conversation and multi-user incident isolation for durable storage.</li>
       <li>Minimal incident lifecycle follow-up actions: complete, cancel, resume, go idle, and no change.</li>
       <li>Runtime Kernel user-interruption policy that marks active incidents interrupted or backgrounded.</li>
       <li><code>INCIDENT_COMPLETION</code> RuntimeEvent handling after active incident lifecycle commits exist.</li>
