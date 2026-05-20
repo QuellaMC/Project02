@@ -199,6 +199,37 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
         self.assertEqual(context.exception.code, "malformed_finalize_result")
         self.assertEqual(store.read_active_incident(build_active_incident_request(event)), None)
 
+    def test_raw_log_mismatch_rejects_before_staging_or_storing_active_incident(self):
+        store_raw_log = InMemoryRawEventLog()
+        commit_raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=store_raw_log)
+        event = normalized_user_message()
+
+        result = commit_life_incident_start(
+            event,
+            role_model_result_with_incident(),
+            life_incident_start_finalizer=store,
+            raw_event_log=commit_raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_START_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], "life_incident_start_finalize")
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertIn("same Raw Event Log instance", result["failure"]["message"])
+        self.assertEqual(store.read_active_incident(build_active_incident_request(event)), None)
+        self.assertEqual(
+            store_raw_log.query({"trace_id": "trace-1", "kinds": ["life_incident_started"]})[
+                "entries"
+            ],
+            [],
+        )
+        self.assertEqual(
+            [entry["kind"] for entry in commit_raw_log.query({"trace_id": "trace-1"})["entries"]],
+            ["life_incident_start_rejected"],
+        )
+
     def test_same_scope_second_start_fails_closed_without_overwriting_active_incident(self):
         raw_log = InMemoryRawEventLog()
         store = InMemoryLifeIncidentStore(raw_event_log=raw_log)

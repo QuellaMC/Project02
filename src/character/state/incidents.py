@@ -60,6 +60,16 @@ class InMemoryLifeIncidentStore:
         self._raw_event_log = raw_event_log
         self._active_incidents_by_scope: dict[IncidentScope, ActiveIncidentSnapshot] = {}
 
+    def require_raw_event_log(self, raw_event_log: object) -> None:
+        if raw_event_log is not self._raw_event_log:
+            raise LifeIncidentStartFinalizerError(
+                (
+                    "InMemoryLifeIncidentStore must finalize against the same "
+                    "Raw Event Log instance that will confirm visibility."
+                ),
+                code="malformed_finalize_result",
+            )
+
     def finalize_life_incident_start(
         self,
         request: LifeIncidentStartFinalizeRequest,

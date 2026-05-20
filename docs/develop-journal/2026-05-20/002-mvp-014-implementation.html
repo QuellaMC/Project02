@@ -28,7 +28,8 @@
       <li>Successful starts stage the already-built <code>life_incident_started</code> entry through <code>InMemoryRawEventLog.expose_committed_success_entry()</code> before storing the active incident for the validated scope.</li>
       <li>Updated the store from one global active-incident slot to scoped in-memory storage keyed by validated request identity.</li>
       <li>Added an explicit reserved <code>IncidentScope(mode="single_user_self_use")</code> for self-use mode when both <code>user_id</code> and <code>conversation_id</code> are absent.</li>
-      <li>Added targeted unit tests for successful finalize/read behavior, copy safety, raw-log staging failure, direct finalizer staging failure, same-scope second-start rejection, different-scope starts, isolated reads, default self-use scope behavior, and malformed raw-log entry validation.</li>
+      <li>Added a store/commit Raw Event Log identity check so mismatched log instances reject before staging success visibility or storing an active incident.</li>
+      <li>Added targeted unit tests for successful finalize/read behavior, copy safety, raw-log staging failure, direct finalizer staging failure, raw-log mismatch rejection, same-scope second-start rejection, different-scope starts, isolated reads, default self-use scope behavior, and malformed raw-log entry validation.</li>
       <li>Added an integration test that runs a <code>USER_MESSAGE</code> turn with the concrete store adapter and verifies the active incident plus query-visible success log.</li>
       <li>Opened <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a> and updated the active plan plus implementation graph with the PR reference.</li>
     </ul>
@@ -59,6 +60,7 @@
       <li>No new RuntimeEvent type, lifecycle action, database adapter, queue, interruption policy, Role Model Loop behavior, or default active-incident source wiring was added.</li>
       <li>The Commit and Effects Engine still builds and validates the started incident snapshot and committed success log entry before the store finalizes anything.</li>
       <li>The store stages raw-log success visibility before storing the active incident for a scope, so raw-log staging failure leaves no active incident.</li>
+      <li>A mismatched store/commit Raw Event Log pair now fails before staging or storing, preventing active incident state from diverging from the rejected commit log.</li>
       <li>Second starts fail closed only for the same incident scope and do not overwrite the stored active incident.</li>
       <li>Different identified <code>user_id</code> / <code>conversation_id</code> scopes can hold separate active incidents, and reads are isolated by matching scope.</li>
       <li>Returned active incidents and Raw Event Log query results are copy-safe.</li>
@@ -67,8 +69,8 @@
 
     <h2>Checks</h2>
     <ul>
-      <li><code>python3.13 -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_incident_start_turn_with_concrete_store_reads_incident_and_query_success_log</code>: passed after review-comment fixes, 9 tests.</li>
-      <li><code>python3.13 -m unittest discover</code>: passed, 219 tests.</li>
+      <li><code>python3.13 -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_incident_start_turn_with_concrete_store_reads_incident_and_query_success_log</code>: passed after raw-log identity fix, 10 tests.</li>
+      <li><code>python3.13 -m unittest discover</code>: passed, 220 tests.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code>: passed.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code>: passed.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/mypy</code>: passed.</li>

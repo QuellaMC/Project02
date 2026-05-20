@@ -82,6 +82,7 @@
       <li>One adapter is in scope: it implements the existing <code>LifeIncidentStartFinalizer</code> protocol used by MVP-012.</li>
       <li>The same store must implement the existing <code>ActiveIncidentSource.read_active_incident(request)</code> contract with <code>ActiveIncidentRequest</code> so it reuses the shared MVP-011 read boundary.</li>
       <li>The adapter must stage the already-built <code>life_incident_started</code> entry through the MVP-013 <code>InMemoryRawEventLog</code> committed-success visibility path.</li>
+      <li>The concrete store must reject finalization before staging or storing if it is paired with a different Raw Event Log instance than the caller will use for confirmation.</li>
       <li>The successful user-turn path should expose the started active incident from the store and expose the matching raw log entry through <code>raw_log.query()</code>.</li>
       <li>The adapter may reject a start when an active incident is already stored for the same scope, but it must not replace, interrupt, queue, complete, cancel, or resume incidents.</li>
     </ul>
@@ -201,22 +202,26 @@
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>If an active incident is already present for the same scope, another start request must fail closed without overwriting the active incident, appending a success log, or adding lifecycle behavior.</td>
+          <td>If the concrete store's staging Raw Event Log instance differs from the <code>raw_event_log</code> passed to <code>commit_life_incident_start()</code> for confirmation, the commit must reject before staging or storing the active incident.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>Different validated <code>user_id</code> / <code>conversation_id</code> scopes may each hold one active incident, and <code>read_active_incident(request)</code> must return only the incident for the matching scope.</td>
+          <td>If an active incident is already present for the same scope, another start request must fail closed without overwriting the active incident, appending a success log, or adding lifecycle behavior.</td>
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>When both <code>user_id</code> and <code>conversation_id</code> are absent, the store must use an explicit reserved internal self-use scope such as <code>IncidentScope(mode="single_user_self_use")</code>, not a fake user ID or a normal-looking global owner.</td>
+          <td>Different validated <code>user_id</code> / <code>conversation_id</code> scopes may each hold one active incident, and <code>read_active_incident(request)</code> must return only the incident for the matching scope.</td>
         </tr>
         <tr>
           <td>FR-11</td>
-          <td>When no <code>life_action</code> is present, existing MVP-012 skipped behavior remains unchanged and the store adapter is not called.</td>
+          <td>When both <code>user_id</code> and <code>conversation_id</code> are absent, the store must use an explicit reserved internal self-use scope such as <code>IncidentScope(mode="single_user_self_use")</code>, not a fake user ID or a normal-looking global owner.</td>
         </tr>
         <tr>
           <td>FR-12</td>
+          <td>When no <code>life_action</code> is present, existing MVP-012 skipped behavior remains unchanged and the store adapter is not called.</td>
+        </tr>
+        <tr>
+          <td>FR-13</td>
           <td>Existing MVP-013 rejection behavior remains unchanged: rejected or malformed finalize paths leave no query-visible <code>life_incident_started</code> entry.</td>
         </tr>
       </tbody>
@@ -251,6 +256,7 @@
       <li>Finalize a valid incident-start request with the concrete in-memory store adapter and assert <code>read_active_incident(request)</code> returns the expected copy-safe active incident through a validated <code>ActiveIncidentRequest</code>.</li>
       <li>Assert the adapter stages the exact <code>committed_log_entry</code> so <code>commit_life_incident_start()</code> can confirm it and make it query-visible.</li>
       <li>Assert staging failure prevents an active incident from being stored.</li>
+      <li>Assert mismatched store/commit Raw Event Log instances reject before staging or storing an active incident.</li>
       <li>Assert a second start while an active incident exists in the same scope is rejected without overwriting the stored incident.</li>
       <li>Assert different identified scopes can store separate active incidents and reads are isolated by matching scope.</li>
       <li>Assert the reserved single-user self-use scope preserves the current missing-ID behavior without using a fake user ID.</li>
@@ -283,7 +289,7 @@
       <li>The active-incident read surface must reuse the MVP-011 <code>ActiveIncidentSource</code> contract so MVP-014 does not create duplicate Character State Engine read APIs.</li>
       <li>The adapter should reuse the existing staging/confirmation contract from MVP-013 rather than appending atomic success logs through the ordinary append path.</li>
       <li>Implementation note: <code>src/character/state/incidents.py</code> adds one scoped in-memory store that implements the existing incident-start finalizer and <code>ActiveIncidentSource</code> read contracts.</li>
-      <li>Implementation note: targeted unit and integration tests prove successful starts, query-visible <code>life_incident_started</code> logs, copy safety, staging failure rejection, same-scope second-start rejection, different-scope starts, isolated reads, and the reserved self-use default scope.</li>
+      <li>Implementation note: targeted unit and integration tests prove successful starts, query-visible <code>life_incident_started</code> logs, copy safety, staging failure rejection, raw-log mismatch rejection, same-scope second-start rejection, different-scope starts, isolated reads, and the reserved self-use default scope.</li>
       <li>The store should prove copy safety now so later persistent stores do not depend on mutable caller-owned dictionaries.</li>
       <li>Residual risk: the store is scoped in-memory storage with a single-user self-use default scope, not production multi-user persistence with auth, locks, migrations, or process-restart durability.</li>
       <li>If implementation pressure suggests persistent databases, queues, active-incident interruption, or completion events, park those as future slices.</li>
