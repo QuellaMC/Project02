@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</title>
+  <title>MVP-015 - Character State Engine Context Builder Boundary v0.1</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,14 +27,13 @@
 </head>
 <body>
   <main>
-    <h1>MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</h1>
-    <p><span class="status">Status: implemented locally; PR #16 open</span></p>
+    <h1>MVP-015 - Character State Engine Context Builder Boundary v0.1</h1>
+    <p><span class="status">Status: active functional spec; implementation not started</span></p>
     <p class="meta">
       Created: 2026-05-20. Active slice path:
       <code>docs/plan/active-slice.html</code>.
       Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
-      Branch: <code>feature/mvp-014-life-incident-store-start-adapter</code>.
-      Pull request: <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a>.
+      Branch: <code>feature/mvp-015-context-builder-boundary</code>.
     </p>
 
     <h2>Source Context</h2>
@@ -44,126 +43,112 @@
       The source pages checked for this slice are
       <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>,
       <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
       <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>,
       <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>, and
       <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
     </p>
     <blockquote>
-      Phase 3 calls for a LifeIncidentStore, but this slice only replaces the
-      MVP-012 incident-start fake finalizer with a concrete in-memory start
-      adapter and proves that its success log remains visible through the
-      MVP-013 Raw Event Log query surface.
+      Notion assigns compact <code>DecisionContext</code> building to the Character
+      State Engine. MVP-015 only moves the already-proven source orchestration
+      for recent visible messages, <code>living_state_brief</code>, and
+      <code>active_incident</code> behind that boundary while preserving the
+      current model-facing context shape.
     </blockquote>
     <p>
       Local implementation truth comes from completed
       <a href="completed/mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001</a>,
       <a href="completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html">MVP-002</a>,
-      <a href="completed/mvp-003-minimal-visible-reply-commit.html">MVP-003</a>,
+      <a href="completed/mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004</a>,
+      <a href="completed/mvp-006-visible-conversation-recent-source.html">MVP-006</a>,
       <a href="completed/mvp-007-minimal-user-turn-orchestrator.html">MVP-007</a>,
-      <a href="completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html">MVP-011</a>,
-      <a href="completed/mvp-012-minimal-start-incident-commit-boundary.html">MVP-012</a>, and
-      <a href="completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html">MVP-013</a>.
+      <a href="completed/mvp-008-read-only-living-state-snapshot-in-decisioncontext.html">MVP-008</a>,
+      <a href="completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html">MVP-011</a>, and
+      <a href="completed/mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html">MVP-014</a>.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Replace the MVP-012 incident-start fake finalizer with a small concrete
-      in-memory <code>LifeIncidentStore</code> / finalizer adapter that durably
-      exposes the started incident and matching <code>life_incident_started</code>
-      Raw Event Log entry through the MVP-013 query surface, without adding the
-      rest of the incident lifecycle.
+      Add the smallest Character State Engine context-builder boundary that
+      owns source requests, source-response validation, copy safety, selection,
+      and final assembly for the existing <code>USER_MESSAGE</code>
+      <code>DecisionContext</code>. Role Model Loop should still render the
+      same model input, call the adapter the same way, parse the same decision
+      contract, and append the same role-model logs.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>One event type remains in scope: <code>USER_MESSAGE</code>.</li>
-      <li>One life action remains in scope: <code>life_action.type = "start_incident"</code>.</li>
-      <li>One concrete scoped in-memory incident store is in scope for started active incident records.</li>
-      <li>One adapter is in scope: it implements the existing <code>LifeIncidentStartFinalizer</code> protocol used by MVP-012.</li>
-      <li>The same store must implement the existing <code>ActiveIncidentSource.read_active_incident(request)</code> contract with <code>ActiveIncidentRequest</code> so it reuses the shared MVP-011 read boundary.</li>
-      <li>The adapter must stage the already-built <code>life_incident_started</code> entry through the MVP-013 <code>InMemoryRawEventLog</code> committed-success visibility path.</li>
-      <li>The concrete store must reject finalization before staging or storing if it is paired with a different Raw Event Log instance than the caller will use for confirmation.</li>
-      <li>The successful user-turn path should expose the started active incident from the store and expose the matching raw log entry through <code>raw_log.query()</code>.</li>
-      <li>The adapter may reject a start when an active incident is already stored for the same scope, but it must not replace, interrupt, queue, complete, cancel, or resume incidents.</li>
+      <li>One implemented event family remains in scope: <code>USER_MESSAGE</code>.</li>
+      <li>One call type remains in scope: <code>user_message_visible_reply</code>.</li>
+      <li>One new Character State Engine context-builder module or equivalent boundary is in scope.</li>
+      <li>The boundary owns orchestration for three already-implemented context sources: recent visible messages, current living state, and active incident.</li>
+      <li>The boundary returns the existing <code>DecisionContext</code> shape with the same <code>event</code>, <code>character_snapshot</code>, and <code>allowed_actions</code> fields.</li>
+      <li>The existing Role Model Loop remains responsible for rendering model input, adapter invocation, structured output parsing, and role-model turn logs.</li>
+      <li>Compatibility wrappers may remain in <code>role_model.loop</code> if needed so existing tests and callers can keep importing current symbols while the implementation delegates to Character State Engine code.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No database, filesystem persistence, migration, repository layer, background worker, scheduler, lock manager, or process-restart durability.</li>
-      <li>No <code>complete_incident</code>, <code>cancel_incident</code>, <code>resume_incident</code>, <code>go_idle</code>, <code>no_change</code>, replacement, interruption, backgrounding, queue, recurrence, reconciliation, or incident completion event.</li>
-      <li>No new RuntimeEvent type, Role Model Loop action, parser behavior, prompt behavior, context field, state patch behavior, body state, Live2D status, tool, asset, retrieval, compaction, or replay executor.</li>
-      <li>No concrete Raw Event Log store beyond the MVP-013 in-memory query helper.</li>
-      <li>No broad CharacterRuntimeStateStore, virtual body store, scheduled directive store, unified retrieval index, debug UI, HTTP endpoint, or CLI command.</li>
-      <li>No change to the model contract: the model still proposes only the MVP-012 <code>start_incident</code> draft and never provides committed-only incident fields.</li>
-      <li>No change to Commit and Effects ownership: Commit and Effects still builds and validates the started incident snapshot and committed log entry before finalization.</li>
+      <li>No new <code>DecisionContext</code> fields, no renamed fields, and no changed field meanings.</li>
+      <li>No retrieval planner, Unified Retrieval Index, <code>context.retrieve()</code> tool, semantic search, keyword search, exact source expansion, summaries, compaction, active threads, or context budget percentages beyond the existing recent-message limits.</li>
+      <li>No new RuntimeEvent type, Runtime Kernel route policy, model provider, Role Model Adapter behavior, prompt behavior, output action, parser behavior, or allowed action combination.</li>
+      <li>No new Raw Event Log kind such as <code>decision_context_built</code>; keep context-build failures logged through the existing <code>role_model_turn_failed</code> path.</li>
+      <li>No storage migration, database adapter, concrete conversation store, concrete state store, incident lifecycle action, interruption policy, scheduler, body state, Live2D status, tool, asset, debug UI, or replay executor.</li>
+      <li>No behavioral change to <code>run_user_message_turn()</code> beyond threading the same injected sources through the new boundary.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
-    <h3>LifeIncidentStore</h3>
-    <pre><code>type LifeIncidentStore = {
-  finalize_life_incident_start(request: LifeIncidentStartFinalizeRequest): LifeIncidentStartFinalizeResult
-  read_active_incident(request: ActiveIncidentRequest): ActiveIncidentSnapshot | null
+    <h3>CharacterContextBuilderRequest</h3>
+    <pre><code>type CharacterContextBuilderRequest = {
+  schema_version: "0.1"
+  event: RuntimeEvent&lt;"USER_MESSAGE"&gt;
+  call_type: "user_message_visible_reply"
+  allow_state_patch: boolean
+  allow_incident_start: boolean
 }</code></pre>
     <p>
-      The concrete MVP-014 implementation may be an in-memory class, but it
-      should be production-shaped code rather than a test-only recording fake.
-      The read method must use the existing
-      <code>character.state.current.ActiveIncidentSource</code> request shape.
-      Returned incidents must be copies.
+      The request may be represented as function parameters if that matches the
+      current Python style. It must normalize and validate the same
+      <code>RuntimeEvent</code> contract as the existing Role Model Loop context
+      builder.
     </p>
 
-    <h3>ActiveIncidentRequest</h3>
-    <pre><code>type ActiveIncidentRequest = {
+    <h3>CharacterContextSources</h3>
+    <pre><code>type CharacterContextSources = {
+  recent_visible_messages_source?: RecentVisibleMessagesSource
+  current_state_source?: CurrentCharacterStateSource
+  active_incident_source?: ActiveIncidentSource
+}</code></pre>
+    <p>
+      These are injected read-only sources. The builder must pass copy-safe
+      request objects to each source and must treat missing sources exactly as
+      the current implementation does.
+    </p>
+
+    <h3>DecisionContext</h3>
+    <pre><code>type DecisionContext = {
   schema_version: "0.1"
   trace_id: string
   event_id: string
-  event_type: "USER_MESSAGE"
-  user_id?: string
-  conversation_id?: string
+  call_type: "user_message_visible_reply"
+  event: {
+    type: "USER_MESSAGE"
+    text: string
+    created_at: string
+    user_id?: string
+    conversation_id?: string
+  }
+  character_snapshot: {
+    recent_visible_messages: RecentVisibleMessage[]
+    living_state_brief?: LivingStateBrief
+    active_incident?: ActiveIncidentBrief
+  }
+  allowed_actions: string[]
 }</code></pre>
     <p>
-      Reuse <code>build_active_incident_request()</code> and
-      <code>validate_active_incident_request()</code> from
-      <code>character.state.current</code>. MVP-014 only proves the store can
-      satisfy this read contract; it does not make the store the default
-      <code>DecisionContext</code> source for every user turn.
-      The concrete store treats explicit null identity fields from direct
-      callers as absent for scope derivation, so self-use mode cannot split
-      into a normal-looking identified null scope.
-    </p>
-
-    <h3>LifeIncidentStartFinalizeRequest</h3>
-    <pre><code>type LifeIncidentStartFinalizeRequest = {
-  schema_version: "0.1"
-  trace_id: string
-  event_id: string
-  event_type: "USER_MESSAGE"
-  decision_action: "visible_reply"
-  life_action_type: "start_incident"
-  commit_time: string
-  draft: LifeIncidentStartDraft
-  started_incident: ActiveIncidentSnapshot
-  committed_log_entry: RawEventLogEntry
-  user_id?: string
-  conversation_id?: string
-}</code></pre>
-    <p>
-      Reuse the MVP-012 request shape and the existing
-      <code>ActiveIncidentSnapshot</code> validation. Do not add model-authored
-      committed fields or store-only metadata fields in this slice.
-    </p>
-
-    <h3>LifeIncidentStartFinalizeResult</h3>
-    <pre><code>type LifeIncidentStartFinalizeResult = {
-  schema_version: "0.1"
-  trace_id: string
-  event_id: string
-  event_type: "USER_MESSAGE"
-  committed_log_entry_id: string
-}</code></pre>
-    <p>
-      Reuse the MVP-012 result shape so <code>commit_life_incident_start()</code>
-      can keep its current validation and result handling.
+      MVP-015 must preserve this current shape. The only intended change is
+      where the context is built, not what the model sees.
     </p>
 
     <h2>Functional Requirements</h2>
@@ -177,55 +162,43 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>The new in-memory store adapter implements the existing <code>LifeIncidentStartFinalizer.finalize_life_incident_start()</code> protocol without changing <code>commit_life_incident_start()</code> call sites beyond replacing the fake.</td>
+          <td>Add a Character State Engine context-builder boundary for the current <code>USER_MESSAGE</code> role-model call.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>The store implements the existing <code>ActiveIncidentSource.read_active_incident(request)</code> contract using <code>ActiveIncidentRequest</code> validation instead of introducing a no-argument duplicate read API.</td>
+          <td>The boundary must return byte-for-byte equivalent data values for existing successful <code>DecisionContext</code> cases: no sources, recent visible messages, living-state brief, active-incident brief, and combined source inputs.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>On a valid finalize request, the adapter stores one active incident snapshot for the validated incident scope and stages the matching already-built <code>life_incident_started</code> <code>RawEventLogEntry</code> through the MVP-013 committed-success visibility helper.</td>
+          <td>Move recent visible message request construction, source-response validation, current-event exclusion, duplicate identity checks, timestamp ordering, candidate limits, selected-message limits, and text-token budget selection behind the Character State Engine boundary without changing their constants or outcomes.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>After <code>commit_life_incident_start()</code> confirms the finalizer result, querying the same trace through <code>InMemoryRawEventLog.query()</code> with <code>kinds = ["life_incident_started"]</code> returns the stored incident's matching committed log entry exactly once.</td>
+          <td>Move living-state source orchestration behind the boundary while reusing <code>build_current_character_state_request()</code>, <code>build_living_state_brief()</code>, and <code>validate_living_state_brief_for_event()</code>.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>The stored active incident and the query-visible <code>life_incident_started</code> entry must agree on <code>trace_id</code>, <code>event_id</code>, <code>incident_id</code>, <code>started_at</code>, <code>source_event_ids</code>, and the committed log entry ID.</td>
+          <td>Move active-incident source orchestration behind the boundary while reusing <code>build_active_incident_request()</code>, <code>build_active_incident_brief()</code>, and <code>validate_active_incident_brief_for_event()</code>.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>Reading the active incident returns a deep copy. Mutating a read result, finalize request, or query result must not mutate the stored incident or raw log entry.</td>
+          <td>Role Model Loop must delegate context construction to the new boundary and keep rendering, adapter calls, parse behavior, returned <code>RoleModelTurnResult</code>, and raw log entry shapes unchanged.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>If raw-log success visibility staging fails, the adapter must reject the finalization and must not store an active incident.</td>
+          <td>Existing context-build failures must still surface as <code>RoleModelValidationError</code> to Role Model Loop and be logged as <code>role_model_turn_failed</code> with <code>stage = "context_build"</code> and <code>code = "malformed_context"</code>.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>If the concrete store's staging Raw Event Log instance differs from the <code>raw_event_log</code> passed to <code>commit_life_incident_start()</code> for confirmation, the commit must reject before staging or storing the active incident.</td>
+          <td>The boundary must preserve current opt-in behavior: <code>allow_state_patch</code> requires a current-state source, and <code>allow_state_patch</code> plus <code>allow_incident_start</code> remains rejected before model rendering.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>If an active incident is already present for the same scope, another start request must fail closed without overwriting the active incident, appending a success log, or adding lifecycle behavior.</td>
+          <td>The builder must pass deep-copy-safe request objects to sources and return context data that cannot be mutated by later source or caller mutations.</td>
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>Different validated <code>user_id</code> / <code>conversation_id</code> scopes may each hold one active incident, and <code>read_active_incident(request)</code> must return only the incident for the matching scope.</td>
-        </tr>
-        <tr>
-          <td>FR-11</td>
-          <td>When both <code>user_id</code> and <code>conversation_id</code> are absent or explicitly null, the store must use an explicit reserved internal self-use scope such as <code>IncidentScope(mode="single_user_self_use")</code>, not a fake user ID or a normal-looking global owner.</td>
-        </tr>
-        <tr>
-          <td>FR-12</td>
-          <td>When no <code>life_action</code> is present, existing MVP-012 skipped behavior remains unchanged and the store adapter is not called.</td>
-        </tr>
-        <tr>
-          <td>FR-13</td>
-          <td>Existing MVP-013 rejection behavior remains unchanged: rejected or malformed finalize paths leave no query-visible <code>life_incident_started</code> entry.</td>
+          <td>The user-turn orchestrator must continue to pass the same visible conversation, current-state, and active-incident sources into the model-call path without changing commit order or visible output behavior.</td>
         </tr>
       </tbody>
     </table>
@@ -233,93 +206,86 @@
     <h2>Non-Functional Requirements</h2>
     <ul>
       <li>Use only Python standard library behavior; do not add dependencies.</li>
-      <li>Keep the adapter small and deterministic with injected raw-log visibility, fake IDs, and fake clocks in tests.</li>
-      <li>Reuse existing <code>ActiveIncidentSnapshot</code>, <code>RawEventLogEntry</code>, <code>SCHEMA_VERSION</code>, and MVP-012 finalize-result validation instead of creating parallel schemas.</li>
-      <li>Keep the implementation future-compatible by naming the store boundary clearly, but do not add database abstractions, migrations, or unused interfaces.</li>
-      <li>Do not duplicate Raw Event Log entries. The success log must appear through the MVP-013 committed-success visibility path, not through ordinary <code>raw_event_log.append()</code>.</li>
-      <li>Keep in-memory durability scoped to the store object's lifetime; do not imply process-restart durability or production multi-user persistence.</li>
+      <li>Prefer moving existing tested helper logic over duplicating it under a new module.</li>
+      <li>Keep the public surface narrow: one context-builder entry point plus source protocols or compatibility exports needed by current callers.</li>
+      <li>Keep code future-compatible by naming the boundary clearly, but do not add unused retrieval, budget, store, or multi-event abstractions.</li>
+      <li>Preserve existing test determinism, fake sources, fake adapter calls, fake clocks, and fake IDs.</li>
+      <li>Keep Role Model Loop focused on model input rendering, adapter invocation, output parsing, and role-model logging.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>MVP-013 is recorded under <a href="completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html">completed plans</a>, and this file is the only active implementation slice.</li>
-      <li>A user turn with a valid <code>life_action.start_incident</code> can use the concrete in-memory store adapter instead of the MVP-012 recording fake.</li>
-      <li>The store exposes the started incident through the existing <code>ActiveIncidentSource.read_active_incident(request)</code> contract after successful finalization.</li>
-      <li>The store uses scoped in-memory storage: same-scope second starts reject, different identified scopes can start separately, and missing IDs use the reserved single-user self-use scope.</li>
-      <li>The same turn exposes the matching <code>life_incident_started</code> entry through the MVP-013 Raw Event Log query surface.</li>
-      <li>Rejected starts and visibility-staging failures leave no active incident and no success log query result.</li>
-      <li>The adapter does not add complete/cancel/resume/interruption/queue behavior or any new RuntimeEvent family.</li>
-      <li>The development journal records source context, files touched, checks run, review notes, next action, and future ideas.</li>
-      <li>Future lifecycle, persistent storage, debug UI, and replay ideas remain parked in <a href="future-slices.html">future-slices.html</a>.</li>
+      <li>MVP-014 is recorded under <a href="completed/mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html">completed plans</a>, and this file is the only active implementation slice.</li>
+      <li>Character State Engine has an explicit context-builder boundary for current <code>USER_MESSAGE</code> context construction.</li>
+      <li>Existing successful model inputs and <code>role_model_turn_completed</code> data snapshots keep the same <code>DecisionContext</code> values as before the move.</li>
+      <li>Existing context-build failures still stop before adapter invocation and still produce the same failure stage and code.</li>
+      <li>Recent visible message behavior remains unchanged, including filtering out the current event, duplicate checks, ordering, maximum selected messages, and text budget.</li>
+      <li>Living-state and active-incident brief behavior remains unchanged, including request shape, optional-source behavior, missing active incident behavior, source-event validation, and copy safety.</li>
+      <li>No retrieval/index/context logging/lifecycle/storage behavior is added.</li>
+      <li>The development journal records source context, files touched, checks run, review notes, next action, future ideas, and whether active slice scope changed.</li>
+      <li>Future retrieval, context-build logging, active threads, body state, interrupted incident, and broader context budget ideas remain parked in <a href="future-slices.html">future-slices.html</a>.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li>Finalize a valid incident-start request with the concrete in-memory store adapter and assert <code>read_active_incident(request)</code> returns the expected copy-safe active incident through a validated <code>ActiveIncidentRequest</code>.</li>
-      <li>Assert the adapter stages the exact <code>committed_log_entry</code> so <code>commit_life_incident_start()</code> can confirm it and make it query-visible.</li>
-      <li>Assert staging failure prevents an active incident from being stored.</li>
-      <li>Assert mismatched store/commit Raw Event Log instances reject before staging or storing an active incident.</li>
-      <li>Assert a second start while an active incident exists in the same scope is rejected without overwriting the stored incident.</li>
-      <li>Assert different identified scopes can store separate active incidents and reads are isolated by matching scope.</li>
-      <li>Assert the reserved single-user self-use scope preserves the current missing-ID behavior without using a fake user ID, and that explicit null identity fields use the same scope.</li>
-      <li>Assert returned incidents and query results are deep copies.</li>
+      <li>Build a no-source <code>USER_MESSAGE</code> context through the Character State Engine boundary and assert it matches the current minimal context exactly.</li>
+      <li>Build context with recent visible messages and assert the existing request shape, current-event exclusion, duplicate handling, ordering, six-message selection, and 1200-token budget behavior are preserved.</li>
+      <li>Build context with a current-state source and assert the existing <code>living_state_brief</code> shape, source request, malformed-source rejection, and copy safety are preserved.</li>
+      <li>Build context with an active-incident source and assert the existing <code>active_incident</code> shape, source request, no-incident omission, malformed-source rejection, and copy safety are preserved.</li>
+      <li>Assert conflicting <code>allow_state_patch</code> and <code>allow_incident_start</code> options still reject before rendering.</li>
+      <li>Assert <code>allow_state_patch</code> without a current-state source still rejects before rendering.</li>
+      <li>Assert any compatibility wrapper in <code>role_model.loop</code> delegates to the Character State Engine boundary and returns the same values.</li>
     </ul>
 
     <h3>Integration Tests</h3>
     <ul>
-      <li>Run a <code>USER_MESSAGE</code> turn with incident-start opt-in, <code>InMemoryRawEventLog</code>, and the concrete in-memory store adapter; assert the turn returns <code>life_incident_started</code>, the store has the active incident, and the trace query includes <code>life_incident_started</code>.</li>
-      <li>Run the no-<code>life_action</code> path and assert the store adapter is not called and existing visible reply behavior remains unchanged.</li>
-      <li>Run a finalizer rejection or staging failure path and assert no active incident is stored and no <code>life_incident_started</code> query result exists.</li>
+      <li>Run <code>run_role_model_turn()</code> with recent visible messages, living-state brief, and active-incident brief; assert the fake adapter receives the unchanged rendered model input shape.</li>
+      <li>Run a <code>USER_MESSAGE</code> turn through <code>run_user_message_turn()</code> and assert visible user projection, model call, optional context sources, and visible reply commit order remain unchanged.</li>
+      <li>Run a malformed source response path and assert the adapter is not called and <code>role_model_turn_failed</code> still records <code>stage = "context_build"</code>.</li>
       <li>Run full unittest discovery.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li><code>commit_effects.incident_start</code> remains responsible for building and validating the started incident snapshot, committed success log entry, rejection log entry, and commit result.</li>
-      <li>The concrete in-memory <code>LifeIncidentStore</code> may live under the Character State Engine area because incident records are character state, but it should remain one small module with no unused future store methods.</li>
-      <li>The store adapter may implement the existing MVP-012 finalizer protocol directly; do not introduce a second incident-start finalizer protocol.</li>
-      <li>The store must implement <code>character.state.current.ActiveIncidentSource</code> for reads; do not add a second no-argument active-incident read API.</li>
-      <li><code>runtime.logging.InMemoryRawEventLog</code> remains the Raw Event Log query surface; do not create an incident-specific raw-log query path.</li>
-      <li><code>runtime.user_turn</code> should only need injection of the concrete adapter where tests or callers previously injected the recording fake. MVP-014 does not make the store the default <code>active_incident_source</code> for later <code>DecisionContext</code> builds.</li>
-      <li>Role Model Loop, Runtime Kernel route policy, and visible reply commit behavior remain unchanged.</li>
+      <li><code>character.state</code> owns source orchestration and compact context assembly for this slice.</li>
+      <li><code>character.state.current</code> continues to own living-state and active-incident read request, snapshot, and brief validation helpers.</li>
+      <li>The recent visible message source protocol and visible conversation adapter should move behind the Character State Engine boundary or be compatibility-exported from there; do not create duplicate validators.</li>
+      <li><code>role_model.loop</code> remains responsible for <code>render_role_model_input()</code>, <code>parse_character_decision()</code>, adapter invocation, and <code>role_model_turn_completed</code>/<code>role_model_turn_failed</code> log construction.</li>
+      <li><code>runtime.user_turn</code> remains responsible for orchestration order and source injection; it should not learn source-specific context rules.</li>
+      <li>Commit and Effects modules remain untouched unless a test import must follow a moved compatibility symbol.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>MVP-014 is a concrete adapter slice, not an incident lifecycle slice.</li>
-      <li>The main risk is accidentally creating a hidden second truth: the in-memory store must not keep a started incident without the matching Raw Event Log success entry becoming query-visible.</li>
-      <li>The active-incident read surface must reuse the MVP-011 <code>ActiveIncidentSource</code> contract so MVP-014 does not create duplicate Character State Engine read APIs.</li>
-      <li>The adapter should reuse the existing staging/confirmation contract from MVP-013 rather than appending atomic success logs through the ordinary append path.</li>
-      <li>Implementation note: <code>src/character/state/incidents.py</code> adds one scoped in-memory store that implements the existing incident-start finalizer and <code>ActiveIncidentSource</code> read contracts.</li>
-      <li>Implementation note: targeted unit and integration tests prove successful starts, query-visible <code>life_incident_started</code> logs, copy safety, staging failure rejection, raw-log mismatch rejection, same-scope second-start rejection, different-scope starts, isolated reads, and the reserved self-use default scope.</li>
-      <li>The store should prove copy safety now so later persistent stores do not depend on mutable caller-owned dictionaries.</li>
-      <li>Residual risk: the store is scoped in-memory storage with a single-user self-use default scope, not production multi-user persistence with auth, locks, migrations, or process-restart durability.</li>
-      <li>If implementation pressure suggests persistent databases, queues, active-incident interruption, or completion events, park those as future slices.</li>
+      <li>This is a boundary extraction slice, not a new runtime behavior slice.</li>
+      <li>The highest risk is accidentally changing the model-facing context while moving helper ownership. Tests should compare values, not only types.</li>
+      <li>Do not add a generic context framework with empty hooks for body state, directives, retrieval, active threads, or future private calls.</li>
+      <li>Keep failure ownership clear: Character State Engine may raise validation errors, but Role Model Loop still logs context-build failure because that is where the model call would have happened.</li>
+      <li>If a helper is still only used by the Role Model Loop compatibility wrapper after the move, keep it private or re-export narrowly; do not create a broad public API.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should the eventual persistent <code>LifeIncidentStore</code> expose a richer query API beyond the existing <code>ActiveIncidentSource</code> current-active read? Not in MVP-014.</li>
-      <li>Should the store become the default active-incident source for following turns? Not in MVP-014; this slice only proves contract compatibility and targeted injection.</li>
-      <li>How should durable or multi-user incident storage key active incidents by <code>user_id</code>, <code>conversation_id</code>, or character identity? Not in MVP-014.</li>
-      <li>How should a durable database transaction coordinate incident writes with Raw Event Log writes? Not in MVP-014.</li>
+      <li>Should the new module be named <code>character.state.context</code> or folded into <code>character.state.current</code>? Implementation should choose the smallest clear boundary.</li>
+      <li>Should <code>role_model.loop.build_decision_context()</code> remain as a permanent wrapper or only a temporary compatibility shim? MVP-015 may keep it to avoid caller churn.</li>
+      <li>When should dedicated context-build raw logs be added? Not in MVP-015.</li>
+      <li>When should retrieval and active-thread context join this builder? Not in MVP-015.</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Persistent <code>LifeIncidentStore</code> backed by a database or append-only incident transition table.</li>
-      <li>Production multi-conversation and multi-user incident isolation for durable storage.</li>
-      <li>Minimal incident lifecycle follow-up actions: complete, cancel, resume, go idle, and no change.</li>
-      <li>Runtime Kernel user-interruption policy that marks active incidents interrupted or backgrounded.</li>
-      <li><code>INCIDENT_COMPLETION</code> RuntimeEvent handling after active incident lifecycle commits exist.</li>
-      <li>Debug inspector and replay views that join incident records with Raw Event Log entries by trace and source event IDs.</li>
+      <li>Dedicated <code>decision_context_built</code> raw log entries with source requests, accepted records, rejected records, and context budget usage.</li>
+      <li>Retrieval planner and <code>context.retrieve()</code> tool backed by a Unified Retrieval Index.</li>
+      <li>Context builder support for active threads, body state, scheduled directives, interrupted incidents, completed incidents, and private event call types.</li>
+      <li>Shared visible conversation message contract if another production boundary consumes committed visible transcript records.</li>
+      <li>Context budget policy after retrieved context, active threads, or tool results create real pressure.</li>
     </ul>
 
     <h2>Next Action</h2>
     <p>
-      Watch <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a>
-      for CI and review feedback, then merge after required checks and approval.
+      Review this narrow spec, then implement the Character State Engine context
+      builder boundary with behavior-preserving tests before opening the MVP-015 PR.
     </p>
   </main>
 </body>

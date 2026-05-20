@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-20 - MVP-015 Functional Spec</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-20 - MVP-015 Functional Spec</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Pulled <code>origin/main</code> and fast-forwarded <code>main</code> from <code>c58e5c0</code> to <code>ad320ac</code>.</li>
+      <li>Created <code>feature/mvp-015-context-builder-boundary</code> from refreshed <code>main</code>.</li>
+      <li>Recorded MVP-014 as completed at <code>docs/plan/completed/mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html</code>.</li>
+      <li>Replaced <code>docs/plan/active-slice.html</code> with <a href="../../plan/active-slice.html">MVP-015 - Character State Engine Context Builder Boundary v0.1</a>.</li>
+      <li>Updated <a href="../../plan/index.html">plan index</a> and <a href="../../plan/future-slices.html">future slices</a> so MVP-015 is the only active implementation slice.</li>
+    </ul>
+
+    <h2>Why It Changed</h2>
+    <p>
+      The Role Model Loop currently assembles recent visible messages,
+      <code>living_state_brief</code>, and <code>active_incident</code> into the
+      model-facing <code>DecisionContext</code>. Notion assigns compact context
+      building to the Character State Engine, and the repo now has enough
+      proven source contracts to move that orchestration without adding new
+      behavior.
+    </p>
+
+    <h2>Source Context</h2>
+    <ul>
+      <li>Notion project hub: <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.</li>
+      <li>Notion roadmap: <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.</li>
+      <li>Notion runtime architecture: <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>.</li>
+      <li>Notion role-model contract: <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>.</li>
+      <li>Notion living state and scheduled life: <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>.</li>
+      <li>Notion Character State Engine and retrieval management: <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>.</li>
+      <li>Notion logging guidance: <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.</li>
+      <li>Local completed plans: MVP-001, MVP-002, MVP-004, MVP-006, MVP-007, MVP-008, MVP-011, and MVP-014.</li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/completed/mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-20/003-mvp-015-functional-spec.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>MVP-015 is intentionally a boundary extraction slice, not a new runtime behavior slice.</li>
+      <li>The active spec requires preserving the current <code>DecisionContext</code> shape and Role Model Loop behavior.</li>
+      <li>Context build failures stay on the existing <code>role_model_turn_failed</code> path with <code>stage = "context_build"</code>.</li>
+      <li>Retrieval, context-build raw logs, active threads, body state, interrupted incidents, private calls, storage, and incident lifecycle changes remain parked.</li>
+    </ul>
+
+    <h2>Checks</h2>
+    <ul>
+      <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-20/003-mvp-015-functional-spec.html</code>: passed.</li>
+      <li><code>python3.13 -m unittest discover</code>: passed, 221 tests.</li>
+      <li><code>git diff --check</code>: passed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Review the MVP-015 spec, then implement the Character State Engine
+      context-builder boundary with behavior-preserving tests before opening a PR.
+    </p>
+  </main>
+</body>
+</html>
