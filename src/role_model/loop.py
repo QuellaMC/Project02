@@ -119,9 +119,7 @@ class VisibleConversationRecentMessagesSource(_CharacterVisibleConversationRecen
         request: RecentVisibleMessagesRequest,
     ) -> list[RecentVisibleMessage]:
         parent_source = cast(character_context.VisibleConversationRecentMessagesSource, super())
-        return _wrap_contract_error(
-            lambda: parent_source.read_recent_visible_messages(request)
-        )
+        return _wrap_contract_error(lambda: parent_source.read_recent_visible_messages(request))
 
 
 def build_decision_context(
