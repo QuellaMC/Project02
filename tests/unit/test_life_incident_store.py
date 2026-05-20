@@ -121,9 +121,9 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
             "thinking through the plan",
         )
         self.assertEqual(
-            raw_log.query({"trace_id": "trace-1", "kinds": ["life_incident_started"]})[
-                "entries"
-            ][0]["data"]["started_incident"]["title"],
+            raw_log.query({"trace_id": "trace-1", "kinds": ["life_incident_started"]})["entries"][
+                0
+            ]["data"]["started_incident"]["title"],
             "thinking through the plan",
         )
 
@@ -188,15 +188,13 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
             first_incident,
         )
         self.assertEqual(
-            raw_log.query({"trace_id": "trace-2", "kinds": ["life_incident_started"]})[
-                "entries"
-            ],
+            raw_log.query({"trace_id": "trace-2", "kinds": ["life_incident_started"]})["entries"],
             [],
         )
         self.assertEqual(
-            raw_log.query({"trace_id": "trace-1", "kinds": ["life_incident_started"]})[
-                "entries"
-            ][0]["data"]["started_incident"],
+            raw_log.query({"trace_id": "trace-1", "kinds": ["life_incident_started"]})["entries"][
+                0
+            ]["data"]["started_incident"],
             first_incident,
         )
 
