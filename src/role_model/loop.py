@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 from character.state import context as character_context
 from character.state.current import (
@@ -118,8 +118,7 @@ class VisibleConversationRecentMessagesSource(_CharacterVisibleConversationRecen
         self,
         request: RecentVisibleMessagesRequest,
     ) -> list[RecentVisibleMessage]:
-        parent_source = cast(character_context.VisibleConversationRecentMessagesSource, super())
-        return _wrap_contract_error(lambda: parent_source.read_recent_visible_messages(request))
+        return _wrap_contract_error(super().read_recent_visible_messages, request)
 
 
 def build_decision_context(
@@ -729,9 +728,9 @@ def _instructions_for_allowed_actions(allowed_actions: list[str]) -> str:
     return ROLE_MODEL_INSTRUCTIONS
 
 
-def _wrap_contract_error[T](callback: Callable[[], T]) -> T:
+def _wrap_contract_error[**P, T](callback: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
     try:
-        return callback()
+        return callback(*args, **kwargs)
     except ContractValidationError as error:
         raise RoleModelValidationError(str(error)) from error
 

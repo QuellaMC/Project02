@@ -75,6 +75,7 @@
       <li>Future retrieval, context-build raw logs, active threads, body state, interrupted incidents, scheduled directives, private calls, storage changes, and broader context budget policy stayed parked.</li>
       <li>Review follow-up: removed stale MVP-012 wording from the conflicting write-action opt-in error in the context builder and user-turn preflight path so the diagnostic matches the MVP-015 boundary.</li>
       <li>Review follow-up: addressed PR comments by using <code>super()</code> in the role-model compatibility source wrapper and correcting the MVP-014 plan-index wording.</li>
+      <li>Review follow-up: addressed the new wrapper comment by passing <code>super().read_recent_visible_messages</code> directly through the shared contract-error wrapper.</li>
     </ul>
 
     <h2>Checks</h2>
@@ -82,6 +83,7 @@
       <li><code>python3.13 -m unittest tests.unit.test_character_context_builder tests.unit.test_role_model_loop tests.integration.test_role_model_loop tests.integration.test_user_message_turn</code>: passed, 109 tests.</li>
       <li><code>python3.13 -m unittest tests.unit.test_character_context_builder tests.unit.test_role_model_loop tests.unit.test_user_turn tests.integration.test_user_message_turn</code>: passed, 101 tests after review cleanup.</li>
       <li><code>python3.13 -m unittest tests.unit.test_role_model_loop tests.unit.test_character_context_builder</code>: passed, 58 tests after PR comment fixes.</li>
+      <li><code>python3.13 -m unittest tests.unit.test_role_model_loop tests.unit.test_character_context_builder</code>: passed, 58 tests after the new wrapper review comment.</li>
       <li><code>python3.13 -m unittest discover</code>: passed, 227 tests.</li>
       <li><code>/private/tmp/project02-tools/bin/ruff format --check .</code>: passed.</li>
       <li><code>/private/tmp/project02-tools/bin/ruff check .</code>: passed.</li>
