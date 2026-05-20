@@ -73,7 +73,13 @@ class InMemoryLifeIncidentStore:
             )
 
         committed_log_entry = validated_request["committed_log_entry"]
-        self._raw_event_log.expose_committed_success_entry(committed_log_entry)
+        try:
+            self._raw_event_log.expose_committed_success_entry(committed_log_entry)
+        except RawEventLogQueryValidationError as error:
+            raise LifeIncidentStartFinalizerError(
+                str(error),
+                code="malformed_finalize_result",
+            ) from error
         self._active_incidents_by_scope[scope] = deepcopy(validated_request["started_incident"])
 
         return {
@@ -211,7 +217,7 @@ def _validate_committed_log_entry(
         require_equal(entry["trace_id"], trace_id, "committed_log_entry.trace_id")
         require_equal(entry["event_id"], event_id, "committed_log_entry.event_id")
         require_equal(entry["kind"], LIFE_INCIDENT_STARTED_KIND, "committed_log_entry.kind")
-    except ContractValidationError as error:
+    except (ContractValidationError, RawEventLogQueryValidationError) as error:
         raise LifeIncidentStartFinalizerError(
             str(error),
             code="malformed_finalize_result",

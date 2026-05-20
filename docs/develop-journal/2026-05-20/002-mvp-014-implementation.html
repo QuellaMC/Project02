@@ -28,7 +28,7 @@
       <li>Successful starts stage the already-built <code>life_incident_started</code> entry through <code>InMemoryRawEventLog.expose_committed_success_entry()</code> before storing the active incident for the validated scope.</li>
       <li>Updated the store from one global active-incident slot to scoped in-memory storage keyed by validated request identity.</li>
       <li>Added an explicit reserved <code>IncidentScope(mode="single_user_self_use")</code> for self-use mode when both <code>user_id</code> and <code>conversation_id</code> are absent.</li>
-      <li>Added targeted unit tests for successful finalize/read behavior, copy safety, raw-log staging failure, same-scope second-start rejection, different-scope starts, isolated reads, default self-use scope behavior, and malformed raw-log entry validation.</li>
+      <li>Added targeted unit tests for successful finalize/read behavior, copy safety, raw-log staging failure, direct finalizer staging failure, same-scope second-start rejection, different-scope starts, isolated reads, default self-use scope behavior, and malformed raw-log entry validation.</li>
       <li>Added an integration test that runs a <code>USER_MESSAGE</code> turn with the concrete store adapter and verifies the active incident plus query-visible success log.</li>
       <li>Opened <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a> and updated the active plan plus implementation graph with the PR reference.</li>
     </ul>
@@ -67,8 +67,8 @@
 
     <h2>Checks</h2>
     <ul>
-      <li><code>python3.13 -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_incident_start_turn_with_concrete_store_reads_incident_and_query_success_log</code>: passed after scoped storage update, 8 tests.</li>
-      <li><code>python3.13 -m unittest discover</code>: passed, 218 tests.</li>
+      <li><code>python3.13 -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_incident_start_turn_with_concrete_store_reads_incident_and_query_success_log</code>: passed after review-comment fixes, 9 tests.</li>
+      <li><code>python3.13 -m unittest discover</code>: passed, 219 tests.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code>: passed.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code>: passed.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/mypy</code>: passed.</li>

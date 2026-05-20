@@ -187,6 +187,18 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
             [],
         )
 
+    def test_direct_visibility_staging_failure_raises_finalizer_error(self):
+        raw_log = RejectingRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        event = normalized_user_message()
+        request = finalize_request_for(event, role_model_result_with_incident())
+
+        with self.assertRaises(LifeIncidentStartFinalizerError) as context:
+            store.finalize_life_incident_start(request)
+
+        self.assertEqual(context.exception.code, "malformed_finalize_result")
+        self.assertEqual(store.read_active_incident(build_active_incident_request(event)), None)
+
     def test_same_scope_second_start_fails_closed_without_overwriting_active_incident(self):
         raw_log = InMemoryRawEventLog()
         store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
