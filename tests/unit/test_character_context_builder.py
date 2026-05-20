@@ -191,7 +191,7 @@ class CharacterContextBuilderTests(unittest.TestCase):
         )
 
     def test_rejects_conflicting_write_action_opt_ins(self):
-        with self.assertRaisesRegex(ContractValidationError, "state_patch and life_action"):
+        with self.assertRaisesRegex(ContractValidationError, "current USER_MESSAGE turn"):
             build_character_decision_context(
                 normalized_user_message(),
                 current_state_source=RecordingCurrentStateSource(current_state_snapshot()),

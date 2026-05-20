@@ -56,7 +56,11 @@
       <li><code>src/character/state/context.py</code></li>
       <li><code>src/character/state/__init__.py</code></li>
       <li><code>src/role_model/loop.py</code></li>
+      <li><code>src/runtime/user_turn.py</code></li>
       <li><code>tests/unit/test_character_context_builder.py</code></li>
+      <li><code>tests/unit/test_role_model_loop.py</code></li>
+      <li><code>tests/unit/test_user_turn.py</code></li>
+      <li><code>tests/integration/test_user_message_turn.py</code></li>
       <li><code>docs/plan/active-slice.html</code></li>
       <li><code>docs/plan/index.html</code></li>
       <li><code>docs/develop-journal/2026-05-20/004-mvp-015-implementation.html</code></li>
@@ -69,11 +73,13 @@
       <li><code>role_model.loop</code> still owns rendering, adapter invocation, structured output parsing, role-model success/failure log construction, and conversion of context-builder validation failures into <code>role_model_turn_failed</code> records.</li>
       <li>The user-turn orchestrator still injects the same visible conversation, current-state, and active-incident sources and keeps the same commit order.</li>
       <li>Future retrieval, context-build raw logs, active threads, body state, interrupted incidents, scheduled directives, private calls, storage changes, and broader context budget policy stayed parked.</li>
+      <li>Review follow-up: removed stale MVP-012 wording from the conflicting write-action opt-in error in the context builder and user-turn preflight path so the diagnostic matches the MVP-015 boundary.</li>
     </ul>
 
     <h2>Checks</h2>
     <ul>
       <li><code>python3.13 -m unittest tests.unit.test_character_context_builder tests.unit.test_role_model_loop tests.integration.test_role_model_loop tests.integration.test_user_message_turn</code>: passed, 109 tests.</li>
+      <li><code>python3.13 -m unittest tests.unit.test_character_context_builder tests.unit.test_role_model_loop tests.unit.test_user_turn tests.integration.test_user_message_turn</code>: passed, 101 tests after review cleanup.</li>
       <li><code>python3.13 -m unittest discover</code>: passed, 227 tests.</li>
       <li><code>/private/tmp/project02-tools/bin/ruff check .</code>: passed.</li>
       <li><code>/private/tmp/project02-mypy/bin/mypy</code>: passed.</li>

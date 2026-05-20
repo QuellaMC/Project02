@@ -106,7 +106,7 @@ def build_character_decision_context(
     normalized_event = validate_normalized_user_message_event(event, source_name="event")
     if allow_state_patch and allow_incident_start:
         raise ContractValidationError(
-            "state_patch and life_action cannot both be allowed in MVP-012."
+            "state_patch and life_action cannot both be allowed in the current USER_MESSAGE turn."
         )
     if allow_state_patch and current_state_source is None:
         raise ContractValidationError("allow_state_patch requires current_state_source.")

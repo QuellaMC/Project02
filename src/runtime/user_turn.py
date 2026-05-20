@@ -87,7 +87,10 @@ def run_user_message_turn(
             failure={
                 "stage": USER_TURN_PREFLIGHT_STOP,
                 "code": CONFLICTING_WRITE_ACTION_OPT_IN_CODE,
-                "message": "state_patch and life_action cannot both be allowed in MVP-012.",
+                "message": (
+                    "state_patch and life_action cannot both be allowed in the "
+                    "current USER_MESSAGE turn."
+                ),
             },
         )
 
