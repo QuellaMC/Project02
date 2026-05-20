@@ -29,8 +29,11 @@ from runtime.logging import (
     Clock,
     IdGenerator,
     RawEventLogEntry,
+    RawEventLogQueryValidationError,
     build_raw_log_entry,
     clock_timestamp,
+    confirm_committed_success_entry_visibility,
+    discard_committed_success_entry_visibility,
     generate_id,
 )
 
@@ -133,6 +136,7 @@ def commit_life_incident_start(
     source_identity = _extract_trusted_source_identity(source_event)
     request: LifeIncidentStartCommitRequest | None = None
     started_incident: Mapping[str, Any] | None = None
+    committed_log_entry: RawEventLogEntry | None = None
 
     try:
         request = build_life_incident_start_commit_request(source_event, role_model_result)
@@ -165,15 +169,29 @@ def commit_life_incident_start(
             started_incident=started_incident,
             committed_log_entry=committed_log_entry,
         )
-        finalize_result = life_incident_start_finalizer.finalize_life_incident_start(
-            deepcopy(finalize_request)
-        )
+        try:
+            finalize_result = life_incident_start_finalizer.finalize_life_incident_start(
+                deepcopy(finalize_request)
+            )
+        except RawEventLogQueryValidationError as error:
+            raise LifeIncidentStartFinalizerError(
+                str(error),
+                code="malformed_finalize_result",
+            ) from error
         validated_finalize_result = validate_life_incident_start_finalize_result(
             finalize_result,
             source_identity=source_identity,
             committed_log_entry=committed_log_entry,
         )
+        try:
+            confirm_committed_success_entry_visibility(raw_event_log, committed_log_entry)
+        except RawEventLogQueryValidationError as error:
+            raise LifeIncidentStartFinalizerError(
+                str(error),
+                code="malformed_finalize_result",
+            ) from error
     except LifeIncidentStartFinalizerError as error:
+        discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
         failure = _build_failure(
             LIFE_INCIDENT_START_FINALIZE_STAGE,
             error.code,

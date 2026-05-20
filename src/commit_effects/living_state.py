@@ -28,8 +28,11 @@ from runtime.logging import (
     Clock,
     IdGenerator,
     RawEventLogEntry,
+    RawEventLogQueryValidationError,
     build_raw_log_entry,
     clock_timestamp,
+    confirm_committed_success_entry_visibility,
+    discard_committed_success_entry_visibility,
 )
 
 LIVING_STATE_PATCH_COMMITTED_STATUS = "living_state_patch_committed"
@@ -159,6 +162,7 @@ def commit_living_state_patch(
     source_identity = _extract_trusted_source_identity(source_event)
     request: LivingStatePatchCommitRequest | None = None
     commit_time: str | None = None
+    committed_log_entry: RawEventLogEntry | None = None
 
     try:
         request = build_living_state_patch_commit_request(source_event, role_model_result)
@@ -198,15 +202,29 @@ def commit_living_state_patch(
             committed_snapshot=validated_snapshot,
             committed_log_entry=committed_log_entry,
         )
-        finalize_result = living_state_patch_finalizer.finalize_living_state_patch_commit(
-            deepcopy(finalize_request)
-        )
+        try:
+            finalize_result = living_state_patch_finalizer.finalize_living_state_patch_commit(
+                deepcopy(finalize_request)
+            )
+        except RawEventLogQueryValidationError as error:
+            raise LivingStatePatchFinalizerError(
+                str(error),
+                code="malformed_finalize_result",
+            ) from error
         validated_finalize_result = validate_living_state_patch_finalize_result(
             finalize_result,
             source_identity=source_identity,
             committed_log_entry=committed_log_entry,
         )
+        try:
+            confirm_committed_success_entry_visibility(raw_event_log, committed_log_entry)
+        except RawEventLogQueryValidationError as error:
+            raise LivingStatePatchFinalizerError(
+                str(error),
+                code="malformed_finalize_result",
+            ) from error
     except LivingStatePatchFinalizerError as error:
+        discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
         failure = _build_failure(
             LIVING_STATE_PATCH_FINALIZE_STAGE,
             error.code,

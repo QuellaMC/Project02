@@ -7,12 +7,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from commit_effects.incident_start import LifeIncidentStartFinalizerError  # noqa: E402
+from commit_effects.incident_start import (  # noqa: E402
+    LIFE_INCIDENT_START_FINALIZE_STAGE,
+    LifeIncidentStartFinalizerError,
+)
 from commit_effects.living_state import (  # noqa: E402
     LIVING_STATE_PATCH_FINALIZE_STAGE,
     LivingStatePatchFinalizerError,
 )
 from runtime.kernel import RuntimeKernel, RuntimeValidationError  # noqa: E402
+from runtime.logging import InMemoryRawEventLog  # noqa: E402
 from runtime.user_turn import run_user_message_turn  # noqa: E402
 
 
@@ -178,9 +182,23 @@ class RecordingLivingStatePatchStore:
 
 
 class RecordingLivingStatePatchFinalizer:
-    def __init__(self, error=None, operations=None):
+    def __init__(
+        self,
+        error=None,
+        result_override=None,
+        operations=None,
+        raw_log_visibility=None,
+        expose_before_result_override=False,
+        append_before_result_override=False,
+        expose_conflicting_success=False,
+    ):
         self.error = error
+        self.result_override = deepcopy(result_override)
         self.operations = operations if operations is not None else []
+        self.raw_log_visibility = raw_log_visibility
+        self.expose_before_result_override = expose_before_result_override
+        self.append_before_result_override = append_before_result_override
+        self.expose_conflicting_success = expose_conflicting_success
         self.requests = []
         self.durable_state_snapshots = []
         self.durable_success_logs = []
@@ -189,6 +207,21 @@ class RecordingLivingStatePatchFinalizer:
         self.requests.append(deepcopy(request))
         if self.error is not None:
             raise self.error
+        if self.raw_log_visibility is not None and self.expose_conflicting_success:
+            self.raw_log_visibility.expose_committed_success_entry(request["committed_log_entry"])
+            conflicting_entry = deepcopy(request["committed_log_entry"])
+            conflicting_entry["data"]["visibility_conflict"] = True
+            self.raw_log_visibility.expose_committed_success_entry(conflicting_entry)
+        if self.result_override is not None:
+            if self.raw_log_visibility is not None and self.append_before_result_override:
+                self.raw_log_visibility.append(request["committed_log_entry"])
+            if self.raw_log_visibility is not None and self.expose_before_result_override:
+                self.raw_log_visibility.expose_committed_success_entry(
+                    request["committed_log_entry"]
+                )
+            return deepcopy(self.result_override)
+        if self.raw_log_visibility is not None:
+            self.raw_log_visibility.expose_committed_success_entry(request["committed_log_entry"])
         self.durable_state_snapshots.append(deepcopy(request["committed_snapshot"]))
         self.durable_success_logs.append(deepcopy(request["committed_log_entry"]))
         self.operations.append(("atomic_finalizer", request["committed_log_entry"]["kind"]))
@@ -202,9 +235,23 @@ class RecordingLivingStatePatchFinalizer:
 
 
 class RecordingLifeIncidentStartFinalizer:
-    def __init__(self, error=None, operations=None):
+    def __init__(
+        self,
+        error=None,
+        result_override=None,
+        operations=None,
+        raw_log_visibility=None,
+        expose_before_result_override=False,
+        append_before_result_override=False,
+        expose_conflicting_success=False,
+    ):
         self.error = error
+        self.result_override = deepcopy(result_override)
         self.operations = operations if operations is not None else []
+        self.raw_log_visibility = raw_log_visibility
+        self.expose_before_result_override = expose_before_result_override
+        self.append_before_result_override = append_before_result_override
+        self.expose_conflicting_success = expose_conflicting_success
         self.requests = []
         self.durable_started_incidents = []
         self.durable_raw_event_log_entries = []
@@ -213,6 +260,21 @@ class RecordingLifeIncidentStartFinalizer:
         self.requests.append(deepcopy(request))
         if self.error is not None:
             raise self.error
+        if self.raw_log_visibility is not None and self.expose_conflicting_success:
+            self.raw_log_visibility.expose_committed_success_entry(request["committed_log_entry"])
+            conflicting_entry = deepcopy(request["committed_log_entry"])
+            conflicting_entry["data"]["visibility_conflict"] = True
+            self.raw_log_visibility.expose_committed_success_entry(conflicting_entry)
+        if self.result_override is not None:
+            if self.raw_log_visibility is not None and self.append_before_result_override:
+                self.raw_log_visibility.append(request["committed_log_entry"])
+            if self.raw_log_visibility is not None and self.expose_before_result_override:
+                self.raw_log_visibility.expose_committed_success_entry(
+                    request["committed_log_entry"]
+                )
+            return deepcopy(self.result_override)
+        if self.raw_log_visibility is not None:
+            self.raw_log_visibility.expose_committed_success_entry(request["committed_log_entry"])
         self.durable_started_incidents.append(deepcopy(request["started_incident"]))
         self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
         self.operations.append(("atomic_finalizer", request["committed_log_entry"]["kind"]))
@@ -345,6 +407,53 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         result["visible_reply_result"]["output"]["text"] = "mutated"
         self.assertEqual(visible_conversation.records[1]["text"], "hello now")
         self.assertEqual(visible_conversation.records[2]["text"], "hello back")
+
+    def test_raw_log_query_surface_returns_ordinary_turn_logs(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "hello now",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=RecordingAdapter(),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        all_entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        visible_reply_entries = raw_log.query(
+            {
+                "trace_id": result["trace_id"],
+                "event_id": result["event_id"],
+                "kinds": ["visible_reply_committed"],
+            }
+        )["entries"]
+
+        self.assertEqual(
+            [entry["kind"] for entry in all_entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "visible_reply_committed",
+            ],
+        )
+        self.assertEqual(
+            [entry["kind"] for entry in visible_reply_entries],
+            ["visible_reply_committed"],
+        )
 
     def test_runs_one_user_turn_with_current_state_in_model_input(self):
         raw_log = RecordingRawEventLog()
@@ -587,6 +696,75 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(visible_conversation.records[-1]["text"], "hello back")
 
+    def test_raw_log_query_surface_includes_incident_start_success_log_in_order(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_start_finalizer = RecordingLifeIncidentStartFinalizer(
+            raw_log_visibility=raw_log
+        )
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "life_action": {
+                        "type": "start_incident",
+                        "incident": {
+                            "type": "think",
+                            "title": "thinking through the plan",
+                            "remaining_seconds": 300,
+                            "interrupt_policy": "interruptible",
+                            "resume_policy": "ask_model",
+                        },
+                    },
+                }
+            )
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "hello now",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_start_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["life_incident_started"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "life_incident_started",
+                "visible_reply_committed",
+            ],
+        )
+        self.assertEqual(len(success_entries), 1)
+        self.assertEqual(
+            result["life_incident_start_result"]["committed_log_entry_id"],
+            success_entries[0]["log_id"],
+        )
+
     def test_incident_start_enabled_turn_without_life_action_preserves_visible_reply_flow(self):
         raw_log = RecordingRawEventLog()
         visible_conversation = InMemoryVisibleConversation([prior_user_record()])
@@ -752,6 +930,330 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         self.assertEqual(len(life_incident_start_finalizer.requests), 1)
         self.assertEqual(life_incident_start_finalizer.durable_started_incidents, [])
         self.assertEqual(life_incident_start_finalizer.durable_raw_event_log_entries, [])
+
+    def test_raw_log_query_surface_excludes_incident_success_log_on_finalizer_rejection(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_start_finalizer = RecordingLifeIncidentStartFinalizer(
+            error=LifeIncidentStartFinalizerError(
+                "finalize rejected",
+                code="finalize_rejected",
+            ),
+            raw_log_visibility=raw_log,
+        )
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "life_action": {
+                        "type": "start_incident",
+                        "incident": {
+                            "type": "think",
+                            "title": "thinking through the plan",
+                            "interrupt_policy": "interruptible",
+                            "resume_policy": "ask_model",
+                        },
+                    },
+                }
+            )
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_start_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["life_incident_started"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "life_incident_start_rejected",
+            ],
+        )
+        self.assertEqual(success_entries, [])
+
+    def test_raw_log_query_surface_excludes_incident_success_log_on_malformed_finalize(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_start_finalizer = RecordingLifeIncidentStartFinalizer(
+            result_override={
+                "schema_version": "0.1",
+                "trace_id": "trace-current",
+                "event_id": "event-current",
+                "event_type": "USER_MESSAGE",
+                "committed_log_entry_id": "wrong-log-id",
+            },
+            raw_log_visibility=raw_log,
+            expose_before_result_override=True,
+        )
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "life_action": {
+                        "type": "start_incident",
+                        "incident": {
+                            "type": "think",
+                            "title": "thinking through the plan",
+                            "interrupt_policy": "interruptible",
+                            "resume_policy": "ask_model",
+                        },
+                    },
+                }
+            )
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_start_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["life_incident_started"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["failure"]["stage"], "life_incident_start_finalize")
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "life_incident_start_rejected",
+            ],
+        )
+        self.assertEqual(success_entries, [])
+        self.assertEqual(life_incident_start_finalizer.durable_started_incidents, [])
+        self.assertEqual(life_incident_start_finalizer.durable_raw_event_log_entries, [])
+
+    def test_raw_log_query_surface_rejects_incident_staging_visibility_failure(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_start_finalizer = RecordingLifeIncidentStartFinalizer(
+            raw_log_visibility=raw_log,
+            expose_conflicting_success=True,
+        )
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "life_action": {
+                        "type": "start_incident",
+                        "incident": {
+                            "type": "think",
+                            "title": "thinking through the plan",
+                            "interrupt_policy": "interruptible",
+                            "resume_policy": "ask_model",
+                        },
+                    },
+                }
+            )
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_start_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["life_incident_started"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_START_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertIn("already exists with different data", result["failure"]["message"])
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "life_incident_start_rejected",
+            ],
+        )
+        self.assertEqual(success_entries, [])
+        self.assertEqual(life_incident_start_finalizer.durable_started_incidents, [])
+        self.assertEqual(life_incident_start_finalizer.durable_raw_event_log_entries, [])
+
+    def test_raw_log_query_surface_rejects_incident_success_accidentally_appended(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_start_finalizer = RecordingLifeIncidentStartFinalizer(
+            result_override={
+                "schema_version": "0.1",
+                "trace_id": "trace-current",
+                "event_id": "event-current",
+                "event_type": "USER_MESSAGE",
+                "committed_log_entry_id": "wrong-log-id",
+            },
+            raw_log_visibility=raw_log,
+            append_before_result_override=True,
+        )
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "life_action": {
+                        "type": "start_incident",
+                        "incident": {
+                            "type": "think",
+                            "title": "thinking through the plan",
+                            "interrupt_policy": "interruptible",
+                            "resume_policy": "ask_model",
+                        },
+                    },
+                }
+            )
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_start_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["life_incident_started"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_START_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertIn("must be exposed and confirmed before append", result["failure"]["message"])
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "life_incident_start_rejected",
+            ],
+        )
+        self.assertEqual(success_entries, [])
+
+    def test_raw_log_query_surface_rejects_incident_success_when_finalizer_does_not_stage(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_start_finalizer = RecordingLifeIncidentStartFinalizer()
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "life_action": {
+                        "type": "start_incident",
+                        "incident": {
+                            "type": "think",
+                            "title": "thinking through the plan",
+                            "interrupt_policy": "interruptible",
+                            "resume_policy": "ask_model",
+                        },
+                    },
+                }
+            )
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_start_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["life_incident_started"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_START_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertIn("not staged by finalizer visibility", result["failure"]["message"])
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "life_incident_start_rejected",
+            ],
+        )
+        self.assertEqual(success_entries, [])
 
     def test_conflicting_write_opt_ins_stop_before_user_visible_message_commit(self):
         raw_log = RecordingRawEventLog()
@@ -921,6 +1423,75 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         self.assertNotIn(
             "state_patch",
             raw_log.entries[3]["data"]["role_model_result"]["decision"],
+        )
+
+    def test_raw_log_query_surface_includes_living_state_success_log_in_order(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        current_state_source = RecordingCurrentStateSource(current_state_snapshot())
+        living_state_patch_store = RecordingLivingStatePatchStore()
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer(
+            raw_log_visibility=raw_log
+        )
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {
+                        "living_state": {
+                            "current_activity": "answering the user",
+                            "mood": "attentive",
+                        }
+                    },
+                }
+            )
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "hello now",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=current_state_source,
+            living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["living_state_patch_committed"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "living_state_patch_committed",
+                "visible_reply_committed",
+            ],
+        )
+        self.assertEqual(len(success_entries), 1)
+        self.assertEqual(
+            result["living_state_patch_result"]["committed_log_entry_id"],
+            success_entries[0]["log_id"],
         )
 
     def test_state_enabled_turn_without_patch_preserves_visible_reply_flow(self):
@@ -1110,6 +1681,305 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         self.assertEqual(len(living_state_patch_finalizer.requests), 1)
         self.assertEqual(living_state_patch_finalizer.durable_state_snapshots, [])
         self.assertEqual(living_state_patch_finalizer.durable_success_logs, [])
+
+    def test_raw_log_query_surface_excludes_state_success_log_on_finalizer_rejection(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {"living_state": {"mood": "attentive"}},
+                }
+            )
+        )
+        living_state_patch_store = RecordingLivingStatePatchStore()
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer(
+            error=LivingStatePatchFinalizerError(
+                "finalize rejected",
+                code="finalize_rejected",
+            ),
+            raw_log_visibility=raw_log,
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["living_state_patch_committed"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "living_state_patch_rejected",
+            ],
+        )
+        self.assertEqual(success_entries, [])
+
+    def test_raw_log_query_surface_excludes_state_success_log_on_malformed_finalize(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {"living_state": {"mood": "attentive"}},
+                }
+            )
+        )
+        living_state_patch_store = RecordingLivingStatePatchStore()
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer(
+            result_override={
+                "schema_version": "0.1",
+                "trace_id": "trace-current",
+                "event_id": "event-current",
+                "event_type": "USER_MESSAGE",
+                "committed_log_entry_id": "wrong-log-id",
+            },
+            raw_log_visibility=raw_log,
+            expose_before_result_override=True,
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["living_state_patch_committed"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["failure"]["stage"], LIVING_STATE_PATCH_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "living_state_patch_rejected",
+            ],
+        )
+        self.assertEqual(success_entries, [])
+        self.assertEqual(living_state_patch_finalizer.durable_state_snapshots, [])
+        self.assertEqual(living_state_patch_finalizer.durable_success_logs, [])
+
+    def test_raw_log_query_surface_rejects_state_staging_visibility_failure(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {"living_state": {"mood": "attentive"}},
+                }
+            )
+        )
+        living_state_patch_store = RecordingLivingStatePatchStore()
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer(
+            raw_log_visibility=raw_log,
+            expose_conflicting_success=True,
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["living_state_patch_committed"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["failure"]["stage"], LIVING_STATE_PATCH_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertIn("already exists with different data", result["failure"]["message"])
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "living_state_patch_rejected",
+            ],
+        )
+        self.assertEqual(success_entries, [])
+        self.assertEqual(living_state_patch_finalizer.durable_state_snapshots, [])
+        self.assertEqual(living_state_patch_finalizer.durable_success_logs, [])
+
+    def test_raw_log_query_surface_rejects_state_success_accidentally_appended(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {"living_state": {"mood": "attentive"}},
+                }
+            )
+        )
+        living_state_patch_store = RecordingLivingStatePatchStore()
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer(
+            result_override={
+                "schema_version": "0.1",
+                "trace_id": "trace-current",
+                "event_id": "event-current",
+                "event_type": "USER_MESSAGE",
+                "committed_log_entry_id": "wrong-log-id",
+            },
+            raw_log_visibility=raw_log,
+            append_before_result_override=True,
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["living_state_patch_committed"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["failure"]["stage"], LIVING_STATE_PATCH_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertIn("must be exposed and confirmed before append", result["failure"]["message"])
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "living_state_patch_rejected",
+            ],
+        )
+        self.assertEqual(success_entries, [])
+
+    def test_raw_log_query_surface_rejects_state_success_when_finalizer_does_not_stage(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "state_patch": {"living_state": {"mood": "attentive"}},
+                }
+            )
+        )
+        living_state_patch_store = RecordingLivingStatePatchStore()
+        living_state_patch_finalizer = RecordingLivingStatePatchFinalizer()
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "payload": {"text": "hello now", "conversation_id": "c-1"},
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
+            living_state_patch_store=living_state_patch_store,
+            living_state_patch_finalizer=living_state_patch_finalizer,
+        )
+
+        entries = raw_log.query({"trace_id": result["trace_id"]})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["living_state_patch_committed"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["failure"]["stage"], LIVING_STATE_PATCH_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertIn("not staged by finalizer visibility", result["failure"]["message"])
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "living_state_patch_rejected",
+            ],
+        )
+        self.assertEqual(success_entries, [])
 
     def test_shape_valid_bad_store_result_stops_before_assistant_reply(self):
         raw_log = RecordingRawEventLog()
