@@ -71,8 +71,8 @@
       <a href="https://github.com/QuellaMC/Project02/pull/14">PR #14</a>.
       MVP-013 is recorded from
       <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>.
-      MVP-014 is implemented locally on
-      <code>feature/mvp-014-life-incident-store-start-adapter</code>.
+      MVP-014 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -101,7 +101,7 @@ flowchart LR
     LifeActionParse["Optional life_action.start_incident parser&lt;br/&gt;MVP-012 implemented&lt;br/&gt;FR-6 parser coverage PR #14"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012 implemented; MVP-014 active"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012 implemented; MVP-014 in PR #16"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -111,7 +111,7 @@ flowchart LR
     AtomicFinalize["Atomic state-plus-log finalize&lt;br/&gt;MVP-010 PR #10 + follow-up PR #11"]
     IncidentStartCommit["Start incident commit/reject&lt;br/&gt;MVP-012 implemented"]
     IncidentStartFinalize["Incident-start finalizer protocol&lt;br/&gt;atomic incident + log visibility"]
-    IncidentStoreAdapter["Concrete in-memory incident start adapter&lt;br/&gt;MVP-014 active"]
+    IncidentStoreAdapter["Concrete in-memory incident start adapter&lt;br/&gt;MVP-014 PR #16"]
   end
 
   subgraph RecentContext["Context Source - MVP-004 and MVP-006 implemented"]
@@ -119,7 +119,7 @@ flowchart LR
     VisibleRecentSource["Visible conversation recent source&lt;br/&gt;maps committed records to context"]
   end
 
-  subgraph CharacterState["Character State Engine - MVP-008 and MVP-011 implemented; MVP-014 active"]
+  subgraph CharacterState["Character State Engine - MVP-008 and MVP-011 implemented; MVP-014 in PR #16"]
     CurrentStateSource["Read-only current-state source&lt;br/&gt;injected fake"]
     LivingStateBrief["living_state_brief&lt;br/&gt;validated compact current reality"]
     ActiveIncidentSource["Read-only active-incident source&lt;br/&gt;MVP-011 PR #12 implemented"]
@@ -185,7 +185,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</a></td>
-          <td>Implemented locally on <code>feature/mvp-014-life-incident-store-start-adapter</code>; PR pending.</td>
+          <td>Open <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a> on <code>feature/mvp-014-life-incident-store-start-adapter</code>.</td>
           <td>Replace the MVP-012 incident-start recording fake with a small concrete in-memory <code>LifeIncidentStore</code> start adapter that stores the active incident, implements the existing <code>ActiveIncidentSource</code> read contract, and exposes the matching <code>life_incident_started</code> entry through the MVP-013 query surface, without adding the rest of the incident lifecycle.</td>
         </tr>
       </tbody>
