@@ -69,8 +69,10 @@
       <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>,
       with parser rejection matrix coverage in
       <a href="https://github.com/QuellaMC/Project02/pull/14">PR #14</a>.
-      MVP-013 is tracked in
+      MVP-013 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>.
+      MVP-014 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -83,11 +85,11 @@ flowchart LR
     RouteUpdate["USER_MESSAGE route&lt;br/&gt;model_needed = true&lt;br/&gt;next_step = user_turn"]
   end
 
-  subgraph RawLogging["Raw Event Logging - implemented; MVP-013 visibility in PR #15"]
+  subgraph RawLogging["Raw Event Logging - MVP-001 and MVP-013 implemented"]
     LogHelper["runtime.logging&lt;br/&gt;shared raw-log envelope"]
     RuntimeLog["runtime_event_received"]
     RoleLog["role_model_turn_completed&lt;br/&gt;role_model_turn_failed"]
-    RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 PR #15"]
+    RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 implemented"]
   end
 
   subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012 implemented; parser coverage in PR #14"]
@@ -99,7 +101,7 @@ flowchart LR
     LifeActionParse["Optional life_action.start_incident parser&lt;br/&gt;MVP-012 implemented&lt;br/&gt;FR-6 parser coverage PR #14"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012 implemented"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012 implemented; MVP-014 in PR #16"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -108,7 +110,8 @@ flowchart LR
     PatchStore["Injected living-state patch sink&lt;br/&gt;MVP-009 prepare boundary"]
     AtomicFinalize["Atomic state-plus-log finalize&lt;br/&gt;MVP-010 PR #10 + follow-up PR #11"]
     IncidentStartCommit["Start incident commit/reject&lt;br/&gt;MVP-012 implemented"]
-    IncidentStartFinalize["Injected incident-start finalizer&lt;br/&gt;atomic incident + log visibility"]
+    IncidentStartFinalize["Incident-start finalizer protocol&lt;br/&gt;atomic incident + log visibility"]
+    IncidentStoreAdapter["Concrete in-memory incident start adapter&lt;br/&gt;MVP-014 PR #16"]
   end
 
   subgraph RecentContext["Context Source - MVP-004 and MVP-006 implemented"]
@@ -116,11 +119,12 @@ flowchart LR
     VisibleRecentSource["Visible conversation recent source&lt;br/&gt;maps committed records to context"]
   end
 
-  subgraph CharacterState["Character State Engine - MVP-008 and MVP-011 implemented"]
+  subgraph CharacterState["Character State Engine - MVP-008 and MVP-011 implemented; MVP-014 in PR #16"]
     CurrentStateSource["Read-only current-state source&lt;br/&gt;injected fake"]
     LivingStateBrief["living_state_brief&lt;br/&gt;validated compact current reality"]
     ActiveIncidentSource["Read-only active-incident source&lt;br/&gt;MVP-011 PR #12 implemented"]
     ActiveIncidentBrief["active_incident brief&lt;br/&gt;validated compact incident context"]
+    InMemoryIncidentStore["In-memory LifeIncidentStore&lt;br/&gt;started active incident only&lt;br/&gt;implements ActiveIncidentSource"]
   end
 
   subgraph UserTurn["User Turn Orchestrator - MVP-007 implemented locally"]
@@ -144,7 +148,9 @@ flowchart LR
   AtomicFinalize --> RawLogQuery
   LifeActionParse --> IncidentStartCommit --> IncidentStartFinalize
   IncidentStartCommit --> LogHelper
-  IncidentStartFinalize --> RawLogQuery
+  IncidentStartFinalize --> IncidentStoreAdapter --> InMemoryIncidentStore
+  IncidentStoreAdapter --> RawLogQuery
+  InMemoryIncidentStore -- "read contract only; no default wiring" --> ActiveIncidentSource
   Parse --> LogHelper --> RoleLog
   Parse --> Commit --> Conversation
   Commit --> CommitLog
@@ -162,8 +168,8 @@ flowchart LR
   classDef active fill:#fff8e6,stroke:#b7832f,color:#172026;
   class Normalize,SharedIntake,RouteUpdate,LogHelper,RuntimeLog,Context,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages,UserProjection,VisibleRecentSource,CurrentStateSource,LivingStateBrief,ActiveIncidentSource,ActiveIncidentBrief,Turn,TurnResult implemented;
   class StatePatchParse,StatePatchCommit,PatchStore,AtomicFinalize implemented;
-  class LifeActionParse,IncidentStartCommit,IncidentStartFinalize implemented;
-  class RawLogQuery active;
+  class LifeActionParse,IncidentStartCommit,IncidentStartFinalize,RawLogQuery implemented;
+  class IncidentStoreAdapter,InMemoryIncidentStore active;
       </pre>
     </div>
 
@@ -178,9 +184,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-013 - Raw Event Log Query/Replay Visibility for Committed Success Logs</a></td>
-          <td>Open <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a> on <code>feature/mvp-013-raw-log-replay-visibility</code>.</td>
-          <td>Prove success logs exposed through MVP-010 and MVP-012 atomic finalizers are visible through the same Raw Event Log query/debug surface as ordinary appended logs, without adding concrete storage, replay execution, debug UI, or new runtime behavior.</td>
+          <td><a href="active-slice.html">MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</a></td>
+          <td>Open <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a> on <code>feature/mvp-014-life-incident-store-start-adapter</code>.</td>
+          <td>Replace the MVP-012 incident-start recording fake with a small concrete in-memory <code>LifeIncidentStore</code> start adapter that stores the active incident, implements the existing <code>ActiveIncidentSource</code> read contract, and exposes the matching <code>life_incident_started</code> entry through the MVP-013 query surface, without adding the rest of the incident lifecycle.</td>
         </tr>
       </tbody>
     </table>
@@ -195,6 +201,11 @@ flowchart LR
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td><a href="completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html">MVP-013 - Raw Event Log Query/Replay Visibility for Committed Success Logs</a></td>
+          <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>.</td>
+          <td>Prove success logs exposed through MVP-010 and MVP-012 atomic finalizers are visible through the same Raw Event Log query/debug surface as ordinary appended logs, without adding concrete storage, replay execution, debug UI, or new runtime behavior.</td>
+        </tr>
         <tr>
           <td><a href="completed/mvp-012-minimal-start-incident-commit-boundary.html">MVP-012 - Minimal Start Incident Commit Boundary</a></td>
           <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/13">PR #13</a>. Parser coverage follow-up merged in <a href="https://github.com/QuellaMC/Project02/pull/14">PR #14</a>.</td>
@@ -265,7 +276,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active MVP-013 Raw Event Log visibility boundary are parked in
+      Ideas beyond the active MVP-014 LifeIncidentStore start adapter are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-20 - MVP-014 Functional Spec</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-20 - MVP-014 Functional Spec</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Pulled <code>origin/main</code> and fast-forwarded <code>main</code> from <code>7888e0a</code> to <code>c58e5c0</code>.</li>
+      <li>Created <code>feature/mvp-014-life-incident-store-start-adapter</code> from refreshed <code>main</code>.</li>
+      <li>Recorded MVP-013 as completed at <code>docs/plan/completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html</code>.</li>
+      <li>Replaced <code>docs/plan/active-slice.html</code> with <a href="../../plan/active-slice.html">MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</a>.</li>
+      <li>Updated <a href="../../plan/index.html">plan index</a> and <a href="../../plan/future-slices.html">future slices</a> so MVP-014 is the only active implementation slice.</li>
+      <li>Addressed spec review findings by requiring the store to implement the existing <code>ActiveIncidentSource.read_active_incident(request)</code> contract and adding Notion 06 to source context.</li>
+    </ul>
+
+    <h2>Why It Changed</h2>
+    <p>
+      MVP-012 proved the incident-start commit contract with a recording fake
+      finalizer, and MVP-013 proved finalizer success logs are visible through
+      the shared Raw Event Log query surface. MVP-014 is the next narrow step:
+      replace the incident-start recording fake with a concrete in-memory
+      <code>LifeIncidentStore</code> start adapter while leaving the rest of the
+      incident lifecycle parked.
+    </p>
+
+    <h2>Source Context</h2>
+    <ul>
+      <li>Notion project hub: <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.</li>
+      <li>Notion roadmap: <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.</li>
+      <li>Notion runtime architecture: <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>.</li>
+      <li>Notion living state and scheduled life: <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>.</li>
+      <li>Notion Character State Engine and retrieval management: <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>.</li>
+      <li>Notion logging guidance: <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.</li>
+      <li>Local completed plans: MVP-001, MVP-002, MVP-003, MVP-007, MVP-011, MVP-012, and MVP-013.</li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-20/001-mvp-014-functional-spec.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>MVP-014 is intentionally a concrete in-memory adapter slice, not a full incident lifecycle or persistence slice.</li>
+      <li>The spec keeps <code>commit_effects.incident_start</code> responsible for building and validating the started incident snapshot and committed success log entry.</li>
+      <li>The store read side now explicitly reuses <code>character.state.current.ActiveIncidentSource</code> and <code>ActiveIncidentRequest</code> instead of defining a duplicate no-argument active-incident read API.</li>
+      <li>The adapter must use the MVP-013 committed-success visibility path so it does not become a hidden second incident log.</li>
+      <li>Persistent storage, migrations, complete/cancel/resume, interruption, incident completion events, debug UI, and replay remain future work.</li>
+    </ul>
+
+    <h2>Checks</h2>
+    <ul>
+      <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-20/001-mvp-014-functional-spec.html</code>: passed.</li>
+      <li><code>python3.13 -m unittest discover</code>: passed, 210 tests.</li>
+      <li><code>git diff --check</code>: passed.</li>
+      <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/index.html docs/develop-journal/2026-05-20/001-mvp-014-functional-spec.html</code>: passed after active-incident read-contract and Notion 06 review fixes.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Implement the concrete in-memory <code>LifeIncidentStore</code> start
+      adapter and targeted tests on this branch.
+    </p>
+  </main>
+</body>
+</html>
