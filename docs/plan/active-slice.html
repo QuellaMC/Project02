@@ -127,6 +127,9 @@
       <code>character.state.current</code>. MVP-014 only proves the store can
       satisfy this read contract; it does not make the store the default
       <code>DecisionContext</code> source for every user turn.
+      The concrete store treats explicit null identity fields from direct
+      callers as absent for scope derivation, so self-use mode cannot split
+      into a normal-looking identified null scope.
     </p>
 
     <h3>LifeIncidentStartFinalizeRequest</h3>
@@ -214,7 +217,7 @@
         </tr>
         <tr>
           <td>FR-11</td>
-          <td>When both <code>user_id</code> and <code>conversation_id</code> are absent, the store must use an explicit reserved internal self-use scope such as <code>IncidentScope(mode="single_user_self_use")</code>, not a fake user ID or a normal-looking global owner.</td>
+          <td>When both <code>user_id</code> and <code>conversation_id</code> are absent or explicitly null, the store must use an explicit reserved internal self-use scope such as <code>IncidentScope(mode="single_user_self_use")</code>, not a fake user ID or a normal-looking global owner.</td>
         </tr>
         <tr>
           <td>FR-12</td>
@@ -259,7 +262,7 @@
       <li>Assert mismatched store/commit Raw Event Log instances reject before staging or storing an active incident.</li>
       <li>Assert a second start while an active incident exists in the same scope is rejected without overwriting the stored incident.</li>
       <li>Assert different identified scopes can store separate active incidents and reads are isolated by matching scope.</li>
-      <li>Assert the reserved single-user self-use scope preserves the current missing-ID behavior without using a fake user ID.</li>
+      <li>Assert the reserved single-user self-use scope preserves the current missing-ID behavior without using a fake user ID, and that explicit null identity fields use the same scope.</li>
       <li>Assert returned incidents and query results are deep copies.</li>
     </ul>
 

@@ -104,7 +104,7 @@ class InMemoryLifeIncidentStore:
         self,
         request: ActiveIncidentRequest,
     ) -> ActiveIncidentSnapshot | None:
-        validated_request = validate_active_incident_request(request)
+        validated_request = validate_active_incident_request(_drop_none_identity_fields(request))
         incident = self._active_incidents_by_scope.get(
             _incident_scope_from_request(validated_request)
         )
@@ -245,7 +245,7 @@ def _validate_committed_log_entry(
 def _validate_optional_ids(request: Mapping[str, Any]) -> dict[str, str]:
     optional_ids: dict[str, str] = {}
     for field_name in ("user_id", "conversation_id"):
-        if field_name in request:
+        if field_name in request and request[field_name] is not None:
             optional_ids[field_name] = require_optional_string(
                 request[field_name],
                 f"LifeIncidentStartFinalizeRequest.{field_name}",
@@ -254,15 +254,27 @@ def _validate_optional_ids(request: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _incident_scope_from_request(request: Mapping[str, Any]) -> IncidentScope:
-    has_user_id = "user_id" in request
-    has_conversation_id = "conversation_id" in request
+    user_id = request.get("user_id")
+    conversation_id = request.get("conversation_id")
+    has_user_id = user_id is not None
+    has_conversation_id = conversation_id is not None
     if not has_user_id and not has_conversation_id:
         return SINGLE_USER_SELF_USE_SCOPE
     return IncidentScope(
         mode=IDENTIFIED_SCOPE_MODE,
-        user_id=request["user_id"] if has_user_id else None,
-        conversation_id=request["conversation_id"] if has_conversation_id else None,
+        user_id=user_id if has_user_id else None,
+        conversation_id=conversation_id if has_conversation_id else None,
     )
+
+
+def _drop_none_identity_fields(request: ActiveIncidentRequest) -> ActiveIncidentRequest:
+    if not isinstance(request, Mapping):
+        return request
+    normalized_request = dict(request)
+    for field_name in ("user_id", "conversation_id"):
+        if normalized_request.get(field_name) is None:
+            normalized_request.pop(field_name, None)
+    return normalized_request
 
 
 def _require_mapping(value: Any, field_name: str) -> Mapping[str, Any]:

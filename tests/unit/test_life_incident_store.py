@@ -450,6 +450,49 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
             [],
         )
 
+    def test_explicit_null_identity_fields_use_default_single_user_self_use_scope(self):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        first_event = normalized_user_message(
+            event_id="event-1",
+            trace_id="trace-1",
+            user_id=None,
+            conversation_id=None,
+        )
+        second_event = normalized_user_message(
+            event_id="event-2",
+            trace_id="trace-2",
+            user_id=None,
+            conversation_id=None,
+        )
+        first_request = finalize_request_for(
+            first_event,
+            role_model_result_with_incident(event_id="event-1", trace_id="trace-1"),
+        )
+        first_request["user_id"] = None
+        first_request["conversation_id"] = None
+
+        store.finalize_life_incident_start(first_request)
+        read_request = build_active_incident_request(first_event)
+        read_request["user_id"] = None
+        read_request["conversation_id"] = None
+        active_incident = store.read_active_incident(read_request)
+        second_request = finalize_request_for(
+            second_event,
+            role_model_result_with_incident(
+                event_id="event-2",
+                trace_id="trace-2",
+                title="second self-use incident",
+            ),
+        )
+
+        with self.assertRaises(LifeIncidentStartFinalizerError) as context:
+            store.finalize_life_incident_start(second_request)
+
+        self.assertEqual(active_incident["title"], "thinking through the plan")
+        self.assertEqual(context.exception.code, "finalize_rejected")
+        self.assertIn("already exists", str(context.exception))
+
     def test_malformed_committed_log_entry_raises_finalizer_error(self):
         raw_log = InMemoryRawEventLog()
         store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
