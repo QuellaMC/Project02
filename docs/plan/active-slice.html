@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-013 - Raw Event Log Query/Replay Visibility for Committed Success Logs</title>
+  <title>MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,14 +27,13 @@
 </head>
 <body>
   <main>
-    <h1>MVP-013 - Raw Event Log Query/Replay Visibility for Committed Success Logs</h1>
-    <p><span class="status">Status: implemented locally; PR #15 open</span></p>
+    <h1>MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</h1>
+    <p><span class="status">Status: implemented locally; PR pending</span></p>
     <p class="meta">
-      Created: 2026-05-19. Active slice path:
+      Created: 2026-05-20. Active slice path:
       <code>docs/plan/active-slice.html</code>.
       Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
-      Branch: <code>feature/mvp-013-raw-log-replay-visibility</code>.
-      Pull request: <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>.
+      Branch: <code>feature/mvp-014-life-incident-store-start-adapter</code>.
     </p>
 
     <h2>Source Context</h2>
@@ -42,78 +41,124 @@
       Product direction comes from the Notion project hub
       <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.
       The source pages checked for this slice are
-      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>,
-      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>, and
-      <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.
+      <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>,
+      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
+      <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>,
+      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
     </p>
     <blockquote>
-      Raw Event Log is the lossless truth. MVP-013 proves that committed
-      success logs exposed through atomic finalizers are visible through the
-      same Raw Event Log query/debug surface as ordinary appended logs.
+      Phase 3 calls for a LifeIncidentStore, but this slice only replaces the
+      MVP-012 incident-start fake finalizer with a concrete in-memory start
+      adapter and proves that its success log remains visible through the
+      MVP-013 Raw Event Log query surface.
     </blockquote>
     <p>
       Local implementation truth comes from completed
       <a href="completed/mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001</a>,
       <a href="completed/mvp-002-minimal-role-model-loop-with-fake-adapter.html">MVP-002</a>,
       <a href="completed/mvp-003-minimal-visible-reply-commit.html">MVP-003</a>,
-      <a href="completed/mvp-005-user-visible-message-projection.html">MVP-005</a>,
       <a href="completed/mvp-007-minimal-user-turn-orchestrator.html">MVP-007</a>,
-      <a href="completed/mvp-009-minimal-living-state-patch-commit.html">MVP-009</a>,
-      <a href="completed/mvp-010-atomic-living-state-patch-commit-boundary.html">MVP-010</a>, and
-      <a href="completed/mvp-012-minimal-start-incident-commit-boundary.html">MVP-012</a>.
+      <a href="completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html">MVP-011</a>,
+      <a href="completed/mvp-012-minimal-start-incident-commit-boundary.html">MVP-012</a>, and
+      <a href="completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html">MVP-013</a>.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Add the smallest read/query visibility surface needed to prove that
-      successful atomic finalizer logs are not hidden second logs. A trace query
-      must return ordinary appended <code>RawEventLogEntry</code> records and
-      finalizer-exposed success entries together, using the same read/debug
-      path and the same entry shape.
+      Replace the MVP-012 incident-start fake finalizer with a small concrete
+      in-memory <code>LifeIncidentStore</code> / finalizer adapter that durably
+      exposes the started incident and matching <code>life_incident_started</code>
+      Raw Event Log entry through the MVP-013 query surface, without adding the
+      rest of the incident lifecycle.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>One new read-side boundary is in scope: a minimal Raw Event Log query/debug surface for existing <code>RawEventLogEntry</code> records.</li>
-      <li>One query use case is in scope: fetch records for a single trace, with optional event ID and kind filters.</li>
-      <li>Two atomic success kinds are in scope: <code>living_state_patch_committed</code> from MVP-010 and <code>life_incident_started</code> from MVP-012.</li>
-      <li>Ordinary appended logs remain in scope, including runtime intake, user visible projection, role-model turn, visible reply commit, and rejection logs.</li>
-      <li>The implementation may use an in-memory fake/debug store so tests can prove visibility without choosing concrete persistence.</li>
-      <li>Finalizers still own atomic exposure of their already-built success log entries; MVP-013 only proves those entries are readable through the Raw Event Log surface afterward.</li>
+      <li>One event type remains in scope: <code>USER_MESSAGE</code>.</li>
+      <li>One life action remains in scope: <code>life_action.type = "start_incident"</code>.</li>
+      <li>One concrete in-memory incident store is in scope for the started active incident record.</li>
+      <li>One adapter is in scope: it implements the existing <code>LifeIncidentStartFinalizer</code> protocol used by MVP-012.</li>
+      <li>The same store must implement the existing <code>ActiveIncidentSource.read_active_incident(request)</code> contract with <code>ActiveIncidentRequest</code> so it reuses the shared MVP-011 read boundary.</li>
+      <li>The adapter must stage the already-built <code>life_incident_started</code> entry through the MVP-013 <code>InMemoryRawEventLog</code> committed-success visibility path.</li>
+      <li>The successful user-turn path should expose the started active incident from the store and expose the matching raw log entry through <code>raw_log.query()</code>.</li>
+      <li>The adapter may reject a start when an active incident is already stored, but it must not replace, interrupt, queue, complete, cancel, or resume incidents.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No concrete database, migration, filesystem store, repository, external service, background worker, scheduler, or production persistence adapter.</li>
-      <li>No replay executor, rollback, reconciliation job, idempotency policy, retry policy, state versioning, or durable transaction design.</li>
-      <li>No debug inspector UI, HTTP endpoint, CLI command, pagination, full-text search, retrieval index, embedding, compaction, or model-facing memory tool.</li>
-      <li>No new RuntimeEvent type, model action, decision parser behavior, prompt behavior, context field, living-state field, incident lifecycle action, body state, tool, Live2D, or asset behavior.</li>
-      <li>No change to Commit and Effects ownership: Commit and Effects still validates and builds success log entries; finalizers still expose already-built committed artifacts atomically.</li>
-      <li>No change to failure semantics: finalizer rejection or malformed finalizer output still produces ordinary rejection logs and no durable success visibility.</li>
+      <li>No database, filesystem persistence, migration, repository layer, background worker, scheduler, lock manager, or process-restart durability.</li>
+      <li>No <code>complete_incident</code>, <code>cancel_incident</code>, <code>resume_incident</code>, <code>go_idle</code>, <code>no_change</code>, replacement, interruption, backgrounding, queue, recurrence, reconciliation, or incident completion event.</li>
+      <li>No new RuntimeEvent type, Role Model Loop action, parser behavior, prompt behavior, context field, state patch behavior, body state, Live2D status, tool, asset, retrieval, compaction, or replay executor.</li>
+      <li>No concrete Raw Event Log store beyond the MVP-013 in-memory query helper.</li>
+      <li>No broad CharacterRuntimeStateStore, virtual body store, scheduled directive store, unified retrieval index, debug UI, HTTP endpoint, or CLI command.</li>
+      <li>No change to the model contract: the model still proposes only the MVP-012 <code>start_incident</code> draft and never provides committed-only incident fields.</li>
+      <li>No change to Commit and Effects ownership: Commit and Effects still builds and validates the started incident snapshot and committed log entry before finalization.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
-    <h3>RawEventLogQuery</h3>
-    <pre><code>type RawEventLogQuery = {
-  trace_id: string
-  event_id?: string
-  kinds?: string[]
+    <h3>LifeIncidentStore</h3>
+    <pre><code>type LifeIncidentStore = {
+  finalize_life_incident_start(request: LifeIncidentStartFinalizeRequest): LifeIncidentStartFinalizeResult
+  read_active_incident(request: ActiveIncidentRequest): ActiveIncidentSnapshot | null
 }</code></pre>
+    <p>
+      The concrete MVP-014 implementation may be an in-memory class, but it
+      should be production-shaped code rather than a test-only recording fake.
+      The read method must use the existing
+      <code>character.state.current.ActiveIncidentSource</code> request shape.
+      Returned incidents must be copies.
+    </p>
 
-    <h3>RawEventLogQueryResult</h3>
-    <pre><code>type RawEventLogQueryResult = {
+    <h3>ActiveIncidentRequest</h3>
+    <pre><code>type ActiveIncidentRequest = {
   schema_version: "0.1"
   trace_id: string
-  entries: RawEventLogEntry[]
+  event_id: string
+  event_type: "USER_MESSAGE"
+  user_id?: string
+  conversation_id?: string
 }</code></pre>
-
-    <h3>RawEventLogEntry</h3>
     <p>
-      MVP-013 must reuse the existing entry shape from <code>runtime.logging</code>:
-      <code>schema_version</code>, <code>log_id</code>, <code>trace_id</code>,
-      <code>event_id</code>, <code>kind</code>, <code>created_at</code>, and
-      <code>data</code>. Do not add a persisted <code>visibility_source</code>,
-      <code>finalizer</code>, or <code>replay</code> field to prove this slice.
+      Reuse <code>build_active_incident_request()</code> and
+      <code>validate_active_incident_request()</code> from
+      <code>character.state.current</code>. MVP-014 only proves the store can
+      satisfy this read contract; it does not make the store the default
+      <code>DecisionContext</code> source for every user turn.
+    </p>
+
+    <h3>LifeIncidentStartFinalizeRequest</h3>
+    <pre><code>type LifeIncidentStartFinalizeRequest = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  event_type: "USER_MESSAGE"
+  decision_action: "visible_reply"
+  life_action_type: "start_incident"
+  commit_time: string
+  draft: LifeIncidentStartDraft
+  started_incident: ActiveIncidentSnapshot
+  committed_log_entry: RawEventLogEntry
+  user_id?: string
+  conversation_id?: string
+}</code></pre>
+    <p>
+      Reuse the MVP-012 request shape and the existing
+      <code>ActiveIncidentSnapshot</code> validation. Do not add model-authored
+      committed fields or store-only metadata fields in this slice.
+    </p>
+
+    <h3>LifeIncidentStartFinalizeResult</h3>
+    <pre><code>type LifeIncidentStartFinalizeResult = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  event_type: "USER_MESSAGE"
+  committed_log_entry_id: string
+}</code></pre>
+    <p>
+      Reuse the MVP-012 result shape so <code>commit_life_incident_start()</code>
+      can keep its current validation and result handling.
     </p>
 
     <h2>Functional Requirements</h2>
@@ -127,39 +172,43 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>Querying by <code>trace_id</code> returns ordinary appended <code>RawEventLogEntry</code> records from the existing append path.</td>
+          <td>The new in-memory store adapter implements the existing <code>LifeIncidentStartFinalizer.finalize_life_incident_start()</code> protocol without changing <code>commit_life_incident_start()</code> call sites beyond replacing the fake.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>Querying by the same <code>trace_id</code> after a successful living-state patch turn returns the <code>living_state_patch_committed</code> entry exposed through the MVP-010 atomic finalizer in the same result list as ordinary appended logs.</td>
+          <td>The store implements the existing <code>ActiveIncidentSource.read_active_incident(request)</code> contract using <code>ActiveIncidentRequest</code> validation instead of introducing a no-argument duplicate read API.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>Querying by the same <code>trace_id</code> after a successful incident-start turn returns the <code>life_incident_started</code> entry exposed through the MVP-012 atomic finalizer in the same result list as ordinary appended logs.</td>
+          <td>On a valid finalize request, the adapter stores one active incident snapshot and stages the matching already-built <code>life_incident_started</code> <code>RawEventLogEntry</code> through the MVP-013 committed-success visibility helper.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>Query filters for <code>event_id</code> and <code>kind</code> must apply identically to ordinary appended entries and finalizer-exposed success entries.</td>
+          <td>After <code>commit_life_incident_start()</code> confirms the finalizer result, querying the same trace through <code>InMemoryRawEventLog.query()</code> with <code>kinds = ["life_incident_started"]</code> returns the stored incident's matching committed log entry exactly once.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>Returned entries are deep copies. Mutating a query result must not change stored append-path entries or finalizer-exposed success entries.</td>
+          <td>The stored active incident and the query-visible <code>life_incident_started</code> entry must agree on <code>trace_id</code>, <code>event_id</code>, <code>incident_id</code>, <code>started_at</code>, <code>source_event_ids</code>, and the committed log entry ID.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>Query result order is deterministic and follows the runtime visibility order for the turn, so a finalizer-exposed success entry appears before the assistant visible reply commit when the finalizer runs before that commit.</td>
+          <td>Reading the active incident returns a deep copy. Mutating a read result, finalize request, or query result must not mutate the stored incident or raw log entry.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>A finalizer-exposed success entry must appear exactly once in query results. The implementation must not return both a private finalizer list entry and a separate appended duplicate.</td>
+          <td>If raw-log success visibility staging fails, the adapter must reject the finalization and must not store an active incident.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>Finalizer rejection and malformed finalizer result paths must not expose a success entry through query results; their existing ordinary rejection logs remain queryable.</td>
+          <td>If an active incident is already present, another start request must fail closed without overwriting the active incident, appending a success log, or adding lifecycle behavior.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>The query/debug surface validates query inputs and rejects unsupported filter shapes without mutating log state.</td>
+          <td>When no <code>life_action</code> is present, existing MVP-012 skipped behavior remains unchanged and the store adapter is not called.</td>
+        </tr>
+        <tr>
+          <td>FR-10</td>
+          <td>Existing MVP-013 rejection behavior remains unchanged: rejected or malformed finalize paths leave no query-visible <code>life_incident_started</code> entry.</td>
         </tr>
       </tbody>
     </table>
@@ -167,90 +216,86 @@
     <h2>Non-Functional Requirements</h2>
     <ul>
       <li>Use only Python standard library behavior; do not add dependencies.</li>
-      <li>Keep the implementation small enough for an in-memory fake/debug store and focused helper functions.</li>
-      <li>Reuse <code>RawEventLogEntry</code> and <code>SCHEMA_VERSION</code> from <code>runtime.logging</code>; do not create a parallel persisted log record type.</li>
-      <li>Keep success entry construction in existing Commit and Effects modules. MVP-013 must not move validation, snapshot construction, or committed-log construction into the read surface.</li>
-      <li>Keep finalizer protocols narrow. If a helper is needed for test fakes, it should expose already-built success log entries to the same underlying queryable store without teaching finalizers to rebuild log entries.</li>
-      <li>Keep tests deterministic with fake IDs and clocks.</li>
+      <li>Keep the adapter small and deterministic with injected raw-log visibility, fake IDs, and fake clocks in tests.</li>
+      <li>Reuse existing <code>ActiveIncidentSnapshot</code>, <code>RawEventLogEntry</code>, <code>SCHEMA_VERSION</code>, and MVP-012 finalize-result validation instead of creating parallel schemas.</li>
+      <li>Keep the implementation future-compatible by naming the store boundary clearly, but do not add database abstractions, migrations, or unused interfaces.</li>
+      <li>Do not duplicate Raw Event Log entries. The success log must appear through the MVP-013 committed-success visibility path, not through ordinary <code>raw_event_log.append()</code>.</li>
+      <li>Keep in-memory durability scoped to the store object's lifetime; do not imply process-restart durability.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>Existing MVP-001 through MVP-012 behavior continues to pass.</li>
-      <li>A trace query over ordinary append-path logs returns intake, projection, role-model, visible-reply, and rejection entries as applicable.</li>
-      <li>A state-patch-enabled user turn exposes <code>living_state_patch_committed</code> through the same trace query result as ordinary appended logs.</li>
-      <li>An incident-start-enabled user turn exposes <code>life_incident_started</code> through the same trace query result as ordinary appended logs.</li>
-      <li>Filtering by kind can select an atomic success entry or an ordinary appended entry through the same query function.</li>
-      <li>Finalizer failure paths show rejection logs but no committed success entry.</li>
-      <li>Query results are copy-safe and duplicate-free.</li>
-      <li>No concrete storage, replay executor, debug UI, new event type, new model action, or broad framework module is added.</li>
-      <li>The development journal records source context, files touched, checks run, review notes, and next action.</li>
-      <li>Future ideas discovered during planning are recorded in <a href="future-slices.html">future-slices.html</a>.</li>
+      <li>MVP-013 is recorded under <a href="completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html">completed plans</a>, and this file is the only active implementation slice.</li>
+      <li>A user turn with a valid <code>life_action.start_incident</code> can use the concrete in-memory store adapter instead of the MVP-012 recording fake.</li>
+      <li>The store exposes the started incident through the existing <code>ActiveIncidentSource.read_active_incident(request)</code> contract after successful finalization.</li>
+      <li>The same turn exposes the matching <code>life_incident_started</code> entry through the MVP-013 Raw Event Log query surface.</li>
+      <li>Rejected starts and visibility-staging failures leave no active incident and no success log query result.</li>
+      <li>The adapter does not add complete/cancel/resume/interruption/queue behavior or any new RuntimeEvent family.</li>
+      <li>The development journal records source context, files touched, checks run, review notes, next action, and future ideas.</li>
+      <li>Future lifecycle, persistent storage, debug UI, and replay ideas remain parked in <a href="future-slices.html">future-slices.html</a>.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li>Query a fake/debug Raw Event Log store by <code>trace_id</code> and assert ordinary appended entries are returned as deep copies.</li>
-      <li>Query with <code>event_id</code> and <code>kind</code> filters and assert the same filtering path applies to append-path and finalizer-exposed entries.</li>
-      <li>Record an already-built <code>living_state_patch_committed</code> success entry through the atomic visibility helper and assert query results include it exactly once.</li>
-      <li>Record an already-built <code>life_incident_started</code> success entry through the atomic visibility helper and assert query results include it exactly once.</li>
-      <li>Reject malformed query filters without altering stored entries.</li>
+      <li>Finalize a valid incident-start request with the concrete in-memory store adapter and assert <code>read_active_incident(request)</code> returns the expected copy-safe active incident through a validated <code>ActiveIncidentRequest</code>.</li>
+      <li>Assert the adapter stages the exact <code>committed_log_entry</code> so <code>commit_life_incident_start()</code> can confirm it and make it query-visible.</li>
+      <li>Assert staging failure prevents an active incident from being stored.</li>
+      <li>Assert a second start while an active incident exists is rejected without overwriting the stored incident.</li>
+      <li>Assert returned incidents and query results are deep copies.</li>
     </ul>
 
     <h3>Integration Tests</h3>
     <ul>
-      <li>Run a default user turn against the queryable fake/debug store and assert ordinary logs are visible through the query surface.</li>
-      <li>Run a living-state patch success turn and assert the trace query includes <code>living_state_patch_committed</code> between the role-model turn log and assistant visible reply commit.</li>
-      <li>Run an incident-start success turn and assert the trace query includes <code>life_incident_started</code> between the role-model turn log and assistant visible reply commit.</li>
-      <li>Run living-state and incident finalizer rejection paths and assert the relevant rejection log is queryable while the success kind is absent.</li>
+      <li>Run a <code>USER_MESSAGE</code> turn with incident-start opt-in, <code>InMemoryRawEventLog</code>, and the concrete in-memory store adapter; assert the turn returns <code>life_incident_started</code>, the store has the active incident, and the trace query includes <code>life_incident_started</code>.</li>
+      <li>Run the no-<code>life_action</code> path and assert the store adapter is not called and existing visible reply behavior remains unchanged.</li>
+      <li>Run a finalizer rejection or staging failure path and assert no active incident is stored and no <code>life_incident_started</code> query result exists.</li>
       <li>Run full unittest discovery.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li><code>runtime.logging</code> may own the minimal query/read helper or in-memory debug store because it already owns <code>RawEventLogEntry</code> construction primitives.</li>
-      <li>Runtime Kernel remains unchanged except for using the same append protocol it already uses.</li>
-      <li>Role Model Loop remains unchanged except for tests proving its ordinary logs are visible through the query surface.</li>
-      <li>Commit and Effects remains the owner of committed success log entry construction for living-state patches and incident starts.</li>
-      <li>Atomic finalizer fakes may expose committed success entries to the same queryable log store, but they must not rebuild or reinterpret those entries.</li>
-      <li>The query/debug helper must not make a finalizer success entry queryable until the caller has validated the finalizer result.</li>
-      <li>User-turn orchestration ordering remains unchanged.</li>
+      <li><code>commit_effects.incident_start</code> remains responsible for building and validating the started incident snapshot, committed success log entry, rejection log entry, and commit result.</li>
+      <li>The concrete in-memory <code>LifeIncidentStore</code> may live under the Character State Engine area because incident records are character state, but it should remain one small module with no unused future store methods.</li>
+      <li>The store adapter may implement the existing MVP-012 finalizer protocol directly; do not introduce a second incident-start finalizer protocol.</li>
+      <li>The store must implement <code>character.state.current.ActiveIncidentSource</code> for reads; do not add a second no-argument active-incident read API.</li>
+      <li><code>runtime.logging.InMemoryRawEventLog</code> remains the Raw Event Log query surface; do not create an incident-specific raw-log query path.</li>
+      <li><code>runtime.user_turn</code> should only need injection of the concrete adapter where tests or callers previously injected the recording fake. MVP-014 does not make the store the default <code>active_incident_source</code> for later <code>DecisionContext</code> builds.</li>
+      <li>Role Model Loop, Runtime Kernel route policy, and visible reply commit behavior remain unchanged.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>MVP-013 is a visibility proof, not a persistence slice.</li>
-      <li>The risk being closed is specific: MVP-010 and MVP-012 success logs bypass ordinary <code>raw_event_log.append()</code>, so a later debug/replay surface could miss them if the finalizer keeps them in a private list.</li>
-      <li>The right proof is a shared read surface over the same <code>RawEventLogEntry</code> shape, not a second copy of committed success logs.</li>
-      <li>Review fix: test/debug finalizer visibility is staged first, then confirmed only after finalizer-result validation, so malformed finalizer output cannot leave both success and rejection visible.</li>
-      <li>Review fix: atomic finalizer success kinds are rejected on the ordinary append path before confirmation, and visibility-store failures raised inside finalizers become ordinary rejection logs.</li>
-      <li>Review fix: staging and confirmation helpers accept only the two implemented atomic finalizer success kinds: <code>living_state_patch_committed</code> and <code>life_incident_started</code>.</li>
-      <li>Review fix: failed confirmation validation does not remove the staged success entry, and discard uses the same atomic-kind guard as staging and confirmation.</li>
-      <li>Review fix: integration finalizer fakes stage query visibility before recording fake durable success artifacts, matching the intended atomic sequence.</li>
-      <li>If implementation pressure suggests storage engines, replay execution, reconciliation, or UI, park those as future slices.</li>
+      <li>MVP-014 is a concrete adapter slice, not an incident lifecycle slice.</li>
+      <li>The main risk is accidentally creating a hidden second truth: the in-memory store must not keep a started incident without the matching Raw Event Log success entry becoming query-visible.</li>
+      <li>The active-incident read surface must reuse the MVP-011 <code>ActiveIncidentSource</code> contract so MVP-014 does not create duplicate Character State Engine read APIs.</li>
+      <li>The adapter should reuse the existing staging/confirmation contract from MVP-013 rather than appending atomic success logs through the ordinary append path.</li>
+      <li>Implementation note: <code>src/character/state/incidents.py</code> adds one in-memory store that implements the existing incident-start finalizer and <code>ActiveIncidentSource</code> read contracts.</li>
+      <li>Implementation note: targeted unit and integration tests prove successful starts, query-visible <code>life_incident_started</code> logs, copy safety, staging failure rejection, and second-start rejection.</li>
+      <li>The store should prove copy safety now so later persistent stores do not depend on mutable caller-owned dictionaries.</li>
+      <li>If implementation pressure suggests persistent databases, queues, active-incident interruption, or completion events, park those as future slices.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should the eventual concrete store expose the same query API directly or through an adapter over a database table? Not in MVP-013.</li>
-      <li>Should query results eventually support pagination, time ranges, redaction, or source expansion? Not in MVP-013.</li>
-      <li>Should replay use query order or an explicit sequence number? MVP-013 should only define enough deterministic order for current in-memory tests.</li>
+      <li>Should the eventual persistent <code>LifeIncidentStore</code> expose a richer query API beyond the existing <code>ActiveIncidentSource</code> current-active read? Not in MVP-014.</li>
+      <li>Should the store become the default active-incident source for following turns? Not in MVP-014; this slice only proves contract compatibility and targeted injection.</li>
+      <li>How should a durable database transaction coordinate incident writes with Raw Event Log writes? Not in MVP-014.</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Concrete Raw Event Log storage with the same query contract.</li>
-      <li>Debug inspector UI for traces, decisions, commits, and rejected outputs.</li>
-      <li>Replay executor that rebuilds a turn from raw logs plus state/context/model snapshots.</li>
-      <li>Pagination, redaction, retention, and permission filtering for debug views.</li>
-      <li>Unified query support for future tool, asset, directive, and maintenance logs.</li>
+      <li>Persistent <code>LifeIncidentStore</code> backed by a database or append-only incident transition table.</li>
+      <li>Minimal incident lifecycle follow-up actions: complete, cancel, resume, go idle, and no change.</li>
+      <li>Runtime Kernel user-interruption policy that marks active incidents interrupted or backgrounded.</li>
+      <li><code>INCIDENT_COMPLETION</code> RuntimeEvent handling after active incident lifecycle commits exist.</li>
+      <li>Debug inspector and replay views that join incident records with Raw Event Log entries by trace and source event IDs.</li>
     </ul>
 
     <h2>Next Action</h2>
     <p>
-      Watch <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>
-      for CI and review feedback, then merge after required checks and approval.
+      Commit the implemented MVP-014 slice, push the short-lived branch, open a
+      pull request, and update the implementation graph with the PR reference.
     </p>
   </main>
 </body>

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-20 - MVP-014 Implementation</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-20 - MVP-014 Implementation</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Added <code>src/character/state/incidents.py</code> with <code>InMemoryLifeIncidentStore</code>.</li>
+      <li>The store implements the existing MVP-012 <code>finalize_life_incident_start()</code> finalizer contract.</li>
+      <li>The same store implements the MVP-011 <code>read_active_incident(request)</code> contract and validates <code>ActiveIncidentRequest</code>.</li>
+      <li>Successful starts stage the already-built <code>life_incident_started</code> entry through <code>InMemoryRawEventLog.expose_committed_success_entry()</code> before storing the active incident.</li>
+      <li>Added targeted unit tests for successful finalize/read behavior, copy safety, raw-log staging failure, and second-start rejection.</li>
+      <li>Added an integration test that runs a <code>USER_MESSAGE</code> turn with the concrete store adapter and verifies the active incident plus query-visible success log.</li>
+      <li>Updated the active plan and plan index from "implementation not started" to implemented locally with PR pending.</li>
+    </ul>
+
+    <h2>Why It Changed</h2>
+    <p>
+      MVP-014 is the first concrete LifeIncidentStore step after MVP-012 proved
+      the incident-start finalizer contract and MVP-013 proved finalizer success
+      logs are visible through the shared Raw Event Log query surface. This keeps
+      the active slice narrow while removing the test-only recording fake from
+      the successful incident-start path used by new tests.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>src/character/state/incidents.py</code></li>
+      <li><code>tests/unit/test_life_incident_store.py</code></li>
+      <li><code>tests/integration/test_user_message_turn.py</code></li>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/develop-journal/2026-05-20/002-mvp-014-implementation.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>No new RuntimeEvent type, lifecycle action, database adapter, queue, interruption policy, Role Model Loop behavior, or default active-incident source wiring was added.</li>
+      <li>The Commit and Effects Engine still builds and validates the started incident snapshot and committed success log entry before the store finalizes anything.</li>
+      <li>The store stages raw-log success visibility before storing the active incident, so raw-log staging failure leaves no active incident.</li>
+      <li>Second starts fail closed with a rejected commit result and do not overwrite the stored active incident.</li>
+      <li>Returned active incidents and Raw Event Log query results are copy-safe.</li>
+    </ul>
+
+    <h2>Checks</h2>
+    <ul>
+      <li><code>python3.13 -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn.UserMessageTurnIntegrationTests.test_incident_start_turn_with_concrete_store_reads_incident_and_query_success_log</code>: failed before implementation because <code>character.state.incidents</code> did not exist; passed after implementation, 4 tests.</li>
+      <li><code>python3.13 -m unittest discover</code>: passed, 214 tests.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code>: passed.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/mypy</code>: passed.</li>
+      <li><code>git diff --check</code>: passed.</li>
+      <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-20/001-mvp-014-functional-spec.html docs/develop-journal/2026-05-20/002-mvp-014-implementation.html</code>: passed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Commit, push, open the MVP-014 PR, and update the implementation graph
+      with the PR reference.
+    </p>
+  </main>
+</body>
+</html>

@@ -7,6 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
+from character.state.current import build_active_incident_request  # noqa: E402
+from character.state.incidents import InMemoryLifeIncidentStore  # noqa: E402
 from commit_effects.incident_start import (  # noqa: E402
     LIFE_INCIDENT_START_FINALIZE_STAGE,
     LifeIncidentStartFinalizerError,
@@ -763,6 +765,82 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         self.assertEqual(
             result["life_incident_start_result"]["committed_log_entry_id"],
             success_entries[0]["log_id"],
+        )
+
+    def test_incident_start_turn_with_concrete_store_reads_incident_and_query_success_log(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        event_input = {
+            "event_id": "event-current",
+            "trace_id": "trace-current",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:30:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "hello now",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+        adapter = RecordingAdapter(
+            raw_text=json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "life_action": {
+                        "type": "start_incident",
+                        "incident": {
+                            "type": "think",
+                            "title": "thinking through the plan",
+                            "remaining_seconds": 300,
+                            "interrupt_policy": "interruptible",
+                            "resume_policy": "ask_model",
+                        },
+                    },
+                }
+            )
+        )
+
+        result = run_user_message_turn(
+            event_input,
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_store,
+        )
+
+        active_incident = life_incident_store.read_active_incident(
+            build_active_incident_request(event_input)
+        )
+        success_entries = raw_log.query(
+            {"trace_id": result["trace_id"], "kinds": ["life_incident_started"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(active_incident["incident_id"], "incident-generated-5")
+        self.assertEqual(active_incident["source_event_ids"], ["event-current"])
+        self.assertEqual(len(success_entries), 1)
+        self.assertEqual(
+            result["life_incident_start_result"]["committed_log_entry_id"],
+            success_entries[0]["log_id"],
+        )
+        self.assertEqual(
+            success_entries[0]["data"]["started_incident"],
+            active_incident,
+        )
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.query({"trace_id": result["trace_id"]})["entries"]],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "life_incident_started",
+                "visible_reply_committed",
+            ],
         )
 
     def test_incident_start_enabled_turn_without_life_action_preserves_visible_reply_flow(self):
