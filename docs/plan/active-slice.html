@@ -170,7 +170,7 @@
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>Move recent visible message request construction, source-response validation, current-event exclusion, duplicate identity checks, timestamp ordering, candidate limits, selected-message limits, and text-token budget selection behind the Character State Engine boundary without changing their constants or outcomes.</td>
+          <td>Move recent visible message request construction, source-response validation, current-event exclusion, duplicate identity checks, timestamp ordering, candidate limits, selected-message limits, and text-token budget selection behind the Character State Engine boundary without changing their constants or outcomes. The implementation must move, extract, or compatibility re-export and reuse the current <code>role_model.loop</code> surface by name: <code>RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES</code>, <code>RECENT_VISIBLE_MESSAGES_MAX_MESSAGES</code>, <code>RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS</code>, <code>_read_recent_visible_messages()</code>, <code>_build_recent_visible_messages_request()</code>, <code>_validate_recent_visible_messages_request()</code>, <code>_validate_recent_visible_message()</code>, <code>_is_current_event_message()</code>, <code>_parse_recent_message_timestamp_before_event()</code>, <code>_reject_duplicate_recent_message_identity()</code>, <code>_select_recent_visible_messages()</code>, and <code>approximate_text_tokens()</code> as needed instead of reimplementing parallel logic.</td>
         </tr>
         <tr>
           <td>FR-4</td>
@@ -231,6 +231,7 @@
     <ul>
       <li>Build a no-source <code>USER_MESSAGE</code> context through the Character State Engine boundary and assert it matches the current minimal context exactly.</li>
       <li>Build context with recent visible messages and assert the existing request shape, current-event exclusion, duplicate handling, ordering, six-message selection, and 1200-token budget behavior are preserved.</li>
+      <li>Review the implementation diff to confirm recent-message constants and helper bodies were moved, extracted, or re-exported from the current <code>role_model.loop</code> implementation rather than copied into a parallel Character State Engine implementation.</li>
       <li>Build context with a current-state source and assert the existing <code>living_state_brief</code> shape, source request, malformed-source rejection, and copy safety are preserved.</li>
       <li>Build context with an active-incident source and assert the existing <code>active_incident</code> shape, source request, no-incident omission, malformed-source rejection, and copy safety are preserved.</li>
       <li>Assert conflicting <code>allow_state_patch</code> and <code>allow_incident_start</code> options still reject before rendering.</li>
@@ -250,7 +251,7 @@
     <ul>
       <li><code>character.state</code> owns source orchestration and compact context assembly for this slice.</li>
       <li><code>character.state.current</code> continues to own living-state and active-incident read request, snapshot, and brief validation helpers.</li>
-      <li>The recent visible message source protocol and visible conversation adapter should move behind the Character State Engine boundary or be compatibility-exported from there; do not create duplicate validators.</li>
+      <li>The recent visible message source protocol, visible conversation adapter, and current recent-message helpers/constants in <code>role_model.loop</code> must move behind the Character State Engine boundary, be extracted into a shared module, or be compatibility-exported from the new boundary. Do not create duplicate validators, selectors, request builders, budget constants, timestamp checks, current-event filters, or duplicate-identity checks.</li>
       <li><code>role_model.loop</code> remains responsible for <code>render_role_model_input()</code>, <code>parse_character_decision()</code>, adapter invocation, and <code>role_model_turn_completed</code>/<code>role_model_turn_failed</code> log construction.</li>
       <li><code>runtime.user_turn</code> remains responsible for orchestration order and source injection; it should not learn source-specific context rules.</li>
       <li>Commit and Effects modules remain untouched unless a test import must follow a moved compatibility symbol.</li>
@@ -261,6 +262,7 @@
       <li>This is a boundary extraction slice, not a new runtime behavior slice.</li>
       <li>The highest risk is accidentally changing the model-facing context while moving helper ownership. Tests should compare values, not only types.</li>
       <li>Do not add a generic context framework with empty hooks for body state, directives, retrieval, active threads, or future private calls.</li>
+      <li>Review fix: recent-message reuse is explicit because AGENTS.md requires reusing existing logic and creating shared helpers only for a real shared boundary. MVP-015 is that boundary; it should move or extract the existing helper bodies rather than copy them into <code>character.state</code>.</li>
       <li>Keep failure ownership clear: Character State Engine may raise validation errors, but Role Model Loop still logs context-build failure because that is where the model call would have happened.</li>
       <li>If a helper is still only used by the Role Model Loop compatibility wrapper after the move, keep it private or re-export narrowly; do not create a broad public API.</li>
     </ul>

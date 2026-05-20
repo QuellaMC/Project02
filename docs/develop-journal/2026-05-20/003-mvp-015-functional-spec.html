@@ -66,6 +66,7 @@
     <ul>
       <li>MVP-015 is intentionally a boundary extraction slice, not a new runtime behavior slice.</li>
       <li>The active spec requires preserving the current <code>DecisionContext</code> shape and Role Model Loop behavior.</li>
+      <li>Review fix: tightened FR-3 and implementation boundaries to name the current <code>role_model.loop</code> recent-message constants and helper functions that must be moved, extracted, or re-exported instead of copied into a parallel Character State Engine implementation.</li>
       <li>Context build failures stay on the existing <code>role_model_turn_failed</code> path with <code>stage = "context_build"</code>.</li>
       <li>Retrieval, context-build raw logs, active threads, body state, interrupted incidents, private calls, storage, and incident lifecycle changes remain parked.</li>
     </ul>
@@ -77,6 +78,8 @@
       <li><code>git diff --check</code>: passed.</li>
       <li>After removing premature PR references: <code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/index.html docs/develop-journal/2026-05-20/003-mvp-015-functional-spec.html</code>: passed.</li>
       <li>After removing premature PR references: <code>git diff --check</code>: passed.</li>
+      <li>After recent-message reuse-contract review fix: <code>python3.13 -m html.parser docs/plan/active-slice.html docs/develop-journal/2026-05-20/003-mvp-015-functional-spec.html</code>: passed.</li>
+      <li>After recent-message reuse-contract review fix: <code>git diff --check</code>: passed.</li>
     </ul>
 
     <h2>Next Action</h2>
