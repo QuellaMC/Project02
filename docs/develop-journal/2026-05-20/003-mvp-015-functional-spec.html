@@ -27,6 +27,7 @@
       <li>Recorded MVP-014 as completed at <code>docs/plan/completed/mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html</code>.</li>
       <li>Replaced <code>docs/plan/active-slice.html</code> with <a href="../../plan/active-slice.html">MVP-015 - Character State Engine Context Builder Boundary v0.1</a>.</li>
       <li>Updated <a href="../../plan/index.html">plan index</a> and <a href="../../plan/future-slices.html">future slices</a> so MVP-015 is the only active implementation slice.</li>
+      <li>Opened <a href="https://github.com/QuellaMC/Project02/pull/17">PR #17</a> and updated the active spec plus implementation graph with the PR reference.</li>
     </ul>
 
     <h2>Why It Changed</h2>
@@ -74,12 +75,15 @@
       <li><code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/completed/mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html docs/plan/future-slices.html docs/plan/index.html docs/develop-journal/index.html docs/develop-journal/2026-05-20/003-mvp-015-functional-spec.html</code>: passed.</li>
       <li><code>python3.13 -m unittest discover</code>: passed, 221 tests.</li>
       <li><code>git diff --check</code>: passed.</li>
+      <li>After PR #17 creation: <code>python3.13 -m html.parser docs/plan/active-slice.html docs/plan/index.html docs/develop-journal/2026-05-20/003-mvp-015-functional-spec.html</code>: passed.</li>
+      <li>After PR #17 creation: <code>git diff --check</code>: passed.</li>
     </ul>
 
     <h2>Next Action</h2>
     <p>
-      Review the MVP-015 spec, then implement the Character State Engine
-      context-builder boundary with behavior-preserving tests before opening a PR.
+      Review <a href="https://github.com/QuellaMC/Project02/pull/17">PR #17</a>,
+      then implement the Character State Engine context-builder boundary with
+      behavior-preserving tests after the spec is accepted.
     </p>
   </main>
 </body>
