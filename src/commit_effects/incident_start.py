@@ -170,6 +170,10 @@ def commit_life_incident_start(
             committed_log_entry=committed_log_entry,
         )
         try:
+            _require_finalizer_raw_event_log(
+                life_incident_start_finalizer,
+                raw_event_log,
+            )
             finalize_result = life_incident_start_finalizer.finalize_life_incident_start(
                 deepcopy(finalize_request)
             )
@@ -691,6 +695,15 @@ def _build_failure(stage: str, code: str, message: str) -> dict[str, str]:
             else "malformed_commit_input"
         )
     return {"stage": stage, "code": code, "message": message}
+
+
+def _require_finalizer_raw_event_log(
+    finalizer: LifeIncidentStartFinalizer,
+    raw_event_log: RawEventLog,
+) -> None:
+    require_raw_event_log = getattr(finalizer, "require_raw_event_log", None)
+    if callable(require_raw_event_log):
+        require_raw_event_log(raw_event_log)
 
 
 def _parse_iso8601_timestamp(value: str) -> datetime:
