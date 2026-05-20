@@ -405,6 +405,33 @@
       <dd>This item is no longer parked; it is the active slice in <a href="active-slice.html">MVP-013</a>.</dd>
     </dl>
 
+    <h2>Raw Event Log Query Audit Entries</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add raw-log audit entries for query/read invocations, including query shape, caller boundary, and returned record IDs.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Broader Runtime Logging &amp; Trace guidance implies reads and retrievals should eventually be auditable, especially once debug inspector, replay, retrieval, or concrete storage reads become user-facing or operationally important.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Captured during MVP-013 review after confirming the active slice intentionally proves minimal query visibility without logging the query operation itself.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-013 should first prove a stable query/read surface over existing <code>RawEventLogEntry</code> records. A later debug/replay or concrete persistence slice should define which read callers need audit entries and how to avoid recursive query logging.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Raw Event Log query audit entries v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Logging every read too early could create noisy or recursive raw-log records before caller identity, pagination, redaction, retention, and replay semantics are defined.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds a read/audit log kind that records query parameters, returned <code>log_id</code> values, caller metadata, and failure details without changing existing query result records.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-013 is only a minimal in-memory query visibility proof for committed success logs. It explicitly defers debug inspector, replay execution, concrete persistence, retrieval indexing, pagination, redaction, and audited read-operation behavior.</dd>
+    </dl>
+
     <h2>Concrete LifeIncidentStore</h2>
     <dl>
       <dt>Idea</dt>
