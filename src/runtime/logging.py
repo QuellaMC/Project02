@@ -54,7 +54,7 @@ class InMemoryRawEventLog:
         self._record_entry(normalized_entry)
 
     def expose_committed_success_entry(self, entry: RawEventLogEntry) -> None:
-        normalized_entry = validate_raw_event_log_entry(entry)
+        normalized_entry = _validate_atomic_finalizer_success_entry(entry)
         log_id = normalized_entry["log_id"]
         committed_entry = self._entries_by_log_id.get(log_id)
         if committed_entry is not None:
@@ -71,7 +71,7 @@ class InMemoryRawEventLog:
         self._pending_success_by_log_id[log_id] = normalized_entry
 
     def confirm_committed_success_entry(self, entry: RawEventLogEntry) -> None:
-        normalized_entry = validate_raw_event_log_entry(entry)
+        normalized_entry = _validate_atomic_finalizer_success_entry(entry)
         log_id = normalized_entry["log_id"]
 
         committed_entry = self._entries_by_log_id.get(log_id)
@@ -243,6 +243,15 @@ def validate_raw_event_log_entry(entry: Mapping[str, Any]) -> RawEventLogEntry:
         ),
         "data": deepcopy(dict(data)),
     }
+
+
+def _validate_atomic_finalizer_success_entry(entry: Mapping[str, Any]) -> RawEventLogEntry:
+    normalized_entry = validate_raw_event_log_entry(entry)
+    if normalized_entry["kind"] not in ATOMIC_FINALIZER_SUCCESS_KINDS:
+        raise RawEventLogQueryValidationError(
+            "RawEventLogEntry.kind must be an atomic finalizer success kind."
+        )
+    return normalized_entry
 
 
 def _entry_matches_query(

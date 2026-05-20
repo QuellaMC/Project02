@@ -134,6 +134,37 @@ class RawEventLogQueryTests(unittest.TestCase):
 
                 self.assertEqual(store.query({"trace_id": "trace-1"})["entries"], [])
 
+    def test_expose_rejects_non_atomic_success_entries(self):
+        ids = SequenceIdGenerator()
+        store = InMemoryRawEventLog()
+        entry = raw_entry(ids, kind="visible_reply_committed")
+
+        with self.assertRaisesRegex(
+            RawEventLogQueryValidationError,
+            "atomic finalizer success kind",
+        ):
+            store.expose_committed_success_entry(entry)
+
+        self.assertEqual(store.query({"trace_id": "trace-1"})["entries"], [])
+
+    def test_confirm_rejects_non_atomic_success_entries(self):
+        ids = SequenceIdGenerator()
+        store = InMemoryRawEventLog()
+        entry = raw_entry(ids, kind="visible_reply_committed")
+
+        store.append(entry)
+        with self.assertRaisesRegex(
+            RawEventLogQueryValidationError,
+            "atomic finalizer success kind",
+        ):
+            store.confirm_committed_success_entry(entry)
+
+        entries = store.query({"trace_id": "trace-1"})["entries"]
+        self.assertEqual(
+            [stored_entry["kind"] for stored_entry in entries],
+            ["visible_reply_committed"],
+        )
+
     def test_unconfirmed_success_entries_are_not_queryable_and_can_be_discarded(self):
         ids = SequenceIdGenerator()
         store = InMemoryRawEventLog()
