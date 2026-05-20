@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-20 - MVP-015 Implementation</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-20 - MVP-015 Implementation</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Added <code>src/character/state/context.py</code> as the Character State Engine context-builder boundary for the existing <code>USER_MESSAGE</code> role-model call.</li>
+      <li>Moved existing recent visible message request construction, source-response validation, current-event exclusion, duplicate identity checks, timestamp ordering, candidate limits, selected-message limits, text-token selection, and visible-conversation record mapping behind that boundary.</li>
+      <li>Moved living-state and active-incident source orchestration behind the same boundary while reusing the existing read helpers in <code>character.state.current</code>.</li>
+      <li>Kept <code>role_model.loop.build_decision_context()</code>, recent-message constants, helper names, and <code>VisibleConversationRecentMessagesSource</code> as compatibility exports/wrappers that delegate to Character State Engine code.</li>
+      <li>Added focused unit tests for direct Character State Engine context building, combined source copy safety, copy-safe source requests, conflicting write-action opt-ins, and role-model compatibility delegation/error conversion.</li>
+      <li>Updated the active slice notes to record the chosen module boundary and remaining PR/graph next action.</li>
+    </ul>
+
+    <h2>Why It Changed</h2>
+    <p>
+      Notion assigns compact <code>DecisionContext</code> construction to the
+      Character State Engine. Earlier MVPs proved recent visible messages,
+      living-state briefs, and active-incident briefs inside the role-model path.
+      MVP-015 moves that existing orchestration to the correct boundary without
+      changing what the model sees or what the user-turn orchestrator commits.
+    </p>
+
+    <h2>Source Context</h2>
+    <ul>
+      <li>Notion roadmap: <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.</li>
+      <li>Notion runtime architecture: <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>.</li>
+      <li>Notion role-model contract: <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>.</li>
+      <li>Notion living state and scheduled life: <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>.</li>
+      <li>Notion Character State Engine and retrieval management: <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>.</li>
+      <li>Notion logging guidance: <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.</li>
+      <li>Local active spec: <a href="../../plan/active-slice.html">MVP-015 - Character State Engine Context Builder Boundary v0.1</a>.</li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>src/character/state/context.py</code></li>
+      <li><code>src/character/state/__init__.py</code></li>
+      <li><code>src/role_model/loop.py</code></li>
+      <li><code>tests/unit/test_character_context_builder.py</code></li>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/develop-journal/2026-05-20/004-mvp-015-implementation.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>Scope did not change: one implemented event family, one call type, and no new <code>DecisionContext</code> fields.</li>
+      <li><code>role_model.loop</code> still owns rendering, adapter invocation, structured output parsing, role-model success/failure log construction, and conversion of context-builder validation failures into <code>role_model_turn_failed</code> records.</li>
+      <li>The user-turn orchestrator still injects the same visible conversation, current-state, and active-incident sources and keeps the same commit order.</li>
+      <li>Future retrieval, context-build raw logs, active threads, body state, interrupted incidents, scheduled directives, private calls, storage changes, and broader context budget policy stayed parked.</li>
+    </ul>
+
+    <h2>Checks</h2>
+    <ul>
+      <li><code>python3.13 -m unittest tests.unit.test_character_context_builder tests.unit.test_role_model_loop tests.integration.test_role_model_loop tests.integration.test_user_message_turn</code>: passed, 109 tests.</li>
+      <li><code>python3.13 -m unittest discover</code>: passed, 227 tests.</li>
+      <li><code>/private/tmp/project02-tools/bin/ruff check .</code>: passed.</li>
+      <li><code>/private/tmp/project02-mypy/bin/mypy</code>: passed.</li>
+      <li><code>git diff --check</code>: passed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Commit the MVP-015 implementation, open the implementation PR, and then
+      update <code>docs/plan/index.html</code> with the PR link assigned by GitHub.
+    </p>
+  </main>
+</body>
+</html>

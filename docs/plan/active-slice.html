@@ -28,7 +28,7 @@
 <body>
   <main>
     <h1>MVP-015 - Character State Engine Context Builder Boundary v0.1</h1>
-    <p><span class="status">Status: active functional spec; implementation not started</span></p>
+    <p><span class="status">Status: implemented locally; implementation PR pending</span></p>
     <p class="meta">
       Created: 2026-05-20. Active slice path:
       <code>docs/plan/active-slice.html</code>.
@@ -265,12 +265,15 @@
       <li>Review fix: recent-message reuse is explicit because AGENTS.md requires reusing existing logic and creating shared helpers only for a real shared boundary. MVP-015 is that boundary; it should move or extract the existing helper bodies rather than copy them into <code>character.state</code>.</li>
       <li>Keep failure ownership clear: Character State Engine may raise validation errors, but Role Model Loop still logs context-build failure because that is where the model call would have happened.</li>
       <li>If a helper is still only used by the Role Model Loop compatibility wrapper after the move, keep it private or re-export narrowly; do not create a broad public API.</li>
+      <li>Implementation note: chose <code>src/character/state/context.py</code> as the smallest clear boundary. It owns the existing <code>DecisionContext</code> assembly, recent-message source request/selection logic, visible-conversation adapter, living-state source read, and active-incident source read.</li>
+      <li>Implementation note: <code>role_model.loop.build_decision_context()</code> remains as a compatibility shim that delegates to <code>build_character_decision_context()</code> and converts Character State Engine validation failures to <code>RoleModelValidationError</code> so existing failure logs keep <code>stage = "context_build"</code>.</li>
+      <li>Implementation note: the current <code>DecisionContext</code> shape, role-model input rendering, parser behavior, user-turn ordering, and raw log shapes were preserved; no retrieval, context-build log, storage, body-state, directive, private-call, or lifecycle behavior was added.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should the new module be named <code>character.state.context</code> or folded into <code>character.state.current</code>? Implementation should choose the smallest clear boundary.</li>
-      <li>Should <code>role_model.loop.build_decision_context()</code> remain as a permanent wrapper or only a temporary compatibility shim? MVP-015 may keep it to avoid caller churn.</li>
+      <li>Resolved for MVP-015: the new module is <code>character.state.context</code> so current-state read helpers can stay in <code>character.state.current</code> while context assembly has a clear boundary.</li>
+      <li>Resolved for MVP-015: <code>role_model.loop.build_decision_context()</code> remains as a compatibility shim to avoid caller churn while delegating implementation ownership to Character State Engine.</li>
       <li>When should dedicated context-build raw logs be added? Not in MVP-015.</li>
       <li>When should retrieval and active-thread context join this builder? Not in MVP-015.</li>
     </ul>
@@ -286,9 +289,8 @@
 
     <h2>Next Action</h2>
     <p>
-      Review this narrow spec, then implement the Character State Engine context
-      builder boundary with behavior-preserving tests before opening an
-      implementation PR.
+      Open the MVP-015 implementation PR, then update the plan graph with the
+      PR link after GitHub assigns the PR number.
     </p>
   </main>
 </body>
