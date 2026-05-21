@@ -1370,7 +1370,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         self.assertEqual(result["stopped_at"], "user_turn_preflight")
         self.assertEqual(result["failure"]["stage"], "user_turn_preflight")
         self.assertEqual(result["failure"]["code"], "conflicting_write_action_opt_in")
-        self.assertIn("state_patch and life_action", result["failure"]["message"])
+        self.assertIn("current USER_MESSAGE turn", result["failure"]["message"])
         self.assertNotIn("user_visible_message_result", result)
         self.assertNotIn("role_model_result", result)
         self.assertNotIn("visible_reply_result", result)
