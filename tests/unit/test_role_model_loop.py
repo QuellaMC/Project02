@@ -856,7 +856,7 @@ class DecisionContextTests(unittest.TestCase):
         )
 
     def test_rejects_state_patch_and_life_action_composition_before_render(self):
-        with self.assertRaisesRegex(RoleModelValidationError, "state_patch and life_action"):
+        with self.assertRaisesRegex(RoleModelValidationError, "current USER_MESSAGE turn"):
             build_decision_context(
                 normalized_user_message(),
                 current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
