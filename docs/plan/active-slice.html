@@ -268,6 +268,7 @@
       <li>Implementation note: chose <code>src/character/state/context.py</code> as the smallest clear boundary. It owns the existing <code>DecisionContext</code> assembly, recent-message source request/selection logic, visible-conversation adapter, living-state source read, and active-incident source read.</li>
       <li>Implementation note: <code>role_model.loop.build_decision_context()</code> remains as a compatibility shim that delegates to <code>build_character_decision_context()</code> and converts Character State Engine validation failures to <code>RoleModelValidationError</code> so existing failure logs keep <code>stage = "context_build"</code>.</li>
       <li>Implementation note: the current <code>DecisionContext</code> shape, role-model input rendering, parser behavior, user-turn ordering, and raw log shapes were preserved; no retrieval, context-build log, storage, body-state, directive, private-call, or lifecycle behavior was added.</li>
+      <li>Known design divergence: the current model input still uses a broad <code>DecisionContext</code> carrying <code>call_type</code>, <code>event</code>, and <code>allowed_actions</code>. MVP-015 preserves this shape intentionally. MVP-016 should split the outer <code>RoleModelInputEnvelope</code> from the inner compact <code>DecisionContext</code>.</li>
     </ul>
 
     <h2>Open Questions</h2>
@@ -283,6 +284,7 @@
       <li>Dedicated <code>decision_context_built</code> raw log entries with source requests, accepted records, rejected records, and context budget usage.</li>
       <li>Retrieval planner and <code>context.retrieve()</code> tool backed by a Unified Retrieval Index.</li>
       <li>Context builder support for active threads, body state, scheduled directives, interrupted incidents, completed incidents, and private event call types.</li>
+      <li>MVP-016 split of the outer <code>RoleModelInputEnvelope</code> from the inner compact <code>DecisionContext</code>.</li>
       <li>Shared visible conversation message contract if another production boundary consumes committed visible transcript records.</li>
       <li>Context budget policy after retrieved context, active threads, or tool results create real pressure.</li>
     </ul>
