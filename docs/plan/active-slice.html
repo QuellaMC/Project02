@@ -218,7 +218,7 @@
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>If finalization fails, raw-log success visibility staging fails, post-confirm incident-clearing completion fails or observes a changed active incident, the store/log instances differ, no active incident exists, incident IDs mismatch, or a storage/source adapter raises unexpectedly, Commit &amp; Effects returns a structured rejected result and appends a <code>life_incident_cancel_rejected</code> log through the ordinary raw-log path. Failures before visibility confirmation must leave the active incident unchanged and no query-visible cancel success entry.</td>
+          <td>If finalization fails, raw-log success visibility staging fails, post-confirm incident-clearing completion fails or observes a changed active incident, the store/log instances differ, no active incident exists, incident IDs mismatch, or a storage/source adapter raises unexpectedly, Commit &amp; Effects returns a structured rejected result and appends a <code>life_incident_cancel_rejected</code> log through the ordinary raw-log path. Failures before visibility confirmation must leave the active incident unchanged and no query-visible cancel success entry. Failures after visibility confirmation intentionally leave the already-confirmed <code>life_incident_cancelled</code> entry query-visible and add a later <code>life_incident_cancel_rejected</code> audit entry, producing a success-plus-rejection audit pair for post-confirm completion failures.</td>
         </tr>
         <tr>
           <td>FR-11</td>
@@ -262,6 +262,7 @@
       <li>Build and validate cancel commit/finalize requests and <code>life_incident_cancelled</code> log entries.</li>
       <li>Finalize cancel through <code>InMemoryLifeIncidentStore</code> and assert same-scope active incident is cleared, other scopes remain, copies are safe, and query-visible success logs are staged/confirmed.</li>
       <li>Reject no-active, incident-ID mismatch, raw-log mismatch, staging failure, and changed-before-completion paths without clearing the wrong active incident.</li>
+      <li>Assert post-confirm completion failures return a rejected result while preserving the already-query-visible <code>life_incident_cancelled</code> entry and appending a later <code>life_incident_cancel_rejected</code> entry.</li>
     </ul>
 
     <h3>Integration Tests</h3>
@@ -289,6 +290,7 @@
       <li>The second risk is accepting cancellation for a stale or invented incident ID; Commit &amp; Effects must re-read and match the current active incident for the event scope.</li>
       <li>The main duplication risk is copying the incident-start validators wholesale without sharing contract helpers or store scope helpers. Extract only when it reduces real duplicated validation in this slice.</li>
       <li>Implementation review must verify the cancel success kind uses the existing atomic finalizer visibility path: <code>ATOMIC_FINALIZER_SUCCESS_KINDS</code>, <code>expose_committed_success_entry()</code>, <code>confirm_committed_success_entry_visibility()</code>, and <code>discard_committed_success_entry_visibility()</code>.</li>
+      <li>Post-confirm completion failures are a deliberate audit edge case: once <code>life_incident_cancelled</code> visibility is confirmed, the commit boundary cannot hide that success entry, so it reports the later completion failure with a structured rejected result and a <code>life_incident_cancel_rejected</code> entry in the same trace.</li>
       <li>Implementation review must verify the Role Model Loop extends or extracts the current start-only life-action parser path for subtype-specific start vs cancel handling instead of adding a second parser.</li>
       <li>Keep the raw log as the only cancelled-history truth for now; do not add store history APIs or persistent storage.</li>
       <li>Do not add interruption semantics. A user message may cancel an active incident only because the model proposed the opted-in cancel action and Commit &amp; Effects accepted it.</li>
