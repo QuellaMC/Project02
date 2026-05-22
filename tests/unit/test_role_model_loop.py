@@ -40,8 +40,13 @@ def normalized_user_message():
     }
 
 
+def render_context(event, context, **kwargs):
+    return render_role_model_input(event, context, **kwargs)
+
+
 def role_model_input():
-    return render_role_model_input(build_decision_context(normalized_user_message()))
+    event = normalized_user_message()
+    return render_context(event, build_decision_context(event))
 
 
 def adapter_output(raw_text):
@@ -286,36 +291,30 @@ class DecisionContextTests(unittest.TestCase):
                 "schema_version": "0.1",
                 "trace_id": "trace-1",
                 "event_id": "event-1",
-                "call_type": "user_message_visible_reply",
-                "event": {
-                    "type": "USER_MESSAGE",
-                    "text": "hello",
-                    "created_at": "2026-05-14T11:30:00+00:00",
-                    "user_id": "user-1",
-                    "conversation_id": "conversation-1",
-                },
                 "character_snapshot": {"recent_visible_messages": []},
-                "allowed_actions": ["visible_reply"],
             },
         )
+        self.assertNotIn("call_type", context)
+        self.assertNotIn("event", context)
+        self.assertNotIn("allowed_actions", context)
 
-    def test_preserves_empty_optional_payload_strings_from_normalized_event(self):
+    def test_envelope_preserves_empty_optional_payload_strings_from_normalized_event(self):
         event = normalized_user_message()
         event["payload"]["user_id"] = ""
         event["payload"]["conversation_id"] = ""
 
-        context = build_decision_context(event)
+        model_input = render_context(event, build_decision_context(event))
 
-        self.assertEqual(context["event"]["user_id"], "")
-        self.assertEqual(context["event"]["conversation_id"], "")
+        self.assertEqual(model_input["event"]["user_id"], "")
+        self.assertEqual(model_input["event"]["conversation_id"], "")
 
-    def test_derives_context_event_type_from_normalized_event(self):
+    def test_envelope_derives_event_type_from_normalized_event(self):
         event = normalized_user_message()
         event["type"] = UserMessageType("USER_MESSAGE")
 
-        context = build_decision_context(event)
+        model_input = render_context(event, build_decision_context(event))
 
-        self.assertIs(context["event"]["type"], event["type"])
+        self.assertIs(model_input["event"]["type"], event["type"])
 
     def test_without_conversation_id_does_not_call_recent_message_source(self):
         event = normalized_user_message()
@@ -377,7 +376,7 @@ class DecisionContextTests(unittest.TestCase):
             context["character_snapshot"]["living_state_brief"],
             living_state_brief(),
         )
-        self.assertEqual(context["allowed_actions"], ["visible_reply"])
+        self.assertNotIn("allowed_actions", context)
 
     def test_state_patch_opt_in_requires_and_advertises_current_state(self):
         source = RecordingCurrentStateSource(current_state_snapshot())
@@ -388,7 +387,12 @@ class DecisionContextTests(unittest.TestCase):
             allow_state_patch=True,
         )
 
-        self.assertEqual(context["allowed_actions"], ["visible_reply", "state_patch"])
+        model_input = render_context(
+            normalized_user_message(),
+            context,
+            allow_state_patch=True,
+        )
+        self.assertEqual(model_input["allowed_actions"], ["visible_reply", "state_patch"])
         self.assertEqual(
             context["character_snapshot"]["living_state_brief"],
             living_state_brief(),
@@ -503,7 +507,7 @@ class DecisionContextTests(unittest.TestCase):
             context["character_snapshot"]["active_incident"],
             active_incident_brief(),
         )
-        self.assertEqual(context["allowed_actions"], ["visible_reply"])
+        self.assertNotIn("allowed_actions", context)
 
     def test_active_incident_source_none_omits_context_field(self):
         source = RecordingActiveIncidentSource(None)
@@ -793,8 +797,8 @@ class DecisionContextTests(unittest.TestCase):
     def test_renders_stable_role_model_input_for_same_context(self):
         context = build_decision_context(normalized_user_message())
 
-        first_input = render_role_model_input(context)
-        second_input = render_role_model_input(context)
+        first_input = render_context(normalized_user_message(), context)
+        second_input = render_context(normalized_user_message(), context)
 
         self.assertEqual(first_input, second_input)
         self.assertEqual(
@@ -803,12 +807,23 @@ class DecisionContextTests(unittest.TestCase):
                 "schema_version": "0.1",
                 "trace_id": "trace-1",
                 "event_id": "event-1",
+                "call_type": "user_message_visible_reply",
+                "event": {
+                    "type": "USER_MESSAGE",
+                    "text": "hello",
+                    "created_at": "2026-05-14T11:30:00+00:00",
+                    "user_id": "user-1",
+                    "conversation_id": "conversation-1",
+                },
+                "allowed_actions": ["visible_reply"],
                 "instructions": ROLE_MODEL_INSTRUCTIONS,
                 "decision_context": context,
             },
         )
-        context["event"]["text"] = "mutated after render"
-        self.assertEqual(first_input["decision_context"]["event"]["text"], "hello")
+        context["character_snapshot"]["recent_visible_messages"].append(recent_message("message-1"))
+        self.assertEqual(
+            first_input["decision_context"]["character_snapshot"], {"recent_visible_messages": []}
+        )
 
     def test_renders_state_patch_output_contract_only_for_opted_in_context(self):
         context = build_decision_context(
@@ -817,14 +832,12 @@ class DecisionContextTests(unittest.TestCase):
             allow_state_patch=True,
         )
 
-        model_input = render_role_model_input(context)
+        model_input = render_context(normalized_user_message(), context, allow_state_patch=True)
 
         self.assertEqual(model_input["instructions"], STATE_PATCH_ROLE_MODEL_INSTRUCTIONS)
         self.assertIn("state_patch.living_state", model_input["instructions"])
-        self.assertEqual(
-            model_input["decision_context"]["allowed_actions"],
-            ["visible_reply", "state_patch"],
-        )
+        self.assertEqual(model_input["allowed_actions"], ["visible_reply", "state_patch"])
+        self.assertNotIn("allowed_actions", model_input["decision_context"])
 
     def test_renders_life_action_output_contract_only_for_incident_start_opt_in(self):
         context = build_decision_context(
@@ -832,7 +845,7 @@ class DecisionContextTests(unittest.TestCase):
             allow_incident_start=True,
         )
 
-        model_input = render_role_model_input(context)
+        model_input = render_context(normalized_user_message(), context, allow_incident_start=True)
 
         self.assertEqual(model_input["instructions"], INCIDENT_START_ROLE_MODEL_INSTRUCTIONS)
         self.assertIn("life_action", model_input["instructions"])
@@ -850,10 +863,8 @@ class DecisionContextTests(unittest.TestCase):
             "resume_policy must be one of: 'ask_model', 'cancel', 'resume'",
             model_input["instructions"],
         )
-        self.assertEqual(
-            model_input["decision_context"]["allowed_actions"],
-            ["visible_reply", "life_action"],
-        )
+        self.assertEqual(model_input["allowed_actions"], ["visible_reply", "life_action"])
+        self.assertNotIn("allowed_actions", model_input["decision_context"])
 
     def test_rejects_state_patch_and_life_action_composition_before_render(self):
         with self.assertRaisesRegex(RoleModelValidationError, "current USER_MESSAGE turn"):
@@ -864,7 +875,7 @@ class DecisionContextTests(unittest.TestCase):
                 allow_incident_start=True,
             )
 
-    def test_render_rejects_malformed_nested_decision_context_event(self):
+    def test_model_input_validation_rejects_malformed_envelope_event(self):
         cases = [
             ({}, "event"),
             (
@@ -890,17 +901,48 @@ class DecisionContextTests(unittest.TestCase):
         for event, error_pattern in cases:
             with self.subTest(event=event):
                 context = build_decision_context(normalized_user_message())
-                context["event"] = event
+                model_input = render_context(normalized_user_message(), context)
+                model_input["event"] = event
 
                 with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
-                    render_role_model_input(context)
+                    parse_character_decision(
+                        model_input,
+                        adapter_output(
+                            json.dumps(
+                                {
+                                    "schema_version": "0.1",
+                                    "action": "visible_reply",
+                                    "visible_reply": {"text": "hello"},
+                                }
+                            )
+                        ),
+                    )
 
     def test_render_rejects_extra_decision_context_fields(self):
         context = build_decision_context(normalized_user_message())
         context["future_field"] = "not allowed yet"
 
         with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
-            render_role_model_input(context)
+            render_context(normalized_user_message(), context)
+
+    def test_render_rejects_legacy_broad_decision_context_fields(self):
+        cases = {
+            "call_type": "user_message_visible_reply",
+            "event": {
+                "type": "USER_MESSAGE",
+                "text": "hello",
+                "created_at": "2026-05-14T11:30:00+00:00",
+            },
+            "allowed_actions": ["visible_reply"],
+        }
+
+        for field_name, value in cases.items():
+            with self.subTest(field_name=field_name):
+                context = build_decision_context(normalized_user_message())
+                context[field_name] = value
+
+                with self.assertRaisesRegex(RoleModelValidationError, field_name):
+                    render_context(normalized_user_message(), context)
 
     def test_render_validates_recent_messages(self):
         context = build_decision_context(normalized_user_message())
@@ -909,19 +951,31 @@ class DecisionContextTests(unittest.TestCase):
         ]
 
         with self.assertRaisesRegex(RoleModelValidationError, "text"):
-            render_role_model_input(context)
+            render_context(normalized_user_message(), context)
 
         context = build_decision_context(normalized_user_message())
         context["character_snapshot"]["future_field"] = "not allowed yet"
 
         with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
-            render_role_model_input(context)
+            render_context(normalized_user_message(), context)
 
         context = build_decision_context(normalized_user_message())
-        context["event"]["future_field"] = "not allowed yet"
+        model_input = render_context(normalized_user_message(), context)
+        model_input["event"]["future_field"] = "not allowed yet"
 
         with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
-            render_role_model_input(context)
+            parse_character_decision(
+                model_input,
+                adapter_output(
+                    json.dumps(
+                        {
+                            "schema_version": "0.1",
+                            "action": "visible_reply",
+                            "visible_reply": {"text": "hello"},
+                        }
+                    )
+                ),
+            )
 
         context = build_decision_context(normalized_user_message())
         context["character_snapshot"]["recent_visible_messages"] = [
@@ -929,7 +983,7 @@ class DecisionContextTests(unittest.TestCase):
         ]
 
         with self.assertRaisesRegex(RoleModelValidationError, "before event.created_at"):
-            render_role_model_input(context)
+            render_context(normalized_user_message(), context)
 
         context = build_decision_context(normalized_user_message())
         context["character_snapshot"]["recent_visible_messages"] = [
@@ -942,7 +996,7 @@ class DecisionContextTests(unittest.TestCase):
         ]
 
         with self.assertRaisesRegex(RoleModelValidationError, "message_id"):
-            render_role_model_input(context)
+            render_context(normalized_user_message(), context)
 
         context = build_decision_context(normalized_user_message())
         context["character_snapshot"]["recent_visible_messages"] = [
@@ -955,21 +1009,22 @@ class DecisionContextTests(unittest.TestCase):
         ]
 
         with self.assertRaisesRegex(RoleModelValidationError, "source_event_id"):
-            render_role_model_input(context)
+            render_context(normalized_user_message(), context)
 
         for event_conversation_id in (None, ""):
             with self.subTest(event_conversation_id=event_conversation_id):
-                context = build_decision_context(normalized_user_message())
+                event = normalized_user_message()
                 if event_conversation_id is None:
-                    context["event"].pop("conversation_id")
+                    event["payload"].pop("conversation_id")
                 else:
-                    context["event"]["conversation_id"] = event_conversation_id
+                    event["payload"]["conversation_id"] = event_conversation_id
+                context = build_decision_context(event)
                 context["character_snapshot"]["recent_visible_messages"] = [
                     recent_message("message-1", conversation_id="")
                 ]
 
                 with self.assertRaisesRegex(RoleModelValidationError, "event.conversation_id"):
-                    render_role_model_input(context)
+                    render_context(event, context)
 
     def test_render_accepts_and_validates_living_state_brief(self):
         context = build_decision_context(
@@ -977,7 +1032,7 @@ class DecisionContextTests(unittest.TestCase):
             current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
         )
 
-        rendered = render_role_model_input(context)
+        rendered = render_context(normalized_user_message(), context)
 
         self.assertEqual(
             rendered["decision_context"]["character_snapshot"]["living_state_brief"],
@@ -986,7 +1041,7 @@ class DecisionContextTests(unittest.TestCase):
 
         context["character_snapshot"]["living_state_brief"]["future_field"] = "not allowed yet"
         with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
-            render_role_model_input(context)
+            render_context(normalized_user_message(), context)
 
         context = build_decision_context(
             normalized_user_message(),
@@ -994,7 +1049,7 @@ class DecisionContextTests(unittest.TestCase):
         )
         context["character_snapshot"]["living_state_brief"]["updated_at"] = "2026-05-14"
         with self.assertRaisesRegex(RoleModelValidationError, "updated_at"):
-            render_role_model_input(context)
+            render_context(normalized_user_message(), context)
 
         context = build_decision_context(
             normalized_user_message(),
@@ -1002,7 +1057,7 @@ class DecisionContextTests(unittest.TestCase):
         )
         context["character_snapshot"]["living_state_brief"]["source_event_ids"] = ["event-1"]
         with self.assertRaisesRegex(RoleModelValidationError, "current event_id"):
-            render_role_model_input(context)
+            render_context(normalized_user_message(), context)
 
     def test_render_accepts_and_validates_active_incident(self):
         context = build_decision_context(
@@ -1010,7 +1065,7 @@ class DecisionContextTests(unittest.TestCase):
             active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
         )
 
-        rendered = render_role_model_input(context)
+        rendered = render_context(normalized_user_message(), context)
 
         self.assertEqual(
             rendered["decision_context"]["character_snapshot"]["active_incident"],
@@ -1019,7 +1074,7 @@ class DecisionContextTests(unittest.TestCase):
 
         context["character_snapshot"]["active_incident"]["future_field"] = "not allowed yet"
         with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
-            render_role_model_input(context)
+            render_context(normalized_user_message(), context)
 
         context = build_decision_context(
             normalized_user_message(),
@@ -1027,28 +1082,41 @@ class DecisionContextTests(unittest.TestCase):
         )
         context["character_snapshot"]["active_incident"]["source_event_ids"] = ["event-1"]
         with self.assertRaisesRegex(RoleModelValidationError, "current event_id"):
-            render_role_model_input(context)
+            render_context(normalized_user_message(), context)
 
     def test_active_incident_does_not_change_allowed_actions(self):
         context = build_decision_context(
             normalized_user_message(),
             active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
         )
-        model_input = render_role_model_input(context)
+        model_input = render_context(normalized_user_message(), context)
 
-        self.assertEqual(context["allowed_actions"], ["visible_reply"])
+        self.assertNotIn("allowed_actions", context)
+        self.assertEqual(model_input["allowed_actions"], ["visible_reply"])
         self.assertEqual(model_input["instructions"], ROLE_MODEL_INSTRUCTIONS)
 
-    def test_render_rejects_manually_composed_state_patch_and_life_action(self):
+    def test_model_input_validation_rejects_manually_composed_allowed_actions(self):
         context = build_decision_context(
             normalized_user_message(),
             current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
             allow_state_patch=True,
         )
-        context["allowed_actions"] = ["visible_reply", "state_patch", "life_action"]
+        model_input = render_context(normalized_user_message(), context, allow_state_patch=True)
+        model_input["allowed_actions"] = ["visible_reply", "state_patch", "life_action"]
 
         with self.assertRaisesRegex(RoleModelValidationError, "allowed_actions"):
-            render_role_model_input(context)
+            parse_character_decision(
+                model_input,
+                adapter_output(
+                    json.dumps(
+                        {
+                            "schema_version": "0.1",
+                            "action": "visible_reply",
+                            "visible_reply": {"text": "hello"},
+                        }
+                    )
+                ),
+            )
 
 
 class VisibleConversationRecentMessagesSourceTests(unittest.TestCase):
@@ -1211,12 +1279,12 @@ class RoleModelLogEntryTests(unittest.TestCase):
             clock=fixed_clock,
         )
 
-        model_input["decision_context"]["event"]["text"] = "mutated input"
+        model_input["event"]["text"] = "mutated input"
         model_output["raw_text"] = "mutated output"
         decision["visible_reply"]["text"] = "mutated decision"
 
         self.assertEqual(
-            entry["data"]["model_input"]["decision_context"]["event"]["text"],
+            entry["data"]["model_input"]["event"]["text"],
             "hello",
         )
         self.assertNotEqual(entry["data"]["model_output"]["raw_text"], "mutated output")
@@ -1301,12 +1369,15 @@ class CharacterDecisionParserTests(unittest.TestCase):
         )
 
     def test_parses_valid_visible_reply_with_allowed_living_state_patch(self):
-        model_input = render_role_model_input(
+        event = normalized_user_message()
+        model_input = render_context(
+            event,
             build_decision_context(
-                normalized_user_message(),
+                event,
                 current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
                 allow_state_patch=True,
-            )
+            ),
+            allow_state_patch=True,
         )
 
         decision = parse_character_decision(
@@ -1346,11 +1417,14 @@ class CharacterDecisionParserTests(unittest.TestCase):
         )
 
     def test_parses_valid_visible_reply_with_allowed_start_incident_life_action(self):
-        model_input = render_role_model_input(
+        event = normalized_user_message()
+        model_input = render_context(
+            event,
             build_decision_context(
-                normalized_user_message(),
+                event,
                 allow_incident_start=True,
-            )
+            ),
+            allow_incident_start=True,
         )
 
         decision = parse_character_decision(
@@ -1422,11 +1496,14 @@ class CharacterDecisionParserTests(unittest.TestCase):
             )
 
     def test_rejects_malformed_allowed_start_incident_life_action(self):
-        model_input = render_role_model_input(
+        event = normalized_user_message()
+        model_input = render_context(
+            event,
             build_decision_context(
-                normalized_user_message(),
+                event,
                 allow_incident_start=True,
-            )
+            ),
+            allow_incident_start=True,
         )
 
         def incident_draft(**overrides):
@@ -1517,12 +1594,15 @@ class CharacterDecisionParserTests(unittest.TestCase):
             )
 
     def test_rejects_malformed_allowed_living_state_patch(self):
-        model_input = render_role_model_input(
+        event = normalized_user_message()
+        model_input = render_context(
+            event,
             build_decision_context(
-                normalized_user_message(),
+                event,
                 current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
                 allow_state_patch=True,
-            )
+            ),
+            allow_state_patch=True,
         )
         cases = [
             ({"living_state": {}}, "at least one"),

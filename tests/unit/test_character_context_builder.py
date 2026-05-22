@@ -120,18 +120,12 @@ class CharacterContextBuilderTests(unittest.TestCase):
                 "schema_version": "0.1",
                 "trace_id": "trace-1",
                 "event_id": "event-1",
-                "call_type": "user_message_visible_reply",
-                "event": {
-                    "type": "USER_MESSAGE",
-                    "text": "hello",
-                    "created_at": "2026-05-14T11:30:00+00:00",
-                    "user_id": "user-1",
-                    "conversation_id": "conversation-1",
-                },
                 "character_snapshot": {"recent_visible_messages": []},
-                "allowed_actions": ["visible_reply"],
             },
         )
+        self.assertNotIn("call_type", context)
+        self.assertNotIn("event", context)
+        self.assertNotIn("allowed_actions", context)
 
     def test_builds_combined_context_and_preserves_copy_safety(self):
         messages = [recent_message()]
@@ -143,7 +137,6 @@ class CharacterContextBuilderTests(unittest.TestCase):
             recent_visible_messages_source=RecordingRecentMessagesSource(messages),
             current_state_source=RecordingCurrentStateSource(state_snapshot),
             active_incident_source=RecordingActiveIncidentSource(incident_snapshot),
-            allow_incident_start=True,
         )
 
         self.assertEqual(
@@ -158,7 +151,7 @@ class CharacterContextBuilderTests(unittest.TestCase):
             context["character_snapshot"]["active_incident"]["title"],
             "Eating lunch",
         )
-        self.assertEqual(context["allowed_actions"], ["visible_reply", "life_action"])
+        self.assertNotIn("allowed_actions", context)
 
         messages[0]["text"] = "mutated after context"
         state_snapshot["living_state"]["mood"] = "mutated after context"
@@ -190,25 +183,13 @@ class CharacterContextBuilderTests(unittest.TestCase):
             RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES,
         )
 
-    def test_rejects_conflicting_write_action_opt_ins(self):
-        with self.assertRaisesRegex(ContractValidationError, "current USER_MESSAGE turn"):
-            build_character_decision_context(
-                normalized_user_message(),
-                current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
-                allow_state_patch=True,
-                allow_incident_start=True,
-            )
-
     def test_role_model_compatibility_wrapper_delegates_to_character_context_builder(self):
         calls = []
         expected_context = {
             "schema_version": "0.1",
             "trace_id": "trace-1",
             "event_id": "event-1",
-            "call_type": "user_message_visible_reply",
-            "event": {"type": "USER_MESSAGE", "text": "stub", "created_at": "stub"},
             "character_snapshot": {"recent_visible_messages": []},
-            "allowed_actions": ["visible_reply"],
         }
         original_builder = role_loop.build_character_decision_context
 
@@ -220,14 +201,13 @@ class CharacterContextBuilderTests(unittest.TestCase):
             role_loop.build_character_decision_context = fake_builder
             context = role_loop.build_decision_context(
                 normalized_user_message(),
-                allow_incident_start=True,
             )
         finally:
             role_loop.build_character_decision_context = original_builder
 
         self.assertIs(context, expected_context)
         self.assertEqual(calls[0][0]["event_id"], "event-1")
-        self.assertTrue(calls[0][1]["allow_incident_start"])
+        self.assertNotIn("allow_incident_start", calls[0][1])
 
     def test_role_model_compatibility_wrapper_converts_context_errors(self):
         original_builder = role_loop.build_character_decision_context

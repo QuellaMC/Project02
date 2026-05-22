@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-015</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-016</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -147,7 +147,7 @@
       <dd>Discovered while defining MVP-004 failure behavior for malformed recent-message source output.</dd>
 
       <dt>Dependency</dt>
-      <dd>A debug/replay slice or later context observability slice should justify the extra log kind. MVP-015 intentionally moves context-builder ownership without adding a new raw-log record because the rendered role-model input snapshot already records the model-facing context for the active slice.</dd>
+      <dd>A debug/replay slice or later context observability slice should justify the extra log kind. MVP-015 intentionally moved context-builder ownership without adding a new raw-log record because the rendered role-model input snapshot already records the model-facing context for that slice.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>DecisionContext build logging v0.1</code>.</dd>
@@ -159,13 +159,13 @@
       <dd>Likely adds a <code>decision_context_built</code> raw log kind without changing existing role-model turn logs.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-015 is explicitly behavior-preserving and keeps context-build failures on the existing <code>role_model_turn_failed</code> path. Dedicated context-build logs are deferred until debug/replay or context observability needs source-request traces.</dd>
+      <dd>MVP-016 is explicitly limited to an envelope/context split and keeps context-build failures on the existing <code>role_model_turn_failed</code> path. Dedicated context-build logs are deferred until debug/replay or context observability needs source-request traces.</dd>
     </dl>
 
     <h2>MVP-015 - Character State Engine Context Builder Boundary v0.1</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Move source orchestration for recent visible messages, living-state brief, and active-incident brief behind a proper Character State Engine context-builder boundary.</dd>
+      <dd>Completed on 2026-05-21. See <a href="completed/mvp-015-character-state-engine-context-builder-boundary.html">completed MVP-015</a>. Move source orchestration for recent visible messages, living-state brief, and active-incident brief behind a proper Character State Engine context-builder boundary.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>Notion assigns context building to the Character State Engine. MVP-004 keeps the minimal read-only recent-message path in <code>role_model.loop</code> only as a staging shortcut.</dd>
@@ -174,7 +174,7 @@
       <dd>Discovered during MVP-004 review of temporary context-builder ownership.</dd>
 
       <dt>Dependency</dt>
-      <dd>MVP-008, MVP-011, and MVP-014 have proven the read-side living-state, active-incident, and in-memory incident-store source contracts. MVP-015 promotes only the smallest context-builder boundary that coordinates those already-proven sources with recent visible messages.</dd>
+      <dd>MVP-008, MVP-011, and MVP-014 proved the read-side living-state, active-incident, and in-memory incident-store source contracts. MVP-015 promoted only the smallest context-builder boundary that coordinates those already-proven sources with recent visible messages.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>MVP-015 - Character State Engine Context Builder Boundary v0.1</code>.</dd>
@@ -186,7 +186,7 @@
       <dd>Preserves the current <code>DecisionContext</code> shape while moving existing source reads and final assembly behind an explicit boundary. Future context-budget policy, retrieval, and context-build logs stay parked.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>This item is no longer parked; it is the active slice in <a href="active-slice.html">MVP-015</a>. Retrieval, active threads, body state, interrupted incidents, private calls, and context-build logs remain parked.</dd>
+      <dd>This item is no longer parked; it has been completed and recorded under completed plans. Retrieval, active threads, body state, interrupted incidents, private calls, and context-build logs remain parked.</dd>
     </dl>
 
     <h2>MVP-016 - Role Model Input Envelope Split v0.1</h2>
@@ -213,7 +213,7 @@
       <dd>Likely introduces a named <code>RoleModelInputEnvelope</code> that owns call metadata and allowed action policy, while the inner <code>DecisionContext</code> keeps only compact event-adjacent and character-state context.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-015 is only the Character State Engine boundary extraction. Changing the model input schema belongs in the next reviewed slice.</dd>
+      <dd>This item is no longer parked; it is the active slice in <a href="active-slice.html">MVP-016</a>. Private calls, retrieval, output-contract renaming, provider templates, and broader context fields remain parked.</dd>
     </dl>
 
     <h2>Shared RecentVisibleMessage Contract</h2>
@@ -240,7 +240,7 @@
       <dd>Likely moves existing validation into <code>runtime.contracts</code> without changing the current <code>DecisionContext</code> shape.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-015 should only move existing recent-message orchestration behind the Character State Engine context-builder boundary; it should not promote a broader shared runtime contract or change the current recent-message shape.</dd>
+      <dd>MVP-016 should only split the role-model input envelope from compact context; it should not promote a broader shared runtime contract or change the current recent-message shape.</dd>
     </dl>
 
     <h2>MVP-007 - Minimal User Turn Orchestrator</h2>
@@ -456,7 +456,7 @@
       <dd>Likely adds a read/audit log kind that records query parameters, returned <code>log_id</code> values, caller metadata, and failure details without changing existing query result records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-015 is only a Character State Engine context-builder boundary move. It should not add debug inspector, replay execution, concrete persistence, retrieval indexing, pagination, redaction, or audited read-operation behavior.</dd>
+      <dd>MVP-016 is only an envelope/context split. It should not add debug inspector, replay execution, concrete persistence, retrieval indexing, pagination, redaction, or audited read-operation behavior.</dd>
     </dl>
 
     <h2>MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</h2>
@@ -498,7 +498,7 @@
       <dd>Discovered while keeping MVP-011 read-only and avoiding <code>life_action</code>.</dd>
 
       <dt>Dependency</dt>
-      <dd>MVP-012 has proven one narrow allowed action and commit/reject log contract for starting an incident. MVP-014 completed the concrete in-memory start adapter. MVP-015 is focused on context-builder ownership, not new lifecycle actions.</dd>
+      <dd>MVP-012 has proven one narrow allowed action and commit/reject log contract for starting an incident. MVP-014 completed the concrete in-memory start adapter. MVP-016 is focused on envelope/context ownership, not new lifecycle actions.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>Minimal incident lifecycle follow-up actions v0.1</code>.</dd>
@@ -510,7 +510,7 @@
       <dd>Likely extends the <code>life_action</code> decision subset and incident commit/reject raw log entries introduced by MVP-012.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-015 should not add lifecycle actions. The remaining actions need separate ordering, conflict, and failure contracts.</dd>
+      <dd>MVP-016 should not add lifecycle actions. The remaining actions need separate ordering, conflict, and failure contracts.</dd>
     </dl>
 
     <h2>User Interruption Incident Policy</h2>
@@ -537,7 +537,7 @@
       <dd>Likely adds <code>interrupted_incident</code> context, interruption status transitions, and a post-turn life action contract.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-015 does not decide or commit interruption; it only moves existing context-source orchestration behind the Character State Engine boundary.</dd>
+      <dd>MVP-016 does not decide or commit interruption; it only splits envelope-owned model input fields from the compact context.</dd>
     </dl>
 
     <h2>INCIDENT_COMPLETION RuntimeEvent</h2>
@@ -564,7 +564,7 @@
       <dd>Likely adds a new <code>RuntimeEvent</code> type, route policy, completed incident context, and completion commit logs.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-015 keeps the single implemented event family as <code>USER_MESSAGE</code> and does not add completion events.</dd>
+      <dd>MVP-016 keeps the single implemented event family as <code>USER_MESSAGE</code> and does not add completion events.</dd>
     </dl>
 
     <h2>Concrete CharacterRuntimeStateStore</h2>
@@ -645,7 +645,7 @@
       <dd>Likely adds tested route outputs for interruption, scheduling, and later event families while preserving the MVP-007 <code>USER_MESSAGE</code> route.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-015 should not broaden Runtime Kernel route policy while moving context building behind the Character State Engine boundary.</dd>
+      <dd>MVP-016 should not broaden Runtime Kernel route policy while splitting envelope-owned model input fields from compact context.</dd>
     </dl>
 
     <h2>Real RoleModelAdapter Provider</h2>
@@ -672,7 +672,7 @@
       <dd>May add provider metadata to model I/O logs without changing <code>CharacterDecision</code>.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-015 still uses injected fake role-model behavior and should not introduce a real provider while moving context-source orchestration.</dd>
+      <dd>MVP-016 still uses injected fake role-model behavior and should not introduce a real provider while splitting the model input envelope.</dd>
     </dl>
 
     <h2>Shared RoleModelTurnResult Validator</h2>
@@ -726,7 +726,7 @@
       <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-015 slice introduces only a Character State Engine context-builder boundary, with no concrete database.</dd>
+      <dd>The active MVP-016 slice introduces only an envelope/context split, with no concrete database.</dd>
     </dl>
 
     <h2>Shared Visible Conversation Message Contract</h2>
@@ -753,7 +753,7 @@
       <dd>Likely adds a shared <code>role</code> / <code>message_id</code> visible transcript contract while preserving compatibility with existing assistant output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-015 slice should only move existing recent-message context orchestration behind the Character State Engine boundary without unifying durable visible-message schemas.</dd>
+      <dd>The active MVP-016 slice should only split envelope-owned model input fields from compact context without unifying durable visible-message schemas.</dd>
     </dl>
 
     <h2>Recent Source Backed By Visible Conversation Records</h2>

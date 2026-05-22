@@ -103,7 +103,7 @@ class MutatingRoleModelAdapter:
 
     def generate(self, model_input):
         self.inputs.append(model_input)
-        model_input["decision_context"]["event"]["text"] = "mutated by adapter"
+        model_input["event"]["text"] = "mutated by adapter"
         return {
             "model_id": "fake-role-model",
             "created_at": "2026-05-14T11:31:00+00:00",
@@ -294,7 +294,8 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
             clock=fixed_clock,
         )
 
-        expected_input = render_role_model_input(build_decision_context(normalized_user_message()))
+        event = normalized_user_message()
+        expected_input = render_role_model_input(event, build_decision_context(event))
         self.assertEqual(adapter.inputs, [expected_input])
         self.assertEqual(
             result,
@@ -445,7 +446,7 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            adapter.inputs[0]["decision_context"]["allowed_actions"],
+            adapter.inputs[0]["allowed_actions"],
             ["visible_reply", "state_patch"],
         )
         self.assertEqual(
@@ -791,11 +792,11 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            adapter.inputs[0]["decision_context"]["event"]["text"],
+            adapter.inputs[0]["event"]["text"],
             "mutated by adapter",
         )
         self.assertEqual(
-            raw_log.entries[0]["data"]["model_input"]["decision_context"]["event"]["text"],
+            raw_log.entries[0]["data"]["model_input"]["event"]["text"],
             "hello",
         )
 
@@ -866,7 +867,8 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
                 clock=fixed_clock,
             )
 
-        expected_input = render_role_model_input(build_decision_context(normalized_user_message()))
+        event = normalized_user_message()
+        expected_input = render_role_model_input(event, build_decision_context(event))
         self.assertEqual(adapter.inputs, [expected_input])
         self.assertEqual(ids.calls, ["log"])
         self.assertEqual(len(raw_log.entries), 1)
