@@ -888,6 +888,13 @@ class DecisionContextTests(unittest.TestCase):
         )
         self.assertNotIn("allowed_actions", model_input["decision_context"])
 
+    def test_rejects_incident_cancel_opt_in_without_active_incident_source(self):
+        with self.assertRaisesRegex(
+            RoleModelValidationError,
+            "allow_incident_cancel requires active_incident_source",
+        ):
+            build_decision_context(normalized_user_message(), allow_incident_cancel=True)
+
     def test_rejects_state_patch_and_life_action_composition_before_render(self):
         with self.assertRaisesRegex(RoleModelValidationError, "current USER_MESSAGE turn"):
             build_decision_context(

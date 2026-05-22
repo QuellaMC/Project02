@@ -70,13 +70,11 @@ class InMemoryLifeIncidentStore:
 
     def require_raw_event_log(self, raw_event_log: object) -> None:
         if raw_event_log is not self._raw_event_log:
-            raise LifeIncidentStartFinalizerError(
-                (
-                    "InMemoryLifeIncidentStore must finalize against the same "
-                    "Raw Event Log instance that will confirm visibility."
-                ),
-                code="malformed_finalize_result",
-            )
+            _raise_raw_event_log_mismatch(LifeIncidentStartFinalizerError)
+
+    def require_life_incident_cancel_raw_event_log(self, raw_event_log: object) -> None:
+        if raw_event_log is not self._raw_event_log:
+            _raise_raw_event_log_mismatch(LifeIncidentCancelFinalizerError)
 
     def finalize_life_incident_start(
         self,
@@ -467,6 +465,18 @@ def _validate_optional_ids(request: Mapping[str, Any], *, source_name: str) -> d
                 f"{source_name}.{field_name}",
             )
     return optional_ids
+
+
+def _raise_raw_event_log_mismatch(
+    error_cls: type[LifeIncidentStartFinalizerError] | type[LifeIncidentCancelFinalizerError],
+) -> None:
+    raise error_cls(
+        (
+            "LifeIncidentStore must finalize against the same Raw Event Log "
+            "instance that will confirm visibility."
+        ),
+        code="malformed_finalize_result",
+    )
 
 
 def _incident_scope_from_request(request: Mapping[str, Any]) -> IncidentScope:

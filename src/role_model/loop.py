@@ -149,7 +149,9 @@ def build_decision_context(
     )
     if allow_state_patch and current_state_source is None:
         raise RoleModelValidationError("allow_state_patch requires current_state_source.")
-    return _wrap_contract_error(
+    if allow_incident_cancel and active_incident_source is None:
+        raise RoleModelValidationError("allow_incident_cancel requires active_incident_source.")
+    decision_context = _wrap_contract_error(
         lambda: build_character_decision_context(
             event,
             recent_visible_messages_source=recent_visible_messages_source,
@@ -157,6 +159,7 @@ def build_decision_context(
             active_incident_source=active_incident_source,
         )
     )
+    return decision_context
 
 
 def build_role_model_input_envelope(

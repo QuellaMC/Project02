@@ -858,7 +858,9 @@ def _require_finalizer_raw_event_log(
     finalizer: LifeIncidentCancelFinalizer,
     raw_event_log: RawEventLog,
 ) -> None:
-    require_raw_event_log = getattr(finalizer, "require_raw_event_log", None)
+    require_raw_event_log = getattr(finalizer, "require_life_incident_cancel_raw_event_log", None)
+    if not callable(require_raw_event_log):
+        require_raw_event_log = getattr(finalizer, "require_raw_event_log", None)
     if callable(require_raw_event_log):
         try:
             require_raw_event_log(raw_event_log)

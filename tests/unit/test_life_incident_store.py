@@ -734,6 +734,17 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
             ["life_incident_cancel_rejected"],
         )
 
+    def test_cancel_raw_log_mismatch_direct_check_raises_cancel_finalizer_error(self):
+        store_raw_log = InMemoryRawEventLog()
+        commit_raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=store_raw_log)
+
+        with self.assertRaises(LifeIncidentCancelFinalizerError) as context:
+            store.require_life_incident_cancel_raw_event_log(commit_raw_log)
+
+        self.assertEqual(context.exception.code, "malformed_finalize_result")
+        self.assertIn("same Raw Event Log instance", str(context.exception))
+
     def test_cancel_clears_only_matching_scope(self):
         raw_log = InMemoryRawEventLog()
         store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
