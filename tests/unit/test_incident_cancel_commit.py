@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from commit_effects.incident_cancel import (  # noqa: E402
+    LIFE_INCIDENT_CANCEL_COMMIT_VALIDATION_STAGE,
     LIFE_INCIDENT_CANCEL_FINALIZE_STAGE,
     LIFE_INCIDENT_CANCEL_REJECTED_STATUS,
     LIFE_INCIDENT_CANCEL_SKIPPED_STATUS,
@@ -44,12 +45,15 @@ class RecordingRawEventLog:
 
 
 class RecordingActiveIncidentSource:
-    def __init__(self, snapshot):
+    def __init__(self, snapshot, *, error=None):
         self.snapshot = deepcopy(snapshot)
+        self.error = error
         self.requests = []
 
     def read_active_incident(self, request):
         self.requests.append(deepcopy(request))
+        if self.error is not None:
+            raise self.error
         return deepcopy(self.snapshot)
 
 
@@ -83,8 +87,9 @@ class RecordingLifeIncidentCancelFinalizer:
 
 
 class StagingCompletionFailingCancelFinalizer:
-    def __init__(self, raw_log):
+    def __init__(self, raw_log, *, completion_error=None):
         self.raw_log = raw_log
+        self.completion_error = completion_error
         self.requests = []
         self.completion_requests = []
 
@@ -108,6 +113,8 @@ class StagingCompletionFailingCancelFinalizer:
 
     def complete_life_incident_cancel_after_log_visible(self, request):
         self.completion_requests.append(deepcopy(request))
+        if self.completion_error is not None:
+            raise self.completion_error
         raise LifeIncidentCancelFinalizerError(
             "completion failed after success log visibility",
             code="finalize_rejected",
@@ -347,6 +354,31 @@ class IncidentCancelCommitTests(unittest.TestCase):
         self.assertEqual(raw_log.entries[0]["kind"], "life_incident_cancel_rejected")
         self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
 
+    def test_active_incident_source_runtime_error_returns_rejected_result(self):
+        raw_log = RecordingRawEventLog()
+        active_source = RecordingActiveIncidentSource(
+            None,
+            error=RuntimeError("incident store unavailable"),
+        )
+        finalizer = RecordingLifeIncidentCancelFinalizer()
+
+        result = commit_life_incident_cancel(
+            normalized_user_message(),
+            role_model_result_with_cancel(),
+            active_incident_source=active_source,
+            life_incident_cancel_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_CANCEL_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_CANCEL_COMMIT_VALIDATION_STAGE)
+        self.assertEqual(result["failure"]["code"], "active_incident_source_error")
+        self.assertIn("incident store unavailable", result["failure"]["message"])
+        self.assertEqual(finalizer.requests, [])
+        self.assertEqual(raw_log.entries[0]["kind"], "life_incident_cancel_rejected")
+
     def test_rejects_incident_id_mismatch_without_finalizer_call(self):
         raw_log = RecordingRawEventLog()
         active_source = RecordingActiveIncidentSource(active_incident_snapshot())
@@ -393,6 +425,31 @@ class IncidentCancelCommitTests(unittest.TestCase):
         self.assertEqual(result["status"], LIFE_INCIDENT_CANCEL_REJECTED_STATUS)
         self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_CANCEL_FINALIZE_STAGE)
         self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertEqual(finalizer.durable_cancelled_incidents, [])
+        self.assertEqual(finalizer.durable_raw_event_log_entries, [])
+        self.assertEqual(raw_log.entries[0]["kind"], "life_incident_cancel_rejected")
+
+    def test_finalizer_runtime_error_returns_rejected_result(self):
+        raw_log = RecordingRawEventLog()
+        active_source = RecordingActiveIncidentSource(active_incident_snapshot())
+        finalizer = RecordingLifeIncidentCancelFinalizer(
+            error=RuntimeError("finalizer storage failed")
+        )
+
+        result = commit_life_incident_cancel(
+            normalized_user_message(),
+            role_model_result_with_cancel(),
+            active_incident_source=active_source,
+            life_incident_cancel_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_CANCEL_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_CANCEL_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertIn("finalizer storage failed", result["failure"]["message"])
         self.assertEqual(finalizer.durable_cancelled_incidents, [])
         self.assertEqual(finalizer.durable_raw_event_log_entries, [])
         self.assertEqual(raw_log.entries[0]["kind"], "life_incident_cancel_rejected")
@@ -448,6 +505,36 @@ class IncidentCancelCommitTests(unittest.TestCase):
         self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_CANCEL_FINALIZE_STAGE)
         self.assertEqual(result["failure"]["code"], "finalize_rejected")
         self.assertIn("completion failed", result["failure"]["message"])
+        self.assertEqual(len(finalizer.completion_requests), 1)
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            ["life_incident_cancelled", "life_incident_cancel_rejected"],
+        )
+
+    def test_completion_runtime_error_after_success_visibility_returns_rejected_result(self):
+        raw_log = InMemoryRawEventLog()
+        active_source = RecordingActiveIncidentSource(active_incident_snapshot())
+        finalizer = StagingCompletionFailingCancelFinalizer(
+            raw_log,
+            completion_error=RuntimeError("incident removal write failed"),
+        )
+
+        result = commit_life_incident_cancel(
+            normalized_user_message(),
+            role_model_result_with_cancel(),
+            active_incident_source=active_source,
+            life_incident_cancel_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        entries = raw_log.query({"trace_id": "trace-cancel"})["entries"]
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_CANCEL_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_CANCEL_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertIn("incident removal write failed", result["failure"]["message"])
         self.assertEqual(len(finalizer.completion_requests), 1)
         self.assertEqual(
             [entry["kind"] for entry in entries],

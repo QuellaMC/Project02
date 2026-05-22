@@ -93,7 +93,7 @@
       <li>No new RuntimeEvent family, route policy, scheduler, timer, body effect, Live2D status, tool request, retrieval/indexing behavior, database storage, migration, debug UI, or replay execution.</li>
       <li>No composition of incident cancel with state patches or incident start in the same model-call contract.</li>
       <li>No default cancellation wiring in ordinary user turns; callers must opt in and provide the concrete cancellation boundary.</li>
-      <li>No changes to the MVP-016 <code>RoleModelInputEnvelope</code> split except the minimum allowed-action/instruction text needed for the cancel opt-in.</li>
+      <li>No changes to the MVP-016 <code>RoleModelInputEnvelope</code> split except the minimum allowed-action subtype marker and instruction text needed for the cancel opt-in.</li>
       <li>No history query API in <code>InMemoryLifeIncidentStore</code>; the raw log is the truth for the cancelled transition in this slice.</li>
     </ul>
 
@@ -190,7 +190,7 @@
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>Render cancel-specific instructions only for the cancel opt-in, while reusing the existing <code>LIFE_ACTION</code> allowed-action envelope and the MVP-016 <code>RoleModelInputEnvelope</code> shape.</td>
+          <td>Render cancel-specific instructions only for the cancel opt-in, while reusing the existing <code>LIFE_ACTION</code> allowed-action envelope and carrying one explicit <code>allowed_life_action_type</code> marker so direct Role Model input validation cannot swap start-vs-cancel parsing by changing only <code>instructions</code>.</td>
         </tr>
         <tr>
           <td>FR-4</td>
@@ -218,7 +218,7 @@
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>If finalization fails, raw-log success visibility staging fails, post-confirm incident-clearing completion fails, the store/log instances differ, no active incident exists, or incident IDs mismatch, Commit &amp; Effects returns a structured rejected result and appends a <code>life_incident_cancel_rejected</code> log through the ordinary raw-log path. Failures before visibility confirmation must leave the active incident unchanged and no query-visible cancel success entry.</td>
+          <td>If finalization fails, raw-log success visibility staging fails, post-confirm incident-clearing completion fails, the store/log instances differ, no active incident exists, incident IDs mismatch, or a storage/source adapter raises unexpectedly, Commit &amp; Effects returns a structured rejected result and appends a <code>life_incident_cancel_rejected</code> log through the ordinary raw-log path. Failures before visibility confirmation must leave the active incident unchanged and no query-visible cancel success entry.</td>
         </tr>
         <tr>
           <td>FR-11</td>

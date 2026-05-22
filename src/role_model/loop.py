@@ -210,6 +210,11 @@ def build_role_model_input_envelope(
         "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
         "event": event_context,
         "allowed_actions": allowed_actions,
+        **(
+            {"allowed_life_action_type": allowed_life_action_type}
+            if allowed_life_action_type is not None
+            else {}
+        ),
         "instructions": _instructions_for_allowed_actions(
             allowed_actions,
             allowed_life_action_type=allowed_life_action_type,
@@ -575,6 +580,7 @@ def _validate_role_model_input(model_input: RoleModelInput) -> RoleModelInput:
                 "call_type",
                 "event",
                 "allowed_actions",
+                "allowed_life_action_type",
                 "instructions",
                 "decision_context",
             },
@@ -598,10 +604,15 @@ def _validate_role_model_input(model_input: RoleModelInput) -> RoleModelInput:
         event_context=event_context,
         allowed_actions=allowed_actions,
     )
+    allowed_life_action_type = _validate_allowed_life_action_type(
+        model_input.get("allowed_life_action_type"),
+        allowed_actions,
+    )
     instructions = _wrap_contract_error(
         lambda: _validate_instructions_for_allowed_actions(
             model_input.get("instructions"),
             allowed_actions,
+            allowed_life_action_type=allowed_life_action_type,
         )
     )
 
@@ -617,6 +628,11 @@ def _validate_role_model_input(model_input: RoleModelInput) -> RoleModelInput:
         "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
         "event": event_context,
         "allowed_actions": allowed_actions,
+        **(
+            {"allowed_life_action_type": allowed_life_action_type}
+            if allowed_life_action_type is not None
+            else {}
+        ),
         "instructions": instructions,
         "decision_context": decision_context,
     }
@@ -893,16 +909,36 @@ def _instructions_for_allowed_actions(
     return ROLE_MODEL_INSTRUCTIONS
 
 
-def _validate_instructions_for_allowed_actions(value: Any, allowed_actions: list[str]) -> str:
+def _validate_allowed_life_action_type(value: Any, allowed_actions: list[str]) -> str | None:
+    if not _life_action_allowed(allowed_actions):
+        if value is not None:
+            raise RoleModelValidationError(
+                "allowed_life_action_type is only valid when life_action is allowed."
+            )
+        return None
+    if value in {START_INCIDENT_ACTION, CANCEL_INCIDENT_ACTION}:
+        return value
+    raise RoleModelValidationError(
+        "allowed_life_action_type must match the selected life_action subtype."
+    )
+
+
+def _validate_instructions_for_allowed_actions(
+    value: Any,
+    allowed_actions: list[str],
+    *,
+    allowed_life_action_type: str | None,
+) -> str:
     if _life_action_allowed(allowed_actions):
         if not isinstance(value, str):
             raise ContractValidationError(
                 "instructions must match the allowed life_action subtype."
             )
-        if value in {
-            INCIDENT_START_ROLE_MODEL_INSTRUCTIONS,
-            INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS,
-        }:
+        expected_instructions = _instructions_for_allowed_actions(
+            allowed_actions,
+            allowed_life_action_type=allowed_life_action_type,
+        )
+        if value == expected_instructions:
             return value
         raise ContractValidationError("instructions must match the allowed life_action subtype.")
     return require_equal(
@@ -915,9 +951,7 @@ def _validate_instructions_for_allowed_actions(value: Any, allowed_actions: list
 def _allowed_life_action_type(model_input: Mapping[str, Any]) -> str:
     if not _life_action_allowed(model_input["allowed_actions"]):
         return START_INCIDENT_ACTION
-    if model_input["instructions"] == INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS:
-        return CANCEL_INCIDENT_ACTION
-    return START_INCIDENT_ACTION
+    return model_input["allowed_life_action_type"]
 
 
 def _wrap_contract_error[**P, T](callback: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:

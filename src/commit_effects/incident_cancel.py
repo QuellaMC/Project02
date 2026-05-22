@@ -50,6 +50,7 @@ LIFE_INCIDENT_CANCEL_FINALIZE_STAGE = "life_incident_cancel_finalize"
 SUPPORTED_FAILURE_CODES_BY_STAGE = {
     LIFE_INCIDENT_CANCEL_COMMIT_VALIDATION_STAGE: {
         "malformed_commit_input",
+        "active_incident_source_error",
         "identity_mismatch",
         "unsupported_result_status",
         "unsupported_action",
@@ -200,6 +201,13 @@ def commit_life_incident_cancel(
                 str(error),
                 code="malformed_finalize_result",
             ) from error
+        except LifeIncidentCancelFinalizerError:
+            raise
+        except Exception as error:
+            raise LifeIncidentCancelFinalizerError(
+                f"finalize_life_incident_cancel failed unexpectedly: {error}",
+                code="finalize_rejected",
+            ) from error
         validated_finalize_result = validate_life_incident_cancel_finalize_result(
             finalize_result,
             source_identity=source_identity,
@@ -220,6 +228,13 @@ def commit_life_incident_cancel(
             raise LifeIncidentCancelFinalizerError(
                 str(error),
                 code="malformed_finalize_result",
+            ) from error
+        except LifeIncidentCancelFinalizerError:
+            raise
+        except Exception as error:
+            raise LifeIncidentCancelFinalizerError(
+                (f"complete_life_incident_cancel_after_log_visible failed unexpectedly: {error}"),
+                code="finalize_rejected",
             ) from error
     except LifeIncidentCancelFinalizerError as error:
         discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
@@ -659,7 +674,13 @@ def _read_active_incident_for_cancel(
 ) -> dict[str, Any]:
     event = _validate_source_event(source_event)
     request = build_active_incident_request(event)
-    active_incident = active_incident_source.read_active_incident(deepcopy(request))
+    try:
+        active_incident = active_incident_source.read_active_incident(deepcopy(request))
+    except Exception as error:
+        raise LifeIncidentCancelCommitValidationError(
+            f"active_incident_source.read_active_incident failed unexpectedly: {error}",
+            code="active_incident_source_error",
+        ) from error
     if active_incident is None:
         raise LifeIncidentCancelCommitValidationError(
             "No active incident exists for this source-event scope.",

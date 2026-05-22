@@ -865,6 +865,7 @@ class DecisionContextTests(unittest.TestCase):
             model_input["instructions"],
         )
         self.assertEqual(model_input["allowed_actions"], ["visible_reply", "life_action"])
+        self.assertEqual(model_input["allowed_life_action_type"], "start_incident")
         self.assertNotIn("allowed_actions", model_input["decision_context"])
 
     def test_renders_life_action_output_contract_only_for_incident_cancel_opt_in(self):
@@ -882,6 +883,7 @@ class DecisionContextTests(unittest.TestCase):
         self.assertIn("incident_id", model_input["instructions"])
         self.assertIn("reason", model_input["instructions"])
         self.assertEqual(model_input["allowed_actions"], ["visible_reply", "life_action"])
+        self.assertEqual(model_input["allowed_life_action_type"], "cancel_incident")
         self.assertEqual(
             model_input["decision_context"]["character_snapshot"]["active_incident"],
             active_incident_brief(),
@@ -1168,6 +1170,42 @@ class DecisionContextTests(unittest.TestCase):
         model_input["instructions"] = {"not": "hashable"}
 
         with self.assertRaisesRegex(RoleModelValidationError, "instructions"):
+            parse_character_decision(
+                model_input,
+                adapter_output("{}"),
+            )
+
+    def test_model_input_validation_rejects_swapped_life_action_instruction_template(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            allow_incident_start=True,
+        )
+        model_input = render_context(
+            normalized_user_message(),
+            context,
+            allow_incident_start=True,
+        )
+        model_input["instructions"] = INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS
+
+        with self.assertRaisesRegex(RoleModelValidationError, "instructions"):
+            parse_character_decision(
+                model_input,
+                adapter_output("{}"),
+            )
+
+    def test_model_input_validation_rejects_missing_life_action_subtype(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            allow_incident_start=True,
+        )
+        model_input = render_context(
+            normalized_user_message(),
+            context,
+            allow_incident_start=True,
+        )
+        model_input.pop("allowed_life_action_type")
+
+        with self.assertRaisesRegex(RoleModelValidationError, "allowed_life_action_type"):
             parse_character_decision(
                 model_input,
                 adapter_output("{}"),
