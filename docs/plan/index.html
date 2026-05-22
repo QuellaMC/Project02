@@ -77,6 +77,8 @@
       <a href="https://github.com/QuellaMC/Project02/pull/18">PR #18</a>.
       MVP-016 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/19">PR #19</a>.
+      MVP-017 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/20">PR #20</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -96,16 +98,16 @@ flowchart LR
     RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 implemented"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015, MVP-016 implemented; MVP-017 active"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015, MVP-016 implemented; MVP-017 PR #20 open"]
     Envelope["RoleModelInputEnvelope split&lt;br/&gt;MVP-016 implemented&lt;br/&gt;call_type/event/actions outside DecisionContext"]
     Render["RoleModelInput renderer&lt;br/&gt;strict envelope validation"]
     Adapter["Injected fake RoleModelAdapter"]
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply required"]
     StatePatchParse["Optional state_patch.living_state parser&lt;br/&gt;MVP-009 implemented"]
-    LifeActionParse["Optional life_action parser&lt;br/&gt;start_incident implemented&lt;br/&gt;cancel_incident MVP-017 active"]
+    LifeActionParse["Optional life_action parser&lt;br/&gt;start_incident implemented&lt;br/&gt;cancel_incident MVP-017 PR #20"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012, MVP-014 implemented; MVP-017 active"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012, MVP-014 implemented; MVP-017 PR #20 open"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -115,9 +117,9 @@ flowchart LR
     AtomicFinalize["Atomic state-plus-log finalize&lt;br/&gt;MVP-010 PR #10 + follow-up PR #11"]
     IncidentStartCommit["Start incident commit/reject&lt;br/&gt;MVP-012 implemented"]
     IncidentStartFinalize["Incident-start finalizer protocol&lt;br/&gt;atomic incident + log visibility"]
-    IncidentCancelCommit["Cancel active incident commit/reject&lt;br/&gt;MVP-017 active"]
+    IncidentCancelCommit["Cancel active incident commit/reject&lt;br/&gt;MVP-017 PR #20"]
     IncidentCancelFinalize["Incident-cancel finalizer protocol&lt;br/&gt;active incident cleared + log visibility"]
-    IncidentStoreAdapter["Concrete in-memory incident store adapter&lt;br/&gt;start implemented; cancel active"]
+    IncidentStoreAdapter["Concrete in-memory incident store adapter&lt;br/&gt;start implemented; cancel PR #20"]
   end
 
   subgraph RecentContext["Context Source - MVP-004 and MVP-006 implemented"]
@@ -198,7 +200,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">MVP-017 - Minimal Cancel Active Incident Commit Boundary</a></td>
-          <td>Functional spec active on <code>feature/mvp-017-minimal-cancel-incident-commit</code>.</td>
+          <td>Implementation PR open; <a href="https://github.com/QuellaMC/Project02/pull/20">PR #20</a>.</td>
           <td>Let an opted-in <code>USER_MESSAGE</code> turn cancel the currently active incident through Commit &amp; Effects and <code>InMemoryLifeIncidentStore</code>, with a query-visible <code>life_incident_cancelled</code> raw log and no extra lifecycle behavior.</td>
         </tr>
       </tbody>
