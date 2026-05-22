@@ -75,8 +75,10 @@
       <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a>.
       MVP-015 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/18">PR #18</a>.
-      MVP-016 is tracked in
+      MVP-016 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/19">PR #19</a>.
+      MVP-017 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/20">PR #20</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -96,16 +98,16 @@ flowchart LR
     RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 implemented"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015 implemented; MVP-016 PR #19 open"]
-    Envelope["RoleModelInputEnvelope split&lt;br/&gt;MVP-016 PR #19&lt;br/&gt;call_type/event/actions outside DecisionContext"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015, MVP-016 implemented; MVP-017 PR #20 open"]
+    Envelope["RoleModelInputEnvelope split&lt;br/&gt;MVP-016 implemented&lt;br/&gt;call_type/event/actions outside DecisionContext"]
     Render["RoleModelInput renderer&lt;br/&gt;strict envelope validation"]
     Adapter["Injected fake RoleModelAdapter"]
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply required"]
     StatePatchParse["Optional state_patch.living_state parser&lt;br/&gt;MVP-009 implemented"]
-    LifeActionParse["Optional life_action.start_incident parser&lt;br/&gt;MVP-012 implemented&lt;br/&gt;FR-6 parser coverage PR #14"]
+    LifeActionParse["Optional life_action parser&lt;br/&gt;start_incident implemented&lt;br/&gt;cancel_incident MVP-017 PR #20"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012, MVP-014 implemented"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012, MVP-014 implemented; MVP-017 PR #20 open"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -115,7 +117,9 @@ flowchart LR
     AtomicFinalize["Atomic state-plus-log finalize&lt;br/&gt;MVP-010 PR #10 + follow-up PR #11"]
     IncidentStartCommit["Start incident commit/reject&lt;br/&gt;MVP-012 implemented"]
     IncidentStartFinalize["Incident-start finalizer protocol&lt;br/&gt;atomic incident + log visibility"]
-    IncidentStoreAdapter["Concrete in-memory incident start adapter&lt;br/&gt;MVP-014 implemented"]
+    IncidentCancelCommit["Cancel active incident commit/reject&lt;br/&gt;MVP-017 PR #20"]
+    IncidentCancelFinalize["Incident-cancel finalizer protocol&lt;br/&gt;active incident cleared + log visibility"]
+    IncidentStoreAdapter["Concrete in-memory incident store adapter&lt;br/&gt;start implemented; cancel PR #20"]
   end
 
   subgraph RecentContext["Context Source - MVP-004 and MVP-006 implemented"]
@@ -128,7 +132,7 @@ flowchart LR
     LivingStateBrief["living_state_brief&lt;br/&gt;validated compact current reality"]
     ActiveIncidentSource["Read-only active-incident source&lt;br/&gt;MVP-011 PR #12 implemented"]
     ActiveIncidentBrief["active_incident brief&lt;br/&gt;validated compact incident context"]
-    InMemoryIncidentStore["In-memory LifeIncidentStore&lt;br/&gt;started active incident only&lt;br/&gt;implements ActiveIncidentSource"]
+    InMemoryIncidentStore["In-memory LifeIncidentStore&lt;br/&gt;active incident storage&lt;br/&gt;implements ActiveIncidentSource"]
     ContextBuilder["Character State Engine context builder&lt;br/&gt;MVP-015 PR #18&lt;br/&gt;owns compact context assembly"]
   end
 
@@ -154,7 +158,10 @@ flowchart LR
   AtomicFinalize --> RawLogQuery
   LifeActionParse --> IncidentStartCommit --> IncidentStartFinalize
   IncidentStartCommit --> LogHelper
+  LifeActionParse --> IncidentCancelCommit --> IncidentCancelFinalize
+  IncidentCancelCommit --> LogHelper
   IncidentStartFinalize --> IncidentStoreAdapter --> InMemoryIncidentStore
+  IncidentCancelFinalize --> IncidentStoreAdapter
   IncidentStoreAdapter --> RawLogQuery
   InMemoryIncidentStore -- "read contract only; no default wiring" --> ActiveIncidentSource
   Parse --> LogHelper --> RoleLog
@@ -174,10 +181,10 @@ flowchart LR
   classDef active fill:#fff8e6,stroke:#b7832f,color:#172026;
   class Normalize,SharedIntake,RouteUpdate,LogHelper,RuntimeLog,Render,Adapter,Parse,RoleLog,Commit,Conversation,CommitLog,RecentMessages,UserProjection,VisibleRecentSource,CurrentStateSource,LivingStateBrief,ActiveIncidentSource,ActiveIncidentBrief,Turn,TurnResult implemented;
   class StatePatchParse,StatePatchCommit,PatchStore,AtomicFinalize implemented;
-  class LifeActionParse,IncidentStartCommit,IncidentStartFinalize,RawLogQuery implemented;
-  class IncidentStoreAdapter,InMemoryIncidentStore implemented;
+  class IncidentStartCommit,IncidentStartFinalize,RawLogQuery implemented;
+  class Envelope,IncidentStoreAdapter,InMemoryIncidentStore implemented;
   class ContextBuilder implemented;
-  class Envelope active;
+  class LifeActionParse,IncidentCancelCommit,IncidentCancelFinalize active;
       </pre>
     </div>
 
@@ -192,9 +199,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-016 - Role Model Input Envelope Split v0.1</a></td>
-          <td>Implementation PR open; <a href="https://github.com/QuellaMC/Project02/pull/19">PR #19</a>.</td>
-          <td>Split the outer <code>RoleModelInputEnvelope</code> from the inner compact <code>DecisionContext</code> by moving <code>call_type</code>, current <code>event</code>, and <code>allowed_actions</code> out of the context while preserving current <code>USER_MESSAGE</code> model-call behavior.</td>
+          <td><a href="active-slice.html">MVP-017 - Minimal Cancel Active Incident Commit Boundary</a></td>
+          <td>Implementation PR open; <a href="https://github.com/QuellaMC/Project02/pull/20">PR #20</a>.</td>
+          <td>Let an opted-in <code>USER_MESSAGE</code> turn cancel the currently active incident through Commit &amp; Effects and <code>InMemoryLifeIncidentStore</code>, with a query-visible <code>life_incident_cancelled</code> raw log and no extra lifecycle behavior.</td>
         </tr>
       </tbody>
     </table>
@@ -209,6 +216,11 @@ flowchart LR
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td><a href="completed/mvp-016-role-model-input-envelope-split.html">MVP-016 - Role Model Input Envelope Split</a></td>
+          <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/19">PR #19</a>.</td>
+          <td>Split the outer <code>RoleModelInputEnvelope</code> from the inner compact <code>DecisionContext</code> by moving <code>call_type</code>, current <code>event</code>, and <code>allowed_actions</code> out of the context while preserving current <code>USER_MESSAGE</code> model-call behavior.</td>
+        </tr>
         <tr>
           <td><a href="completed/mvp-015-character-state-engine-context-builder-boundary.html">MVP-015 - Character State Engine Context Builder Boundary</a></td>
           <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/18">PR #18</a>.</td>
@@ -294,7 +306,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active MVP-016 envelope/context split are parked in
+      Ideas beyond the active MVP-017 cancel-active-incident commit boundary are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 

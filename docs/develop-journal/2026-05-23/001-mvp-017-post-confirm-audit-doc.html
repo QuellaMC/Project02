@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-23 - MVP-017 Post-Confirm Audit Documentation</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-23 - MVP-017 Post-Confirm Audit Documentation</h1>
+    <p>
+      Documented the post-confirm cancel completion edge case for
+      <a href="https://github.com/QuellaMC/Project02/pull/20">PR #20</a>.
+      No production behavior changed.
+    </p>
+
+    <h2>Comment Triage</h2>
+    <ul>
+      <li>Post-confirm completion failure semantics: actionable as documentation. Existing tests already assert that a failure after confirmed <code>life_incident_cancelled</code> visibility returns a rejected result and appends <code>life_incident_cancel_rejected</code> while preserving the confirmed success entry.</li>
+    </ul>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Expanded MVP-017 FR-10 to explicitly state the success-plus-rejection audit pair for failures after raw-log success visibility is confirmed.</li>
+      <li>Added a unit-test-plan bullet naming the post-confirm completion failure assertion.</li>
+      <li>Added a review note explaining why the confirmed <code>life_incident_cancelled</code> entry remains query-visible when the later completion step fails.</li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/develop-journal/2026-05-23/001-mvp-017-post-confirm-audit-doc.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Tests and Checks</h2>
+    <ul>
+      <li><code>python3 -m unittest tests.unit.test_incident_cancel_commit</code> - passed, 13 tests.</li>
+      <li><code>git diff --check</code> - passed.</li>
+      <li><code>HTMLParser over docs/**/*.html</code> - parsed 80 HTML files.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Push the documentation-only follow-up to PR #20 and verify CI.
+    </p>
+  </main>
+</body>
+</html>

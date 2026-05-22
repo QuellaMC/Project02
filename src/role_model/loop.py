@@ -16,8 +16,10 @@ from runtime.contracts import (
     ACTIVE_INCIDENT_INTERRUPT_POLICIES,
     ACTIVE_INCIDENT_RESUME_POLICIES,
     ACTIVE_INCIDENT_TYPES,
+    CANCEL_INCIDENT_ACTION,
     DECISION_READY_FOR_COMMIT_STATUS,
     LIFE_ACTION,
+    START_INCIDENT_ACTION,
     STATE_PATCH_ACTION,
     USER_MESSAGE,
     VISIBLE_REPLY_ACTION,
@@ -87,6 +89,14 @@ INCIDENT_START_ROLE_MODEL_INSTRUCTIONS = (
     f"of: {INCIDENT_RESUME_POLICY_CONTRACT_VALUES}. Do not include committed "
     "incident fields or extra fields."
 )
+INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS = (
+    "Return one JSON object only. The object must contain schema_version='0.1', "
+    "action='visible_reply', and visible_reply.text as a non-empty string. "
+    "It may also include optional life_action with type='cancel_incident', "
+    "incident_id as the current active incident ID, and reason as a non-empty "
+    "model-provided explanation. Do not include start_incident, cancelled "
+    "incident fields, state_patch, or extra fields."
+)
 
 DecisionContext = character_context.DecisionContext
 RecentVisibleMessage = character_context.RecentVisibleMessage
@@ -130,14 +140,18 @@ def build_decision_context(
     active_incident_source: ActiveIncidentSource | None = None,
     allow_state_patch: bool = False,
     allow_incident_start: bool = False,
+    allow_incident_cancel: bool = False,
 ) -> DecisionContext:
-    if allow_state_patch and allow_incident_start:
-        raise RoleModelValidationError(
-            "state_patch and life_action cannot both be allowed in the current USER_MESSAGE turn."
-        )
+    _require_supported_write_action_opt_in(
+        allow_state_patch=allow_state_patch,
+        allow_incident_start=allow_incident_start,
+        allow_incident_cancel=allow_incident_cancel,
+    )
     if allow_state_patch and current_state_source is None:
         raise RoleModelValidationError("allow_state_patch requires current_state_source.")
-    return _wrap_contract_error(
+    if allow_incident_cancel and active_incident_source is None:
+        raise RoleModelValidationError("allow_incident_cancel requires active_incident_source.")
+    decision_context = _wrap_contract_error(
         lambda: build_character_decision_context(
             event,
             recent_visible_messages_source=recent_visible_messages_source,
@@ -145,6 +159,7 @@ def build_decision_context(
             active_incident_source=active_incident_source,
         )
     )
+    return decision_context
 
 
 def build_role_model_input_envelope(
@@ -153,6 +168,7 @@ def build_role_model_input_envelope(
     *,
     allow_state_patch: bool = False,
     allow_incident_start: bool = False,
+    allow_incident_cancel: bool = False,
 ) -> RoleModelInputEnvelope:
     normalized_event = _wrap_contract_error(
         lambda: validate_normalized_user_message_event(event, source_name="event")
@@ -160,6 +176,11 @@ def build_role_model_input_envelope(
     allowed_actions = _allowed_actions_for_call(
         allow_state_patch=allow_state_patch,
         allow_incident_start=allow_incident_start,
+        allow_incident_cancel=allow_incident_cancel,
+    )
+    allowed_life_action_type = _allowed_life_action_type_for_call(
+        allow_incident_start=allow_incident_start,
+        allow_incident_cancel=allow_incident_cancel,
     )
     event_context = _build_user_message_event_context(normalized_event)
     validated_context = _validate_decision_context(
@@ -189,7 +210,15 @@ def build_role_model_input_envelope(
         "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
         "event": event_context,
         "allowed_actions": allowed_actions,
-        "instructions": _instructions_for_allowed_actions(allowed_actions),
+        **(
+            {"allowed_life_action_type": allowed_life_action_type}
+            if allowed_life_action_type is not None
+            else {}
+        ),
+        "instructions": _instructions_for_allowed_actions(
+            allowed_actions,
+            allowed_life_action_type=allowed_life_action_type,
+        ),
         "decision_context": validated_context,
     }
 
@@ -200,12 +229,14 @@ def render_role_model_input(
     *,
     allow_state_patch: bool = False,
     allow_incident_start: bool = False,
+    allow_incident_cancel: bool = False,
 ) -> RoleModelInput:
     return build_role_model_input_envelope(
         event,
         decision_context,
         allow_state_patch=allow_state_patch,
         allow_incident_start=allow_incident_start,
+        allow_incident_cancel=allow_incident_cancel,
     )
 
 
@@ -231,6 +262,7 @@ def parse_character_decision(
             require_attached_ids=False,
             allow_state_patch=_state_patch_allowed(validated_model_input["allowed_actions"]),
             allow_life_action=_life_action_allowed(validated_model_input["allowed_actions"]),
+            allowed_life_action_type=_allowed_life_action_type(validated_model_input),
             source_name="model output",
         )
     )
@@ -248,6 +280,7 @@ def run_role_model_turn(
     active_incident_source: ActiveIncidentSource | None = None,
     allow_state_patch: bool = False,
     allow_incident_start: bool = False,
+    allow_incident_cancel: bool = False,
 ) -> RoleModelTurnResult:
     try:
         decision_context = build_decision_context(
@@ -257,12 +290,14 @@ def run_role_model_turn(
             active_incident_source=active_incident_source,
             allow_state_patch=allow_state_patch,
             allow_incident_start=allow_incident_start,
+            allow_incident_cancel=allow_incident_cancel,
         )
         model_input = render_role_model_input(
             event,
             decision_context,
             allow_state_patch=allow_state_patch,
             allow_incident_start=allow_incident_start,
+            allow_incident_cancel=allow_incident_cancel,
         )
     except RoleModelValidationError as error:
         raw_event_log.append(
@@ -545,6 +580,7 @@ def _validate_role_model_input(model_input: RoleModelInput) -> RoleModelInput:
                 "call_type",
                 "event",
                 "allowed_actions",
+                "allowed_life_action_type",
                 "instructions",
                 "decision_context",
             },
@@ -568,11 +604,15 @@ def _validate_role_model_input(model_input: RoleModelInput) -> RoleModelInput:
         event_context=event_context,
         allowed_actions=allowed_actions,
     )
+    allowed_life_action_type = _validate_allowed_life_action_type(
+        model_input.get("allowed_life_action_type"),
+        allowed_actions,
+    )
     instructions = _wrap_contract_error(
-        lambda: require_equal(
+        lambda: _validate_instructions_for_allowed_actions(
             model_input.get("instructions"),
-            _instructions_for_allowed_actions(allowed_actions),
-            "instructions",
+            allowed_actions,
+            allowed_life_action_type=allowed_life_action_type,
         )
     )
 
@@ -588,6 +628,11 @@ def _validate_role_model_input(model_input: RoleModelInput) -> RoleModelInput:
         "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
         "event": event_context,
         "allowed_actions": allowed_actions,
+        **(
+            {"allowed_life_action_type": allowed_life_action_type}
+            if allowed_life_action_type is not None
+            else {}
+        ),
         "instructions": instructions,
         "decision_context": decision_context,
     }
@@ -732,6 +777,7 @@ def _validate_character_decision(
             require_attached_ids=True,
             allow_state_patch=_state_patch_allowed(model_input["allowed_actions"]),
             allow_life_action=_life_action_allowed(model_input["allowed_actions"]),
+            allowed_life_action_type=_allowed_life_action_type(model_input),
             source_name="CharacterDecision",
         )
     )
@@ -741,17 +787,35 @@ def _allowed_actions_for_call(
     *,
     allow_state_patch: bool,
     allow_incident_start: bool,
+    allow_incident_cancel: bool,
 ) -> list[str]:
-    if allow_state_patch and allow_incident_start:
-        raise RoleModelValidationError(
-            "state_patch and life_action cannot both be allowed in the current USER_MESSAGE turn."
-        )
+    _require_supported_write_action_opt_in(
+        allow_state_patch=allow_state_patch,
+        allow_incident_start=allow_incident_start,
+        allow_incident_cancel=allow_incident_cancel,
+    )
     allowed_actions = [VISIBLE_REPLY_ACTION]
     if allow_state_patch:
         allowed_actions.append(STATE_PATCH_ACTION)
-    if allow_incident_start:
+    if allow_incident_start or allow_incident_cancel:
         allowed_actions.append(LIFE_ACTION)
     return allowed_actions
+
+
+def _require_supported_write_action_opt_in(
+    *,
+    allow_state_patch: bool,
+    allow_incident_start: bool,
+    allow_incident_cancel: bool,
+) -> None:
+    enabled_count = sum(
+        1 for enabled in (allow_state_patch, allow_incident_start, allow_incident_cancel) if enabled
+    )
+    if enabled_count > 1:
+        raise RoleModelValidationError(
+            "Only one write-action opt-in may be enabled for a USER_MESSAGE turn: "
+            "state_patch, start_incident, or cancel_incident."
+        )
 
 
 def _build_user_message_event_context(event: RuntimeEvent) -> dict[str, Any]:
@@ -819,12 +883,79 @@ def _life_action_allowed(allowed_actions: list[str]) -> bool:
     return allowed_actions == [VISIBLE_REPLY_ACTION, LIFE_ACTION]
 
 
-def _instructions_for_allowed_actions(allowed_actions: list[str]) -> str:
+def _allowed_life_action_type_for_call(
+    *,
+    allow_incident_start: bool,
+    allow_incident_cancel: bool,
+) -> str | None:
+    if allow_incident_start:
+        return START_INCIDENT_ACTION
+    if allow_incident_cancel:
+        return CANCEL_INCIDENT_ACTION
+    return None
+
+
+def _instructions_for_allowed_actions(
+    allowed_actions: list[str],
+    *,
+    allowed_life_action_type: str | None = START_INCIDENT_ACTION,
+) -> str:
     if _state_patch_allowed(allowed_actions):
         return STATE_PATCH_ROLE_MODEL_INSTRUCTIONS
     if _life_action_allowed(allowed_actions):
+        if allowed_life_action_type == CANCEL_INCIDENT_ACTION:
+            return INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS
         return INCIDENT_START_ROLE_MODEL_INSTRUCTIONS
     return ROLE_MODEL_INSTRUCTIONS
+
+
+def _validate_allowed_life_action_type(value: Any, allowed_actions: list[str]) -> str | None:
+    if not _life_action_allowed(allowed_actions):
+        if value is not None:
+            raise RoleModelValidationError(
+                "allowed_life_action_type is only valid when life_action is allowed."
+            )
+        return None
+    if not isinstance(value, str):
+        raise RoleModelValidationError(
+            "allowed_life_action_type must match the selected life_action subtype."
+        )
+    if value in {START_INCIDENT_ACTION, CANCEL_INCIDENT_ACTION}:
+        return value
+    raise RoleModelValidationError(
+        "allowed_life_action_type must match the selected life_action subtype."
+    )
+
+
+def _validate_instructions_for_allowed_actions(
+    value: Any,
+    allowed_actions: list[str],
+    *,
+    allowed_life_action_type: str | None,
+) -> str:
+    if _life_action_allowed(allowed_actions):
+        if not isinstance(value, str):
+            raise ContractValidationError(
+                "instructions must match the allowed life_action subtype."
+            )
+        expected_instructions = _instructions_for_allowed_actions(
+            allowed_actions,
+            allowed_life_action_type=allowed_life_action_type,
+        )
+        if value == expected_instructions:
+            return value
+        raise ContractValidationError("instructions must match the allowed life_action subtype.")
+    return require_equal(
+        value,
+        _instructions_for_allowed_actions(allowed_actions),
+        "instructions",
+    )
+
+
+def _allowed_life_action_type(model_input: Mapping[str, Any]) -> str:
+    if not _life_action_allowed(model_input["allowed_actions"]):
+        return START_INCIDENT_ACTION
+    return model_input["allowed_life_action_type"]
 
 
 def _wrap_contract_error[**P, T](callback: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:

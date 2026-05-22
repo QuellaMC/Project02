@@ -77,7 +77,8 @@ class UserTurnStopTests(unittest.TestCase):
         self.assertEqual(result["stopped_at"], "user_turn_preflight")
         self.assertEqual(result["failure"]["stage"], "user_turn_preflight")
         self.assertEqual(result["failure"]["code"], "conflicting_write_action_opt_in")
-        self.assertIn("current USER_MESSAGE turn", result["failure"]["message"])
+        self.assertIn("Only one write-action opt-in", result["failure"]["message"])
+        self.assertIn("cancel_incident", result["failure"]["message"])
         self.assertNotIn("user_visible_message_result", result)
         self.assertNotIn("role_model_result", result)
         self.assertEqual([entry["kind"] for entry in raw_log.entries], ["runtime_event_received"])
@@ -86,6 +87,48 @@ class UserTurnStopTests(unittest.TestCase):
         role_model_turn.assert_not_called()
         commit_patch.assert_not_called()
         commit_incident.assert_not_called()
+        commit_reply.assert_not_called()
+        adapter.generate.assert_not_called()
+
+    def test_rejects_incident_cancel_without_active_source_before_user_visible_message_commit(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = RecordingVisibleConversation()
+        adapter = Mock()
+
+        with (
+            patch("runtime.user_turn.commit_user_visible_message") as commit_user,
+            patch("runtime.user_turn.run_role_model_turn") as role_model_turn,
+            patch("runtime.user_turn.commit_life_incident_cancel") as commit_cancel,
+            patch("runtime.user_turn.commit_visible_reply") as commit_reply,
+        ):
+            result = run_user_message_turn(
+                {
+                    "event_id": "event-1",
+                    "trace_id": "trace-1",
+                    "type": "USER_MESSAGE",
+                    "created_at": "2026-05-14T11:30:00+00:00",
+                    "payload": {"text": "hello", "conversation_id": "c-1"},
+                },
+                adapter=adapter,
+                raw_event_log=raw_log,
+                visible_conversation=visible_conversation,
+                id_generator=SequenceIdGenerator(),
+                clock=fixed_clock,
+                life_incident_cancel_finalizer=object(),
+            )
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["stopped_at"], "user_turn_preflight")
+        self.assertEqual(result["failure"]["stage"], "user_turn_preflight")
+        self.assertEqual(result["failure"]["code"], "missing_incident_cancel_source")
+        self.assertIn("active_incident_source", result["failure"]["message"])
+        self.assertNotIn("user_visible_message_result", result)
+        self.assertNotIn("role_model_result", result)
+        self.assertEqual([entry["kind"] for entry in raw_log.entries], ["runtime_event_received"])
+        self.assertEqual(visible_conversation.records, [])
+        commit_user.assert_not_called()
+        role_model_turn.assert_not_called()
+        commit_cancel.assert_not_called()
         commit_reply.assert_not_called()
         adapter.generate.assert_not_called()
 
