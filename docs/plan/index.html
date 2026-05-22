@@ -73,8 +73,10 @@
       <a href="https://github.com/QuellaMC/Project02/pull/15">PR #15</a>.
       MVP-014 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a>.
-      MVP-015 is tracked in
+      MVP-015 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/18">PR #18</a>.
+      MVP-016 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/19">PR #19</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -94,8 +96,9 @@ flowchart LR
     RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 implemented"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012 implemented; MVP-015 delegates context build"]
-    Render["RoleModelInput renderer&lt;br/&gt;strict context validation"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015 implemented; MVP-016 PR #19 open"]
+    Envelope["RoleModelInputEnvelope split&lt;br/&gt;MVP-016 PR #19&lt;br/&gt;call_type/event/actions outside DecisionContext"]
+    Render["RoleModelInput renderer&lt;br/&gt;strict envelope validation"]
     Adapter["Injected fake RoleModelAdapter"]
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply required"]
     StatePatchParse["Optional state_patch.living_state parser&lt;br/&gt;MVP-009 implemented"]
@@ -120,13 +123,13 @@ flowchart LR
     VisibleRecentSource["Visible conversation recent source&lt;br/&gt;maps committed records to context"]
   end
 
-  subgraph CharacterState["Character State Engine - MVP-008, MVP-011, MVP-014 implemented; MVP-015 active"]
+  subgraph CharacterState["Character State Engine - MVP-008, MVP-011, MVP-014, MVP-015 implemented"]
     CurrentStateSource["Read-only current-state source&lt;br/&gt;injected fake"]
     LivingStateBrief["living_state_brief&lt;br/&gt;validated compact current reality"]
     ActiveIncidentSource["Read-only active-incident source&lt;br/&gt;MVP-011 PR #12 implemented"]
     ActiveIncidentBrief["active_incident brief&lt;br/&gt;validated compact incident context"]
     InMemoryIncidentStore["In-memory LifeIncidentStore&lt;br/&gt;started active incident only&lt;br/&gt;implements ActiveIncidentSource"]
-    ContextBuilder["Character State Engine context builder&lt;br/&gt;MVP-015 PR #18&lt;br/&gt;preserves DecisionContext shape"]
+    ContextBuilder["Character State Engine context builder&lt;br/&gt;MVP-015 PR #18&lt;br/&gt;owns compact context assembly"]
   end
 
   subgraph UserTurn["User Turn Orchestrator - MVP-007 implemented locally"]
@@ -136,7 +139,8 @@ flowchart LR
 
   UserMessage --> Normalize --> SharedIntake --> RouteUpdate
   SharedIntake --> LogHelper --> RuntimeLog
-  Normalize --> ContextBuilder --> Render --> Adapter --> Parse
+  Normalize --> ContextBuilder --> Envelope --> Render --> Adapter --> Parse
+  Normalize --> Envelope
   Parse --> StatePatchParse
   Parse --> LifeActionParse
   Normalize --> UserProjection
@@ -172,7 +176,8 @@ flowchart LR
   class StatePatchParse,StatePatchCommit,PatchStore,AtomicFinalize implemented;
   class LifeActionParse,IncidentStartCommit,IncidentStartFinalize,RawLogQuery implemented;
   class IncidentStoreAdapter,InMemoryIncidentStore implemented;
-  class ContextBuilder active;
+  class ContextBuilder implemented;
+  class Envelope active;
       </pre>
     </div>
 
@@ -187,9 +192,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-015 - Character State Engine Context Builder Boundary v0.1</a></td>
-          <td>Implementation PR open; <a href="https://github.com/QuellaMC/Project02/pull/18">PR #18</a>.</td>
-          <td>Move source orchestration for recent visible messages, <code>living_state_brief</code>, and <code>active_incident</code> behind a Character State Engine context-builder boundary while preserving the current <code>DecisionContext</code> shape and Role Model Loop behavior.</td>
+          <td><a href="active-slice.html">MVP-016 - Role Model Input Envelope Split v0.1</a></td>
+          <td>Implementation PR open; <a href="https://github.com/QuellaMC/Project02/pull/19">PR #19</a>.</td>
+          <td>Split the outer <code>RoleModelInputEnvelope</code> from the inner compact <code>DecisionContext</code> by moving <code>call_type</code>, current <code>event</code>, and <code>allowed_actions</code> out of the context while preserving current <code>USER_MESSAGE</code> model-call behavior.</td>
         </tr>
       </tbody>
     </table>
@@ -204,6 +209,11 @@ flowchart LR
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td><a href="completed/mvp-015-character-state-engine-context-builder-boundary.html">MVP-015 - Character State Engine Context Builder Boundary</a></td>
+          <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/18">PR #18</a>.</td>
+          <td>Move source orchestration for recent visible messages, <code>living_state_brief</code>, and <code>active_incident</code> behind a Character State Engine context-builder boundary while preserving the current broad <code>DecisionContext</code> shape as a deliberate compatibility step.</td>
+        </tr>
         <tr>
           <td><a href="completed/mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html">MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</a></td>
           <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a>.</td>
@@ -284,7 +294,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active MVP-015 context-builder boundary are parked in
+      Ideas beyond the active MVP-016 envelope/context split are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 

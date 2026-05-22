@@ -99,6 +99,7 @@ _CharacterVisibleConversationRecentMessagesSource = (
     character_context.VisibleConversationRecentMessagesSource
 )
 RoleModelInput = dict[str, Any]
+RoleModelInputEnvelope = RoleModelInput
 RoleModelAdapterOutput = dict[str, Any]
 CharacterDecision = dict[str, Any]
 RoleModelTurnResult = dict[str, Any]
@@ -130,28 +131,82 @@ def build_decision_context(
     allow_state_patch: bool = False,
     allow_incident_start: bool = False,
 ) -> DecisionContext:
+    if allow_state_patch and allow_incident_start:
+        raise RoleModelValidationError(
+            "state_patch and life_action cannot both be allowed in the current USER_MESSAGE turn."
+        )
+    if allow_state_patch and current_state_source is None:
+        raise RoleModelValidationError("allow_state_patch requires current_state_source.")
     return _wrap_contract_error(
         lambda: build_character_decision_context(
             event,
             recent_visible_messages_source=recent_visible_messages_source,
             current_state_source=current_state_source,
             active_incident_source=active_incident_source,
-            allow_state_patch=allow_state_patch,
-            allow_incident_start=allow_incident_start,
         )
     )
 
 
-def render_role_model_input(decision_context: DecisionContext) -> RoleModelInput:
-    validated_context = _validate_decision_context(decision_context)
+def build_role_model_input_envelope(
+    event: RuntimeEvent,
+    decision_context: DecisionContext,
+    *,
+    allow_state_patch: bool = False,
+    allow_incident_start: bool = False,
+) -> RoleModelInputEnvelope:
+    normalized_event = _wrap_contract_error(
+        lambda: validate_normalized_user_message_event(event, source_name="event")
+    )
+    allowed_actions = _allowed_actions_for_call(
+        allow_state_patch=allow_state_patch,
+        allow_incident_start=allow_incident_start,
+    )
+    event_context = _build_user_message_event_context(normalized_event)
+    validated_context = _validate_decision_context(
+        decision_context,
+        event_context=event_context,
+        allowed_actions=allowed_actions,
+    )
+    _wrap_contract_error(
+        lambda: require_equal(
+            normalized_event["trace_id"],
+            validated_context["trace_id"],
+            "trace_id",
+        )
+    )
+    _wrap_contract_error(
+        lambda: require_equal(
+            normalized_event["event_id"],
+            validated_context["event_id"],
+            "event_id",
+        )
+    )
 
     return {
         "schema_version": SCHEMA_VERSION,
         "trace_id": validated_context["trace_id"],
         "event_id": validated_context["event_id"],
-        "instructions": _instructions_for_allowed_actions(validated_context["allowed_actions"]),
+        "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
+        "event": event_context,
+        "allowed_actions": allowed_actions,
+        "instructions": _instructions_for_allowed_actions(allowed_actions),
         "decision_context": validated_context,
     }
+
+
+def render_role_model_input(
+    event: RuntimeEvent,
+    decision_context: DecisionContext,
+    *,
+    allow_state_patch: bool = False,
+    allow_incident_start: bool = False,
+) -> RoleModelInput:
+    return build_role_model_input_envelope(
+        event,
+        decision_context,
+        allow_state_patch=allow_state_patch,
+        allow_incident_start=allow_incident_start,
+    )
 
 
 def parse_character_decision(
@@ -174,12 +229,8 @@ def parse_character_decision(
             trace_id=validated_model_input["trace_id"],
             event_id=validated_model_input["event_id"],
             require_attached_ids=False,
-            allow_state_patch=_state_patch_allowed(
-                validated_model_input["decision_context"]["allowed_actions"]
-            ),
-            allow_life_action=_life_action_allowed(
-                validated_model_input["decision_context"]["allowed_actions"]
-            ),
+            allow_state_patch=_state_patch_allowed(validated_model_input["allowed_actions"]),
+            allow_life_action=_life_action_allowed(validated_model_input["allowed_actions"]),
             source_name="model output",
         )
     )
@@ -207,7 +258,12 @@ def run_role_model_turn(
             allow_state_patch=allow_state_patch,
             allow_incident_start=allow_incident_start,
         )
-        model_input = render_role_model_input(decision_context)
+        model_input = render_role_model_input(
+            event,
+            decision_context,
+            allow_state_patch=allow_state_patch,
+            allow_incident_start=allow_incident_start,
+        )
     except RoleModelValidationError as error:
         raw_event_log.append(
             build_role_model_context_failed_log_entry(
@@ -261,11 +317,10 @@ def run_role_model_turn(
             clock=clock,
         )
     )
-    event_type = decision_context["event"]["type"]
     return {
         "trace_id": event["trace_id"],
         "event_id": event["event_id"],
-        "event_type": event_type,
+        "event_type": model_input["event"]["type"],
         "model_called": True,
         "status": DECISION_READY_FOR_COMMIT_STATUS,
         "decision": decision,
@@ -483,18 +538,40 @@ def _validate_role_model_input(model_input: RoleModelInput) -> RoleModelInput:
     _wrap_contract_error(
         lambda: reject_extra_keys(
             model_input,
-            {"schema_version", "trace_id", "event_id", "instructions", "decision_context"},
+            {
+                "schema_version",
+                "trace_id",
+                "event_id",
+                "call_type",
+                "event",
+                "allowed_actions",
+                "instructions",
+                "decision_context",
+            },
             "RoleModelInput",
         )
     )
     _wrap_contract_error(
         lambda: require_equal(model_input.get("schema_version"), SCHEMA_VERSION, "schema_version")
     )
-    decision_context = _validate_decision_context(model_input.get("decision_context"))
+    _wrap_contract_error(
+        lambda: require_equal(
+            model_input.get("call_type"),
+            USER_MESSAGE_VISIBLE_REPLY_CALL,
+            "call_type",
+        )
+    )
+    event_context = _validate_event_context(model_input.get("event"))
+    allowed_actions = _validate_allowed_actions(model_input.get("allowed_actions"))
+    decision_context = _validate_decision_context(
+        model_input.get("decision_context"),
+        event_context=event_context,
+        allowed_actions=allowed_actions,
+    )
     instructions = _wrap_contract_error(
         lambda: require_equal(
             model_input.get("instructions"),
-            _instructions_for_allowed_actions(decision_context["allowed_actions"]),
+            _instructions_for_allowed_actions(allowed_actions),
             "instructions",
         )
     )
@@ -508,12 +585,20 @@ def _validate_role_model_input(model_input: RoleModelInput) -> RoleModelInput:
         "schema_version": SCHEMA_VERSION,
         "trace_id": trace_id,
         "event_id": event_id,
+        "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
+        "event": event_context,
+        "allowed_actions": allowed_actions,
         "instructions": instructions,
         "decision_context": decision_context,
     }
 
 
-def _validate_decision_context(decision_context: Any) -> DecisionContext:
+def _validate_decision_context(
+    decision_context: Any,
+    *,
+    event_context: Mapping[str, Any],
+    allowed_actions: list[str],
+) -> DecisionContext:
     if not isinstance(decision_context, Mapping):
         raise RoleModelValidationError("DecisionContext must be a mapping.")
     _wrap_contract_error(
@@ -523,10 +608,7 @@ def _validate_decision_context(decision_context: Any) -> DecisionContext:
                 "schema_version",
                 "trace_id",
                 "event_id",
-                "call_type",
-                "event",
                 "character_snapshot",
-                "allowed_actions",
             },
             "DecisionContext",
         )
@@ -544,43 +626,6 @@ def _validate_decision_context(decision_context: Any) -> DecisionContext:
     event_id = _wrap_contract_error(
         lambda: require_string(decision_context.get("event_id"), "event_id")
     )
-    _wrap_contract_error(
-        lambda: require_equal(
-            decision_context.get("call_type"),
-            USER_MESSAGE_VISIBLE_REPLY_CALL,
-            "call_type",
-        )
-    )
-    allowed_actions = _validate_allowed_actions(decision_context.get("allowed_actions"))
-
-    event = decision_context.get("event")
-    if not isinstance(event, Mapping):
-        raise RoleModelValidationError("event must be a mapping.")
-    _wrap_contract_error(
-        lambda: reject_extra_keys(
-            event,
-            {"type", "text", "created_at", "user_id", "conversation_id"},
-            "DecisionContext.event",
-        )
-    )
-    event_type = _wrap_contract_error(
-        lambda: require_equal(event.get("type"), USER_MESSAGE, "event.type")
-    )
-    text = _wrap_contract_error(lambda: require_string(event.get("text"), "event.text"))
-    event_context = {
-        "type": event_type,
-        "text": text,
-        "created_at": _validate_timestamp(event.get("created_at"), "event.created_at"),
-    }
-    for field_name in ("user_id", "conversation_id"):
-        if field_name in event:
-            value = event[field_name]
-            event_context[field_name] = _wrap_contract_error(
-                lambda: require_optional_string(
-                    value,
-                    f"event.{field_name}",
-                )
-            )
     character_snapshot = _validate_character_snapshot(
         decision_context.get("character_snapshot"),
         conversation_id=event_context.get("conversation_id"),
@@ -596,10 +641,7 @@ def _validate_decision_context(decision_context: Any) -> DecisionContext:
         "schema_version": SCHEMA_VERSION,
         "trace_id": trace_id,
         "event_id": event_id,
-        "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
-        "event": event_context,
         "character_snapshot": character_snapshot,
-        "allowed_actions": allowed_actions,
     }
 
 
@@ -688,15 +730,72 @@ def _validate_character_decision(
             trace_id=model_input["trace_id"],
             event_id=model_input["event_id"],
             require_attached_ids=True,
-            allow_state_patch=_state_patch_allowed(
-                model_input["decision_context"]["allowed_actions"]
-            ),
-            allow_life_action=_life_action_allowed(
-                model_input["decision_context"]["allowed_actions"]
-            ),
+            allow_state_patch=_state_patch_allowed(model_input["allowed_actions"]),
+            allow_life_action=_life_action_allowed(model_input["allowed_actions"]),
             source_name="CharacterDecision",
         )
     )
+
+
+def _allowed_actions_for_call(
+    *,
+    allow_state_patch: bool,
+    allow_incident_start: bool,
+) -> list[str]:
+    if allow_state_patch and allow_incident_start:
+        raise RoleModelValidationError(
+            "state_patch and life_action cannot both be allowed in the current USER_MESSAGE turn."
+        )
+    allowed_actions = [VISIBLE_REPLY_ACTION]
+    if allow_state_patch:
+        allowed_actions.append(STATE_PATCH_ACTION)
+    if allow_incident_start:
+        allowed_actions.append(LIFE_ACTION)
+    return allowed_actions
+
+
+def _build_user_message_event_context(event: RuntimeEvent) -> dict[str, Any]:
+    payload = event["payload"]
+    event_context: dict[str, Any] = {
+        "type": event["type"],
+        "text": payload["text"],
+        "created_at": event["created_at"],
+    }
+    for field_name in ("user_id", "conversation_id"):
+        if field_name in payload:
+            event_context[field_name] = payload[field_name]
+    return event_context
+
+
+def _validate_event_context(event: Any) -> dict[str, Any]:
+    if not isinstance(event, Mapping):
+        raise RoleModelValidationError("event must be a mapping.")
+    _wrap_contract_error(
+        lambda: reject_extra_keys(
+            event,
+            {"type", "text", "created_at", "user_id", "conversation_id"},
+            "RoleModelInput.event",
+        )
+    )
+    event_type = _wrap_contract_error(
+        lambda: require_equal(event.get("type"), USER_MESSAGE, "event.type")
+    )
+    text = _wrap_contract_error(lambda: require_string(event.get("text"), "event.text"))
+    event_context = {
+        "type": event_type,
+        "text": text,
+        "created_at": _validate_timestamp(event.get("created_at"), "event.created_at"),
+    }
+    for field_name in ("user_id", "conversation_id"):
+        if field_name in event:
+            value = event[field_name]
+            event_context[field_name] = _wrap_contract_error(
+                lambda: require_optional_string(
+                    value,
+                    f"event.{field_name}",
+                )
+            )
+    return event_context
 
 
 def _validate_allowed_actions(value: Any) -> list[str]:

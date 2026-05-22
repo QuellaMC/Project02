@@ -20,8 +20,6 @@ from runtime.contracts import (
     ASSISTANT_VISIBLE_REPLY_KIND,
     ASSISTANT_VISIBLE_REPLY_ROLE,
     DECISION_READY_FOR_COMMIT_STATUS,
-    LIFE_ACTION,
-    STATE_PATCH_ACTION,
     USER_MESSAGE,
     USER_VISIBLE_MESSAGE_KIND,
     USER_VISIBLE_MESSAGE_ROLE,
@@ -100,27 +98,8 @@ def build_character_decision_context(
     recent_visible_messages_source: RecentVisibleMessagesSource | None = None,
     current_state_source: CurrentCharacterStateSource | None = None,
     active_incident_source: ActiveIncidentSource | None = None,
-    allow_state_patch: bool = False,
-    allow_incident_start: bool = False,
 ) -> DecisionContext:
     normalized_event = validate_normalized_user_message_event(event, source_name="event")
-    if allow_state_patch and allow_incident_start:
-        raise ContractValidationError(
-            "state_patch and life_action cannot both be allowed in the current USER_MESSAGE turn."
-        )
-    if allow_state_patch and current_state_source is None:
-        raise ContractValidationError("allow_state_patch requires current_state_source.")
-    payload = normalized_event["payload"]
-
-    event_context = {
-        "type": normalized_event["type"],
-        "text": payload["text"],
-        "created_at": normalized_event["created_at"],
-    }
-    for field_name in ("user_id", "conversation_id"):
-        if field_name in payload:
-            event_context[field_name] = payload[field_name]
-
     recent_visible_messages = _read_recent_visible_messages(
         normalized_event,
         recent_visible_messages_source=recent_visible_messages_source,
@@ -142,20 +121,11 @@ def build_character_decision_context(
     if active_incident_brief is not None:
         character_snapshot["active_incident"] = active_incident_brief
 
-    allowed_actions = [VISIBLE_REPLY_ACTION]
-    if allow_state_patch:
-        allowed_actions.append(STATE_PATCH_ACTION)
-    if allow_incident_start:
-        allowed_actions.append(LIFE_ACTION)
-
     return {
         "schema_version": SCHEMA_VERSION,
         "trace_id": normalized_event["trace_id"],
         "event_id": normalized_event["event_id"],
-        "call_type": USER_MESSAGE_VISIBLE_REPLY_CALL,
-        "event": event_context,
         "character_snapshot": character_snapshot,
-        "allowed_actions": allowed_actions,
     }
 
 

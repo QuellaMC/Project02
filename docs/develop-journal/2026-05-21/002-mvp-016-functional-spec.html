@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-21 - MVP-016 Functional Spec</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-21 - MVP-016 Functional Spec</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Pulled <code>origin/main</code> and created <code>feature/mvp-016-role-model-input-envelope</code> from updated <code>main</code>.</li>
+      <li>Recorded MVP-015 under <a href="../../plan/completed/mvp-015-character-state-engine-context-builder-boundary.html">completed plans</a> after PR #18 merged.</li>
+      <li>Replaced <a href="../../plan/active-slice.html">active-slice.html</a> with <code>MVP-016 - Role Model Input Envelope Split v0.1</code>.</li>
+      <li>Updated the plan index and future-slices parking lot so MVP-016 is the only active implementation slice.</li>
+      <li>Review follow-up: recorded the Notion source mismatch between newer envelope/context split pages and older broad <code>DecisionContext</code> examples before implementation.</li>
+      <li>Review follow-up: added Notion 05 and Notion 09 to the active source-context list for complete traceability.</li>
+      <li>Review follow-up: tightened the shared-code reuse requirement by naming the exact current validation, action-constant, context-builder, and Role Model input/action helper surfaces.</li>
+    </ul>
+
+    <h2>Why It Changed</h2>
+    <p>
+      MVP-015 intentionally kept the broad model-facing <code>DecisionContext</code>
+      shape while moving context assembly behind the Character State Engine.
+      MVP-016 now owns the narrow follow-up: split the outer
+      <code>RoleModelInputEnvelope</code> from the inner compact
+      <code>DecisionContext</code> without adding new runtime behavior.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/completed/mvp-015-character-state-engine-context-builder-boundary.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+      <li><code>docs/plan/future-slices.html</code></li>
+      <li><code>docs/develop-journal/2026-05-21/002-mvp-016-functional-spec.html</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+    </ul>
+
+    <h2>Checks</h2>
+    <ul>
+      <li><code>python3.13 -c 'from html.parser import HTMLParser; ...'</code>: passed for 6 edited HTML files.</li>
+      <li><code>git diff --check</code>: passed for tracked diffs.</li>
+      <li><code>python3.13 -c '... trailing whitespace ...'</code>: passed for 2 new HTML files.</li>
+      <li>Runtime unit tests were not run because this is a docs-only spec promotion with no production code changes.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>MVP-016 is a schema-ownership split, not a behavior expansion.</li>
+      <li>The active spec moves only <code>call_type</code>, current <code>event</code>, and <code>allowed_actions</code> out of the inner context.</li>
+      <li>The spec now records that Notion 03 and 06 support the newer split while Notion 02 and 05 still contain broader conceptual <code>DecisionContext</code> examples; Notion 09 provides the MVP roadmap and build-order traceability for keeping the slice narrow.</li>
+      <li>The spec now explicitly requires reuse, movement, extraction, or narrow compatibility export of <code>runtime.contracts.validate_normalized_user_message_event()</code>, <code>VISIBLE_REPLY_ACTION</code>, <code>STATE_PATCH_ACTION</code>, <code>LIFE_ACTION</code>, <code>character.state.context.build_character_decision_context()</code>, and the relevant Role Model Loop input/action helpers.</li>
+      <li>Private calls, retrieval, output-contract renaming, provider templates, new actions, and context-build logs remain parked for future slices.</li>
+      <li>Active slice scope changed from MVP-015 to MVP-016.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Review the MVP-016 spec for scope, then implement tests for the compact
+      context shape and role-model input envelope before changing runtime code.
+    </p>
+  </main>
+</body>
+</html>
