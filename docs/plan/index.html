@@ -75,7 +75,8 @@
       <a href="https://github.com/QuellaMC/Project02/pull/16">PR #16</a>.
       MVP-015 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/18">PR #18</a>.
-      MVP-016 is implemented locally and has no implementation PR yet.
+      MVP-016 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/19">PR #19</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -95,8 +96,8 @@ flowchart LR
     RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 implemented"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015 implemented; MVP-016 implemented locally"]
-    Envelope["RoleModelInputEnvelope split&lt;br/&gt;MVP-016 local implementation&lt;br/&gt;call_type/event/actions outside DecisionContext"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015 implemented; MVP-016 PR #19 open"]
+    Envelope["RoleModelInputEnvelope split&lt;br/&gt;MVP-016 PR #19&lt;br/&gt;call_type/event/actions outside DecisionContext"]
     Render["RoleModelInput renderer&lt;br/&gt;strict envelope validation"]
     Adapter["Injected fake RoleModelAdapter"]
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply required"]
@@ -192,7 +193,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">MVP-016 - Role Model Input Envelope Split v0.1</a></td>
-          <td>Implemented locally; no implementation PR yet.</td>
+          <td>Implementation PR open; <a href="https://github.com/QuellaMC/Project02/pull/19">PR #19</a>.</td>
           <td>Split the outer <code>RoleModelInputEnvelope</code> from the inner compact <code>DecisionContext</code> by moving <code>call_type</code>, current <code>event</code>, and <code>allowed_actions</code> out of the context while preserving current <code>USER_MESSAGE</code> model-call behavior.</td>
         </tr>
       </tbody>
