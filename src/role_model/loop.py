@@ -916,6 +916,10 @@ def _validate_allowed_life_action_type(value: Any, allowed_actions: list[str]) -
                 "allowed_life_action_type is only valid when life_action is allowed."
             )
         return None
+    if not isinstance(value, str):
+        raise RoleModelValidationError(
+            "allowed_life_action_type must match the selected life_action subtype."
+        )
     if value in {START_INCIDENT_ACTION, CANCEL_INCIDENT_ACTION}:
         return value
     raise RoleModelValidationError(

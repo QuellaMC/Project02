@@ -218,7 +218,7 @@
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>If finalization fails, raw-log success visibility staging fails, post-confirm incident-clearing completion fails, the store/log instances differ, no active incident exists, incident IDs mismatch, or a storage/source adapter raises unexpectedly, Commit &amp; Effects returns a structured rejected result and appends a <code>life_incident_cancel_rejected</code> log through the ordinary raw-log path. Failures before visibility confirmation must leave the active incident unchanged and no query-visible cancel success entry.</td>
+          <td>If finalization fails, raw-log success visibility staging fails, post-confirm incident-clearing completion fails or observes a changed active incident, the store/log instances differ, no active incident exists, incident IDs mismatch, or a storage/source adapter raises unexpectedly, Commit &amp; Effects returns a structured rejected result and appends a <code>life_incident_cancel_rejected</code> log through the ordinary raw-log path. Failures before visibility confirmation must leave the active incident unchanged and no query-visible cancel success entry.</td>
         </tr>
         <tr>
           <td>FR-11</td>
@@ -247,7 +247,7 @@
       <li>A cancel-opted-in <code>USER_MESSAGE</code> turn can parse <code>life_action.cancel_incident</code> with <code>incident_id</code> and <code>reason</code>.</li>
       <li>The turn cancels only the active incident for the source-event scope through Commit &amp; Effects and <code>InMemoryLifeIncidentStore</code>.</li>
       <li>A successful cancel clears the active incident for that scope and exposes one query-visible <code>life_incident_cancelled</code> raw log entry.</li>
-      <li>No active incident is cleared when there is no active incident, the incident ID mismatches, finalization rejects, visibility staging fails, or the store/log instances differ.</li>
+      <li>No active incident is cleared when there is no active incident, the incident ID mismatches, finalization rejects, visibility staging fails, the active incident changes before completion, or the store/log instances differ.</li>
       <li>Default visible-reply turns, state-patch opt-in turns, and incident-start opt-in turns keep their current behavior.</li>
       <li>No complete/resume/go-idle/no-change/interruption/queue/scheduler/body/Live2D/tool/retrieval/database behavior is added.</li>
       <li>The development journal records source context, files touched, checks run, review notes, next action, future ideas, and whether active slice scope changed.</li>
@@ -261,7 +261,7 @@
       <li>Assert start, cancel, and state-patch opt-ins cannot be composed in one <code>USER_MESSAGE</code> model call.</li>
       <li>Build and validate cancel commit/finalize requests and <code>life_incident_cancelled</code> log entries.</li>
       <li>Finalize cancel through <code>InMemoryLifeIncidentStore</code> and assert same-scope active incident is cleared, other scopes remain, copies are safe, and query-visible success logs are staged/confirmed.</li>
-      <li>Reject no-active, incident-ID mismatch, raw-log mismatch, and staging failure paths without clearing the active incident.</li>
+      <li>Reject no-active, incident-ID mismatch, raw-log mismatch, staging failure, and changed-before-completion paths without clearing the wrong active incident.</li>
     </ul>
 
     <h3>Integration Tests</h3>

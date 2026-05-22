@@ -148,8 +148,12 @@ class InMemoryLifeIncidentStore:
         validated_request = _validate_life_incident_cancel_finalize_request(request)
         scope = _incident_scope_from_request(validated_request)
         current_active_incident = self._active_incidents_by_scope.get(scope)
-        if current_active_incident == validated_request["active_incident"]:
-            self._active_incidents_by_scope.pop(scope, None)
+        if current_active_incident != validated_request["active_incident"]:
+            raise LifeIncidentCancelFinalizerError(
+                "Active incident changed before cancellation could be completed.",
+                code="finalize_rejected",
+            )
+        self._active_incidents_by_scope.pop(scope, None)
 
     def read_active_incident(
         self,
