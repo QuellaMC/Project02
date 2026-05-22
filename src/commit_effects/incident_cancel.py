@@ -94,6 +94,11 @@ class LifeIncidentCancelFinalizer(Protocol):
         request: LifeIncidentCancelFinalizeRequest,
     ) -> dict[str, Any]: ...
 
+    def complete_life_incident_cancel_after_log_visible(
+        self,
+        request: LifeIncidentCancelFinalizeRequest,
+    ) -> None: ...
+
 
 def build_life_incident_cancel_commit_request(
     source_event: RuntimeEvent,
@@ -139,6 +144,7 @@ def commit_life_incident_cancel(
     active_incident: Mapping[str, Any] | None = None
     cancelled_incident: Mapping[str, Any] | None = None
     committed_log_entry: RawEventLogEntry | None = None
+    finalize_request: LifeIncidentCancelFinalizeRequest | None = None
 
     try:
         request = build_life_incident_cancel_commit_request(source_event, role_model_result)
@@ -246,6 +252,10 @@ def commit_life_incident_cancel(
         )
         return _build_rejected_result(source_identity, failure)
 
+    assert finalize_request is not None
+    life_incident_cancel_finalizer.complete_life_incident_cancel_after_log_visible(
+        deepcopy(finalize_request)
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "trace_id": source_identity["trace_id"],

@@ -308,6 +308,7 @@ class RecordingLifeIncidentCancelFinalizer:
         self.append_before_result_override = append_before_result_override
         self.expose_conflicting_success = expose_conflicting_success
         self.requests = []
+        self.completion_requests = []
         self.durable_cancelled_incidents = []
         self.durable_raw_event_log_entries = []
 
@@ -330,9 +331,6 @@ class RecordingLifeIncidentCancelFinalizer:
             return deepcopy(self.result_override)
         if self.raw_log_visibility is not None:
             self.raw_log_visibility.expose_committed_success_entry(request["committed_log_entry"])
-        self.durable_cancelled_incidents.append(deepcopy(request["cancelled_incident"]))
-        self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
-        self.operations.append(("atomic_finalizer", request["committed_log_entry"]["kind"]))
         return {
             "schema_version": "0.1",
             "trace_id": request["trace_id"],
@@ -340,6 +338,12 @@ class RecordingLifeIncidentCancelFinalizer:
             "event_type": request["event_type"],
             "committed_log_entry_id": request["committed_log_entry"]["log_id"],
         }
+
+    def complete_life_incident_cancel_after_log_visible(self, request):
+        self.completion_requests.append(deepcopy(request))
+        self.durable_cancelled_incidents.append(deepcopy(request["cancelled_incident"]))
+        self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
+        self.operations.append(("atomic_finalizer", request["committed_log_entry"]["kind"]))
 
 
 def prior_user_record():

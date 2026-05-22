@@ -49,7 +49,6 @@ SINGLE_USER_SELF_USE_SCOPE_MODE = "single_user_self_use"
 
 class CommittedSuccessRawEventLog(Protocol):
     def expose_committed_success_entry(self, entry: RawEventLogEntry) -> None: ...
-    def confirm_committed_success_entry(self, entry: RawEventLogEntry) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -128,13 +127,11 @@ class InMemoryLifeIncidentStore:
         committed_log_entry = validated_request["committed_log_entry"]
         try:
             self._raw_event_log.expose_committed_success_entry(committed_log_entry)
-            self._raw_event_log.confirm_committed_success_entry(committed_log_entry)
         except RawEventLogQueryValidationError as error:
             raise LifeIncidentCancelFinalizerError(
                 str(error),
                 code="malformed_finalize_result",
             ) from error
-        self._active_incidents_by_scope.pop(scope, None)
 
         return {
             "schema_version": SCHEMA_VERSION,
@@ -143,6 +140,16 @@ class InMemoryLifeIncidentStore:
             "event_type": USER_MESSAGE,
             "committed_log_entry_id": committed_log_entry["log_id"],
         }
+
+    def complete_life_incident_cancel_after_log_visible(
+        self,
+        request: LifeIncidentCancelFinalizeRequest,
+    ) -> None:
+        validated_request = _validate_life_incident_cancel_finalize_request(request)
+        scope = _incident_scope_from_request(validated_request)
+        current_active_incident = self._active_incidents_by_scope.get(scope)
+        if current_active_incident == validated_request["active_incident"]:
+            self._active_incidents_by_scope.pop(scope, None)
 
     def read_active_incident(
         self,

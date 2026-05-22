@@ -63,6 +63,37 @@ class RejectingCancelConfirmRawEventLog(InMemoryRawEventLog):
         super().confirm_committed_success_entry(entry)
 
 
+class RejectSecondCancelConfirmRawEventLog(InMemoryRawEventLog):
+    def __init__(self):
+        super().__init__()
+        self.cancel_confirm_count = 0
+
+    def confirm_committed_success_entry(self, entry):
+        if entry["kind"] == "life_incident_cancelled":
+            self.cancel_confirm_count += 1
+            if self.cancel_confirm_count > 1:
+                raise RawEventLogQueryValidationError("cancel visibility confirmed twice")
+        super().confirm_committed_success_entry(entry)
+
+
+class MalformedResultAfterCancelStageFinalizer:
+    def __init__(self, store):
+        self.store = store
+        self.completed = False
+
+    def require_life_incident_cancel_raw_event_log(self, raw_event_log):
+        self.store.require_life_incident_cancel_raw_event_log(raw_event_log)
+
+    def finalize_life_incident_cancel(self, request):
+        result = self.store.finalize_life_incident_cancel(request)
+        result["committed_log_entry_id"] = "wrong-log-id"
+        return result
+
+    def complete_life_incident_cancel_after_log_visible(self, request):
+        self.completed = True
+        self.store.complete_life_incident_cancel_after_log_visible(request)
+
+
 def normalized_user_message(
     *,
     event_id="event-1",
@@ -636,6 +667,35 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
             "thinking through the plan",
         )
 
+    def test_cancel_success_confirms_visibility_once_before_clearing_active_incident(self):
+        raw_log = RejectSecondCancelConfirmRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        start_event = normalized_user_message(event_id="event-1", trace_id="trace-1")
+        cancel_event = normalized_user_message(event_id="event-2", trace_id="trace-2")
+        ids = SequenceIdGenerator()
+        commit_life_incident_start(
+            start_event,
+            role_model_result_with_incident(event_id="event-1", trace_id="trace-1"),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        result = commit_life_incident_cancel(
+            cancel_event,
+            role_model_result_with_cancel(),
+            active_incident_source=store,
+            life_incident_cancel_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_CANCELLED_STATUS)
+        self.assertEqual(raw_log.cancel_confirm_count, 1)
+        self.assertIsNone(store.read_active_incident(build_active_incident_request(cancel_event)))
+
     def test_cancel_visibility_staging_failure_rejects_without_clearing_active_incident(self):
         raw_log = RejectingCancelRawEventLog()
         store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
@@ -730,6 +790,50 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
         self.assertEqual(result["failure"]["stage"], "life_incident_cancel_finalize")
         self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
         self.assertIn("cancel visibility confirm failed", result["failure"]["message"])
+        self.assertEqual(
+            store.read_active_incident(build_active_incident_request(cancel_event)),
+            active_incident,
+        )
+        self.assertEqual(
+            raw_log.query({"trace_id": "trace-2", "kinds": ["life_incident_cancelled"]})["entries"],
+            [],
+        )
+
+    def test_malformed_cancel_finalize_result_discards_staged_success_and_keeps_active_incident(
+        self,
+    ):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        finalizer = MalformedResultAfterCancelStageFinalizer(store)
+        start_event = normalized_user_message(event_id="event-1", trace_id="trace-1")
+        cancel_event = normalized_user_message(event_id="event-2", trace_id="trace-2")
+        ids = SequenceIdGenerator()
+        commit_life_incident_start(
+            start_event,
+            role_model_result_with_incident(event_id="event-1", trace_id="trace-1"),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+        active_incident = deepcopy(
+            store.read_active_incident(build_active_incident_request(cancel_event))
+        )
+
+        result = commit_life_incident_cancel(
+            cancel_event,
+            role_model_result_with_cancel(),
+            active_incident_source=store,
+            life_incident_cancel_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_CANCEL_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], "life_incident_cancel_finalize")
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertFalse(finalizer.completed)
         self.assertEqual(
             store.read_active_incident(build_active_incident_request(cancel_event)),
             active_incident,

@@ -210,7 +210,7 @@
         </tr>
         <tr>
           <td>FR-8</td>
-          <td><code>InMemoryLifeIncidentStore</code> must implement the cancel finalization boundary, add <code>life_incident_cancelled</code> to <code>runtime.logging.ATOMIC_FINALIZER_SUCCESS_KINDS</code>, stage the success log through the existing <code>expose_committed_success_entry()</code> helper, clear only the matching active incident scope, and return copy-safe results.</td>
+          <td><code>InMemoryLifeIncidentStore</code> must implement the cancel finalization boundary, add <code>life_incident_cancelled</code> to <code>runtime.logging.ATOMIC_FINALIZER_SUCCESS_KINDS</code>, stage the success log through the existing <code>expose_committed_success_entry()</code> helper, clear only the matching active incident scope after Commit &amp; Effects confirms raw-log visibility, and return copy-safe results.</td>
         </tr>
         <tr>
           <td>FR-9</td>

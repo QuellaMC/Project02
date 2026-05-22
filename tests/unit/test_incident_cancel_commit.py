@@ -57,6 +57,7 @@ class RecordingLifeIncidentCancelFinalizer:
         self.error = error
         self.result_override = deepcopy(result_override)
         self.requests = []
+        self.completion_requests = []
         self.durable_cancelled_incidents = []
         self.durable_raw_event_log_entries = []
 
@@ -66,8 +67,6 @@ class RecordingLifeIncidentCancelFinalizer:
             raise self.error
         if self.result_override is not None:
             return deepcopy(self.result_override)
-        self.durable_cancelled_incidents.append(deepcopy(request["cancelled_incident"]))
-        self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
         return {
             "schema_version": "0.1",
             "trace_id": request["trace_id"],
@@ -75,6 +74,11 @@ class RecordingLifeIncidentCancelFinalizer:
             "event_type": request["event_type"],
             "committed_log_entry_id": request["committed_log_entry"]["log_id"],
         }
+
+    def complete_life_incident_cancel_after_log_visible(self, request):
+        self.completion_requests.append(deepcopy(request))
+        self.durable_cancelled_incidents.append(deepcopy(request["cancelled_incident"]))
+        self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
 
 
 def normalized_user_message():
@@ -284,6 +288,10 @@ class IncidentCancelCommitTests(unittest.TestCase):
             finalizer.durable_raw_event_log_entries[0]["data"]["source_event"]["payload"]["text"],
             "stop that",
         )
+        self.assertEqual(
+            finalizer.completion_requests[0]["committed_log_entry"]["log_id"],
+            result["committed_log_entry_id"],
+        )
 
     def test_rejects_when_no_active_incident_without_finalizer_call(self):
         raw_log = RecordingRawEventLog()
@@ -384,6 +392,7 @@ class IncidentCancelCommitTests(unittest.TestCase):
         self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
         self.assertEqual(finalizer.durable_cancelled_incidents, [])
         self.assertEqual(finalizer.durable_raw_event_log_entries, [])
+        self.assertEqual(finalizer.completion_requests, [])
 
     def test_cancelled_snapshot_and_log_entries_deep_copy_inputs(self):
         event = normalized_user_message()
