@@ -895,6 +895,10 @@ def _instructions_for_allowed_actions(
 
 def _validate_instructions_for_allowed_actions(value: Any, allowed_actions: list[str]) -> str:
     if _life_action_allowed(allowed_actions):
+        if not isinstance(value, str):
+            raise ContractValidationError(
+                "instructions must match the allowed life_action subtype."
+            )
         if value in {
             INCIDENT_START_ROLE_MODEL_INSTRUCTIONS,
             INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS,

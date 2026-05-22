@@ -1155,6 +1155,24 @@ class DecisionContextTests(unittest.TestCase):
                 ),
             )
 
+    def test_model_input_validation_rejects_unhashable_life_action_instructions(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            allow_incident_start=True,
+        )
+        model_input = render_context(
+            normalized_user_message(),
+            context,
+            allow_incident_start=True,
+        )
+        model_input["instructions"] = {"not": "hashable"}
+
+        with self.assertRaisesRegex(RoleModelValidationError, "instructions"):
+            parse_character_decision(
+                model_input,
+                adapter_output("{}"),
+            )
+
 
 class VisibleConversationRecentMessagesSourceTests(unittest.TestCase):
     def test_maps_user_and_assistant_visible_records_to_recent_messages(self):

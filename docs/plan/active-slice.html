@@ -218,7 +218,7 @@
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>If finalization fails, raw-log success visibility staging fails, the store/log instances differ, no active incident exists, or incident IDs mismatch, the active incident remains unchanged and a <code>life_incident_cancel_rejected</code> log is appended through the ordinary raw-log path.</td>
+          <td>If finalization fails, raw-log success visibility staging fails, post-confirm incident-clearing completion fails, the store/log instances differ, no active incident exists, or incident IDs mismatch, Commit &amp; Effects returns a structured rejected result and appends a <code>life_incident_cancel_rejected</code> log through the ordinary raw-log path. Failures before visibility confirmation must leave the active incident unchanged and no query-visible cancel success entry.</td>
         </tr>
         <tr>
           <td>FR-11</td>

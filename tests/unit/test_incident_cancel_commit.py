@@ -19,6 +19,7 @@ from commit_effects.incident_cancel import (  # noqa: E402
     build_life_incident_cancelled_log_entry,
     commit_life_incident_cancel,
 )
+from runtime.logging import InMemoryRawEventLog  # noqa: E402
 
 
 def fixed_clock():
@@ -79,6 +80,38 @@ class RecordingLifeIncidentCancelFinalizer:
         self.completion_requests.append(deepcopy(request))
         self.durable_cancelled_incidents.append(deepcopy(request["cancelled_incident"]))
         self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
+
+
+class StagingCompletionFailingCancelFinalizer:
+    def __init__(self, raw_log):
+        self.raw_log = raw_log
+        self.requests = []
+        self.completion_requests = []
+
+    def require_life_incident_cancel_raw_event_log(self, raw_event_log):
+        if raw_event_log is not self.raw_log:
+            raise LifeIncidentCancelFinalizerError(
+                "LifeIncidentStore must finalize against the same Raw Event Log instance.",
+                code="malformed_finalize_result",
+            )
+
+    def finalize_life_incident_cancel(self, request):
+        self.requests.append(deepcopy(request))
+        self.raw_log.expose_committed_success_entry(request["committed_log_entry"])
+        return {
+            "schema_version": "0.1",
+            "trace_id": request["trace_id"],
+            "event_id": request["event_id"],
+            "event_type": request["event_type"],
+            "committed_log_entry_id": request["committed_log_entry"]["log_id"],
+        }
+
+    def complete_life_incident_cancel_after_log_visible(self, request):
+        self.completion_requests.append(deepcopy(request))
+        raise LifeIncidentCancelFinalizerError(
+            "completion failed after success log visibility",
+            code="finalize_rejected",
+        )
 
 
 def normalized_user_message():
@@ -393,6 +426,33 @@ class IncidentCancelCommitTests(unittest.TestCase):
         self.assertEqual(finalizer.durable_cancelled_incidents, [])
         self.assertEqual(finalizer.durable_raw_event_log_entries, [])
         self.assertEqual(finalizer.completion_requests, [])
+
+    def test_completion_failure_after_success_visibility_returns_rejected_result(self):
+        raw_log = InMemoryRawEventLog()
+        active_source = RecordingActiveIncidentSource(active_incident_snapshot())
+        finalizer = StagingCompletionFailingCancelFinalizer(raw_log)
+
+        result = commit_life_incident_cancel(
+            normalized_user_message(),
+            role_model_result_with_cancel(),
+            active_incident_source=active_source,
+            life_incident_cancel_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        entries = raw_log.query({"trace_id": "trace-cancel"})["entries"]
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_CANCEL_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_CANCEL_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertIn("completion failed", result["failure"]["message"])
+        self.assertEqual(len(finalizer.completion_requests), 1)
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            ["life_incident_cancelled", "life_incident_cancel_rejected"],
+        )
 
     def test_cancelled_snapshot_and_log_entries_deep_copy_inputs(self):
         event = normalized_user_message()

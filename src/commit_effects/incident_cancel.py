@@ -212,6 +212,15 @@ def commit_life_incident_cancel(
                 str(error),
                 code="malformed_finalize_result",
             ) from error
+        try:
+            life_incident_cancel_finalizer.complete_life_incident_cancel_after_log_visible(
+                deepcopy(finalize_request)
+            )
+        except RawEventLogQueryValidationError as error:
+            raise LifeIncidentCancelFinalizerError(
+                str(error),
+                code="malformed_finalize_result",
+            ) from error
     except LifeIncidentCancelFinalizerError as error:
         discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
         failure = _build_failure(
@@ -252,10 +261,6 @@ def commit_life_incident_cancel(
         )
         return _build_rejected_result(source_identity, failure)
 
-    assert finalize_request is not None
-    life_incident_cancel_finalizer.complete_life_incident_cancel_after_log_visible(
-        deepcopy(finalize_request)
-    )
     return {
         "schema_version": SCHEMA_VERSION,
         "trace_id": source_identity["trace_id"],
