@@ -47,6 +47,11 @@ LIFE_INCIDENT_CANCEL_COMMIT_STOP = "life_incident_cancel_commit"
 VISIBLE_REPLY_COMMIT_STOP = "visible_reply_commit"
 USER_TURN_NEXT_STEP = "user_turn"
 CONFLICTING_WRITE_ACTION_OPT_IN_CODE = "conflicting_write_action_opt_in"
+MISSING_INCIDENT_CANCEL_SOURCE_CODE = "missing_incident_cancel_source"
+WRITE_ACTION_OPT_IN_CONFLICT_MESSAGE = (
+    "Only one write-action opt-in may be enabled for a USER_MESSAGE turn: "
+    "state_patch, start_incident, or cancel_incident."
+)
 
 UserMessageTurnResult = dict[str, Any]
 
@@ -102,10 +107,7 @@ def run_user_message_turn(
             failure={
                 "stage": USER_TURN_PREFLIGHT_STOP,
                 "code": CONFLICTING_WRITE_ACTION_OPT_IN_CODE,
-                "message": (
-                    "state_patch and life_action cannot both be allowed in the "
-                    "current USER_MESSAGE turn."
-                ),
+                "message": WRITE_ACTION_OPT_IN_CONFLICT_MESSAGE,
             },
         )
     if allow_incident_cancel and active_incident_source is None:
@@ -115,7 +117,7 @@ def run_user_message_turn(
             stopped_at=USER_TURN_PREFLIGHT_STOP,
             failure={
                 "stage": USER_TURN_PREFLIGHT_STOP,
-                "code": CONFLICTING_WRITE_ACTION_OPT_IN_CODE,
+                "code": MISSING_INCIDENT_CANCEL_SOURCE_CODE,
                 "message": "incident cancel requires active_incident_source.",
             },
         )

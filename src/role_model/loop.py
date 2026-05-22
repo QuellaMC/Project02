@@ -797,7 +797,8 @@ def _require_supported_write_action_opt_in(
     )
     if enabled_count > 1:
         raise RoleModelValidationError(
-            "state_patch and life_action cannot both be allowed in the current USER_MESSAGE turn."
+            "Only one write-action opt-in may be enabled for a USER_MESSAGE turn: "
+            "state_patch, start_incident, or cancel_incident."
         )
 
 

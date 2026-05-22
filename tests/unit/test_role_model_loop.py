@@ -896,7 +896,7 @@ class DecisionContextTests(unittest.TestCase):
             build_decision_context(normalized_user_message(), allow_incident_cancel=True)
 
     def test_rejects_state_patch_and_life_action_composition_before_render(self):
-        with self.assertRaisesRegex(RoleModelValidationError, "current USER_MESSAGE turn"):
+        with self.assertRaisesRegex(RoleModelValidationError, "Only one write-action opt-in"):
             build_decision_context(
                 normalized_user_message(),
                 current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
@@ -904,7 +904,7 @@ class DecisionContextTests(unittest.TestCase):
                 allow_incident_start=True,
             )
 
-        with self.assertRaisesRegex(RoleModelValidationError, "current USER_MESSAGE turn"):
+        with self.assertRaisesRegex(RoleModelValidationError, "Only one write-action opt-in"):
             build_decision_context(
                 normalized_user_message(),
                 active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
