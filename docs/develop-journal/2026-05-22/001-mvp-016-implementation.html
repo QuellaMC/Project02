@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-22 - MVP-016 Implementation</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-22 - MVP-016 Implementation</h1>
+    <p>
+      Implemented <a href="../../plan/active-slice.html">MVP-016 - Role Model Input Envelope Split v0.1</a>
+      on branch <code>feature/mvp-016-role-model-input-envelope</code>.
+    </p>
+
+    <h2>Source Context</h2>
+    <ul>
+      <li>Checked Notion <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a> for the top-level <code>RoleModelInputEnvelope</code>, compact <code>DecisionContext</code>, current-event ownership, and allowed-action scoping.</li>
+      <li>Checked Notion <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a> for Character State Engine ownership of compact context building.</li>
+      <li>Used local MVP-016 active spec source-context mismatch notes to keep older broad Notion examples out of the implemented runtime shape.</li>
+    </ul>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li><code>character.state.context.build_character_decision_context()</code> now returns the compact inner <code>DecisionContext</code> with <code>schema_version</code>, <code>trace_id</code>, <code>event_id</code>, and <code>character_snapshot</code> only.</li>
+      <li><code>role_model.loop</code> now builds and validates <code>RoleModelInputEnvelope</code> with top-level <code>call_type</code>, current <code>event</code>, <code>allowed_actions</code>, <code>instructions</code>, and compact <code>decision_context</code>.</li>
+      <li>Parser and completed-turn validation now derive <code>state_patch</code> and <code>life_action</code> permission from envelope <code>allowed_actions</code>, not from the compact context.</li>
+      <li>Existing recent-message, living-state, active-incident, visible-reply, state-patch, and incident-start behavior stayed unchanged apart from the model input snapshot shape.</li>
+    </ul>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>src/character/state/context.py</code></li>
+      <li><code>src/role_model/loop.py</code></li>
+      <li><code>tests/unit/test_character_context_builder.py</code></li>
+      <li><code>tests/unit/test_role_model_loop.py</code></li>
+      <li><code>tests/integration/test_role_model_loop.py</code></li>
+      <li><code>tests/integration/test_user_message_turn.py</code></li>
+      <li><code>docs/develop-journal/index.html</code></li>
+      <li><code>docs/plan/active-slice.html</code></li>
+      <li><code>docs/plan/index.html</code></li>
+    </ul>
+
+    <h2>Tests and Checks</h2>
+    <ul>
+      <li><code>python -m unittest discover</code> - 227 tests passed.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code> - passed after formatting <code>tests/unit/test_role_model_loop.py</code>.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/mypy src</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>The implementation reuses <code>runtime.contracts.validate_normalized_user_message_event()</code>, the existing action constants, the Character State Engine context-builder source orchestration, and the existing role-model allowed-action/instruction helpers.</li>
+      <li><code>RoleModelInput</code> remains as the public compatibility alias; <code>RoleModelInputEnvelope</code> names the envelope boundary without forcing broader adapter churn.</li>
+      <li><code>build_decision_context()</code> remains as the Role Model Loop compatibility wrapper; it now returns the compact shape and keeps preflight errors at the existing role-model validation boundary.</li>
+      <li>No new event family, action type, provider, storage, retrieval, context-build log, or runtime orchestration behavior was added.</li>
+    </ul>
+
+    <h2>Future Ideas</h2>
+    <p>
+      No new future ideas were discovered during implementation. The existing
+      MVP-016 parking lot items for <code>output_contract</code>, private call
+      envelopes, model I/O storage, context-build logs, retrieval, and broader
+      context fields remain deferred.
+    </p>
+
+    <h2>Scope and Next Action</h2>
+    <p>
+      Active slice scope did not change during implementation. Next action:
+      create the MVP-016 commit and open the implementation PR, then update
+      <code>docs/plan/index.html</code> with the PR link after PR creation.
+    </p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MVP-015 - Character State Engine Context Builder Boundary v0.1</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    h3 { margin-top: 22px; font-size: 1rem; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul, ol { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    pre { overflow-x: auto; background: #202923; color: #f3f7f1; border-radius: 8px; padding: 16px; }
+    pre code { background: transparent; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; }
+    th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #edf1eb; }
+    blockquote { border-left: 4px solid #b9c6bd; margin: 16px 0; padding: 8px 14px; background: #fff; color: #34413d; }
+    .status { display: inline-block; border: 1px solid #aebbad; border-radius: 999px; padding: 2px 10px; background: #fff; font-size: 0.9rem; }
+    .meta { color: #4a5651; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-015 - Character State Engine Context Builder Boundary v0.1</h1>
+    <p><span class="status">Status: implemented and merged; PR #18</span></p>
+    <p class="meta">
+      Created: 2026-05-20. Completed slice path:
+      <code>docs/plan/completed/mvp-015-character-state-engine-context-builder-boundary.html</code>.
+      Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
+      Branch: <code>feature/mvp-015-context-builder-boundary</code>.
+    </p>
+
+    <h2>Source Context</h2>
+    <p>
+      Product direction comes from the Notion project hub
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.
+      The source pages checked for this slice are
+      <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>,
+      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
+      <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>,
+      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
+    </p>
+    <blockquote>
+      Notion assigns compact <code>DecisionContext</code> building to the Character
+      State Engine. MVP-015 only moves the already-proven source orchestration
+      for recent visible messages, <code>living_state_brief</code>, and
+      <code>active_incident</code> behind that boundary while preserving the
+      current model-facing context shape.
+    </blockquote>
+    <p>
+      Local implementation truth comes from completed
+      <a href="mvp-001-runtime-event-intake-and-raw-logging.html">MVP-001</a>,
+      <a href="mvp-002-minimal-role-model-loop-with-fake-adapter.html">MVP-002</a>,
+      <a href="mvp-004-recent-visible-messages-in-decisioncontext.html">MVP-004</a>,
+      <a href="mvp-006-visible-conversation-recent-source.html">MVP-006</a>,
+      <a href="mvp-007-minimal-user-turn-orchestrator.html">MVP-007</a>,
+      <a href="mvp-008-read-only-living-state-snapshot-in-decisioncontext.html">MVP-008</a>,
+      <a href="mvp-011-read-only-active-incident-brief-in-decisioncontext.html">MVP-011</a>, and
+      <a href="mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html">MVP-014</a>.
+    </p>
+
+    <h2>Goal</h2>
+    <p>
+      Add the smallest Character State Engine context-builder boundary that
+      owns source requests, source-response validation, copy safety, selection,
+      and final assembly for the existing <code>USER_MESSAGE</code>
+      <code>DecisionContext</code>. Role Model Loop should still render the
+      same model input, call the adapter the same way, parse the same decision
+      contract, and append the same role-model logs.
+    </p>
+
+    <h2>Current Scope</h2>
+    <ul>
+      <li>One implemented event family remains in scope: <code>USER_MESSAGE</code>.</li>
+      <li>One call type remains in scope: <code>user_message_visible_reply</code>.</li>
+      <li>One new Character State Engine context-builder module or equivalent boundary is in scope.</li>
+      <li>The boundary owns orchestration for three already-implemented context sources: recent visible messages, current living state, and active incident.</li>
+      <li>The boundary returns the existing <code>DecisionContext</code> shape with the same <code>event</code>, <code>character_snapshot</code>, and <code>allowed_actions</code> fields.</li>
+      <li>The existing Role Model Loop remains responsible for rendering model input, adapter invocation, structured output parsing, and role-model turn logs.</li>
+      <li>Compatibility wrappers may remain in <code>role_model.loop</code> if needed so existing tests and callers can keep importing current symbols while the implementation delegates to Character State Engine code.</li>
+    </ul>
+
+    <h2>Explicit Non-Goals</h2>
+    <ul>
+      <li>No new <code>DecisionContext</code> fields, no renamed fields, and no changed field meanings.</li>
+      <li>No retrieval planner, Unified Retrieval Index, <code>context.retrieve()</code> tool, semantic search, keyword search, exact source expansion, summaries, compaction, active threads, or context budget percentages beyond the existing recent-message limits.</li>
+      <li>No new RuntimeEvent type, Runtime Kernel route policy, model provider, Role Model Adapter behavior, prompt behavior, output action, parser behavior, or allowed action combination.</li>
+      <li>No new Raw Event Log kind such as <code>decision_context_built</code>; keep context-build failures logged through the existing <code>role_model_turn_failed</code> path.</li>
+      <li>No storage migration, database adapter, concrete conversation store, concrete state store, incident lifecycle action, interruption policy, scheduler, body state, Live2D status, tool, asset, debug UI, or replay executor.</li>
+      <li>No behavioral change to <code>run_user_message_turn()</code> beyond threading the same injected sources through the new boundary.</li>
+    </ul>
+
+    <h2>Minimal Schema</h2>
+    <h3>CharacterContextBuilderRequest</h3>
+    <pre><code>type CharacterContextBuilderRequest = {
+  schema_version: "0.1"
+  event: RuntimeEvent&lt;"USER_MESSAGE"&gt;
+  call_type: "user_message_visible_reply"
+  allow_state_patch: boolean
+  allow_incident_start: boolean
+}</code></pre>
+    <p>
+      The request may be represented as function parameters if that matches the
+      current Python style. It must normalize and validate the same
+      <code>RuntimeEvent</code> contract as the existing Role Model Loop context
+      builder.
+    </p>
+
+    <h3>CharacterContextSources</h3>
+    <pre><code>type CharacterContextSources = {
+  recent_visible_messages_source?: RecentVisibleMessagesSource
+  current_state_source?: CurrentCharacterStateSource
+  active_incident_source?: ActiveIncidentSource
+}</code></pre>
+    <p>
+      These are injected read-only sources. The builder must pass copy-safe
+      request objects to each source and must treat missing sources exactly as
+      the current implementation does.
+    </p>
+
+    <h3>DecisionContext</h3>
+    <pre><code>type DecisionContext = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  call_type: "user_message_visible_reply"
+  event: {
+    type: "USER_MESSAGE"
+    text: string
+    created_at: string
+    user_id?: string
+    conversation_id?: string
+  }
+  character_snapshot: {
+    recent_visible_messages: RecentVisibleMessage[]
+    living_state_brief?: LivingStateBrief
+    active_incident?: ActiveIncidentBrief
+  }
+  allowed_actions: string[]
+}</code></pre>
+    <p>
+      MVP-015 must preserve this current shape. The only intended change is
+      where the context is built, not what the model sees.
+    </p>
+
+    <h2>Functional Requirements</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Requirement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>FR-1</td>
+          <td>Add a Character State Engine context-builder boundary for the current <code>USER_MESSAGE</code> role-model call.</td>
+        </tr>
+        <tr>
+          <td>FR-2</td>
+          <td>The boundary must return byte-for-byte equivalent data values for existing successful <code>DecisionContext</code> cases: no sources, recent visible messages, living-state brief, active-incident brief, and combined source inputs.</td>
+        </tr>
+        <tr>
+          <td>FR-3</td>
+          <td>Move recent visible message request construction, source-response validation, current-event exclusion, duplicate identity checks, timestamp ordering, candidate limits, selected-message limits, and text-token budget selection behind the Character State Engine boundary without changing their constants or outcomes. The implementation must move, extract, or compatibility re-export and reuse the current <code>role_model.loop</code> surface by name: <code>RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES</code>, <code>RECENT_VISIBLE_MESSAGES_MAX_MESSAGES</code>, <code>RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS</code>, <code>_read_recent_visible_messages()</code>, <code>_build_recent_visible_messages_request()</code>, <code>_validate_recent_visible_messages_request()</code>, <code>_validate_recent_visible_message()</code>, <code>_is_current_event_message()</code>, <code>_parse_recent_message_timestamp_before_event()</code>, <code>_reject_duplicate_recent_message_identity()</code>, <code>_select_recent_visible_messages()</code>, and <code>approximate_text_tokens()</code> as needed instead of reimplementing parallel logic.</td>
+        </tr>
+        <tr>
+          <td>FR-4</td>
+          <td>Move living-state source orchestration behind the boundary while reusing <code>build_current_character_state_request()</code>, <code>build_living_state_brief()</code>, and <code>validate_living_state_brief_for_event()</code>.</td>
+        </tr>
+        <tr>
+          <td>FR-5</td>
+          <td>Move active-incident source orchestration behind the boundary while reusing <code>build_active_incident_request()</code>, <code>build_active_incident_brief()</code>, and <code>validate_active_incident_brief_for_event()</code>.</td>
+        </tr>
+        <tr>
+          <td>FR-6</td>
+          <td>Role Model Loop must delegate context construction to the new boundary and keep rendering, adapter calls, parse behavior, returned <code>RoleModelTurnResult</code>, and raw log entry shapes unchanged.</td>
+        </tr>
+        <tr>
+          <td>FR-7</td>
+          <td>Existing context-build failures must still surface as <code>RoleModelValidationError</code> to Role Model Loop and be logged as <code>role_model_turn_failed</code> with <code>stage = "context_build"</code> and <code>code = "malformed_context"</code>.</td>
+        </tr>
+        <tr>
+          <td>FR-8</td>
+          <td>The boundary must preserve current opt-in behavior: <code>allow_state_patch</code> requires a current-state source, and <code>allow_state_patch</code> plus <code>allow_incident_start</code> remains rejected before model rendering.</td>
+        </tr>
+        <tr>
+          <td>FR-9</td>
+          <td>The builder must pass deep-copy-safe request objects to sources and return context data that cannot be mutated by later source or caller mutations.</td>
+        </tr>
+        <tr>
+          <td>FR-10</td>
+          <td>The user-turn orchestrator must continue to pass the same visible conversation, current-state, and active-incident sources into the model-call path without changing commit order or visible output behavior.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Non-Functional Requirements</h2>
+    <ul>
+      <li>Use only Python standard library behavior; do not add dependencies.</li>
+      <li>Prefer moving existing tested helper logic over duplicating it under a new module.</li>
+      <li>Keep the public surface narrow: one context-builder entry point plus source protocols or compatibility exports needed by current callers.</li>
+      <li>Keep code future-compatible by naming the boundary clearly, but do not add unused retrieval, budget, store, or multi-event abstractions.</li>
+      <li>Preserve existing test determinism, fake sources, fake adapter calls, fake clocks, and fake IDs.</li>
+      <li>Keep Role Model Loop focused on model input rendering, adapter invocation, output parsing, and role-model logging.</li>
+    </ul>
+
+    <h2>Acceptance Criteria</h2>
+    <ul>
+      <li>MVP-014 is recorded under <a href="mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html">completed plans</a>, and MVP-015 is recorded as completed after PR #18 merged.</li>
+      <li>Character State Engine has an explicit context-builder boundary for current <code>USER_MESSAGE</code> context construction.</li>
+      <li>Existing successful model inputs and <code>role_model_turn_completed</code> data snapshots keep the same <code>DecisionContext</code> values as before the move.</li>
+      <li>Existing context-build failures still stop before adapter invocation and still produce the same failure stage and code.</li>
+      <li>Recent visible message behavior remains unchanged, including filtering out the current event, duplicate checks, ordering, maximum selected messages, and text budget.</li>
+      <li>Living-state and active-incident brief behavior remains unchanged, including request shape, optional-source behavior, missing active incident behavior, source-event validation, and copy safety.</li>
+      <li>No retrieval/index/context logging/lifecycle/storage behavior is added.</li>
+      <li>The development journal records source context, files touched, checks run, review notes, next action, future ideas, and whether active slice scope changed.</li>
+      <li>Future retrieval, context-build logging, active threads, body state, interrupted incident, and broader context budget ideas remain parked in <a href="../future-slices.html">future-slices.html</a>.</li>
+    </ul>
+
+    <h2>Test Plan</h2>
+    <h3>Unit Tests</h3>
+    <ul>
+      <li>Build a no-source <code>USER_MESSAGE</code> context through the Character State Engine boundary and assert it matches the current minimal context exactly.</li>
+      <li>Build context with recent visible messages and assert the existing request shape, current-event exclusion, duplicate handling, ordering, six-message selection, and 1200-token budget behavior are preserved.</li>
+      <li>Review the implementation diff to confirm recent-message constants and helper bodies were moved, extracted, or re-exported from the current <code>role_model.loop</code> implementation rather than copied into a parallel Character State Engine implementation.</li>
+      <li>Build context with a current-state source and assert the existing <code>living_state_brief</code> shape, source request, malformed-source rejection, and copy safety are preserved.</li>
+      <li>Build context with an active-incident source and assert the existing <code>active_incident</code> shape, source request, no-incident omission, malformed-source rejection, and copy safety are preserved.</li>
+      <li>Assert conflicting <code>allow_state_patch</code> and <code>allow_incident_start</code> options still reject before rendering.</li>
+      <li>Assert <code>allow_state_patch</code> without a current-state source still rejects before rendering.</li>
+      <li>Assert any compatibility wrapper in <code>role_model.loop</code> delegates to the Character State Engine boundary and returns the same values.</li>
+    </ul>
+
+    <h3>Integration Tests</h3>
+    <ul>
+      <li>Run <code>run_role_model_turn()</code> with recent visible messages, living-state brief, and active-incident brief; assert the fake adapter receives the unchanged rendered model input shape.</li>
+      <li>Run a <code>USER_MESSAGE</code> turn through <code>run_user_message_turn()</code> and assert visible user projection, model call, optional context sources, and visible reply commit order remain unchanged.</li>
+      <li>Run a malformed source response path and assert the adapter is not called and <code>role_model_turn_failed</code> still records <code>stage = "context_build"</code>.</li>
+      <li>Run full unittest discovery.</li>
+    </ul>
+
+    <h2>Implementation Boundaries</h2>
+    <ul>
+      <li><code>character.state</code> owns source orchestration and compact context assembly for this slice.</li>
+      <li><code>character.state.current</code> continues to own living-state and active-incident read request, snapshot, and brief validation helpers.</li>
+      <li>The recent visible message source protocol, visible conversation adapter, and current recent-message helpers/constants in <code>role_model.loop</code> must move behind the Character State Engine boundary, be extracted into a shared module, or be compatibility-exported from the new boundary. Do not create duplicate validators, selectors, request builders, budget constants, timestamp checks, current-event filters, or duplicate-identity checks.</li>
+      <li><code>role_model.loop</code> remains responsible for <code>render_role_model_input()</code>, <code>parse_character_decision()</code>, adapter invocation, and <code>role_model_turn_completed</code>/<code>role_model_turn_failed</code> log construction.</li>
+      <li><code>runtime.user_turn</code> remains responsible for orchestration order and source injection; it should not learn source-specific context rules.</li>
+      <li>Commit and Effects modules remain untouched unless a test import must follow a moved compatibility symbol.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>This is a boundary extraction slice, not a new runtime behavior slice.</li>
+      <li>The highest risk is accidentally changing the model-facing context while moving helper ownership. Tests should compare values, not only types.</li>
+      <li>Do not add a generic context framework with empty hooks for body state, directives, retrieval, active threads, or future private calls.</li>
+      <li>Review fix: recent-message reuse is explicit because AGENTS.md requires reusing existing logic and creating shared helpers only for a real shared boundary. MVP-015 is that boundary; it should move or extract the existing helper bodies rather than copy them into <code>character.state</code>.</li>
+      <li>Keep failure ownership clear: Character State Engine may raise validation errors, but Role Model Loop still logs context-build failure because that is where the model call would have happened.</li>
+      <li>If a helper is still only used by the Role Model Loop compatibility wrapper after the move, keep it private or re-export narrowly; do not create a broad public API.</li>
+      <li>Implementation note: chose <code>src/character/state/context.py</code> as the smallest clear boundary. It owns the existing <code>DecisionContext</code> assembly, recent-message source request/selection logic, visible-conversation adapter, living-state source read, and active-incident source read.</li>
+      <li>Implementation note: <code>role_model.loop.build_decision_context()</code> remains as a compatibility shim that delegates to <code>build_character_decision_context()</code> and converts Character State Engine validation failures to <code>RoleModelValidationError</code> so existing failure logs keep <code>stage = "context_build"</code>.</li>
+      <li>Implementation note: the current <code>DecisionContext</code> shape, role-model input rendering, parser behavior, user-turn ordering, and raw log shapes were preserved; no retrieval, context-build log, storage, body-state, directive, private-call, or lifecycle behavior was added.</li>
+      <li>Known design divergence: the current model input still uses a broad <code>DecisionContext</code> carrying <code>call_type</code>, <code>event</code>, and <code>allowed_actions</code>. MVP-015 preserves this shape intentionally. MVP-016 should split the outer <code>RoleModelInputEnvelope</code> from the inner compact <code>DecisionContext</code>.</li>
+    </ul>
+
+    <h2>Open Questions</h2>
+    <ul>
+      <li>Resolved for MVP-015: the new module is <code>character.state.context</code> so current-state read helpers can stay in <code>character.state.current</code> while context assembly has a clear boundary.</li>
+      <li>Resolved for MVP-015: <code>role_model.loop.build_decision_context()</code> remains as a compatibility shim to avoid caller churn while delegating implementation ownership to Character State Engine.</li>
+      <li>When should dedicated context-build raw logs be added? Not in MVP-015.</li>
+      <li>When should retrieval and active-thread context join this builder? Not in MVP-015.</li>
+    </ul>
+
+    <h2>Future Ideas Discovered During Planning</h2>
+    <ul>
+      <li>Dedicated <code>decision_context_built</code> raw log entries with source requests, accepted records, rejected records, and context budget usage.</li>
+      <li>Retrieval planner and <code>context.retrieve()</code> tool backed by a Unified Retrieval Index.</li>
+      <li>Context builder support for active threads, body state, scheduled directives, interrupted incidents, completed incidents, and private event call types.</li>
+      <li>MVP-016 split of the outer <code>RoleModelInputEnvelope</code> from the inner compact <code>DecisionContext</code>.</li>
+      <li>Shared visible conversation message contract if another production boundary consumes committed visible transcript records.</li>
+      <li>Context budget policy after retrieved context, active threads, or tool results create real pressure.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Completed and merged through <a href="https://github.com/QuellaMC/Project02/pull/18">PR #18</a>.
+      The next active slice is <a href="../active-slice.html">MVP-016 - Role Model Input Envelope Split v0.1</a>.
+    </p>
+  </main>
+</body>
+</html>

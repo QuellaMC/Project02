@@ -563,7 +563,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         )
         character_snapshot = adapter.calls[0]["decision_context"]["character_snapshot"]
         self.assertEqual(character_snapshot["active_incident"], active_incident_brief())
-        self.assertNotIn("life_action", adapter.calls[0]["decision_context"]["allowed_actions"])
+        self.assertNotIn("life_action", adapter.calls[0]["allowed_actions"])
         self.assertEqual(
             raw_log.entries[2]["data"]["model_input"]["decision_context"]["character_snapshot"][
                 "active_incident"
@@ -657,7 +657,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "user_turn_committed")
         self.assertEqual(
-            adapter.calls[0]["decision_context"]["allowed_actions"],
+            adapter.calls[0]["allowed_actions"],
             ["visible_reply", "life_action"],
         )
         self.assertEqual(
@@ -1435,7 +1435,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "user_turn_committed")
         self.assertEqual(
-            adapter.calls[0]["decision_context"]["allowed_actions"],
+            adapter.calls[0]["allowed_actions"],
             ["visible_reply", "state_patch"],
         )
         self.assertEqual(
@@ -1605,7 +1605,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "user_turn_committed")
         self.assertEqual(
-            adapter.calls[0]["decision_context"]["allowed_actions"],
+            adapter.calls[0]["allowed_actions"],
             ["visible_reply", "state_patch"],
         )
         self.assertEqual(
