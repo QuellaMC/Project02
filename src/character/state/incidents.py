@@ -49,6 +49,7 @@ SINGLE_USER_SELF_USE_SCOPE_MODE = "single_user_self_use"
 
 class CommittedSuccessRawEventLog(Protocol):
     def expose_committed_success_entry(self, entry: RawEventLogEntry) -> None: ...
+    def confirm_committed_success_entry(self, entry: RawEventLogEntry) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,7 @@ class InMemoryLifeIncidentStore:
         committed_log_entry = validated_request["committed_log_entry"]
         try:
             self._raw_event_log.expose_committed_success_entry(committed_log_entry)
+            self._raw_event_log.confirm_committed_success_entry(committed_log_entry)
         except RawEventLogQueryValidationError as error:
             raise LifeIncidentCancelFinalizerError(
                 str(error),

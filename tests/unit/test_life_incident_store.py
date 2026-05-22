@@ -56,6 +56,13 @@ class RejectingCancelRawEventLog(InMemoryRawEventLog):
         super().expose_committed_success_entry(entry)
 
 
+class RejectingCancelConfirmRawEventLog(InMemoryRawEventLog):
+    def confirm_committed_success_entry(self, entry):
+        if entry["kind"] == "life_incident_cancelled":
+            raise RawEventLogQueryValidationError("cancel visibility confirm failed")
+        super().confirm_committed_success_entry(entry)
+
+
 def normalized_user_message(
     *,
     event_id="event-1",
@@ -689,6 +696,47 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
         self.assertEqual(
             store.read_active_incident(build_active_incident_request(cancel_event)),
             active_incident,
+        )
+
+    def test_cancel_visibility_confirm_failure_rejects_without_clearing_active_incident(self):
+        raw_log = RejectingCancelConfirmRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        start_event = normalized_user_message(event_id="event-1", trace_id="trace-1")
+        cancel_event = normalized_user_message(event_id="event-2", trace_id="trace-2")
+        ids = SequenceIdGenerator()
+        commit_life_incident_start(
+            start_event,
+            role_model_result_with_incident(event_id="event-1", trace_id="trace-1"),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+        active_incident = deepcopy(
+            store.read_active_incident(build_active_incident_request(cancel_event))
+        )
+
+        result = commit_life_incident_cancel(
+            cancel_event,
+            role_model_result_with_cancel(),
+            active_incident_source=store,
+            life_incident_cancel_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_CANCEL_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], "life_incident_cancel_finalize")
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertIn("cancel visibility confirm failed", result["failure"]["message"])
+        self.assertEqual(
+            store.read_active_incident(build_active_incident_request(cancel_event)),
+            active_incident,
+        )
+        self.assertEqual(
+            raw_log.query({"trace_id": "trace-2", "kinds": ["life_incident_cancelled"]})["entries"],
+            [],
         )
 
     def test_raw_log_mismatch_rejects_cancel_before_staging_or_clearing_active_incident(self):
