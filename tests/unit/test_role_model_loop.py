@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from role_model.loop import (  # noqa: E402
+    INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS,
     INCIDENT_START_ROLE_MODEL_INSTRUCTIONS,
     RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES,
     RECENT_VISIBLE_MESSAGES_MAX_MESSAGES,
@@ -866,6 +867,27 @@ class DecisionContextTests(unittest.TestCase):
         self.assertEqual(model_input["allowed_actions"], ["visible_reply", "life_action"])
         self.assertNotIn("allowed_actions", model_input["decision_context"])
 
+    def test_renders_life_action_output_contract_only_for_incident_cancel_opt_in(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
+            allow_incident_cancel=True,
+        )
+
+        model_input = render_context(normalized_user_message(), context, allow_incident_cancel=True)
+
+        self.assertEqual(model_input["instructions"], INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS)
+        self.assertIn("life_action", model_input["instructions"])
+        self.assertIn("cancel_incident", model_input["instructions"])
+        self.assertIn("incident_id", model_input["instructions"])
+        self.assertIn("reason", model_input["instructions"])
+        self.assertEqual(model_input["allowed_actions"], ["visible_reply", "life_action"])
+        self.assertEqual(
+            model_input["decision_context"]["character_snapshot"]["active_incident"],
+            active_incident_brief(),
+        )
+        self.assertNotIn("allowed_actions", model_input["decision_context"])
+
     def test_rejects_state_patch_and_life_action_composition_before_render(self):
         with self.assertRaisesRegex(RoleModelValidationError, "current USER_MESSAGE turn"):
             build_decision_context(
@@ -873,6 +895,14 @@ class DecisionContextTests(unittest.TestCase):
                 current_state_source=RecordingCurrentStateSource(current_state_snapshot()),
                 allow_state_patch=True,
                 allow_incident_start=True,
+            )
+
+        with self.assertRaisesRegex(RoleModelValidationError, "current USER_MESSAGE turn"):
+            build_decision_context(
+                normalized_user_message(),
+                active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
+                allow_incident_start=True,
+                allow_incident_cancel=True,
             )
 
     def test_model_input_validation_rejects_malformed_envelope_event(self):
@@ -1471,6 +1501,52 @@ class CharacterDecisionParserTests(unittest.TestCase):
             },
         )
 
+    def test_parses_valid_visible_reply_with_allowed_cancel_incident_life_action(self):
+        event = normalized_user_message()
+        model_input = render_context(
+            event,
+            build_decision_context(
+                event,
+                active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
+                allow_incident_cancel=True,
+            ),
+            allow_incident_cancel=True,
+        )
+
+        decision = parse_character_decision(
+            model_input,
+            adapter_output(
+                json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": " Hi there. "},
+                        "life_action": {
+                            "type": "cancel_incident",
+                            "incident_id": " incident-1 ",
+                            "reason": " User needs attention now. ",
+                        },
+                    }
+                )
+            ),
+        )
+
+        self.assertEqual(
+            decision,
+            {
+                "schema_version": "0.1",
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "action": "visible_reply",
+                "visible_reply": {"text": "Hi there."},
+                "life_action": {
+                    "type": "cancel_incident",
+                    "incident_id": "incident-1",
+                    "reason": "User needs attention now.",
+                },
+            },
+        )
+
     def test_rejects_life_action_when_model_input_did_not_allow_it(self):
         with self.assertRaisesRegex(RoleModelValidationError, "life_action"):
             parse_character_decision(
@@ -1557,6 +1633,114 @@ class CharacterDecisionParserTests(unittest.TestCase):
             (
                 start_incident_action(incident_draft(started_at="2026-05-14T11:31:00+00:00")),
                 "started_at",
+            ),
+        ]
+
+        for life_action, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    parse_character_decision(
+                        model_input,
+                        adapter_output(
+                            json.dumps(
+                                {
+                                    "schema_version": "0.1",
+                                    "action": "visible_reply",
+                                    "visible_reply": {"text": "hello"},
+                                    "life_action": life_action,
+                                }
+                            )
+                        ),
+                    )
+
+    def test_rejects_wrong_life_action_subtype_for_opt_in(self):
+        event = normalized_user_message()
+        start_model_input = render_context(
+            event,
+            build_decision_context(event, allow_incident_start=True),
+            allow_incident_start=True,
+        )
+        cancel_model_input = render_context(
+            event,
+            build_decision_context(
+                event,
+                active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
+                allow_incident_cancel=True,
+            ),
+            allow_incident_cancel=True,
+        )
+
+        with self.assertRaisesRegex(RoleModelValidationError, "start_incident"):
+            parse_character_decision(
+                start_model_input,
+                adapter_output(
+                    json.dumps(
+                        {
+                            "schema_version": "0.1",
+                            "action": "visible_reply",
+                            "visible_reply": {"text": "hello"},
+                            "life_action": {
+                                "type": "cancel_incident",
+                                "incident_id": "incident-1",
+                                "reason": "stop",
+                            },
+                        }
+                    )
+                ),
+            )
+
+        with self.assertRaisesRegex(RoleModelValidationError, "cancel_incident"):
+            parse_character_decision(
+                cancel_model_input,
+                adapter_output(
+                    json.dumps(
+                        {
+                            "schema_version": "0.1",
+                            "action": "visible_reply",
+                            "visible_reply": {"text": "hello"},
+                            "life_action": {
+                                "type": "start_incident",
+                                "incident": {
+                                    "type": "think",
+                                    "title": "Think",
+                                    "interrupt_policy": "interruptible",
+                                    "resume_policy": "resume",
+                                },
+                            },
+                        }
+                    )
+                ),
+            )
+
+    def test_rejects_malformed_allowed_cancel_incident_life_action(self):
+        event = normalized_user_message()
+        model_input = render_context(
+            event,
+            build_decision_context(
+                event,
+                active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
+                allow_incident_cancel=True,
+            ),
+            allow_incident_cancel=True,
+        )
+
+        cases = [
+            (
+                {"type": "cancel_incident", "incident_id": "", "reason": "stop"},
+                "incident_id",
+            ),
+            (
+                {"type": "cancel_incident", "incident_id": "incident-1", "reason": ""},
+                "reason",
+            ),
+            (
+                {
+                    "type": "cancel_incident",
+                    "incident_id": "incident-1",
+                    "reason": "stop",
+                    "cancelled_at": "2026-05-14T11:31:00+00:00",
+                },
+                "cancelled_at",
             ),
         ]
 

@@ -5,10 +5,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from runtime.contracts import (  # noqa: E402
+    CANCEL_INCIDENT_ACTION,
     DECISION_READY_FOR_COMMIT_STATUS,
+    START_INCIDENT_ACTION,
     USER_MESSAGE,
     VISIBLE_REPLY_ACTION,
     ContractValidationError,
+    normalize_cancel_incident_life_action,
     normalize_living_state_patch,
     normalize_role_model_turn_result,
     normalize_start_incident_life_action,
@@ -229,6 +232,84 @@ class RuntimeContractTests(unittest.TestCase):
             },
         )
 
+    def test_normalizes_visible_reply_with_optional_cancel_incident_life_action(self):
+        decision = normalize_visible_reply_decision_with_optional_life_action(
+            {
+                "schema_version": "0.1",
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "action": "visible_reply",
+                "visible_reply": {"text": " hello back "},
+                "life_action": {
+                    "type": "cancel_incident",
+                    "incident_id": " incident-1 ",
+                    "reason": " User needs me now. ",
+                },
+            },
+            trace_id="trace-1",
+            event_id="event-1",
+            require_attached_ids=True,
+            allow_life_action=True,
+            allowed_life_action_type=CANCEL_INCIDENT_ACTION,
+        )
+
+        self.assertEqual(decision["visible_reply"]["text"], "hello back")
+        self.assertEqual(
+            decision["life_action"],
+            {
+                "type": "cancel_incident",
+                "incident_id": "incident-1",
+                "reason": "User needs me now.",
+            },
+        )
+
+    def test_life_action_subtype_must_match_opt_in(self):
+        with self.assertRaisesRegex(ContractValidationError, "start_incident"):
+            normalize_visible_reply_decision_with_optional_life_action(
+                {
+                    "schema_version": "0.1",
+                    "trace_id": "trace-1",
+                    "event_id": "event-1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "life_action": {
+                        "type": "cancel_incident",
+                        "incident_id": "incident-1",
+                        "reason": "stop",
+                    },
+                },
+                trace_id="trace-1",
+                event_id="event-1",
+                require_attached_ids=True,
+                allow_life_action=True,
+                allowed_life_action_type=START_INCIDENT_ACTION,
+            )
+
+        with self.assertRaisesRegex(ContractValidationError, "cancel_incident"):
+            normalize_visible_reply_decision_with_optional_life_action(
+                {
+                    "schema_version": "0.1",
+                    "trace_id": "trace-1",
+                    "event_id": "event-1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                    "life_action": {
+                        "type": "start_incident",
+                        "incident": {
+                            "type": "think",
+                            "title": "Think",
+                            "interrupt_policy": "interruptible",
+                            "resume_policy": "ask_model",
+                        },
+                    },
+                },
+                trace_id="trace-1",
+                event_id="event-1",
+                require_attached_ids=True,
+                allow_life_action=True,
+                allowed_life_action_type=CANCEL_INCIDENT_ACTION,
+            )
+
     def test_rejects_life_action_when_not_allowed(self):
         with self.assertRaisesRegex(ContractValidationError, "life_action"):
             normalize_visible_reply_decision_with_optional_life_action(
@@ -348,6 +429,29 @@ class RuntimeContractTests(unittest.TestCase):
             with self.subTest(error_pattern=error_pattern):
                 with self.assertRaisesRegex(ContractValidationError, error_pattern):
                     normalize_start_incident_life_action(life_action)
+
+    def test_cancel_incident_life_action_rejects_malformed_payloads(self):
+        cases = [
+            ({"type": "start_incident", "incident_id": "incident-1", "reason": "stop"}, "type"),
+            ({"type": "cancel_incident", "incident_id": " ", "reason": "stop"}, "incident_id"),
+            ({"type": "cancel_incident", "incident_id": "incident-1", "reason": " "}, "reason"),
+            (
+                {
+                    "type": "cancel_incident",
+                    "incident_id": "incident-1",
+                    "reason": "stop",
+                    "status": "cancelled",
+                },
+                "status",
+            ),
+            ({"type": "cancel_incident", "incident_id": "incident-1"}, "reason"),
+            ({"type": "cancel_incident", "reason": "stop"}, "incident_id"),
+        ]
+
+        for life_action, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(ContractValidationError, error_pattern):
+                    normalize_cancel_incident_life_action(life_action)
 
     def test_rejects_life_action_and_state_patch_composition(self):
         with self.assertRaisesRegex(ContractValidationError, "state_patch and life_action"):
