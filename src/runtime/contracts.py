@@ -12,6 +12,7 @@ VISIBLE_REPLY_ACTION = "visible_reply"
 STATE_PATCH_ACTION = "state_patch"
 LIFE_ACTION = "life_action"
 START_INCIDENT_ACTION = "start_incident"
+CANCEL_INCIDENT_ACTION = "cancel_incident"
 DECISION_READY_FOR_COMMIT_STATUS = "decision_ready_for_commit"
 ASSISTANT_VISIBLE_REPLY_KIND = "assistant_visible_reply"
 USER_VISIBLE_MESSAGE_KIND = "user_visible_message"
@@ -138,6 +139,7 @@ def normalize_visible_reply_decision_with_optional_living_state_patch(
     require_attached_ids: bool,
     allow_state_patch: bool,
     allow_life_action: bool = False,
+    allowed_life_action_type: str = START_INCIDENT_ACTION,
     source_name: str = "CharacterDecision",
 ) -> CharacterDecision:
     return _normalize_visible_reply_decision_with_optional_extensions(
@@ -147,6 +149,7 @@ def normalize_visible_reply_decision_with_optional_living_state_patch(
         require_attached_ids=require_attached_ids,
         allow_state_patch=allow_state_patch,
         allow_life_action=allow_life_action,
+        allowed_life_action_type=allowed_life_action_type,
         source_name=source_name,
     )
 
@@ -158,6 +161,7 @@ def normalize_visible_reply_decision_with_optional_life_action(
     event_id: str,
     require_attached_ids: bool,
     allow_life_action: bool,
+    allowed_life_action_type: str = START_INCIDENT_ACTION,
     source_name: str = "CharacterDecision",
 ) -> CharacterDecision:
     return _normalize_visible_reply_decision_with_optional_extensions(
@@ -167,6 +171,7 @@ def normalize_visible_reply_decision_with_optional_life_action(
         require_attached_ids=require_attached_ids,
         allow_state_patch=False,
         allow_life_action=allow_life_action,
+        allowed_life_action_type=allowed_life_action_type,
         source_name=source_name,
     )
 
@@ -179,6 +184,7 @@ def _normalize_visible_reply_decision_with_optional_extensions(
     require_attached_ids: bool,
     allow_state_patch: bool,
     allow_life_action: bool,
+    allowed_life_action_type: str = START_INCIDENT_ACTION,
     source_name: str,
 ) -> CharacterDecision:
     if allow_state_patch and allow_life_action:
@@ -227,11 +233,27 @@ def _normalize_visible_reply_decision_with_optional_extensions(
             source_name=f"{source_name}.state_patch",
         )
     if "life_action" in decision:
-        normalized["life_action"] = normalize_start_incident_life_action(
+        normalized["life_action"] = normalize_life_action(
             decision["life_action"],
+            allowed_life_action_type=allowed_life_action_type,
             source_name=f"{source_name}.life_action",
         )
     return normalized
+
+
+def normalize_life_action(
+    life_action: Any,
+    *,
+    allowed_life_action_type: str,
+    source_name: str = "life_action",
+) -> dict[str, Any]:
+    if allowed_life_action_type == START_INCIDENT_ACTION:
+        return normalize_start_incident_life_action(life_action, source_name=source_name)
+    if allowed_life_action_type == CANCEL_INCIDENT_ACTION:
+        return normalize_cancel_incident_life_action(life_action, source_name=source_name)
+    raise ContractValidationError(
+        "allowed_life_action_type must be 'start_incident' or 'cancel_incident'."
+    )
 
 
 def normalize_start_incident_life_action(
@@ -241,12 +263,12 @@ def normalize_start_incident_life_action(
 ) -> dict[str, Any]:
     if not isinstance(life_action, Mapping):
         raise ContractValidationError(f"{source_name} must be a mapping.")
-    reject_extra_keys(life_action, {"type", "incident"}, source_name)
     action_type = require_equal(
         life_action.get("type"),
         START_INCIDENT_ACTION,
         f"{source_name}.type",
     )
+    reject_extra_keys(life_action, {"type", "incident"}, source_name)
     incident = life_action.get("incident")
     if not isinstance(incident, Mapping):
         raise ContractValidationError(f"{source_name}.incident must be a mapping.")
@@ -286,6 +308,35 @@ def normalize_start_incident_life_action(
     return {
         "type": action_type,
         "incident": normalized_incident,
+    }
+
+
+def normalize_cancel_incident_life_action(
+    life_action: Any,
+    *,
+    source_name: str = "life_action",
+) -> dict[str, str]:
+    if not isinstance(life_action, Mapping):
+        raise ContractValidationError(f"{source_name} must be a mapping.")
+    action_type = require_equal(
+        life_action.get("type"),
+        CANCEL_INCIDENT_ACTION,
+        f"{source_name}.type",
+    )
+    reject_extra_keys(life_action, {"type", "incident_id", "reason"}, source_name)
+    incident_id = require_string(
+        life_action.get("incident_id"),
+        f"{source_name}.incident_id",
+    ).strip()
+    reason = require_string(life_action.get("reason"), f"{source_name}.reason").strip()
+    if not incident_id:
+        raise ContractValidationError(f"{source_name}.incident_id must be a non-empty string.")
+    if not reason:
+        raise ContractValidationError(f"{source_name}.reason must be a non-empty string.")
+    return {
+        "type": action_type,
+        "incident_id": incident_id,
+        "reason": reason,
     }
 
 

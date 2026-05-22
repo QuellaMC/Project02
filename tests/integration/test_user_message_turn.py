@@ -289,6 +289,63 @@ class RecordingLifeIncidentStartFinalizer:
         }
 
 
+class RecordingLifeIncidentCancelFinalizer:
+    def __init__(
+        self,
+        error=None,
+        result_override=None,
+        operations=None,
+        raw_log_visibility=None,
+        expose_before_result_override=False,
+        append_before_result_override=False,
+        expose_conflicting_success=False,
+    ):
+        self.error = error
+        self.result_override = deepcopy(result_override)
+        self.operations = operations if operations is not None else []
+        self.raw_log_visibility = raw_log_visibility
+        self.expose_before_result_override = expose_before_result_override
+        self.append_before_result_override = append_before_result_override
+        self.expose_conflicting_success = expose_conflicting_success
+        self.requests = []
+        self.completion_requests = []
+        self.durable_cancelled_incidents = []
+        self.durable_raw_event_log_entries = []
+
+    def finalize_life_incident_cancel(self, request):
+        self.requests.append(deepcopy(request))
+        if self.error is not None:
+            raise self.error
+        if self.raw_log_visibility is not None and self.expose_conflicting_success:
+            self.raw_log_visibility.expose_committed_success_entry(request["committed_log_entry"])
+            conflicting_entry = deepcopy(request["committed_log_entry"])
+            conflicting_entry["data"]["visibility_conflict"] = True
+            self.raw_log_visibility.expose_committed_success_entry(conflicting_entry)
+        if self.result_override is not None:
+            if self.raw_log_visibility is not None and self.append_before_result_override:
+                self.raw_log_visibility.append(request["committed_log_entry"])
+            if self.raw_log_visibility is not None and self.expose_before_result_override:
+                self.raw_log_visibility.expose_committed_success_entry(
+                    request["committed_log_entry"]
+                )
+            return deepcopy(self.result_override)
+        if self.raw_log_visibility is not None:
+            self.raw_log_visibility.expose_committed_success_entry(request["committed_log_entry"])
+        return {
+            "schema_version": "0.1",
+            "trace_id": request["trace_id"],
+            "event_id": request["event_id"],
+            "event_type": request["event_type"],
+            "committed_log_entry_id": request["committed_log_entry"]["log_id"],
+        }
+
+    def complete_life_incident_cancel_after_log_visible(self, request):
+        self.completion_requests.append(deepcopy(request))
+        self.durable_cancelled_incidents.append(deepcopy(request["cancelled_incident"]))
+        self.durable_raw_event_log_entries.append(deepcopy(request["committed_log_entry"]))
+        self.operations.append(("atomic_finalizer", request["committed_log_entry"]["kind"]))
+
+
 def prior_user_record():
     return {
         "schema_version": "0.1",
@@ -843,6 +900,277 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             ],
         )
 
+    def test_incident_cancel_enabled_turn_with_concrete_store_clears_incident_before_reply(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        start_event = {
+            "event_id": "event-start",
+            "trace_id": "trace-start",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:25:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "go think",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+        run_user_message_turn(
+            start_event,
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "thinking"},
+                        "life_action": {
+                            "type": "start_incident",
+                            "incident": {
+                                "type": "think",
+                                "title": "thinking through the plan",
+                                "remaining_seconds": 300,
+                                "interrupt_policy": "interruptible",
+                                "resume_policy": "ask_model",
+                            },
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_store,
+        )
+        active_incident = life_incident_store.read_active_incident(
+            build_active_incident_request(start_event)
+        )
+        cancel_event = {
+            "event_id": "event-cancel",
+            "trace_id": "trace-cancel",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:31:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "stop thinking and answer",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+
+        result = run_user_message_turn(
+            cancel_event,
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "hello back"},
+                        "life_action": {
+                            "type": "cancel_incident",
+                            "incident_id": active_incident["incident_id"],
+                            "reason": "User needs an immediate answer.",
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            active_incident_source=life_incident_store,
+            life_incident_cancel_finalizer=life_incident_store,
+        )
+
+        cancel_entries = raw_log.query({"trace_id": "trace-cancel"})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": "trace-cancel", "kinds": ["life_incident_cancelled"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            result["life_incident_cancel_result"]["cancelled_incident"]["incident_id"],
+            active_incident["incident_id"],
+        )
+        self.assertIsNone(
+            life_incident_store.read_active_incident(build_active_incident_request(cancel_event))
+        )
+        self.assertEqual(
+            [entry["kind"] for entry in cancel_entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "life_incident_cancelled",
+                "visible_reply_committed",
+            ],
+        )
+        self.assertEqual(len(success_entries), 1)
+        self.assertEqual(
+            result["life_incident_cancel_result"]["committed_log_entry_id"],
+            success_entries[0]["log_id"],
+        )
+        self.assertEqual(visible_conversation.records[-1]["text"], "hello back")
+
+    def test_incident_cancel_enabled_turn_with_no_active_incident_stops_before_reply(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-cancel",
+                "trace_id": "trace-cancel",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "stop",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "hello back"},
+                        "life_action": {
+                            "type": "cancel_incident",
+                            "incident_id": "incident-missing",
+                            "reason": "User needs attention.",
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            active_incident_source=life_incident_store,
+            life_incident_cancel_finalizer=life_incident_store,
+        )
+
+        entries = raw_log.query({"trace_id": "trace-cancel"})["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["stopped_at"], "life_incident_cancel_commit")
+        self.assertEqual(result["failure"]["code"], "no_active_incident")
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "life_incident_cancel_rejected",
+            ],
+        )
+        self.assertEqual(
+            [record["kind"] for record in visible_conversation.records],
+            [
+                "user_visible_message",
+                "user_visible_message",
+            ],
+        )
+
+    def test_incident_cancel_enabled_turn_with_mismatched_id_preserves_active_incident(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        start_event = {
+            "event_id": "event-start",
+            "trace_id": "trace-start",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:25:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "go think",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+        run_user_message_turn(
+            start_event,
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "thinking"},
+                        "life_action": {
+                            "type": "start_incident",
+                            "incident": {
+                                "type": "think",
+                                "title": "thinking through the plan",
+                                "interrupt_policy": "interruptible",
+                                "resume_policy": "ask_model",
+                            },
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_store,
+        )
+        original_active = deepcopy(
+            life_incident_store.read_active_incident(build_active_incident_request(start_event))
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-cancel",
+                "trace_id": "trace-cancel",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:31:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "stop",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "hello back"},
+                        "life_action": {
+                            "type": "cancel_incident",
+                            "incident_id": "incident-other",
+                            "reason": "User needs attention.",
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            active_incident_source=life_incident_store,
+            life_incident_cancel_finalizer=life_incident_store,
+        )
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["failure"]["code"], "incident_id_mismatch")
+        self.assertEqual(
+            life_incident_store.read_active_incident(build_active_incident_request(start_event)),
+            original_active,
+        )
+        self.assertEqual(
+            raw_log.query({"trace_id": "trace-cancel", "kinds": ["life_incident_cancelled"]})[
+                "entries"
+            ],
+            [],
+        )
+
     def test_incident_start_enabled_turn_without_life_action_preserves_visible_reply_flow(self):
         raw_log = RecordingRawEventLog()
         visible_conversation = InMemoryVisibleConversation([prior_user_record()])
@@ -1370,7 +1698,8 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         self.assertEqual(result["stopped_at"], "user_turn_preflight")
         self.assertEqual(result["failure"]["stage"], "user_turn_preflight")
         self.assertEqual(result["failure"]["code"], "conflicting_write_action_opt_in")
-        self.assertIn("current USER_MESSAGE turn", result["failure"]["message"])
+        self.assertIn("Only one write-action opt-in", result["failure"]["message"])
+        self.assertIn("cancel_incident", result["failure"]["message"])
         self.assertNotIn("user_visible_message_result", result)
         self.assertNotIn("role_model_result", result)
         self.assertNotIn("visible_reply_result", result)
