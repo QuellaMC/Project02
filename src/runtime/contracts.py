@@ -13,6 +13,7 @@ STATE_PATCH_ACTION = "state_patch"
 LIFE_ACTION = "life_action"
 START_INCIDENT_ACTION = "start_incident"
 CANCEL_INCIDENT_ACTION = "cancel_incident"
+COMPLETE_INCIDENT_ACTION = "complete_incident"
 DECISION_READY_FOR_COMMIT_STATUS = "decision_ready_for_commit"
 ASSISTANT_VISIBLE_REPLY_KIND = "assistant_visible_reply"
 USER_VISIBLE_MESSAGE_KIND = "user_visible_message"
@@ -251,8 +252,11 @@ def normalize_life_action(
         return normalize_start_incident_life_action(life_action, source_name=source_name)
     if allowed_life_action_type == CANCEL_INCIDENT_ACTION:
         return normalize_cancel_incident_life_action(life_action, source_name=source_name)
+    if allowed_life_action_type == COMPLETE_INCIDENT_ACTION:
+        return normalize_complete_incident_life_action(life_action, source_name=source_name)
     raise ContractValidationError(
-        "allowed_life_action_type must be 'start_incident' or 'cancel_incident'."
+        "allowed_life_action_type must be 'start_incident', "
+        "'cancel_incident', or 'complete_incident'."
     )
 
 
@@ -337,6 +341,31 @@ def normalize_cancel_incident_life_action(
         "type": action_type,
         "incident_id": incident_id,
         "reason": reason,
+    }
+
+
+def normalize_complete_incident_life_action(
+    life_action: Any,
+    *,
+    source_name: str = "life_action",
+) -> dict[str, str]:
+    if not isinstance(life_action, Mapping):
+        raise ContractValidationError(f"{source_name} must be a mapping.")
+    action_type = require_equal(
+        life_action.get("type"),
+        COMPLETE_INCIDENT_ACTION,
+        f"{source_name}.type",
+    )
+    reject_extra_keys(life_action, {"type", "incident_id"}, source_name)
+    incident_id = require_string(
+        life_action.get("incident_id"),
+        f"{source_name}.incident_id",
+    ).strip()
+    if not incident_id:
+        raise ContractValidationError(f"{source_name}.incident_id must be a non-empty string.")
+    return {
+        "type": action_type,
+        "incident_id": incident_id,
     }
 
 

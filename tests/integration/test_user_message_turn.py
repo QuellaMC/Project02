@@ -1171,6 +1171,274 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             [],
         )
 
+    def test_incident_complete_enabled_turn_with_concrete_store_clears_incident_before_reply(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        start_event = {
+            "event_id": "event-start",
+            "trace_id": "trace-start",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:25:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "go think",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+        run_user_message_turn(
+            start_event,
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "thinking"},
+                        "life_action": {
+                            "type": "start_incident",
+                            "incident": {
+                                "type": "think",
+                                "title": "thinking through the plan",
+                                "remaining_seconds": 300,
+                                "interrupt_policy": "interruptible",
+                                "resume_policy": "ask_model",
+                            },
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_store,
+        )
+        active_incident = life_incident_store.read_active_incident(
+            build_active_incident_request(start_event)
+        )
+        complete_event = {
+            "event_id": "event-complete",
+            "trace_id": "trace-complete",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:31:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "that task is done",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+
+        result = run_user_message_turn(
+            complete_event,
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "hello back"},
+                        "life_action": {
+                            "type": "complete_incident",
+                            "incident_id": active_incident["incident_id"],
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            active_incident_source=life_incident_store,
+            life_incident_complete_finalizer=life_incident_store,
+        )
+
+        complete_entries = raw_log.query({"trace_id": "trace-complete"})["entries"]
+        success_entries = raw_log.query(
+            {"trace_id": "trace-complete", "kinds": ["life_incident_completed"]}
+        )["entries"]
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            result["life_incident_complete_result"]["completed_incident"]["incident_id"],
+            active_incident["incident_id"],
+        )
+        self.assertIsNone(
+            life_incident_store.read_active_incident(build_active_incident_request(complete_event))
+        )
+        self.assertEqual(
+            [entry["kind"] for entry in complete_entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "life_incident_completed",
+                "visible_reply_committed",
+            ],
+        )
+        self.assertEqual(len(success_entries), 1)
+        self.assertEqual(
+            result["life_incident_complete_result"]["committed_log_entry_id"],
+            success_entries[0]["log_id"],
+        )
+        self.assertEqual(visible_conversation.records[-1]["text"], "hello back")
+
+    def test_incident_complete_enabled_turn_with_no_active_incident_stops_before_reply(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-complete",
+                "trace_id": "trace-complete",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "done",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "hello back"},
+                        "life_action": {
+                            "type": "complete_incident",
+                            "incident_id": "incident-missing",
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            active_incident_source=life_incident_store,
+            life_incident_complete_finalizer=life_incident_store,
+        )
+
+        entries = raw_log.query({"trace_id": "trace-complete"})["entries"]
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["stopped_at"], "life_incident_complete_commit")
+        self.assertEqual(result["failure"]["code"], "no_active_incident")
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "life_incident_complete_rejected",
+            ],
+        )
+        self.assertEqual(
+            [record["kind"] for record in visible_conversation.records],
+            [
+                "user_visible_message",
+                "user_visible_message",
+            ],
+        )
+
+    def test_incident_complete_enabled_turn_with_mismatched_id_preserves_active_incident(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        start_event = {
+            "event_id": "event-start",
+            "trace_id": "trace-start",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:25:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "go think",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+        run_user_message_turn(
+            start_event,
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "thinking"},
+                        "life_action": {
+                            "type": "start_incident",
+                            "incident": {
+                                "type": "think",
+                                "title": "thinking through the plan",
+                                "interrupt_policy": "interruptible",
+                                "resume_policy": "ask_model",
+                            },
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_store,
+        )
+        original_active = deepcopy(
+            life_incident_store.read_active_incident(build_active_incident_request(start_event))
+        )
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-complete",
+                "trace_id": "trace-complete",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:31:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "done",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "hello back"},
+                        "life_action": {
+                            "type": "complete_incident",
+                            "incident_id": "incident-other",
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            active_incident_source=life_incident_store,
+            life_incident_complete_finalizer=life_incident_store,
+        )
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["failure"]["code"], "incident_id_mismatch")
+        self.assertEqual(
+            life_incident_store.read_active_incident(build_active_incident_request(start_event)),
+            original_active,
+        )
+        self.assertEqual(
+            raw_log.query({"trace_id": "trace-complete", "kinds": ["life_incident_completed"]})[
+                "entries"
+            ],
+            [],
+        )
+
     def test_incident_start_enabled_turn_without_life_action_preserves_visible_reply_flow(self):
         raw_log = RecordingRawEventLog()
         visible_conversation = InMemoryVisibleConversation([prior_user_record()])
