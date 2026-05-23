@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from character.state.current import (
     ActiveIncidentSource,
     build_active_incident_request,
     validate_active_incident_snapshot,
+)
+from commit_effects.incident_lifecycle import (
+    IncidentLifecycleCommitConfig,
+    IncidentLifecycleCommitHooks,
+    commit_life_incident_lifecycle_transition,
 )
 from runtime.contracts import (
     CANCEL_INCIDENT_ACTION,
@@ -34,9 +38,6 @@ from runtime.logging import (
     RawEventLogEntry,
     RawEventLogQueryValidationError,
     build_raw_log_entry,
-    clock_timestamp,
-    confirm_committed_success_entry_visibility,
-    discard_committed_success_entry_visibility,
     validate_raw_event_log_entry,
 )
 
@@ -140,151 +141,53 @@ def commit_life_incident_cancel(
     clock: Clock,
 ) -> LifeIncidentCancelCommitResult:
     source_identity = _extract_trusted_source_identity(source_event)
-    request: LifeIncidentCancelCommitRequest | None = None
-    life_action: Mapping[str, Any] | None = None
-    active_incident: Mapping[str, Any] | None = None
-    cancelled_incident: Mapping[str, Any] | None = None
-    committed_log_entry: RawEventLogEntry | None = None
-    finalize_request: LifeIncidentCancelFinalizeRequest | None = None
-
-    try:
-        request = build_life_incident_cancel_commit_request(source_event, role_model_result)
-        if request is None:
-            return {
-                "schema_version": SCHEMA_VERSION,
-                "trace_id": source_identity["trace_id"],
-                "event_id": source_identity["event_id"],
-                "event_type": USER_MESSAGE,
-                "status": LIFE_INCIDENT_CANCEL_SKIPPED_STATUS,
-            }
-        life_action = _life_action_from_commit_request(request)
-        active_incident = _read_active_incident_for_cancel(
-            source_event,
-            active_incident_source=active_incident_source,
-        )
-        if active_incident["incident_id"] != request["incident_id"]:
-            raise LifeIncidentCancelCommitValidationError(
-                "life_action.incident_id must match the current active incident.",
-                code="incident_id_mismatch",
-            )
-        commit_time = clock_timestamp(clock)
-        request["commit_time"] = commit_time
-        cancelled_incident = build_cancelled_life_incident_snapshot(
-            active_incident,
-            request,
-        )
-        committed_log_entry = build_life_incident_cancelled_log_entry(
-            source_event,
-            role_model_result,
-            life_action,
-            active_incident,
-            cancelled_incident,
-            id_generator=id_generator,
-            clock=_clock_at(commit_time),
-        )
-        finalize_request = build_life_incident_cancel_finalize_request(
-            request,
-            active_incident=active_incident,
-            cancelled_incident=cancelled_incident,
-            committed_log_entry=committed_log_entry,
-        )
-        try:
-            _require_finalizer_raw_event_log(
-                life_incident_cancel_finalizer,
-                raw_event_log,
-            )
-            finalize_result = life_incident_cancel_finalizer.finalize_life_incident_cancel(
-                deepcopy(finalize_request)
-            )
-        except RawEventLogQueryValidationError as error:
-            raise LifeIncidentCancelFinalizerError(
-                str(error),
-                code="malformed_finalize_result",
-            ) from error
-        except LifeIncidentCancelFinalizerError:
-            raise
-        except Exception as error:
-            raise LifeIncidentCancelFinalizerError(
-                f"finalize_life_incident_cancel failed unexpectedly: {error}",
-                code="finalize_rejected",
-            ) from error
-        validated_finalize_result = validate_life_incident_cancel_finalize_result(
-            finalize_result,
-            source_identity=source_identity,
-            committed_log_entry=committed_log_entry,
-        )
-        try:
-            confirm_committed_success_entry_visibility(raw_event_log, committed_log_entry)
-        except RawEventLogQueryValidationError as error:
-            raise LifeIncidentCancelFinalizerError(
-                str(error),
-                code="malformed_finalize_result",
-            ) from error
-        try:
-            life_incident_cancel_finalizer.complete_life_incident_cancel_after_log_visible(
-                deepcopy(finalize_request)
-            )
-        except RawEventLogQueryValidationError as error:
-            raise LifeIncidentCancelFinalizerError(
-                str(error),
-                code="malformed_finalize_result",
-            ) from error
-        except LifeIncidentCancelFinalizerError:
-            raise
-        except Exception as error:
-            raise LifeIncidentCancelFinalizerError(
-                (f"complete_life_incident_cancel_after_log_visible failed unexpectedly: {error}"),
-                code="finalize_rejected",
-            ) from error
-    except LifeIncidentCancelFinalizerError as error:
-        discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
-        failure = _build_failure(
-            LIFE_INCIDENT_CANCEL_FINALIZE_STAGE,
-            error.code,
-            str(error),
-        )
-        raw_event_log.append(
-            build_life_incident_cancel_rejected_log_entry(
-                source_event,
-                role_model_result_snapshot=role_model_result,
-                life_action_snapshot=life_action,
-                active_incident_snapshot=active_incident,
-                cancelled_incident_snapshot=cancelled_incident,
-                failure=failure,
-                id_generator=id_generator,
-                clock=clock,
-            )
-        )
-        return _build_rejected_result(source_identity, failure)
-    except LifeIncidentCancelCommitValidationError as error:
-        failure = _build_failure(
-            LIFE_INCIDENT_CANCEL_COMMIT_VALIDATION_STAGE,
-            error.code,
-            str(error),
-        )
-        raw_event_log.append(
-            build_life_incident_cancel_rejected_log_entry(
-                source_event,
-                role_model_result_snapshot=role_model_result,
-                life_action_snapshot=life_action,
-                active_incident_snapshot=active_incident,
-                cancelled_incident_snapshot=cancelled_incident,
-                failure=failure,
-                id_generator=id_generator,
-                clock=clock,
-            )
-        )
-        return _build_rejected_result(source_identity, failure)
-
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "trace_id": source_identity["trace_id"],
-        "event_id": source_identity["event_id"],
-        "event_type": USER_MESSAGE,
-        "status": LIFE_INCIDENT_CANCELLED_STATUS,
-        "cancelled_incident": deepcopy(dict(cancelled_incident)),
-        "committed_log_entry_id": validated_finalize_result["committed_log_entry_id"],
-    }
+    return commit_life_incident_lifecycle_transition(
+        source_event,
+        role_model_result,
+        source_identity=source_identity,
+        active_incident_source=active_incident_source,
+        finalizer=life_incident_cancel_finalizer,
+        raw_event_log=raw_event_log,
+        id_generator=id_generator,
+        clock=clock,
+        config=IncidentLifecycleCommitConfig(
+            skipped_status=LIFE_INCIDENT_CANCEL_SKIPPED_STATUS,
+            success_status=LIFE_INCIDENT_CANCELLED_STATUS,
+            success_snapshot_key="cancelled_incident",
+            commit_validation_stage=LIFE_INCIDENT_CANCEL_COMMIT_VALIDATION_STAGE,
+            finalize_stage=LIFE_INCIDENT_CANCEL_FINALIZE_STAGE,
+            finalize_method_name="finalize_life_incident_cancel",
+            complete_after_visible_method_name="complete_life_incident_cancel_after_log_visible",
+        ),
+        hooks=IncidentLifecycleCommitHooks(
+            build_commit_request=build_life_incident_cancel_commit_request,
+            life_action_from_commit_request=_life_action_from_commit_request,
+            read_active_incident=lambda event, source: _read_active_incident_for_cancel(
+                event,
+                active_incident_source=source,
+            ),
+            build_transition_snapshot=build_cancelled_life_incident_snapshot,
+            build_success_log_entry=build_life_incident_cancelled_log_entry,
+            build_finalize_request=build_life_incident_cancel_finalize_request,
+            require_finalizer_raw_event_log=_require_finalizer_raw_event_log,
+            finalize=lambda finalizer, request: finalizer.finalize_life_incident_cancel(request),
+            validate_finalize_result=validate_life_incident_cancel_finalize_result,
+            complete_after_visible=lambda finalizer, request: (
+                finalizer.complete_life_incident_cancel_after_log_visible(request)
+            ),
+            build_rejected_log_entry=build_life_incident_cancel_rejected_log_entry,
+            build_failure=_build_failure,
+            build_rejected_result=_build_rejected_result,
+            commit_validation_error_type=LifeIncidentCancelCommitValidationError,
+            finalizer_error_type=LifeIncidentCancelFinalizerError,
+            commit_validation_error_factory=lambda message, code: (
+                LifeIncidentCancelCommitValidationError(message, code=code)
+            ),
+            finalizer_error_factory=lambda message, code: LifeIncidentCancelFinalizerError(
+                message, code=code
+            ),
+        ),
+    )
 
 
 def build_cancelled_life_incident_snapshot(
@@ -949,18 +852,6 @@ def _validate_cancelled_source_event_ids(
             "cancelled_incident.source_event_ids must preserve active IDs and append event_id once."
         )
     return source_event_ids
-
-
-def _parse_iso8601_timestamp(value: str) -> datetime:
-    timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if timestamp.tzinfo is None:
-        return timestamp.replace(tzinfo=UTC)
-    return timestamp
-
-
-def _clock_at(timestamp: str) -> Clock:
-    parsed_timestamp = _parse_iso8601_timestamp(timestamp)
-    return lambda: parsed_timestamp
 
 
 def _wrap_validation_contract_error[T](callback: Callable[[], T]) -> T:
