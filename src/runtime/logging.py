@@ -11,6 +11,7 @@ ATOMIC_FINALIZER_SUCCESS_KINDS = frozenset(
         "living_state_patch_committed",
         "life_incident_started",
         "life_incident_cancelled",
+        "life_incident_completed",
     }
 )
 

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-017 - Minimal Cancel Active Incident Commit Boundary v0.1</title>
+  <title>MVP-018 - Minimal Complete Active Incident Commit Boundary v0.1</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,14 +27,13 @@
 </head>
 <body>
   <main>
-    <h1>MVP-017 - Minimal Cancel Active Incident Commit Boundary v0.1</h1>
-    <p><span class="status">Status: implementation PR open</span></p>
+    <h1>MVP-018 - Minimal Complete Active Incident Commit Boundary v0.1</h1>
+    <p><span class="status">Status: implementation complete pending PR</span></p>
     <p class="meta">
-      Created: 2026-05-22. Active slice path:
+      Created: 2026-05-23. Active slice path:
       <code>docs/plan/active-slice.html</code>.
       Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
-      Branch: <code>feature/mvp-017-minimal-cancel-incident-commit</code>.
-      PR: <a href="https://github.com/QuellaMC/Project02/pull/20">#20</a>.
+      Branch: <code>feature/mvp-018-minimal-complete-active-incident-commit-boundary</code>.
     </p>
 
     <h2>Source Context</h2>
@@ -44,17 +43,20 @@
       The source pages checked for this slice are
       <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
       <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
+      <a href="https://www.notion.so/35f8995c0c5e813982a2dfc95071e237">04 - Event Triggers &amp; Runtime Hooks</a>,
       <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>,
-      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>, and
       <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.
     </p>
     <blockquote>
-      Notion defines Commit &amp; Effects as the only boundary that validates and
-      commits durable incident transitions. It also lists
-      <code>life_action.cancel_incident</code> as a model-proposed action and
-      <code>LifeIncidentStore</code> as the durable incident lifecycle truth.
-      MVP-017 promotes only the smallest cancel transition for the currently
-      active incident.
+      Notion lists <code>life_action.complete_incident</code> as a
+      model-proposed decision and makes Commit &amp; Effects the only durable
+      incident transition writer. Notion also describes a later
+      <code>INCIDENT_COMPLETION</code> private event flow. MVP-018 intentionally
+      promotes only the smallest existing <code>USER_MESSAGE</code> commit
+      boundary for completing the current active incident; the private event
+      flow stays parked.
     </blockquote>
     <p>
       Local implementation truth comes from completed
@@ -62,39 +64,41 @@
       <a href="completed/mvp-012-minimal-start-incident-commit-boundary.html">MVP-012</a>,
       <a href="completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html">MVP-013</a>,
       <a href="completed/mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html">MVP-014</a>,
-      <a href="completed/mvp-015-character-state-engine-context-builder-boundary.html">MVP-015</a>, and
-      <a href="completed/mvp-016-role-model-input-envelope-split.html">MVP-016</a>.
+      <a href="completed/mvp-015-character-state-engine-context-builder-boundary.html">MVP-015</a>,
+      <a href="completed/mvp-016-role-model-input-envelope-split.html">MVP-016</a>, and
+      <a href="completed/mvp-017-minimal-cancel-active-incident-commit-boundary.html">MVP-017</a>.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Let an opted-in <code>USER_MESSAGE</code> turn cancel the currently active
-      incident through Commit &amp; Effects and the
+      Let an opted-in <code>USER_MESSAGE</code> turn complete the currently
+      active incident through Commit &amp; Effects and the
       <code>InMemoryLifeIncidentStore</code>, expose a query-visible
-      <code>life_incident_cancelled</code> raw log entry, and add no other
-      incident lifecycle behavior.
+      <code>life_incident_completed</code> raw log entry, and add no timer,
+      scheduler, body, Live2D, proactive-message, follow-up incident, or private
+      <code>INCIDENT_COMPLETION</code> behavior.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
       <li>One event family remains in scope: <code>USER_MESSAGE</code>.</li>
-      <li>One new model-proposed life action subtype is in scope: <code>cancel_incident</code>.</li>
-      <li>The turn must opt in to incident cancellation explicitly; default visible-reply turns keep the MVP-016 allowed action set and parser behavior.</li>
-      <li>Cancellation applies only to the active incident for the validated user/conversation scope derived from the source event.</li>
-      <li>The cancel action must identify the active incident by <code>incident_id</code> and include a non-empty model-provided reason.</li>
-      <li>Commit &amp; Effects validates the role-model result, validates the current active incident, builds the cancellation log entry, and finalizes cancellation through the store.</li>
-      <li><code>InMemoryLifeIncidentStore</code> remains the concrete in-memory incident boundary and must make <code>read_active_incident(request)</code> return <code>None</code> for the cancelled scope after success.</li>
-      <li>The successful cancellation raw log must be visible through the existing Raw Event Log query/debug surface.</li>
+      <li>One new model-proposed life action subtype is in scope: <code>complete_incident</code>.</li>
+      <li>The turn must opt in to incident completion explicitly; default visible-reply turns keep the current MVP-017 allowed action set and parser behavior.</li>
+      <li>Completion applies only to the active incident for the validated user/conversation scope derived from the source event.</li>
+      <li>The complete action must identify the current active incident by <code>incident_id</code>.</li>
+      <li>Commit &amp; Effects validates the role-model result, re-reads and validates the active incident, builds the completion log entry, and finalizes completion through the store.</li>
+      <li><code>InMemoryLifeIncidentStore</code> remains the concrete in-memory incident boundary and must make <code>read_active_incident(request)</code> return <code>None</code> for the completed scope after success.</li>
+      <li>The successful completion raw log must be visible through the existing Raw Event Log query/debug surface.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No <code>complete_incident</code>, <code>resume_incident</code>, <code>go_idle</code>, <code>no_change</code>, interruption policy, background incident behavior, replacement behavior, incident queue, or incident completion event.</li>
-      <li>No new RuntimeEvent family, route policy, scheduler, timer, body effect, Live2D status, tool request, retrieval/indexing behavior, database storage, migration, debug UI, or replay execution.</li>
-      <li>No composition of incident cancel with state patches or incident start in the same model-call contract.</li>
-      <li>No default cancellation wiring in ordinary user turns; callers must opt in and provide the concrete cancellation boundary.</li>
-      <li>No changes to the MVP-016 <code>RoleModelInputEnvelope</code> split except the minimum allowed-action subtype marker and instruction text needed for the cancel opt-in.</li>
-      <li>No history query API in <code>InMemoryLifeIncidentStore</code>; the raw log is the truth for the cancelled transition in this slice.</li>
+      <li>No <code>INCIDENT_COMPLETION</code> RuntimeEvent, timer, scheduler, private incident-completion role-model call, completed-incident context builder field, or proactive message.</li>
+      <li>No <code>resume_incident</code>, <code>go_idle</code>, <code>no_change</code>, interruption policy, background incident behavior, replacement behavior, incident queue, or follow-up incident chain.</li>
+      <li>No body effect, living-state patch, Live2D status, tool request, retrieval/indexing behavior, database storage, migration, debug UI, or replay execution.</li>
+      <li>No composition of incident completion with state patches, incident start, or incident cancel in the same model-call contract.</li>
+      <li>No default completion wiring in ordinary user turns; callers must opt in and provide the concrete completion boundary.</li>
+      <li>No history query API in <code>InMemoryLifeIncidentStore</code>; the raw log is the truth for the completed transition in this slice.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
@@ -106,69 +110,67 @@
   action: "visible_reply"
   visible_reply: { text: string }
   life_action?: {
-    type: "cancel_incident"
+    type: "complete_incident"
     incident_id: string
-    reason: string
   }
 }</code></pre>
     <p>
-      The action stays a visible-reply turn with an optional life action, matching
-      the MVP-012 incident-start pattern. The allowed life-action subtype is
-      selected by the caller's explicit cancel opt-in.
+      The action stays a visible-reply turn with an optional life action,
+      matching the MVP-012 start and MVP-017 cancel pattern. The allowed
+      life-action subtype is selected by the caller's explicit complete opt-in.
     </p>
 
-    <h3>LifeIncidentCancelCommitRequest</h3>
-    <pre><code>type LifeIncidentCancelCommitRequest = {
+    <h3>LifeIncidentCompleteCommitRequest</h3>
+    <pre><code>type LifeIncidentCompleteCommitRequest = {
   schema_version: "0.1"
   trace_id: string
   event_id: string
   event_type: "USER_MESSAGE"
   decision_action: "visible_reply"
-  life_action_type: "cancel_incident"
+  life_action_type: "complete_incident"
   incident_id: string
-  reason: string
   user_id?: string
   conversation_id?: string
 }</code></pre>
 
-    <h3>LifeIncidentCancelFinalizeRequest</h3>
-    <pre><code>type LifeIncidentCancelFinalizeRequest = LifeIncidentCancelCommitRequest &amp; {
+    <h3>LifeIncidentCompleteFinalizeRequest</h3>
+    <pre><code>type LifeIncidentCompleteFinalizeRequest = LifeIncidentCompleteCommitRequest &amp; {
   commit_time: string
   active_incident: ActiveIncidentSnapshot
-  cancelled_incident: {
+  completed_incident: {
     schema_version: "0.1"
     incident_id: string
     type: string
-    status: "cancelled"
+    status: "completed"
     title: string
     started_at?: string
     expected_end_at?: string
+    actual_end_at: string
     remaining_seconds?: number
     interrupt_policy: "interruptible" | "background" | "protected"
     resume_policy: "resume" | "ask_model" | "cancel"
-    cancelled_at: string
-    cancellation_reason: string
     source_event_ids: string[]
   }
-  committed_log_entry: RawEventLogEntry&lt;"life_incident_cancelled"&gt;
+  committed_log_entry: RawEventLogEntry&lt;"life_incident_completed"&gt;
 }</code></pre>
     <p>
-      <code>cancelled_incident.source_event_ids</code> should preserve the active
-      incident's source IDs and append the cancelling <code>event_id</code> once.
-      The existing active-incident read validator remains active-only; a
-      cancelled snapshot is only a commit/log artifact in this slice.
+      <code>completed_incident.source_event_ids</code> should preserve the
+      active incident's source IDs and append the completing
+      <code>event_id</code> once. The existing active-incident read validator
+      remains active-only; a completed snapshot is only a commit/log artifact in
+      this slice.
     </p>
 
-    <h3>life_incident_cancelled Raw Log</h3>
-    <pre><code>type LifeIncidentCancelledLogData = {
+    <h3>life_incident_completed Raw Log</h3>
+    <pre><code>type LifeIncidentCompletedLogData = {
+  source_event: RuntimeEvent
   role_model_result: RoleModelTurnResult
   life_action: {
-    type: "cancel_incident"
+    type: "complete_incident"
     incident_id: string
-    reason: string
   }
   active_incident: ActiveIncidentSnapshot
-  cancelled_incident: CancelledLifeIncidentSnapshot
+  completed_incident: CompletedLifeIncidentSnapshot
 }</code></pre>
 
     <h2>Functional Requirements</h2>
@@ -182,51 +184,55 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>Add a shared <code>CANCEL_INCIDENT_ACTION = "cancel_incident"</code> contract constant and a narrow normalizer for <code>life_action.cancel_incident</code> that requires only <code>type</code>, <code>incident_id</code>, and non-empty <code>reason</code>.</td>
+          <td>Add a shared <code>COMPLETE_INCIDENT_ACTION = "complete_incident"</code> contract constant and a narrow normalizer for <code>life_action.complete_incident</code> that requires only <code>type</code> and a non-empty <code>incident_id</code>.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>Extend or extract Role Model Loop's existing <code>allow_incident_start</code> life-action opt-in path into a subtype-specific start-vs-cancel selection path so a caller may allow incident start or incident cancel, but never both and never alongside state patch in this slice. Do not copy a parallel parser path.</td>
+          <td>Extend the current subtype-specific <code>life_action</code> opt-in path to support exactly one of start, cancel, or complete. A caller may allow incident start, incident cancel, or incident completion, but never more than one and never alongside state patch in this slice.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>Render cancel-specific instructions only for the cancel opt-in, while reusing the existing <code>LIFE_ACTION</code> allowed-action envelope and carrying one explicit <code>allowed_life_action_type</code> marker so direct Role Model input validation cannot swap start-vs-cancel parsing by changing only <code>instructions</code>.</td>
+          <td>Render complete-specific instructions only for the complete opt-in, while reusing the existing <code>LIFE_ACTION</code> allowed-action envelope and carrying <code>allowed_life_action_type = "complete_incident"</code> so direct Role Model input validation cannot swap subtype parsing by changing only <code>instructions</code>.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>When cancel is not opted in, reject <code>life_action.cancel_incident</code> before commit through the existing role-model parsing/validation failure path.</td>
+          <td>When complete is not opted in, reject <code>life_action.complete_incident</code> before commit through the existing role-model parsing/validation failure path.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>Add a new <code>commit_effects.incident_cancel</code> boundary that builds a cancel commit request from a normalized <code>USER_MESSAGE</code> event and role-model result, returning skipped when the decision has no life action.</td>
+          <td>Add a new <code>commit_effects.incident_complete</code> boundary that builds a complete commit request from a normalized <code>USER_MESSAGE</code> event and role-model result, returning skipped when the decision has no life action.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>The cancel commit boundary must read/validate the active incident for the source-event scope before finalizing, reject if there is no active incident, and reject if the requested <code>incident_id</code> does not match the current active incident.</td>
+          <td>The complete commit boundary must read/validate the active incident for the source-event scope before finalizing, reject if there is no active incident, and reject if the requested <code>incident_id</code> does not match the current active incident.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>On success, Commit &amp; Effects builds one <code>life_incident_cancelled</code> raw log entry and finalizes cancellation through the injected finalizer/store before the assistant visible reply is committed.</td>
+          <td>On success, Commit &amp; Effects builds one <code>life_incident_completed</code> raw log entry and finalizes completion through the injected finalizer/store before the assistant visible reply is committed.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td><code>InMemoryLifeIncidentStore</code> must implement the cancel finalization boundary, add <code>life_incident_cancelled</code> to <code>runtime.logging.ATOMIC_FINALIZER_SUCCESS_KINDS</code>, stage the success log through the existing <code>expose_committed_success_entry()</code> helper, clear only the matching active incident scope after Commit &amp; Effects confirms raw-log visibility, and return copy-safe results.</td>
+          <td><code>InMemoryLifeIncidentStore</code> must implement the complete finalization boundary, add <code>life_incident_completed</code> to <code>runtime.logging.ATOMIC_FINALIZER_SUCCESS_KINDS</code>, stage the success log through the existing <code>expose_committed_success_entry()</code> helper, clear only the matching active incident scope after Commit &amp; Effects confirms raw-log visibility, and return copy-safe results.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>After a successful cancel, <code>read_active_incident(request)</code> for the same scope returns <code>None</code>; other identified scopes remain unchanged.</td>
+          <td>After a successful completion, <code>read_active_incident(request)</code> for the same scope returns <code>None</code>; other identified scopes remain unchanged.</td>
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>If finalization fails, raw-log success visibility staging fails, post-confirm incident-clearing completion fails or observes a changed active incident, the store/log instances differ, no active incident exists, incident IDs mismatch, or a storage/source adapter raises unexpectedly, Commit &amp; Effects returns a structured rejected result and appends a <code>life_incident_cancel_rejected</code> log through the ordinary raw-log path. Failures before visibility confirmation must leave the active incident unchanged and no query-visible cancel success entry. Failures after visibility confirmation intentionally leave the already-confirmed <code>life_incident_cancelled</code> entry query-visible and add a later <code>life_incident_cancel_rejected</code> audit entry, producing a success-plus-rejection audit pair for post-confirm completion failures.</td>
+          <td>If finalization fails, raw-log success visibility staging fails, post-confirm incident-clearing completion fails or observes a changed active incident, the store/log instances differ, no active incident exists, incident IDs mismatch, or a storage/source adapter raises unexpectedly, Commit &amp; Effects returns a structured rejected result and appends a <code>life_incident_complete_rejected</code> log through the ordinary raw-log path. Failures before visibility confirmation must leave the active incident unchanged and no query-visible complete success entry. Failures after visibility confirmation intentionally leave the already-confirmed <code>life_incident_completed</code> entry query-visible and add a later <code>life_incident_complete_rejected</code> audit entry.</td>
         </tr>
         <tr>
           <td>FR-11</td>
-          <td>The successful <code>life_incident_cancelled</code> entry must be visible through <code>raw_event_log.query()</code> and must agree with the commit result on trace ID, event ID, incident ID, cancellation time, reason, and committed log entry ID.</td>
+          <td>The successful <code>life_incident_completed</code> entry must be visible through <code>raw_event_log.query()</code> and must agree with the commit result on trace ID, event ID, incident ID, completion time, and committed log entry ID.</td>
         </tr>
         <tr>
           <td>FR-12</td>
-          <td>The implementation must reuse, move, extract, or compatibility-export existing shared code surfaces instead of duplicating them: <code>runtime.contracts.validate_normalized_user_message_event()</code>, <code>normalize_role_model_turn_result()</code>, <code>normalize_start_incident_life_action()</code> or a shared subtype-specific extraction from it, <code>VISIBLE_REPLY_ACTION</code>, <code>LIFE_ACTION</code>, <code>START_INCIDENT_ACTION</code>, <code>character.state.current.build_active_incident_request()</code>, <code>validate_active_incident_request()</code>, <code>validate_active_incident_snapshot()</code>, <code>runtime.logging.ATOMIC_FINALIZER_SUCCESS_KINDS</code>, <code>runtime.logging.confirm_committed_success_entry_visibility()</code>, <code>runtime.logging.discard_committed_success_entry_visibility()</code>, <code>InMemoryLifeIncidentStore.read_active_incident()</code>, the raw-log protocol's <code>expose_committed_success_entry()</code>, <code>character.state.incidents._incident_scope_from_request()</code>, <code>_drop_none_identity_fields()</code>, <code>role_model.loop._validate_allowed_actions()</code>, <code>_life_action_allowed()</code>, and <code>_instructions_for_allowed_actions()</code>. The current start-only life-action normalizer and <code>allow_incident_start</code> path must be extended or extracted for subtype-specific start vs cancel handling, not copied into a parallel parser.</td>
+          <td>The implementation must reuse, move, extract, or compatibility-export existing shared code surfaces instead of duplicating them: <code>runtime.contracts.validate_normalized_user_message_event()</code>, <code>normalize_role_model_turn_result()</code>, the existing <code>normalize_life_action()</code> subtype dispatch, <code>normalize_start_incident_life_action()</code>, <code>normalize_cancel_incident_life_action()</code>, <code>VISIBLE_REPLY_ACTION</code>, <code>LIFE_ACTION</code>, <code>START_INCIDENT_ACTION</code>, <code>CANCEL_INCIDENT_ACTION</code>, <code>character.state.current.build_active_incident_request()</code>, <code>validate_active_incident_request()</code>, <code>validate_active_incident_snapshot()</code>, <code>runtime.logging.ATOMIC_FINALIZER_SUCCESS_KINDS</code>, <code>runtime.logging.confirm_committed_success_entry_visibility()</code>, <code>runtime.logging.discard_committed_success_entry_visibility()</code>, <code>InMemoryLifeIncidentStore.read_active_incident()</code>, the raw-log protocol's <code>expose_committed_success_entry()</code>, <code>character.state.incidents._incident_scope_from_request()</code>, <code>_drop_none_identity_fields()</code>, <code>role_model.loop._validate_allowed_actions()</code>, <code>_allowed_life_action_type_for_call()</code>, <code>_validate_allowed_life_action_type()</code>, <code>_life_action_allowed()</code>, and <code>_instructions_for_allowed_actions()</code>. The current start/cancel subtype handling must be extended or extracted, not copied into a parallel parser.</td>
+        </tr>
+        <tr>
+          <td>FR-13</td>
+          <td><code>runtime.user_turn</code> may coordinate the optional complete boundary like the start and cancel boundaries, but it must keep one write-action opt-in per <code>USER_MESSAGE</code> turn and must require an active-incident source for completion.</td>
         </tr>
       </tbody>
     </table>
@@ -234,91 +240,93 @@
     <h2>Non-Functional Requirements</h2>
     <ul>
       <li>Use only Python standard library behavior; do not add dependencies.</li>
-      <li>Keep the implementation small and parallel to the already proven incident-start commit boundary where that reduces risk.</li>
-      <li>Keep Commit &amp; Effects as the only writer for cancellation; the role model proposes, and the store only finalizes validated commit requests.</li>
+      <li>Keep the implementation small and parallel to the proven incident-cancel boundary where that reduces risk.</li>
+      <li>Keep Commit &amp; Effects as the only writer for completion; the role model proposes, and the store only finalizes validated commit requests.</li>
       <li>Keep <code>InMemoryLifeIncidentStore</code> scoped, copy-safe, and in-memory only.</li>
       <li>Keep tests deterministic with fake clocks, fake IDs, fake adapters, and in-memory stores/logs.</li>
-      <li>Do not add generalized incident lifecycle abstractions unless two implemented actions need them during review.</li>
+      <li>Do not add generalized incident lifecycle abstractions unless they remove real duplication across the implemented start, cancel, and complete actions.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>MVP-016 is recorded under <a href="completed/mvp-016-role-model-input-envelope-split.html">completed plans</a>, and this file is the only active implementation slice.</li>
-      <li>A cancel-opted-in <code>USER_MESSAGE</code> turn can parse <code>life_action.cancel_incident</code> with <code>incident_id</code> and <code>reason</code>.</li>
-      <li>The turn cancels only the active incident for the source-event scope through Commit &amp; Effects and <code>InMemoryLifeIncidentStore</code>.</li>
-      <li>A successful cancel clears the active incident for that scope and exposes one query-visible <code>life_incident_cancelled</code> raw log entry.</li>
+      <li>MVP-017 is recorded under <a href="completed/mvp-017-minimal-cancel-active-incident-commit-boundary.html">completed plans</a>, and this file is the only active implementation slice.</li>
+      <li>A complete-opted-in <code>USER_MESSAGE</code> turn can parse <code>life_action.complete_incident</code> with <code>incident_id</code>.</li>
+      <li>The turn completes only the active incident for the source-event scope through Commit &amp; Effects and <code>InMemoryLifeIncidentStore</code>.</li>
+      <li>A successful completion clears the active incident for that scope and exposes one query-visible <code>life_incident_completed</code> raw log entry.</li>
       <li>No active incident is cleared when there is no active incident, the incident ID mismatches, finalization rejects, visibility staging fails, the active incident changes before completion, or the store/log instances differ.</li>
-      <li>Default visible-reply turns, state-patch opt-in turns, and incident-start opt-in turns keep their current behavior.</li>
-      <li>No complete/resume/go-idle/no-change/interruption/queue/scheduler/body/Live2D/tool/retrieval/database behavior is added.</li>
+      <li>Default visible-reply turns, state-patch opt-in turns, incident-start opt-in turns, and incident-cancel opt-in turns keep their current behavior.</li>
+      <li>No <code>INCIDENT_COMPLETION</code> event, private completion call, completed-incident context field, proactive output, body/living-state/Live2D effect, scheduler, tool, retrieval, queue, database, or replay behavior is added.</li>
       <li>The development journal records source context, files touched, checks run, review notes, next action, future ideas, and whether active slice scope changed.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li>Normalize valid and malformed <code>life_action.cancel_incident</code> decisions, including missing/empty <code>incident_id</code>, missing/empty <code>reason</code>, extra fields, and unsupported subtype in the wrong opt-in.</li>
-      <li>Render role-model input for cancel opt-in and assert allowed actions, instructions, and the compact MVP-016 context envelope remain valid.</li>
-      <li>Assert start, cancel, and state-patch opt-ins cannot be composed in one <code>USER_MESSAGE</code> model call.</li>
-      <li>Build and validate cancel commit/finalize requests and <code>life_incident_cancelled</code> log entries.</li>
-      <li>Finalize cancel through <code>InMemoryLifeIncidentStore</code> and assert same-scope active incident is cleared, other scopes remain, copies are safe, and query-visible success logs are staged/confirmed.</li>
+      <li>Normalize valid and malformed <code>life_action.complete_incident</code> decisions, including missing/empty <code>incident_id</code>, extra fields, and unsupported subtype in the wrong opt-in.</li>
+      <li>Render role-model input for complete opt-in and assert allowed actions, instructions, subtype marker, and the compact MVP-016 context envelope remain valid.</li>
+      <li>Assert start, cancel, complete, and state-patch opt-ins cannot be composed in one <code>USER_MESSAGE</code> model call.</li>
+      <li>Build and validate complete commit/finalize requests, completed incident snapshots, and <code>life_incident_completed</code> log entries.</li>
+      <li>Finalize complete through <code>InMemoryLifeIncidentStore</code> and assert same-scope active incident is cleared, other scopes remain, copies are safe, and query-visible success logs are staged/confirmed.</li>
       <li>Reject no-active, incident-ID mismatch, raw-log mismatch, staging failure, and changed-before-completion paths without clearing the wrong active incident.</li>
-      <li>Assert post-confirm completion failures return a rejected result while preserving the already-query-visible <code>life_incident_cancelled</code> entry and appending a later <code>life_incident_cancel_rejected</code> entry.</li>
+      <li>Reject when the active-incident source raises unexpectedly while reading the current active incident, with a structured <code>life_incident_complete_rejected</code> log and no query-visible completion success entry.</li>
+      <li>Reject when the completion finalizer raises an unexpected exception before raw-log success visibility is confirmed, leaving the active incident unchanged and no query-visible completion success entry.</li>
+      <li>Reject when post-confirm active-incident clearing raises unexpectedly after raw-log success visibility is confirmed, preserving the already-query-visible <code>life_incident_completed</code> entry and appending a later <code>life_incident_complete_rejected</code> audit entry.</li>
+      <li>Assert post-confirm completion failures return a rejected result while preserving the already-query-visible <code>life_incident_completed</code> entry and appending a later <code>life_incident_complete_rejected</code> entry.</li>
     </ul>
 
     <h3>Integration Tests</h3>
     <ul>
-      <li>Start an active incident with the concrete store, then run a cancel-opted-in <code>USER_MESSAGE</code> turn and assert the turn result, store read, and raw-log query all show the cancellation.</li>
-      <li>Run a cancel-opted-in turn with no active incident and assert the user turn stops at the cancel commit boundary with a rejection log and no visible assistant reply commit.</li>
-      <li>Run a cancel-opted-in turn with a mismatched <code>incident_id</code> and assert the original active incident remains visible.</li>
-      <li>Run existing incident-start, living-state patch, visible-reply-only, and full unittest discovery gates to prove current behavior did not widen or regress.</li>
+      <li>Start an active incident with the concrete store, then run a complete-opted-in <code>USER_MESSAGE</code> turn and assert the turn result, store read, and raw-log query all show the completion.</li>
+      <li>Run a complete-opted-in turn with no active incident and assert the user turn stops at the complete commit boundary with a rejection log and no visible assistant reply commit.</li>
+      <li>Run a complete-opted-in turn with a mismatched <code>incident_id</code> and assert the original active incident remains visible.</li>
+      <li>Run existing incident-start, incident-cancel, living-state patch, visible-reply-only, and full unittest discovery gates to prove current behavior did not widen or regress.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
       <li><code>runtime.contracts</code> owns shared action constants and life-action normalization.</li>
-      <li><code>role_model.loop</code> owns allowed-action rendering, cancel-specific instruction text, adapter invocation, output parsing, and role-model logs.</li>
-      <li><code>commit_effects.incident_cancel</code> owns cancel commit request construction, active-incident validation, cancellation log construction, finalizer result validation, rejection logs, and success/rejection result envelopes.</li>
+      <li><code>role_model.loop</code> owns allowed-action rendering, complete-specific instruction text, adapter invocation, output parsing, and role-model logs.</li>
+      <li><code>commit_effects.incident_complete</code> owns complete commit request construction, active-incident validation, completion log construction, finalizer result validation, rejection logs, and success/rejection result envelopes.</li>
       <li><code>character.state.incidents.InMemoryLifeIncidentStore</code> owns scoped in-memory finalization and the existing read contract; it does not become a lifecycle history query API.</li>
-      <li><code>runtime.user_turn</code> may coordinate the optional cancel boundary in the same narrow way it coordinates incident start, but it should not own cancellation validation.</li>
+      <li><code>runtime.user_turn</code> may coordinate the optional complete boundary in the same narrow way it coordinates incident start and cancel, but it should not own completion validation.</li>
       <li><code>character.state.context</code> should not change except through existing active-incident read behavior if tests need the current active incident in model context.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>This is a minimal Commit &amp; Effects cancel boundary, not the full incident lifecycle.</li>
+      <li>This is a minimal Commit &amp; Effects complete boundary, not the private incident-completion event flow.</li>
       <li>The highest risk is clearing active incident state without a query-visible success log; finalization must keep state and log visibility atomic.</li>
-      <li>The second risk is accepting cancellation for a stale or invented incident ID; Commit &amp; Effects must re-read and match the current active incident for the event scope.</li>
-      <li>The main duplication risk is copying the incident-start validators wholesale without sharing contract helpers or store scope helpers. Extract only when it reduces real duplicated validation in this slice.</li>
-      <li>Implementation review must verify the cancel success kind uses the existing atomic finalizer visibility path: <code>ATOMIC_FINALIZER_SUCCESS_KINDS</code>, <code>expose_committed_success_entry()</code>, <code>confirm_committed_success_entry_visibility()</code>, and <code>discard_committed_success_entry_visibility()</code>.</li>
-      <li>Post-confirm completion failures are a deliberate audit edge case: once <code>life_incident_cancelled</code> visibility is confirmed, the commit boundary cannot hide that success entry, so it reports the later completion failure with a structured rejected result and a <code>life_incident_cancel_rejected</code> entry in the same trace.</li>
-      <li>Implementation review must verify the Role Model Loop extends or extracts the current start-only life-action parser path for subtype-specific start vs cancel handling instead of adding a second parser.</li>
-      <li>Keep the raw log as the only cancelled-history truth for now; do not add store history APIs or persistent storage.</li>
-      <li>Do not add interruption semantics. A user message may cancel an active incident only because the model proposed the opted-in cancel action and Commit &amp; Effects accepted it.</li>
+      <li>The second risk is accepting completion for a stale or invented incident ID; Commit &amp; Effects must re-read and match the current active incident for the event scope.</li>
+      <li>The main duplication risk is copying the incident-cancel module wholesale without extracting the shared commit/finalizer validation shape where it is actually common. Keep the extraction practical and covered by tests.</li>
+      <li>Implementation review must verify the complete success kind uses the existing atomic finalizer visibility path: <code>ATOMIC_FINALIZER_SUCCESS_KINDS</code>, <code>expose_committed_success_entry()</code>, <code>confirm_committed_success_entry_visibility()</code>, and <code>discard_committed_success_entry_visibility()</code>.</li>
+      <li>Post-confirm completion failures follow the MVP-017 audit rule: once <code>life_incident_completed</code> visibility is confirmed, the commit boundary cannot hide that success entry, so it reports the later completion failure with a structured rejected result and a <code>life_incident_complete_rejected</code> entry in the same trace.</li>
+      <li>Implementation review must verify the Role Model Loop extends or extracts the current life-action subtype parser path instead of adding a third parallel parser.</li>
+      <li>Keep the raw log as the only completed-history truth for now; do not add store history APIs or persistent storage.</li>
+      <li>Do not add automatic time-based completion. A user message may complete an active incident only because the model proposed the opted-in complete action and Commit &amp; Effects accepted it.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should later persistent <code>LifeIncidentStore</code> retain cancelled incident history directly, or continue to derive it from the Raw Event Log? Not in MVP-017.</li>
-      <li>Should cancellation produce body, living-state, Live2D, or scheduler effects? Not in MVP-017.</li>
-      <li>Should user interruption automatically cancel, interrupt, or background incidents before the model sees the turn? Not in MVP-017.</li>
+      <li>Should later persistent <code>LifeIncidentStore</code> retain completed incident history directly, or continue to derive it from the Raw Event Log? Not in MVP-018.</li>
+      <li>Should completion apply body, living-state, Live2D, or scheduler effects? Not in MVP-018.</li>
+      <li>Should expected-end timers emit private <code>INCIDENT_COMPLETION</code> events? Parked for a later event-intake slice.</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Complete, resume, go-idle, and no-change incident lifecycle commit boundaries after cancel is proven.</li>
+      <li><code>INCIDENT_COMPLETION</code> RuntimeEvent intake after the user-message completion commit boundary is proven.</li>
+      <li>Private incident-completion role-model call with <code>completed_incident</code> context and optional proactive output.</li>
+      <li>Resume, go-idle, and no-change incident lifecycle commit boundaries after complete is proven.</li>
       <li>Runtime Kernel user-interruption policy that can mark incidents interrupted/background before a user turn.</li>
       <li>Persistent incident lifecycle storage with transition history and migrations.</li>
-      <li><code>INCIDENT_COMPLETION</code> runtime events after active lifecycle transitions are stable.</li>
       <li>Body/living-state/Live2D effects for incident lifecycle transitions.</li>
       <li>Retrieval indexing over incident lifecycle episodes once raw transition truth is stable.</li>
     </ul>
 
     <h2>Next Action</h2>
     <p>
-      Watch <a href="https://github.com/QuellaMC/Project02/pull/20">PR #20</a>
-      for CI and review feedback. Keep any follow-up changes inside the
-      cancel-active-incident commit boundary unless a separate active slice is
-      promoted.
+      Review the MVP-018 implementation diff for scope and duplication, then
+      commit the implementation branch and open the PR.
     </p>
   </main>
 </body>
