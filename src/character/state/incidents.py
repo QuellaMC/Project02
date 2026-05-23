@@ -16,12 +16,18 @@ from commit_effects.incident_cancel import (
     LifeIncidentCancelFinalizerError,
     validate_cancelled_life_incident_snapshot,
 )
+from commit_effects.incident_complete import (
+    LIFE_INCIDENT_COMPLETED_KIND,
+    LifeIncidentCompleteFinalizerError,
+    validate_completed_life_incident_snapshot,
+)
 from commit_effects.incident_start import (
     LIFE_INCIDENT_STARTED_KIND,
     LifeIncidentStartFinalizerError,
 )
 from runtime.contracts import (
     CANCEL_INCIDENT_ACTION,
+    COMPLETE_INCIDENT_ACTION,
     START_INCIDENT_ACTION,
     USER_MESSAGE,
     VISIBLE_REPLY_ACTION,
@@ -43,6 +49,8 @@ LifeIncidentStartFinalizeRequest = dict[str, Any]
 LifeIncidentStartFinalizeResult = dict[str, Any]
 LifeIncidentCancelFinalizeRequest = dict[str, Any]
 LifeIncidentCancelFinalizeResult = dict[str, Any]
+LifeIncidentCompleteFinalizeRequest = dict[str, Any]
+LifeIncidentCompleteFinalizeResult = dict[str, Any]
 IDENTIFIED_SCOPE_MODE = "identified"
 SINGLE_USER_SELF_USE_SCOPE_MODE = "single_user_self_use"
 
@@ -75,6 +83,10 @@ class InMemoryLifeIncidentStore:
     def require_life_incident_cancel_raw_event_log(self, raw_event_log: object) -> None:
         if raw_event_log is not self._raw_event_log:
             _raise_raw_event_log_mismatch(LifeIncidentCancelFinalizerError)
+
+    def require_life_incident_complete_raw_event_log(self, raw_event_log: object) -> None:
+        if raw_event_log is not self._raw_event_log:
+            _raise_raw_event_log_mismatch(LifeIncidentCompleteFinalizerError)
 
     def finalize_life_incident_start(
         self,
@@ -151,6 +163,55 @@ class InMemoryLifeIncidentStore:
         if current_active_incident != validated_request["active_incident"]:
             raise LifeIncidentCancelFinalizerError(
                 "Active incident changed before cancellation could be completed.",
+                code="finalize_rejected",
+            )
+        self._active_incidents_by_scope.pop(scope, None)
+
+    def finalize_life_incident_complete(
+        self,
+        request: LifeIncidentCompleteFinalizeRequest,
+    ) -> LifeIncidentCompleteFinalizeResult:
+        validated_request = _validate_life_incident_complete_finalize_request(request)
+        scope = _incident_scope_from_request(validated_request)
+        current_active_incident = self._active_incidents_by_scope.get(scope)
+        if current_active_incident is None:
+            raise LifeIncidentCompleteFinalizerError(
+                "No active incident exists for this scope.",
+                code="finalize_rejected",
+            )
+        if current_active_incident != validated_request["active_incident"]:
+            raise LifeIncidentCompleteFinalizerError(
+                "Active incident changed before completion could be finalized.",
+                code="finalize_rejected",
+            )
+
+        committed_log_entry = validated_request["committed_log_entry"]
+        try:
+            self._raw_event_log.expose_committed_success_entry(committed_log_entry)
+        except RawEventLogQueryValidationError as error:
+            raise LifeIncidentCompleteFinalizerError(
+                str(error),
+                code="malformed_finalize_result",
+            ) from error
+
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "trace_id": validated_request["trace_id"],
+            "event_id": validated_request["event_id"],
+            "event_type": USER_MESSAGE,
+            "committed_log_entry_id": committed_log_entry["log_id"],
+        }
+
+    def complete_life_incident_complete_after_log_visible(
+        self,
+        request: LifeIncidentCompleteFinalizeRequest,
+    ) -> None:
+        validated_request = _validate_life_incident_complete_finalize_request(request)
+        scope = _incident_scope_from_request(validated_request)
+        current_active_incident = self._active_incidents_by_scope.get(scope)
+        if current_active_incident != validated_request["active_incident"]:
+            raise LifeIncidentCompleteFinalizerError(
+                "Active incident changed before completion could be completed.",
                 code="finalize_rejected",
             )
         self._active_incidents_by_scope.pop(scope, None)
@@ -409,6 +470,135 @@ def _validate_life_incident_cancel_finalize_request(
     return validated_request
 
 
+def _validate_life_incident_complete_finalize_request(
+    request: Any,
+) -> LifeIncidentCompleteFinalizeRequest:
+    if not isinstance(request, Mapping):
+        raise LifeIncidentCompleteFinalizerError(
+            "LifeIncidentCompleteFinalizeRequest must be a mapping.",
+            code="malformed_finalize_result",
+        )
+
+    try:
+        reject_extra_keys(
+            request,
+            {
+                "schema_version",
+                "trace_id",
+                "event_id",
+                "event_type",
+                "decision_action",
+                "life_action_type",
+                "incident_id",
+                "commit_time",
+                "active_incident",
+                "completed_incident",
+                "committed_log_entry",
+                "user_id",
+                "conversation_id",
+            },
+            "LifeIncidentCompleteFinalizeRequest",
+        )
+        schema_version = require_equal(
+            request.get("schema_version"),
+            SCHEMA_VERSION,
+            "LifeIncidentCompleteFinalizeRequest.schema_version",
+        )
+        trace_id = require_string(
+            request.get("trace_id"),
+            "LifeIncidentCompleteFinalizeRequest.trace_id",
+        )
+        event_id = require_string(
+            request.get("event_id"),
+            "LifeIncidentCompleteFinalizeRequest.event_id",
+        )
+        event_type = require_equal(
+            request.get("event_type"),
+            USER_MESSAGE,
+            "LifeIncidentCompleteFinalizeRequest.event_type",
+        )
+        decision_action = require_equal(
+            request.get("decision_action"),
+            VISIBLE_REPLY_ACTION,
+            "LifeIncidentCompleteFinalizeRequest.decision_action",
+        )
+        life_action_type = require_equal(
+            request.get("life_action_type"),
+            COMPLETE_INCIDENT_ACTION,
+            "LifeIncidentCompleteFinalizeRequest.life_action_type",
+        )
+        incident_id = require_string(
+            request.get("incident_id"),
+            "LifeIncidentCompleteFinalizeRequest.incident_id",
+        )
+        commit_time = validate_iso8601_timestamp(
+            request.get("commit_time"),
+            "LifeIncidentCompleteFinalizeRequest.commit_time",
+        )
+        active_incident = validate_active_incident_snapshot(request.get("active_incident"))
+        completed_incident = validate_completed_life_incident_snapshot(
+            request.get("completed_incident"),
+            active_incident=active_incident,
+            commit_request={
+                "schema_version": schema_version,
+                "trace_id": trace_id,
+                "event_id": event_id,
+                "event_type": event_type,
+                "decision_action": decision_action,
+                "life_action_type": life_action_type,
+                "incident_id": incident_id,
+                "commit_time": commit_time,
+            },
+        )
+        committed_log_entry = _validate_complete_committed_log_entry(
+            request.get("committed_log_entry"),
+            trace_id=trace_id,
+            event_id=event_id,
+            active_incident=active_incident,
+            completed_incident=completed_incident,
+        )
+        optional_ids = _validate_optional_ids(
+            request,
+            source_name="LifeIncidentCompleteFinalizeRequest",
+        )
+    except (
+        ContractValidationError,
+        RawEventLogQueryValidationError,
+        LifeIncidentCompleteFinalizerError,
+    ) as error:
+        raise LifeIncidentCompleteFinalizerError(
+            str(error),
+            code="malformed_finalize_result",
+        ) from error
+    except ValueError as error:
+        raise LifeIncidentCompleteFinalizerError(
+            str(error),
+            code=getattr(error, "code", "malformed_finalize_result"),
+        ) from error
+
+    if active_incident["incident_id"] != incident_id:
+        raise LifeIncidentCompleteFinalizerError(
+            "active_incident.incident_id must match incident_id.",
+            code="malformed_finalize_result",
+        )
+
+    validated_request: LifeIncidentCompleteFinalizeRequest = {
+        "schema_version": schema_version,
+        "trace_id": trace_id,
+        "event_id": event_id,
+        "event_type": event_type,
+        "decision_action": decision_action,
+        "life_action_type": life_action_type,
+        "incident_id": incident_id,
+        "commit_time": commit_time,
+        "active_incident": active_incident,
+        "completed_incident": completed_incident,
+        "committed_log_entry": committed_log_entry,
+    }
+    validated_request.update(optional_ids)
+    return validated_request
+
+
 def _validate_committed_log_entry(
     committed_log_entry: Any,
     *,
@@ -469,6 +659,39 @@ def _validate_cancel_committed_log_entry(
     return entry
 
 
+def _validate_complete_committed_log_entry(
+    committed_log_entry: Any,
+    *,
+    trace_id: str,
+    event_id: str,
+    active_incident: Mapping[str, Any],
+    completed_incident: Mapping[str, Any],
+) -> RawEventLogEntry:
+    try:
+        entry = validate_raw_event_log_entry(committed_log_entry)
+        require_equal(entry["trace_id"], trace_id, "committed_log_entry.trace_id")
+        require_equal(entry["event_id"], event_id, "committed_log_entry.event_id")
+        require_equal(entry["kind"], LIFE_INCIDENT_COMPLETED_KIND, "committed_log_entry.kind")
+    except (ContractValidationError, RawEventLogQueryValidationError) as error:
+        raise LifeIncidentCompleteFinalizerError(
+            str(error),
+            code="malformed_finalize_result",
+        ) from error
+
+    data = entry["data"]
+    if data.get("active_incident") != dict(active_incident):
+        raise LifeIncidentCompleteFinalizerError(
+            "committed_log_entry.data.active_incident must match active_incident.",
+            code="malformed_finalize_result",
+        )
+    if data.get("completed_incident") != dict(completed_incident):
+        raise LifeIncidentCompleteFinalizerError(
+            "committed_log_entry.data.completed_incident must match completed_incident.",
+            code="malformed_finalize_result",
+        )
+    return entry
+
+
 def _validate_optional_ids(request: Mapping[str, Any], *, source_name: str) -> dict[str, str]:
     optional_ids: dict[str, str] = {}
     for field_name in ("user_id", "conversation_id"):
@@ -481,7 +704,11 @@ def _validate_optional_ids(request: Mapping[str, Any], *, source_name: str) -> d
 
 
 def _raise_raw_event_log_mismatch(
-    error_cls: type[LifeIncidentStartFinalizerError] | type[LifeIncidentCancelFinalizerError],
+    error_cls: (
+        type[LifeIncidentStartFinalizerError]
+        | type[LifeIncidentCancelFinalizerError]
+        | type[LifeIncidentCompleteFinalizerError]
+    ),
 ) -> None:
     raise error_cls(
         (
