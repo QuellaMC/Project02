@@ -28,7 +28,9 @@
     <ul>
       <li>Added <code>commit_effects.incident_lifecycle</code> as the narrow shared helper for active-incident lifecycle commit orchestration.</li>
       <li>Moved the common cancel/complete flow for commit time assignment, success log staging, finalizer result validation, raw-log visibility confirmation, post-confirm completion, rejection logging, and success/rejection result shaping into that helper.</li>
+      <li>Moved the remaining mechanical private validation wrappers for source events, role-model results, active-incident reads, finalizer result envelopes, committed log entries, failure envelopes, raw-log guard lookup, matching incident fields, source-event IDs, contract-error wrapping, and snapshot copying into the same shared lifecycle helper.</li>
       <li>Kept subtype-specific request parsing, life-action normalization, active-incident read wrapping, snapshot construction, success log schemas, finalize request validation, failure-code tables, and public exception types in <code>incident_cancel</code> and <code>incident_complete</code>.</li>
+      <li>Preserved the public entry points, schema names, statuses, raw-log kinds, failure stages, failure codes, and existing tests for both cancel and complete.</li>
       <li>Updated the active slice review notes to record that the documented duplication risk is now resolved by the shared helper.</li>
     </ul>
 

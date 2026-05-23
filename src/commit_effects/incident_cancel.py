@@ -4,15 +4,27 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import Any, Protocol
 
-from character.state.current import (
-    ActiveIncidentSource,
-    build_active_incident_request,
-    validate_active_incident_snapshot,
-)
+from character.state.current import ActiveIncidentSource
 from commit_effects.incident_lifecycle import (
     IncidentLifecycleCommitConfig,
     IncidentLifecycleCommitHooks,
+    append_lifecycle_source_event_id_once,
+    build_lifecycle_failure,
+    build_lifecycle_rejected_result,
     commit_life_incident_lifecycle_transition,
+    extract_trusted_lifecycle_source_identity,
+    normalize_lifecycle_role_model_result,
+    read_active_lifecycle_incident,
+    require_lifecycle_finalizer_raw_event_log,
+    require_matching_lifecycle_field,
+    snapshot_lifecycle_value,
+    validate_lifecycle_active_incident_for_commit,
+    validate_lifecycle_committed_log_entry,
+    validate_lifecycle_failure,
+    validate_lifecycle_finalize_result,
+    validate_lifecycle_source_event,
+    validate_lifecycle_source_event_ids,
+    wrap_lifecycle_contract_error,
 )
 from runtime.contracts import (
     CANCEL_INCIDENT_ACTION,
@@ -20,14 +32,11 @@ from runtime.contracts import (
     VISIBLE_REPLY_ACTION,
     RuntimeEvent,
     normalize_cancel_incident_life_action,
-    normalize_role_model_turn_result,
-    normalize_visible_reply_decision_with_optional_life_action,
     reject_extra_keys,
     require_equal,
     require_optional_string,
     require_string,
     validate_iso8601_timestamp,
-    validate_normalized_user_message_event,
 )
 from runtime.contracts import ContractValidationError as SharedContractValidationError
 from runtime.kernel import RawEventLog
@@ -36,9 +45,7 @@ from runtime.logging import (
     Clock,
     IdGenerator,
     RawEventLogEntry,
-    RawEventLogQueryValidationError,
     build_raw_log_entry,
-    validate_raw_event_log_entry,
 )
 
 LIFE_INCIDENT_CANCELLED_STATUS = "life_incident_cancelled"
@@ -100,6 +107,14 @@ class LifeIncidentCancelFinalizer(Protocol):
         self,
         request: LifeIncidentCancelFinalizeRequest,
     ) -> None: ...
+
+
+def _commit_validation_error(message: str, code: str) -> LifeIncidentCancelCommitValidationError:
+    return LifeIncidentCancelCommitValidationError(message, code=code)
+
+
+def _finalizer_error(message: str, code: str) -> LifeIncidentCancelFinalizerError:
+    return LifeIncidentCancelFinalizerError(message, code=code)
 
 
 def build_life_incident_cancel_commit_request(
@@ -180,12 +195,8 @@ def commit_life_incident_cancel(
             build_rejected_result=_build_rejected_result,
             commit_validation_error_type=LifeIncidentCancelCommitValidationError,
             finalizer_error_type=LifeIncidentCancelFinalizerError,
-            commit_validation_error_factory=lambda message, code: (
-                LifeIncidentCancelCommitValidationError(message, code=code)
-            ),
-            finalizer_error_factory=lambda message, code: LifeIncidentCancelFinalizerError(
-                message, code=code
-            ),
+            commit_validation_error_factory=_commit_validation_error,
+            finalizer_error_factory=_finalizer_error,
         ),
     )
 
@@ -302,92 +313,13 @@ def validate_life_incident_cancel_finalize_result(
     source_identity: Mapping[str, str],
     committed_log_entry: Mapping[str, Any],
 ) -> LifeIncidentCancelFinalizeResult:
-    if not isinstance(finalize_result, Mapping):
-        raise LifeIncidentCancelFinalizerError(
-            "LifeIncidentCancelFinalizeResult must be a mapping.",
-            code="malformed_finalize_result",
-        )
-    try:
-        reject_extra_keys(
-            finalize_result,
-            {
-                "schema_version",
-                "trace_id",
-                "event_id",
-                "event_type",
-                "committed_log_entry_id",
-            },
-            "LifeIncidentCancelFinalizeResult",
-        )
-        schema_version = require_equal(
-            finalize_result.get("schema_version"),
-            SCHEMA_VERSION,
-            "LifeIncidentCancelFinalizeResult.schema_version",
-        )
-        trace_id = require_string(
-            finalize_result.get("trace_id"),
-            "LifeIncidentCancelFinalizeResult.trace_id",
-        )
-        event_id = require_string(
-            finalize_result.get("event_id"),
-            "LifeIncidentCancelFinalizeResult.event_id",
-        )
-        event_type = require_equal(
-            finalize_result.get("event_type"),
-            USER_MESSAGE,
-            "LifeIncidentCancelFinalizeResult.event_type",
-        )
-        committed_log_entry_id = require_string(
-            finalize_result.get("committed_log_entry_id"),
-            "LifeIncidentCancelFinalizeResult.committed_log_entry_id",
-        )
-    except SharedContractValidationError as error:
-        raise LifeIncidentCancelFinalizerError(
-            str(error),
-            code="malformed_finalize_result",
-        ) from error
-
-    if trace_id != source_identity["trace_id"]:
-        raise LifeIncidentCancelFinalizerError(
-            "LifeIncidentCancelFinalizeResult.trace_id must match source_event.trace_id.",
-            code="malformed_finalize_result",
-        )
-    if event_id != source_identity["event_id"]:
-        raise LifeIncidentCancelFinalizerError(
-            "LifeIncidentCancelFinalizeResult.event_id must match source_event.event_id.",
-            code="malformed_finalize_result",
-        )
-    if not isinstance(committed_log_entry, Mapping):
-        raise LifeIncidentCancelFinalizerError(
-            "committed_log_entry must be a mapping.",
-            code="malformed_finalize_result",
-        )
-    try:
-        expected_log_id = require_string(
-            committed_log_entry.get("log_id"),
-            "committed_log_entry.log_id",
-        )
-    except SharedContractValidationError as error:
-        raise LifeIncidentCancelFinalizerError(
-            str(error),
-            code="malformed_finalize_result",
-        ) from error
-    if committed_log_entry_id != expected_log_id:
-        raise LifeIncidentCancelFinalizerError(
-            (
-                "LifeIncidentCancelFinalizeResult.committed_log_entry_id must match "
-                "committed_log_entry.log_id."
-            ),
-            code="malformed_finalize_result",
-        )
-
-    return {
-        "schema_version": schema_version,
-        "trace_id": trace_id,
-        "event_id": event_id,
-        "event_type": event_type,
-        "committed_log_entry_id": committed_log_entry_id,
-    }
+    return validate_lifecycle_finalize_result(
+        finalize_result,
+        source_identity=source_identity,
+        committed_log_entry=committed_log_entry,
+        result_name="LifeIncidentCancelFinalizeResult",
+        finalizer_error_factory=_finalizer_error,
+    )
 
 
 def build_life_incident_cancel_rejected_log_entry(
@@ -538,11 +470,9 @@ def validate_cancelled_life_incident_snapshot(
 
 
 def _validate_source_event(source_event: Any) -> RuntimeEvent:
-    return _wrap_validation_contract_error(
-        lambda: validate_normalized_user_message_event(
-            source_event,
-            source_name="source_event",
-        )
+    return validate_lifecycle_source_event(
+        source_event,
+        commit_validation_error_factory=_commit_validation_error,
     )
 
 
@@ -551,22 +481,11 @@ def _validate_role_model_result(
     *,
     source_event: RuntimeEvent,
 ) -> RoleModelTurnResult:
-    return _wrap_validation_contract_error(
-        lambda: normalize_role_model_turn_result(
-            role_model_result,
-            source_event=source_event,
-            decision_normalizer=lambda decision: (
-                normalize_visible_reply_decision_with_optional_life_action(
-                    decision,
-                    trace_id=source_event["trace_id"],
-                    event_id=source_event["event_id"],
-                    require_attached_ids=True,
-                    allow_life_action=True,
-                    allowed_life_action_type=CANCEL_INCIDENT_ACTION,
-                    source_name="CharacterDecision",
-                )
-            ),
-        )
+    return normalize_lifecycle_role_model_result(
+        role_model_result,
+        source_event=source_event,
+        allowed_life_action_type=CANCEL_INCIDENT_ACTION,
+        commit_validation_error_factory=_commit_validation_error,
     )
 
 
@@ -575,28 +494,18 @@ def _read_active_incident_for_cancel(
     *,
     active_incident_source: ActiveIncidentSource,
 ) -> dict[str, Any]:
-    event = _validate_source_event(source_event)
-    request = build_active_incident_request(event)
-    try:
-        active_incident = active_incident_source.read_active_incident(deepcopy(request))
-    except Exception as error:
-        raise LifeIncidentCancelCommitValidationError(
-            f"active_incident_source.read_active_incident failed unexpectedly: {error}",
-            code="active_incident_source_error",
-        ) from error
-    if active_incident is None:
-        raise LifeIncidentCancelCommitValidationError(
-            "No active incident exists for this source-event scope.",
-            code="no_active_incident",
-        )
-    return _validate_active_incident_for_commit(active_incident)
+    return read_active_lifecycle_incident(
+        source_event,
+        active_incident_source=active_incident_source,
+        commit_validation_error_factory=_commit_validation_error,
+    )
 
 
 def _validate_active_incident_for_commit(active_incident: Any) -> dict[str, Any]:
-    try:
-        return validate_active_incident_snapshot(active_incident)
-    except SharedContractValidationError as error:
-        raise LifeIncidentCancelCommitValidationError(str(error), code=error.code) from error
+    return validate_lifecycle_active_incident_for_commit(
+        active_incident,
+        commit_validation_error_factory=_commit_validation_error,
+    )
 
 
 def _normalize_cancel_life_action(life_action: Any) -> dict[str, str]:
@@ -713,99 +622,61 @@ def _validate_committed_log_entry(
     *,
     source_identity: Mapping[str, str],
 ) -> dict[str, Any]:
-    try:
-        entry = validate_raw_event_log_entry(committed_log_entry)
-        require_equal(
-            entry["trace_id"], source_identity["trace_id"], "committed_log_entry.trace_id"
-        )
-        require_equal(
-            entry["event_id"], source_identity["event_id"], "committed_log_entry.event_id"
-        )
-        require_equal(entry["kind"], LIFE_INCIDENT_CANCELLED_KIND, "committed_log_entry.kind")
-    except (SharedContractValidationError, RawEventLogQueryValidationError) as error:
-        raise LifeIncidentCancelCommitValidationError(str(error)) from error
-    return entry
+    return validate_lifecycle_committed_log_entry(
+        committed_log_entry,
+        source_identity=source_identity,
+        success_kind=LIFE_INCIDENT_CANCELLED_KIND,
+        commit_validation_error_factory=_commit_validation_error,
+    )
 
 
 def _extract_trusted_source_identity(source_event: Any) -> dict[str, str]:
-    if not isinstance(source_event, Mapping):
-        raise LifeIncidentCancelCommitValidationError("source_event must be a mapping.")
-    trace_id = _wrap_validation_contract_error(
-        lambda: require_string(source_event.get("trace_id"), "trace_id")
+    return extract_trusted_lifecycle_source_identity(
+        source_event,
+        commit_validation_error_factory=_commit_validation_error,
     )
-    event_id = _wrap_validation_contract_error(
-        lambda: require_string(source_event.get("event_id"), "event_id")
-    )
-    return {
-        "trace_id": trace_id,
-        "event_id": event_id,
-        "event_type": USER_MESSAGE,
-    }
 
 
 def _build_rejected_result(
     source_identity: Mapping[str, str],
     failure: Mapping[str, str],
 ) -> LifeIncidentCancelCommitResult:
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "trace_id": source_identity["trace_id"],
-        "event_id": source_identity["event_id"],
-        "event_type": USER_MESSAGE,
-        "status": LIFE_INCIDENT_CANCEL_REJECTED_STATUS,
-        "failure": deepcopy(dict(failure)),
-    }
+    return build_lifecycle_rejected_result(
+        source_identity,
+        failure,
+        rejected_status=LIFE_INCIDENT_CANCEL_REJECTED_STATUS,
+    )
 
 
 def _validate_failure(failure: Mapping[str, Any]) -> dict[str, str]:
-    if not isinstance(failure, Mapping):
-        raise LifeIncidentCancelCommitValidationError("failure must be a mapping.")
-    _wrap_validation_contract_error(
-        lambda: reject_extra_keys(failure, {"stage", "code", "message"}, "failure")
+    return validate_lifecycle_failure(
+        failure,
+        supported_failure_codes_by_stage=SUPPORTED_FAILURE_CODES_BY_STAGE,
+        lifecycle_label="incident-cancel",
+        commit_validation_error_factory=_commit_validation_error,
     )
-    stage = failure.get("stage")
-    if stage not in SUPPORTED_FAILURE_CODES_BY_STAGE:
-        raise LifeIncidentCancelCommitValidationError(
-            "failure.stage must be a supported incident-cancel failure stage."
-        )
-    code = failure.get("code")
-    if code not in SUPPORTED_FAILURE_CODES_BY_STAGE[stage]:
-        raise LifeIncidentCancelCommitValidationError(
-            "failure.code must be supported for failure.stage."
-        )
-    return {
-        "stage": stage,
-        "code": code,
-        "message": _wrap_validation_contract_error(
-            lambda: require_string(failure.get("message"), "failure.message")
-        ),
-    }
 
 
 def _build_failure(stage: str, code: str, message: str) -> dict[str, str]:
-    supported_codes = SUPPORTED_FAILURE_CODES_BY_STAGE[stage]
-    if code not in supported_codes:
-        code = (
-            "malformed_finalize_result"
-            if stage == LIFE_INCIDENT_CANCEL_FINALIZE_STAGE
-            else "malformed_commit_input"
-        )
-    return {"stage": stage, "code": code, "message": message}
+    return build_lifecycle_failure(
+        stage,
+        code,
+        message,
+        supported_failure_codes_by_stage=SUPPORTED_FAILURE_CODES_BY_STAGE,
+        finalize_stage=LIFE_INCIDENT_CANCEL_FINALIZE_STAGE,
+    )
 
 
 def _require_finalizer_raw_event_log(
     finalizer: LifeIncidentCancelFinalizer,
     raw_event_log: RawEventLog,
 ) -> None:
-    require_raw_event_log = getattr(finalizer, "require_life_incident_cancel_raw_event_log", None)
-    if not callable(require_raw_event_log):
-        require_raw_event_log = getattr(finalizer, "require_raw_event_log", None)
-    if callable(require_raw_event_log):
-        try:
-            require_raw_event_log(raw_event_log)
-        except Exception as error:
-            code = getattr(error, "code", "malformed_finalize_result")
-            raise LifeIncidentCancelFinalizerError(str(error), code=code) from error
+    require_lifecycle_finalizer_raw_event_log(
+        finalizer,
+        raw_event_log,
+        specific_method_name="require_life_incident_cancel_raw_event_log",
+        finalizer_error_factory=_finalizer_error,
+    )
 
 
 def _require_matching_field(
@@ -813,17 +684,17 @@ def _require_matching_field(
     active_incident: Mapping[str, Any],
     field_name: str,
 ) -> Any:
-    if snapshot.get(field_name) != active_incident[field_name]:
-        raise LifeIncidentCancelCommitValidationError(
-            f"cancelled_incident.{field_name} must match active_incident.{field_name}."
-        )
-    return snapshot[field_name]
+    return require_matching_lifecycle_field(
+        snapshot,
+        active_incident,
+        field_name,
+        snapshot_name="cancelled_incident",
+        commit_validation_error_factory=_commit_validation_error,
+    )
 
 
 def _append_source_event_id_once(source_event_ids: list[str], event_id: str) -> list[str]:
-    if event_id in source_event_ids:
-        return list(source_event_ids)
-    return [*source_event_ids, event_id]
+    return append_lifecycle_source_event_id_once(source_event_ids, event_id)
 
 
 def _validate_cancelled_source_event_ids(
@@ -832,37 +703,21 @@ def _validate_cancelled_source_event_ids(
     active_source_event_ids: list[str],
     event_id: str,
 ) -> list[str]:
-    if not isinstance(value, list):
-        raise LifeIncidentCancelCommitValidationError(
-            "cancelled_incident.source_event_ids must be a list."
-        )
-    source_event_ids: list[str] = []
-    for source_event_id in value:
-        source_event_ids.append(
-            _wrap_validation_contract_error(
-                lambda: require_string(
-                    source_event_id,
-                    "cancelled_incident.source_event_ids[]",
-                )
-            )
-        )
-    expected_source_event_ids = _append_source_event_id_once(active_source_event_ids, event_id)
-    if source_event_ids != expected_source_event_ids:
-        raise LifeIncidentCancelCommitValidationError(
-            "cancelled_incident.source_event_ids must preserve active IDs and append event_id once."
-        )
-    return source_event_ids
+    return validate_lifecycle_source_event_ids(
+        value,
+        active_source_event_ids=active_source_event_ids,
+        event_id=event_id,
+        snapshot_name="cancelled_incident",
+        commit_validation_error_factory=_commit_validation_error,
+    )
 
 
 def _wrap_validation_contract_error[T](callback: Callable[[], T]) -> T:
-    try:
-        return callback()
-    except SharedContractValidationError as error:
-        code = "malformed_commit_input" if error.code == "invalid_contract" else error.code
-        raise LifeIncidentCancelCommitValidationError(str(error), code=code) from error
+    return wrap_lifecycle_contract_error(
+        callback,
+        commit_validation_error_factory=_commit_validation_error,
+    )
 
 
 def _snapshot(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return deepcopy(dict(value))
-    return {"raw_value": repr(value)}
+    return snapshot_lifecycle_value(value)

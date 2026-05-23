@@ -6,8 +6,22 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from character.state.current import ActiveIncidentSource
-from runtime.contracts import USER_MESSAGE, RuntimeEvent
+from character.state.current import (
+    ActiveIncidentSource,
+    build_active_incident_request,
+    validate_active_incident_snapshot,
+)
+from runtime.contracts import (
+    USER_MESSAGE,
+    RuntimeEvent,
+    normalize_role_model_turn_result,
+    normalize_visible_reply_decision_with_optional_life_action,
+    reject_extra_keys,
+    require_equal,
+    require_string,
+    validate_normalized_user_message_event,
+)
+from runtime.contracts import ContractValidationError as SharedContractValidationError
 from runtime.kernel import RawEventLog
 from runtime.logging import (
     SCHEMA_VERSION,
@@ -18,11 +32,13 @@ from runtime.logging import (
     clock_timestamp,
     confirm_committed_success_entry_visibility,
     discard_committed_success_entry_visibility,
+    validate_raw_event_log_entry,
 )
 
 RoleModelTurnResult = dict[str, Any]
 IncidentLifecycleCommitRequest = dict[str, Any]
 IncidentLifecycleCommitResult = dict[str, Any]
+IncidentLifecycleErrorFactory = Callable[[str, str], Exception]
 
 
 @dataclass(frozen=True)
@@ -188,6 +204,388 @@ def commit_life_incident_lifecycle_transition(
     result[config.success_snapshot_key] = deepcopy(dict(transition_snapshot))
     result["committed_log_entry_id"] = validated_finalize_result["committed_log_entry_id"]
     return result
+
+
+def validate_lifecycle_source_event(
+    source_event: Any,
+    *,
+    commit_validation_error_factory: IncidentLifecycleErrorFactory,
+) -> RuntimeEvent:
+    return wrap_lifecycle_contract_error(
+        lambda: validate_normalized_user_message_event(
+            source_event,
+            source_name="source_event",
+        ),
+        commit_validation_error_factory=commit_validation_error_factory,
+    )
+
+
+def normalize_lifecycle_role_model_result(
+    role_model_result: Any,
+    *,
+    source_event: RuntimeEvent,
+    allowed_life_action_type: str,
+    commit_validation_error_factory: IncidentLifecycleErrorFactory,
+) -> RoleModelTurnResult:
+    return wrap_lifecycle_contract_error(
+        lambda: normalize_role_model_turn_result(
+            role_model_result,
+            source_event=source_event,
+            decision_normalizer=lambda decision: (
+                normalize_visible_reply_decision_with_optional_life_action(
+                    decision,
+                    trace_id=source_event["trace_id"],
+                    event_id=source_event["event_id"],
+                    require_attached_ids=True,
+                    allow_life_action=True,
+                    allowed_life_action_type=allowed_life_action_type,
+                    source_name="CharacterDecision",
+                )
+            ),
+        ),
+        commit_validation_error_factory=commit_validation_error_factory,
+    )
+
+
+def read_active_lifecycle_incident(
+    source_event: RuntimeEvent,
+    *,
+    active_incident_source: ActiveIncidentSource,
+    commit_validation_error_factory: IncidentLifecycleErrorFactory,
+) -> dict[str, Any]:
+    event = validate_lifecycle_source_event(
+        source_event,
+        commit_validation_error_factory=commit_validation_error_factory,
+    )
+    request = build_active_incident_request(event)
+    try:
+        active_incident = active_incident_source.read_active_incident(deepcopy(request))
+    except Exception as error:
+        raise commit_validation_error_factory(
+            f"active_incident_source.read_active_incident failed unexpectedly: {error}",
+            "active_incident_source_error",
+        ) from error
+    if active_incident is None:
+        raise commit_validation_error_factory(
+            "No active incident exists for this source-event scope.",
+            "no_active_incident",
+        )
+    return validate_lifecycle_active_incident_for_commit(
+        active_incident,
+        commit_validation_error_factory=commit_validation_error_factory,
+    )
+
+
+def validate_lifecycle_active_incident_for_commit(
+    active_incident: Any,
+    *,
+    commit_validation_error_factory: IncidentLifecycleErrorFactory,
+) -> dict[str, Any]:
+    try:
+        return validate_active_incident_snapshot(active_incident)
+    except SharedContractValidationError as error:
+        raise commit_validation_error_factory(str(error), error.code) from error
+
+
+def validate_lifecycle_finalize_result(
+    finalize_result: Any,
+    *,
+    source_identity: Mapping[str, str],
+    committed_log_entry: Mapping[str, Any],
+    result_name: str,
+    finalizer_error_factory: IncidentLifecycleErrorFactory,
+) -> dict[str, Any]:
+    if not isinstance(finalize_result, Mapping):
+        raise finalizer_error_factory(
+            f"{result_name} must be a mapping.",
+            "malformed_finalize_result",
+        )
+    try:
+        reject_extra_keys(
+            finalize_result,
+            {
+                "schema_version",
+                "trace_id",
+                "event_id",
+                "event_type",
+                "committed_log_entry_id",
+            },
+            result_name,
+        )
+        schema_version = require_equal(
+            finalize_result.get("schema_version"),
+            SCHEMA_VERSION,
+            f"{result_name}.schema_version",
+        )
+        trace_id = require_string(
+            finalize_result.get("trace_id"),
+            f"{result_name}.trace_id",
+        )
+        event_id = require_string(
+            finalize_result.get("event_id"),
+            f"{result_name}.event_id",
+        )
+        event_type = require_equal(
+            finalize_result.get("event_type"),
+            USER_MESSAGE,
+            f"{result_name}.event_type",
+        )
+        committed_log_entry_id = require_string(
+            finalize_result.get("committed_log_entry_id"),
+            f"{result_name}.committed_log_entry_id",
+        )
+    except SharedContractValidationError as error:
+        raise finalizer_error_factory(
+            str(error),
+            "malformed_finalize_result",
+        ) from error
+
+    if trace_id != source_identity["trace_id"]:
+        raise finalizer_error_factory(
+            f"{result_name}.trace_id must match source_event.trace_id.",
+            "malformed_finalize_result",
+        )
+    if event_id != source_identity["event_id"]:
+        raise finalizer_error_factory(
+            f"{result_name}.event_id must match source_event.event_id.",
+            "malformed_finalize_result",
+        )
+    if not isinstance(committed_log_entry, Mapping):
+        raise finalizer_error_factory(
+            "committed_log_entry must be a mapping.",
+            "malformed_finalize_result",
+        )
+    try:
+        expected_log_id = require_string(
+            committed_log_entry.get("log_id"),
+            "committed_log_entry.log_id",
+        )
+    except SharedContractValidationError as error:
+        raise finalizer_error_factory(
+            str(error),
+            "malformed_finalize_result",
+        ) from error
+    if committed_log_entry_id != expected_log_id:
+        raise finalizer_error_factory(
+            f"{result_name}.committed_log_entry_id must match committed_log_entry.log_id.",
+            "malformed_finalize_result",
+        )
+
+    return {
+        "schema_version": schema_version,
+        "trace_id": trace_id,
+        "event_id": event_id,
+        "event_type": event_type,
+        "committed_log_entry_id": committed_log_entry_id,
+    }
+
+
+def validate_lifecycle_committed_log_entry(
+    committed_log_entry: Any,
+    *,
+    source_identity: Mapping[str, str],
+    success_kind: str,
+    commit_validation_error_factory: IncidentLifecycleErrorFactory,
+) -> dict[str, Any]:
+    try:
+        entry = validate_raw_event_log_entry(committed_log_entry)
+        require_equal(
+            entry["trace_id"], source_identity["trace_id"], "committed_log_entry.trace_id"
+        )
+        require_equal(
+            entry["event_id"], source_identity["event_id"], "committed_log_entry.event_id"
+        )
+        require_equal(entry["kind"], success_kind, "committed_log_entry.kind")
+    except (SharedContractValidationError, RawEventLogQueryValidationError) as error:
+        raise commit_validation_error_factory(str(error), "malformed_commit_input") from error
+    return entry
+
+
+def extract_trusted_lifecycle_source_identity(
+    source_event: Any,
+    *,
+    commit_validation_error_factory: IncidentLifecycleErrorFactory,
+) -> dict[str, str]:
+    if not isinstance(source_event, Mapping):
+        raise commit_validation_error_factory(
+            "source_event must be a mapping.",
+            "malformed_commit_input",
+        )
+    trace_id = wrap_lifecycle_contract_error(
+        lambda: require_string(source_event.get("trace_id"), "trace_id"),
+        commit_validation_error_factory=commit_validation_error_factory,
+    )
+    event_id = wrap_lifecycle_contract_error(
+        lambda: require_string(source_event.get("event_id"), "event_id"),
+        commit_validation_error_factory=commit_validation_error_factory,
+    )
+    return {
+        "trace_id": trace_id,
+        "event_id": event_id,
+        "event_type": USER_MESSAGE,
+    }
+
+
+def build_lifecycle_rejected_result(
+    source_identity: Mapping[str, str],
+    failure: Mapping[str, str],
+    *,
+    rejected_status: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "trace_id": source_identity["trace_id"],
+        "event_id": source_identity["event_id"],
+        "event_type": USER_MESSAGE,
+        "status": rejected_status,
+        "failure": deepcopy(dict(failure)),
+    }
+
+
+def validate_lifecycle_failure(
+    failure: Mapping[str, Any],
+    *,
+    supported_failure_codes_by_stage: Mapping[str, set[str]],
+    lifecycle_label: str,
+    commit_validation_error_factory: IncidentLifecycleErrorFactory,
+) -> dict[str, str]:
+    if not isinstance(failure, Mapping):
+        raise commit_validation_error_factory(
+            "failure must be a mapping.",
+            "malformed_commit_input",
+        )
+    wrap_lifecycle_contract_error(
+        lambda: reject_extra_keys(failure, {"stage", "code", "message"}, "failure"),
+        commit_validation_error_factory=commit_validation_error_factory,
+    )
+    stage = failure.get("stage")
+    if not isinstance(stage, str) or stage not in supported_failure_codes_by_stage:
+        raise commit_validation_error_factory(
+            f"failure.stage must be a supported {lifecycle_label} failure stage.",
+            "malformed_commit_input",
+        )
+    code = failure.get("code")
+    if not isinstance(code, str) or code not in supported_failure_codes_by_stage[stage]:
+        raise commit_validation_error_factory(
+            "failure.code must be supported for failure.stage.",
+            "malformed_commit_input",
+        )
+    return {
+        "stage": stage,
+        "code": code,
+        "message": wrap_lifecycle_contract_error(
+            lambda: require_string(failure.get("message"), "failure.message"),
+            commit_validation_error_factory=commit_validation_error_factory,
+        ),
+    }
+
+
+def build_lifecycle_failure(
+    stage: str,
+    code: str,
+    message: str,
+    *,
+    supported_failure_codes_by_stage: Mapping[str, set[str]],
+    finalize_stage: str,
+) -> dict[str, str]:
+    supported_codes = supported_failure_codes_by_stage[stage]
+    if code not in supported_codes:
+        code = "malformed_finalize_result" if stage == finalize_stage else "malformed_commit_input"
+    return {"stage": stage, "code": code, "message": message}
+
+
+def require_lifecycle_finalizer_raw_event_log(
+    finalizer: Any,
+    raw_event_log: RawEventLog,
+    *,
+    specific_method_name: str,
+    finalizer_error_factory: IncidentLifecycleErrorFactory,
+) -> None:
+    require_raw_event_log = getattr(finalizer, specific_method_name, None)
+    if not callable(require_raw_event_log):
+        require_raw_event_log = getattr(finalizer, "require_raw_event_log", None)
+    if callable(require_raw_event_log):
+        try:
+            require_raw_event_log(raw_event_log)
+        except Exception as error:
+            code = getattr(error, "code", "malformed_finalize_result")
+            raise finalizer_error_factory(str(error), code) from error
+
+
+def require_matching_lifecycle_field(
+    snapshot: Mapping[str, Any],
+    active_incident: Mapping[str, Any],
+    field_name: str,
+    *,
+    snapshot_name: str,
+    commit_validation_error_factory: IncidentLifecycleErrorFactory,
+) -> Any:
+    if snapshot.get(field_name) != active_incident[field_name]:
+        raise commit_validation_error_factory(
+            f"{snapshot_name}.{field_name} must match active_incident.{field_name}.",
+            "malformed_commit_input",
+        )
+    return snapshot[field_name]
+
+
+def append_lifecycle_source_event_id_once(source_event_ids: list[str], event_id: str) -> list[str]:
+    if event_id in source_event_ids:
+        return list(source_event_ids)
+    return [*source_event_ids, event_id]
+
+
+def validate_lifecycle_source_event_ids(
+    value: Any,
+    *,
+    active_source_event_ids: list[str],
+    event_id: str,
+    snapshot_name: str,
+    commit_validation_error_factory: IncidentLifecycleErrorFactory,
+) -> list[str]:
+    if not isinstance(value, list):
+        raise commit_validation_error_factory(
+            f"{snapshot_name}.source_event_ids must be a list.",
+            "malformed_commit_input",
+        )
+    source_event_ids: list[str] = []
+    for source_event_id in value:
+        source_event_ids.append(
+            wrap_lifecycle_contract_error(
+                lambda: require_string(
+                    source_event_id,
+                    f"{snapshot_name}.source_event_ids[]",
+                ),
+                commit_validation_error_factory=commit_validation_error_factory,
+            )
+        )
+    expected_source_event_ids = append_lifecycle_source_event_id_once(
+        active_source_event_ids,
+        event_id,
+    )
+    if source_event_ids != expected_source_event_ids:
+        raise commit_validation_error_factory(
+            f"{snapshot_name}.source_event_ids must preserve active IDs and append event_id once.",
+            "malformed_commit_input",
+        )
+    return source_event_ids
+
+
+def wrap_lifecycle_contract_error[T](
+    callback: Callable[[], T],
+    *,
+    commit_validation_error_factory: IncidentLifecycleErrorFactory,
+) -> T:
+    try:
+        return callback()
+    except SharedContractValidationError as error:
+        code = "malformed_commit_input" if error.code == "invalid_contract" else error.code
+        raise commit_validation_error_factory(str(error), code) from error
+
+
+def snapshot_lifecycle_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return deepcopy(dict(value))
+    return {"raw_value": repr(value)}
 
 
 def _stage_lifecycle_success(
