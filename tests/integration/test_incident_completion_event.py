@@ -1,5 +1,6 @@
 import sys
 import unittest
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -8,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from character.state.current import build_active_incident_request  # noqa: E402
 from character.state.incidents import InMemoryLifeIncidentStore  # noqa: E402
 from commit_effects.incident_complete import (  # noqa: E402
+    INCIDENT_COMPLETION_EVENT_FINALIZE_STAGE,
     LIFE_INCIDENT_COMPLETE_REJECTED_STATUS,
     LIFE_INCIDENT_COMPLETED_STATUS,
     commit_life_incident_completion_event,
@@ -73,6 +75,27 @@ def role_model_result_with_incident():
             },
         },
     }
+
+
+class ActiveIncidentChangingCompleteFinalizeFinalizer:
+    def __init__(self, store):
+        self.store = store
+        self.completed = False
+
+    def require_life_incident_complete_raw_event_log(self, raw_event_log):
+        self.store.require_life_incident_complete_raw_event_log(raw_event_log)
+
+    def finalize_life_incident_complete(self, request):
+        active_incidents_by_scope = self.store._active_incidents_by_scope
+        scope = next(iter(active_incidents_by_scope))
+        changed_incident = deepcopy(request["active_incident"])
+        changed_incident["title"] = "changed before completion"
+        active_incidents_by_scope[scope] = changed_incident
+        return self.store.finalize_life_incident_complete(request)
+
+    def complete_life_incident_complete_after_log_visible(self, request):
+        self.completed = True
+        self.store.complete_life_incident_complete_after_log_visible(request)
 
 
 class IncidentCompletionEventIntegrationTests(unittest.TestCase):
@@ -227,6 +250,124 @@ class IncidentCompletionEventIntegrationTests(unittest.TestCase):
         self.assertEqual(
             store.read_active_incident(build_active_incident_request(start))["incident_id"],
             "incident-generated-1",
+        )
+
+    def test_raw_log_mismatch_rejects_without_clearing_active_incident(self):
+        store_raw_log = InMemoryRawEventLog()
+        commit_raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=store_raw_log)
+        ids = SequenceIdGenerator()
+        commit_life_incident_start(
+            start_event(),
+            role_model_result_with_incident(),
+            life_incident_start_finalizer=store,
+            raw_event_log=store_raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+        intake_result = intake_runtime_event(
+            {
+                "event_id": "event-completion",
+                "trace_id": "trace-completion",
+                "type": "INCIDENT_COMPLETION",
+                "created_at": "2026-05-24T08:59:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "incident_id": "incident-generated-1",
+                    "user_id": "user-1",
+                    "conversation_id": "conversation-1",
+                },
+            },
+            raw_event_log=commit_raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        result = commit_life_incident_completion_event(
+            intake_result["event"],
+            active_incident_source=store,
+            life_incident_complete_finalizer=store,
+            raw_event_log=commit_raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_COMPLETE_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], INCIDENT_COMPLETION_EVENT_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertIn("same Raw Event Log instance", result["failure"]["message"])
+        self.assertEqual(
+            store.read_active_incident(build_active_incident_request(intake_result["event"]))[
+                "incident_id"
+            ],
+            "incident-generated-1",
+        )
+        self.assertEqual(
+            store_raw_log.query(
+                {"trace_id": "trace-completion", "kinds": ["life_incident_completed"]}
+            )["entries"],
+            [],
+        )
+        self.assertEqual(
+            [
+                entry["kind"]
+                for entry in commit_raw_log.query({"trace_id": "trace-completion"})["entries"]
+            ],
+            ["runtime_event_received", "life_incident_complete_rejected"],
+        )
+
+    def test_active_incident_changed_before_finalize_rejects_without_success(self):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        finalizer = ActiveIncidentChangingCompleteFinalizeFinalizer(store)
+        ids = SequenceIdGenerator()
+        start = start_event()
+        commit_life_incident_start(
+            start,
+            role_model_result_with_incident(),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+        intake_result = intake_runtime_event(
+            {
+                "event_id": "event-completion",
+                "trace_id": "trace-completion",
+                "type": "INCIDENT_COMPLETION",
+                "created_at": "2026-05-24T08:59:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "incident_id": "incident-generated-1",
+                    "user_id": "user-1",
+                    "conversation_id": "conversation-1",
+                },
+            },
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        result = commit_life_incident_completion_event(
+            intake_result["event"],
+            active_incident_source=store,
+            life_incident_complete_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+        current_active_incident = store.read_active_incident(build_active_incident_request(start))
+        entries = raw_log.query({"trace_id": "trace-completion"})["entries"]
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_COMPLETE_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], INCIDENT_COMPLETION_EVENT_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertIn("changed before completion could be finalized", result["failure"]["message"])
+        self.assertFalse(finalizer.completed)
+        self.assertEqual(current_active_incident["title"], "changed before completion")
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            ["runtime_event_received", "life_incident_complete_rejected"],
         )
 
 

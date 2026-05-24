@@ -326,7 +326,8 @@
       <li>Extended active-incident reads so the same scoped request helper works for user-message and incident-completion events.</li>
       <li>Added <code>commit_life_incident_completion_event()</code> to Commit &amp; Effects. It re-reads the active incident, matches <code>incident_id</code>, builds a completed snapshot with the existing validation rules, stages the success raw log, confirms visibility, then clears the active incident through <code>InMemoryLifeIncidentStore</code>.</li>
       <li>Reused the existing <code>life_incident_completed</code> success kind and atomic raw-log visibility path, with <code>completion_source = "incident_completion_event"</code> to distinguish the deterministic event path from MVP-018's model-proposed user-message path.</li>
-      <li>Added unit and integration coverage for success, malformed event intake, no-active rejection, incident-ID mismatch, active-source failure, finalizer failure, post-confirm clearing failure, deep-copy safety, and no-model/no-visible-output behavior.</li>
+      <li>Review fix: malformed <code>INCIDENT_COMPLETION</code> payloads now use the structured rejected-result and raw-log audit path instead of raising before event-specific failure wrapping.</li>
+      <li>Added unit and integration coverage for success, malformed event intake and commit input, no-active rejection, incident-ID mismatch, active-source failure, raw-log mismatch, pre-confirm finalizer failure, visibility staging failure, changed-before-finalize rejection, post-confirm clearing failure, deep-copy safety, and no-model/no-visible-output behavior.</li>
       <li>Left scheduler generation, private role-model aftermath, body/living-state/Live2D effects, proactive output, follow-up incidents, persistent completed history, retrieval indexing, and <code>completed_incident</code> DecisionContext fields out of scope.</li>
     </ul>
 

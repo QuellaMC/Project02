@@ -252,8 +252,8 @@ def commit_life_incident_completion_event(
     id_generator: IdGenerator,
     clock: Clock,
 ) -> LifeIncidentCompleteCommitResult:
-    event = _validate_incident_completion_event(source_event)
-    source_identity = _extract_trusted_incident_completion_source_identity(event)
+    source_identity = _extract_rejectable_incident_completion_source_identity(source_event)
+    event: RuntimeEvent | None = None
     request: LifeIncidentCompletionEventCommitRequest | None = None
     active_incident: Mapping[str, Any] | None = None
     completed_incident: Mapping[str, Any] | None = None
@@ -262,6 +262,7 @@ def commit_life_incident_completion_event(
     validated_finalize_result: Mapping[str, Any] | None = None
 
     try:
+        event = _validate_incident_completion_event(source_event)
         request = build_life_incident_completion_event_commit_request(event)
         active_incident = _read_active_incident_for_completion_event(
             event,
@@ -311,7 +312,7 @@ def commit_life_incident_completion_event(
                 str(error),
             )
             _append_completion_event_rejected_entry(
-                event,
+                source_event,
                 active_incident_snapshot=active_incident,
                 completed_incident_snapshot=completed_incident,
                 failure=failure,
@@ -328,7 +329,7 @@ def commit_life_incident_completion_event(
                 str(error),
             )
             _append_completion_event_rejected_entry(
-                event,
+                source_event,
                 active_incident_snapshot=active_incident,
                 completed_incident_snapshot=completed_incident,
                 failure=failure,
@@ -342,6 +343,7 @@ def commit_life_incident_completion_event(
 
     assert completed_incident is not None
     assert validated_finalize_result is not None
+    assert event is not None
     return {
         "schema_version": SCHEMA_VERSION,
         "trace_id": source_identity["trace_id"],
@@ -551,7 +553,7 @@ def build_life_incident_completion_event_rejected_log_entry(
     id_generator: IdGenerator,
     clock: Clock,
 ) -> RawEventLogEntry:
-    source_identity = _extract_trusted_incident_completion_source_identity(source_event)
+    source_identity = _extract_rejectable_incident_completion_source_identity(source_event)
     validated_failure = _validate_event_failure(failure)
     data: dict[str, Any] = {
         "source_event": _snapshot(source_event),
@@ -881,11 +883,21 @@ def _extract_trusted_source_identity(source_event: Any) -> dict[str, str]:
     )
 
 
-def _extract_trusted_incident_completion_source_identity(source_event: Any) -> dict[str, str]:
-    event = _validate_incident_completion_event(source_event)
+def _extract_rejectable_incident_completion_source_identity(source_event: Any) -> dict[str, str]:
+    if not isinstance(source_event, Mapping):
+        raise _commit_validation_error("source_event must be a mapping.", "malformed_commit_input")
+    trace_id = _wrap_validation_contract_error(
+        lambda: require_string(source_event.get("trace_id"), "source_event.trace_id")
+    )
+    event_id = _wrap_validation_contract_error(
+        lambda: require_string(source_event.get("event_id"), "source_event.event_id")
+    )
+    _wrap_validation_contract_error(
+        lambda: require_equal(source_event.get("type"), INCIDENT_COMPLETION, "source_event.type")
+    )
     return {
-        "trace_id": event["trace_id"],
-        "event_id": event["event_id"],
+        "trace_id": trace_id,
+        "event_id": event_id,
         "event_type": INCIDENT_COMPLETION,
     }
 

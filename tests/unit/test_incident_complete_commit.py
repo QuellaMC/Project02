@@ -25,7 +25,7 @@ from commit_effects.incident_complete import (  # noqa: E402
     commit_life_incident_complete,
     commit_life_incident_completion_event,
 )
-from runtime.logging import InMemoryRawEventLog  # noqa: E402
+from runtime.logging import InMemoryRawEventLog, RawEventLogQueryValidationError  # noqa: E402
 
 
 def fixed_clock():
@@ -124,6 +124,13 @@ class StagingCompletionFailingCompleteFinalizer:
             "completion failed after success log visibility",
             code="finalize_rejected",
         )
+
+
+class RejectingCompleteRawEventLog(InMemoryRawEventLog):
+    def expose_committed_success_entry(self, entry):
+        if entry["kind"] == "life_incident_completed":
+            raise RawEventLogQueryValidationError("complete visibility staging failed")
+        super().expose_committed_success_entry(entry)
 
 
 def normalized_user_message():
@@ -456,6 +463,62 @@ class IncidentCompleteCommitTests(unittest.TestCase):
         )
         self.assertNotIn("role_model_result_snapshot", raw_log.entries[0]["data"])
 
+    def test_malformed_event_completion_returns_rejected_result_and_log_entry(self):
+        raw_log = RecordingRawEventLog()
+        active_source = RecordingActiveIncidentSource(active_incident_snapshot())
+        finalizer = RecordingLifeIncidentCompleteFinalizer()
+        event = normalized_incident_completion_event()
+        del event["payload"]["incident_id"]
+
+        result = commit_life_incident_completion_event(
+            event,
+            active_incident_source=active_source,
+            life_incident_complete_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_COMPLETE_REJECTED_STATUS)
+        self.assertEqual(result["event_type"], "INCIDENT_COMPLETION")
+        self.assertEqual(
+            result["failure"]["stage"], INCIDENT_COMPLETION_EVENT_COMMIT_VALIDATION_STAGE
+        )
+        self.assertEqual(result["failure"]["code"], "malformed_commit_input")
+        self.assertIn("source_event.payload.incident_id", result["failure"]["message"])
+        self.assertEqual(active_source.requests, [])
+        self.assertEqual(finalizer.requests, [])
+        self.assertEqual(raw_log.entries[0]["kind"], "life_incident_complete_rejected")
+        self.assertEqual(raw_log.entries[0]["trace_id"], "trace-completion-due")
+        self.assertEqual(raw_log.entries[0]["event_id"], "event-completion-due")
+        self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
+
+    def test_event_completion_active_source_runtime_error_returns_rejected_result(self):
+        raw_log = RecordingRawEventLog()
+        active_source = RecordingActiveIncidentSource(
+            None,
+            error=RuntimeError("incident store unavailable"),
+        )
+        finalizer = RecordingLifeIncidentCompleteFinalizer()
+
+        result = commit_life_incident_completion_event(
+            normalized_incident_completion_event(),
+            active_incident_source=active_source,
+            life_incident_complete_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_COMPLETE_REJECTED_STATUS)
+        self.assertEqual(
+            result["failure"]["stage"], INCIDENT_COMPLETION_EVENT_COMMIT_VALIDATION_STAGE
+        )
+        self.assertEqual(result["failure"]["code"], "active_incident_source_error")
+        self.assertIn("incident store unavailable", result["failure"]["message"])
+        self.assertEqual(finalizer.requests, [])
+        self.assertEqual(raw_log.entries[0]["kind"], "life_incident_complete_rejected")
+
     def test_event_completion_rejects_incident_id_mismatch_without_finalizer_call(self):
         raw_log = RecordingRawEventLog()
         active_source = RecordingActiveIncidentSource(active_incident_snapshot())
@@ -479,6 +542,90 @@ class IncidentCompleteCommitTests(unittest.TestCase):
         self.assertEqual(raw_log.entries[0]["kind"], "life_incident_complete_rejected")
         self.assertEqual(
             raw_log.entries[0]["data"]["active_incident_snapshot"]["incident_id"], "incident-1"
+        )
+
+    def test_event_completion_raw_log_mismatch_rejects_before_staging(self):
+        store_raw_log = InMemoryRawEventLog()
+        commit_raw_log = InMemoryRawEventLog()
+        active_source = RecordingActiveIncidentSource(active_incident_snapshot())
+        finalizer = StagingCompletionFailingCompleteFinalizer(store_raw_log)
+
+        result = commit_life_incident_completion_event(
+            normalized_incident_completion_event(),
+            active_incident_source=active_source,
+            life_incident_complete_finalizer=finalizer,
+            raw_event_log=commit_raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_COMPLETE_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], INCIDENT_COMPLETION_EVENT_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertIn("same Raw Event Log instance", result["failure"]["message"])
+        self.assertEqual(finalizer.requests, [])
+        self.assertEqual(
+            [
+                entry["kind"]
+                for entry in commit_raw_log.query({"trace_id": "trace-completion-due"})["entries"]
+            ],
+            ["life_incident_complete_rejected"],
+        )
+        self.assertEqual(
+            store_raw_log.query({"trace_id": "trace-completion-due"})["entries"],
+            [],
+        )
+
+    def test_event_completion_finalizer_failure_rejects_without_success_log(self):
+        raw_log = RecordingRawEventLog()
+        active_source = RecordingActiveIncidentSource(active_incident_snapshot())
+        finalizer = RecordingLifeIncidentCompleteFinalizer(
+            error=LifeIncidentCompleteFinalizerError(
+                "finalize rejected",
+                code="finalize_rejected",
+            )
+        )
+
+        result = commit_life_incident_completion_event(
+            normalized_incident_completion_event(),
+            active_incident_source=active_source,
+            life_incident_complete_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_COMPLETE_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], INCIDENT_COMPLETION_EVENT_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertEqual(finalizer.durable_completed_incidents, [])
+        self.assertEqual(finalizer.durable_raw_event_log_entries, [])
+        self.assertEqual(raw_log.entries[0]["kind"], "life_incident_complete_rejected")
+
+    def test_event_completion_visibility_staging_failure_rejects_without_success_log(self):
+        raw_log = RejectingCompleteRawEventLog()
+        active_source = RecordingActiveIncidentSource(active_incident_snapshot())
+        finalizer = StagingCompletionFailingCompleteFinalizer(raw_log)
+
+        result = commit_life_incident_completion_event(
+            normalized_incident_completion_event(),
+            active_incident_source=active_source,
+            life_incident_complete_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        entries = raw_log.query({"trace_id": "trace-completion-due"})["entries"]
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_COMPLETE_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], INCIDENT_COMPLETION_EVENT_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "malformed_finalize_result")
+        self.assertIn("complete visibility staging failed", result["failure"]["message"])
+        self.assertEqual(finalizer.completion_requests, [])
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            ["life_incident_complete_rejected"],
         )
 
     def test_event_completion_failure_after_success_visibility_keeps_success_and_audit(self):
