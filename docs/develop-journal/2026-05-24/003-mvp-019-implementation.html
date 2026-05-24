@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-24 - MVP-019 Implementation</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-24 - MVP-019 Implementation</h1>
+    <p>
+      Implemented <a href="../../plan/active-slice.html">MVP-019 - Minimal Incident Completion RuntimeEvent Boundary v0.1</a>
+      as the first deterministic non-user-message runtime event path.
+    </p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Added a shared <code>INCIDENT_COMPLETION</code> event constant, normalized payload validator, kernel payload normalizer, and deterministic route with <code>model_needed = false</code> and <code>next_step = "incident_completion_commit"</code>.</li>
+      <li>Extended <code>ActiveIncidentRequest</code> validation so active-incident reads support exactly <code>USER_MESSAGE</code> and <code>INCIDENT_COMPLETION</code>. Current-state reads remain user-message-only.</li>
+      <li>Added <code>commit_life_incident_completion_event()</code> to Commit &amp; Effects. The boundary re-reads the active incident, rejects stale or mismatched events, builds the completed snapshot with the existing MVP-018 rules, stages and confirms the success raw log, then clears the active incident through the existing finalizer/store path.</li>
+      <li>Added event-specific success and rejection log builders that carry <code>completion_source = "incident_completion_event"</code> and do not fabricate role-model result, character decision, or life-action data.</li>
+      <li>Updated <code>InMemoryLifeIncidentStore</code> completion finalization to return the validated source event type, so the same store can finalize either the MVP-018 user-message path or the MVP-019 event path.</li>
+      <li>Added unit and integration tests for kernel intake, active-incident request reuse, event completion success, structured rejection, post-confirm clearing failure, copy safety, and no-model/no-visible-output behavior.</li>
+    </ul>
+
+    <h2>Why It Was Needed</h2>
+    <p>
+      Notion defines incident completion as a runtime trigger, but the local
+      implementation first needed MVP-018's user-message completion commit
+      path and atomic <code>life_incident_completed</code> raw-log visibility.
+      MVP-019 connects the next narrow boundary without adding scheduler
+      generation, model aftermath, body effects, Live2D, proactive output,
+      follow-up incidents, or completed-history storage.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>src/runtime/contracts.py</code>, <code>src/runtime/kernel.py</code></li>
+      <li><code>src/character/state/current.py</code>, <code>src/character/state/incidents.py</code></li>
+      <li><code>src/commit_effects/incident_complete.py</code>, <code>src/commit_effects/incident_lifecycle.py</code></li>
+      <li><code>tests/unit/test_runtime_kernel.py</code>, <code>tests/integration/test_runtime_kernel_intake_logging.py</code>, <code>tests/unit/test_current_state.py</code>, <code>tests/unit/test_incident_complete_commit.py</code>, <code>tests/integration/test_incident_completion_event.py</code></li>
+      <li><code>docs/plan/active-slice.html</code>, <code>docs/plan/index.html</code>, <code>docs/plan/future-slices.html</code>, and this journal entry.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>Shared-code reuse: the event path reuses the kernel dispatch tables, active-incident request/scope helpers, completed snapshot validation, finalizer result validation, raw-log visibility helpers, and in-memory store clearing semantics.</li>
+      <li>Boundary discipline: <code>role_model.loop</code>, <code>character.state.context</code>, and <code>runtime.user_turn</code> were not changed because MVP-019 does not build context, call a model, or commit visible output.</li>
+      <li>Higher-level refactor proposal: a request-driven incident lifecycle transition helper is parked in <a href="../../plan/future-slices.html">future-slices.html</a>. It should wait until there is a second no-model lifecycle event path, so MVP-019 does not become a speculative framework rewrite.</li>
+      <li>Active slice scope did not change during implementation.</li>
+      <li>No new future behavior was implemented beyond the existing parking-lot items and the request-driven helper refactor note.</li>
+    </ul>
+
+    <h2>Checks Run</h2>
+    <ul>
+      <li><code>python -m unittest tests.unit.test_runtime_kernel tests.unit.test_current_state tests.unit.test_incident_complete_commit tests.integration.test_runtime_kernel_intake_logging tests.integration.test_incident_completion_event</code> - failed before implementation, then passed after implementation.</li>
+      <li><code>python -m unittest discover</code> - passed, 314 tests.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff format src tests</code> - passed, reformatted 3 files.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code> - passed after import sorting.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code> - passed, 40 files already formatted.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/mypy src</code> - passed, no issues in 19 source files.</li>
+      <li><code>python -m compileall src tests</code> - passed.</li>
+      <li><code>python -c 'from html.parser import HTMLParser; ...'</code> - parsed 93 HTML files.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Commit the MVP-019 slice, push the branch, open the PR, then update the
+      plan graph with the PR link.
+    </p>
+  </main>
+</body>
+</html>

@@ -6,9 +6,11 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from runtime.contracts import (
+    INCIDENT_COMPLETION,
     USER_MESSAGE,
     ContractValidationError,
     validate_iso8601_timestamp,
+    validate_normalized_incident_completion_event,
     validate_normalized_user_message_event,
 )
 from runtime.logging import (
@@ -27,6 +29,7 @@ RuntimeEvent = dict[str, Any]
 RuntimeRouteResult = dict[str, Any]
 RuntimeEventIntakeResult = dict[str, Any]
 PayloadNormalizer = Callable[[Any], dict[str, Any]]
+EventValidator = Callable[[Any], RuntimeEvent]
 RouteBuilder = Callable[[RuntimeEvent], RuntimeRouteResult]
 _MISSING = object()
 
@@ -126,7 +129,7 @@ def normalize_runtime_event(
         "payload": payload,
     }
     try:
-        return validate_normalized_user_message_event(normalized_event)
+        return EVENT_VALIDATORS[event_type](normalized_event)
     except ContractValidationError as error:
         raise RuntimeValidationError(str(error)) from error
 
@@ -165,6 +168,16 @@ def _route_user_message_event(event: RuntimeEvent) -> RuntimeRouteResult:
     }
 
 
+def _route_incident_completion_event(event: RuntimeEvent) -> RuntimeRouteResult:
+    return {
+        "trace_id": event["trace_id"],
+        "event_id": event["event_id"],
+        "event_type": event["type"],
+        "model_needed": False,
+        "next_step": "incident_completion_commit",
+    }
+
+
 def _normalize_event_type(value: Any) -> str:
     if (
         not isinstance(value, str)
@@ -189,6 +202,32 @@ def _normalize_user_message_payload(payload: Any) -> dict[str, str]:
         raise RuntimeValidationError("payload.text must be a non-empty string.")
 
     normalized = {"text": text}
+    for field_name in ("user_id", "conversation_id"):
+        if field_name in payload:
+            value = payload[field_name]
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise RuntimeValidationError(f"payload.{field_name} must be a string.")
+            normalized[field_name] = value
+
+    return normalized
+
+
+def _normalize_incident_completion_payload(payload: Any) -> dict[str, str]:
+    if not isinstance(payload, Mapping):
+        raise RuntimeValidationError("payload must be a mapping.")
+
+    extra_keys = set(payload) - {"incident_id", "user_id", "conversation_id"}
+    if extra_keys:
+        formatted = ", ".join(sorted(extra_keys))
+        raise RuntimeValidationError(f"payload contains extra field(s): {formatted}.")
+
+    incident_id = payload.get("incident_id")
+    if not isinstance(incident_id, str) or not incident_id.strip():
+        raise RuntimeValidationError("payload.incident_id must be a non-empty string.")
+
+    normalized = {"incident_id": incident_id.strip()}
     for field_name in ("user_id", "conversation_id"):
         if field_name in payload:
             value = payload[field_name]
@@ -243,8 +282,15 @@ def _normalize_schema_version(event_input: Mapping[str, Any]) -> str:
 
 EVENT_PAYLOAD_NORMALIZERS: dict[str, PayloadNormalizer] = {
     USER_MESSAGE: _normalize_user_message_payload,
+    INCIDENT_COMPLETION: _normalize_incident_completion_payload,
+}
+
+EVENT_VALIDATORS: dict[str, EventValidator] = {
+    USER_MESSAGE: validate_normalized_user_message_event,
+    INCIDENT_COMPLETION: validate_normalized_incident_completion_event,
 }
 
 EVENT_ROUTE_BUILDERS: dict[str, RouteBuilder] = {
     USER_MESSAGE: _route_user_message_event,
+    INCIDENT_COMPLETION: _route_incident_completion_event,
 }

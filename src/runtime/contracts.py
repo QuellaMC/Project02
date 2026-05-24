@@ -8,6 +8,7 @@ from typing import Any
 from runtime.logging import SCHEMA_VERSION
 
 USER_MESSAGE = "USER_MESSAGE"
+INCIDENT_COMPLETION = "INCIDENT_COMPLETION"
 VISIBLE_REPLY_ACTION = "visible_reply"
 STATE_PATCH_ACTION = "state_patch"
 LIFE_ACTION = "life_action"
@@ -71,6 +72,53 @@ def validate_normalized_user_message_event(
         raise ContractValidationError(f"{source_name}.payload.text must be a non-empty string.")
 
     normalized_payload: dict[str, str] = {"text": text}
+    for field_name in ("user_id", "conversation_id"):
+        if field_name in payload:
+            normalized_payload[field_name] = require_optional_string(
+                payload[field_name],
+                f"{source_name}.payload.{field_name}",
+            )
+
+    return {
+        "event_id": event_id,
+        "trace_id": trace_id,
+        "type": event_type,
+        "created_at": created_at,
+        "schema_version": SCHEMA_VERSION,
+        "payload": normalized_payload,
+    }
+
+
+def validate_normalized_incident_completion_event(
+    event: Any,
+    *,
+    source_name: str = "RuntimeEvent",
+) -> RuntimeEvent:
+    if not isinstance(event, Mapping):
+        raise ContractValidationError(f"{source_name} must be a mapping.")
+
+    event_id = require_string(event.get("event_id"), f"{source_name}.event_id")
+    trace_id = require_string(event.get("trace_id"), f"{source_name}.trace_id")
+    event_type = require_equal(event.get("type"), INCIDENT_COMPLETION, f"{source_name}.type")
+    created_at = validate_iso8601_timestamp(
+        event.get("created_at"),
+        f"{source_name}.created_at",
+    )
+    require_equal(event.get("schema_version"), SCHEMA_VERSION, f"{source_name}.schema_version")
+
+    payload = event.get("payload")
+    if not isinstance(payload, Mapping):
+        raise ContractValidationError(f"{source_name}.payload must be a mapping.")
+    reject_extra_keys(
+        payload,
+        {"incident_id", "user_id", "conversation_id"},
+        f"{source_name}.payload",
+    )
+    incident_id = require_string(
+        payload.get("incident_id"),
+        f"{source_name}.payload.incident_id",
+    ).strip()
+    normalized_payload: dict[str, str] = {"incident_id": incident_id}
     for field_name in ("user_id", "conversation_id"):
         if field_name in payload:
             normalized_payload[field_name] = require_optional_string(

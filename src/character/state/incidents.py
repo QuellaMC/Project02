@@ -28,6 +28,7 @@ from commit_effects.incident_start import (
 from runtime.contracts import (
     CANCEL_INCIDENT_ACTION,
     COMPLETE_INCIDENT_ACTION,
+    INCIDENT_COMPLETION,
     START_INCIDENT_ACTION,
     USER_MESSAGE,
     VISIBLE_REPLY_ACTION,
@@ -36,6 +37,7 @@ from runtime.contracts import (
     require_equal,
     require_optional_string,
     require_string,
+    require_supported_value,
     validate_iso8601_timestamp,
 )
 from runtime.logging import (
@@ -198,7 +200,7 @@ class InMemoryLifeIncidentStore:
             "schema_version": SCHEMA_VERSION,
             "trace_id": validated_request["trace_id"],
             "event_id": validated_request["event_id"],
-            "event_type": USER_MESSAGE,
+            "event_type": validated_request["event_type"],
             "committed_log_entry_id": committed_log_entry["log_id"],
         }
 
@@ -512,21 +514,30 @@ def _validate_life_incident_complete_finalize_request(
             request.get("event_id"),
             "LifeIncidentCompleteFinalizeRequest.event_id",
         )
-        event_type = require_equal(
+        event_type = require_supported_value(
             request.get("event_type"),
-            USER_MESSAGE,
+            {USER_MESSAGE, INCIDENT_COMPLETION},
             "LifeIncidentCompleteFinalizeRequest.event_type",
         )
-        decision_action = require_equal(
-            request.get("decision_action"),
-            VISIBLE_REPLY_ACTION,
-            "LifeIncidentCompleteFinalizeRequest.decision_action",
-        )
-        life_action_type = require_equal(
-            request.get("life_action_type"),
-            COMPLETE_INCIDENT_ACTION,
-            "LifeIncidentCompleteFinalizeRequest.life_action_type",
-        )
+        if event_type == USER_MESSAGE:
+            decision_action = require_equal(
+                request.get("decision_action"),
+                VISIBLE_REPLY_ACTION,
+                "LifeIncidentCompleteFinalizeRequest.decision_action",
+            )
+            life_action_type = require_equal(
+                request.get("life_action_type"),
+                COMPLETE_INCIDENT_ACTION,
+                "LifeIncidentCompleteFinalizeRequest.life_action_type",
+            )
+        else:
+            if "decision_action" in request or "life_action_type" in request:
+                raise ContractValidationError(
+                    "LifeIncidentCompleteFinalizeRequest must not include model decision fields "
+                    "for INCIDENT_COMPLETION."
+                )
+            decision_action = None
+            life_action_type = None
         incident_id = require_string(
             request.get("incident_id"),
             "LifeIncidentCompleteFinalizeRequest.incident_id",
@@ -544,11 +555,17 @@ def _validate_life_incident_complete_finalize_request(
                 "trace_id": trace_id,
                 "event_id": event_id,
                 "event_type": event_type,
-                "decision_action": decision_action,
-                "life_action_type": life_action_type,
                 "incident_id": incident_id,
                 "commit_time": commit_time,
-            },
+            }
+            | (
+                {
+                    "decision_action": decision_action,
+                    "life_action_type": life_action_type,
+                }
+                if event_type == USER_MESSAGE
+                else {}
+            ),
         )
         committed_log_entry = _validate_complete_committed_log_entry(
             request.get("committed_log_entry"),
@@ -587,14 +604,15 @@ def _validate_life_incident_complete_finalize_request(
         "trace_id": trace_id,
         "event_id": event_id,
         "event_type": event_type,
-        "decision_action": decision_action,
-        "life_action_type": life_action_type,
         "incident_id": incident_id,
         "commit_time": commit_time,
         "active_incident": active_incident,
         "completed_incident": completed_incident,
         "committed_log_entry": committed_log_entry,
     }
+    if event_type == USER_MESSAGE:
+        validated_request["decision_action"] = decision_action
+        validated_request["life_action_type"] = life_action_type
     validated_request.update(optional_ids)
     return validated_request
 
