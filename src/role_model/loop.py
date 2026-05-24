@@ -23,6 +23,7 @@ from runtime.contracts import (
     START_INCIDENT_ACTION,
     STATE_PATCH_ACTION,
     USER_MESSAGE,
+    USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD,
     VISIBLE_REPLY_ACTION,
     ContractValidationError,
     RuntimeEvent,
@@ -723,7 +724,12 @@ def _validate_character_snapshot(
     _wrap_contract_error(
         lambda: reject_extra_keys(
             character_snapshot,
-            {"recent_visible_messages", "living_state_brief", "active_incident"},
+            {
+                "recent_visible_messages",
+                "living_state_brief",
+                "active_incident",
+                USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD,
+            },
             "DecisionContext.character_snapshot",
         )
     )
@@ -742,6 +748,16 @@ def _validate_character_snapshot(
                 event_id=event_id,
             )
         )
+    if USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD in character_snapshot:
+        if character_snapshot[USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD] is not True:
+            raise RoleModelValidationError(
+                f"{USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD} must be true when present."
+            )
+        if "active_incident" not in normalized_snapshot:
+            raise RoleModelValidationError(
+                f"{USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD} requires active_incident."
+            )
+        normalized_snapshot[USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD] = True
 
     recent_visible_messages = character_snapshot.get("recent_visible_messages")
     if not isinstance(recent_visible_messages, list):

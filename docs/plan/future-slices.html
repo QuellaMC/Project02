@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-019</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-020</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -159,7 +159,7 @@
       <dd>Likely adds a <code>decision_context_built</code> raw log kind without changing existing role-model turn logs.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-019 is explicitly limited to the deterministic incident-completion event boundary. Dedicated context-build logs are deferred until debug/replay or context observability needs source-request traces.</dd>
+      <dd>MVP-020 is explicitly limited to one computed read-only interruption context flag. Dedicated context-build logs are deferred until debug/replay or context observability needs source-request traces.</dd>
     </dl>
 
     <h2>MVP-015 - Character State Engine Context Builder Boundary v0.1</h2>
@@ -240,7 +240,7 @@
       <dd>Likely moves existing validation into <code>runtime.contracts</code> without changing the current <code>DecisionContext</code> shape.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-019 should only add the minimal incident-completion event contract; it should not promote a broader shared runtime contract or change the current recent-message shape.</dd>
+      <dd>MVP-020 should only add the computed interruption context flag; it should not promote a broader shared runtime contract or change the current recent-message shape.</dd>
     </dl>
 
     <h2>MVP-007 - Minimal User Turn Orchestrator</h2>
@@ -456,7 +456,7 @@
       <dd>Likely adds a read/audit log kind that records query parameters, returned <code>log_id</code> values, caller metadata, and failure details without changing existing query result records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-019 is only a minimal incident-completion event boundary. It should not add debug inspector, replay execution, concrete persistence, retrieval indexing, pagination, redaction, or audited read-operation behavior.</dd>
+      <dd>MVP-020 is only a computed read-only context flag. It should not add debug inspector, replay execution, concrete persistence, retrieval indexing, pagination, redaction, or audited read-operation behavior.</dd>
     </dl>
 
     <h2>MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</h2>
@@ -510,34 +510,34 @@
       <dd>MVP-017 extended the <code>life_action</code> decision subset with <code>cancel_incident</code> and added cancel success/rejection raw log entries. MVP-018 extended the same subtype path with <code>complete_incident</code> and completion success/rejection raw log entries. Later lifecycle actions should follow the same narrow pattern only after the event boundary is proven.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-019 should add only the <code>INCIDENT_COMPLETION</code> event boundary. Resume, go idle, and no-change actions need separate ordering, conflict, and failure contracts.</dd>
+      <dd>MVP-020 should add only a read-only model-context cue for user interruption. Resume, go idle, and no-change actions need separate ordering, conflict, and failure contracts.</dd>
     </dl>
 
-    <h2>User Interruption Incident Policy</h2>
+    <h2>Durable User Interruption Incident Policy</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Let Runtime Kernel detect an active incident during a <code>USER_MESSAGE</code> turn and expose an <code>interrupted_incident</code> or background incident view according to policy.</dd>
+      <dd>Let Runtime Kernel and Commit &amp; Effects decide whether an active incident should become interrupted, continue in background, or remain protected during a <code>USER_MESSAGE</code> turn, then expose the appropriate model context.</dd>
 
       <dt>Why It May Matter</dt>
-      <dd>User interruption is central to the live-character behavior, but it needs a proven active incident view first.</dd>
+      <dd>User interruption is central to the live-character behavior, but durable interruption needs more than the MVP-020 read-only context cue.</dd>
 
       <dt>Source Or Trigger</dt>
       <dd>Discovered while reviewing Notion Phase 4 and deliberately leaving interruption out of MVP-011.</dd>
 
       <dt>Dependency</dt>
-      <dd>Active incident context should work first; lifecycle commit behavior may be needed before interruption can be durably recorded.</dd>
+      <dd>MVP-020 should first prove that the model can see a computed interruption cue. Durable policy needs explicit transition rules, Commit &amp; Effects validation, and raw-log audit behavior.</dd>
 
       <dt>Possible Future Slice</dt>
-      <dd><code>User interruption policy v0.1</code>.</dd>
+      <dd><code>Durable user interruption policy v0.1</code>.</dd>
 
       <dt>Risk Or Unknown</dt>
       <dd>Adding interruption too early could change route policy, incident status, allowed actions, and commit behavior in one pass.</dd>
 
       <dt>Schema Evolution Impact</dt>
-      <dd>Likely adds <code>interrupted_incident</code> context, interruption status transitions, and a post-turn life action contract.</dd>
+      <dd>Likely adds <code>interrupted_incident</code> context, interruption/background status transitions, and post-turn resume/cancel/no-change action contracts.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-019 does not decide or commit interruption; it only accepts a deterministic completion event for the current active incident.</dd>
+      <dd>MVP-020 only computes <code>user_message_interrupted_active_incident</code> for the model-facing context. It does not decide or commit interruption policy, backgrounding, resume behavior, or incident status changes.</dd>
     </dl>
 
     <h2>INCIDENT_COMPLETION RuntimeEvent Follow-ups</h2>
@@ -672,7 +672,7 @@
       <dd>Likely adds tested route outputs for interruption, scheduling, and later event families while preserving the MVP-007 <code>USER_MESSAGE</code> route.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-019 should add exactly one non-user-message route and should not broaden Runtime Kernel priority, interruption, or scheduling policy.</dd>
+      <dd>MVP-020 should not broaden Runtime Kernel priority, interruption, or scheduling policy; it only adds a read-only context flag after the existing active-incident read.</dd>
     </dl>
 
     <h2>Real RoleModelAdapter Provider</h2>
@@ -699,7 +699,7 @@
       <dd>May add provider metadata to model I/O logs without changing <code>CharacterDecision</code>.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-019 should not introduce a real provider while adding a deterministic non-model incident-completion event path.</dd>
+      <dd>MVP-020 should not introduce a real provider while adding a computed context field to the existing user-turn path.</dd>
     </dl>
 
     <h2>Shared RoleModelTurnResult Validator</h2>
@@ -753,7 +753,7 @@
       <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-019 slice introduces only an in-memory incident-completion event path, with no concrete database.</dd>
+      <dd>The active MVP-020 slice introduces only a computed read-only model-context flag, with no concrete database.</dd>
     </dl>
 
     <h2>Shared Visible Conversation Message Contract</h2>
@@ -780,7 +780,7 @@
       <dd>Likely adds a shared <code>role</code> / <code>message_id</code> visible transcript contract while preserving compatibility with existing assistant output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-019 slice should only add the incident-completion event boundary without unifying durable visible-message schemas.</dd>
+      <dd>The active MVP-020 slice should only add the computed interruption context flag without unifying durable visible-message schemas.</dd>
     </dl>
 
     <h2>Recent Source Backed By Visible Conversation Records</h2>

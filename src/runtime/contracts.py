@@ -33,6 +33,7 @@ ACTIVE_INCIDENT_TYPES = {
 }
 ACTIVE_INCIDENT_INTERRUPT_POLICIES = {"interruptible", "background", "protected"}
 ACTIVE_INCIDENT_RESUME_POLICIES = {"resume", "ask_model", "cancel"}
+USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD = "user_message_interrupted_active_incident"
 
 RuntimeEvent = dict[str, Any]
 CharacterDecision = dict[str, Any]

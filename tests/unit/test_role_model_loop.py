@@ -509,6 +509,10 @@ class DecisionContextTests(unittest.TestCase):
             context["character_snapshot"]["active_incident"],
             active_incident_brief(),
         )
+        self.assertIs(
+            context["character_snapshot"]["user_message_interrupted_active_incident"],
+            True,
+        )
         self.assertNotIn("allowed_actions", context)
 
     def test_active_incident_source_none_omits_context_field(self):
@@ -520,6 +524,10 @@ class DecisionContextTests(unittest.TestCase):
         )
 
         self.assertNotIn("active_incident", context["character_snapshot"])
+        self.assertNotIn(
+            "user_message_interrupted_active_incident",
+            context["character_snapshot"],
+        )
         self.assertEqual(source.requests[0]["event_id"], "event-1")
 
     def test_rejects_malformed_active_incident_source_response(self):
@@ -1152,6 +1160,12 @@ class DecisionContextTests(unittest.TestCase):
             rendered["decision_context"]["character_snapshot"]["active_incident"],
             active_incident_brief(),
         )
+        self.assertIs(
+            rendered["decision_context"]["character_snapshot"][
+                "user_message_interrupted_active_incident"
+            ],
+            True,
+        )
 
         context["character_snapshot"]["active_incident"]["future_field"] = "not allowed yet"
         with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
@@ -1163,6 +1177,31 @@ class DecisionContextTests(unittest.TestCase):
         )
         context["character_snapshot"]["active_incident"]["source_event_ids"] = ["event-1"]
         with self.assertRaisesRegex(RoleModelValidationError, "current event_id"):
+            render_context(normalized_user_message(), context)
+
+    def test_render_rejects_malformed_user_message_interruption_flag(self):
+        cases = [
+            (False, "must be true"),
+            ("true", "must be true"),
+        ]
+
+        for value, error_pattern in cases:
+            with self.subTest(value=value):
+                context = build_decision_context(
+                    normalized_user_message(),
+                    active_incident_source=RecordingActiveIncidentSource(
+                        active_incident_snapshot()
+                    ),
+                )
+                context["character_snapshot"]["user_message_interrupted_active_incident"] = value
+
+                with self.assertRaisesRegex(RoleModelValidationError, error_pattern):
+                    render_context(normalized_user_message(), context)
+
+        context = build_decision_context(normalized_user_message())
+        context["character_snapshot"]["user_message_interrupted_active_incident"] = True
+
+        with self.assertRaisesRegex(RoleModelValidationError, "requires active_incident"):
             render_context(normalized_user_message(), context)
 
     def test_active_incident_does_not_change_allowed_actions(self):
