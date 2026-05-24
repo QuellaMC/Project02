@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-018</a> is active.
+      Do not implement these while <a href="active-slice.html">MVP-019</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -159,7 +159,7 @@
       <dd>Likely adds a <code>decision_context_built</code> raw log kind without changing existing role-model turn logs.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-018 is explicitly limited to completing the currently active incident. Dedicated context-build logs are deferred until debug/replay or context observability needs source-request traces.</dd>
+      <dd>MVP-019 is explicitly limited to the deterministic incident-completion event boundary. Dedicated context-build logs are deferred until debug/replay or context observability needs source-request traces.</dd>
     </dl>
 
     <h2>MVP-015 - Character State Engine Context Builder Boundary v0.1</h2>
@@ -240,7 +240,7 @@
       <dd>Likely moves existing validation into <code>runtime.contracts</code> without changing the current <code>DecisionContext</code> shape.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-018 should only add the complete-active-incident commit boundary; it should not promote a broader shared runtime contract or change the current recent-message shape.</dd>
+      <dd>MVP-019 should only add the minimal incident-completion event contract; it should not promote a broader shared runtime contract or change the current recent-message shape.</dd>
     </dl>
 
     <h2>MVP-007 - Minimal User Turn Orchestrator</h2>
@@ -456,7 +456,7 @@
       <dd>Likely adds a read/audit log kind that records query parameters, returned <code>log_id</code> values, caller metadata, and failure details without changing existing query result records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-018 is only a complete-active-incident commit boundary. It should not add debug inspector, replay execution, concrete persistence, retrieval indexing, pagination, redaction, or audited read-operation behavior.</dd>
+      <dd>MVP-019 is only a minimal incident-completion event boundary. It should not add debug inspector, replay execution, concrete persistence, retrieval indexing, pagination, redaction, or audited read-operation behavior.</dd>
     </dl>
 
     <h2>MVP-014 - Minimal Concrete LifeIncidentStore Start Adapter</h2>
@@ -489,7 +489,7 @@
     <h2>Remaining Incident Lifecycle Actions</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>After MVP-012 proves <code>start_incident</code>, validate and commit the remaining model-proposed incident lifecycle actions one at a time. MVP-017 completed <code>cancel_incident</code>; MVP-018 promotes only <code>complete_incident</code>; resume, go idle, and no change remain parked.</dd>
+      <dd>After MVP-012 proves <code>start_incident</code>, validate and commit the remaining model-proposed incident lifecycle actions one at a time. MVP-017 completed <code>cancel_incident</code>; MVP-018 completed <code>complete_incident</code>; resume, go idle, and no change remain parked.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>The Basic Incident System eventually needs Commit and Effects to own accepted lifecycle transitions instead of letting the model mutate incidents directly.</dd>
@@ -498,7 +498,7 @@
       <dd>Discovered while keeping MVP-011 read-only and avoiding <code>life_action</code>.</dd>
 
       <dt>Dependency</dt>
-      <dd>MVP-012 has proven one narrow allowed action and commit/reject log contract for starting an incident. MVP-014 completed the concrete in-memory start adapter. MVP-017 proved cancellation of the current active incident. MVP-018 is proving only completion of the current active incident.</dd>
+      <dd>MVP-012 has proven one narrow allowed action and commit/reject log contract for starting an incident. MVP-014 completed the concrete in-memory start adapter. MVP-017 proved cancellation of the current active incident. MVP-018 proved completion of the current active incident.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>Minimal incident lifecycle follow-up actions v0.1</code>.</dd>
@@ -507,10 +507,10 @@
       <dd>The slice can become too broad if it includes queues, body effects, Live2D, scheduling, interruption, and completion events together.</dd>
 
       <dt>Schema Evolution Impact</dt>
-      <dd>MVP-017 extended the <code>life_action</code> decision subset with <code>cancel_incident</code> and added cancel success/rejection raw log entries. MVP-018 extends the same subtype path with <code>complete_incident</code> and completion success/rejection raw log entries. Later lifecycle actions should follow the same narrow pattern only after completion is proven.</dd>
+      <dd>MVP-017 extended the <code>life_action</code> decision subset with <code>cancel_incident</code> and added cancel success/rejection raw log entries. MVP-018 extended the same subtype path with <code>complete_incident</code> and completion success/rejection raw log entries. Later lifecycle actions should follow the same narrow pattern only after the event boundary is proven.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-018 should add only <code>complete_incident</code>. Resume, go idle, and no-change actions need separate ordering, conflict, and failure contracts.</dd>
+      <dd>MVP-019 should add only the <code>INCIDENT_COMPLETION</code> event boundary. Resume, go idle, and no-change actions need separate ordering, conflict, and failure contracts.</dd>
     </dl>
 
     <h2>User Interruption Incident Policy</h2>
@@ -537,13 +537,13 @@
       <dd>Likely adds <code>interrupted_incident</code> context, interruption status transitions, and a post-turn life action contract.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-018 does not decide or commit interruption; it only accepts an opted-in model-proposed complete action for the current active incident.</dd>
+      <dd>MVP-019 does not decide or commit interruption; it only accepts a deterministic completion event for the current active incident.</dd>
     </dl>
 
-    <h2>INCIDENT_COMPLETION RuntimeEvent</h2>
+    <h2>INCIDENT_COMPLETION RuntimeEvent Follow-ups</h2>
     <dl>
       <dt>Idea</dt>
-      <dd>Add an <code>INCIDENT_COMPLETION</code> event family after one active incident lifecycle exists.</dd>
+      <dd>Extend the minimal <code>INCIDENT_COMPLETION</code> event family after MVP-019 proves deterministic intake, routing, commit, and rejection logging.</dd>
 
       <dt>Why It May Matter</dt>
       <dd>Completed incidents should eventually trigger deterministic effects and optional model judgment.</dd>
@@ -552,19 +552,46 @@
       <dd>Discovered while checking Notion Phase 3 and keeping MVP-011 on the existing <code>USER_MESSAGE</code> path.</dd>
 
       <dt>Dependency</dt>
-      <dd>A minimal active incident lifecycle should exist before completion events can be meaningful.</dd>
+      <dd>MVP-018 must first prove active incident completion; MVP-019 must first prove the deterministic completion event boundary.</dd>
 
       <dt>Possible Future Slice</dt>
-      <dd><code>INCIDENT_COMPLETION event intake v0.1</code>.</dd>
+      <dd><code>INCIDENT_COMPLETION scheduled/private aftermath v0.1</code>.</dd>
 
       <dt>Risk Or Unknown</dt>
       <dd>Completion events may pull in scheduling, body effects, proactive output, and follow-up incident chains if not sliced narrowly.</dd>
 
       <dt>Schema Evolution Impact</dt>
-      <dd>Likely adds a new <code>RuntimeEvent</code> type, route policy, completed incident context, and completion commit logs.</dd>
+      <dd>Likely adds scheduler generation, idempotency metadata, completed incident context, body/living-state effects, and optional private model aftermath while preserving the MVP-019 event route and completion commit logs.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-018 keeps the single implemented event family as <code>USER_MESSAGE</code> and completes an active incident only through an opted-in model-proposed action. It does not add the private <code>INCIDENT_COMPLETION</code> event flow.</dd>
+      <dd>MVP-019 adds only direct <code>INCIDENT_COMPLETION</code> intake, routing, active-incident matching, completion, and rejection logging. It does not add scheduler generation, private role-model aftermath, body effects, proactive output, or follow-up incidents.</dd>
+    </dl>
+
+    <h2>Request-Driven Incident Lifecycle Transition Helper</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Extract a lower-level lifecycle transition helper that accepts a prebuilt commit request, source identity, active-incident reader, transition snapshot builder, source-specific success log builder, and rejection log builder without requiring role-model result data.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>MVP-017 and MVP-018 share a model-proposed lifecycle helper. MVP-019 adds the first no-model lifecycle event path and deliberately avoids faking <code>RoleModelTurnResult</code> or <code>life_action</code> data. A later second no-model lifecycle event may justify factoring the finalizer/visibility/rejection sequence one layer lower.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered during MVP-019 implementation while keeping event-driven completion deterministic and separate from the model-proposed complete path.</dd>
+
+      <dt>Dependency</dt>
+      <dd>At least one more non-model lifecycle transition or event path should exist so the abstraction has two concrete callers.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Incident lifecycle request-transition helper v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Extracting too early could turn a narrow event slice into a broad framework rewrite, or hide the important difference between model-proposed and deterministic event sources.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>No schema change is expected; the refactor would preserve existing <code>life_incident_completed</code>, <code>life_incident_complete_rejected</code>, and completion-source log data.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-019 has only one deterministic lifecycle event path. The current implementation already reuses the active-incident request contract, completed snapshot validation, finalizer result validation, raw-log visibility helpers, and in-memory store clearing semantics without introducing a speculative helper.</dd>
     </dl>
 
     <h2>Concrete CharacterRuntimeStateStore</h2>
@@ -645,7 +672,7 @@
       <dd>Likely adds tested route outputs for interruption, scheduling, and later event families while preserving the MVP-007 <code>USER_MESSAGE</code> route.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-018 should not broaden Runtime Kernel route policy while adding the complete-active-incident commit boundary.</dd>
+      <dd>MVP-019 should add exactly one non-user-message route and should not broaden Runtime Kernel priority, interruption, or scheduling policy.</dd>
     </dl>
 
     <h2>Real RoleModelAdapter Provider</h2>
@@ -672,7 +699,7 @@
       <dd>May add provider metadata to model I/O logs without changing <code>CharacterDecision</code>.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>MVP-018 still uses injected fake role-model behavior and should not introduce a real provider while adding the complete-active-incident commit boundary.</dd>
+      <dd>MVP-019 should not introduce a real provider while adding a deterministic non-model incident-completion event path.</dd>
     </dl>
 
     <h2>Shared RoleModelTurnResult Validator</h2>
@@ -726,7 +753,7 @@
       <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-018 slice introduces only in-memory active incident completion, with no concrete database.</dd>
+      <dd>The active MVP-019 slice introduces only an in-memory incident-completion event path, with no concrete database.</dd>
     </dl>
 
     <h2>Shared Visible Conversation Message Contract</h2>
@@ -753,7 +780,7 @@
       <dd>Likely adds a shared <code>role</code> / <code>message_id</code> visible transcript contract while preserving compatibility with existing assistant output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-018 slice should only add the complete-active-incident commit boundary without unifying durable visible-message schemas.</dd>
+      <dd>The active MVP-019 slice should only add the incident-completion event boundary without unifying durable visible-message schemas.</dd>
     </dl>
 
     <h2>Recent Source Backed By Visible Conversation Records</h2>

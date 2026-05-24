@@ -79,18 +79,22 @@
       <a href="https://github.com/QuellaMC/Project02/pull/19">PR #19</a>.
       MVP-017 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/20">PR #20</a>.
-      MVP-018 is tracked in
+      MVP-018 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/21">PR #21</a>.
+      MVP-019 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/22">PR #22</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
 flowchart LR
   UserMessage["USER_MESSAGE RuntimeEvent"]
+  IncidentCompletionEvent["INCIDENT_COMPLETION RuntimeEvent&lt;br/&gt;MVP-019 PR #22 open"]
 
-  subgraph RuntimeKernel["Runtime Kernel - MVP-001 and MVP-007 implemented"]
+  subgraph RuntimeKernel["Runtime Kernel - MVP-001 and MVP-007 implemented; MVP-019 PR #22 open"]
     Normalize["Normalize event&lt;br/&gt;schema, timestamp, ids"]
     SharedIntake["Shared intake helper&lt;br/&gt;raw log append + route"]
     RouteUpdate["USER_MESSAGE route&lt;br/&gt;model_needed = true&lt;br/&gt;next_step = user_turn"]
+    IncidentCompletionRoute["INCIDENT_COMPLETION route&lt;br/&gt;model_needed = false&lt;br/&gt;next_step = incident_completion_commit&lt;br/&gt;PR #22"]
   end
 
   subgraph RawLogging["Raw Event Logging - MVP-001 and MVP-013 implemented"]
@@ -100,16 +104,16 @@ flowchart LR
     RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 implemented"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015, MVP-016, MVP-017 implemented; MVP-018 PR #21 open"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015, MVP-016, MVP-017, MVP-018 implemented"]
     Envelope["RoleModelInputEnvelope split&lt;br/&gt;MVP-016 implemented&lt;br/&gt;call_type/event/actions outside DecisionContext"]
     Render["RoleModelInput renderer&lt;br/&gt;strict envelope validation"]
     Adapter["Injected fake RoleModelAdapter"]
     Parse["CharacterDecision parser&lt;br/&gt;visible_reply required"]
     StatePatchParse["Optional state_patch.living_state parser&lt;br/&gt;MVP-009 implemented"]
-    LifeActionParse["Optional life_action parser&lt;br/&gt;start_incident + cancel_incident implemented&lt;br/&gt;complete_incident MVP-018 PR #21"]
+    LifeActionParse["Optional life_action parser&lt;br/&gt;start_incident + cancel_incident + complete_incident implemented"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012, MVP-014, MVP-017 implemented; MVP-018 PR #21 open"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012, MVP-014, MVP-017, MVP-018 implemented; MVP-019 PR #22 open"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -121,9 +125,10 @@ flowchart LR
     IncidentStartFinalize["Incident-start finalizer protocol&lt;br/&gt;atomic incident + log visibility"]
     IncidentCancelCommit["Cancel active incident commit/reject&lt;br/&gt;MVP-017 implemented"]
     IncidentCancelFinalize["Incident-cancel finalizer protocol&lt;br/&gt;active incident cleared + log visibility"]
-    IncidentCompleteCommit["Complete active incident commit/reject&lt;br/&gt;MVP-018 PR #21"]
+    IncidentCompleteCommit["Complete active incident commit/reject&lt;br/&gt;MVP-018 implemented"]
     IncidentCompleteFinalize["Incident-complete finalizer protocol&lt;br/&gt;active incident cleared + log visibility"]
-    IncidentStoreAdapter["Concrete in-memory incident store adapter&lt;br/&gt;start + cancel implemented&lt;br/&gt;complete MVP-018 PR #21"]
+    IncidentCompletionEventCommit["INCIDENT_COMPLETION commit/reject&lt;br/&gt;MVP-019 PR #22"]
+    IncidentStoreAdapter["Concrete in-memory incident store adapter&lt;br/&gt;start + cancel + complete implemented"]
   end
 
   subgraph RecentContext["Context Source - MVP-004 and MVP-006 implemented"]
@@ -146,7 +151,9 @@ flowchart LR
   end
 
   UserMessage --> Normalize --> SharedIntake --> RouteUpdate
+  IncidentCompletionEvent --> Normalize
   SharedIntake --> LogHelper --> RuntimeLog
+  SharedIntake --> IncidentCompletionRoute
   Normalize --> ContextBuilder --> Envelope --> Render --> Adapter --> Parse
   Normalize --> Envelope
   Parse --> StatePatchParse
@@ -166,6 +173,8 @@ flowchart LR
   IncidentCancelCommit --> LogHelper
   LifeActionParse --> IncidentCompleteCommit --> IncidentCompleteFinalize
   IncidentCompleteCommit --> LogHelper
+  IncidentCompletionRoute --> IncidentCompletionEventCommit --> IncidentCompleteFinalize
+  IncidentCompletionEventCommit --> LogHelper
   IncidentStartFinalize --> IncidentStoreAdapter --> InMemoryIncidentStore
   IncidentCancelFinalize --> IncidentStoreAdapter
   IncidentCompleteFinalize --> IncidentStoreAdapter
@@ -190,9 +199,10 @@ flowchart LR
   class StatePatchParse,StatePatchCommit,PatchStore,AtomicFinalize implemented;
   class IncidentStartCommit,IncidentStartFinalize,RawLogQuery implemented;
   class IncidentCancelCommit,IncidentCancelFinalize implemented;
+  class LifeActionParse,IncidentCompleteCommit,IncidentCompleteFinalize implemented;
   class Envelope,IncidentStoreAdapter,InMemoryIncidentStore implemented;
   class ContextBuilder implemented;
-  class LifeActionParse,IncidentCompleteCommit,IncidentCompleteFinalize active;
+  class IncidentCompletionEvent,IncidentCompletionRoute,IncidentCompletionEventCommit active;
       </pre>
     </div>
 
@@ -207,9 +217,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-018 - Minimal Complete Active Incident Commit Boundary</a></td>
-          <td>Implementation PR open; <a href="https://github.com/QuellaMC/Project02/pull/21">PR #21</a>.</td>
-          <td>Let an opted-in <code>USER_MESSAGE</code> turn complete the currently active incident through Commit &amp; Effects and <code>InMemoryLifeIncidentStore</code>, with a query-visible <code>life_incident_completed</code> raw log and no private completion event, scheduler, body, Live2D, or follow-up incident behavior.</td>
+          <td><a href="active-slice.html">MVP-019 - Minimal Incident Completion RuntimeEvent Boundary</a></td>
+          <td>Implementation PR open; <a href="https://github.com/QuellaMC/Project02/pull/22">PR #22</a>.</td>
+          <td>Add a narrow <code>INCIDENT_COMPLETION</code> RuntimeEvent with <code>incident_id</code>, route it without a model call, and commit matching active-incident completion through Commit &amp; Effects with structured rejection logs.</td>
         </tr>
       </tbody>
     </table>
@@ -224,6 +234,11 @@ flowchart LR
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td><a href="completed/mvp-018-minimal-complete-active-incident-commit-boundary.html">MVP-018 - Minimal Complete Active Incident Commit Boundary</a></td>
+          <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/21">PR #21</a>.</td>
+          <td>Let an opted-in <code>USER_MESSAGE</code> turn complete the currently active incident through Commit &amp; Effects and <code>InMemoryLifeIncidentStore</code>, with a query-visible <code>life_incident_completed</code> raw log and no private completion event, scheduler, body, Live2D, or follow-up incident behavior.</td>
+        </tr>
         <tr>
           <td><a href="completed/mvp-017-minimal-cancel-active-incident-commit-boundary.html">MVP-017 - Minimal Cancel Active Incident Commit Boundary</a></td>
           <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/20">PR #20</a>.</td>
@@ -319,7 +334,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active MVP-018 complete-active-incident commit boundary are parked in
+      Ideas beyond the active MVP-019 incident-completion event boundary are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 

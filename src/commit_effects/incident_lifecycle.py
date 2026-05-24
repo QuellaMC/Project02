@@ -326,8 +326,11 @@ def validate_lifecycle_finalize_result(
             f"{result_name}.event_id",
         )
         event_type = require_equal(
-            finalize_result.get("event_type"),
-            USER_MESSAGE,
+            require_string(
+                finalize_result.get("event_type"),
+                f"{result_name}.event_type",
+            ),
+            source_identity["event_type"],
             f"{result_name}.event_type",
         )
         committed_log_entry_id = require_string(
@@ -436,7 +439,7 @@ def build_lifecycle_rejected_result(
         "schema_version": SCHEMA_VERSION,
         "trace_id": source_identity["trace_id"],
         "event_id": source_identity["event_id"],
-        "event_type": USER_MESSAGE,
+        "event_type": source_identity["event_type"],
         "status": rejected_status,
         "failure": deepcopy(dict(failure)),
     }
@@ -676,7 +679,7 @@ def _build_status_result(
         "schema_version": SCHEMA_VERSION,
         "trace_id": source_identity["trace_id"],
         "event_id": source_identity["event_id"],
-        "event_type": USER_MESSAGE,
+        "event_type": source_identity["event_type"],
         "status": status,
     }
 

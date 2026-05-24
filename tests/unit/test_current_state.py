@@ -41,6 +41,21 @@ def normalized_user_message():
     }
 
 
+def normalized_incident_completion():
+    return {
+        "event_id": "event-complete",
+        "trace_id": "trace-complete",
+        "type": "INCIDENT_COMPLETION",
+        "created_at": "2026-05-14T11:40:00+00:00",
+        "schema_version": "0.1",
+        "payload": {
+            "incident_id": "incident-1",
+            "user_id": "user-1",
+            "conversation_id": "conversation-1",
+        },
+    }
+
+
 def current_state_snapshot():
     return {
         "schema_version": "0.1",
@@ -105,6 +120,21 @@ class CurrentCharacterStateRequestTests(unittest.TestCase):
 
         self.assertEqual(request["user_id"], "")
         self.assertEqual(request["conversation_id"], "")
+
+    def test_builds_request_from_normalized_incident_completion(self):
+        request = build_active_incident_request(normalized_incident_completion())
+
+        self.assertEqual(
+            request,
+            {
+                "schema_version": "0.1",
+                "trace_id": "trace-complete",
+                "event_id": "event-complete",
+                "event_type": "INCIDENT_COMPLETION",
+                "user_id": "user-1",
+                "conversation_id": "conversation-1",
+            },
+        )
 
     def test_rejects_request_extra_fields_and_wrong_event_type(self):
         with self.assertRaisesRegex(ContractValidationError, "character_id"):
