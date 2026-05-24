@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-24 - MVP-019 Functional Spec</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-24 - MVP-019 Functional Spec</h1>
+    <p>
+      Promoted <a href="../../plan/active-slice.html">MVP-019 - Minimal Incident Completion RuntimeEvent Boundary v0.1</a>
+      after syncing <code>origin/main</code> and branching from the updated
+      mainline.
+    </p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Recorded MVP-018 under <a href="../../plan/completed/mvp-018-minimal-complete-active-incident-commit-boundary.html">completed plans</a>.</li>
+      <li>Replaced <a href="../../plan/active-slice.html">active-slice.html</a> with the MVP-019 functional spec.</li>
+      <li>Updated the plan index and future-slices parking lot so MVP-019 is the only active implementation slice.</li>
+      <li>Redirected stale MVP-018 journal and completed-plan links away from <code>active-slice.html</code> to the completed MVP-018 archive.</li>
+    </ul>
+
+    <h2>Why It Was Needed</h2>
+    <p>
+      Notion describes all triggers as <code>RuntimeEvent</code>s and includes
+      <code>INCIDENT_COMPLETION</code> as the incident-completion trigger. Local
+      MVP-018 has now proven the adjacent user-message
+      <code>complete_incident</code> commit boundary and atomic
+      <code>life_incident_completed</code> raw-log visibility path. MVP-019
+      keeps the next step narrow by accepting only a direct completion event,
+      routing without model judgment, and committing the matching active
+      incident through Commit &amp; Effects.
+    </p>
+
+    <h2>Source Context</h2>
+    <ul>
+      <li>Notion checked: pages 02, 02A, 03, 04, 08, and 09 from the Live Character Framework hub.</li>
+      <li>Local docs checked: MVP-018 active spec, plan index, future-slices parking lot, and development journal index.</li>
+      <li>Local code checked: <code>runtime.kernel</code>, <code>runtime.contracts</code>, <code>runtime.logging</code>, <code>commit_effects.incident_complete</code>, <code>commit_effects.incident_lifecycle</code>, <code>character.state.incidents</code>, and current runtime tests.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>MVP-019 is intentionally event-boundary-only. It adds no scheduler/timer generation, private role-model completion call, body effect, Live2D effect, proactive message, follow-up incident, or <code>completed_incident</code> DecisionContext field.</li>
+      <li>The spec requires Commit &amp; Effects to re-read the active incident and match <code>incident_id</code> before clearing anything.</li>
+      <li>The spec explicitly forbids faking <code>RoleModelTurnResult</code>, <code>CharacterDecision</code>, or <code>life_action</code> data just to reuse MVP-018 helper code.</li>
+      <li>Active slice scope changed from MVP-018 to MVP-019.</li>
+    </ul>
+
+    <h2>Checks Run</h2>
+    <ul>
+      <li><code>python3 -c 'from html.parser import HTMLParser; ...'</code> - parsed 10 edited HTML files.</li>
+      <li><code>git diff --check</code> - passed.</li>
+      <li><code>python3 -m unittest discover</code> - passed, 299 tests.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Review the MVP-019 spec for scope and shared-code reuse, then implement
+      focused tests and the smallest passing code for the deterministic
+      <code>INCIDENT_COMPLETION</code> boundary.
+    </p>
+  </main>
+</body>
+</html>

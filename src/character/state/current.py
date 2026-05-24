@@ -7,6 +7,7 @@ from runtime.contracts import (
     ACTIVE_INCIDENT_INTERRUPT_POLICIES,
     ACTIVE_INCIDENT_RESUME_POLICIES,
     ACTIVE_INCIDENT_TYPES,
+    INCIDENT_COMPLETION,
     USER_MESSAGE,
     ContractValidationError,
     RuntimeEvent,
@@ -16,6 +17,7 @@ from runtime.contracts import (
     require_string,
     require_supported_value,
     validate_iso8601_timestamp,
+    validate_normalized_incident_completion_event,
     validate_normalized_user_message_event,
     validate_remaining_seconds,
 )
@@ -60,16 +62,17 @@ def validate_current_character_state_request(
 
 
 def build_active_incident_request(event: RuntimeEvent) -> ActiveIncidentRequest:
-    return _build_user_message_read_request(
+    return _build_active_incident_read_request(
         event,
         request_name="ActiveIncidentRequest",
     )
 
 
 def validate_active_incident_request(request: Any) -> ActiveIncidentRequest:
-    return _validate_user_message_read_request(
+    return _validate_runtime_event_read_request(
         request,
         request_name="ActiveIncidentRequest",
+        allowed_event_types={USER_MESSAGE, INCIDENT_COMPLETION},
     )
 
 
@@ -392,10 +395,45 @@ def _build_user_message_read_request(
     return _validate_user_message_read_request(request, request_name=request_name)
 
 
+def _build_active_incident_read_request(
+    event: RuntimeEvent,
+    *,
+    request_name: str,
+) -> dict[str, Any]:
+    normalized_event = _validate_active_incident_request_event(
+        event,
+        source_name=f"{request_name}.event",
+    )
+    payload = normalized_event["payload"]
+    request: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "trace_id": normalized_event["trace_id"],
+        "event_id": normalized_event["event_id"],
+        "event_type": normalized_event["type"],
+    }
+    for field_name in ("user_id", "conversation_id"):
+        if field_name in payload:
+            request[field_name] = payload[field_name]
+    return validate_active_incident_request(request)
+
+
 def _validate_user_message_read_request(
     request: Any,
     *,
     request_name: str,
+) -> dict[str, Any]:
+    return _validate_runtime_event_read_request(
+        request,
+        request_name=request_name,
+        allowed_event_types={USER_MESSAGE},
+    )
+
+
+def _validate_runtime_event_read_request(
+    request: Any,
+    *,
+    request_name: str,
+    allowed_event_types: set[str],
 ) -> dict[str, Any]:
     if not isinstance(request, Mapping):
         raise ContractValidationError(f"{request_name} must be a mapping.")
@@ -429,6 +467,12 @@ def _validate_user_message_read_request(
             request.get("event_type"),
             USER_MESSAGE,
             f"{request_name}.event_type",
+        )
+        if allowed_event_types == {USER_MESSAGE}
+        else require_supported_value(
+            request.get("event_type"),
+            allowed_event_types,
+            f"{request_name}.event_type",
         ),
     }
     for field_name in ("user_id", "conversation_id"):
@@ -438,6 +482,19 @@ def _validate_user_message_read_request(
                 f"{request_name}.{field_name}",
             )
     return normalized_request
+
+
+def _validate_active_incident_request_event(event: Any, *, source_name: str) -> RuntimeEvent:
+    if not isinstance(event, Mapping):
+        raise ContractValidationError(f"{source_name} must be a mapping.")
+    event_type = event.get("type")
+    if event_type == USER_MESSAGE:
+        return validate_normalized_user_message_event(event, source_name=source_name)
+    if event_type == INCIDENT_COMPLETION:
+        return validate_normalized_incident_completion_event(event, source_name=source_name)
+    raise ContractValidationError(
+        f"{source_name}.type must be one of: INCIDENT_COMPLETION, USER_MESSAGE."
+    )
 
 
 def _validate_source_event_ids(value: Any, field_name: str) -> list[str]:

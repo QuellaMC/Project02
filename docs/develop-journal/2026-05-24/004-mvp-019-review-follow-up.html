@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-24 - MVP-019 Review Follow-up</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-24 - MVP-019 Review Follow-up</h1>
+    <p>
+      Addressed review feedback on
+      <a href="https://github.com/QuellaMC/Project02/pull/22">PR #22</a>
+      for <a href="../../plan/active-slice.html">MVP-019 - Minimal Incident Completion RuntimeEvent Boundary v0.1</a>.
+    </p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Moved <code>commit_life_incident_completion_event()</code> to extract only the stable incident-completion source identity before strict payload validation, so malformed completion payloads return a structured rejected result and <code>life_incident_complete_rejected</code> raw-log entry.</li>
+      <li>Added event-specific unit coverage for malformed completion commit input, active-source exceptions, raw-log mismatch, pre-confirm finalizer rejection, visibility staging failure, and existing post-confirm audit behavior.</li>
+      <li>Added concrete in-memory-store integration coverage for raw-log mismatch and active-incident changed-before-finalize rejection on the <code>INCIDENT_COMPLETION</code> path.</li>
+      <li>Updated the active slice implementation results to record the review fix and the now-explicit event failure coverage.</li>
+    </ul>
+
+    <h2>Why It Was Needed</h2>
+    <p>
+      The active spec already required event-specific coverage for raw-log
+      mismatch, active-source exceptions, pre-confirm finalizer/staging
+      failures, and changed-before-completion rejection. The PR review also
+      found that malformed completion payloads validated before the event
+      wrapper, which skipped the structured rejection audit path.
+    </p>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>The fix does not widen MVP-019 behavior. It only makes the existing Commit &amp; Effects event boundary reject malformed payloads with the same traceable result/log shape used by other event failure paths.</li>
+      <li>The event path still does not call the model, emit visible output, schedule work, or add completed-history storage.</li>
+      <li>The higher-level request-driven lifecycle helper remains parked until another no-model lifecycle event repeats this pattern.</li>
+    </ul>
+
+    <h2>Checks Run</h2>
+    <ul>
+      <li><code>python -m unittest tests.unit.test_incident_complete_commit tests.integration.test_incident_completion_event</code> - passed, 29 tests.</li>
+      <li><code>python -m unittest discover</code> - passed, 321 tests.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code> - passed, 40 files already formatted.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/mypy src</code> - passed, no issues in 19 source files.</li>
+      <li><code>python -m compileall src tests</code> - passed.</li>
+      <li><code>python -c 'from html.parser import HTMLParser; ...'</code> - parsed 90 HTML files.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Push the PR #22 review-fix commit, resolve the addressed review thread,
+      and let CI re-run on the updated branch.
+    </p>
+  </main>
+</body>
+</html>

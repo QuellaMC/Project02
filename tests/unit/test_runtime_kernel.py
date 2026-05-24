@@ -61,6 +61,39 @@ class RuntimeEventNormalizationTests(unittest.TestCase):
         )
         self.assertEqual(ids.calls, ["event", "trace"])
 
+    def test_normalizes_incident_completion_with_missing_ids(self):
+        ids = SequenceIdGenerator()
+
+        event = normalize_runtime_event(
+            {
+                "type": "INCIDENT_COMPLETION",
+                "payload": {
+                    "incident_id": " incident-1 ",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(
+            event,
+            {
+                "event_id": "event-generated-1",
+                "trace_id": "trace-generated-2",
+                "type": "INCIDENT_COMPLETION",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "incident_id": "incident-1",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+        )
+        self.assertEqual(ids.calls, ["event", "trace"])
+
     def test_preserves_existing_ids_and_created_at(self):
         ids = SequenceIdGenerator()
 
@@ -148,6 +181,26 @@ class RuntimeEventNormalizationTests(unittest.TestCase):
                         clock=fixed_clock,
                     )
 
+    def test_rejects_malformed_incident_completion_payloads(self):
+        cases = [
+            (None, "payload"),
+            ({}, "incident_id"),
+            ({"incident_id": ""}, "incident_id"),
+            ({"incident_id": "   "}, "incident_id"),
+            ({"incident_id": "incident-1", "user_id": 123}, "user_id"),
+            ({"incident_id": "incident-1", "conversation_id": object()}, "conversation_id"),
+            ({"incident_id": "incident-1", "future": "nope"}, "future"),
+        ]
+
+        for payload, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(RuntimeValidationError, error_pattern):
+                    normalize_runtime_event(
+                        {"type": "INCIDENT_COMPLETION", "payload": payload},
+                        id_generator=SequenceIdGenerator(),
+                        clock=fixed_clock,
+                    )
+
     def test_returns_deterministic_user_turn_route(self):
         event = {
             "event_id": "event-1",
@@ -168,6 +221,29 @@ class RuntimeEventNormalizationTests(unittest.TestCase):
                 "event_type": "USER_MESSAGE",
                 "model_needed": True,
                 "next_step": "user_turn",
+            },
+        )
+
+    def test_returns_deterministic_incident_completion_route(self):
+        event = {
+            "event_id": "event-1",
+            "trace_id": "trace-1",
+            "type": "INCIDENT_COMPLETION",
+            "created_at": "2026-05-14T11:30:00+00:00",
+            "schema_version": "0.1",
+            "payload": {"incident_id": "incident-1"},
+        }
+
+        route = route_runtime_event(event)
+
+        self.assertEqual(
+            route,
+            {
+                "trace_id": "trace-1",
+                "event_id": "event-1",
+                "event_type": "INCIDENT_COMPLETION",
+                "model_needed": False,
+                "next_step": "incident_completion_commit",
             },
         )
 
@@ -196,6 +272,33 @@ class RuntimeEventNormalizationTests(unittest.TestCase):
         )
         self.assertEqual(len(raw_log.entries), 1)
         self.assertEqual(raw_log.entries[0]["kind"], "runtime_event_received")
+
+    def test_shared_intake_appends_incident_completion_log_and_route(self):
+        ids = SequenceIdGenerator()
+        raw_log = RecordingRawEventLog()
+
+        result = intake_runtime_event(
+            {"type": "INCIDENT_COMPLETION", "payload": {"incident_id": "incident-1"}},
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["event"]["event_id"], "event-generated-1")
+        self.assertEqual(result["event"]["trace_id"], "trace-generated-2")
+        self.assertEqual(
+            result["route"],
+            {
+                "trace_id": "trace-generated-2",
+                "event_id": "event-generated-1",
+                "event_type": "INCIDENT_COMPLETION",
+                "model_needed": False,
+                "next_step": "incident_completion_commit",
+            },
+        )
+        self.assertEqual(len(raw_log.entries), 1)
+        self.assertEqual(raw_log.entries[0]["kind"], "runtime_event_received")
+        self.assertEqual(raw_log.entries[0]["data"]["event"]["type"], "INCIDENT_COMPLETION")
 
     def test_raw_event_log_entry_copies_event_snapshot(self):
         event = {

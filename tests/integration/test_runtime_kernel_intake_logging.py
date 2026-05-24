@@ -71,6 +71,42 @@ class RuntimeKernelIntakeLoggingTests(unittest.TestCase):
             {"text": "hello", "user_id": "u-1", "conversation_id": "c-1"},
         )
 
+    def test_incident_completion_intake_appends_one_raw_log_and_routes_without_model(self):
+        raw_log = RecordingRawEventLog()
+        kernel = RuntimeKernel(raw_log, id_generator=SequenceIdGenerator(), clock=fixed_clock)
+
+        route = kernel.handle_event(
+            {
+                "type": "INCIDENT_COMPLETION",
+                "payload": {
+                    "incident_id": "incident-1",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            }
+        )
+
+        self.assertEqual(
+            route,
+            {
+                "trace_id": "trace-generated-2",
+                "event_id": "event-generated-1",
+                "event_type": "INCIDENT_COMPLETION",
+                "model_needed": False,
+                "next_step": "incident_completion_commit",
+            },
+        )
+        self.assertEqual(len(raw_log.entries), 1)
+        self.assertEqual(raw_log.entries[0]["log_id"], "log-generated-3")
+        self.assertEqual(raw_log.entries[0]["kind"], "runtime_event_received")
+        self.assertEqual(raw_log.entries[0]["trace_id"], "trace-generated-2")
+        self.assertEqual(raw_log.entries[0]["event_id"], "event-generated-1")
+        self.assertEqual(raw_log.entries[0]["schema_version"], "0.1")
+        self.assertEqual(
+            raw_log.entries[0]["data"]["event"]["payload"],
+            {"incident_id": "incident-1", "user_id": "u-1", "conversation_id": "c-1"},
+        )
+
     def test_validation_failure_does_not_append_raw_log(self):
         raw_log = RecordingRawEventLog()
         kernel = RuntimeKernel(raw_log, id_generator=SequenceIdGenerator(), clock=fixed_clock)
