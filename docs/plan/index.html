@@ -83,7 +83,8 @@
       <a href="https://github.com/QuellaMC/Project02/pull/21">PR #21</a>.
       MVP-019 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/22">PR #22</a>.
-      MVP-020 is implemented locally and ready for review.
+      MVP-020 is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/23">PR #23</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -105,7 +106,7 @@ flowchart LR
     RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 implemented"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015, MVP-016, MVP-017, MVP-018 implemented; MVP-020 implemented locally"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015, MVP-016, MVP-017, MVP-018 implemented; MVP-020 PR #23 open"]
     Envelope["RoleModelInputEnvelope split&lt;br/&gt;MVP-016 implemented&lt;br/&gt;call_type/event/actions outside DecisionContext"]
     Render["RoleModelInput renderer&lt;br/&gt;strict envelope validation"]
     Adapter["Injected fake RoleModelAdapter"]
@@ -137,14 +138,14 @@ flowchart LR
     VisibleRecentSource["Visible conversation recent source&lt;br/&gt;maps committed records to context"]
   end
 
-  subgraph CharacterState["Character State Engine - MVP-008, MVP-011, MVP-014, MVP-015 implemented; MVP-020 implemented locally"]
+  subgraph CharacterState["Character State Engine - MVP-008, MVP-011, MVP-014, MVP-015 implemented; MVP-020 PR #23 open"]
     CurrentStateSource["Read-only current-state source&lt;br/&gt;injected fake"]
     LivingStateBrief["living_state_brief&lt;br/&gt;validated compact current reality"]
     ActiveIncidentSource["Read-only active-incident source&lt;br/&gt;MVP-011 PR #12 implemented"]
     ActiveIncidentBrief["active_incident brief&lt;br/&gt;validated compact incident context"]
     InMemoryIncidentStore["In-memory LifeIncidentStore&lt;br/&gt;active incident storage&lt;br/&gt;implements ActiveIncidentSource"]
     ContextBuilder["Character State Engine context builder&lt;br/&gt;MVP-015 PR #18&lt;br/&gt;owns compact context assembly"]
-    InterruptionFlag["user_message_interrupted_active_incident&lt;br/&gt;computed read-only flag&lt;br/&gt;MVP-020 implemented locally"]
+    InterruptionFlag["user_message_interrupted_active_incident&lt;br/&gt;computed read-only flag&lt;br/&gt;MVP-020 PR #23"]
   end
 
   subgraph UserTurn["User Turn Orchestrator - MVP-007 implemented locally"]
@@ -221,7 +222,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">MVP-020 - Computed User Interruption Context</a></td>
-          <td>Implementation complete locally; pull request not opened yet.</td>
+          <td>Implementation PR open; <a href="https://github.com/QuellaMC/Project02/pull/23">PR #23</a>.</td>
           <td>Add one read-only computed <code>character_snapshot.user_message_interrupted_active_incident</code> flag when a <code>USER_MESSAGE</code> context includes an active incident, without durable interruption status, resume behavior, new commit transition, scheduler, body, or Live2D changes.</td>
         </tr>
       </tbody>
