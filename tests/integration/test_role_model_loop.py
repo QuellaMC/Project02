@@ -220,12 +220,48 @@ def living_state_brief():
     }
 
 
+def active_incident_snapshot():
+    return {
+        "schema_version": "0.1",
+        "incident_id": "incident-1",
+        "type": "eat",
+        "status": "active",
+        "title": "Eating lunch",
+        "remaining_seconds": 600,
+        "interrupt_policy": "interruptible",
+        "resume_policy": "resume",
+        "source_event_ids": ["event-incident-started"],
+    }
+
+
+def active_incident_brief():
+    return {
+        "incident_id": "incident-1",
+        "type": "eat",
+        "title": "Eating lunch",
+        "remaining_seconds": 600,
+        "interrupt_policy": "interruptible",
+        "resume_policy": "resume",
+        "source_event_ids": ["event-incident-started"],
+    }
+
+
 class FakeCurrentStateSource:
     def __init__(self, snapshot):
         self.snapshot = snapshot
         self.requests = []
 
     def read_current_state(self, request):
+        self.requests.append(request)
+        return self.snapshot
+
+
+class FakeActiveIncidentSource:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+        self.requests = []
+
+    def read_active_incident(self, request):
         self.requests.append(request)
         return self.snapshot
 
@@ -414,6 +450,49 @@ class RoleModelLoopIntegrationTests(unittest.TestCase):
                 "living_state_brief"
             ],
             living_state_brief(),
+        )
+
+    def test_active_incident_interruption_flag_flows_to_adapter_and_success_log(self):
+        raw_log = RecordingRawEventLog()
+        active_incident_source = FakeActiveIncidentSource(active_incident_snapshot())
+        adapter = FakeRoleModelAdapter(
+            json.dumps(
+                {
+                    "schema_version": "0.1",
+                    "action": "visible_reply",
+                    "visible_reply": {"text": "hello back"},
+                }
+            )
+        )
+
+        run_role_model_turn(
+            normalized_user_message_with_conversation(),
+            adapter=adapter,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            active_incident_source=active_incident_source,
+        )
+
+        self.assertEqual(
+            active_incident_source.requests,
+            [
+                {
+                    "schema_version": "0.1",
+                    "trace_id": "trace-1",
+                    "event_id": "event-1",
+                    "event_type": "USER_MESSAGE",
+                    "conversation_id": "conversation-1",
+                }
+            ],
+        )
+        character_snapshot = adapter.inputs[0]["decision_context"]["character_snapshot"]
+        self.assertEqual(character_snapshot["active_incident"], active_incident_brief())
+        self.assertIs(character_snapshot["user_message_interrupted_active_incident"], True)
+        self.assertEqual(adapter.inputs[0]["allowed_actions"], ["visible_reply"])
+        self.assertEqual(
+            raw_log.entries[0]["data"]["model_input"]["decision_context"]["character_snapshot"],
+            character_snapshot,
         )
 
     def test_state_patch_opt_in_flows_to_adapter_result_and_success_log(self):

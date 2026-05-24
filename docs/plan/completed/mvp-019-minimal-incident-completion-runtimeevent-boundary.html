@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MVP-019 - Minimal Incident Completion RuntimeEvent Boundary v0.1</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    h3 { margin-top: 22px; font-size: 1rem; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul, ol { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    pre { overflow-x: auto; background: #202923; color: #f3f7f1; border-radius: 8px; padding: 16px; }
+    pre code { background: transparent; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; }
+    th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #edf1eb; }
+    blockquote { border-left: 4px solid #b9c6bd; margin: 16px 0; padding: 8px 14px; background: #fff; color: #34413d; }
+    .status { display: inline-block; border: 1px solid #aebbad; border-radius: 999px; padding: 2px 10px; background: #fff; font-size: 0.9rem; }
+    .meta { color: #4a5651; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-019 - Minimal Incident Completion RuntimeEvent Boundary v0.1</h1>
+    <p><span class="status">Status: implemented and merged</span></p>
+    <p class="meta">
+      Created: 2026-05-24. Completed archive path:
+      <code>docs/plan/completed/mvp-019-minimal-incident-completion-runtimeevent-boundary.html</code>.
+      Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
+      Branch: <code>feature/mvp-019-incident-completion-runtime-event</code>.
+      PR: <a href="https://github.com/QuellaMC/Project02/pull/22">#22</a>, merged in commit <code>62371e5</code>.
+    </p>
+
+    <h2>Source Context</h2>
+    <p>
+      Product direction comes from the Notion project hub
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.
+      The source pages checked for this slice are
+      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
+      <a href="https://www.notion.so/3608995c0c5e817f9cd4c4c6312d6db0">02A - Runtime Kernel &amp; Operation Routing</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
+      <a href="https://www.notion.so/35f8995c0c5e813982a2dfc95071e237">04 - Event Triggers &amp; Runtime Hooks</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.
+    </p>
+    <blockquote>
+      Notion makes all triggers enter as <code>RuntimeEvent</code>s, lists
+      <code>INCIDENT_COMPLETION</code> as the incident-completion trigger, names
+      Runtime Kernel as the single entry point for all runtime events, and
+      assigns model-needed routing to the Kernel and durable incident writes
+      plus logging to Commit &amp; Effects. Notion also describes later deterministic body effects, optional private
+      model judgment, proactive output, and follow-up incidents. MVP-019
+      intentionally promotes only the minimal deterministic event boundary and
+      leaves those broader behaviors parked.
+    </blockquote>
+    <p>
+      Local implementation truth comes from completed
+      <a href="completed/mvp-011-read-only-active-incident-brief-in-decisioncontext.html">MVP-011</a>,
+      <a href="completed/mvp-012-minimal-start-incident-commit-boundary.html">MVP-012</a>,
+      <a href="completed/mvp-013-raw-event-log-query-replay-visibility-for-committed-success-logs.html">MVP-013</a>,
+      <a href="completed/mvp-014-minimal-concrete-lifeincidentstore-start-adapter.html">MVP-014</a>,
+      <a href="completed/mvp-015-character-state-engine-context-builder-boundary.html">MVP-015</a>,
+      <a href="completed/mvp-016-role-model-input-envelope-split.html">MVP-016</a>,
+      <a href="completed/mvp-017-minimal-cancel-active-incident-commit-boundary.html">MVP-017</a>, and
+      <a href="completed/mvp-018-minimal-complete-active-incident-commit-boundary.html">MVP-018</a>.
+      MVP-018 already proved the user-message <code>complete_incident</code>
+      commit path and the <code>life_incident_completed</code> atomic raw-log
+      visibility path.
+    </p>
+
+    <h2>Goal</h2>
+    <p>
+      Add the first non-user-message runtime event boundary by accepting a
+      minimal <code>INCIDENT_COMPLETION</code> event with an
+      <code>incident_id</code>, routing it through Runtime Kernel without a
+      model call, and committing the active incident completion through Commit
+      &amp; Effects by re-reading and matching the current active incident.
+    </p>
+
+    <h2>Current Scope</h2>
+    <ul>
+      <li>One new event family is in scope: <code>INCIDENT_COMPLETION</code>.</li>
+      <li>The new event payload requires <code>incident_id</code> and may carry the same optional <code>user_id</code> and <code>conversation_id</code> identity fields used by active-incident scope reads.</li>
+      <li>Runtime Kernel must normalize, raw-log, and route <code>INCIDENT_COMPLETION</code> as a non-user-message event.</li>
+      <li>The route is deterministic: no model judgment is needed and the next boundary is the incident-completion commit path.</li>
+      <li>Commit &amp; Effects must re-read the active incident for the event scope, compare the active <code>incident_id</code> to the event payload, and reject mismatches.</li>
+      <li>Successful completion produces a <code>life_incident_completed</code> raw log entry, confirms it through the existing atomic success visibility path, clears the matching active incident, and returns a structured commit result.</li>
+      <li>Rejections are structured, logged with <code>life_incident_complete_rejected</code>, and leave active incident state unchanged unless the failure occurs after success visibility is already confirmed.</li>
+      <li>The existing <code>USER_MESSAGE</code> start, cancel, complete, state-patch, and visible-reply flows must keep their current contracts.</li>
+    </ul>
+
+    <h2>Explicit Non-Goals</h2>
+    <ul>
+      <li>No scheduler, timer generation, expected-end scanning, missed-event reconciliation, or background worker.</li>
+      <li>No private role-model call, no <code>private_incident_completion</code> envelope, and no model output parsing for this event path.</li>
+      <li>No body effects, living-state patch, Live2D status, proactive message, tool request, retrieval, continuity write, or asset behavior.</li>
+      <li>No follow-up incident, incident queue behavior, resume, go idle, no change, interruption policy, or incident chaining.</li>
+      <li>No <code>completed_incident</code> field in <code>DecisionContext</code> and no Character State Engine context-builder change.</li>
+      <li>No persistent database adapter, migration, completed-incident history API, debug UI, replay execution, or generalized scheduler policy.</li>
+      <li>No change to the MVP-018 <code>USER_MESSAGE</code> <code>life_action.complete_incident</code> model-proposed path except shared helpers needed to avoid duplication.</li>
+    </ul>
+
+    <h2>Minimal Schema</h2>
+    <h3>INCIDENT_COMPLETION RuntimeEvent</h3>
+    <pre><code>type IncidentCompletionEvent = {
+  schema_version: "0.1"
+  event_id: string
+  trace_id: string
+  type: "INCIDENT_COMPLETION"
+  created_at: string
+  payload: {
+    incident_id: string
+    user_id?: string
+    conversation_id?: string
+  }
+}</code></pre>
+    <p>
+      <code>incident_id</code> is required and must be non-empty. Optional
+      identity fields are copied into the active-incident read and finalize
+      requests when provided; absent identity fields preserve the current
+      single-user self-use test scope.
+    </p>
+
+    <h3>RuntimeRouteResult</h3>
+    <pre><code>type IncidentCompletionRouteResult = {
+  trace_id: string
+  event_id: string
+  event_type: "INCIDENT_COMPLETION"
+  model_needed: false
+  next_step: "incident_completion_commit"
+}</code></pre>
+
+    <h3>LifeIncidentCompletionEventCommitRequest</h3>
+    <pre><code>type LifeIncidentCompletionEventCommitRequest = {
+  schema_version: "0.1"
+  trace_id: string
+  event_id: string
+  event_type: "INCIDENT_COMPLETION"
+  incident_id: string
+  commit_time: string
+  user_id?: string
+  conversation_id?: string
+}</code></pre>
+
+    <h3>LifeIncidentCompletionEventFinalizeRequest</h3>
+    <pre><code>type LifeIncidentCompletionEventFinalizeRequest =
+  LifeIncidentCompletionEventCommitRequest &amp; {
+    active_incident: ActiveIncidentSnapshot
+    completed_incident: CompletedLifeIncidentSnapshot
+    committed_log_entry: RawEventLogEntry&lt;"life_incident_completed"&gt;
+  }</code></pre>
+
+    <h3>life_incident_completed Raw Log Data</h3>
+    <pre><code>type IncidentCompletionEventCompletedLogData = {
+  source_event: IncidentCompletionEvent
+  completion_source: "incident_completion_event"
+  active_incident: ActiveIncidentSnapshot
+  completed_incident: CompletedLifeIncidentSnapshot
+}</code></pre>
+    <p>
+      The event path must not fabricate a <code>RoleModelTurnResult</code>,
+      <code>CharacterDecision</code>, or <code>life_action</code>. The same log
+      kind is reused because the durable transition is the same; the
+      <code>completion_source</code> field distinguishes this deterministic
+      event path from the MVP-018 model-proposed user-message path.
+    </p>
+
+    <h3>life_incident_complete_rejected Raw Log Data</h3>
+    <pre><code>type IncidentCompletionEventRejectedLogData = {
+  source_event: IncidentCompletionEvent
+  completion_source: "incident_completion_event"
+  active_incident_snapshot?: unknown
+  completed_incident_snapshot?: unknown
+  failure: {
+    stage: "incident_completion_event_commit_validation" |
+           "incident_completion_event_finalize"
+    code: string
+    message: string
+  }
+}</code></pre>
+
+    <h2>Functional Requirements</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Requirement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>FR-1</td>
+          <td>Add a shared <code>INCIDENT_COMPLETION = "INCIDENT_COMPLETION"</code> contract constant and a narrow normalized event validator for the new event shape. Do not add other event families in this slice.</td>
+        </tr>
+        <tr>
+          <td>FR-2</td>
+          <td>Extend <code>runtime.kernel</code> event-normalizer and route tables so <code>USER_MESSAGE</code> keeps its current behavior and <code>INCIDENT_COMPLETION</code> is the only supported non-user-message event type.</td>
+        </tr>
+        <tr>
+          <td>FR-3</td>
+          <td>Kernel intake for <code>INCIDENT_COMPLETION</code> must assign missing IDs and <code>schema_version</code>, validate <code>created_at</code>, normalize payload identity fields, append exactly one <code>runtime_event_received</code> log entry, and return the deterministic non-model route.</td>
+        </tr>
+        <tr>
+          <td>FR-4</td>
+          <td>Malformed <code>INCIDENT_COMPLETION</code> inputs, including missing payload, blank <code>incident_id</code>, non-string identity fields, invalid timestamps, unsupported schema versions, and extra payload fields, must fail before any commit attempt.</td>
+        </tr>
+        <tr>
+          <td>FR-5</td>
+          <td>Add a Commit &amp; Effects event-completion boundary that accepts only a normalized <code>INCIDENT_COMPLETION</code> event and does not require or accept a role-model result.</td>
+        </tr>
+        <tr>
+          <td>FR-6</td>
+          <td>The commit boundary must build an active-incident request from the event identity fields by reusing or extracting the existing active-incident request/scope helpers; it must not duplicate scope logic in a parallel implementation.</td>
+        </tr>
+        <tr>
+          <td>FR-7</td>
+          <td>Before finalization, Commit &amp; Effects must re-read the active incident, reject if no active incident exists, and reject if the event payload <code>incident_id</code> does not match the current active incident.</td>
+        </tr>
+        <tr>
+          <td>FR-8</td>
+          <td>On success, Commit &amp; Effects must reuse the MVP-018 completed-snapshot validation rules, set <code>actual_end_at</code> from the commit clock, preserve active source IDs, append the completion event ID once, and build one <code>life_incident_completed</code> raw log entry.</td>
+        </tr>
+        <tr>
+          <td>FR-9</td>
+          <td><code>InMemoryLifeIncidentStore</code> must finalize the event-driven completion through the same raw-log visibility and same-scope clearing guarantees as MVP-018, while keeping copy-safe reads and no completed-history API.</td>
+        </tr>
+        <tr>
+          <td>FR-10</td>
+          <td>Failures before raw-log success visibility is confirmed must return a structured rejected result, append <code>life_incident_complete_rejected</code> through the ordinary raw-log path, leave the active incident unchanged, and leave no query-visible <code>life_incident_completed</code> entry.</td>
+        </tr>
+        <tr>
+          <td>FR-11</td>
+          <td>Failures after raw-log success visibility is confirmed must preserve the already-query-visible <code>life_incident_completed</code> entry and append a later <code>life_incident_complete_rejected</code> audit entry in the same trace.</td>
+        </tr>
+        <tr>
+          <td>FR-12</td>
+          <td>The successful result must agree with <code>raw_event_log.query()</code> on trace ID, event ID, event type, incident ID, completion time, completed snapshot, and committed log entry ID.</td>
+        </tr>
+        <tr>
+          <td>FR-13</td>
+          <td>The implementation must reuse, move, extract, or compatibility-export existing shared code surfaces instead of duplicating them: <code>runtime.contracts.validate_iso8601_timestamp()</code>, <code>runtime.kernel.EVENT_PAYLOAD_NORMALIZERS</code>, <code>runtime.kernel.EVENT_ROUTE_BUILDERS</code>, <code>runtime.logging.build_raw_log_entry()</code>, <code>runtime.logging.ATOMIC_FINALIZER_SUCCESS_KINDS</code>, <code>runtime.logging.confirm_committed_success_entry_visibility()</code>, <code>runtime.logging.discard_committed_success_entry_visibility()</code>, <code>character.state.current.validate_active_incident_request()</code>, <code>character.state.current.validate_active_incident_snapshot()</code>, <code>character.state.incidents._incident_scope_from_request()</code>, <code>character.state.incidents._drop_none_identity_fields()</code>, <code>commit_effects.incident_complete.build_completed_life_incident_snapshot()</code>, <code>commit_effects.incident_complete.validate_completed_life_incident_snapshot()</code>, and the shared lifecycle failure/finalizer helpers where they fit the event path without faking model data.</td>
+        </tr>
+        <tr>
+          <td>FR-14</td>
+          <td>The event path must prove that no Role Model Loop adapter is invoked, no <code>DecisionContext</code> is built, no visible reply is committed, and no user-turn orchestration is required.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Non-Functional Requirements</h2>
+    <ul>
+      <li>Use only Python standard library behavior; do not add dependencies.</li>
+      <li>Keep the new runtime event contract small and table-driven like the existing kernel user-message path.</li>
+      <li>Keep Commit &amp; Effects as the only boundary that clears the active incident or exposes completion success.</li>
+      <li>Keep the event path deterministic and testable with fake clocks, fake IDs, in-memory logs, and in-memory incident stores.</li>
+      <li>Prefer precise shared helpers over a broad lifecycle framework rewrite.</li>
+      <li>Preserve append-only raw logging and the current atomic success visibility contract.</li>
+    </ul>
+
+    <h2>Acceptance Criteria</h2>
+    <ul>
+      <li>MVP-018 is recorded under <a href="completed/mvp-018-minimal-complete-active-incident-commit-boundary.html">completed plans</a>, and this file is the only active implementation slice.</li>
+      <li>A valid <code>INCIDENT_COMPLETION</code> event with <code>incident_id</code> normalizes through Runtime Kernel, appends <code>runtime_event_received</code>, and routes with <code>model_needed = false</code> and <code>next_step = "incident_completion_commit"</code>.</li>
+      <li>The commit boundary completes only the matching active incident for the event scope and clears that active incident after the success log is query-visible.</li>
+      <li>The <code>life_incident_completed</code> entry is visible through <code>raw_event_log.query()</code> and carries <code>completion_source = "incident_completion_event"</code>.</li>
+      <li>No active incident is cleared when the event is malformed, there is no active incident, the incident ID mismatches, the source read raises, the raw-log instance mismatches, finalization rejects, visibility staging fails, or the active incident changes before completion.</li>
+      <li>Post-confirm clearing failures preserve the query-visible success entry and add a structured rejection audit.</li>
+      <li>Existing <code>USER_MESSAGE</code> routing and MVP-018 model-proposed <code>complete_incident</code> behavior continue to pass unchanged.</li>
+      <li>No scheduler, timer, private role-model call, body effect, Live2D effect, proactive message, follow-up incident, or <code>completed_incident</code> DecisionContext is added.</li>
+      <li>The development journal records source context, files touched, checks run, review notes, next action, future ideas, and whether active slice scope changed.</li>
+    </ul>
+
+    <h2>Test Plan</h2>
+    <h3>Unit Tests</h3>
+    <ul>
+      <li>Normalize valid and malformed <code>INCIDENT_COMPLETION</code> events, including missing/blank <code>incident_id</code>, extra payload fields, optional identity fields, bad schema version, and bad <code>created_at</code>.</li>
+      <li>Assert <code>route_runtime_event()</code> returns the deterministic non-user-message route for <code>INCIDENT_COMPLETION</code> and keeps the existing <code>USER_MESSAGE</code> route unchanged.</li>
+      <li>Assert kernel intake appends one <code>runtime_event_received</code> entry with the normalized event snapshot for <code>INCIDENT_COMPLETION</code>.</li>
+      <li>Build and validate event-completion commit/finalize requests, completed snapshots, success logs, rejection logs, and failure envelopes without role-model result data.</li>
+      <li>Finalize an event-driven completion through <code>InMemoryLifeIncidentStore</code> and assert same-scope active incident is cleared, other scopes remain unchanged, copies are safe, and query-visible success logs are staged and confirmed.</li>
+      <li>Reject no-active, incident-ID mismatch, raw-log mismatch, active-source exception, finalizer pre-confirm exception, staging failure, and changed-before-completion paths without clearing active state or exposing success.</li>
+      <li>Reject post-confirm clearing failure with both a visible success entry and a later <code>life_incident_complete_rejected</code> entry.</li>
+      <li>Run existing incident-complete user-message tests to prove the event path did not break MVP-018.</li>
+    </ul>
+
+    <h3>Integration Tests</h3>
+    <ul>
+      <li>Start an active incident with the concrete in-memory store, intake an <code>INCIDENT_COMPLETION</code> event through Runtime Kernel, pass the normalized event to Commit &amp; Effects, and assert route, result, store read, and raw-log query all show completion.</li>
+      <li>Run an <code>INCIDENT_COMPLETION</code> event with no active incident and assert a structured rejection log and no visible reply/model logs.</li>
+      <li>Run an <code>INCIDENT_COMPLETION</code> event with a mismatched <code>incident_id</code> and assert the original active incident remains visible.</li>
+      <li>Run existing <code>USER_MESSAGE</code> user-turn integration tests to confirm user-message routing and completion opt-in behavior are unchanged.</li>
+    </ul>
+
+    <h2>Implementation Boundaries</h2>
+    <ul>
+      <li><code>runtime.contracts</code> owns shared event constants and normalized event validation contracts.</li>
+      <li><code>runtime.kernel</code> owns event intake, event-type dispatch, payload normalization, raw event received logging, and deterministic route construction.</li>
+      <li><code>commit_effects.incident_complete</code> owns event-completion commit request construction, active-incident matching, completed snapshot/log construction, finalizer result validation, rejection logs, and success/rejection result envelopes.</li>
+      <li><code>commit_effects.incident_lifecycle</code> may be extended only for real shared commit/finalizer behavior that applies to both user-message and event-driven completion without model-data assumptions.</li>
+      <li><code>character.state.incidents.InMemoryLifeIncidentStore</code> owns scoped in-memory finalization and active-incident clearing; it does not become an incident history store.</li>
+      <li><code>role_model.loop</code>, <code>character.state.context</code>, and <code>runtime.user_turn</code> should remain unchanged unless a test proves a small compatibility export is needed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>This is the first non-user-message <code>RuntimeEvent</code> slice, but it must not become the generic event-system slice.</li>
+      <li>The highest risk is pretending the event path is a role-model path. Do not fake <code>RoleModelTurnResult</code>, <code>CharacterDecision</code>, or <code>life_action</code> data to reuse MVP-018 helpers.</li>
+      <li>The second risk is clearing active incident state before the success log is query-visible. Preserve the existing atomic finalizer visibility sequence.</li>
+      <li>The third risk is accepting stale expected-end events. Re-read the active incident and match <code>incident_id</code> at commit time.</li>
+      <li>Keep identity scope boring: optional <code>user_id</code> and <code>conversation_id</code> use the same active-incident scope behavior already proven by the store.</li>
+      <li>Do not implement the source of the event. Tests may directly supply <code>INCIDENT_COMPLETION</code>; scheduler/timer slices can generate it later.</li>
+      <li>Implementation review: the shared active-incident request contract now admits exactly <code>USER_MESSAGE</code> and <code>INCIDENT_COMPLETION</code>, preserving current state reads as user-message-only.</li>
+      <li>Implementation review: the event path adds dedicated no-model completion log builders instead of fabricating <code>RoleModelTurnResult</code> or <code>life_action</code> data.</li>
+      <li>Higher-level refactor proposal: if a second no-model lifecycle event repeats the same finalizer sequence, extract a request-driven lifecycle transition helper that accepts prebuilt commit requests and source-specific log builders without model-result assumptions. MVP-019 parks that refactor because there is only one event-driven lifecycle path.</li>
+    </ul>
+
+    <h2>Implementation Results</h2>
+    <ul>
+      <li>Added <code>INCIDENT_COMPLETION</code> as the only new runtime event constant, payload normalizer, validator, and deterministic route.</li>
+      <li>Extended active-incident reads so the same scoped request helper works for user-message and incident-completion events.</li>
+      <li>Added <code>commit_life_incident_completion_event()</code> to Commit &amp; Effects. It re-reads the active incident, matches <code>incident_id</code>, builds a completed snapshot with the existing validation rules, stages the success raw log, confirms visibility, then clears the active incident through <code>InMemoryLifeIncidentStore</code>.</li>
+      <li>Reused the existing <code>life_incident_completed</code> success kind and atomic raw-log visibility path, with <code>completion_source = "incident_completion_event"</code> to distinguish the deterministic event path from MVP-018's model-proposed user-message path.</li>
+      <li>Review fix: malformed <code>INCIDENT_COMPLETION</code> payloads now use the structured rejected-result and raw-log audit path instead of raising before event-specific failure wrapping.</li>
+      <li>Added unit and integration coverage for success, malformed event intake and commit input, no-active rejection, incident-ID mismatch, active-source failure, raw-log mismatch, pre-confirm finalizer failure, visibility staging failure, changed-before-finalize rejection, post-confirm clearing failure, deep-copy safety, and no-model/no-visible-output behavior.</li>
+      <li>Left scheduler generation, private role-model aftermath, body/living-state/Live2D effects, proactive output, follow-up incidents, persistent completed history, retrieval indexing, and <code>completed_incident</code> DecisionContext fields out of scope.</li>
+    </ul>
+
+    <h2>Open Questions</h2>
+    <ul>
+      <li>Should future scheduler-generated completion events include idempotency keys or expected scheduled time? Not in MVP-019.</li>
+      <li>Should later private incident completion model calls receive <code>completed_incident</code> context and produce proactive output? Not in MVP-019.</li>
+      <li>Should a persistent <code>LifeIncidentStore</code> keep completed history directly or continue deriving it from Raw Event Log? Not in MVP-019.</li>
+    </ul>
+
+    <h2>Future Ideas Discovered During Planning</h2>
+    <ul>
+      <li>Scheduler or timer generation of <code>INCIDENT_COMPLETION</code> when <code>expected_end_at</code> is reached.</li>
+      <li>Private incident-completion role-model call with <code>completed_incident</code> context and optional proactive output.</li>
+      <li>Body, living-state, and Live2D effects for incident completion.</li>
+      <li>Follow-up incident or chain policy after completion.</li>
+      <li>Persistent incident lifecycle storage with completed history, idempotency, and migrations.</li>
+      <li>Retrieval indexing over completed incident episodes once raw transition truth is stable.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Continue with <a href="../active-slice.html">MVP-020 - Computed User
+      Interruption Context v0.1</a>, which stays read-only and adds only a
+      model-facing context flag for user turns that arrive while an active
+      incident exists.
+    </p>
+  </main>
+</body>
+</html>
