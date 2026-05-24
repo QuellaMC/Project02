@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-24 - MVP-020 Source Context Review Finding</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-24 - MVP-020 Source Context Review Finding</h1>
+    <p>
+      Reviewed <a href="../../plan/active-slice.html">MVP-020 - Computed User
+      Interruption Context v0.1</a> against local docs, current code seams, and
+      the Notion source pages for runtime routing, role-model input, event
+      hooks, living incidents, Character State Engine context, and the MVP
+      roadmap.
+    </p>
+
+    <h2>Finding</h2>
+    <p>
+      The spec changes the Role Model Loop validation/rendering surface but did
+      not list Notion <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>
+      as source context. That page is relevant because it owns the model input
+      envelope, compact <code>DecisionContext</code>, and the eventual
+      user-interruption context shape.
+    </p>
+
+    <h2>Fix</h2>
+    <ul>
+      <li>Added Notion 03 to the MVP-020 Source Context list.</li>
+      <li>Clarified that Notion eventually wants a compact interrupted-incident context plus durable background/resume behavior, while MVP-020 intentionally implements only a read-only presence flag.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>The narrow slice remains aligned as a staging step, not as the full Notion Phase 4 interruption lifecycle.</li>
+      <li>The implementation should still reuse the existing <code>build_active_incident_request()</code>, <code>build_active_incident_brief()</code>, <code>validate_active_incident_brief_for_event()</code>, and Role Model Loop character-snapshot validation path.</li>
+      <li>No production code was changed in this review pass.</li>
+    </ul>
+
+    <h2>Validation</h2>
+    <ul>
+      <li><code>python3 -m html.parser docs/plan/active-slice.html docs/develop-journal/index.html docs/develop-journal/2026-05-24/006-mvp-020-source-context-review-finding.html</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+  </main>
+</body>
+</html>

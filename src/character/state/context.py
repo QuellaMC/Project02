@@ -21,6 +21,7 @@ from runtime.contracts import (
     ASSISTANT_VISIBLE_REPLY_ROLE,
     DECISION_READY_FOR_COMMIT_STATUS,
     USER_MESSAGE,
+    USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD,
     USER_VISIBLE_MESSAGE_KIND,
     USER_VISIBLE_MESSAGE_ROLE,
     VISIBLE_REPLY_ACTION,
@@ -120,6 +121,7 @@ def build_character_decision_context(
         character_snapshot["living_state_brief"] = living_state_brief
     if active_incident_brief is not None:
         character_snapshot["active_incident"] = active_incident_brief
+        character_snapshot[USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD] = True
 
     return {
         "schema_version": SCHEMA_VERSION,

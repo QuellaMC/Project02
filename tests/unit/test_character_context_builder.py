@@ -151,6 +151,10 @@ class CharacterContextBuilderTests(unittest.TestCase):
             context["character_snapshot"]["active_incident"]["title"],
             "Eating lunch",
         )
+        self.assertIs(
+            context["character_snapshot"]["user_message_interrupted_active_incident"],
+            True,
+        )
         self.assertNotIn("allowed_actions", context)
 
         messages[0]["text"] = "mutated after context"
@@ -169,6 +173,44 @@ class CharacterContextBuilderTests(unittest.TestCase):
             context["character_snapshot"]["active_incident"]["title"],
             "Eating lunch",
         )
+
+    def test_active_incident_flag_is_derived_from_single_existing_read(self):
+        source = RecordingActiveIncidentSource(active_incident_snapshot())
+
+        context = build_character_decision_context(
+            normalized_user_message(),
+            active_incident_source=source,
+        )
+
+        self.assertEqual(len(source.requests), 1)
+        self.assertEqual(source.requests[0]["event_id"], "event-1")
+        self.assertEqual(
+            context["character_snapshot"]["active_incident"]["title"],
+            "Eating lunch",
+        )
+        self.assertIs(
+            context["character_snapshot"]["user_message_interrupted_active_incident"],
+            True,
+        )
+
+    def test_omits_interruption_flag_without_active_incident(self):
+        no_active_source = RecordingActiveIncidentSource(None)
+
+        context_without_source = build_character_decision_context(normalized_user_message())
+        context_without_active_incident = build_character_decision_context(
+            normalized_user_message(),
+            active_incident_source=no_active_source,
+        )
+
+        self.assertNotIn(
+            "user_message_interrupted_active_incident",
+            context_without_source["character_snapshot"],
+        )
+        self.assertNotIn(
+            "user_message_interrupted_active_incident",
+            context_without_active_incident["character_snapshot"],
+        )
+        self.assertEqual(len(no_active_source.requests), 1)
 
     def test_sources_receive_copy_safe_requests(self):
         event = normalized_user_message()
