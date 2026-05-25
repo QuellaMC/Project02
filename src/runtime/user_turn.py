@@ -4,7 +4,11 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Protocol
 
-from character.state.current import ActiveIncidentSource, CurrentCharacterStateSource
+from character.state.current import (
+    ActiveIncidentSource,
+    CurrentCharacterStateSource,
+    InterruptedIncidentSource,
+)
 from commit_effects.incident_cancel import (
     LIFE_INCIDENT_CANCEL_REJECTED_STATUS,
     LifeIncidentCancelFinalizer,
@@ -14,6 +18,12 @@ from commit_effects.incident_complete import (
     LIFE_INCIDENT_COMPLETE_REJECTED_STATUS,
     LifeIncidentCompleteFinalizer,
     commit_life_incident_complete,
+)
+from commit_effects.incident_interrupt import (
+    LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS,
+    LIFE_INCIDENT_INTERRUPTED_STATUS,
+    LifeIncidentInterruptFinalizer,
+    commit_life_incident_interruption,
 )
 from commit_effects.incident_start import (
     LIFE_INCIDENT_START_REJECTED_STATUS,
@@ -50,11 +60,14 @@ LIVING_STATE_PATCH_COMMIT_STOP = "living_state_patch_commit"
 LIFE_INCIDENT_START_COMMIT_STOP = "life_incident_start_commit"
 LIFE_INCIDENT_CANCEL_COMMIT_STOP = "life_incident_cancel_commit"
 LIFE_INCIDENT_COMPLETE_COMMIT_STOP = "life_incident_complete_commit"
+LIFE_INCIDENT_INTERRUPT_COMMIT_STOP = "life_incident_interrupt_commit"
 VISIBLE_REPLY_COMMIT_STOP = "visible_reply_commit"
 USER_TURN_NEXT_STEP = "user_turn"
 CONFLICTING_WRITE_ACTION_OPT_IN_CODE = "conflicting_write_action_opt_in"
 MISSING_INCIDENT_CANCEL_SOURCE_CODE = "missing_incident_cancel_source"
 MISSING_INCIDENT_COMPLETE_SOURCE_CODE = "missing_incident_complete_source"
+MISSING_INCIDENT_INTERRUPT_SOURCE_CODE = "missing_incident_interrupt_source"
+MISSING_INTERRUPTED_INCIDENT_SOURCE_CODE = "missing_interrupted_incident_source"
 WRITE_ACTION_OPT_IN_CONFLICT_MESSAGE = (
     "Only one write-action opt-in may be enabled for a USER_MESSAGE turn: "
     "state_patch, start_incident, cancel_incident, or complete_incident."
@@ -77,11 +90,13 @@ def run_user_message_turn(
     clock: Clock,
     current_state_source: CurrentCharacterStateSource | None = None,
     active_incident_source: ActiveIncidentSource | None = None,
+    interrupted_incident_source: InterruptedIncidentSource | None = None,
     living_state_patch_store: LivingStatePatchStore | None = None,
     living_state_patch_finalizer: LivingStatePatchFinalizer | None = None,
     life_incident_start_finalizer: LifeIncidentStartFinalizer | None = None,
     life_incident_cancel_finalizer: LifeIncidentCancelFinalizer | None = None,
     life_incident_complete_finalizer: LifeIncidentCompleteFinalizer | None = None,
+    life_incident_interrupt_finalizer: LifeIncidentInterruptFinalizer | None = None,
 ) -> UserMessageTurnResult:
     intake_result = intake_runtime_event(
         event_input,
@@ -101,6 +116,7 @@ def run_user_message_turn(
     allow_incident_start = life_incident_start_finalizer is not None
     allow_incident_cancel = life_incident_cancel_finalizer is not None
     allow_incident_complete = life_incident_complete_finalizer is not None
+    allow_incident_interrupt = life_incident_interrupt_finalizer is not None
     if (
         sum(
             1
@@ -146,6 +162,28 @@ def run_user_message_turn(
                 "message": "incident cancel requires active_incident_source.",
             },
         )
+    if allow_incident_interrupt and active_incident_source is None:
+        return _build_stopped_result(
+            event,
+            route,
+            stopped_at=USER_TURN_PREFLIGHT_STOP,
+            failure={
+                "stage": USER_TURN_PREFLIGHT_STOP,
+                "code": MISSING_INCIDENT_INTERRUPT_SOURCE_CODE,
+                "message": "incident interrupt requires active_incident_source.",
+            },
+        )
+    if allow_incident_interrupt and interrupted_incident_source is None:
+        return _build_stopped_result(
+            event,
+            route,
+            stopped_at=USER_TURN_PREFLIGHT_STOP,
+            failure={
+                "stage": USER_TURN_PREFLIGHT_STOP,
+                "code": MISSING_INTERRUPTED_INCIDENT_SOURCE_CODE,
+                "message": "incident interrupt requires interrupted_incident_source.",
+            },
+        )
 
     user_visible_message_result = commit_user_visible_message(
         event,
@@ -163,6 +201,36 @@ def run_user_message_turn(
             user_visible_message_result=user_visible_message_result,
         )
 
+    life_incident_interrupt_result: Mapping[str, Any] | None = None
+    if allow_incident_interrupt:
+        assert active_incident_source is not None
+        assert life_incident_interrupt_finalizer is not None
+        life_incident_interrupt_result = commit_life_incident_interruption(
+            event,
+            active_incident_source=active_incident_source,
+            life_incident_interrupt_finalizer=life_incident_interrupt_finalizer,
+            raw_event_log=raw_event_log,
+            id_generator=id_generator,
+            clock=clock,
+        )
+        if life_incident_interrupt_result["status"] == LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS:
+            return _build_stopped_result(
+                event,
+                route,
+                stopped_at=LIFE_INCIDENT_INTERRUPT_COMMIT_STOP,
+                failure=life_incident_interrupt_result["failure"],
+                user_visible_message_result=user_visible_message_result,
+                life_incident_interrupt_result=life_incident_interrupt_result,
+            )
+
+    interrupted_source_for_context = interrupted_incident_source
+    if (
+        allow_incident_interrupt
+        and life_incident_interrupt_result is not None
+        and life_incident_interrupt_result["status"] != LIFE_INCIDENT_INTERRUPTED_STATUS
+    ):
+        interrupted_source_for_context = None
+
     role_model_result = run_role_model_turn(
         event,
         adapter=adapter,
@@ -174,6 +242,7 @@ def run_user_message_turn(
         ),
         current_state_source=current_state_source,
         active_incident_source=active_incident_source,
+        interrupted_incident_source=interrupted_source_for_context,
         allow_state_patch=allow_state_patch,
         allow_incident_start=allow_incident_start,
         allow_incident_cancel=allow_incident_cancel,
@@ -201,6 +270,7 @@ def run_user_message_turn(
                 failure=living_state_patch_result["failure"],
                 user_visible_message_result=user_visible_message_result,
                 role_model_result=role_model_result,
+                life_incident_interrupt_result=life_incident_interrupt_result,
                 living_state_patch_result=living_state_patch_result,
             )
 
@@ -225,6 +295,7 @@ def run_user_message_turn(
                 failure=life_incident_start_result["failure"],
                 user_visible_message_result=user_visible_message_result,
                 role_model_result=role_model_result,
+                life_incident_interrupt_result=life_incident_interrupt_result,
                 living_state_patch_result=living_state_patch_result,
                 life_incident_start_result=life_incident_start_result,
             )
@@ -248,6 +319,7 @@ def run_user_message_turn(
                 failure=life_incident_cancel_result["failure"],
                 user_visible_message_result=user_visible_message_result,
                 role_model_result=role_model_result,
+                life_incident_interrupt_result=life_incident_interrupt_result,
                 living_state_patch_result=living_state_patch_result,
                 life_incident_start_result=life_incident_start_result,
                 life_incident_cancel_result=life_incident_cancel_result,
@@ -272,6 +344,7 @@ def run_user_message_turn(
                 failure=life_incident_complete_result["failure"],
                 user_visible_message_result=user_visible_message_result,
                 role_model_result=role_model_result,
+                life_incident_interrupt_result=life_incident_interrupt_result,
                 living_state_patch_result=living_state_patch_result,
                 life_incident_start_result=life_incident_start_result,
                 life_incident_cancel_result=life_incident_cancel_result,
@@ -295,6 +368,7 @@ def run_user_message_turn(
             failure=visible_reply_result["failure"],
             user_visible_message_result=user_visible_message_result,
             role_model_result=role_model_result,
+            life_incident_interrupt_result=life_incident_interrupt_result,
             living_state_patch_result=living_state_patch_result,
             life_incident_start_result=life_incident_start_result,
             life_incident_cancel_result=life_incident_cancel_result,
@@ -319,6 +393,8 @@ def run_user_message_turn(
     }
     if living_state_patch_result is not None:
         result["living_state_patch_result"] = deepcopy(dict(living_state_patch_result))
+    if life_incident_interrupt_result is not None:
+        result["life_incident_interrupt_result"] = deepcopy(dict(life_incident_interrupt_result))
     if life_incident_start_result is not None:
         result["life_incident_start_result"] = deepcopy(dict(life_incident_start_result))
     if life_incident_cancel_result is not None:
@@ -360,6 +436,7 @@ def _build_stopped_result(
     failure: Mapping[str, Any],
     user_visible_message_result: Mapping[str, Any] | None = None,
     role_model_result: Mapping[str, Any] | None = None,
+    life_incident_interrupt_result: Mapping[str, Any] | None = None,
     living_state_patch_result: Mapping[str, Any] | None = None,
     life_incident_start_result: Mapping[str, Any] | None = None,
     life_incident_cancel_result: Mapping[str, Any] | None = None,
@@ -380,6 +457,8 @@ def _build_stopped_result(
         result["user_visible_message_result"] = deepcopy(dict(user_visible_message_result))
     if role_model_result is not None:
         result["role_model_result"] = deepcopy(dict(role_model_result))
+    if life_incident_interrupt_result is not None:
+        result["life_incident_interrupt_result"] = deepcopy(dict(life_incident_interrupt_result))
     if living_state_patch_result is not None:
         result["living_state_patch_result"] = deepcopy(dict(living_state_patch_result))
     if life_incident_start_result is not None:

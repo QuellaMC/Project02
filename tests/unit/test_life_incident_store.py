@@ -28,6 +28,13 @@ from commit_effects.incident_complete import (  # noqa: E402
     build_life_incident_completed_log_entry,
     commit_life_incident_complete,
 )
+from commit_effects.incident_interrupt import (  # noqa: E402
+    LIFE_INCIDENT_INTERRUPTED_STATUS,
+    build_interrupted_life_incident_snapshot,
+    build_life_incident_interrupt_finalize_request,
+    build_life_incident_interrupted_log_entry,
+    commit_life_incident_interruption,
+)
 from commit_effects.incident_start import (  # noqa: E402
     LIFE_INCIDENT_START_REJECTED_STATUS,
     LIFE_INCIDENT_STARTED_STATUS,
@@ -358,6 +365,37 @@ def complete_finalize_request_for(event, role_model_result, active_incident):
     )
 
 
+def interrupt_finalize_request_for(event, active_incident):
+    ids = SequenceIdGenerator()
+    commit_request = {
+        "schema_version": "0.1",
+        "trace_id": event["trace_id"],
+        "event_id": event["event_id"],
+        "event_type": event["type"],
+        "incident_id": active_incident["incident_id"],
+        "commit_time": fixed_clock().isoformat(),
+        "user_id": event["payload"]["user_id"],
+        "conversation_id": event["payload"]["conversation_id"],
+    }
+    interrupted_incident = build_interrupted_life_incident_snapshot(
+        active_incident,
+        commit_request,
+    )
+    committed_log_entry = build_life_incident_interrupted_log_entry(
+        event,
+        active_incident,
+        interrupted_incident,
+        id_generator=ids,
+        clock=fixed_clock,
+    )
+    return build_life_incident_interrupt_finalize_request(
+        commit_request,
+        active_incident=active_incident,
+        interrupted_incident=interrupted_incident,
+        committed_log_entry=committed_log_entry,
+    )
+
+
 class InMemoryLifeIncidentStoreTests(unittest.TestCase):
     def test_finalizes_start_and_reads_active_incident_through_existing_contract(self):
         raw_log = InMemoryRawEventLog()
@@ -407,6 +445,96 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
                 0
             ]["data"]["started_incident"]["title"],
             "thinking through the plan",
+        )
+
+    def test_interrupt_finalizer_moves_active_to_interrupted_after_visible_log(self):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        start_event = normalized_user_message()
+        commit_life_incident_start(
+            start_event,
+            role_model_result_with_incident(),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+        interrupt_event = normalized_user_message(
+            event_id="event-interrupt",
+            trace_id="trace-interrupt",
+        )
+
+        result = commit_life_incident_interruption(
+            interrupt_event,
+            active_incident_source=store,
+            life_incident_interrupt_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_INTERRUPTED_STATUS)
+        self.assertIsNone(
+            store.read_active_incident(build_active_incident_request(interrupt_event))
+        )
+        interrupted = store.read_interrupted_incident(
+            build_active_incident_request(interrupt_event)
+        )
+        self.assertEqual(interrupted["incident_id"], "incident-generated-1")
+        self.assertEqual(interrupted["status"], "interrupted")
+        self.assertEqual(interrupted["source_event_ids"], ["event-1", "event-interrupt"])
+        interrupted["title"] = "mutated outside store"
+        self.assertEqual(
+            store.read_interrupted_incident(build_active_incident_request(interrupt_event))[
+                "title"
+            ],
+            "thinking through the plan",
+        )
+        success_entries = raw_log.query(
+            {
+                "trace_id": "trace-interrupt",
+                "event_id": "event-interrupt",
+                "kinds": ["life_incident_interrupted"],
+            }
+        )["entries"]
+        self.assertEqual(len(success_entries), 1)
+
+    def test_direct_interrupt_finalize_does_not_move_state_until_completion(self):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        start_event = normalized_user_message()
+        commit_life_incident_start(
+            start_event,
+            role_model_result_with_incident(),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+        active_incident = store.read_active_incident(build_active_incident_request(start_event))
+        interrupt_event = normalized_user_message(
+            event_id="event-interrupt",
+            trace_id="trace-interrupt",
+        )
+        request = interrupt_finalize_request_for(interrupt_event, active_incident)
+
+        store.finalize_life_incident_interrupt(request)
+
+        self.assertIsNotNone(
+            store.read_active_incident(build_active_incident_request(interrupt_event))
+        )
+        self.assertIsNone(
+            store.read_interrupted_incident(build_active_incident_request(interrupt_event))
+        )
+
+        raw_log.confirm_committed_success_entry(request["committed_log_entry"])
+        store.complete_life_incident_interrupt_after_log_visible(request)
+
+        self.assertIsNone(
+            store.read_active_incident(build_active_incident_request(interrupt_event))
+        )
+        self.assertIsNotNone(
+            store.read_interrupted_incident(build_active_incident_request(interrupt_event))
         )
 
     def test_visibility_staging_failure_rejects_without_storing_active_incident(self):

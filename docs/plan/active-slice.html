@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-020 - Computed User Interruption Context v0.1</title>
+  <title>MVP-021 - Minimal Durable User Interruption Boundary v0.1</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,14 +27,13 @@
 </head>
 <body>
   <main>
-    <h1>MVP-020 - Computed User Interruption Context v0.1</h1>
-    <p><span class="status">Status: implementation PR open</span></p>
+    <h1>MVP-021 - Minimal Durable User Interruption Boundary v0.1</h1>
+    <p><span class="status">Status: implemented locally, PR pending</span></p>
     <p class="meta">
-      Created: 2026-05-24. Active slice path:
+      Created: 2026-05-25. Active slice path:
       <code>docs/plan/active-slice.html</code>.
       Runtime language: Python 3. Test runner: Python standard library <code>unittest</code>.
-      Branch: <code>feature/mvp-020-computed-user-interruption-context</code>.
-      PR: <a href="https://github.com/QuellaMC/Project02/pull/23">#23</a>.
+      Branch: <code>feature/mvp-021-minimal-durable-user-interruption-boundary</code>.
     </p>
 
     <h2>Source Context</h2>
@@ -44,19 +43,21 @@
       The source pages checked for this slice are
       <a href="https://www.notion.so/3608995c0c5e817f9cd4c4c6312d6db0">02A - Runtime Kernel &amp; Operation Routing</a>,
       <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
-      <a href="https://www.notion.so/35f8995c0c5e813982a2dfc95071e237">04 - Event Triggers &amp; Runtime Hooks</a>,
       <a href="https://www.notion.so/35f8995c0c5e814c8b95fb64ce80cd58">05 - Living State &amp; Scheduled Life</a>,
-      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>, and
       <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.
     </p>
     <blockquote>
-      Notion describes user messages as higher-priority than active life
-      incidents, says the Character State Engine builds the model-facing
-      context, and eventually wants a compact interrupted-incident context plus
-      durable interrupted/background/resume behavior. MVP-020 intentionally
-      takes only the smallest read-only context step: tell the model that this
-      user turn interrupted an active incident, without changing incident status
-      or adding a new action.
+      Notion says a user message wins over an active life incident, the runtime
+      marks the incident as interrupted, background, or protected according to
+      policy, and later context includes interruption context. Notion logging
+      examples also call out the durable transition <code>inc_123 active -&gt;
+      interrupted by USER_MESSAGE evt_456</code>. MVP-021 implements the
+      smallest pre-model step: one deterministic immediate policy outcome for
+      each current <code>interrupt_policy</code>, with only
+      <code>"interruptible"</code> moving state to an
+      <code>interrupted_incident</code>.
     </blockquote>
     <p>
       Local implementation truth comes from completed
@@ -65,78 +66,174 @@
       <a href="completed/mvp-015-character-state-engine-context-builder-boundary.html">MVP-015</a>,
       <a href="completed/mvp-016-role-model-input-envelope-split.html">MVP-016</a>,
       <a href="completed/mvp-017-minimal-cancel-active-incident-commit-boundary.html">MVP-017</a>,
-      <a href="completed/mvp-018-minimal-complete-active-incident-commit-boundary.html">MVP-018</a>, and
-      <a href="completed/mvp-019-minimal-incident-completion-runtimeevent-boundary.html">MVP-019</a>.
-      The existing Character State Engine context builder already reads and
-      validates a compact <code>active_incident</code> brief for normalized
-      <code>USER_MESSAGE</code> events. MVP-020 derives the new flag from that
-      same read instead of adding a second incident lookup or a parallel
-      interruption boundary.
+      <a href="completed/mvp-018-minimal-complete-active-incident-commit-boundary.html">MVP-018</a>,
+      <a href="completed/mvp-019-minimal-incident-completion-runtimeevent-boundary.html">MVP-019</a>, and
+      <a href="completed/mvp-020-computed-user-interruption-context.html">MVP-020</a>.
+      The existing code already has active-incident reads, in-memory active
+      incident storage, query-visible start/cancel/complete logs, and a shared
+      incident lifecycle helper. MVP-021 should extend those seams instead of
+      adding a second incident store, second raw-log path, or parallel context
+      validator.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Add a read-only computed model-context flag so a <code>USER_MESSAGE</code>
-      turn that sees an <code>active_incident</code> also exposes
-      <code>character_snapshot.user_message_interrupted_active_incident = true</code>.
-      This makes the interruption explicit to the model while preserving the
-      current active incident snapshot and all existing commit behavior.
+      When a normalized <code>USER_MESSAGE</code> arrives for a scope with one
+      active incident, Commit &amp; Effects evaluates the incident's
+      <code>interrupt_policy</code> and records one deterministic query-visible
+      outcome. <code>"interruptible"</code> moves
+      <code>active_incident</code> to <code>interrupted_incident</code>;
+      <code>"background"</code> keeps the active incident running and records
+      that it continued in background; <code>"protected"</code> keeps the active
+      incident running and records that interruption was protected.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>Only normalized <code>USER_MESSAGE</code> decision contexts are in scope.</li>
-      <li>When the existing active-incident source returns a valid active incident brief, Character State Engine includes the existing <code>character_snapshot.active_incident</code> and the new computed flag with value <code>true</code>.</li>
-      <li>When no active incident source is configured, or the source returns <code>None</code>, the flag is omitted and minimal contexts stay unchanged.</li>
-      <li>The flag is derived from the same validated active incident brief already used by MVP-011 and MVP-015. No additional source read is allowed.</li>
-      <li>Role Model Loop must accept and render the new field inside <code>decision_context.character_snapshot</code> without changing <code>call_type</code>, current event rendering, instructions, or allowed actions.</li>
-      <li>Existing state-patch, start-incident, cancel-incident, complete-incident, visible-reply, and incident-completion event paths must keep their current behavior.</li>
+      <li>Only normalized <code>USER_MESSAGE</code> events are in scope.</li>
+      <li>Only the existing one-active-incident-per-scope model is in scope.</li>
+      <li>All existing active-incident <code>interrupt_policy</code> values are in scope: <code>"interruptible"</code>, <code>"background"</code>, and <code>"protected"</code>.</li>
+      <li>The policy outcome is deterministic runtime behavior. It does not require a model proposal, new model action, or proactive output.</li>
+      <li>The policy evaluation must run through Commit &amp; Effects and produce exactly one success outcome when an active incident exists.</li>
+      <li>For <code>interrupt_policy = "interruptible"</code>, the transition must use the incident store finalizer pattern, with raw-log visibility confirmed before active incident state is changed.</li>
+      <li>The interrupted snapshot preserves the active incident's identity and fields, changes status to <code>interrupted</code>, records <code>interrupted_at</code>, and appends the interrupting <code>USER_MESSAGE</code> event ID once to <code>source_event_ids</code>.</li>
+      <li>The in-memory incident store moves the matching scoped record out of the active slot and into one interrupted slot after the <code>life_incident_interrupted</code> success log is query-visible.</li>
+      <li>For <code>interrupt_policy = "background"</code>, the active incident remains active and unchanged while Commit &amp; Effects appends <code>life_incident_continued_in_background</code>.</li>
+      <li>For <code>interrupt_policy = "protected"</code>, the active incident remains active and unchanged while Commit &amp; Effects appends <code>life_incident_protected_from_interruption</code>.</li>
+      <li>Character State Engine gets a narrow read path for the latest interrupted incident in the same scope and may include <code>character_snapshot.interrupted_incident</code> after an interruptible transition. Background/protected outcomes continue to expose the existing <code>active_incident</code> context with the MVP-020 computed interruption cue instead of an interrupted incident because no durable background/protected incident state exists yet.</li>
+      <li>The existing MVP-020 computed flag remains compatible for read-only paths that still see an active incident, but the durable MVP-021 path should prefer the explicit <code>interrupted_incident</code> brief after an interruptible transition commits.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No durable <code>interrupted</code> status, background status, incident replacement, or active-incident mutation.</li>
-      <li>No <code>interrupted_incident</code> object, no <code>resume_incident</code>, no <code>go_idle</code>, no <code>no_change</code>, and no new model action.</li>
-      <li>No new Commit &amp; Effects transition, raw-log kind, scheduler event, timer behavior, body effect, Live2D status, tool behavior, retrieval behavior, or asset behavior.</li>
-      <li>No Runtime Kernel priority or route-policy change. The existing <code>USER_MESSAGE</code> route remains the route.</li>
-      <li>No persistent database adapter, migration, completed/interrupted history API, debug UI, replay execution, or context-build raw log entry.</li>
-      <li>No broad DecisionContext reshaping. This slice adds one narrow optional field and keeps the current compatibility shape.</li>
+      <li>No <code>resume_incident</code>, <code>go_idle</code>, <code>no_change</code>, post-turn life action, or incident restart behavior.</li>
+      <li>No background incident storage, protected deferral state, post-turn policy engine, or user-confirmed override. MVP-021 records only the immediate background/protected policy outcome and leaves the active incident unchanged.</li>
+      <li>No incident queue, multiple interrupted incidents per scope, recurring incidents, or replacement behavior.</li>
+      <li>No scheduler changes, timer events, body effects, Live2D status, assets, tools, retrieval, continuity writes, or proactive messages.</li>
+      <li>No new RuntimeEvent family and no broad Runtime Kernel priority rewrite. This slice uses the existing <code>USER_MESSAGE</code> route.</li>
+      <li>No persistent database adapter, migration, replay executor, debug UI, or external service.</li>
+      <li>No change to visible reply commit semantics. The interruption log is internal raw truth, not a user-visible message.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
-    <h3>DecisionContext Character Snapshot</h3>
-    <pre><code>type DecisionContext = {
+    <h3>Interrupted Incident Snapshot</h3>
+    <pre><code>type InterruptedIncidentSnapshot = {
   schema_version: "0.1"
-  trace_id: string
-  event_id: string
-  character_snapshot: {
-    recent_visible_messages: RecentVisibleMessage[]
-    living_state_brief?: LivingStateBrief
-    active_incident?: ActiveIncidentBrief
-    user_message_interrupted_active_incident?: true
-  }
+  incident_id: string
+  type: "idle" | "eat" | "drink" | "sleep" | "rest" | "work" | "think" | "wait" | "custom"
+  status: "interrupted"
+  title: string
+  started_at?: string
+  expected_end_at?: string
+  remaining_seconds?: number
+  interrupt_policy: "interruptible"
+  resume_policy: "resume" | "ask_model" | "cancel"
+  interrupted_at: string
+  source_event_ids: string[]
 }</code></pre>
     <p>
-      The new field is a computed presence flag. For MVP-020 it is present only
-      with value <code>true</code>, and only when <code>active_incident</code> is
-      also present for the same <code>USER_MESSAGE</code> context. The field is
-      omitted when there is no active incident; no explicit <code>false</code>
-      value is introduced in this slice.
+      The snapshot is durable Commit &amp; Effects output. It keeps the active
+      incident's core fields unchanged except for the lifecycle status and
+      interruption timestamp. It does not add a resume plan, background status,
+      body effect, or model-authored meaning.
     </p>
 
-    <h3>Model-Facing Example</h3>
+    <h3>Interrupted Incident Brief</h3>
+    <pre><code>type InterruptedIncidentBrief = {
+  incident_id: string
+  type: string
+  title: string
+  started_at?: string
+  expected_end_at?: string
+  remaining_seconds?: number
+  interrupt_policy: "interruptible"
+  resume_policy: string
+  interrupted_at: string
+  source_event_ids: string[]
+}</code></pre>
+    <p>
+      The model-facing brief omits <code>status</code> because the field name
+      already carries the lifecycle state. Unlike the active incident brief,
+      the interrupted brief may include the current user message's
+      <code>event_id</code> in <code>source_event_ids</code> when the context is
+      built after the same turn's interruption commit.
+      Notion's conceptual interruption object can carry all interruption
+      policies; MVP-021 narrows <code>interrupted_incident</code> to committed
+      <code>"interruptible"</code> transitions and keeps background/protected
+      context on the existing active-incident path until a later durable
+      background/protected policy slice exists.
+    </p>
+
+    <h3>Policy Outcome</h3>
+    <pre><code>type UserInterruptionPolicyOutcome =
+  | {
+      outcome: "interrupted"
+      kind: "life_incident_interrupted"
+      active_incident: ActiveIncidentSnapshot
+      interrupted_incident: InterruptedIncidentSnapshot
+    }
+  | {
+      outcome: "continued_in_background"
+      kind: "life_incident_continued_in_background"
+      active_incident: ActiveIncidentSnapshot
+    }
+  | {
+      outcome: "protected_from_interruption"
+      kind: "life_incident_protected_from_interruption"
+      active_incident: ActiveIncidentSnapshot
+    }</code></pre>
+    <p>
+      Background and protected outcomes are durable raw-log facts, not new
+      incident statuses in MVP-021. They do not move or rewrite the active
+      incident.
+    </p>
+
+    <h3>Raw Log Entries</h3>
     <pre><code>{
-  "character_snapshot": {
-    "active_incident": {
+  "schema_version": "0.1",
+  "trace_id": "trace-user-1",
+  "event_id": "event-user-1",
+  "kind": "life_incident_interrupted",
+  "data": {
+    "source_event": { "type": "USER_MESSAGE", "event_id": "event-user-1" },
+    "active_incident": { "incident_id": "incident-1", "status": "active" },
+    "interrupted_incident": {
       "incident_id": "incident-1",
-      "type": "eat",
-      "title": "Eating lunch",
-      "remaining_seconds": 600,
-      "interrupt_policy": "interruptible",
-      "resume_policy": "resume",
-      "source_event_ids": ["event-incident-started"]
+      "status": "interrupted",
+      "interrupted_at": "2026-05-25T09:00:00+00:00"
+    }
+  }
+}
+
+{
+  "schema_version": "0.1",
+  "trace_id": "trace-user-2",
+  "event_id": "event-user-2",
+  "kind": "life_incident_continued_in_background",
+  "data": {
+    "source_event": { "type": "USER_MESSAGE", "event_id": "event-user-2" },
+    "active_incident": {
+      "incident_id": "incident-2",
+      "status": "active",
+      "interrupt_policy": "background"
     },
-    "user_message_interrupted_active_incident": true
+    "outcome": "continued_in_background"
+  }
+}
+
+{
+  "schema_version": "0.1",
+  "trace_id": "trace-user-3",
+  "event_id": "event-user-3",
+  "kind": "life_incident_protected_from_interruption",
+  "data": {
+    "source_event": { "type": "USER_MESSAGE", "event_id": "event-user-3" },
+    "active_incident": {
+      "incident_id": "incident-3",
+      "status": "active",
+      "interrupt_policy": "protected"
+    },
+    "outcome": "protected_from_interruption"
   }
 }</code></pre>
 
@@ -151,154 +248,183 @@
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>Extend the Character State Engine context-builder contract to allow <code>character_snapshot.user_message_interrupted_active_incident</code> as the only new context field.</td>
+          <td>Add a Commit &amp; Effects interruption commit boundary for normalized <code>USER_MESSAGE</code> events that reads the current active incident through the existing active-incident read request shape.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>Set the flag to <code>true</code> only after the existing active-incident source returns a valid active incident brief for the current normalized <code>USER_MESSAGE</code>.</td>
+          <td>If no active incident exists for the event scope, return a deterministic skipped result and do not append an interruption outcome log or mutate incident state.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>Derive the flag from the already-read <code>active_incident_brief</code>; do not add a second active-incident read, new source protocol, new runtime event type, or Kernel policy check.</td>
+          <td>If an active incident exists, branch by its validated <code>interrupt_policy</code> and produce exactly one supported outcome: <code>interrupted</code>, <code>continued_in_background</code>, or <code>protected_from_interruption</code>.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>Omit the flag when <code>active_incident</code> is absent because the active-incident source is missing or returns <code>None</code>.</td>
+          <td>For <code>interrupt_policy = "interruptible"</code>, build an <code>InterruptedIncidentSnapshot</code> that preserves the active incident's identity, type, title, timing, <code>interrupt_policy = "interruptible"</code>, resume policy, and prior source IDs; sets <code>status = "interrupted"</code>; sets <code>interrupted_at</code> from the injected clock; and appends the user event ID once.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>Reject malformed model-context inputs where the field is present without <code>active_incident</code>, or where the field value is anything other than <code>true</code>.</td>
+          <td>Expose exactly one query-visible <code>life_incident_interrupted</code> raw log for an interruptible transition. The log must include the normalized source event, the active incident snapshot, and the interrupted incident snapshot.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>Update Role Model Loop context validation so rendered model inputs preserve the new flag and continue rejecting unrelated future fields.</td>
+          <td>For <code>interrupt_policy = "background"</code>, leave the scoped active incident unchanged and expose exactly one query-visible <code>life_incident_continued_in_background</code> raw log containing the normalized source event, unchanged active incident snapshot, and <code>outcome = "continued_in_background"</code>.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>Keep existing allowed-actions policy unchanged. The flag must not automatically enable cancel, complete, resume, state patch, or any other action.</td>
+          <td>For <code>interrupt_policy = "protected"</code>, leave the scoped active incident unchanged and expose exactly one query-visible <code>life_incident_protected_from_interruption</code> raw log containing the normalized source event, unchanged active incident snapshot, and <code>outcome = "protected_from_interruption"</code>.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>Keep copy-safety behavior: callers and sources must not be able to mutate the emitted context or active-incident brief after construction.</td>
+          <td>Use the same atomic visibility rule as start/cancel/complete for the interruptible state-moving path: if success-log staging, query confirmation, finalizer validation, or post-visible state change fails, keep the active incident unchanged and surface a structured rejected result plus rejected raw log where the existing lifecycle pattern requires one.</td>
         </tr>
         <tr>
           <td>FR-9</td>
-          <td>Do not append a raw log entry, commit state, clear an incident, schedule an event, or emit a visible output because of this flag.</td>
+          <td>Extend <code>InMemoryLifeIncidentStore</code> narrowly so successful interruptible interruption removes the scoped active incident only after the success log is visible and stores one latest interrupted incident for that scope. Background/protected outcomes must not move or rewrite the active incident.</td>
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>Existing <code>USER_MESSAGE</code>, <code>INCIDENT_COMPLETION</code>, start, cancel, complete, visible-reply, and state-patch tests must keep passing without contract drift.</td>
+          <td>Add a read-only interrupted-incident source/request/brief path for Character State Engine context building. The request must reuse the current event identity fields and remain copy-safe.</td>
+        </tr>
+        <tr>
+          <td>FR-11</td>
+          <td>For <code>USER_MESSAGE</code> contexts built after an interruptible transition, include <code>character_snapshot.interrupted_incident</code> and omit a duplicate <code>active_incident</code> for the same incident. For background/protected outcomes, keep the existing <code>active_incident</code> context path.</td>
+        </tr>
+        <tr>
+          <td>FR-12</td>
+          <td>Update Role Model Loop context validation/rendering to accept the new <code>interrupted_incident</code> brief while continuing to reject unrelated future context fields.</td>
+        </tr>
+        <tr>
+          <td>FR-13</td>
+          <td>Wire the user-turn orchestration only enough to run the deterministic interruption policy outcome before the model-facing context is built when the new dependencies are supplied. Missing optional interruption dependencies must not break existing tests or existing no-interruption user turns.</td>
+        </tr>
+        <tr>
+          <td>FR-14</td>
+          <td>Do not add or enable <code>resume_incident</code>, <code>go_idle</code>, <code>no_change</code>, background mutation, protected mutation, scheduler, body, Live2D, tool, retrieval, continuity, or proactive-message behavior.</td>
         </tr>
       </tbody>
     </table>
 
     <h2>Non-Functional Requirements</h2>
     <ul>
-      <li>Keep the implementation boring and local to the existing Character State Engine context builder and Role Model Loop validation/rendering seam.</li>
-      <li>Reuse existing <code>active_incident</code> brief validation and <code>ActiveIncidentSource</code> request construction.</li>
-      <li>Preserve deterministic behavior and avoid live model providers or external services in tests.</li>
-      <li>Keep the new schema field model-facing only. It is not a persisted runtime record and does not change source-of-truth incident state.</li>
-      <li>Avoid speculative abstractions for interruption policies. Full policy work remains parked until a later durable interruption slice.</li>
+      <li>Reuse existing lifecycle validation, raw-log, finalizer, and copy-safety patterns from incident start/cancel/complete before adding any new abstraction.</li>
+      <li>Name and reuse exact shared surfaces in implementation: <code>commit_effects.incident_lifecycle</code> helper functions, <code>runtime.logging.ATOMIC_FINALIZER_SUCCESS_KINDS</code>, <code>confirm_committed_success_entry_visibility()</code>, <code>discard_committed_success_entry_visibility()</code>, <code>build_raw_log_entry()</code>, <code>build_active_incident_request()</code>, <code>validate_active_incident_request()</code>, <code>_incident_scope_from_request()</code>, and <code>_drop_none_identity_fields()</code>.</li>
+      <li>Keep the implementation deterministic and test-only. No live model provider, external service, or machine-local dependency is allowed.</li>
+      <li>Keep the new interrupted storage surface in memory only and scoped exactly like the existing active incident store. Background/protected outcomes add raw-log facts only.</li>
+      <li>Preserve existing <code>USER_MESSAGE</code>, start, cancel, complete, incident-completion, visible-reply, state-patch, and MVP-020 context behavior unless the new optional interruption boundary is explicitly supplied.</li>
+      <li>Keep errors explicit. Validation and finalizer failures must be inspectable through result status and raw logs, not hidden behind character language.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>A <code>USER_MESSAGE</code> context built with a valid active incident includes both <code>character_snapshot.active_incident</code> and <code>character_snapshot.user_message_interrupted_active_incident = true</code>.</li>
-      <li>A <code>USER_MESSAGE</code> context built without an active incident omits the flag and matches the existing minimal shape apart from unrelated configured sources.</li>
-      <li>The active-incident source receives the existing request shape exactly once per context build.</li>
-      <li>Role Model Loop accepts and renders the new field inside the decision context, while malformed or unrelated future fields are still rejected.</li>
-      <li>The flag does not change allowed actions, instructions, Runtime Kernel routing, raw logging, Commit &amp; Effects behavior, or incident store state.</li>
-      <li>Relevant unit tests and full test discovery pass, and the journal records the files changed and commands run.</li>
+      <li>Given a scoped interruptible active incident and a normalized <code>USER_MESSAGE</code>, the interruption commit returns <code>life_incident_interrupted</code>, exposes a query-visible <code>life_incident_interrupted</code> raw log, clears the active incident read, and makes the interrupted incident readable for that scope.</li>
+      <li>Given a scoped background active incident and a normalized <code>USER_MESSAGE</code>, the policy commit returns <code>life_incident_continued_in_background</code>, exposes a query-visible log with that kind, and leaves the active incident unchanged and readable.</li>
+      <li>Given a scoped protected active incident and a normalized <code>USER_MESSAGE</code>, the policy commit returns <code>life_incident_protected_from_interruption</code>, exposes a query-visible log with that kind, and leaves the active incident unchanged and readable.</li>
+      <li>Given no active incident, the interruption boundary skips without raw-log or store mutation.</li>
+      <li>Given visibility staging, visibility confirmation, malformed finalizer result, or post-visible store conflict, the active incident remains active and the failure is surfaced consistently with the existing lifecycle failure pattern.</li>
+      <li>A <code>USER_MESSAGE</code> context can include <code>character_snapshot.interrupted_incident</code> after an interruptible transition, while background/protected contexts keep using <code>character_snapshot.active_incident</code>. Role Model Loop renders the context without allowing any new life action.</li>
+      <li>No test needs a live model provider, Notion, external service, concrete database, scheduler, Live2D renderer, asset system, or background worker.</li>
+      <li>Relevant unit tests, integration tests, full unittest discovery, Ruff lint/format, mypy, source compilation, HTML parsing, and <code>git diff --check</code> pass before implementation is called complete.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <h3>Unit Tests</h3>
     <ul>
-      <li>In <code>tests/unit/test_character_context_builder.py</code>, assert the Character State Engine context builder emits the flag when a valid active incident exists.</li>
-      <li>Assert contexts with no active-incident source, or a source returning <code>None</code>, omit the flag.</li>
-      <li>Assert the active-incident source is still called once with the current <code>build_active_incident_request()</code> shape and a copy-safe request.</li>
-      <li>Assert malformed active-incident source responses still fail through the existing active-incident validation path.</li>
-      <li>In <code>tests/unit/test_role_model_loop.py</code>, assert role-model input rendering preserves the flag and rejects malformed flag values or a flag without <code>active_incident</code>.</li>
-      <li>Assert active-incident context still does not alter allowed actions unless explicit existing action opt-ins are passed.</li>
+      <li>In a new or existing Commit &amp; Effects interruption test module, cover successful active-to-interrupted snapshot construction and <code>life_incident_interrupted</code> raw-log shape.</li>
+      <li>Cover background outcome behavior: <code>life_incident_continued_in_background</code> is query-visible and the active incident remains unchanged.</li>
+      <li>Cover protected outcome behavior: <code>life_incident_protected_from_interruption</code> is query-visible and the active incident remains unchanged.</li>
+      <li>Cover skipped behavior when no active incident exists.</li>
+      <li>Cover source error, malformed source snapshot, malformed finalize result, visibility staging failure, visibility confirmation failure, and post-visible state conflict without losing the active incident.</li>
+      <li>In <code>tests/unit/test_life_incident_store.py</code>, cover active-to-interrupted movement, query-visible log exposure, interrupted read copy-safety, active read clearing, and one-interrupted-incident-per-scope behavior.</li>
+      <li>In <code>tests/unit/test_character_context_builder.py</code>, cover interrupted-incident source requests, brief validation, context inclusion, copy-safety, and rejection of malformed interrupted briefs.</li>
+      <li>In <code>tests/unit/test_role_model_loop.py</code>, cover rendering of <code>interrupted_incident</code> and rejection of unsupported future fields or malformed interrupted incident data.</li>
     </ul>
 
-    <h3>Regression Tests</h3>
+    <h3>Integration Tests</h3>
     <ul>
-      <li>Run full <code>unittest</code> discovery after implementation.</li>
-      <li>Run Ruff lint and format checks, mypy, and source compilation according to the repo gate.</li>
-      <li>Pay particular attention to MVP-019 incident-completion event tests, because this slice must not affect non-user-message event handling.</li>
+      <li>Extend user-turn integration coverage so a user message with an interruptible active incident commits interruption before model input rendering, then the fake adapter sees <code>character_snapshot.interrupted_incident</code>.</li>
+      <li>Extend user-turn integration coverage so background and protected active incidents produce their query-visible policy logs before model input rendering while the fake adapter still sees <code>character_snapshot.active_incident</code>.</li>
+      <li>Assert the same flow does not enable resume/go-idle/no-change and does not emit proactive output.</li>
+      <li>Assert existing cancel, complete, and incident-completion flows still pass and do not read or write interrupted incident state unless the MVP-021 boundary is configured.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li><strong>Character State Engine:</strong> owns computing and placing the read-only flag in <code>DecisionContext.character_snapshot</code>.</li>
-      <li><strong>Role Model Loop:</strong> owns validating and rendering the updated context shape into the model input envelope.</li>
-      <li><strong>Runtime Kernel:</strong> unchanged. It still normalizes and routes <code>USER_MESSAGE</code> as before.</li>
-      <li><strong>Commit &amp; Effects Engine:</strong> unchanged. No new transition or side effect is accepted because of the flag.</li>
-      <li><strong>Persistence and logs:</strong> unchanged. Raw truth remains the existing active incident snapshot and runtime/model/commit logs.</li>
+      <li><strong>Runtime Kernel:</strong> unchanged except that the existing user-turn path may receive optional interruption dependencies. No new route policy matrix is introduced.</li>
+      <li><strong>Commit &amp; Effects Engine:</strong> owns validating and committing the three immediate interruption policy outcomes, raw-log entries, rejected results, and interruptible finalizer contract.</li>
+      <li><strong>Character State Engine:</strong> owns the read-only interrupted-incident context brief after Commit &amp; Effects has created durable interrupted truth. It keeps the active-incident context path for background/protected outcomes.</li>
+      <li><strong>Role Model Loop:</strong> owns accepting and rendering the new context field only; it does not parse a new life action.</li>
+      <li><strong>LifeIncidentStore:</strong> owns the in-memory active-to-interrupted movement and read surface for the current scope. It does not store background/protected status in MVP-021.</li>
     </ul>
 
     <h2>Implementation Notes</h2>
     <ul>
-      <li>The field name is shared through <code>runtime.contracts.USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD</code>.</li>
-      <li><code>character.state.context.build_character_decision_context()</code> sets the flag only after the existing active-incident source returns a valid brief.</li>
-      <li><code>role_model.loop</code> accepts the field only as literal <code>true</code> and only when <code>active_incident</code> is present in the same character snapshot.</li>
-      <li>No higher-level interruption policy refactor was needed for MVP-020. If a later slice adds durable <code>interrupted_incident</code> or multiple computed character-snapshot fields, promote shared character-snapshot validation into <code>runtime.contracts</code> then.</li>
+      <li>Prefer names parallel to existing status/kind constants: <code>LIFE_INCIDENT_INTERRUPTED_STATUS</code>, <code>LIFE_INCIDENT_CONTINUED_IN_BACKGROUND_STATUS</code>, <code>LIFE_INCIDENT_PROTECTED_FROM_INTERRUPTION_STATUS</code>, <code>LIFE_INCIDENT_INTERRUPT_SKIPPED_STATUS</code>, <code>LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS</code>, plus matching raw-log kind constants.</li>
+      <li>Add only <code>LIFE_INCIDENT_INTERRUPTED_KIND</code> to <code>runtime.logging.ATOMIC_FINALIZER_SUCCESS_KINDS</code> because it is the only MVP-021 success kind that moves incident state through a finalizer.</li>
+      <li>The new commit path is deterministic and should not depend on <code>RoleModelTurnResult</code>. If the shared lifecycle helper is too role-model-action-specific, extract only the proven shared validation/log/finalizer helpers needed for this deterministic path.</li>
+      <li>Reuse <code>append_lifecycle_source_event_id_once()</code>, <code>validate_lifecycle_source_event_ids()</code>, <code>require_matching_lifecycle_field()</code>, <code>require_lifecycle_finalizer_raw_event_log()</code>, <code>validate_lifecycle_committed_log_entry()</code>, <code>validate_lifecycle_finalize_result()</code>, <code>build_lifecycle_failure()</code>, <code>build_lifecycle_rejected_result()</code>, and <code>snapshot_lifecycle_value()</code> where those helpers match the interruption contract.</li>
+      <li>Use <code>build_raw_log_entry()</code> for <code>life_incident_interrupted</code>, <code>life_incident_continued_in_background</code>, <code>life_incident_protected_from_interruption</code>, and <code>life_incident_interrupt_rejected</code>. Confirm or discard staged interruptible success visibility with <code>confirm_committed_success_entry_visibility()</code> and <code>discard_committed_success_entry_visibility()</code>.</li>
+      <li>Reuse <code>build_active_incident_request()</code> and <code>validate_active_incident_request()</code> for active reads, and reuse <code>_incident_scope_from_request()</code> plus <code>_drop_none_identity_fields()</code> for scoped in-memory store lookup.</li>
+      <li>Keep the interrupted read contract separate from <code>read_active_incident()</code>. Do not make <code>read_active_incident()</code> return interrupted snapshots.</li>
+      <li>Keep <code>interrupted_incident</code> as a model-facing brief, not a full internal snapshot with <code>status</code>.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>Do not introduce an <code>InterruptedIncidentBrief</code> yet. The active incident remains the only incident object in this context.</li>
-      <li>Do not create a second active-incident helper, flag helper, or policy layer unless the implementation otherwise duplicates real validation logic.</li>
-      <li>Do not infer emotional meaning from the flag. It tells the model the turn interrupted an active incident; the model still decides tone in the existing user-turn call.</li>
-      <li>Keep the flag coupled to <code>active_incident</code> presence. This avoids a broad boolean policy surface before durable interruption behavior is specified.</li>
-      <li>Future-compatible code may leave the validation shape easy to extend to <code>interrupted_incident</code> later, but must not implement that field now.</li>
+      <li>Watch for duplicated lifecycle validation copied from cancel/complete. Shared helper extraction is acceptable only where it removes real duplication and preserves current behavior.</li>
+      <li>Watch for hidden widening in user-turn orchestration. MVP-021 should add one optional deterministic pre-model policy outcome boundary, not a general lifecycle engine.</li>
+      <li>Watch for stale active/read-only context behavior. Once an interruptible transition commits, the model should see <code>interrupted_incident</code> rather than a duplicate active incident for the same record. Background/protected outcomes should continue to show the unchanged active incident.</li>
+      <li>Watch for policy creep. Resume, idle, cancellation-after-interruption, durable background status, durable protected deferral, and follow-up incident behavior stay parked.</li>
     </ul>
 
     <h2>What It Stores Now</h2>
     <p>
-      Nothing new is stored. The runtime still stores the same raw event,
-      visible conversation, and incident records. MVP-020 only computes a
-      model-facing view during context construction.
+      It stores one interrupted incident snapshot per scope in the in-memory
+      incident store for successful interruptible transitions. It also stores
+      one query-visible raw log entry for each successful policy outcome:
+      <code>life_incident_interrupted</code>,
+      <code>life_incident_continued_in_background</code>, or
+      <code>life_incident_protected_from_interruption</code>.
     </p>
 
     <h2>What It Does Not Store Yet</h2>
     <p>
-      It does not store an interrupted status, remaining time adjustment,
-      resume intent, interruption policy decision, background incident, or
-      post-turn lifecycle action.
+      It does not store a resume plan, background incident state, protected
+      deferral state, incident queue, body delta, Live2D status, proactive
+      output, recurrence, long-term database record, replay projection, or
+      debug-inspector view.
     </p>
 
     <h2>What Comes Later</h2>
     <p>
-      A later durable interruption slice can decide whether an active incident
-      becomes interrupted, continues in background, asks the model to resume,
-      or is cancelled after the user turn. That later slice needs its own
-      state transition, Commit &amp; Effects validation, logs, and tests.
+      Later slices can decide how interrupted incidents resume, go idle, stay
+      cancelled, become durable background incidents, or receive protected
+      deferral behavior. Those later slices need separate model action
+      contracts, Commit &amp; Effects transitions, policy rules, context examples,
+      raw logs, and tests.
     </p>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should a later slice replace this presence flag with an explicit <code>interrupted_incident</code> object? Not in MVP-020.</li>
-      <li>Should <code>interrupt_policy = "background"</code> or <code>"protected"</code> produce different context flags? Not in MVP-020.</li>
-      <li>Should future contexts include an explicit <code>false</code> value when no active incident exists? Not in MVP-020.</li>
-      <li>Should the Runtime Kernel perform priority/policy interruption handling before context build? Not in MVP-020.</li>
+      <li>Should background/protected outcomes later create durable status records beyond the query-visible policy log? Not in MVP-021.</li>
+      <li>Should the interrupted brief include a computed remaining-time adjustment? Not in MVP-021.</li>
+      <li>Should later contexts include both the interrupted incident and a separate active incident when another incident starts? Not in MVP-021.</li>
+      <li>Should interrupted incident records eventually persist outside the in-memory store? Not in MVP-021.</li>
     </ul>
 
     <h2>Future Ideas Discovered During Planning</h2>
     <ul>
-      <li>Durable user-interruption lifecycle that records interrupted/background/protected outcomes.</li>
-      <li><code>resume_incident</code>, <code>go_idle</code>, and <code>no_change</code> life-action commit boundaries after the read-only interruption cue is proven.</li>
-      <li>An <code>interrupted_incident</code> context object that can differ from <code>active_incident</code> after durable policy exists.</li>
-      <li>Context-build raw logs for explaining exactly why the flag was included.</li>
-      <li>Body and Live2D reactions to interruption after durable state transitions exist.</li>
+      <li><code>resume_incident</code>, <code>go_idle</code>, and <code>no_change</code> life-action commit boundaries.</li>
+      <li>Post-turn background/protected behavior beyond the immediate query-visible policy outcome.</li>
+      <li>Multiple interrupted incidents or an incident history query surface.</li>
+      <li>Body and Live2D reactions to interruption after durable state transitions are proven.</li>
+      <li>Debug/replay views for incident lifecycle transitions.</li>
     </ul>
 
     <h2>Next Action</h2>
     <p>
-      Review <a href="https://github.com/QuellaMC/Project02/pull/23">PR #23</a>
-      for scope, shared-code reuse, and the read-only interruption context
-      contract.
+      Open the MVP-021 pull request, wait for CI/review, and update
+      <code>docs/plan/index.html</code> with the PR link after PR creation.
     </p>
   </main>
 </body>
