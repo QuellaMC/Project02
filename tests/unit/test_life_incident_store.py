@@ -29,6 +29,7 @@ from commit_effects.incident_complete import (  # noqa: E402
     commit_life_incident_complete,
 )
 from commit_effects.incident_interrupt import (  # noqa: E402
+    LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS,
     LIFE_INCIDENT_INTERRUPTED_STATUS,
     build_interrupted_life_incident_snapshot,
     build_life_incident_interrupt_finalize_request,
@@ -183,6 +184,27 @@ class ActiveIncidentChangingCompleteCompletionFinalizer:
         changed_incident["title"] = "changed before completion"
         active_incidents_by_scope[scope] = changed_incident
         self.store.complete_life_incident_complete_after_log_visible(request)
+
+
+class ActiveIncidentChangingInterruptCompletionFinalizer:
+    def __init__(self, store):
+        self.store = store
+        self.completed = False
+
+    def require_life_incident_interrupt_raw_event_log(self, raw_event_log):
+        self.store.require_life_incident_interrupt_raw_event_log(raw_event_log)
+
+    def finalize_life_incident_interrupt(self, request):
+        return self.store.finalize_life_incident_interrupt(request)
+
+    def complete_life_incident_interrupt_after_log_visible(self, request):
+        self.completed = True
+        active_incidents_by_scope = self.store._active_incidents_by_scope
+        scope = next(iter(active_incidents_by_scope))
+        changed_incident = deepcopy(request["active_incident"])
+        changed_incident["title"] = "changed before completion"
+        active_incidents_by_scope[scope] = changed_incident
+        self.store.complete_life_incident_interrupt_after_log_visible(request)
 
 
 def normalized_user_message(
@@ -535,6 +557,56 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
         )
         self.assertIsNotNone(
             store.read_interrupted_incident(build_active_incident_request(interrupt_event))
+        )
+
+    def test_interrupt_state_conflict_after_success_visibility_keeps_active_incident(self):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        finalizer = ActiveIncidentChangingInterruptCompletionFinalizer(store)
+        ids = SequenceIdGenerator()
+        start_event = normalized_user_message()
+        commit_life_incident_start(
+            start_event,
+            role_model_result_with_incident(),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+        interrupt_event = normalized_user_message(
+            event_id="event-interrupt",
+            trace_id="trace-interrupt",
+        )
+
+        result = commit_life_incident_interruption(
+            interrupt_event,
+            active_incident_source=store,
+            life_incident_interrupt_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        current_active_incident = store.read_active_incident(
+            build_active_incident_request(interrupt_event)
+        )
+        entries = raw_log.query({"trace_id": "trace-interrupt"})["entries"]
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], "life_incident_interrupt_finalize")
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertIn(
+            "changed before interruption could be completed",
+            result["failure"]["message"],
+        )
+        self.assertTrue(finalizer.completed)
+        self.assertEqual(current_active_incident["title"], "changed before completion")
+        self.assertIsNone(
+            store.read_interrupted_incident(build_active_incident_request(interrupt_event))
+        )
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            ["life_incident_interrupted", "life_incident_interrupt_rejected"],
         )
 
     def test_visibility_staging_failure_rejects_without_storing_active_incident(self):

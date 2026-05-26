@@ -104,6 +104,41 @@ class RecordingLifeIncidentInterruptFinalizer:
             raise self.completion_error
 
 
+class StagingCompletionFailingInterruptFinalizer:
+    def __init__(self, raw_log, *, completion_error=None):
+        self.raw_log = raw_log
+        self.completion_error = completion_error
+        self.requests = []
+        self.completion_requests = []
+
+    def require_life_incident_interrupt_raw_event_log(self, raw_event_log):
+        if raw_event_log is not self.raw_log:
+            raise LifeIncidentInterruptFinalizerError(
+                "LifeIncidentStore must finalize against the same Raw Event Log instance.",
+                code="malformed_finalize_result",
+            )
+
+    def finalize_life_incident_interrupt(self, request):
+        self.requests.append(deepcopy(request))
+        self.raw_log.expose_committed_success_entry(request["committed_log_entry"])
+        return {
+            "schema_version": "0.1",
+            "trace_id": request["trace_id"],
+            "event_id": request["event_id"],
+            "event_type": request["event_type"],
+            "committed_log_entry_id": request["committed_log_entry"]["log_id"],
+        }
+
+    def complete_life_incident_interrupt_after_log_visible(self, request):
+        self.completion_requests.append(deepcopy(request))
+        if self.completion_error is not None:
+            raise self.completion_error
+        raise LifeIncidentInterruptFinalizerError(
+            "completion failed after success log visibility",
+            code="finalize_rejected",
+        )
+
+
 def normalized_user_message():
     return {
         "event_id": "event-interrupt",
@@ -315,6 +350,55 @@ class IncidentInterruptCommitTests(unittest.TestCase):
         )["entries"]
         self.assertEqual(len(rejected), 1)
         self.assertEqual(rejected[0]["data"]["failure"], result["failure"])
+
+    def test_completion_failure_after_success_visibility_returns_rejected_result(self):
+        raw_log = InMemoryRawEventLog()
+        active_incident = active_incident_snapshot()
+        finalizer = StagingCompletionFailingInterruptFinalizer(raw_log)
+
+        result = commit_life_incident_interruption(
+            normalized_user_message(),
+            active_incident_source=RecordingActiveIncidentSource(active_incident),
+            life_incident_interrupt_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        entries = raw_log.query({"trace_id": "trace-interrupt"})["entries"]
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_INTERRUPT_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertIn("completion failed", result["failure"]["message"])
+        self.assertEqual(len(finalizer.completion_requests), 1)
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            ["life_incident_interrupted", "life_incident_interrupt_rejected"],
+        )
+
+    def test_completion_runtime_error_after_success_visibility_returns_rejected_result(self):
+        raw_log = InMemoryRawEventLog()
+        active_incident = active_incident_snapshot()
+        finalizer = StagingCompletionFailingInterruptFinalizer(
+            raw_log,
+            completion_error=RuntimeError("incident interrupt write failed"),
+        )
+
+        result = commit_life_incident_interruption(
+            normalized_user_message(),
+            active_incident_source=RecordingActiveIncidentSource(active_incident),
+            life_incident_interrupt_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_INTERRUPT_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertIn("incident interrupt write failed", result["failure"]["message"])
+        self.assertEqual(len(finalizer.completion_requests), 1)
 
     def test_builders_preserve_active_identity_and_validate_log_shape(self):
         event = normalized_user_message()
