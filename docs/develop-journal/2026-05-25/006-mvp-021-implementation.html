@@ -36,6 +36,7 @@
       <li>Extended <code>InMemoryLifeIncidentStore</code> with the interrupted read/finalizer surface while preserving the existing active read, cancel, complete, and start behavior.</li>
       <li>Added an <code>interrupted_incident</code> Character State Engine brief and Role Model Loop validation/rendering, without adding resume/go-idle/no-change actions.</li>
       <li>Wired the optional user-turn interruption dependency so the deterministic policy outcome runs before model context build when explicitly supplied.</li>
+      <li>Review follow-up: tightened user-turn integration coverage so both non-interruptible policies, <code>"background"</code> and <code>"protected"</code>, prove the policy log is written before model context while the active incident remains available.</li>
     </ul>
 
     <h2>Review Notes</h2>
