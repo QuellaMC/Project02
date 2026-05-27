@@ -129,6 +129,7 @@ class InMemoryLifeIncidentStore:
                 code="malformed_finalize_result",
             ) from error
         self._active_incidents_by_scope[scope] = deepcopy(validated_request["started_incident"])
+        self._interrupted_incidents_by_scope.pop(scope, None)
 
         return {
             "schema_version": SCHEMA_VERSION,
@@ -186,6 +187,7 @@ class InMemoryLifeIncidentStore:
                 code="finalize_rejected",
             )
         self._active_incidents_by_scope.pop(scope, None)
+        self._interrupted_incidents_by_scope.pop(scope, None)
 
     def finalize_life_incident_complete(
         self,
@@ -235,6 +237,7 @@ class InMemoryLifeIncidentStore:
                 code="finalize_rejected",
             )
         self._active_incidents_by_scope.pop(scope, None)
+        self._interrupted_incidents_by_scope.pop(scope, None)
 
     def finalize_life_incident_interrupt(
         self,

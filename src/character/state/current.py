@@ -563,8 +563,13 @@ def validate_interrupted_incident_brief_for_event(
     *,
     event_id: str,
 ) -> InterruptedIncidentBrief:
-    require_string(event_id, "event_id")
-    return validate_interrupted_incident_brief(brief)
+    current_event_id = require_string(event_id, "event_id")
+    validated_brief = validate_interrupted_incident_brief(brief)
+    if current_event_id not in validated_brief["source_event_ids"]:
+        raise ContractValidationError(
+            "interrupted_incident.source_event_ids must include current event_id."
+        )
+    return validated_brief
 
 
 def _build_user_message_read_request(

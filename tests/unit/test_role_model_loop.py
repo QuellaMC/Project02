@@ -1215,7 +1215,7 @@ class DecisionContextTests(unittest.TestCase):
     def test_render_accepts_and_validates_interrupted_incident(self):
         context = build_decision_context(
             normalized_user_message(),
-            active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
+            active_incident_source=RecordingActiveIncidentSource(None),
             interrupted_incident_source=RecordingInterruptedIncidentSource(
                 interrupted_incident_snapshot()
             ),

@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
+from commit_effects import incident_interrupt as incident_interrupt_module  # noqa: E402
 from commit_effects.incident_interrupt import (  # noqa: E402
     LIFE_INCIDENT_CONTINUED_IN_BACKGROUND_STATUS,
     LIFE_INCIDENT_INTERRUPT_COMMIT_VALIDATION_STAGE,
@@ -438,6 +439,34 @@ class IncidentInterruptCommitTests(unittest.TestCase):
         self.assertEqual(
             finalize_request["committed_log_entry"]["kind"], "life_incident_interrupted"
         )
+
+    def test_interrupted_log_clock_accepts_z_suffix_commit_time(self):
+        event = normalized_user_message()
+        active_incident = active_incident_snapshot()
+        commit_request = {
+            "schema_version": "0.1",
+            "trace_id": "trace-interrupt",
+            "event_id": "event-interrupt",
+            "event_type": "USER_MESSAGE",
+            "incident_id": "incident-1",
+            "commit_time": "2026-05-25T09:00:00Z",
+            "user_id": "user-1",
+            "conversation_id": "conversation-1",
+        }
+        interrupted_incident = build_interrupted_life_incident_snapshot(
+            active_incident,
+            commit_request,
+        )
+
+        log_entry = build_life_incident_interrupted_log_entry(
+            event,
+            active_incident,
+            interrupted_incident,
+            id_generator=SequenceIdGenerator(),
+            clock=incident_interrupt_module._clock_at(commit_request["commit_time"]),
+        )
+
+        self.assertEqual(log_entry["created_at"], "2026-05-25T09:00:00+00:00")
 
 
 if __name__ == "__main__":

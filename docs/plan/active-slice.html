@@ -155,9 +155,10 @@
     <p>
       The model-facing brief omits <code>status</code> because the field name
       already carries the lifecycle state. Unlike the active incident brief,
-      the interrupted brief may include the current user message's
-      <code>event_id</code> in <code>source_event_ids</code> when the context is
-      built after the same turn's interruption commit.
+      the interrupted brief is accepted only when it includes the current user
+      message's <code>event_id</code> in <code>source_event_ids</code>, so a
+      stale interrupted record from an older turn cannot replace current active
+      context.
       Notion's conceptual interruption object can carry all interruption
       policies; MVP-021 narrows <code>interrupted_incident</code> to committed
       <code>"interruptible"</code> transitions and keeps background/protected
@@ -285,11 +286,11 @@
         </tr>
         <tr>
           <td>FR-10</td>
-          <td>Add a read-only interrupted-incident source/request/brief path for Character State Engine context building. The request must reuse the current event identity fields and remain copy-safe.</td>
+          <td>Add a read-only interrupted-incident source/request/brief path for Character State Engine context building. The request must reuse the current event identity fields, remain copy-safe, and accept an interrupted brief only when it is sourced from the current event.</td>
         </tr>
         <tr>
           <td>FR-11</td>
-          <td>For <code>USER_MESSAGE</code> contexts built after an interruptible transition, include <code>character_snapshot.interrupted_incident</code> and omit a duplicate <code>active_incident</code> for the same incident. For background/protected outcomes, keep the existing <code>active_incident</code> context path.</td>
+          <td>For <code>USER_MESSAGE</code> contexts built after an interruptible transition, include <code>character_snapshot.interrupted_incident</code> and omit a duplicate <code>active_incident</code> for the same incident. If an active incident is present, prefer the active context path and do not let an older interrupted record dominate it. For background/protected outcomes, keep the existing <code>active_incident</code> context path.</td>
         </tr>
         <tr>
           <td>FR-12</td>
@@ -374,7 +375,7 @@
     <ul>
       <li>Watch for duplicated lifecycle validation copied from cancel/complete. Shared helper extraction is acceptable only where it removes real duplication and preserves current behavior.</li>
       <li>Watch for hidden widening in user-turn orchestration. MVP-021 should add one optional deterministic pre-model policy outcome boundary, not a general lifecycle engine.</li>
-      <li>Watch for stale active/read-only context behavior. Once an interruptible transition commits, the model should see <code>interrupted_incident</code> rather than a duplicate active incident for the same record. Background/protected outcomes should continue to show the unchanged active incident.</li>
+      <li>Watch for stale active/read-only context behavior. Once an interruptible transition commits, the same turn's model context should see <code>interrupted_incident</code> rather than a duplicate active incident for the same record. Later active incidents should supersede old interrupted records.</li>
       <li>Watch for policy creep. Resume, idle, cancellation-after-interruption, durable background status, durable protected deferral, and follow-up incident behavior stay parked.</li>
     </ul>
 
@@ -386,6 +387,8 @@
       <code>life_incident_interrupted</code>,
       <code>life_incident_continued_in_background</code>, or
       <code>life_incident_protected_from_interruption</code>.
+      A later successful active incident start for the same scope supersedes
+      and clears the prior in-memory interrupted slot.
     </p>
 
     <h2>What It Does Not Store Yet</h2>

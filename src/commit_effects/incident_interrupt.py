@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from character.state.current import (
@@ -857,5 +857,8 @@ def _snapshot(value: Any) -> Any:
 
 
 def _clock_at(timestamp: str) -> Clock:
-    parsed = datetime.fromisoformat(timestamp)
-    return lambda: parsed
+    validated_timestamp = validate_iso8601_timestamp(timestamp, "timestamp")
+    parsed_timestamp = datetime.fromisoformat(validated_timestamp.replace("Z", "+00:00"))
+    if parsed_timestamp.tzinfo is None:
+        parsed_timestamp = parsed_timestamp.replace(tzinfo=UTC)
+    return lambda: parsed_timestamp

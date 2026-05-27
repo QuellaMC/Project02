@@ -234,8 +234,10 @@ class CharacterContextBuilderTests(unittest.TestCase):
         )
         self.assertEqual(len(no_active_source.requests), 1)
 
-    def test_interrupted_incident_context_uses_interrupted_read_before_active_read(self):
-        active_source = RecordingActiveIncidentSource(active_incident_snapshot())
+    def test_interrupted_incident_context_uses_interrupted_read_when_no_active_incident_exists(
+        self,
+    ):
+        active_source = RecordingActiveIncidentSource(None)
         interrupted_source = RecordingInterruptedIncidentSource(interrupted_incident_snapshot())
 
         context = build_character_decision_context(
@@ -244,8 +246,8 @@ class CharacterContextBuilderTests(unittest.TestCase):
             interrupted_incident_source=interrupted_source,
         )
 
+        self.assertEqual(len(active_source.requests), 1)
         self.assertEqual(len(interrupted_source.requests), 1)
-        self.assertEqual(active_source.requests, [])
         self.assertEqual(
             context["character_snapshot"]["interrupted_incident"],
             build_interrupted_incident_brief(interrupted_incident_snapshot()),
@@ -256,9 +258,11 @@ class CharacterContextBuilderTests(unittest.TestCase):
             context["character_snapshot"],
         )
 
-    def test_context_falls_back_to_active_incident_when_no_interrupted_incident_exists(self):
+    def test_context_prefers_active_incident_without_reading_stale_interrupted_incident(self):
         active_source = RecordingActiveIncidentSource(active_incident_snapshot())
-        interrupted_source = RecordingInterruptedIncidentSource(None)
+        stale_interrupted = interrupted_incident_snapshot()
+        stale_interrupted["source_event_ids"] = ["event-incident-started", "event-old"]
+        interrupted_source = RecordingInterruptedIncidentSource(stale_interrupted)
 
         context = build_character_decision_context(
             normalized_user_message(),
@@ -266,9 +270,10 @@ class CharacterContextBuilderTests(unittest.TestCase):
             interrupted_incident_source=interrupted_source,
         )
 
-        self.assertEqual(len(interrupted_source.requests), 1)
         self.assertEqual(len(active_source.requests), 1)
+        self.assertEqual(interrupted_source.requests, [])
         self.assertIn("active_incident", context["character_snapshot"])
+        self.assertNotIn("interrupted_incident", context["character_snapshot"])
         self.assertIs(
             context["character_snapshot"]["user_message_interrupted_active_incident"],
             True,
@@ -283,6 +288,16 @@ class CharacterContextBuilderTests(unittest.TestCase):
         )
 
         self.assertEqual(validated["source_event_ids"], ["event-incident-started", "event-1"])
+
+    def test_interrupted_incident_brief_rejects_missing_current_event_source_id(self):
+        brief = build_interrupted_incident_brief(interrupted_incident_snapshot())
+        brief["source_event_ids"] = ["event-incident-started", "event-old"]
+
+        with self.assertRaisesRegex(ContractValidationError, "current event_id"):
+            validate_interrupted_incident_brief_for_event(
+                brief,
+                event_id="event-1",
+            )
 
     def test_rejects_malformed_interrupted_incident_source_payload(self):
         malformed_snapshot = interrupted_incident_snapshot()

@@ -521,6 +521,56 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
         )["entries"]
         self.assertEqual(len(success_entries), 1)
 
+    def test_start_after_interruption_clears_interrupted_incident_for_scope(self):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        start_event = normalized_user_message(event_id="event-1", trace_id="trace-1")
+        interrupt_event = normalized_user_message(
+            event_id="event-interrupt",
+            trace_id="trace-interrupt",
+        )
+        next_start_event = normalized_user_message(event_id="event-2", trace_id="trace-2")
+
+        commit_life_incident_start(
+            start_event,
+            role_model_result_with_incident(event_id="event-1", trace_id="trace-1"),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+        interrupt_result = commit_life_incident_interruption(
+            interrupt_event,
+            active_incident_source=store,
+            life_incident_interrupt_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+        next_start_result = commit_life_incident_start(
+            next_start_event,
+            role_model_result_with_incident(
+                event_id="event-2",
+                trace_id="trace-2",
+                title="new active incident",
+            ),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(interrupt_result["status"], LIFE_INCIDENT_INTERRUPTED_STATUS)
+        self.assertEqual(next_start_result["status"], LIFE_INCIDENT_STARTED_STATUS)
+        self.assertIsNone(
+            store.read_interrupted_incident(build_active_incident_request(next_start_event))
+        )
+        self.assertEqual(
+            store.read_active_incident(build_active_incident_request(next_start_event))["title"],
+            "new active incident",
+        )
+
     def test_direct_interrupt_finalize_does_not_move_state_until_completion(self):
         raw_log = InMemoryRawEventLog()
         store = InMemoryLifeIncidentStore(raw_event_log=raw_log)

@@ -114,15 +114,15 @@ def build_character_decision_context(
         normalized_event,
         current_state_source=current_state_source,
     )
-    interrupted_incident_brief = _read_interrupted_incident_brief(
+    active_incident_brief = _read_active_incident_brief(
         normalized_event,
-        interrupted_incident_source=interrupted_incident_source,
+        active_incident_source=active_incident_source,
     )
-    active_incident_brief = None
-    if interrupted_incident_brief is None:
-        active_incident_brief = _read_active_incident_brief(
+    interrupted_incident_brief = None
+    if active_incident_brief is None:
+        interrupted_incident_brief = _read_interrupted_incident_brief(
             normalized_event,
-            active_incident_source=active_incident_source,
+            interrupted_incident_source=interrupted_incident_source,
         )
 
     character_snapshot: dict[str, Any] = {
