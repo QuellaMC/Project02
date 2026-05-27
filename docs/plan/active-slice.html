@@ -298,7 +298,7 @@
         </tr>
         <tr>
           <td>FR-13</td>
-          <td>Wire the user-turn orchestration only enough to run the deterministic interruption policy outcome before the model-facing context is built when the new dependencies are supplied. Missing optional interruption dependencies must not break existing tests or existing no-interruption user turns.</td>
+          <td>Wire the user-turn orchestration only enough to run the deterministic interruption policy outcome before the model-facing context is built when the new dependencies are supplied. Treat the interruption finalizer as a durable write-action opt-in that is mutually exclusive with state patch, start, cancel, and complete opt-ins. Missing optional interruption dependencies must not break existing tests or existing no-interruption user turns.</td>
         </tr>
         <tr>
           <td>FR-14</td>
@@ -325,6 +325,7 @@
       <li>Given no active incident, the interruption boundary skips without raw-log or store mutation.</li>
       <li>Given visibility staging, visibility confirmation, malformed finalizer result, or post-visible store conflict, the active incident remains active and the failure is surfaced consistently with the existing lifecycle failure pattern.</li>
       <li>A <code>USER_MESSAGE</code> context can include <code>character_snapshot.interrupted_incident</code> after an interruptible transition, while background/protected contexts keep using <code>character_snapshot.active_incident</code>. Role Model Loop renders the context without allowing any new life action.</li>
+      <li>Supplying <code>life_incident_interrupt_finalizer</code> alongside another write-action opt-in is rejected during user-turn preflight before the user-visible message, interruption commit, model turn, or later write commit runs.</li>
       <li>No test needs a live model provider, Notion, external service, concrete database, scheduler, Live2D renderer, asset system, or background worker.</li>
       <li>Relevant unit tests, integration tests, full unittest discovery, Ruff lint/format, mypy, source compilation, HTML parsing, and <code>git diff --check</code> pass before implementation is called complete.</li>
     </ul>
@@ -346,6 +347,7 @@
     <ul>
       <li>Extend user-turn integration coverage so a user message with an interruptible active incident commits interruption before model input rendering, then the fake adapter sees <code>character_snapshot.interrupted_incident</code>.</li>
       <li>Extend user-turn integration coverage so background and protected active incidents produce their query-visible policy logs before model input rendering while the fake adapter still sees <code>character_snapshot.active_incident</code>.</li>
+      <li>Cover user-turn preflight rejection when interruption handling is enabled with any other write-action opt-in.</li>
       <li>Assert the same flow does not enable resume/go-idle/no-change and does not emit proactive output.</li>
       <li>Assert existing cancel, complete, and incident-completion flows still pass and do not read or write interrupted incident state unless the MVP-021 boundary is configured.</li>
     </ul>

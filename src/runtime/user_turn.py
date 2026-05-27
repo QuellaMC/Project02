@@ -70,7 +70,7 @@ MISSING_INCIDENT_INTERRUPT_SOURCE_CODE = "missing_incident_interrupt_source"
 MISSING_INTERRUPTED_INCIDENT_SOURCE_CODE = "missing_interrupted_incident_source"
 WRITE_ACTION_OPT_IN_CONFLICT_MESSAGE = (
     "Only one write-action opt-in may be enabled for a USER_MESSAGE turn: "
-    "state_patch, start_incident, cancel_incident, or complete_incident."
+    "state_patch, start_incident, cancel_incident, complete_incident, or interrupt_incident."
 )
 
 UserMessageTurnResult = dict[str, Any]
@@ -125,6 +125,7 @@ def run_user_message_turn(
                 allow_incident_start,
                 allow_incident_cancel,
                 allow_incident_complete,
+                allow_incident_interrupt,
             )
             if enabled
         )
