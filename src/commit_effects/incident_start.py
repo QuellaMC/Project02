@@ -206,16 +206,20 @@ def commit_life_incident_start(
             finalize_request,
         )
     except LifeIncidentStartFinalizerError as error:
+        failure_error = error
         if not success_visibility_confirmed:
             discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
-            _discard_start_after_log_not_visible(
-                life_incident_start_finalizer,
-                finalize_request,
-            )
+            try:
+                _discard_start_after_log_not_visible(
+                    life_incident_start_finalizer,
+                    finalize_request,
+                )
+            except LifeIncidentStartFinalizerError as discard_error:
+                failure_error = discard_error
         failure = _build_failure(
             LIFE_INCIDENT_START_FINALIZE_STAGE,
-            error.code,
-            str(error),
+            failure_error.code,
+            str(failure_error),
         )
         raw_event_log.append(
             build_life_incident_start_rejected_log_entry(
@@ -755,7 +759,15 @@ def _discard_start_after_log_not_visible(
     )
     if not callable(discard_after_log_not_visible) or finalize_request is None:
         return
-    discard_after_log_not_visible(deepcopy(dict(finalize_request)))
+    try:
+        discard_after_log_not_visible(deepcopy(dict(finalize_request)))
+    except LifeIncidentStartFinalizerError:
+        raise
+    except Exception as error:
+        raise LifeIncidentStartFinalizerError(
+            f"discard_life_incident_start_after_log_not_visible failed unexpectedly: {error}",
+            code="finalize_rejected",
+        ) from error
 
 
 def _parse_iso8601_timestamp(value: str) -> datetime:

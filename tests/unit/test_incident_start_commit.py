@@ -67,6 +67,21 @@ class RecordingLifeIncidentStartFinalizer:
         }
 
 
+class DiscardFailingLifeIncidentStartFinalizer(RecordingLifeIncidentStartFinalizer):
+    def __init__(self):
+        super().__init__(
+            error=LifeIncidentStartFinalizerError(
+                "finalize rejected",
+                code="finalize_rejected",
+            )
+        )
+        self.discard_requests = []
+
+    def discard_life_incident_start_after_log_not_visible(self, request):
+        self.discard_requests.append(deepcopy(request))
+        raise RuntimeError("discard failed")
+
+
 def normalized_user_message():
     return {
         "event_id": "event-1",
@@ -283,6 +298,30 @@ class IncidentStartCommitTests(unittest.TestCase):
         self.assertEqual(finalizer.durable_started_incidents, [])
         self.assertEqual(finalizer.durable_raw_event_log_entries, [])
         self.assertEqual(raw_log.entries[0]["kind"], "life_incident_start_rejected")
+
+    def test_discard_hook_failure_returns_structured_rejection(self):
+        raw_log = RecordingRawEventLog()
+        finalizer = DiscardFailingLifeIncidentStartFinalizer()
+
+        result = commit_life_incident_start(
+            normalized_user_message(),
+            role_model_result_with_incident(),
+            life_incident_start_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_START_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_START_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertIn(
+            "discard_life_incident_start_after_log_not_visible failed unexpectedly",
+            result["failure"]["message"],
+        )
+        self.assertEqual(len(finalizer.discard_requests), 1)
+        self.assertEqual(raw_log.entries[0]["kind"], "life_incident_start_rejected")
+        self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
 
     def test_started_incident_snapshot_reuses_active_incident_validation(self):
         snapshot = build_started_life_incident_snapshot(
