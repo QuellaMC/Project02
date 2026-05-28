@@ -10,6 +10,9 @@ from character.state import (  # noqa: E402
 from character.state import (
     CharacterRuntimeStateSnapshot as ExportedCharacterRuntimeStateSnapshot,
 )
+from character.state import (
+    InterruptedIncidentSnapshot as ExportedInterruptedIncidentSnapshot,
+)
 from character.state import __all__ as character_state_public_contracts  # noqa: E402
 from character.state.current import (  # noqa: E402
     build_active_incident_brief,
@@ -101,8 +104,16 @@ class PublicContractExportTests(unittest.TestCase):
     def test_reexports_character_state_read_contracts(self):
         self.assertIn("CharacterRuntimeStateSnapshot", character_state_public_contracts)
         self.assertIn("ActiveIncidentSnapshot", character_state_public_contracts)
+        self.assertIn("InterruptedIncidentSnapshot", character_state_public_contracts)
+        self.assertIn("InterruptedIncidentSource", character_state_public_contracts)
+        self.assertIn("build_interrupted_incident_request", character_state_public_contracts)
+        self.assertIn(
+            "validate_interrupted_incident_brief_for_event",
+            character_state_public_contracts,
+        )
         self.assertIsNotNone(ExportedCharacterRuntimeStateSnapshot)
         self.assertIsNotNone(ExportedActiveIncidentSnapshot)
+        self.assertIsNotNone(ExportedInterruptedIncidentSnapshot)
 
 
 class CurrentCharacterStateRequestTests(unittest.TestCase):

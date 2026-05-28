@@ -667,7 +667,7 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
             [],
         )
 
-    def test_start_state_conflict_after_success_visibility_keeps_started_incident(self):
+    def test_start_post_visible_completion_failure_keeps_visible_success(self):
         raw_log = InMemoryRawEventLog()
         store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
         finalizer = ActiveIncidentChangingStartCompletionFinalizer(store)
@@ -685,19 +685,12 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
         current_active_incident = store.read_active_incident(build_active_incident_request(event))
         entries = raw_log.query({"trace_id": "trace-1"})["entries"]
 
-        self.assertEqual(result["status"], LIFE_INCIDENT_START_REJECTED_STATUS)
-        self.assertEqual(result["failure"]["stage"], "life_incident_start_finalize")
-        self.assertEqual(result["failure"]["code"], "finalize_rejected")
-        self.assertIn(
-            "changed before start could be completed",
-            result["failure"]["message"],
-        )
+        self.assertEqual(result["status"], LIFE_INCIDENT_STARTED_STATUS)
+        self.assertEqual(result["started_incident"]["incident_id"], "incident-generated-1")
+        self.assertNotIn("failure", result)
         self.assertTrue(finalizer.completed)
         self.assertEqual(current_active_incident["title"], "changed before completion")
-        self.assertEqual(
-            [entry["kind"] for entry in entries],
-            ["life_incident_started", "life_incident_start_rejected"],
-        )
+        self.assertEqual([entry["kind"] for entry in entries], ["life_incident_started"])
 
     def test_direct_interrupt_finalize_does_not_move_state_until_completion(self):
         raw_log = InMemoryRawEventLog()

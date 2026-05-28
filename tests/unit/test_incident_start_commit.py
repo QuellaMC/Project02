@@ -19,6 +19,7 @@ from commit_effects.incident_start import (  # noqa: E402
     build_started_life_incident_snapshot,
     commit_life_incident_start,
 )
+from runtime.logging import InMemoryRawEventLog  # noqa: E402
 
 
 def fixed_clock():
@@ -80,6 +81,36 @@ class DiscardFailingLifeIncidentStartFinalizer(RecordingLifeIncidentStartFinaliz
     def discard_life_incident_start_after_log_not_visible(self, request):
         self.discard_requests.append(deepcopy(request))
         raise RuntimeError("discard failed")
+
+
+class CompletionFailingVisibleStartFinalizer:
+    def __init__(self, raw_log):
+        self.raw_log = raw_log
+        self.completion_requests = []
+
+    def require_raw_event_log(self, raw_event_log):
+        if raw_event_log is not self.raw_log:
+            raise LifeIncidentStartFinalizerError(
+                "Raw Event Log mismatch.",
+                code="malformed_finalize_result",
+            )
+
+    def finalize_life_incident_start(self, request):
+        self.raw_log.expose_committed_success_entry(request["committed_log_entry"])
+        return {
+            "schema_version": "0.1",
+            "trace_id": request["trace_id"],
+            "event_id": request["event_id"],
+            "event_type": request["event_type"],
+            "committed_log_entry_id": request["committed_log_entry"]["log_id"],
+        }
+
+    def complete_life_incident_start_after_log_visible(self, request):
+        self.completion_requests.append(deepcopy(request))
+        raise LifeIncidentStartFinalizerError(
+            "post-visible completion failed",
+            code="finalize_rejected",
+        )
 
 
 def normalized_user_message():
@@ -322,6 +353,26 @@ class IncidentStartCommitTests(unittest.TestCase):
         self.assertEqual(len(finalizer.discard_requests), 1)
         self.assertEqual(raw_log.entries[0]["kind"], "life_incident_start_rejected")
         self.assertEqual(raw_log.entries[0]["data"]["failure"], result["failure"])
+
+    def test_post_visible_completion_failure_keeps_visible_success_result(self):
+        raw_log = InMemoryRawEventLog()
+        finalizer = CompletionFailingVisibleStartFinalizer(raw_log)
+
+        result = commit_life_incident_start(
+            normalized_user_message(),
+            role_model_result_with_incident(),
+            life_incident_start_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        entries = raw_log.query({"trace_id": "trace-1"})["entries"]
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_STARTED_STATUS)
+        self.assertEqual(result["committed_log_entry_id"], entries[0]["log_id"])
+        self.assertEqual(len(finalizer.completion_requests), 1)
+        self.assertEqual([entry["kind"] for entry in entries], ["life_incident_started"])
 
     def test_started_incident_snapshot_reuses_active_incident_validation(self):
         snapshot = build_started_life_incident_snapshot(

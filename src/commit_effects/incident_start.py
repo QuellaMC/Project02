@@ -201,10 +201,15 @@ def commit_life_incident_start(
                 code="malformed_finalize_result",
             ) from error
         success_visibility_confirmed = True
-        _complete_start_after_log_visible(
-            life_incident_start_finalizer,
-            finalize_request,
-        )
+        try:
+            _complete_start_after_log_visible(
+                life_incident_start_finalizer,
+                finalize_request,
+            )
+        except LifeIncidentStartFinalizerError:
+            # The success log is already query-visible; do not append a
+            # contradictory rejected lifecycle record after that point.
+            pass
     except LifeIncidentStartFinalizerError as error:
         failure_error = error
         if not success_visibility_confirmed:
