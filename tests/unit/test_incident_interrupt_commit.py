@@ -47,7 +47,17 @@ class RecordingRawEventLog(InMemoryRawEventLog):
         super().append(entry)
 
 
-class RejectingInterruptConfirmRawEventLog(InMemoryRawEventLog):
+class RecordingDiscardRawEventLog(InMemoryRawEventLog):
+    def __init__(self):
+        super().__init__()
+        self.discarded_entries = []
+
+    def discard_committed_success_entry(self, entry):
+        self.discarded_entries.append(deepcopy(entry))
+        super().discard_committed_success_entry(entry)
+
+
+class RejectingInterruptConfirmRawEventLog(RecordingDiscardRawEventLog):
     def confirm_committed_success_entry(self, entry):
         if entry["kind"] == "life_incident_interrupted":
             raise RawEventLogQueryValidationError("interrupt visibility confirm failed")
@@ -319,6 +329,8 @@ class IncidentInterruptCommitTests(unittest.TestCase):
         )["entries"]
         self.assertEqual(visible_success, [])
         self.assertEqual(len(rejected), 1)
+        self.assertEqual(len(raw_log.discarded_entries), 1)
+        self.assertEqual(raw_log.discarded_entries[0]["kind"], "life_incident_interrupted")
 
     def test_rejects_source_errors_with_query_visible_failure_log(self):
         raw_log = RecordingRawEventLog()
@@ -352,8 +364,8 @@ class IncidentInterruptCommitTests(unittest.TestCase):
         self.assertEqual(len(rejected), 1)
         self.assertEqual(rejected[0]["data"]["failure"], result["failure"])
 
-    def test_completion_failure_after_success_visibility_returns_rejected_result(self):
-        raw_log = InMemoryRawEventLog()
+    def test_completion_failure_after_success_visibility_returns_rejected_without_discard(self):
+        raw_log = RecordingDiscardRawEventLog()
         active_incident = active_incident_snapshot()
         finalizer = StagingCompletionFailingInterruptFinalizer(raw_log)
 
@@ -377,6 +389,7 @@ class IncidentInterruptCommitTests(unittest.TestCase):
             [entry["kind"] for entry in entries],
             ["life_incident_interrupted", "life_incident_interrupt_rejected"],
         )
+        self.assertEqual(raw_log.discarded_entries, [])
 
     def test_completion_runtime_error_after_success_visibility_returns_rejected_result(self):
         raw_log = InMemoryRawEventLog()

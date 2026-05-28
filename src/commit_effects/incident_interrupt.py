@@ -151,6 +151,7 @@ def commit_life_incident_interruption(
     committed_log_entry: RawEventLogEntry | None = None
     finalize_request: LifeIncidentInterruptFinalizeRequest | None = None
     validated_finalize_result: Mapping[str, Any] | None = None
+    success_visibility_confirmed = False
 
     try:
         event = _validate_source_event(source_event)
@@ -192,6 +193,7 @@ def commit_life_incident_interruption(
                 confirm_committed_success_entry_visibility(raw_event_log, committed_log_entry)
             except RawEventLogQueryValidationError as error:
                 raise _finalizer_error(str(error), "malformed_finalize_result") from error
+            success_visibility_confirmed = True
             _complete_interrupt_success_after_visible(
                 life_incident_interrupt_finalizer,
                 finalize_request,
@@ -231,7 +233,8 @@ def commit_life_incident_interruption(
         )
     except Exception as error:
         if isinstance(error, LifeIncidentInterruptFinalizerError):
-            discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
+            if not success_visibility_confirmed:
+                discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
             failure = _build_failure(
                 LIFE_INCIDENT_INTERRUPT_FINALIZE_STAGE,
                 _error_code(error, "finalize_rejected"),
