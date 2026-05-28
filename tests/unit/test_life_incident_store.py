@@ -121,6 +121,30 @@ class RejectSecondCancelConfirmRawEventLog(InMemoryRawEventLog):
         super().confirm_committed_success_entry(entry)
 
 
+class ActiveIncidentChangingStartCompletionFinalizer:
+    def __init__(self, store):
+        self.store = store
+        self.completed = False
+
+    def require_raw_event_log(self, raw_event_log):
+        self.store.require_raw_event_log(raw_event_log)
+
+    def finalize_life_incident_start(self, request):
+        return self.store.finalize_life_incident_start(request)
+
+    def complete_life_incident_start_after_log_visible(self, request):
+        self.completed = True
+        active_incidents_by_scope = self.store._active_incidents_by_scope
+        scope = next(iter(active_incidents_by_scope))
+        changed_incident = deepcopy(request["started_incident"])
+        changed_incident["title"] = "changed before completion"
+        active_incidents_by_scope[scope] = changed_incident
+        self.store.complete_life_incident_start_after_log_visible(request)
+
+    def discard_life_incident_start_after_log_not_visible(self, request):
+        self.store.discard_life_incident_start_after_log_not_visible(request)
+
+
 class MalformedResultAfterCancelStageFinalizer:
     def __init__(self, store):
         self.store = store
@@ -641,6 +665,38 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
         self.assertEqual(
             raw_log.query({"trace_id": "trace-2", "kinds": ["life_incident_started"]})["entries"],
             [],
+        )
+
+    def test_start_state_conflict_after_success_visibility_keeps_started_incident(self):
+        raw_log = InMemoryRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        finalizer = ActiveIncidentChangingStartCompletionFinalizer(store)
+        event = normalized_user_message()
+
+        result = commit_life_incident_start(
+            event,
+            role_model_result_with_incident(),
+            life_incident_start_finalizer=finalizer,
+            raw_event_log=raw_log,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+        )
+
+        current_active_incident = store.read_active_incident(build_active_incident_request(event))
+        entries = raw_log.query({"trace_id": "trace-1"})["entries"]
+
+        self.assertEqual(result["status"], LIFE_INCIDENT_START_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], "life_incident_start_finalize")
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertIn(
+            "changed before start could be completed",
+            result["failure"]["message"],
+        )
+        self.assertTrue(finalizer.completed)
+        self.assertEqual(current_active_incident["title"], "changed before completion")
+        self.assertEqual(
+            [entry["kind"] for entry in entries],
+            ["life_incident_started", "life_incident_start_rejected"],
         )
 
     def test_direct_interrupt_finalize_does_not_move_state_until_completion(self):

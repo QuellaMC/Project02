@@ -142,6 +142,7 @@ def commit_life_incident_start(
     started_incident: Mapping[str, Any] | None = None
     committed_log_entry: RawEventLogEntry | None = None
     finalize_request: LifeIncidentStartFinalizeRequest | None = None
+    success_visibility_confirmed = False
 
     try:
         request = build_life_incident_start_commit_request(source_event, role_model_result)
@@ -199,16 +200,18 @@ def commit_life_incident_start(
                 str(error),
                 code="malformed_finalize_result",
             ) from error
+        success_visibility_confirmed = True
         _complete_start_after_log_visible(
             life_incident_start_finalizer,
             finalize_request,
         )
     except LifeIncidentStartFinalizerError as error:
-        discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
-        _discard_start_after_log_not_visible(
-            life_incident_start_finalizer,
-            finalize_request,
-        )
+        if not success_visibility_confirmed:
+            discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
+            _discard_start_after_log_not_visible(
+                life_incident_start_finalizer,
+                finalize_request,
+            )
         failure = _build_failure(
             LIFE_INCIDENT_START_FINALIZE_STAGE,
             error.code,

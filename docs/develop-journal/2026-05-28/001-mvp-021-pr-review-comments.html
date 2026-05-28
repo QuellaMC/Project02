@@ -20,7 +20,7 @@
   <main>
     <h1>2026-05-28 - MVP-021 PR Review Comments</h1>
     <p>
-      Addressed two new unresolved inline review comments on
+      Addressed unresolved inline review comments on
       <a href="https://github.com/QuellaMC/Project02/pull/24">PR #24</a>
       without widening the MVP-021 interruption boundary.
     </p>
@@ -30,7 +30,9 @@
       <li>After <code>life_incident_interrupted</code>, <code>run_user_message_turn()</code> now suppresses the active incident source for that same model context so a stale active adapter cannot hide the committed <code>interrupted_incident</code>.</li>
       <li><code>InMemoryLifeIncidentStore</code> now clears a prior interrupted slot for a replacement start only in <code>complete_life_incident_start_after_log_visible()</code>, after the start success log is confirmed query-visible.</li>
       <li><code>commit_life_incident_start()</code> gained narrow optional post-confirm and discard hooks that mirror the existing staged-success lifecycle pattern without requiring every test finalizer to implement them.</li>
+      <li>Follow-up review fix: the start discard hook now runs only before success-log visibility is confirmed, so post-visible completion failures cannot roll back already visible incident truth.</li>
       <li>Added unit coverage for failed replacement-start visibility confirmation preserving the interrupted incident, plus integration coverage for a stale active read adapter during an interrupting user turn.</li>
+      <li>Added unit coverage for a post-visible start completion conflict keeping the started incident state aligned with the already visible success log while returning a rejected result.</li>
     </ul>
 
     <h2>Why</h2>
@@ -45,8 +47,8 @@
 
     <h2>Validation</h2>
     <ul>
-      <li><code>python -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn tests.unit.test_incident_start_commit</code> - passed, 87 tests.</li>
-      <li><code>python -m unittest discover</code> - passed, 356 tests.</li>
+      <li><code>python -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn tests.unit.test_incident_start_commit</code> - passed, 88 tests.</li>
+      <li><code>python -m unittest discover</code> - passed, 357 tests.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code> - passed.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code> - passed.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/mypy src</code> - passed.</li>
