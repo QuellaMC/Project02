@@ -34,6 +34,8 @@
       <li>Follow-up review fix: <code>commit_life_incident_interruption()</code> now mirrors the same visibility-confirmed guard and skips success-log discard after post-visible completion failures.</li>
       <li>Follow-up review fix: user-turn interruption context now reads from the policy result snapshot, so lagging active or interrupted read adapters cannot make the model context diverge from the just-recorded policy outcome.</li>
       <li>Follow-up review fix: stale but well-formed interrupted incident reads are ignored on ordinary context builds when they are not sourced from the current event.</li>
+      <li>Clarified the PR description that MVP-021 is the pre-model durable interruption boundary, not the later model-chosen post-turn life-action loop.</li>
+      <li>Documented why <code>run_user_message_turn()</code> still preflights <code>interrupted_incident_source</code>: immediate success uses the committed snapshot for read-your-writes, while the slice still requires the Character State interrupted read boundary to be wired explicitly.</li>
       <li>Added unit coverage for failed replacement-start visibility confirmation preserving the interrupted incident, plus integration coverage for a stale active read adapter during an interrupting user turn.</li>
       <li>Added unit coverage for a post-visible start completion conflict keeping the started incident state aligned with the already visible success log while returning a rejected result.</li>
       <li>Added unit coverage proving interrupt success visibility is discarded before confirmation failure but not after post-visible completion failure.</li>

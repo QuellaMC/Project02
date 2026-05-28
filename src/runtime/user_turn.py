@@ -189,6 +189,9 @@ def run_user_message_turn(
             },
         )
     if allow_incident_interrupt and interrupted_incident_source is None:
+        # Keep the interrupted read boundary explicit for the MVP-021 context contract.
+        # Same-turn interruptible success uses a committed snapshot for read-your-writes,
+        # but normal interrupted reads still need the configured Character State source.
         return _build_stopped_result(
             event,
             route,
