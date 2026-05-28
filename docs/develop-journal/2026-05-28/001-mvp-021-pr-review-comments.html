@@ -35,12 +35,14 @@
       <li>Follow-up review fix: user-turn interruption context now reads from the policy result snapshot, so lagging active or interrupted read adapters cannot make the model context diverge from the just-recorded policy outcome.</li>
       <li>Follow-up review fix: stale but well-formed interrupted incident reads are ignored on ordinary context builds when they are not sourced from the current event.</li>
       <li>Follow-up review fix: <code>commit_life_incident_start()</code> now contains failures from the optional start discard hook and returns a structured <code>life_incident_start_rejected</code> result instead of letting cleanup errors escape the commit boundary.</li>
+      <li>Follow-up review fix: <code>run_user_message_turn()</code> no longer preflights <code>interrupted_incident_source</code> for every interruption turn; skipped, background, protected, and same-turn interruptible success paths now use only the incident source each context path actually needs.</li>
       <li>Clarified the PR description that MVP-021 is the pre-model durable interruption boundary, not the later model-chosen post-turn life-action loop.</li>
-      <li>Documented why <code>run_user_message_turn()</code> still preflights <code>interrupted_incident_source</code>: immediate success uses the committed snapshot for read-your-writes, while the slice still requires the Character State interrupted read boundary to be wired explicitly.</li>
+      <li>Documented why same-turn interruption context does not require a redundant interrupted read adapter: immediate success uses the committed snapshot for read-your-writes, non-interruptible policies use the policy-read active snapshot, and skipped interruption has no incident context.</li>
       <li>Added unit coverage for failed replacement-start visibility confirmation preserving the interrupted incident, plus integration coverage for a stale active read adapter during an interrupting user turn.</li>
       <li>Added unit coverage for a post-visible start completion conflict keeping the started incident state aligned with the already visible success log while returning a rejected result.</li>
       <li>Added unit coverage proving interrupt success visibility is discarded before confirmation failure but not after post-visible completion failure.</li>
       <li>Added unit coverage proving start discard-hook failures are represented as rejected start results and rejected raw-log entries.</li>
+      <li>Added integration coverage proving skipped, background, and protected interruption outcomes reach model context without <code>interrupted_incident_source</code>.</li>
     </ul>
 
     <h2>Why</h2>
@@ -55,10 +57,10 @@
 
     <h2>Validation</h2>
     <ul>
-      <li><code>python -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn tests.unit.test_incident_start_commit</code> - passed, 89 tests.</li>
+      <li><code>python -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn tests.unit.test_incident_start_commit</code> - passed, 90 tests.</li>
       <li><code>python -m unittest tests.unit.test_incident_interrupt_commit tests.unit.test_life_incident_store tests.integration.test_user_message_turn</code> - passed, 91 tests.</li>
-      <li><code>python -m unittest tests.unit.test_character_context_builder tests.integration.test_user_message_turn tests.unit.test_user_turn</code> - passed, 69 tests.</li>
-      <li><code>python -m unittest discover</code> - passed, 359 tests.</li>
+      <li><code>python -m unittest tests.unit.test_character_context_builder tests.integration.test_user_message_turn tests.unit.test_user_turn</code> - passed, 70 tests.</li>
+      <li><code>python -m unittest discover</code> - passed, 360 tests.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code> - passed.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code> - passed.</li>
       <li><code>/private/tmp/project02-checks-venv/bin/mypy src</code> - passed.</li>

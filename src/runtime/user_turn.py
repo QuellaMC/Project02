@@ -70,7 +70,6 @@ CONFLICTING_WRITE_ACTION_OPT_IN_CODE = "conflicting_write_action_opt_in"
 MISSING_INCIDENT_CANCEL_SOURCE_CODE = "missing_incident_cancel_source"
 MISSING_INCIDENT_COMPLETE_SOURCE_CODE = "missing_incident_complete_source"
 MISSING_INCIDENT_INTERRUPT_SOURCE_CODE = "missing_incident_interrupt_source"
-MISSING_INTERRUPTED_INCIDENT_SOURCE_CODE = "missing_interrupted_incident_source"
 WRITE_ACTION_OPT_IN_CONFLICT_MESSAGE = (
     "Only one write-action opt-in may be enabled for a USER_MESSAGE turn: "
     "state_patch, start_incident, cancel_incident, complete_incident, or interrupt_incident."
@@ -186,20 +185,6 @@ def run_user_message_turn(
                 "stage": USER_TURN_PREFLIGHT_STOP,
                 "code": MISSING_INCIDENT_INTERRUPT_SOURCE_CODE,
                 "message": "incident interrupt requires active_incident_source.",
-            },
-        )
-    if allow_incident_interrupt and interrupted_incident_source is None:
-        # Keep the interrupted read boundary explicit for the MVP-021 context contract.
-        # Same-turn interruptible success uses a committed snapshot for read-your-writes,
-        # but normal interrupted reads still need the configured Character State source.
-        return _build_stopped_result(
-            event,
-            route,
-            stopped_at=USER_TURN_PREFLIGHT_STOP,
-            failure={
-                "stage": USER_TURN_PREFLIGHT_STOP,
-                "code": MISSING_INTERRUPTED_INCIDENT_SOURCE_CODE,
-                "message": "incident interrupt requires interrupted_incident_source.",
             },
         )
 

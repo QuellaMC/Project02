@@ -1111,6 +1111,55 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             result["life_incident_interrupt_result"]["interrupted_incident"]["incident_id"],
         )
 
+    def test_user_turn_interrupt_skipped_without_interrupted_source_reaches_model(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        interrupt_event = {
+            "event_id": "event-interrupt",
+            "trace_id": "trace-interrupt",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:31:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "are you there?",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+        adapter = RecordingAdapter()
+
+        result = run_user_message_turn(
+            interrupt_event,
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            active_incident_source=life_incident_store,
+            life_incident_interrupt_finalizer=life_incident_store,
+        )
+
+        character_snapshot = adapter.calls[0]["decision_context"]["character_snapshot"]
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            result["life_incident_interrupt_result"]["status"],
+            "life_incident_interrupt_skipped",
+        )
+        self.assertNotIn("active_incident", character_snapshot)
+        self.assertNotIn("interrupted_incident", character_snapshot)
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.query({"trace_id": "trace-interrupt"})["entries"]],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "visible_reply_committed",
+            ],
+        )
+
     def test_user_turn_non_interruptible_policy_logs_before_model_context_and_keeps_active(self):
         cases = [
             {
@@ -1207,7 +1256,6 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                     clock=fixed_clock,
                     active_incident_source=unstable_active_source,
                     life_incident_interrupt_finalizer=life_incident_store,
-                    interrupted_incident_source=life_incident_store,
                 )
 
                 character_snapshot = adapter.calls[0]["decision_context"]["character_snapshot"]
