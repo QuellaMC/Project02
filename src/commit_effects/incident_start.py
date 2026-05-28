@@ -90,6 +90,10 @@ class LifeIncidentStartFinalizer(Protocol):
     finalizer is the Raw Event Log visibility boundary for the success record.
     If it cannot expose both artifacts together, it must raise before exposing
     either artifact.
+
+    In-memory finalizers that stage mutable state before raw-log confirmation
+    may optionally expose complete_life_incident_start_after_log_visible() and
+    discard_life_incident_start_after_log_not_visible() hooks.
     """
 
     def finalize_life_incident_start(
@@ -137,6 +141,7 @@ def commit_life_incident_start(
     request: LifeIncidentStartCommitRequest | None = None
     started_incident: Mapping[str, Any] | None = None
     committed_log_entry: RawEventLogEntry | None = None
+    finalize_request: LifeIncidentStartFinalizeRequest | None = None
 
     try:
         request = build_life_incident_start_commit_request(source_event, role_model_result)
@@ -194,8 +199,16 @@ def commit_life_incident_start(
                 str(error),
                 code="malformed_finalize_result",
             ) from error
+        _complete_start_after_log_visible(
+            life_incident_start_finalizer,
+            finalize_request,
+        )
     except LifeIncidentStartFinalizerError as error:
         discard_committed_success_entry_visibility(raw_event_log, committed_log_entry)
+        _discard_start_after_log_not_visible(
+            life_incident_start_finalizer,
+            finalize_request,
+        )
         failure = _build_failure(
             LIFE_INCIDENT_START_FINALIZE_STAGE,
             error.code,
@@ -704,6 +717,42 @@ def _require_finalizer_raw_event_log(
     require_raw_event_log = getattr(finalizer, "require_raw_event_log", None)
     if callable(require_raw_event_log):
         require_raw_event_log(raw_event_log)
+
+
+def _complete_start_after_log_visible(
+    finalizer: LifeIncidentStartFinalizer,
+    finalize_request: Mapping[str, Any],
+) -> None:
+    complete_after_log_visible = getattr(
+        finalizer,
+        "complete_life_incident_start_after_log_visible",
+        None,
+    )
+    if not callable(complete_after_log_visible):
+        return
+    try:
+        complete_after_log_visible(deepcopy(dict(finalize_request)))
+    except LifeIncidentStartFinalizerError:
+        raise
+    except Exception as error:
+        raise LifeIncidentStartFinalizerError(
+            f"complete_life_incident_start_after_log_visible failed unexpectedly: {error}",
+            code="finalize_rejected",
+        ) from error
+
+
+def _discard_start_after_log_not_visible(
+    finalizer: LifeIncidentStartFinalizer,
+    finalize_request: Mapping[str, Any] | None,
+) -> None:
+    discard_after_log_not_visible = getattr(
+        finalizer,
+        "discard_life_incident_start_after_log_not_visible",
+        None,
+    )
+    if not callable(discard_after_log_not_visible) or finalize_request is None:
+        return
+    discard_after_log_not_visible(deepcopy(dict(finalize_request)))
 
 
 def _parse_iso8601_timestamp(value: str) -> datetime:

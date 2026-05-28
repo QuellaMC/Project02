@@ -390,7 +390,8 @@
       <code>life_incident_continued_in_background</code>, or
       <code>life_incident_protected_from_interruption</code>.
       A later successful active incident start for the same scope supersedes
-      and clears the prior in-memory interrupted slot.
+      and clears the prior in-memory interrupted slot only after the start
+      success log is confirmed query-visible.
     </p>
 
     <h2>What It Does Not Store Yet</h2>

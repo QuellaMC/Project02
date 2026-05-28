@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-28 - MVP-021 PR Review Comments</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-28 - MVP-021 PR Review Comments</h1>
+    <p>
+      Addressed two new unresolved inline review comments on
+      <a href="https://github.com/QuellaMC/Project02/pull/24">PR #24</a>
+      without widening the MVP-021 interruption boundary.
+    </p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>After <code>life_incident_interrupted</code>, <code>run_user_message_turn()</code> now suppresses the active incident source for that same model context so a stale active adapter cannot hide the committed <code>interrupted_incident</code>.</li>
+      <li><code>InMemoryLifeIncidentStore</code> now clears a prior interrupted slot for a replacement start only in <code>complete_life_incident_start_after_log_visible()</code>, after the start success log is confirmed query-visible.</li>
+      <li><code>commit_life_incident_start()</code> gained narrow optional post-confirm and discard hooks that mirror the existing staged-success lifecycle pattern without requiring every test finalizer to implement them.</li>
+      <li>Added unit coverage for failed replacement-start visibility confirmation preserving the interrupted incident, plus integration coverage for a stale active read adapter during an interrupting user turn.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      MVP-021 promises that an interruptible transition feeds explicit
+      interrupted context to the role model in the same turn. Passing a stale
+      active source after the transition could render the old active incident
+      instead. Clearing interrupted state before a replacement start was fully
+      visible could also lose the only interrupted context when the replacement
+      start is rejected.
+    </p>
+
+    <h2>Validation</h2>
+    <ul>
+      <li><code>python -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn tests.unit.test_incident_start_commit</code> - passed, 87 tests.</li>
+      <li><code>python -m unittest discover</code> - passed, 356 tests.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/mypy src</code> - passed.</li>
+      <li><code>python -m compileall src tests</code> - passed.</li>
+      <li><code>python -c 'import pathlib, html.parser; parser=html.parser.HTMLParser(); [parser.feed(path.read_text()) for path in pathlib.Path("docs").rglob("*.html")]'</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Run the focused MVP-021 checks, then the full repository quality gates,
+      and resolve the two review threads if validation passes.
+    </p>
+  </main>
+</body>
+</html>

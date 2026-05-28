@@ -129,7 +129,6 @@ class InMemoryLifeIncidentStore:
                 code="malformed_finalize_result",
             ) from error
         self._active_incidents_by_scope[scope] = deepcopy(validated_request["started_incident"])
-        self._interrupted_incidents_by_scope.pop(scope, None)
 
         return {
             "schema_version": SCHEMA_VERSION,
@@ -138,6 +137,30 @@ class InMemoryLifeIncidentStore:
             "event_type": USER_MESSAGE,
             "committed_log_entry_id": committed_log_entry["log_id"],
         }
+
+    def complete_life_incident_start_after_log_visible(
+        self,
+        request: LifeIncidentStartFinalizeRequest,
+    ) -> None:
+        validated_request = _validate_life_incident_start_finalize_request(request)
+        scope = _incident_scope_from_request(validated_request)
+        current_active_incident = self._active_incidents_by_scope.get(scope)
+        if current_active_incident != validated_request["started_incident"]:
+            raise LifeIncidentStartFinalizerError(
+                "Active incident changed before start could be completed.",
+                code="finalize_rejected",
+            )
+        self._interrupted_incidents_by_scope.pop(scope, None)
+
+    def discard_life_incident_start_after_log_not_visible(
+        self,
+        request: LifeIncidentStartFinalizeRequest,
+    ) -> None:
+        validated_request = _validate_life_incident_start_finalize_request(request)
+        scope = _incident_scope_from_request(validated_request)
+        current_active_incident = self._active_incidents_by_scope.get(scope)
+        if current_active_incident == validated_request["started_incident"]:
+            self._active_incidents_by_scope.pop(scope, None)
 
     def finalize_life_incident_cancel(
         self,

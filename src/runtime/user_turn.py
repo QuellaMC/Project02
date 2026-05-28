@@ -224,7 +224,14 @@ def run_user_message_turn(
                 life_incident_interrupt_result=life_incident_interrupt_result,
             )
 
+    active_source_for_context = active_incident_source
     interrupted_source_for_context = interrupted_incident_source
+    if (
+        allow_incident_interrupt
+        and life_incident_interrupt_result is not None
+        and life_incident_interrupt_result["status"] == LIFE_INCIDENT_INTERRUPTED_STATUS
+    ):
+        active_source_for_context = None
     if (
         allow_incident_interrupt
         and life_incident_interrupt_result is not None
@@ -242,7 +249,7 @@ def run_user_message_turn(
             visible_conversation
         ),
         current_state_source=current_state_source,
-        active_incident_source=active_incident_source,
+        active_incident_source=active_source_for_context,
         interrupted_incident_source=interrupted_source_for_context,
         allow_state_patch=allow_state_patch,
         allow_incident_start=allow_incident_start,

@@ -95,6 +95,19 @@ class RejectingCompleteConfirmRawEventLog(InMemoryRawEventLog):
         super().confirm_committed_success_entry(entry)
 
 
+class RejectSecondStartConfirmRawEventLog(InMemoryRawEventLog):
+    def __init__(self):
+        super().__init__()
+        self.start_confirm_count = 0
+
+    def confirm_committed_success_entry(self, entry):
+        if entry["kind"] == "life_incident_started":
+            self.start_confirm_count += 1
+            if self.start_confirm_count > 1:
+                raise RawEventLogQueryValidationError("start visibility confirm failed")
+        super().confirm_committed_success_entry(entry)
+
+
 class RejectSecondCancelConfirmRawEventLog(InMemoryRawEventLog):
     def __init__(self):
         super().__init__()
@@ -569,6 +582,65 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
         self.assertEqual(
             store.read_active_incident(build_active_incident_request(next_start_event))["title"],
             "new active incident",
+        )
+
+    def test_start_visibility_confirm_failure_preserves_interrupted_incident_for_scope(self):
+        raw_log = RejectSecondStartConfirmRawEventLog()
+        store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        start_event = normalized_user_message(event_id="event-1", trace_id="trace-1")
+        interrupt_event = normalized_user_message(
+            event_id="event-interrupt",
+            trace_id="trace-interrupt",
+        )
+        next_start_event = normalized_user_message(event_id="event-2", trace_id="trace-2")
+
+        commit_life_incident_start(
+            start_event,
+            role_model_result_with_incident(event_id="event-1", trace_id="trace-1"),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+        interrupt_result = commit_life_incident_interruption(
+            interrupt_event,
+            active_incident_source=store,
+            life_incident_interrupt_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        next_start_result = commit_life_incident_start(
+            next_start_event,
+            role_model_result_with_incident(
+                event_id="event-2",
+                trace_id="trace-2",
+                title="new active incident",
+            ),
+            life_incident_start_finalizer=store,
+            raw_event_log=raw_log,
+            id_generator=ids,
+            clock=fixed_clock,
+        )
+
+        interrupted = store.read_interrupted_incident(
+            build_active_incident_request(interrupt_event)
+        )
+
+        self.assertEqual(interrupt_result["status"], LIFE_INCIDENT_INTERRUPTED_STATUS)
+        self.assertEqual(next_start_result["status"], LIFE_INCIDENT_START_REJECTED_STATUS)
+        self.assertEqual(next_start_result["failure"]["stage"], "life_incident_start_finalize")
+        self.assertIn("start visibility confirm failed", next_start_result["failure"]["message"])
+        self.assertIsNotNone(interrupted)
+        self.assertEqual(interrupted["incident_id"], "incident-generated-1")
+        self.assertIsNone(
+            store.read_active_incident(build_active_incident_request(next_start_event))
+        )
+        self.assertEqual(
+            raw_log.query({"trace_id": "trace-2", "kinds": ["life_incident_started"]})["entries"],
+            [],
         )
 
     def test_direct_interrupt_finalize_does_not_move_state_until_completion(self):
