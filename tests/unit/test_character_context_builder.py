@@ -258,6 +258,24 @@ class CharacterContextBuilderTests(unittest.TestCase):
             context["character_snapshot"],
         )
 
+    def test_stale_interrupted_incident_read_is_ignored_when_no_active_incident_exists(self):
+        stale_interrupted = interrupted_incident_snapshot()
+        stale_interrupted["source_event_ids"] = ["event-incident-started", "event-old"]
+        interrupted_source = RecordingInterruptedIncidentSource(stale_interrupted)
+
+        context = build_character_decision_context(
+            normalized_user_message(),
+            interrupted_incident_source=interrupted_source,
+        )
+
+        self.assertEqual(len(interrupted_source.requests), 1)
+        self.assertNotIn("active_incident", context["character_snapshot"])
+        self.assertNotIn("interrupted_incident", context["character_snapshot"])
+        self.assertNotIn(
+            "user_message_interrupted_active_incident",
+            context["character_snapshot"],
+        )
+
     def test_context_prefers_active_incident_without_reading_stale_interrupted_incident(self):
         active_source = RecordingActiveIncidentSource(active_incident_snapshot())
         stale_interrupted = interrupted_incident_snapshot()

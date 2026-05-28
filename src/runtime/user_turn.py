@@ -20,8 +20,11 @@ from commit_effects.incident_complete import (
     commit_life_incident_complete,
 )
 from commit_effects.incident_interrupt import (
+    LIFE_INCIDENT_CONTINUED_IN_BACKGROUND_STATUS,
     LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS,
+    LIFE_INCIDENT_INTERRUPT_SKIPPED_STATUS,
     LIFE_INCIDENT_INTERRUPTED_STATUS,
+    LIFE_INCIDENT_PROTECTED_FROM_INTERRUPTION_STATUS,
     LifeIncidentInterruptFinalizer,
     commit_life_incident_interruption,
 )
@@ -78,6 +81,17 @@ UserMessageTurnResult = dict[str, Any]
 
 class VisibleConversationBoundary(VisibleConversationRecordSource, Protocol):
     def append(self, output: dict[str, Any]) -> None: ...
+
+
+class _SnapshotIncidentSource:
+    def __init__(self, snapshot: Mapping[str, Any]) -> None:
+        self._snapshot = deepcopy(dict(snapshot))
+
+    def read_active_incident(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return deepcopy(self._snapshot)
+
+    def read_interrupted_incident(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return deepcopy(self._snapshot)
 
 
 def run_user_message_turn(
@@ -226,18 +240,24 @@ def run_user_message_turn(
 
     active_source_for_context = active_incident_source
     interrupted_source_for_context = interrupted_incident_source
-    if (
-        allow_incident_interrupt
-        and life_incident_interrupt_result is not None
-        and life_incident_interrupt_result["status"] == LIFE_INCIDENT_INTERRUPTED_STATUS
-    ):
-        active_source_for_context = None
-    if (
-        allow_incident_interrupt
-        and life_incident_interrupt_result is not None
-        and life_incident_interrupt_result["status"] != LIFE_INCIDENT_INTERRUPTED_STATUS
-    ):
-        interrupted_source_for_context = None
+    if allow_incident_interrupt and life_incident_interrupt_result is not None:
+        interrupt_status = life_incident_interrupt_result["status"]
+        if interrupt_status == LIFE_INCIDENT_INTERRUPTED_STATUS:
+            active_source_for_context = None
+            interrupted_source_for_context = _SnapshotIncidentSource(
+                life_incident_interrupt_result["interrupted_incident"]
+            )
+        elif interrupt_status in (
+            LIFE_INCIDENT_CONTINUED_IN_BACKGROUND_STATUS,
+            LIFE_INCIDENT_PROTECTED_FROM_INTERRUPTION_STATUS,
+        ):
+            active_source_for_context = _SnapshotIncidentSource(
+                life_incident_interrupt_result["active_incident"]
+            )
+            interrupted_source_for_context = None
+        elif interrupt_status == LIFE_INCIDENT_INTERRUPT_SKIPPED_STATUS:
+            active_source_for_context = None
+            interrupted_source_for_context = None
 
     role_model_result = run_role_model_turn(
         event,

@@ -170,6 +170,28 @@ class RecordingActiveIncidentSource:
         return deepcopy(self.snapshot)
 
 
+class SequenceActiveIncidentSource:
+    def __init__(self, snapshots):
+        self.snapshots = [deepcopy(snapshot) for snapshot in snapshots]
+        self.requests = []
+
+    def read_active_incident(self, request):
+        self.requests.append(deepcopy(request))
+        if not self.snapshots:
+            return None
+        return deepcopy(self.snapshots.pop(0))
+
+
+class RecordingInterruptedIncidentSource:
+    def __init__(self, snapshot):
+        self.snapshot = deepcopy(snapshot)
+        self.requests = []
+
+    def read_interrupted_incident(self, request):
+        self.requests.append(deepcopy(request))
+        return deepcopy(self.snapshot)
+
+
 class RecordingLivingStatePatchStore:
     def __init__(self, snapshot=None, error=None):
         self.snapshot = deepcopy(snapshot or committed_snapshot())
@@ -1048,6 +1070,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         stale_active_source = RecordingActiveIncidentSource(
             life_incident_store.read_active_incident(build_active_incident_request(start_event))
         )
+        lagging_interrupted_source = RecordingInterruptedIncidentSource(None)
         interrupt_event = {
             "event_id": "event-interrupt",
             "trace_id": "trace-interrupt",
@@ -1071,7 +1094,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             clock=fixed_clock,
             active_incident_source=stale_active_source,
             life_incident_interrupt_finalizer=life_incident_store,
-            interrupted_incident_source=life_incident_store,
+            interrupted_incident_source=lagging_interrupted_source,
         )
 
         character_snapshot = adapter.calls[0]["decision_context"]["character_snapshot"]
@@ -1081,6 +1104,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
             result["life_incident_interrupt_result"]["status"], "life_incident_interrupted"
         )
         self.assertEqual(len(stale_active_source.requests), 1)
+        self.assertEqual(lagging_interrupted_source.requests, [])
         self.assertNotIn("active_incident", character_snapshot)
         self.assertEqual(
             character_snapshot["interrupted_incident"]["incident_id"],
@@ -1154,6 +1178,12 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                     clock=fixed_clock,
                     life_incident_start_finalizer=life_incident_store,
                 )
+                policy_active_snapshot = life_incident_store.read_active_incident(
+                    build_active_incident_request(start_event)
+                )
+                unstable_active_source = SequenceActiveIncidentSource(
+                    [policy_active_snapshot, None]
+                )
                 interrupt_event = {
                     "event_id": "event-interrupt",
                     "trace_id": "trace-interrupt",
@@ -1175,7 +1205,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                     visible_conversation=visible_conversation,
                     id_generator=ids,
                     clock=fixed_clock,
-                    active_incident_source=life_incident_store,
+                    active_incident_source=unstable_active_source,
                     life_incident_interrupt_finalizer=life_incident_store,
                     interrupted_incident_source=life_incident_store,
                 )
@@ -1191,6 +1221,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                     result["life_incident_interrupt_result"]["active_incident"]["interrupt_policy"],
                     case["policy"],
                 )
+                self.assertEqual(len(unstable_active_source.requests), 1)
                 self.assertIn("active_incident", character_snapshot)
                 self.assertEqual(character_snapshot["active_incident"]["title"], case["title"])
                 self.assertNotIn("interrupted_incident", character_snapshot)

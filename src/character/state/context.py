@@ -18,6 +18,7 @@ from character.state.current import (
     build_living_state_brief,
     validate_active_incident_brief_for_event,
     validate_interrupted_incident_brief_for_event,
+    validate_interrupted_incident_snapshot,
     validate_living_state_brief_for_event,
 )
 from runtime.contracts import (
@@ -237,7 +238,10 @@ def _read_interrupted_incident_brief(
     snapshot = interrupted_incident_source.read_interrupted_incident(deepcopy(request))
     if snapshot is None:
         return None
-    interrupted_incident_brief = build_interrupted_incident_brief(snapshot)
+    validated_snapshot = validate_interrupted_incident_snapshot(snapshot)
+    if event["event_id"] not in validated_snapshot["source_event_ids"]:
+        return None
+    interrupted_incident_brief = build_interrupted_incident_brief(validated_snapshot)
     return validate_interrupted_incident_brief_for_event(
         interrupted_incident_brief,
         event_id=event["event_id"],
