@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-29 - MVP-021 Interrupt Post-visible Review</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-29 - MVP-021 Interrupt Post-visible Review</h1>
+    <p>
+      Addressed a new inline review comment on
+      <a href="https://github.com/QuellaMC/Project02/pull/24">PR #24</a>
+      about post-visible interrupt completion failures.
+    </p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li><code>commit_life_incident_interruption()</code> now mirrors the start commit path after <code>life_incident_interrupted</code> success visibility is confirmed.</li>
+      <li>If <code>complete_life_incident_interrupt_after_log_visible()</code> raises after the success log is query-visible, the commit returns the already published success result instead of appending a contradictory <code>life_incident_interrupt_rejected</code> record.</li>
+      <li>Focused unit coverage now proves both finalizer-authored and unexpected post-visible completion failures leave one visible success log, no rejected interrupt log, and no success discard.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      Once the success log is query-visible, raw-log truth has already committed the interruption.
+      A later completion-hook failure must not publish a rejected outcome for the same event.
+      The boundary still keeps pre-visibility confirmation failures rejected and discardable.
+    </p>
+
+    <h2>Validation</h2>
+    <ul>
+      <li><code>python -m unittest tests.unit.test_incident_interrupt_commit</code> - passed, 10 tests.</li>
+      <li><code>python -m unittest tests.unit.test_incident_interrupt_commit tests.unit.test_life_incident_store tests.integration.test_user_message_turn</code> - passed, 92 tests.</li>
+      <li>Fresh delegated review agent checked the final uncommitted diff and reported no issues.</li>
+      <li><code>python -m unittest discover</code> - passed, 361 tests.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code> - passed.</li>
+      <li><code>uvx --from mypy mypy src</code> - passed. The previous temp venv <code>mypy</code> entrypoint failed because that venv no longer contained <code>mypy.__main__</code>.</li>
+      <li><code>python -m compileall src tests</code> - passed.</li>
+      <li><code>python -c 'import pathlib, html.parser; parser=html.parser.HTMLParser(); [parser.feed(path.read_text()) for path in pathlib.Path("docs").rglob("*.html")]'</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Run a fresh delegated diff review, full local quality gates, then resolve the GitHub review thread if all validation passes.
+    </p>
+  </main>
+</body>
+</html>

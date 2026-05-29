@@ -29,7 +29,6 @@ from commit_effects.incident_complete import (  # noqa: E402
     commit_life_incident_complete,
 )
 from commit_effects.incident_interrupt import (  # noqa: E402
-    LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS,
     LIFE_INCIDENT_INTERRUPTED_STATUS,
     build_interrupted_life_incident_snapshot,
     build_life_incident_interrupt_finalize_request,
@@ -730,7 +729,7 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
             store.read_interrupted_incident(build_active_incident_request(interrupt_event))
         )
 
-    def test_interrupt_state_conflict_after_success_visibility_keeps_active_incident(self):
+    def test_interrupt_state_conflict_after_success_visibility_returns_success(self):
         raw_log = InMemoryRawEventLog()
         store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
         finalizer = ActiveIncidentChangingInterruptCompletionFinalizer(store)
@@ -763,13 +762,8 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
         )
         entries = raw_log.query({"trace_id": "trace-interrupt"})["entries"]
 
-        self.assertEqual(result["status"], LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS)
-        self.assertEqual(result["failure"]["stage"], "life_incident_interrupt_finalize")
-        self.assertEqual(result["failure"]["code"], "finalize_rejected")
-        self.assertIn(
-            "changed before interruption could be completed",
-            result["failure"]["message"],
-        )
+        self.assertEqual(result["status"], LIFE_INCIDENT_INTERRUPTED_STATUS)
+        self.assertEqual(result["interrupted_incident"]["incident_id"], "incident-generated-1")
         self.assertTrue(finalizer.completed)
         self.assertEqual(current_active_incident["title"], "changed before completion")
         self.assertIsNone(
@@ -777,7 +771,7 @@ class InMemoryLifeIncidentStoreTests(unittest.TestCase):
         )
         self.assertEqual(
             [entry["kind"] for entry in entries],
-            ["life_incident_interrupted", "life_incident_interrupt_rejected"],
+            ["life_incident_interrupted"],
         )
 
     def test_visibility_staging_failure_rejects_without_storing_active_incident(self):

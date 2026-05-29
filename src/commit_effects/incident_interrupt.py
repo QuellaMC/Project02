@@ -194,10 +194,15 @@ def commit_life_incident_interruption(
             except RawEventLogQueryValidationError as error:
                 raise _finalizer_error(str(error), "malformed_finalize_result") from error
             success_visibility_confirmed = True
-            _complete_interrupt_success_after_visible(
-                life_incident_interrupt_finalizer,
-                finalize_request,
-            )
+            try:
+                _complete_interrupt_success_after_visible(
+                    life_incident_interrupt_finalizer,
+                    finalize_request,
+                )
+            except LifeIncidentInterruptFinalizerError:
+                # The success log is already query-visible; do not append a
+                # contradictory rejected lifecycle record after that point.
+                pass
             result = _build_status_result(source_identity, LIFE_INCIDENT_INTERRUPTED_STATUS)
             result["interrupted_incident"] = deepcopy(dict(interrupted_incident))
             result["committed_log_entry_id"] = validated_finalize_result["committed_log_entry_id"]
