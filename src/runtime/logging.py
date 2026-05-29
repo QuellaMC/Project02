@@ -12,6 +12,7 @@ ATOMIC_FINALIZER_SUCCESS_KINDS = frozenset(
         "life_incident_started",
         "life_incident_cancelled",
         "life_incident_completed",
+        "life_incident_interrupted",
     }
 )
 

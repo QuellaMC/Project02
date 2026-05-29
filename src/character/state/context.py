@@ -9,11 +9,16 @@ from typing import Any, Protocol
 from character.state.current import (
     ActiveIncidentSource,
     CurrentCharacterStateSource,
+    InterruptedIncidentSource,
     build_active_incident_brief,
     build_active_incident_request,
     build_current_character_state_request,
+    build_interrupted_incident_brief,
+    build_interrupted_incident_request,
     build_living_state_brief,
     validate_active_incident_brief_for_event,
+    validate_interrupted_incident_brief_for_event,
+    validate_interrupted_incident_snapshot,
     validate_living_state_brief_for_event,
 )
 from runtime.contracts import (
@@ -99,6 +104,7 @@ def build_character_decision_context(
     recent_visible_messages_source: RecentVisibleMessagesSource | None = None,
     current_state_source: CurrentCharacterStateSource | None = None,
     active_incident_source: ActiveIncidentSource | None = None,
+    interrupted_incident_source: InterruptedIncidentSource | None = None,
 ) -> DecisionContext:
     normalized_event = validate_normalized_user_message_event(event, source_name="event")
     recent_visible_messages = _read_recent_visible_messages(
@@ -113,6 +119,12 @@ def build_character_decision_context(
         normalized_event,
         active_incident_source=active_incident_source,
     )
+    interrupted_incident_brief = None
+    if active_incident_brief is None:
+        interrupted_incident_brief = _read_interrupted_incident_brief(
+            normalized_event,
+            interrupted_incident_source=interrupted_incident_source,
+        )
 
     character_snapshot: dict[str, Any] = {
         "recent_visible_messages": recent_visible_messages,
@@ -122,6 +134,8 @@ def build_character_decision_context(
     if active_incident_brief is not None:
         character_snapshot["active_incident"] = active_incident_brief
         character_snapshot[USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD] = True
+    if interrupted_incident_brief is not None:
+        character_snapshot["interrupted_incident"] = interrupted_incident_brief
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -208,6 +222,28 @@ def _read_active_incident_brief(
     active_incident_brief = build_active_incident_brief(snapshot)
     return validate_active_incident_brief_for_event(
         active_incident_brief,
+        event_id=event["event_id"],
+    )
+
+
+def _read_interrupted_incident_brief(
+    event: RuntimeEvent,
+    *,
+    interrupted_incident_source: InterruptedIncidentSource | None,
+) -> dict[str, Any] | None:
+    if interrupted_incident_source is None:
+        return None
+
+    request = build_interrupted_incident_request(event)
+    snapshot = interrupted_incident_source.read_interrupted_incident(deepcopy(request))
+    if snapshot is None:
+        return None
+    validated_snapshot = validate_interrupted_incident_snapshot(snapshot)
+    if event["event_id"] not in validated_snapshot["source_event_ids"]:
+        return None
+    interrupted_incident_brief = build_interrupted_incident_brief(validated_snapshot)
+    return validate_interrupted_incident_brief_for_event(
+        interrupted_incident_brief,
         event_id=event["event_id"],
     )
 

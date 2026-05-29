@@ -10,17 +10,23 @@ from character.state import (  # noqa: E402
 from character.state import (
     CharacterRuntimeStateSnapshot as ExportedCharacterRuntimeStateSnapshot,
 )
+from character.state import (
+    InterruptedIncidentSnapshot as ExportedInterruptedIncidentSnapshot,
+)
 from character.state import __all__ as character_state_public_contracts  # noqa: E402
 from character.state.current import (  # noqa: E402
     build_active_incident_brief,
     build_active_incident_request,
     build_current_character_state_request,
+    build_interrupted_incident_brief,
     build_living_state_brief,
     validate_active_incident_brief_for_event,
     validate_active_incident_request,
     validate_active_incident_snapshot,
     validate_current_character_state_request,
     validate_current_character_state_snapshot,
+    validate_interrupted_incident_brief_for_event,
+    validate_interrupted_incident_snapshot,
     validate_living_state_brief_for_event,
 )
 from runtime.contracts import ContractValidationError  # noqa: E402
@@ -86,12 +92,28 @@ def active_incident_snapshot():
     }
 
 
+def interrupted_incident_snapshot():
+    snapshot = active_incident_snapshot()
+    snapshot["status"] = "interrupted"
+    snapshot["interrupted_at"] = "2026-05-14T11:30:00+00:00"
+    snapshot["source_event_ids"] = ["event-incident-started", "event-1"]
+    return snapshot
+
+
 class PublicContractExportTests(unittest.TestCase):
     def test_reexports_character_state_read_contracts(self):
         self.assertIn("CharacterRuntimeStateSnapshot", character_state_public_contracts)
         self.assertIn("ActiveIncidentSnapshot", character_state_public_contracts)
+        self.assertIn("InterruptedIncidentSnapshot", character_state_public_contracts)
+        self.assertIn("InterruptedIncidentSource", character_state_public_contracts)
+        self.assertIn("build_interrupted_incident_request", character_state_public_contracts)
+        self.assertIn(
+            "validate_interrupted_incident_brief_for_event",
+            character_state_public_contracts,
+        )
         self.assertIsNotNone(ExportedCharacterRuntimeStateSnapshot)
         self.assertIsNotNone(ExportedActiveIncidentSnapshot)
+        self.assertIsNotNone(ExportedInterruptedIncidentSnapshot)
 
 
 class CurrentCharacterStateRequestTests(unittest.TestCase):
@@ -337,6 +359,67 @@ class ActiveIncidentSnapshotTests(unittest.TestCase):
             with self.subTest(error_pattern=error_pattern):
                 with self.assertRaisesRegex(ContractValidationError, error_pattern):
                     validate_active_incident_snapshot(snapshot)
+
+
+class InterruptedIncidentSnapshotTests(unittest.TestCase):
+    def test_maps_valid_snapshot_to_interrupted_incident_brief(self):
+        brief = build_interrupted_incident_brief(interrupted_incident_snapshot())
+
+        self.assertEqual(
+            brief,
+            {
+                "incident_id": "incident-1",
+                "type": "eat",
+                "title": "Eating lunch",
+                "started_at": "2026-05-14T11:00:00+00:00",
+                "expected_end_at": "2026-05-14T11:40:00+00:00",
+                "remaining_seconds": 600,
+                "interrupt_policy": "interruptible",
+                "resume_policy": "resume",
+                "interrupted_at": "2026-05-14T11:30:00+00:00",
+                "source_event_ids": ["event-incident-started", "event-1"],
+            },
+        )
+        self.assertNotIn("status", brief)
+
+    def test_snapshot_validation_copies_source_event_ids(self):
+        snapshot = interrupted_incident_snapshot()
+        validated = validate_interrupted_incident_snapshot(snapshot)
+        validated["source_event_ids"].append("mutated")
+
+        self.assertEqual(snapshot["source_event_ids"], ["event-incident-started", "event-1"])
+
+    def test_rejects_interrupted_incident_not_sourced_from_current_event(self):
+        brief = build_interrupted_incident_brief(
+            {**interrupted_incident_snapshot(), "source_event_ids": ["event-incident-started"]}
+        )
+
+        with self.assertRaisesRegex(ContractValidationError, "current event_id"):
+            validate_interrupted_incident_brief_for_event(brief, event_id="event-1")
+
+    def test_rejects_malformed_interrupted_incident_snapshots(self):
+        cases = [
+            ({**interrupted_incident_snapshot(), "schema_version": "0.2"}, "schema_version"),
+            ({**interrupted_incident_snapshot(), "incident_id": ""}, "incident_id"),
+            ({**interrupted_incident_snapshot(), "type": "dance"}, "type"),
+            ({**interrupted_incident_snapshot(), "status": "active"}, "status"),
+            ({**interrupted_incident_snapshot(), "title": ""}, "title"),
+            ({**interrupted_incident_snapshot(), "interrupted_at": "bad"}, "interrupted_at"),
+            (
+                {**interrupted_incident_snapshot(), "interrupt_policy": "background"},
+                "interrupt_policy",
+            ),
+            ({**interrupted_incident_snapshot(), "resume_policy": "ignore"}, "resume_policy"),
+            ({**interrupted_incident_snapshot(), "source_event_ids": []}, "source_event_ids"),
+            ({**interrupted_incident_snapshot(), "source_event_ids": [""]}, "source_event_ids"),
+            ({**interrupted_incident_snapshot(), "future_field": "nope"}, "future_field"),
+            ("not a mapping", "InterruptedIncidentSnapshot"),
+        ]
+
+        for snapshot, error_pattern in cases:
+            with self.subTest(error_pattern=error_pattern):
+                with self.assertRaisesRegex(ContractValidationError, error_pattern):
+                    validate_interrupted_incident_snapshot(snapshot)
 
 
 if __name__ == "__main__":
