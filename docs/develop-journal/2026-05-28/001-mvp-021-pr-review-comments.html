@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-28 - MVP-021 PR Review Comments</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-28 - MVP-021 PR Review Comments</h1>
+    <p>
+      Addressed unresolved inline review comments on
+      <a href="https://github.com/QuellaMC/Project02/pull/24">PR #24</a>
+      without widening the MVP-021 interruption boundary.
+    </p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>After <code>life_incident_interrupted</code>, <code>run_user_message_turn()</code> now suppresses the active incident source for that same model context so a stale active adapter cannot hide the committed <code>interrupted_incident</code>.</li>
+      <li><code>InMemoryLifeIncidentStore</code> now clears a prior interrupted slot for a replacement start only in <code>complete_life_incident_start_after_log_visible()</code>, after the start success log is confirmed query-visible.</li>
+      <li><code>commit_life_incident_start()</code> gained narrow optional post-confirm and discard hooks that mirror the existing staged-success lifecycle pattern without requiring every test finalizer to implement them.</li>
+      <li>Follow-up review fix: the start discard hook now runs only before success-log visibility is confirmed, so post-visible completion failures cannot roll back already visible incident truth.</li>
+      <li>Follow-up review fix: <code>commit_life_incident_interruption()</code> now mirrors the same visibility-confirmed guard and skips success-log discard after post-visible completion failures.</li>
+      <li>Follow-up review fix: user-turn interruption context now reads from the policy result snapshot, so lagging active or interrupted read adapters cannot make the model context diverge from the just-recorded policy outcome.</li>
+      <li>Follow-up review fix: stale but well-formed interrupted incident reads are ignored on ordinary context builds when they are not sourced from the current event.</li>
+      <li>Follow-up review fix: <code>commit_life_incident_start()</code> now contains failures from the optional start discard hook and returns a structured <code>life_incident_start_rejected</code> result instead of letting cleanup errors escape the commit boundary.</li>
+      <li>Follow-up review fix: post-visible start completion hook failures no longer append a contradictory <code>life_incident_start_rejected</code> record after the <code>life_incident_started</code> success log is already query-visible.</li>
+      <li>Follow-up review fix: <code>character.state</code> now re-exports the interrupted-incident request, source, brief, builder, and validator contracts.</li>
+      <li>Follow-up review fix: <code>run_user_message_turn()</code> no longer preflights <code>interrupted_incident_source</code> for every interruption turn; skipped, background, protected, and same-turn interruptible success paths now use only the incident source each context path actually needs.</li>
+      <li>Clarified the PR description that MVP-021 is the pre-model durable interruption boundary, not the later model-chosen post-turn life-action loop.</li>
+      <li>Documented why same-turn interruption context does not require a redundant interrupted read adapter: immediate success uses the committed snapshot for read-your-writes, non-interruptible policies use the policy-read active snapshot, and skipped interruption has no incident context.</li>
+      <li>Added unit coverage for failed replacement-start visibility confirmation preserving the interrupted incident, plus integration coverage for a stale active read adapter during an interrupting user turn.</li>
+      <li>Added unit coverage for a post-visible start completion conflict preserving the already visible success result and avoiding a rejected lifecycle record.</li>
+      <li>Added unit coverage proving interrupt success visibility is discarded before confirmation failure but not after post-visible completion failure.</li>
+      <li>Added unit coverage proving start discard-hook failures are represented as rejected start results and rejected raw-log entries.</li>
+      <li>Added public contract export coverage for interrupted-incident Character State Engine contracts.</li>
+      <li>Added integration coverage proving skipped, background, and protected interruption outcomes reach model context without <code>interrupted_incident_source</code>.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      MVP-021 promises that an interruptible transition feeds explicit
+      interrupted context to the role model in the same turn. Passing a stale
+      active source after the transition could render the old active incident
+      instead. Clearing interrupted state before a replacement start was fully
+      visible could also lose the only interrupted context when the replacement
+      start is rejected.
+    </p>
+
+    <h2>Validation</h2>
+    <ul>
+      <li><code>python -m unittest tests.unit.test_incident_start_commit tests.unit.test_life_incident_store tests.unit.test_current_state</code> - passed, 65 tests.</li>
+      <li><code>python -m unittest tests.unit.test_life_incident_store tests.integration.test_user_message_turn tests.unit.test_incident_start_commit</code> - passed, 91 tests.</li>
+      <li><code>python -m unittest tests.unit.test_incident_interrupt_commit tests.unit.test_life_incident_store tests.integration.test_user_message_turn</code> - passed, 92 tests.</li>
+      <li><code>python -m unittest tests.unit.test_character_context_builder tests.integration.test_user_message_turn tests.unit.test_user_turn</code> - passed, 70 tests.</li>
+      <li>Fresh delegated review agent checked the current diff and reported no issues.</li>
+      <li><code>python -m unittest discover</code> - passed, 361 tests.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/mypy src</code> - passed.</li>
+      <li><code>python -m compileall src tests</code> - passed.</li>
+      <li><code>python -c 'import pathlib, html.parser; parser=html.parser.HTMLParser(); [parser.feed(path.read_text()) for path in pathlib.Path("docs").rglob("*.html")]'</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Run the focused MVP-021 checks, then the full repository quality gates,
+      and resolve any remaining review threads if validation passes.
+    </p>
+  </main>
+</body>
+</html>

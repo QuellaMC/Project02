@@ -29,6 +29,9 @@ LivingStateBrief = dict[str, Any]
 ActiveIncidentRequest = dict[str, Any]
 ActiveIncidentSnapshot = dict[str, Any]
 ActiveIncidentBrief = dict[str, Any]
+InterruptedIncidentRequest = dict[str, Any]
+InterruptedIncidentSnapshot = dict[str, Any]
+InterruptedIncidentBrief = dict[str, Any]
 
 
 class CurrentCharacterStateSource(Protocol):
@@ -43,6 +46,13 @@ class ActiveIncidentSource(Protocol):
         self,
         request: ActiveIncidentRequest,
     ) -> ActiveIncidentSnapshot | None: ...
+
+
+class InterruptedIncidentSource(Protocol):
+    def read_interrupted_incident(
+        self,
+        request: InterruptedIncidentRequest,
+    ) -> InterruptedIncidentSnapshot | None: ...
 
 
 def build_current_character_state_request(event: RuntimeEvent) -> CurrentCharacterStateRequest:
@@ -73,6 +83,20 @@ def validate_active_incident_request(request: Any) -> ActiveIncidentRequest:
         request,
         request_name="ActiveIncidentRequest",
         allowed_event_types={USER_MESSAGE, INCIDENT_COMPLETION},
+    )
+
+
+def build_interrupted_incident_request(event: RuntimeEvent) -> InterruptedIncidentRequest:
+    return _build_user_message_read_request(
+        event,
+        request_name="InterruptedIncidentRequest",
+    )
+
+
+def validate_interrupted_incident_request(request: Any) -> InterruptedIncidentRequest:
+    return _validate_user_message_read_request(
+        request,
+        request_name="InterruptedIncidentRequest",
     )
 
 
@@ -225,6 +249,23 @@ def build_active_incident_brief(snapshot: Any) -> ActiveIncidentBrief:
     return validate_active_incident_brief(brief)
 
 
+def build_interrupted_incident_brief(snapshot: Any) -> InterruptedIncidentBrief:
+    validated_snapshot = validate_interrupted_incident_snapshot(snapshot)
+    brief: InterruptedIncidentBrief = {
+        "incident_id": validated_snapshot["incident_id"],
+        "type": validated_snapshot["type"],
+        "title": validated_snapshot["title"],
+        "interrupt_policy": validated_snapshot["interrupt_policy"],
+        "resume_policy": validated_snapshot["resume_policy"],
+        "interrupted_at": validated_snapshot["interrupted_at"],
+        "source_event_ids": list(validated_snapshot["source_event_ids"]),
+    }
+    for field_name in ("started_at", "expected_end_at", "remaining_seconds"):
+        if field_name in validated_snapshot:
+            brief[field_name] = validated_snapshot[field_name]
+    return validate_interrupted_incident_brief(brief)
+
+
 def validate_active_incident_snapshot(snapshot: Any) -> ActiveIncidentSnapshot:
     if not isinstance(snapshot, Mapping):
         raise ContractValidationError("ActiveIncidentSnapshot must be a mapping.")
@@ -298,6 +339,84 @@ def validate_active_incident_snapshot(snapshot: Any) -> ActiveIncidentSnapshot:
     return normalized_snapshot
 
 
+def validate_interrupted_incident_snapshot(snapshot: Any) -> InterruptedIncidentSnapshot:
+    if not isinstance(snapshot, Mapping):
+        raise ContractValidationError("InterruptedIncidentSnapshot must be a mapping.")
+    reject_extra_keys(
+        snapshot,
+        {
+            "schema_version",
+            "incident_id",
+            "type",
+            "status",
+            "title",
+            "started_at",
+            "expected_end_at",
+            "remaining_seconds",
+            "interrupt_policy",
+            "resume_policy",
+            "interrupted_at",
+            "source_event_ids",
+        },
+        "InterruptedIncidentSnapshot",
+    )
+    normalized_snapshot: InterruptedIncidentSnapshot = {
+        "schema_version": require_equal(
+            snapshot.get("schema_version"),
+            SCHEMA_VERSION,
+            "InterruptedIncidentSnapshot.schema_version",
+        ),
+        "incident_id": require_string(
+            snapshot.get("incident_id"),
+            "InterruptedIncidentSnapshot.incident_id",
+        ),
+        "type": require_supported_value(
+            snapshot.get("type"),
+            ACTIVE_INCIDENT_TYPES,
+            "InterruptedIncidentSnapshot.type",
+        ),
+        "status": require_equal(
+            snapshot.get("status"),
+            "interrupted",
+            "InterruptedIncidentSnapshot.status",
+        ),
+        "title": require_string(
+            snapshot.get("title"),
+            "InterruptedIncidentSnapshot.title",
+        ),
+        "interrupt_policy": require_equal(
+            snapshot.get("interrupt_policy"),
+            "interruptible",
+            "InterruptedIncidentSnapshot.interrupt_policy",
+        ),
+        "resume_policy": require_supported_value(
+            snapshot.get("resume_policy"),
+            ACTIVE_INCIDENT_RESUME_POLICIES,
+            "InterruptedIncidentSnapshot.resume_policy",
+        ),
+        "interrupted_at": validate_iso8601_timestamp(
+            snapshot.get("interrupted_at"),
+            "InterruptedIncidentSnapshot.interrupted_at",
+        ),
+        "source_event_ids": _validate_non_empty_source_event_ids(
+            snapshot.get("source_event_ids"),
+            "InterruptedIncidentSnapshot.source_event_ids",
+        ),
+    }
+    for field_name in ("started_at", "expected_end_at"):
+        if field_name in snapshot:
+            normalized_snapshot[field_name] = validate_iso8601_timestamp(
+                snapshot[field_name],
+                f"InterruptedIncidentSnapshot.{field_name}",
+            )
+    if "remaining_seconds" in snapshot:
+        normalized_snapshot["remaining_seconds"] = validate_remaining_seconds(
+            snapshot["remaining_seconds"],
+            "InterruptedIncidentSnapshot.remaining_seconds",
+        )
+    return normalized_snapshot
+
+
 def validate_active_incident_brief(brief: Any) -> ActiveIncidentBrief:
     if not isinstance(brief, Mapping):
         raise ContractValidationError("active_incident must be a mapping.")
@@ -359,6 +478,72 @@ def validate_active_incident_brief(brief: Any) -> ActiveIncidentBrief:
     return normalized_brief
 
 
+def validate_interrupted_incident_brief(brief: Any) -> InterruptedIncidentBrief:
+    if not isinstance(brief, Mapping):
+        raise ContractValidationError("interrupted_incident must be a mapping.")
+    reject_extra_keys(
+        brief,
+        {
+            "incident_id",
+            "type",
+            "title",
+            "started_at",
+            "expected_end_at",
+            "remaining_seconds",
+            "interrupt_policy",
+            "resume_policy",
+            "interrupted_at",
+            "source_event_ids",
+        },
+        "interrupted_incident",
+    )
+    normalized_brief: InterruptedIncidentBrief = {
+        "incident_id": require_string(
+            brief.get("incident_id"),
+            "interrupted_incident.incident_id",
+        ),
+        "type": require_supported_value(
+            brief.get("type"),
+            ACTIVE_INCIDENT_TYPES,
+            "interrupted_incident.type",
+        ),
+        "title": require_string(
+            brief.get("title"),
+            "interrupted_incident.title",
+        ),
+        "interrupt_policy": require_equal(
+            brief.get("interrupt_policy"),
+            "interruptible",
+            "interrupted_incident.interrupt_policy",
+        ),
+        "resume_policy": require_supported_value(
+            brief.get("resume_policy"),
+            ACTIVE_INCIDENT_RESUME_POLICIES,
+            "interrupted_incident.resume_policy",
+        ),
+        "interrupted_at": validate_iso8601_timestamp(
+            brief.get("interrupted_at"),
+            "interrupted_incident.interrupted_at",
+        ),
+        "source_event_ids": _validate_non_empty_source_event_ids(
+            brief.get("source_event_ids"),
+            "interrupted_incident.source_event_ids",
+        ),
+    }
+    for field_name in ("started_at", "expected_end_at"):
+        if field_name in brief:
+            normalized_brief[field_name] = validate_iso8601_timestamp(
+                brief[field_name],
+                f"interrupted_incident.{field_name}",
+            )
+    if "remaining_seconds" in brief:
+        normalized_brief["remaining_seconds"] = validate_remaining_seconds(
+            brief["remaining_seconds"],
+            "interrupted_incident.remaining_seconds",
+        )
+    return normalized_brief
+
+
 def validate_active_incident_brief_for_event(
     brief: Any,
     *,
@@ -369,6 +554,20 @@ def validate_active_incident_brief_for_event(
     if current_event_id in validated_brief["source_event_ids"]:
         raise ContractValidationError(
             "active_incident.source_event_ids must not include current event_id."
+        )
+    return validated_brief
+
+
+def validate_interrupted_incident_brief_for_event(
+    brief: Any,
+    *,
+    event_id: str,
+) -> InterruptedIncidentBrief:
+    current_event_id = require_string(event_id, "event_id")
+    validated_brief = validate_interrupted_incident_brief(brief)
+    if current_event_id not in validated_brief["source_event_ids"]:
+        raise ContractValidationError(
+            "interrupted_incident.source_event_ids must include current event_id."
         )
     return validated_brief
 

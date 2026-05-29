@@ -162,6 +162,29 @@ def active_incident_brief():
     }
 
 
+def interrupted_incident_snapshot():
+    snapshot = active_incident_snapshot()
+    snapshot["status"] = "interrupted"
+    snapshot["interrupted_at"] = "2026-05-14T11:30:00+00:00"
+    snapshot["source_event_ids"] = ["event-incident-started", "event-1"]
+    return snapshot
+
+
+def interrupted_incident_brief():
+    return {
+        "incident_id": "incident-1",
+        "type": "eat",
+        "title": "Eating lunch",
+        "started_at": "2026-05-14T11:00:00+00:00",
+        "expected_end_at": "2026-05-14T11:40:00+00:00",
+        "remaining_seconds": 600,
+        "interrupt_policy": "interruptible",
+        "resume_policy": "resume",
+        "interrupted_at": "2026-05-14T11:30:00+00:00",
+        "source_event_ids": ["event-incident-started", "event-1"],
+    }
+
+
 class RecordingCurrentStateSource:
     def __init__(self, snapshot):
         self.snapshot = snapshot
@@ -191,6 +214,16 @@ class RecordingActiveIncidentSource:
         self.requests = []
 
     def read_active_incident(self, request):
+        self.requests.append(request)
+        return self.snapshot
+
+
+class RecordingInterruptedIncidentSource:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+        self.requests = []
+
+    def read_interrupted_incident(self, request):
         self.requests.append(request)
         return self.snapshot
 
@@ -1177,6 +1210,50 @@ class DecisionContextTests(unittest.TestCase):
         )
         context["character_snapshot"]["active_incident"]["source_event_ids"] = ["event-1"]
         with self.assertRaisesRegex(RoleModelValidationError, "current event_id"):
+            render_context(normalized_user_message(), context)
+
+    def test_render_accepts_and_validates_interrupted_incident(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            active_incident_source=RecordingActiveIncidentSource(None),
+            interrupted_incident_source=RecordingInterruptedIncidentSource(
+                interrupted_incident_snapshot()
+            ),
+        )
+
+        rendered = render_context(normalized_user_message(), context)
+
+        self.assertEqual(
+            rendered["decision_context"]["character_snapshot"]["interrupted_incident"],
+            interrupted_incident_brief(),
+        )
+        self.assertNotIn(
+            "active_incident",
+            rendered["decision_context"]["character_snapshot"],
+        )
+
+        context["character_snapshot"]["interrupted_incident"]["future_field"] = "not allowed yet"
+        with self.assertRaisesRegex(RoleModelValidationError, "future_field"):
+            render_context(normalized_user_message(), context)
+
+        context = build_decision_context(
+            normalized_user_message(),
+            interrupted_incident_source=RecordingInterruptedIncidentSource(
+                interrupted_incident_snapshot()
+            ),
+        )
+        context["character_snapshot"]["interrupted_incident"]["status"] = "interrupted"
+        with self.assertRaisesRegex(RoleModelValidationError, "status"):
+            render_context(normalized_user_message(), context)
+
+    def test_render_rejects_duplicate_active_and_interrupted_incident_context(self):
+        context = build_decision_context(
+            normalized_user_message(),
+            active_incident_source=RecordingActiveIncidentSource(active_incident_snapshot()),
+        )
+        context["character_snapshot"]["interrupted_incident"] = interrupted_incident_brief()
+
+        with self.assertRaisesRegex(RoleModelValidationError, "active_incident"):
             render_context(normalized_user_message(), context)
 
     def test_render_rejects_malformed_user_message_interruption_flag(self):

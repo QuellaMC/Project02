@@ -170,6 +170,28 @@ class RecordingActiveIncidentSource:
         return deepcopy(self.snapshot)
 
 
+class SequenceActiveIncidentSource:
+    def __init__(self, snapshots):
+        self.snapshots = [deepcopy(snapshot) for snapshot in snapshots]
+        self.requests = []
+
+    def read_active_incident(self, request):
+        self.requests.append(deepcopy(request))
+        if not self.snapshots:
+            return None
+        return deepcopy(self.snapshots.pop(0))
+
+
+class RecordingInterruptedIncidentSource:
+    def __init__(self, snapshot):
+        self.snapshot = deepcopy(snapshot)
+        self.requests = []
+
+    def read_interrupted_incident(self, request):
+        self.requests.append(deepcopy(request))
+        return deepcopy(self.snapshot)
+
+
 class RecordingLivingStatePatchStore:
     def __init__(self, snapshot=None, error=None):
         self.snapshot = deepcopy(snapshot or committed_snapshot())
@@ -899,6 +921,376 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
                 "visible_reply_committed",
             ],
         )
+
+    def test_user_turn_interrupts_active_incident_before_model_context(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        start_event = {
+            "event_id": "event-start",
+            "trace_id": "trace-start",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:25:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "go eat",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+        run_user_message_turn(
+            start_event,
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "eating"},
+                        "life_action": {
+                            "type": "start_incident",
+                            "incident": {
+                                "type": "eat",
+                                "title": "Eating lunch",
+                                "remaining_seconds": 1200,
+                                "interrupt_policy": "interruptible",
+                                "resume_policy": "resume",
+                            },
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_store,
+        )
+        interrupt_event = {
+            "event_id": "event-interrupt",
+            "trace_id": "trace-interrupt",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:31:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "are you there?",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+        adapter = RecordingAdapter()
+
+        result = run_user_message_turn(
+            interrupt_event,
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            active_incident_source=life_incident_store,
+            life_incident_interrupt_finalizer=life_incident_store,
+            interrupted_incident_source=life_incident_store,
+        )
+
+        character_snapshot = adapter.calls[0]["decision_context"]["character_snapshot"]
+        interrupt_entries = raw_log.query({"trace_id": "trace-interrupt"})["entries"]
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            result["life_incident_interrupt_result"]["status"], "life_incident_interrupted"
+        )
+        self.assertNotIn("active_incident", character_snapshot)
+        self.assertEqual(
+            character_snapshot["interrupted_incident"]["incident_id"],
+            result["life_incident_interrupt_result"]["interrupted_incident"]["incident_id"],
+        )
+        self.assertIsNone(
+            life_incident_store.read_active_incident(build_active_incident_request(interrupt_event))
+        )
+        self.assertIsNotNone(
+            life_incident_store.read_interrupted_incident(
+                build_active_incident_request(interrupt_event)
+            )
+        )
+        self.assertEqual(
+            [entry["kind"] for entry in interrupt_entries],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "life_incident_interrupted",
+                "role_model_turn_completed",
+                "visible_reply_committed",
+            ],
+        )
+
+    def test_user_turn_interrupt_context_suppresses_stale_active_source(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        start_event = {
+            "event_id": "event-start",
+            "trace_id": "trace-start",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:25:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "go eat",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+        run_user_message_turn(
+            start_event,
+            adapter=RecordingAdapter(
+                raw_text=json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "action": "visible_reply",
+                        "visible_reply": {"text": "eating"},
+                        "life_action": {
+                            "type": "start_incident",
+                            "incident": {
+                                "type": "eat",
+                                "title": "Eating lunch",
+                                "remaining_seconds": 1200,
+                                "interrupt_policy": "interruptible",
+                                "resume_policy": "resume",
+                            },
+                        },
+                    }
+                )
+            ),
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_store,
+        )
+        stale_active_source = RecordingActiveIncidentSource(
+            life_incident_store.read_active_incident(build_active_incident_request(start_event))
+        )
+        lagging_interrupted_source = RecordingInterruptedIncidentSource(None)
+        interrupt_event = {
+            "event_id": "event-interrupt",
+            "trace_id": "trace-interrupt",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:31:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "are you there?",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+        adapter = RecordingAdapter()
+
+        result = run_user_message_turn(
+            interrupt_event,
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            active_incident_source=stale_active_source,
+            life_incident_interrupt_finalizer=life_incident_store,
+            interrupted_incident_source=lagging_interrupted_source,
+        )
+
+        character_snapshot = adapter.calls[0]["decision_context"]["character_snapshot"]
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            result["life_incident_interrupt_result"]["status"], "life_incident_interrupted"
+        )
+        self.assertEqual(len(stale_active_source.requests), 1)
+        self.assertEqual(lagging_interrupted_source.requests, [])
+        self.assertNotIn("active_incident", character_snapshot)
+        self.assertEqual(
+            character_snapshot["interrupted_incident"]["incident_id"],
+            result["life_incident_interrupt_result"]["interrupted_incident"]["incident_id"],
+        )
+
+    def test_user_turn_interrupt_skipped_without_interrupted_source_reaches_model(self):
+        raw_log = InMemoryRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+        ids = SequenceIdGenerator()
+        interrupt_event = {
+            "event_id": "event-interrupt",
+            "trace_id": "trace-interrupt",
+            "type": "USER_MESSAGE",
+            "created_at": "2026-05-14T11:31:00+00:00",
+            "schema_version": "0.1",
+            "payload": {
+                "text": "are you there?",
+                "user_id": "u-1",
+                "conversation_id": "c-1",
+            },
+        }
+        adapter = RecordingAdapter()
+
+        result = run_user_message_turn(
+            interrupt_event,
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=ids,
+            clock=fixed_clock,
+            active_incident_source=life_incident_store,
+            life_incident_interrupt_finalizer=life_incident_store,
+        )
+
+        character_snapshot = adapter.calls[0]["decision_context"]["character_snapshot"]
+
+        self.assertEqual(result["status"], "user_turn_committed")
+        self.assertEqual(
+            result["life_incident_interrupt_result"]["status"],
+            "life_incident_interrupt_skipped",
+        )
+        self.assertNotIn("active_incident", character_snapshot)
+        self.assertNotIn("interrupted_incident", character_snapshot)
+        self.assertEqual(
+            [entry["kind"] for entry in raw_log.query({"trace_id": "trace-interrupt"})["entries"]],
+            [
+                "runtime_event_received",
+                "user_visible_message_committed",
+                "role_model_turn_completed",
+                "visible_reply_committed",
+            ],
+        )
+
+    def test_user_turn_non_interruptible_policy_logs_before_model_context_and_keeps_active(self):
+        cases = [
+            {
+                "policy": "background",
+                "incident_type": "work",
+                "title": "Working quietly",
+                "reply": "working",
+                "user_text": "quick question",
+                "expected_status": "life_incident_continued_in_background",
+                "expected_kind": "life_incident_continued_in_background",
+            },
+            {
+                "policy": "protected",
+                "incident_type": "sleep",
+                "title": "Sleeping deeply",
+                "reply": "sleeping",
+                "user_text": "wake up?",
+                "expected_status": "life_incident_protected_from_interruption",
+                "expected_kind": "life_incident_protected_from_interruption",
+            },
+        ]
+
+        for case in cases:
+            with self.subTest(policy=case["policy"]):
+                raw_log = InMemoryRawEventLog()
+                visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+                life_incident_store = InMemoryLifeIncidentStore(raw_event_log=raw_log)
+                ids = SequenceIdGenerator()
+                start_event = {
+                    "event_id": "event-start",
+                    "trace_id": "trace-start",
+                    "type": "USER_MESSAGE",
+                    "created_at": "2026-05-14T11:25:00+00:00",
+                    "schema_version": "0.1",
+                    "payload": {
+                        "text": "go work",
+                        "user_id": "u-1",
+                        "conversation_id": "c-1",
+                    },
+                }
+                run_user_message_turn(
+                    start_event,
+                    adapter=RecordingAdapter(
+                        raw_text=json.dumps(
+                            {
+                                "schema_version": "0.1",
+                                "action": "visible_reply",
+                                "visible_reply": {"text": case["reply"]},
+                                "life_action": {
+                                    "type": "start_incident",
+                                    "incident": {
+                                        "type": case["incident_type"],
+                                        "title": case["title"],
+                                        "remaining_seconds": 1200,
+                                        "interrupt_policy": case["policy"],
+                                        "resume_policy": "resume",
+                                    },
+                                },
+                            }
+                        )
+                    ),
+                    raw_event_log=raw_log,
+                    visible_conversation=visible_conversation,
+                    id_generator=ids,
+                    clock=fixed_clock,
+                    life_incident_start_finalizer=life_incident_store,
+                )
+                policy_active_snapshot = life_incident_store.read_active_incident(
+                    build_active_incident_request(start_event)
+                )
+                unstable_active_source = SequenceActiveIncidentSource(
+                    [policy_active_snapshot, None]
+                )
+                interrupt_event = {
+                    "event_id": "event-interrupt",
+                    "trace_id": "trace-interrupt",
+                    "type": "USER_MESSAGE",
+                    "created_at": "2026-05-14T11:31:00+00:00",
+                    "schema_version": "0.1",
+                    "payload": {
+                        "text": case["user_text"],
+                        "user_id": "u-1",
+                        "conversation_id": "c-1",
+                    },
+                }
+                adapter = RecordingAdapter()
+
+                result = run_user_message_turn(
+                    interrupt_event,
+                    adapter=adapter,
+                    raw_event_log=raw_log,
+                    visible_conversation=visible_conversation,
+                    id_generator=ids,
+                    clock=fixed_clock,
+                    active_incident_source=unstable_active_source,
+                    life_incident_interrupt_finalizer=life_incident_store,
+                )
+
+                character_snapshot = adapter.calls[0]["decision_context"]["character_snapshot"]
+
+                self.assertEqual(result["status"], "user_turn_committed")
+                self.assertEqual(
+                    result["life_incident_interrupt_result"]["status"],
+                    case["expected_status"],
+                )
+                self.assertEqual(
+                    result["life_incident_interrupt_result"]["active_incident"]["interrupt_policy"],
+                    case["policy"],
+                )
+                self.assertEqual(len(unstable_active_source.requests), 1)
+                self.assertIn("active_incident", character_snapshot)
+                self.assertEqual(character_snapshot["active_incident"]["title"], case["title"])
+                self.assertNotIn("interrupted_incident", character_snapshot)
+                self.assertIsNotNone(
+                    life_incident_store.read_active_incident(
+                        build_active_incident_request(interrupt_event)
+                    )
+                )
+                self.assertEqual(
+                    [
+                        entry["kind"]
+                        for entry in raw_log.query({"trace_id": "trace-interrupt"})["entries"]
+                    ],
+                    [
+                        "runtime_event_received",
+                        "user_visible_message_committed",
+                        case["expected_kind"],
+                        "role_model_turn_completed",
+                        "visible_reply_committed",
+                    ],
+                )
 
     def test_incident_cancel_enabled_turn_with_concrete_store_clears_incident_before_reply(self):
         raw_log = InMemoryRawEventLog()
@@ -1968,6 +2360,7 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         self.assertEqual(result["failure"]["code"], "conflicting_write_action_opt_in")
         self.assertIn("Only one write-action opt-in", result["failure"]["message"])
         self.assertIn("cancel_incident", result["failure"]["message"])
+        self.assertIn("interrupt_incident", result["failure"]["message"])
         self.assertNotIn("user_visible_message_result", result)
         self.assertNotIn("role_model_result", result)
         self.assertNotIn("visible_reply_result", result)
@@ -1978,6 +2371,50 @@ class UserMessageTurnIntegrationTests(unittest.TestCase):
         self.assertEqual(current_state_source.requests, [])
         self.assertEqual(living_state_patch_store.requests, [])
         self.assertEqual(living_state_patch_finalizer.requests, [])
+        self.assertEqual(life_incident_start_finalizer.requests, [])
+        self.assertEqual(life_incident_start_finalizer.durable_started_incidents, [])
+        self.assertEqual(life_incident_start_finalizer.durable_raw_event_log_entries, [])
+
+    def test_incident_interrupt_conflict_stops_before_user_visible_message_commit(self):
+        raw_log = RecordingRawEventLog()
+        visible_conversation = InMemoryVisibleConversation([prior_user_record()])
+        adapter = RecordingAdapter()
+        life_incident_start_finalizer = RecordingLifeIncidentStartFinalizer()
+
+        result = run_user_message_turn(
+            {
+                "event_id": "event-current",
+                "trace_id": "trace-current",
+                "type": "USER_MESSAGE",
+                "created_at": "2026-05-14T11:30:00+00:00",
+                "schema_version": "0.1",
+                "payload": {
+                    "text": "hello now",
+                    "user_id": "u-1",
+                    "conversation_id": "c-1",
+                },
+            },
+            adapter=adapter,
+            raw_event_log=raw_log,
+            visible_conversation=visible_conversation,
+            id_generator=SequenceIdGenerator(),
+            clock=fixed_clock,
+            life_incident_start_finalizer=life_incident_start_finalizer,
+            life_incident_interrupt_finalizer=object(),
+        )
+
+        self.assertEqual(result["status"], "user_turn_stopped")
+        self.assertEqual(result["stopped_at"], "user_turn_preflight")
+        self.assertEqual(result["failure"]["stage"], "user_turn_preflight")
+        self.assertEqual(result["failure"]["code"], "conflicting_write_action_opt_in")
+        self.assertIn("interrupt_incident", result["failure"]["message"])
+        self.assertNotIn("user_visible_message_result", result)
+        self.assertNotIn("life_incident_interrupt_result", result)
+        self.assertNotIn("role_model_result", result)
+        self.assertEqual([entry["kind"] for entry in raw_log.entries], ["runtime_event_received"])
+        self.assertEqual(visible_conversation.records, [prior_user_record()])
+        self.assertEqual(visible_conversation.read_requests, [])
+        self.assertEqual(adapter.calls, [])
         self.assertEqual(life_incident_start_finalizer.requests, [])
         self.assertEqual(life_incident_start_finalizer.durable_started_incidents, [])
         self.assertEqual(life_incident_start_finalizer.durable_raw_event_log_entries, [])

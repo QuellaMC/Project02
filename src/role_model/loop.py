@@ -9,7 +9,9 @@ from character.state import context as character_context
 from character.state.current import (
     ActiveIncidentSource,
     CurrentCharacterStateSource,
+    InterruptedIncidentSource,
     validate_active_incident_brief_for_event,
+    validate_interrupted_incident_brief_for_event,
     validate_living_state_brief_for_event,
 )
 from runtime.contracts import (
@@ -148,6 +150,7 @@ def build_decision_context(
     recent_visible_messages_source: RecentVisibleMessagesSource | None = None,
     current_state_source: CurrentCharacterStateSource | None = None,
     active_incident_source: ActiveIncidentSource | None = None,
+    interrupted_incident_source: InterruptedIncidentSource | None = None,
     allow_state_patch: bool = False,
     allow_incident_start: bool = False,
     allow_incident_cancel: bool = False,
@@ -171,6 +174,7 @@ def build_decision_context(
             recent_visible_messages_source=recent_visible_messages_source,
             current_state_source=current_state_source,
             active_incident_source=active_incident_source,
+            interrupted_incident_source=interrupted_incident_source,
         )
     )
     return decision_context
@@ -297,6 +301,7 @@ def run_role_model_turn(
     recent_visible_messages_source: RecentVisibleMessagesSource | None = None,
     current_state_source: CurrentCharacterStateSource | None = None,
     active_incident_source: ActiveIncidentSource | None = None,
+    interrupted_incident_source: InterruptedIncidentSource | None = None,
     allow_state_patch: bool = False,
     allow_incident_start: bool = False,
     allow_incident_cancel: bool = False,
@@ -308,6 +313,7 @@ def run_role_model_turn(
             recent_visible_messages_source=recent_visible_messages_source,
             current_state_source=current_state_source,
             active_incident_source=active_incident_source,
+            interrupted_incident_source=interrupted_incident_source,
             allow_state_patch=allow_state_patch,
             allow_incident_start=allow_incident_start,
             allow_incident_cancel=allow_incident_cancel,
@@ -728,6 +734,7 @@ def _validate_character_snapshot(
                 "recent_visible_messages",
                 "living_state_brief",
                 "active_incident",
+                "interrupted_incident",
                 USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD,
             },
             "DecisionContext.character_snapshot",
@@ -747,6 +754,17 @@ def _validate_character_snapshot(
                 character_snapshot["active_incident"],
                 event_id=event_id,
             )
+        )
+    if "interrupted_incident" in character_snapshot:
+        normalized_snapshot["interrupted_incident"] = _wrap_contract_error(
+            lambda: validate_interrupted_incident_brief_for_event(
+                character_snapshot["interrupted_incident"],
+                event_id=event_id,
+            )
+        )
+    if "active_incident" in normalized_snapshot and "interrupted_incident" in normalized_snapshot:
+        raise RoleModelValidationError(
+            "character_snapshot must not include both active_incident and interrupted_incident."
         )
     if USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD in character_snapshot:
         if character_snapshot[USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD] is not True:
