@@ -199,10 +199,13 @@ def commit_life_incident_interruption(
                     life_incident_interrupt_finalizer,
                     finalize_request,
                 )
-            except LifeIncidentInterruptFinalizerError:
-                # The success log is already query-visible; do not append a
-                # contradictory rejected lifecycle record after that point.
-                pass
+            except LifeIncidentInterruptFinalizerError as error:
+                failure = _build_failure(
+                    LIFE_INCIDENT_INTERRUPT_FINALIZE_STAGE,
+                    _error_code(error, "finalize_rejected"),
+                    str(error),
+                )
+                return _build_rejected_result(source_identity, failure)
             result = _build_status_result(source_identity, LIFE_INCIDENT_INTERRUPTED_STATUS)
             result["interrupted_incident"] = deepcopy(dict(interrupted_incident))
             result["committed_log_entry_id"] = validated_finalize_result["committed_log_entry_id"]

@@ -364,7 +364,9 @@ class IncidentInterruptCommitTests(unittest.TestCase):
         self.assertEqual(len(rejected), 1)
         self.assertEqual(rejected[0]["data"]["failure"], result["failure"])
 
-    def test_completion_failure_after_success_visibility_returns_success_without_rejected_log(self):
+    def test_completion_failure_after_success_visibility_returns_rejected_without_rejected_log(
+        self,
+    ):
         raw_log = RecordingDiscardRawEventLog()
         active_incident = active_incident_snapshot()
         finalizer = StagingCompletionFailingInterruptFinalizer(raw_log)
@@ -387,8 +389,10 @@ class IncidentInterruptCommitTests(unittest.TestCase):
             }
         )["entries"]
 
-        self.assertEqual(result["status"], LIFE_INCIDENT_INTERRUPTED_STATUS)
-        self.assertEqual(result["interrupted_incident"]["status"], "interrupted")
+        self.assertEqual(result["status"], LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_INTERRUPT_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertIn("completion failed", result["failure"]["message"])
         self.assertEqual(len(finalizer.completion_requests), 1)
         self.assertEqual(
             [entry["kind"] for entry in entries],
@@ -397,7 +401,7 @@ class IncidentInterruptCommitTests(unittest.TestCase):
         self.assertEqual(rejected, [])
         self.assertEqual(raw_log.discarded_entries, [])
 
-    def test_completion_runtime_error_after_success_visibility_returns_success(self):
+    def test_completion_runtime_error_after_success_visibility_returns_rejected(self):
         raw_log = InMemoryRawEventLog()
         active_incident = active_incident_snapshot()
         finalizer = StagingCompletionFailingInterruptFinalizer(
@@ -422,8 +426,10 @@ class IncidentInterruptCommitTests(unittest.TestCase):
             }
         )["entries"]
 
-        self.assertEqual(result["status"], LIFE_INCIDENT_INTERRUPTED_STATUS)
-        self.assertEqual(result["interrupted_incident"]["incident_id"], "incident-1")
+        self.assertEqual(result["status"], LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS)
+        self.assertEqual(result["failure"]["stage"], LIFE_INCIDENT_INTERRUPT_FINALIZE_STAGE)
+        self.assertEqual(result["failure"]["code"], "finalize_rejected")
+        self.assertIn("incident interrupt write failed", result["failure"]["message"])
         self.assertEqual(rejected, [])
         self.assertEqual(len(finalizer.completion_requests), 1)
 
