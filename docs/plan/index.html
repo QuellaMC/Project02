@@ -87,10 +87,12 @@
       <a href="https://github.com/QuellaMC/Project02/pull/23">PR #23</a>.
       MVP-021 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/24">PR #24</a>.
-      The active TypeScript runtime source-of-truth cutover is local on branch
-      <code>mvp-typescript-shadow-port</code>. The completed TypeScript runtime
-      now lives under <code>src/</code> with tests under <code>tests/</code>;
-      Python is preserved on <code>legacy-python-main</code>.
+      The TypeScript runtime source-of-truth cutover is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/25">PR #25</a>
+      on branch <code>mvp-typescript-shadow-port</code>. The completed
+      TypeScript runtime now lives under <code>src/</code> with tests under
+      <code>tests/</code>; Python is preserved on remote branch
+      <code>legacy-python-main</code>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -158,14 +160,14 @@ flowchart LR
     InterruptedIncidentBrief["interrupted_incident brief&lt;br/&gt;validated compact interrupted context&lt;br/&gt;MVP-021 implemented"]
   end
 
-  subgraph TypeScriptRuntime["TypeScript Runtime - source of truth"]
-    TSContracts["src runtime contracts&lt;br/&gt;Stage 2 implemented"]
-    TSLogging["src raw logging&lt;br/&gt;Stage 3 implemented"]
-    TSKernel["src Runtime Kernel&lt;br/&gt;Stage 4 implemented"]
-    TSCharacterState["src Character State read-side&lt;br/&gt;Stage 5 implemented"]
-    TSRoleModel["src Role Model Loop&lt;br/&gt;Stage 6 implemented"]
-    TSCommitEffects["src Commit Effects&lt;br/&gt;Stage 7A visible, 7B living-state, 7C incident lifecycle implemented"]
-    TSUserTurn["src User Turn orchestration&lt;br/&gt;Stage 8 implemented"]
+  subgraph TypeScriptRuntime["TypeScript Runtime - source of truth&lt;br/&gt;PR #25 open"]
+    TSContracts["src runtime contracts&lt;br/&gt;Stage 2 implemented&lt;br/&gt;PR #25"]
+    TSLogging["src raw logging&lt;br/&gt;Stage 3 implemented&lt;br/&gt;PR #25"]
+    TSKernel["src Runtime Kernel&lt;br/&gt;Stage 4 implemented&lt;br/&gt;PR #25"]
+    TSCharacterState["src Character State read-side&lt;br/&gt;Stage 5 implemented&lt;br/&gt;PR #25"]
+    TSRoleModel["src Role Model Loop&lt;br/&gt;Stage 6 implemented&lt;br/&gt;PR #25"]
+    TSCommitEffects["src Commit Effects&lt;br/&gt;Stage 7A visible, 7B living-state, 7C incident lifecycle implemented&lt;br/&gt;PR #25"]
+    TSUserTurn["src User Turn orchestration&lt;br/&gt;Stage 8 implemented&lt;br/&gt;PR #25"]
   end
 
   subgraph UserTurn["User Turn Orchestrator - MVP-007 implemented locally"]
@@ -267,7 +269,7 @@ flowchart LR
       <tbody>
         <tr>
           <td><a href="active-slice.html">TypeScript Runtime Source of Truth Cutover</a></td>
-          <td>Active on branch <code>mvp-typescript-shadow-port</code>.</td>
+          <td>Open in <a href="https://github.com/QuellaMC/Project02/pull/25">PR #25</a> on branch <code>mvp-typescript-shadow-port</code>.</td>
           <td>Promote the completed TypeScript runtime to the branch source of truth: production source under <code>src/</code>, production tests under <code>tests/</code>, TypeScript-only CI, updated package metadata, and Python preserved on <code>legacy-python-main</code>.</td>
         </tr>
       </tbody>
