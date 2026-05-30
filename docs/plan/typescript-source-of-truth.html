@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TypeScript Runtime Source of Truth Tracker</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 960px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; }
+    th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #edf1eb; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>TypeScript Runtime Source of Truth Tracker</h1>
+    <p>
+      Local tracker for the completed
+      <a href="https://www.notion.so/36f8995c0c5e80a5be6aee4982f0e23a">Notion TypeScript migration goal</a>.
+      The TypeScript runtime is now the source of truth on this branch under
+      <code>src/</code> and <code>tests/</code>. The old Python implementation
+      is preserved on <code>legacy-python-main</code>.
+    </p>
+
+    <h2>Stage Status</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Stage</th>
+          <th>Status</th>
+          <th>Evidence</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Stages 1-4</td>
+          <td>Implemented and review-gate clean.</td>
+          <td>See <a href="../develop-journal/2026-05-29/002-typescript-shadow-port-stage-1.html">2026-05-29 journal</a>.</td>
+        </tr>
+        <tr>
+          <td>Stage 5</td>
+          <td>Implemented and review-gate clean.</td>
+          <td>Character State read-side and DecisionContext tests under <code>tests/unit/character/state/</code>. Confirmatory review evidence and fresh PASS re-review are recorded in <a href="../develop-journal/2026-05-30/002-typescript-shadow-port-stage-5-review-gate.html">2026-05-30 Stage 5 review gate journal</a>.</td>
+        </tr>
+        <tr>
+          <td>Stage 6</td>
+          <td>Implemented and review-gate clean.</td>
+          <td>Role Model Loop source under <code>src/role-model/</code> and tests under <code>tests/unit/role-model/</code> plus <code>tests/integration/</code>. Fresh re-review agents Hubble, Raman, and Kant the 2nd passed with no P0/P1/P2 findings after malformed-output snapshot parity fixes.</td>
+        </tr>
+        <tr>
+          <td>Stage 7A</td>
+          <td>Implemented and review-gate clean.</td>
+          <td>Visible conversation Commit Effects only: <code>src/commit-effects/visible-reply.ts</code>, unit tests under <code>tests/unit/commit-effects/</code>, and integration tests under <code>tests/integration/</code>. Fresh re-review agents Huygens the 2nd, Schrodinger the 2nd, and Planck the 2nd passed with no P0/P1/P2 findings after append-error, coverage, and docs fixes. Final-review follow-up extracted shared malformed snapshot logic into <code>src/runtime/logging.ts</code> and added clone/cycle regressions. Fresh final-review agents Newton the 2nd, Kuhn the 2nd, and Locke the 2nd passed with no P0/P1/P2 findings.</td>
+        </tr>
+        <tr>
+          <td>Stage 7B</td>
+          <td>Implemented and review-gate clean.</td>
+          <td>Living-state patch Commit Effects only: <code>src/commit-effects/living-state.ts</code> and <code>tests/unit/commit-effects/living-state.test.ts</code>. The first scope/test/docs review found P2 gaps for staged-success discard coverage and stale Stage 7B documentation; both follow-ups are recorded in <a href="../develop-journal/2026-05-30/004-typescript-shadow-port-stage-7b-living-state.html">2026-05-30 Stage 7B journal</a>. Fresh re-review agents Sagan, Descartes, and Heisenberg passed with no P0/P1/P2/P3 findings. Fresh final review agents Kierkegaard, Maxwell, and Mill also passed with no P0/P1/P2/P3 findings.</td>
+        </tr>
+        <tr>
+          <td>Stage 7C</td>
+          <td>Implemented and review-gate clean.</td>
+          <td>Incident lifecycle, incident-completion-event, interruption Commit Effects, and the scoped in-memory incident store are under <code>src/commit-effects/</code> and <code>src/character/state/incidents.ts</code>. Replacement review agents Rawls, Pascal, and Ampere passed with no P0/P1/P2/P3 findings after the start-finalizer parity fix. Evidence is recorded in <a href="../develop-journal/2026-05-30/005-typescript-shadow-port-stage-7c-incident-effects.html">2026-05-30 Stage 7C journal</a>.</td>
+        </tr>
+        <tr>
+          <td>Stage 8</td>
+          <td>Implemented and review-gate clean.</td>
+          <td>User-turn orchestration is under <code>src/runtime/user-turn.ts</code> with tests in <code>tests/unit/runtime/user-turn.test.ts</code>. Replacement review agents Planck and Poincare passed with no P0/P1/P2/P3 findings; Darwin found only stale future-slice parking-lot P3s that were fixed. Evidence is recorded in <a href="../develop-journal/2026-05-30/006-typescript-shadow-port-stage-8-user-turn.html">2026-05-30 Stage 8 journal</a>.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Final Review Follow-Up</h2>
+    <p>
+      The final port review found actionable parity issues in the concrete
+      incident-store absence path, direct route validation, raw-log clone
+      errors, incident finalizer error-code mapping, lifecycle rejection
+      behavior for invalid source-event types, offset-preserving explicit
+      clock timestamps, and Python-style raw-log data cloning. The
+      follow-up fixes are recorded in
+      <a href="../develop-journal/2026-05-30/007-typescript-shadow-port-final-review-follow-up.html">the
+      2026-05-30 final review follow-up journal</a>, with regression tests under
+      <code>tests/unit/character/state/</code>,
+      <code>tests/unit/runtime/</code>, and
+      <code>tests/unit/commit-effects/</code>.
+      Follow-up read-only reviewers found no remaining P0/P1/P2 blockers after
+      the incident-finalizer and stale-doc wording fixes.
+    </p>
+
+    <h2>Cutover Status</h2>
+    <ul>
+      <li>TypeScript source now lives under production <code>src/</code>; TypeScript tests now live under production <code>tests/</code>.</li>
+      <li>Python source and tests were removed from this branch after <code>legacy-python-main</code> was created from local <code>main</code>.</li>
+      <li>Generated TypeScript timestamps from JavaScript <code>Date</code> are UTC-normalized to Python's <code>+00:00</code> shape. Explicit ISO string clocks preserve non-UTC offsets and fractional precision for port paths that already own an ISO timestamp.</li>
+      <li>Interruption post-visible raw-log validation errors intentionally remain <code>finalize_rejected</code>, matching Python's bespoke interruption helper. Cancel and complete use <code>malformed_finalize_result</code> for that hook through the shared lifecycle helper.</li>
+      <li>CI now validates TypeScript only with <code>pnpm lint</code>, <code>pnpm typecheck</code>, and <code>pnpm test</code>.</li>
+      <li>GitHub default-branch and branch-protection changes remain external release-management steps after the cutover PR is reviewed.</li>
+    </ul>
+
+    <h2>Verification</h2>
+    <ul>
+      <li><code>pnpm lint</code> - passed.</li>
+      <li><code>pnpm typecheck</code> - passed.</li>
+      <li><code>pnpm test</code> - passed: 19 files, 173 tests.</li>
+      <li><code>python3 -c "from html.parser import HTMLParser; import pathlib; [HTMLParser().feed(path.read_text()) for path in pathlib.Path('docs').rglob('*.html')]"</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Final Summary Fields</h2>
+    <p>The final response for this goal must include:</p>
+    <ul>
+      <li>Branch name.</li>
+      <li>Completed stages.</li>
+      <li>Files added or changed.</li>
+      <li>Tests run and results.</li>
+      <li>Review gates completed.</li>
+      <li>TypeScript-native design decisions.</li>
+      <li>Dependencies and tooling added.</li>
+      <li>Known gaps.</li>
+      <li>Next recommended migration slice.</li>
+      <li>Manual commands to run before merging.</li>
+    </ul>
+  </main>
+</body>
+</html>

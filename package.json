@@ -1,13 +1,20 @@
 {
-  "name": "project02-typescript-shadow-port",
+  "name": "project02-runtime",
+  "description": "TypeScript runtime foundation for the Project02 Live Character Framework.",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.0",
   "engines": {
     "node": ">=24.12.0"
   },
+  "exports": {
+    "./runtime/*": "./src/runtime/*.ts",
+    "./character/state/*": "./src/character/state/*.ts",
+    "./role-model/*": "./src/role-model/*.ts",
+    "./commit-effects/*": "./src/commit-effects/*.ts"
+  },
   "scripts": {
-    "lint": "eslint --no-error-on-unmatched-pattern \"src-ts/**/*.ts\" \"tests-ts/**/*.ts\" \"vitest.config.ts\"",
+    "lint": "eslint --no-error-on-unmatched-pattern \"src/**/*.ts\" \"tests/**/*.ts\" \"vitest.config.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

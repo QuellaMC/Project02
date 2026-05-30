@@ -87,11 +87,10 @@
       <a href="https://github.com/QuellaMC/Project02/pull/23">PR #23</a>.
       MVP-021 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/24">PR #24</a>.
-      The active TypeScript shadow-port slice is local on branch
-      <code>mvp-typescript-shadow-port</code>; Stages 1-8 are implemented and
-      review-gate clean through Stage 8 user-turn orchestration. Final review
-      follow-up fixed the actionable parity findings; production TypeScript
-      cutover and Python removal remain a separate future slice.
+      The active TypeScript runtime source-of-truth cutover is local on branch
+      <code>mvp-typescript-shadow-port</code>. The completed TypeScript runtime
+      now lives under <code>src/</code> with tests under <code>tests/</code>;
+      Python is preserved on <code>legacy-python-main</code>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -159,14 +158,14 @@ flowchart LR
     InterruptedIncidentBrief["interrupted_incident brief&lt;br/&gt;validated compact interrupted context&lt;br/&gt;MVP-021 implemented"]
   end
 
-  subgraph TypeScriptShadow["TypeScript Shadow Port - active"]
-    TSContracts["src-ts runtime contracts&lt;br/&gt;Stage 2 implemented"]
-    TSLogging["src-ts raw logging&lt;br/&gt;Stage 3 implemented"]
-    TSKernel["src-ts Runtime Kernel&lt;br/&gt;Stage 4 implemented"]
-    TSCharacterState["src-ts Character State read-side&lt;br/&gt;Stage 5 implemented"]
-    TSRoleModel["src-ts Role Model Loop&lt;br/&gt;Stage 6 implemented"]
-    TSCommitEffects["src-ts Commit Effects&lt;br/&gt;Stage 7A visible, 7B living-state, 7C incident lifecycle implemented"]
-    TSUserTurn["src-ts User Turn orchestration&lt;br/&gt;Stage 8 implemented"]
+  subgraph TypeScriptRuntime["TypeScript Runtime - source of truth"]
+    TSContracts["src runtime contracts&lt;br/&gt;Stage 2 implemented"]
+    TSLogging["src raw logging&lt;br/&gt;Stage 3 implemented"]
+    TSKernel["src Runtime Kernel&lt;br/&gt;Stage 4 implemented"]
+    TSCharacterState["src Character State read-side&lt;br/&gt;Stage 5 implemented"]
+    TSRoleModel["src Role Model Loop&lt;br/&gt;Stage 6 implemented"]
+    TSCommitEffects["src Commit Effects&lt;br/&gt;Stage 7A visible, 7B living-state, 7C incident lifecycle implemented"]
+    TSUserTurn["src User Turn orchestration&lt;br/&gt;Stage 8 implemented"]
   end
 
   subgraph UserTurn["User Turn Orchestrator - MVP-007 implemented locally"]
@@ -267,9 +266,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">TypeScript Shadow Port - Runtime Foundation Stages 1-8</a></td>
+          <td><a href="active-slice.html">TypeScript Runtime Source of Truth Cutover</a></td>
           <td>Active on branch <code>mvp-typescript-shadow-port</code>.</td>
-          <td>Add a strict TypeScript shadow implementation beside the Python runtime for tooling, runtime contracts, raw logging, Runtime Kernel intake/routing, Character State read-side/context building, Role Model Loop model-boundary behavior, Stage 7A visible conversation Commit Effects, Stage 7B living-state patch Commit Effects, Stage 7C incident lifecycle Commit Effects, and Stage 8 user-turn orchestration. Python remains production source of truth and the TypeScript code does not switch runtime behavior.</td>
+          <td>Promote the completed TypeScript runtime to the branch source of truth: production source under <code>src/</code>, production tests under <code>tests/</code>, TypeScript-only CI, updated package metadata, and Python preserved on <code>legacy-python-main</code>.</td>
         </tr>
       </tbody>
     </table>
@@ -399,7 +398,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active TypeScript shadow-port slice are parked in
+      Ideas beyond the active TypeScript source-of-truth cutover are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 

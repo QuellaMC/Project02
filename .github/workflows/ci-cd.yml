@@ -23,11 +23,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -36,19 +31,10 @@ jobs:
       - name: Enable pnpm
         run: corepack enable
 
-      - name: Install lint tools
-        run: python -m pip install --upgrade pip ruff
-
-      - name: Install TypeScript dependencies
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run Ruff lint
-        run: ruff check .
-
-      - name: Check Ruff formatting
-        run: ruff format --check .
-
-      - name: Run TypeScript lint
+      - name: Run lint
         run: pnpm lint
 
   typecheck:
@@ -59,11 +45,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -72,16 +53,10 @@ jobs:
       - name: Enable pnpm
         run: corepack enable
 
-      - name: Install typecheck tools
-        run: python -m pip install --upgrade pip mypy
-
-      - name: Install TypeScript dependencies
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run mypy typecheck
-        run: mypy src
-
-      - name: Run TypeScript typecheck
+      - name: Run typecheck
         run: pnpm typecheck
 
   test:
@@ -92,11 +67,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -105,22 +75,10 @@ jobs:
       - name: Enable pnpm
         run: corepack enable
 
-      - name: Install TypeScript dependencies
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Compile Python sources
-        run: python -m compileall src tests
-
-      - name: Run unit tests
-        run: python -m unittest discover -s tests/unit -t .
-
-      - name: Run integration tests
-        run: python -m unittest discover -s tests/integration -t .
-
-      - name: Run full test discovery
-        run: python -m unittest discover -s tests -t .
-
-      - name: Run TypeScript tests
+      - name: Run tests
         run: pnpm test
 
   pull-request-gate:

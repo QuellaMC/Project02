@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while the <a href="active-slice.html">TypeScript shadow-port slice</a> is active.
+      Do not implement these while the <a href="active-slice.html">active TypeScript source-of-truth cutover</a> is in progress.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -753,7 +753,7 @@
       <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The completed MVP-021 slice introduced only an in-memory interrupted-incident slot for interruptible transitions and query-visible interruption policy logs, with no concrete database. The active TypeScript shadow-port slice must not broaden persistence behavior.</dd>
+      <dd>The completed MVP-021 slice introduced only an in-memory interrupted-incident slot for interruptible transitions and query-visible interruption policy logs, with no concrete database. The active TypeScript cutover must not broaden persistence behavior.</dd>
     </dl>
 
     <h2>Shared Visible Conversation Message Contract</h2>
@@ -780,7 +780,7 @@
       <dd>Likely adds a shared <code>role</code> / <code>message_id</code> visible transcript contract while preserving compatibility with existing assistant output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The completed MVP-021 slice only added the minimal interruption policy boundary. The active TypeScript shadow-port slice should preserve existing visible-message contracts rather than unify them.</dd>
+      <dd>The completed MVP-021 slice only added the minimal interruption policy boundary. The active TypeScript cutover should preserve existing visible-message contracts rather than unify them.</dd>
     </dl>
 
     <h2>Recent Source Backed By Visible Conversation Records</h2>
@@ -901,25 +901,25 @@
       <dd>A forged atomic success entry with the same <code>log_id</code> but different data can currently discard a staged success entry.</dd>
 
       <dt>Source Or Trigger</dt>
-      <dd>Discovered during the TypeScript shadow-port Stage 3 review. The TypeScript port preserves current Python discard-by-<code>log_id</code> behavior for parity.</dd>
+      <dd>Discovered during the TypeScript shadow-port Stage 3 review. The TypeScript runtime currently preserves the Python-era discard-by-<code>log_id</code> behavior for compatibility.</dd>
 
       <dt>Dependency</dt>
-      <dd>Change the Python Raw Event Log oracle first, then update the TypeScript shadow port and both test suites together.</dd>
+      <dd>Update the TypeScript Raw Event Log contract intentionally and keep <code>legacy-python-main</code> available as historical comparison if needed.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>Raw Log pending success discard hardening v0.1</code>.</dd>
 
       <dt>Risk Or Unknown</dt>
-      <dd>Hardening only the TypeScript shadow port would create migration drift from the current production Python runtime.</dd>
+      <dd>Hardening the behavior changes replay/debug semantics and should be reviewed as its own runtime contract change.</dd>
 
       <dt>Schema Evolution Impact</dt>
       <dd>No persisted schema change is expected; this is validation behavior around pending in-memory visibility.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active TypeScript shadow-port slice must mirror the current Python runtime foundation, not improve semantics in TypeScript first.</dd>
+      <dd>The active TypeScript cutover changes source ownership and layout only; behavior hardening belongs in a later focused runtime slice.</dd>
     </dl>
 
-    <h2>TypeScript Production Cutover and Python Removal</h2>
+    <h2>Completed: TypeScript Production Cutover and Python Removal</h2>
     <dl>
       <dt>Idea</dt>
       <dd>Promote the TypeScript runtime from shadow implementation to production source of truth, then remove or archive the Python runtime foundation from the main development branch.</dd>
@@ -928,22 +928,22 @@
       <dd>The final migration intent is to make TypeScript the maintained runtime foundation rather than carrying two implementations indefinitely.</dd>
 
       <dt>Source Or Trigger</dt>
-      <dd>Recorded during the TypeScript shadow-port final review follow-up, when the user asked whether Python can be removed and branches renamed.</dd>
+      <dd>Recorded during the final TypeScript migration review follow-up, when the user asked whether Python can be removed and branches renamed.</dd>
 
       <dt>Dependency</dt>
-      <dd>The shadow-port branch must merge cleanly with green TypeScript, Python-oracle, docs, and diff-hygiene checks. A cutover spec must also decide source layout, package entry points, required CI checks, branch protection changes, documentation ownership, and rollback behavior.</dd>
+      <dd>The pre-cutover TypeScript commit had to land cleanly with green TypeScript checks and Python-oracle checks first. The cutover then moved TypeScript to <code>src/</code>/<code>tests/</code>, switched CI to TypeScript-only, and preserved Python on <code>legacy-python-main</code>.</dd>
 
       <dt>Possible Future Slice</dt>
       <dd><code>TypeScript production cutover v0.1</code>.</dd>
 
       <dt>Risk Or Unknown</dt>
-      <dd>Deleting Python on the shadow-port branch would remove the behavior oracle before the production TypeScript entry points, CI policy, and branch protection strategy are explicitly reviewed.</dd>
+      <dd>Deleting Python before a reviewed cutover would remove the behavior oracle before the production TypeScript entry points, CI policy, and branch protection strategy are explicitly reviewed.</dd>
 
       <dt>Schema Evolution Impact</dt>
       <dd>No runtime record schema change is intended. Import paths, package names, and CI job names may change and must be documented as operational migration details.</dd>
 
-      <dt>Do Not Implement Now Because</dt>
-      <dd>The active slice is a shadow port. Production deletion and branch renaming are release-management actions and need their own reviewed cutover plan.</dd>
+      <dt>Status</dt>
+      <dd>Completed locally on <code>mvp-typescript-shadow-port</code>. GitHub default-branch and branch-protection changes remain external release-management steps.</dd>
     </dl>
   </main>
 </body>

@@ -3,42 +3,32 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Test Layout Policy</title>
+  <title>Test Layout</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
-    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    main { max-width: 840px; margin: 0 auto; padding: 44px 24px; }
     h1, h2 { line-height: 1.2; margin: 0 0 12px; }
     h1 { font-size: 2rem; }
-    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    h2 { margin-top: 30px; font-size: 1.2rem; }
     p { margin: 0 0 14px; }
-    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
     ul { padding-left: 22px; }
     code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
   </style>
 </head>
 <body>
   <main>
-    <h1>Test Layout Policy</h1>
+    <h1>Test Layout</h1>
     <p>
-      Tests are created as part of each TDD slice. This project starts with
-      separate unit and integration roots.
+      <code>tests/</code> is the TypeScript Vitest test root. Tests should
+      verify behavior through public module boundaries and keep parity
+      expectations explicit when they preserve Python-era runtime contracts.
     </p>
 
-    <h2>Folders</h2>
+    <h2>Roots</h2>
     <ul>
-      <li><a href="unit/README.html">tests/unit</a>: pure functions, validation, parsing, deterministic routing, and isolated state transitions.</li>
-      <li><a href="integration/README.html">tests/integration</a>: behavior across boundaries such as event intake to raw log append.</li>
+      <li><code>tests/unit/</code>: focused module and boundary behavior tests.</li>
+      <li><code>tests/integration/</code>: cross-boundary runtime flow tests.</li>
     </ul>
-
-    <h2>Rules</h2>
-    <ul>
-      <li>Write only the tests needed for the active functional spec.</li>
-      <li>Prefer fast unit coverage for pure contracts before integration coverage.</li>
-      <li>Integration tests should prove module collaboration without depending on live model providers.</li>
-      <li>Each implementation journal must list the tests run and the result.</li>
-    </ul>
-
-    <p><a href="../docs/wiki/index.html">Back to project wiki</a></p>
   </main>
 </body>
 </html>

@@ -5,7 +5,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
-    files: ['src-ts/**/*.ts', 'tests-ts/**/*.ts', 'vitest.config.ts'],
+    files: ['src/**/*.ts', 'tests/**/*.ts', 'vitest.config.ts'],
     languageOptions: {
       parserOptions: {
         projectService: true,

@@ -22,8 +22,8 @@
 
     <h2>Source Context Read</h2>
     <p>
-      Re-read <a href="../../plan/active-slice.html">the active TypeScript
-      shadow-port slice</a>, <a href="../../plan/typescript-shadow-port-goal.html">the
+      Re-read <a href="../../plan/completed/typescript-runtime-migration.html">the completed TypeScript
+      migration slice</a>, <a href="../../plan/typescript-source-of-truth.html">the
       local goal tracker</a>, Python incident Commit Effects modules,
       Python <code>InMemoryLifeIncidentStore</code>, and the focused Python
       incident lifecycle, interruption, store, and completion-event tests.
@@ -74,7 +74,7 @@
       <li><code>python3 -m unittest tests.unit.test_incident_start_commit tests.unit.test_incident_cancel_commit tests.unit.test_incident_complete_commit tests.unit.test_incident_interrupt_commit tests.unit.test_life_incident_store tests.integration.test_incident_completion_event</code> - passed: 97 tests.</li>
       <li><code>python3 -m unittest discover</code> - passed: 361 tests.</li>
       <li><code>python3 -m compileall src tests</code> - passed.</li>
-      <li><code>python3 -c 'from html.parser import HTMLParser; import pathlib, sys; parser = HTMLParser(); [parser.feed(pathlib.Path(path).read_text()) for path in sys.argv[1:]]' docs/plan/active-slice.html docs/plan/typescript-shadow-port-goal.html docs/develop-journal/index.html docs/develop-journal/2026-05-30/005-typescript-shadow-port-stage-7c-incident-effects.html</code> - passed.</li>
+      <li><code>python3 -c 'from html.parser import HTMLParser; import pathlib, sys; parser = HTMLParser(); [parser.feed(pathlib.Path(path).read_text()) for path in sys.argv[1:]]' docs/plan/active-slice.html docs/plan/typescript-source-of-truth.html docs/develop-journal/index.html docs/develop-journal/2026-05-30/005-typescript-shadow-port-stage-7c-incident-effects.html</code> - passed.</li>
       <li><code>git diff --check</code> - passed.</li>
     </ul>
 
