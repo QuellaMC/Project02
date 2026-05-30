@@ -38,6 +38,15 @@
       <a href="typescript-source-of-truth.html">the TypeScript source-of-truth tracker</a>
       and the 2026-05-29/2026-05-30 development journals.
     </p>
+    <p>
+      Source-of-truth note: the original Notion migration goal framed the work
+      as a shadow port with Python remaining production truth. After the
+      complete port passed review gates, the user approved a two-branch cutover:
+      keep Python on <code>legacy-python-main</code> and make this branch the
+      TypeScript source-of-truth line. This PR must call out that approved
+      exception explicitly because it intentionally exceeds the original
+      shadow-port-only wording.
+    </p>
 
     <h2>Goal</h2>
     <p>

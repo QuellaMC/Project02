@@ -25,14 +25,23 @@ import {
   type IdGenerator,
   type RawEventLogEntry
 } from '../runtime/logging.ts';
-import { validateCommittedIncidentLogEntry } from './incident-lifecycle.ts';
+import {
+  buildIncidentFailure,
+  buildIncidentRejectedResult,
+  buildIncidentStatusResult,
+  copyOptionalIdentityFieldsFromRecord,
+  copyOptionalPayloadIdentityFields,
+  validateCommittedIncidentLogEntry,
+  validateIncidentFailure,
+  type IncidentFailure as LifecycleIncidentFailure,
+  type IncidentSourceIdentity
+} from './incident-lifecycle.ts';
 import {
   asRecord,
   getOwnField,
   rejectExtraKeys,
   requireLiteral,
   requireOneOf,
-  requireOptionalString,
   requireString,
   validateIso8601Timestamp,
   type ValueRecord
@@ -93,17 +102,8 @@ type EventFailureStage = keyof typeof EVENT_FAILURE_CODES_BY_STAGE;
 type FailureStage = ModelFailureStage | EventFailureStage;
 type CompleteEventType = typeof USER_MESSAGE | typeof INCIDENT_COMPLETION;
 
-type SourceIdentity = {
-  trace_id: string;
-  event_id: string;
-  event_type: CompleteEventType;
-};
-
-type IncidentFailure = {
-  stage: FailureStage;
-  code: string;
-  message: string;
-};
+type SourceIdentity = IncidentSourceIdentity<CompleteEventType>;
+type IncidentFailure = LifecycleIncidentFailure<FailureStage>;
 
 export type CompletedIncidentSnapshot = Omit<ActiveIncidentSnapshot, 'status'> & {
   status: 'completed';
@@ -331,7 +331,7 @@ export function commitLifeIncidentComplete(
     );
     completeAfterLogVisible(lifeIncidentCompleteFinalizer, finalizeRequest);
     return {
-      ...buildStatusResult(sourceIdentity, LIFE_INCIDENT_COMPLETED_STATUS),
+      ...buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_COMPLETED_STATUS),
       completed_incident: structuredClone(completedIncident),
       committed_log_entry_id: validatedFinalizeResult.committed_log_entry_id
     };
@@ -354,7 +354,11 @@ export function commitLifeIncidentComplete(
           clock
         })
       );
-      return buildRejectedResult(sourceIdentity, failure);
+      return buildIncidentRejectedResult(
+        sourceIdentity,
+        LIFE_INCIDENT_COMPLETE_REJECTED_STATUS,
+        failure
+      );
     }
     if (error instanceof LifeIncidentCompleteCommitValidationError) {
       const failure = buildModelFailure(
@@ -373,7 +377,11 @@ export function commitLifeIncidentComplete(
           clock
         })
       );
-      return buildRejectedResult(sourceIdentity, failure);
+      return buildIncidentRejectedResult(
+        sourceIdentity,
+        LIFE_INCIDENT_COMPLETE_REJECTED_STATUS,
+        failure
+      );
     }
     throw error;
   }
@@ -436,7 +444,7 @@ export function commitLifeIncidentCompletionEvent(
     );
     completeAfterLogVisible(lifeIncidentCompleteFinalizer, finalizeRequest);
     return {
-      ...buildStatusResult(sourceIdentity, LIFE_INCIDENT_COMPLETED_STATUS),
+      ...buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_COMPLETED_STATUS),
       completed_incident: structuredClone(completedIncident),
       committed_log_entry_id: validatedFinalizeResult.committed_log_entry_id
     };
@@ -457,7 +465,11 @@ export function commitLifeIncidentCompletionEvent(
           clock
         })
       );
-      return buildRejectedResult(sourceIdentity, failure);
+      return buildIncidentRejectedResult(
+        sourceIdentity,
+        LIFE_INCIDENT_COMPLETE_REJECTED_STATUS,
+        failure
+      );
     }
     if (error instanceof LifeIncidentCompleteCommitValidationError) {
       const failure = buildEventFailure(
@@ -474,7 +486,11 @@ export function commitLifeIncidentCompletionEvent(
           clock
         })
       );
-      return buildRejectedResult(sourceIdentity, failure);
+      return buildIncidentRejectedResult(
+        sourceIdentity,
+        LIFE_INCIDENT_COMPLETE_REJECTED_STATUS,
+        failure
+      );
     }
     throw error;
   }
@@ -1018,7 +1034,10 @@ function validateCompleteCommitRequest(
   copyOptionalIdentityFieldsFromRecord(
     request,
     normalized,
-    'LifeIncidentCompleteCommitRequest'
+    {
+      sourceName: 'LifeIncidentCompleteCommitRequest',
+      makeError: (message) => new LifeIncidentCompleteCommitValidationError(message)
+    }
   );
   return normalized;
 }
@@ -1126,45 +1145,24 @@ function extractTrustedLifecycleSourceIdentity(sourceEvent: unknown): SourceIden
   };
 }
 
-function buildStatusResult<Status extends string>(
-  sourceIdentity: SourceIdentity,
-  status: Status
-): {
-  schema_version: SchemaVersion;
-  trace_id: string;
-  event_id: string;
-  event_type: CompleteEventType;
-  status: Status;
-} {
-  return {
-    schema_version: SCHEMA_VERSION,
-    trace_id: sourceIdentity.trace_id,
-    event_id: sourceIdentity.event_id,
-    event_type: sourceIdentity.event_type,
-    status
-  };
-}
-
-function buildRejectedResult(
-  sourceIdentity: SourceIdentity,
-  failure: IncidentFailure
-): Extract<LifeIncidentCompleteCommitResult, { status: typeof LIFE_INCIDENT_COMPLETE_REJECTED_STATUS }> {
-  return {
-    ...buildStatusResult(sourceIdentity, LIFE_INCIDENT_COMPLETE_REJECTED_STATUS),
-    failure: structuredClone(failure)
-  };
-}
-
 function buildModelFailure(stage: ModelFailureStage, code: string, message: string): IncidentFailure {
-  const supportedCodes = MODEL_FAILURE_CODES_BY_STAGE[stage];
-  const normalizedCode = includesString(supportedCodes, code) ? code : fallbackModelCode(stage);
-  return { stage, code: normalizedCode, message };
+  return buildIncidentFailure({
+    stage,
+    code,
+    message,
+    supportedCodes: MODEL_FAILURE_CODES_BY_STAGE[stage],
+    fallbackCode: fallbackModelCode(stage)
+  });
 }
 
 function buildEventFailure(stage: EventFailureStage, code: string, message: string): IncidentFailure {
-  const supportedCodes = EVENT_FAILURE_CODES_BY_STAGE[stage];
-  const normalizedCode = includesString(supportedCodes, code) ? code : fallbackEventCode(stage);
-  return { stage, code: normalizedCode, message };
+  return buildIncidentFailure({
+    stage,
+    code,
+    message,
+    supportedCodes: EVENT_FAILURE_CODES_BY_STAGE[stage],
+    fallbackCode: fallbackEventCode(stage)
+  });
 }
 
 function fallbackModelCode(stage: ModelFailureStage): string {
@@ -1180,53 +1178,25 @@ function fallbackEventCode(stage: EventFailureStage): string {
 }
 
 function validateModelFailure(failure: unknown): IncidentFailure {
-  return validateFailure(
+  return validateIncidentFailure<ModelFailureStage, LifeIncidentCompleteCommitValidationError>(
     failure,
-    MODEL_FAILURE_CODES_BY_STAGE,
-    'incident-complete'
+    {
+      supportedByStage: MODEL_FAILURE_CODES_BY_STAGE,
+      label: 'incident-complete',
+      makeError: (message) => new LifeIncidentCompleteCommitValidationError(message)
+    }
   );
 }
 
 function validateEventFailure(failure: unknown): IncidentFailure {
-  return validateFailure(
+  return validateIncidentFailure<EventFailureStage, LifeIncidentCompleteCommitValidationError>(
     failure,
-    EVENT_FAILURE_CODES_BY_STAGE,
-    'incident-completion-event'
+    {
+      supportedByStage: EVENT_FAILURE_CODES_BY_STAGE,
+      label: 'incident-completion-event',
+      makeError: (message) => new LifeIncidentCompleteCommitValidationError(message)
+    }
   );
-}
-
-function validateFailure(
-  failure: unknown,
-  supportedByStage: Record<string, readonly string[]>,
-  label: string
-): IncidentFailure {
-  const failureRecord = asCommitRecord(failure, 'failure');
-  wrapCommitContractError(() => {
-    rejectExtraKeys(failureRecord, ['stage', 'code', 'message'], 'failure');
-  });
-  const stage = wrapCommitContractError(() =>
-    requireString(getOwnField(failureRecord, 'stage'), 'failure.stage')
-  );
-  if (!Object.hasOwn(supportedByStage, stage)) {
-    throw new LifeIncidentCompleteCommitValidationError(
-      `failure.stage must be a supported ${label} failure stage.`
-    );
-  }
-  const code = wrapCommitContractError(() =>
-    requireString(getOwnField(failureRecord, 'code'), 'failure.code')
-  );
-  if (!includesString(supportedByStage[stage] ?? [], code)) {
-    throw new LifeIncidentCompleteCommitValidationError(
-      'failure.code must be supported for failure.stage.'
-    );
-  }
-  return {
-    stage: stage as FailureStage,
-    code,
-    message: wrapCommitContractError(() =>
-      requireString(getOwnField(failureRecord, 'message'), 'failure.message')
-    )
-  };
 }
 
 function stageCompleteSuccess(
@@ -1320,37 +1290,6 @@ function callCompleteRawLogRequirement(
           ? 'malformed_finalize_result'
           : 'finalize_rejected'
     });
-  }
-}
-
-function copyOptionalPayloadIdentityFields(
-  event: UserMessageRuntimeEvent | IncidentCompletionRuntimeEvent,
-  request: LifeIncidentCompleteCommitRequest | LifeIncidentCompletionEventCommitRequest
-): void {
-  if (event.payload.user_id !== undefined) {
-    request.user_id = event.payload.user_id;
-  }
-  if (event.payload.conversation_id !== undefined) {
-    request.conversation_id = event.payload.conversation_id;
-  }
-}
-
-function copyOptionalIdentityFieldsFromRecord(
-  input: ValueRecord,
-  output: (LifeIncidentCompleteCommitRequest | LifeIncidentCompletionEventCommitRequest) & {
-    commit_time?: string;
-  },
-  sourceName: string
-): void {
-  for (const fieldName of ['user_id', 'conversation_id'] as const) {
-    if (Object.hasOwn(input, fieldName)) {
-      const value = getOwnField(input, fieldName);
-      if (value !== undefined && value !== null) {
-        output[fieldName] = wrapCommitContractError(() =>
-          requireOptionalString(value, `${sourceName}.${fieldName}`)
-        );
-      }
-    }
   }
 }
 
@@ -1508,10 +1447,6 @@ function wrapFinalizerContractError<T>(callback: () => T): T {
     }
     throw error;
   }
-}
-
-function includesString(values: readonly string[], value: string): boolean {
-  return values.includes(value);
 }
 
 function arraysEqual(left: readonly string[], right: readonly string[]): boolean {

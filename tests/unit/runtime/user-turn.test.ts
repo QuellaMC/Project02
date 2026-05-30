@@ -9,7 +9,11 @@ import {
   type RoleModelAdapter,
   type RoleModelInputEnvelope
 } from '../../../src/role-model/loop.ts';
-import { InMemoryRawEventLog, type IdGenerator } from '../../../src/runtime/logging.ts';
+import {
+  InMemoryRawEventLog,
+  type IdGenerator,
+  type RawEventLogEntry
+} from '../../../src/runtime/logging.ts';
 import type { VisibleConversationRecord } from '../../../src/commit-effects/visible-reply.ts';
 import type {
   LivingStatePatchFinalizeRequest,
@@ -95,6 +99,22 @@ class RawLogExposingLivingStatePatchFinalizer {
       committed_log_entry_id: request.committed_log_entry.log_id
     };
   }
+}
+
+function roleModelResultDecision(entry: RawEventLogEntry | undefined): Record<string, unknown> {
+  const roleModelResult = entry?.data['role_model_result'];
+  if (!isRecord(roleModelResult)) {
+    throw new Error('expected role model result record');
+  }
+  const decision = roleModelResult['decision'];
+  if (!isRecord(decision)) {
+    throw new Error('expected role model decision record');
+  }
+  return decision;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function fixedClock(): Date {
@@ -491,10 +511,7 @@ describe('user message turn orchestration', () => {
         visible_reply: { text: 'hello back' }
       }
     });
-    expect(
-      (entries.at(-1)?.data['role_model_result'] as { decision?: Record<string, unknown> })
-        .decision
-    ).not.toHaveProperty('state_patch');
+    expect(roleModelResultDecision(entries.at(-1))).not.toHaveProperty('state_patch');
   });
 
   it('stops before assistant visible reply when living-state patch commit rejects', () => {
@@ -575,10 +592,7 @@ describe('user message turn orchestration', () => {
       'life_incident_started',
       'visible_reply_committed'
     ]);
-    expect(
-      (entries.at(-1)?.data['role_model_result'] as { decision?: Record<string, unknown> })
-        .decision
-    ).not.toHaveProperty('life_action');
+    expect(roleModelResultDecision(entries.at(-1))).not.toHaveProperty('life_action');
   });
 
   it('stops before assistant visible reply when incident start is rejected', () => {

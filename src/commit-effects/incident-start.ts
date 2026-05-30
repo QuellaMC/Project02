@@ -24,13 +24,22 @@ import {
   type IdGenerator,
   type RawEventLogEntry
 } from '../runtime/logging.ts';
-import { validateCommittedIncidentLogEntry } from './incident-lifecycle.ts';
+import {
+  buildIncidentFailure,
+  buildIncidentRejectedResult,
+  buildIncidentStatusResult,
+  copyOptionalIdentityFieldsFromRecord,
+  copyOptionalPayloadIdentityFields,
+  validateCommittedIncidentLogEntry,
+  validateIncidentFailure,
+  type IncidentFailure as LifecycleIncidentFailure,
+  type IncidentSourceIdentity
+} from './incident-lifecycle.ts';
 import {
   asRecord,
   getOwnField,
   rejectExtraKeys,
   requireLiteral,
-  requireOptionalString,
   requireString,
   validateIso8601Timestamp,
   type ValueRecord
@@ -64,16 +73,8 @@ const FAILURE_CODES_BY_STAGE = {
 } as const;
 
 type FailureStage = keyof typeof FAILURE_CODES_BY_STAGE;
-type SourceIdentity = {
-  trace_id: string;
-  event_id: string;
-  event_type: typeof USER_MESSAGE;
-};
-type IncidentFailure = {
-  stage: FailureStage;
-  code: string;
-  message: string;
-};
+type SourceIdentity = IncidentSourceIdentity<typeof USER_MESSAGE>;
+type IncidentFailure = LifecycleIncidentFailure<FailureStage>;
 
 export type LifeIncidentStartCommitRequest = {
   schema_version: SchemaVersion;
@@ -225,7 +226,7 @@ export function commitLifeIncidentStart(
   try {
     const commitRequest = buildLifeIncidentStartCommitRequest(sourceEvent, roleModelResult);
     if (commitRequest === undefined) {
-      return buildStatusResult(sourceIdentity, LIFE_INCIDENT_START_SKIPPED_STATUS);
+      return buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_START_SKIPPED_STATUS);
     }
 
     const commitTime = clockTimestamp(clock);
@@ -288,7 +289,7 @@ export function commitLifeIncidentStart(
       }
     }
     return {
-      ...buildStatusResult(sourceIdentity, LIFE_INCIDENT_STARTED_STATUS),
+      ...buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_STARTED_STATUS),
       started_incident: structuredClone(startedIncident),
       committed_log_entry_id: validatedFinalizeResult.committed_log_entry_id
     };
@@ -322,7 +323,11 @@ export function commitLifeIncidentStart(
           clock
         })
       );
-      return buildRejectedResult(sourceIdentity, failure);
+      return buildIncidentRejectedResult(
+        sourceIdentity,
+        LIFE_INCIDENT_START_REJECTED_STATUS,
+        failure
+      );
     }
 
     if (error instanceof LifeIncidentStartCommitValidationError) {
@@ -341,7 +346,11 @@ export function commitLifeIncidentStart(
           clock
         })
       );
-      return buildRejectedResult(sourceIdentity, failure);
+      return buildIncidentRejectedResult(
+        sourceIdentity,
+        LIFE_INCIDENT_START_REJECTED_STATUS,
+        failure
+      );
     }
     throw error;
   }
@@ -521,7 +530,7 @@ export function buildLifeIncidentStartRejectedLogEntry(
     roleModelResultSnapshot: unknown;
     draftSnapshot?: unknown;
     startedIncidentSnapshot?: unknown;
-    failure: IncidentFailure;
+    failure: unknown;
     idGenerator: IdGenerator;
     clock: Clock;
   }
@@ -652,7 +661,10 @@ function validateStartCommitRequest(
   copyOptionalIdentityFieldsFromRecord(
     request,
     normalized,
-    'LifeIncidentStartCommitRequest'
+    {
+      sourceName: 'LifeIncidentStartCommitRequest',
+      makeError: (message) => new LifeIncidentStartCommitValidationError(message)
+    }
   );
   return normalized;
 }
@@ -740,39 +752,14 @@ function extractTrustedSourceIdentity(sourceEvent: unknown): SourceIdentity {
   };
 }
 
-function buildStatusResult<Status extends string>(
-  sourceIdentity: SourceIdentity,
-  status: Status
-): {
-  schema_version: SchemaVersion;
-  trace_id: string;
-  event_id: string;
-  event_type: typeof USER_MESSAGE;
-  status: Status;
-} {
-  return {
-    schema_version: SCHEMA_VERSION,
-    trace_id: sourceIdentity.trace_id,
-    event_id: sourceIdentity.event_id,
-    event_type: USER_MESSAGE,
-    status
-  };
-}
-
-function buildRejectedResult(
-  sourceIdentity: SourceIdentity,
-  failure: IncidentFailure
-): Extract<LifeIncidentStartCommitResult, { status: typeof LIFE_INCIDENT_START_REJECTED_STATUS }> {
-  return {
-    ...buildStatusResult(sourceIdentity, LIFE_INCIDENT_START_REJECTED_STATUS),
-    failure: structuredClone(failure)
-  };
-}
-
 function buildFailure(stage: FailureStage, code: string, message: string): IncidentFailure {
-  const supportedCodes = FAILURE_CODES_BY_STAGE[stage];
-  const normalizedCode = includesString(supportedCodes, code) ? code : fallbackCode(stage);
-  return { stage, code: normalizedCode, message };
+  return buildIncidentFailure({
+    stage,
+    code,
+    message,
+    supportedCodes: FAILURE_CODES_BY_STAGE[stage],
+    fallbackCode: fallbackCode(stage)
+  });
 }
 
 function fallbackCode(stage: FailureStage): string {
@@ -782,67 +769,11 @@ function fallbackCode(stage: FailureStage): string {
 }
 
 function validateFailure(failure: unknown): IncidentFailure {
-  const failureRecord = asCommitRecord(failure, 'failure');
-  wrapCommitContractError(() => {
-    rejectExtraKeys(failureRecord, ['stage', 'code', 'message'], 'failure');
+  return validateIncidentFailure<FailureStage, LifeIncidentStartCommitValidationError>(failure, {
+    supportedByStage: FAILURE_CODES_BY_STAGE,
+    label: 'incident-start',
+    makeError: (message) => new LifeIncidentStartCommitValidationError(message)
   });
-  const stage = wrapCommitContractError(() =>
-    requireString(getOwnField(failureRecord, 'stage'), 'failure.stage')
-  );
-  if (!Object.hasOwn(FAILURE_CODES_BY_STAGE, stage)) {
-    throw new LifeIncidentStartCommitValidationError(
-      'failure.stage must be a supported incident-start failure stage.'
-    );
-  }
-  const code = wrapCommitContractError(() =>
-    requireString(getOwnField(failureRecord, 'code'), 'failure.code')
-  );
-  const typedStage = stage as FailureStage;
-  if (!includesString(FAILURE_CODES_BY_STAGE[typedStage], code)) {
-    throw new LifeIncidentStartCommitValidationError(
-      'failure.code must be supported for failure.stage.'
-    );
-  }
-  return {
-    stage: typedStage,
-    code,
-    message: wrapCommitContractError(() =>
-      requireString(getOwnField(failureRecord, 'message'), 'failure.message')
-    )
-  };
-}
-
-function includesString(values: readonly string[], value: string): boolean {
-  return values.includes(value);
-}
-
-function copyOptionalPayloadIdentityFields(
-  event: UserMessageRuntimeEvent,
-  request: LifeIncidentStartCommitRequest
-): void {
-  if (event.payload.user_id !== undefined) {
-    request.user_id = event.payload.user_id;
-  }
-  if (event.payload.conversation_id !== undefined) {
-    request.conversation_id = event.payload.conversation_id;
-  }
-}
-
-function copyOptionalIdentityFieldsFromRecord(
-  input: ValueRecord,
-  output: LifeIncidentStartCommitRequest | LifeIncidentStartPrepareRequest,
-  sourceName: string
-): void {
-  for (const fieldName of ['user_id', 'conversation_id'] as const) {
-    if (Object.hasOwn(input, fieldName)) {
-      const value = getOwnField(input, fieldName);
-      if (value !== undefined && value !== null) {
-        output[fieldName] = wrapCommitContractError(() =>
-          requireOptionalString(value, `${sourceName}.${fieldName}`)
-        );
-      }
-    }
-  }
 }
 
 function getStartedAt(snapshot: unknown): unknown {

@@ -302,15 +302,15 @@ describe('InMemoryLifeIncidentStore', () => {
       throw new Error('expected start success');
     }
 
-    const readRequest: Record<string, unknown> = {
+    const readRequest = {
       schema_version: '0.1',
       trace_id: 'trace-start',
       event_id: 'event-start',
       event_type: 'USER_MESSAGE',
       user_id: null,
       conversation_id: null
-    };
+    } as const;
 
-    expect(store.readActiveIncident(readRequest as Parameters<typeof store.readActiveIncident>[0])).toEqual(startResult.started_incident);
+    expect(store.readActiveIncident(readRequest)).toEqual(startResult.started_incident);
   });
 });

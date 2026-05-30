@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-30 - TypeScript PR readiness follow-up</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-30 - TypeScript PR Readiness Follow-Up</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Moved shared incident status, rejection, failure, and optional identity helpers into <code>src/commit-effects/incident-lifecycle.ts</code>.</li>
+      <li>Updated start, cancel, complete, and interrupt commit effects to reuse the shared lifecycle helpers instead of repeating local plumbing.</li>
+      <li>Kept incident-specific validation, snapshot construction, finalizer calls, and policy behavior in the concrete commit modules.</li>
+      <li>Removed the tautological <code>tests/unit/runtime/schema.test.ts</code> constant check.</li>
+      <li>Replaced broad assertion-time casts in user-turn and incident-store tests with local record narrowing or a validated read surface.</li>
+      <li>Changed <code>pnpm lint</code> to pass <code>--max-warnings=0</code> so lint warnings fail local and CI gates.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      PR readiness review found that the full migration is acceptable as a
+      broad PR, but the incident lifecycle modules still had duplicate
+      validation and identity handling. The follow-up reduces drift risk while
+      avoiding runtime behavior changes.
+    </p>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>pnpm check</code> - passed: lint with <code>--max-warnings=0</code>, typecheck, and 18 Vitest files with 173 tests.</li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code> - passed.</li>
+      <li><code>python3 -c "from html.parser import HTMLParser; import pathlib; [HTMLParser().feed(path.read_text()) for path in pathlib.Path('docs').rglob('*.html')]"</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>The large PR scope is intentional for the full TypeScript migration and source-of-truth cutover.</li>
+      <li>The PR body should explicitly explain the user-approved exception from the original Notion shadow-port wording: Python is preserved on <code>legacy-python-main</code>, while this branch becomes the TypeScript source-of-truth line.</li>
+      <li>The removed schema-version test was redundant with behavior tests that validate schema-bearing runtime records. A focused regression test was added for shared failure-stage validation.</li>
+      <li><code>legacy-python-main</code> remains at local <code>main</code> and already points to a signed GitHub merge commit; it does not need rewriting for this TypeScript PR branch.</li>
+      <li>The TypeScript migration branch commits carry SSH signatures. Local verification used an allowed-signers file derived from the configured signing key.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Push the signed TypeScript migration branch and create the full migration
+      pull request.
+    </p>
+  </main>
+</body>
+</html>

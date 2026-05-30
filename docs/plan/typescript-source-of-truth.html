@@ -29,6 +29,14 @@
       <code>src/</code> and <code>tests/</code>. The old Python implementation
       is preserved on <code>legacy-python-main</code>.
     </p>
+    <p>
+      Source-of-truth note: the original Notion goal described a shadow port
+      that would not replace Python production truth. The completed-port review
+      changed the local branch plan with user approval: preserve Python on
+      <code>legacy-python-main</code> and use this branch for the full
+      TypeScript cutover. PR text should mention this approved exception and
+      the two-branch rollback/reference model.
+    </p>
 
     <h2>Stage Status</h2>
     <table>
@@ -109,7 +117,7 @@
     <ul>
       <li><code>pnpm lint</code> - passed.</li>
       <li><code>pnpm typecheck</code> - passed.</li>
-      <li><code>pnpm test</code> - passed: 19 files, 173 tests.</li>
+      <li><code>pnpm test</code> - passed: 18 files, 173 tests after PR-readiness cleanup removed the redundant schema constant test and added shared failure-validation coverage.</li>
       <li><code>python3 -c "from html.parser import HTMLParser; import pathlib; [HTMLParser().feed(path.read_text()) for path in pathlib.Path('docs').rglob('*.html')]"</code> - passed.</li>
       <li><code>git diff --check</code> - passed.</li>
     </ul>

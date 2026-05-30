@@ -22,13 +22,22 @@ import {
   type IdGenerator,
   type RawEventLogEntry
 } from '../runtime/logging.ts';
-import { validateCommittedIncidentLogEntry } from './incident-lifecycle.ts';
+import {
+  buildIncidentFailure,
+  buildIncidentRejectedResult,
+  buildIncidentStatusResult,
+  copyOptionalIdentityFieldsFromRecord,
+  copyOptionalPayloadIdentityFields,
+  validateCommittedIncidentLogEntry,
+  validateIncidentFailure,
+  type IncidentFailure as LifecycleIncidentFailure,
+  type IncidentSourceIdentity
+} from './incident-lifecycle.ts';
 import {
   asRecord,
   getOwnField,
   rejectExtraKeys,
   requireLiteral,
-  requireOptionalString,
   requireString,
   validateIso8601Timestamp,
   type ValueRecord
@@ -67,16 +76,8 @@ const FAILURE_CODES_BY_STAGE = {
 } as const;
 
 type FailureStage = keyof typeof FAILURE_CODES_BY_STAGE;
-type SourceIdentity = {
-  trace_id: string;
-  event_id: string;
-  event_type: typeof USER_MESSAGE;
-};
-type IncidentFailure = {
-  stage: FailureStage;
-  code: string;
-  message: string;
-};
+type SourceIdentity = IncidentSourceIdentity<typeof USER_MESSAGE>;
+type IncidentFailure = LifecycleIncidentFailure<FailureStage>;
 
 export type CancelledIncidentSnapshot = Omit<ActiveIncidentSnapshot, 'status'> & {
   status: 'cancelled';
@@ -238,7 +239,7 @@ export function commitLifeIncidentCancel(
   try {
     const commitRequest = buildLifeIncidentCancelCommitRequest(sourceEvent, roleModelResult);
     if (commitRequest === undefined) {
-      return buildStatusResult(sourceIdentity, LIFE_INCIDENT_CANCEL_SKIPPED_STATUS);
+      return buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_CANCEL_SKIPPED_STATUS);
     }
     lifeActionSnapshot = {
       type: CANCEL_INCIDENT_ACTION,
@@ -322,7 +323,7 @@ export function commitLifeIncidentCancel(
       );
     }
     return {
-      ...buildStatusResult(sourceIdentity, LIFE_INCIDENT_CANCELLED_STATUS),
+      ...buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_CANCELLED_STATUS),
       cancelled_incident: structuredClone(cancelledIncident),
       committed_log_entry_id: validatedFinalizeResult.committed_log_entry_id
     };
@@ -345,7 +346,11 @@ export function commitLifeIncidentCancel(
           clock
         })
       );
-      return buildRejectedResult(sourceIdentity, failure);
+      return buildIncidentRejectedResult(
+        sourceIdentity,
+        LIFE_INCIDENT_CANCEL_REJECTED_STATUS,
+        failure
+      );
     }
     if (error instanceof LifeIncidentCancelCommitValidationError) {
       const failure = buildFailure(
@@ -364,7 +369,11 @@ export function commitLifeIncidentCancel(
           clock
         })
       );
-      return buildRejectedResult(sourceIdentity, failure);
+      return buildIncidentRejectedResult(
+        sourceIdentity,
+        LIFE_INCIDENT_CANCEL_REJECTED_STATUS,
+        failure
+      );
     }
     throw error;
   }
@@ -797,7 +806,10 @@ function validateCancelCommitRequest(commitRequest: unknown): LifeIncidentCancel
   copyOptionalIdentityFieldsFromRecord(
     request,
     normalized,
-    'LifeIncidentCancelCommitRequest'
+    {
+      sourceName: 'LifeIncidentCancelCommitRequest',
+      makeError: (message) => new LifeIncidentCancelCommitValidationError(message)
+    }
   );
   return normalized;
 }
@@ -867,39 +879,14 @@ function extractTrustedSourceIdentity(sourceEvent: unknown): SourceIdentity {
   };
 }
 
-function buildStatusResult<Status extends string>(
-  sourceIdentity: SourceIdentity,
-  status: Status
-): {
-  schema_version: SchemaVersion;
-  trace_id: string;
-  event_id: string;
-  event_type: typeof USER_MESSAGE;
-  status: Status;
-} {
-  return {
-    schema_version: SCHEMA_VERSION,
-    trace_id: sourceIdentity.trace_id,
-    event_id: sourceIdentity.event_id,
-    event_type: USER_MESSAGE,
-    status
-  };
-}
-
-function buildRejectedResult(
-  sourceIdentity: SourceIdentity,
-  failure: IncidentFailure
-): Extract<LifeIncidentCancelCommitResult, { status: typeof LIFE_INCIDENT_CANCEL_REJECTED_STATUS }> {
-  return {
-    ...buildStatusResult(sourceIdentity, LIFE_INCIDENT_CANCEL_REJECTED_STATUS),
-    failure: structuredClone(failure)
-  };
-}
-
 function buildFailure(stage: FailureStage, code: string, message: string): IncidentFailure {
-  const supportedCodes = FAILURE_CODES_BY_STAGE[stage];
-  const normalizedCode = includesString(supportedCodes, code) ? code : fallbackCode(stage);
-  return { stage, code: normalizedCode, message };
+  return buildIncidentFailure({
+    stage,
+    code,
+    message,
+    supportedCodes: FAILURE_CODES_BY_STAGE[stage],
+    fallbackCode: fallbackCode(stage)
+  });
 }
 
 function fallbackCode(stage: FailureStage): string {
@@ -909,63 +896,11 @@ function fallbackCode(stage: FailureStage): string {
 }
 
 function validateFailure(failure: unknown): IncidentFailure {
-  const failureRecord = asCommitRecord(failure, 'failure');
-  wrapCommitContractError(() => {
-    rejectExtraKeys(failureRecord, ['stage', 'code', 'message'], 'failure');
+  return validateIncidentFailure<FailureStage, LifeIncidentCancelCommitValidationError>(failure, {
+    supportedByStage: FAILURE_CODES_BY_STAGE,
+    label: 'incident-cancel',
+    makeError: (message) => new LifeIncidentCancelCommitValidationError(message)
   });
-  const stage = wrapCommitContractError(() =>
-    requireString(getOwnField(failureRecord, 'stage'), 'failure.stage')
-  );
-  if (!Object.hasOwn(FAILURE_CODES_BY_STAGE, stage)) {
-    throw new LifeIncidentCancelCommitValidationError(
-      'failure.stage must be a supported incident-cancel failure stage.'
-    );
-  }
-  const typedStage = stage as FailureStage;
-  const code = wrapCommitContractError(() =>
-    requireString(getOwnField(failureRecord, 'code'), 'failure.code')
-  );
-  if (!includesString(FAILURE_CODES_BY_STAGE[typedStage], code)) {
-    throw new LifeIncidentCancelCommitValidationError(
-      'failure.code must be supported for failure.stage.'
-    );
-  }
-  return {
-    stage: typedStage,
-    code,
-    message: wrapCommitContractError(() =>
-      requireString(getOwnField(failureRecord, 'message'), 'failure.message')
-    )
-  };
-}
-
-function copyOptionalPayloadIdentityFields(
-  event: UserMessageRuntimeEvent,
-  request: LifeIncidentCancelCommitRequest
-): void {
-  if (event.payload.user_id !== undefined) {
-    request.user_id = event.payload.user_id;
-  }
-  if (event.payload.conversation_id !== undefined) {
-    request.conversation_id = event.payload.conversation_id;
-  }
-}
-
-function copyOptionalIdentityFieldsFromRecord(
-  input: ValueRecord,
-  output: LifeIncidentCancelCommitRequest | LifeIncidentCancelPrepareRequest,
-  sourceName: string
-): void {
-  for (const fieldName of ['user_id', 'conversation_id'] as const) {
-    if (Object.hasOwn(input, fieldName)) {
-      const value = getOwnField(input, fieldName);
-      if (value !== undefined && value !== null) {
-        output[fieldName] = wrapCommitContractError(() =>
-          requireOptionalString(value, `${sourceName}.${fieldName}`)
-        );
-      }
-    }
-  }
 }
 
 function copyOptionalIncidentFields(
@@ -1147,10 +1082,6 @@ function wrapFinalizerContractError<T>(callback: () => T): T {
     }
     throw error;
   }
-}
-
-function includesString(values: readonly string[], value: string): boolean {
-  return values.includes(value);
 }
 
 function arraysEqual(left: readonly string[], right: readonly string[]): boolean {

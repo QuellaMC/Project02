@@ -16,13 +16,22 @@ import {
   type IdGenerator,
   type RawEventLogEntry
 } from '../runtime/logging.ts';
-import { validateCommittedIncidentLogEntry } from './incident-lifecycle.ts';
+import {
+  buildIncidentFailure,
+  buildIncidentRejectedResult,
+  buildIncidentStatusResult,
+  copyOptionalIdentityFieldsFromRecord,
+  copyOptionalPayloadIdentityFields,
+  validateCommittedIncidentLogEntry,
+  validateIncidentFailure,
+  type IncidentFailure as LifecycleIncidentFailure,
+  type IncidentSourceIdentity
+} from './incident-lifecycle.ts';
 import {
   asRecord,
   getOwnField,
   rejectExtraKeys,
   requireLiteral,
-  requireOptionalString,
   requireString,
   validateIso8601Timestamp,
   type ValueRecord
@@ -65,16 +74,8 @@ const FAILURE_CODES_BY_STAGE = {
 } as const;
 
 type FailureStage = keyof typeof FAILURE_CODES_BY_STAGE;
-type SourceIdentity = {
-  trace_id: string;
-  event_id: string;
-  event_type: typeof USER_MESSAGE;
-};
-type IncidentFailure = {
-  stage: FailureStage;
-  code: string;
-  message: string;
-};
+type SourceIdentity = IncidentSourceIdentity<typeof USER_MESSAGE>;
+type IncidentFailure = LifecycleIncidentFailure<FailureStage>;
 type PolicyOutcome =
   | {
       status: typeof LIFE_INCIDENT_CONTINUED_IN_BACKGROUND_STATUS;
@@ -235,7 +236,7 @@ export function commitLifeIncidentInterruption(
     const event = validateSourceEvent(sourceEvent);
     activeIncident = readActiveIncidentForInterruption(event, activeIncidentSource);
     if (activeIncident === undefined) {
-      return buildStatusResult(sourceIdentity, LIFE_INCIDENT_INTERRUPT_SKIPPED_STATUS);
+      return buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_INTERRUPT_SKIPPED_STATUS);
     }
 
     if (activeIncident.interrupt_policy === 'interruptible') {
@@ -280,15 +281,16 @@ export function commitLifeIncidentInterruption(
         if (error instanceof LifeIncidentInterruptFinalizerError) {
           // Python parity: after success visibility, surface the completion
           // failure to the caller without appending a contradictory rejected log.
-          return buildRejectedResult(
+          return buildIncidentRejectedResult(
             sourceIdentity,
+            LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS,
             buildFailure(LIFE_INCIDENT_INTERRUPT_FINALIZE_STAGE, error.code, error.message)
           );
         }
         throw error;
       }
       return {
-        ...buildStatusResult(sourceIdentity, LIFE_INCIDENT_INTERRUPTED_STATUS),
+        ...buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_INTERRUPTED_STATUS),
         interrupted_incident: structuredClone(interruptedIncident),
         committed_log_entry_id: validatedFinalizeResult.committed_log_entry_id
       };
@@ -332,7 +334,11 @@ export function commitLifeIncidentInterruption(
           clock
         })
       );
-      return buildRejectedResult(sourceIdentity, failure);
+      return buildIncidentRejectedResult(
+        sourceIdentity,
+        LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS,
+        failure
+      );
     }
     if (error instanceof LifeIncidentInterruptCommitValidationError) {
       const failure = buildFailure(
@@ -349,7 +355,11 @@ export function commitLifeIncidentInterruption(
           clock
         })
       );
-      return buildRejectedResult(sourceIdentity, failure);
+      return buildIncidentRejectedResult(
+        sourceIdentity,
+        LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS,
+        failure
+      );
     }
     throw error;
   }
@@ -727,7 +737,10 @@ function validateInterruptCommitRequest(
   copyOptionalIdentityFieldsFromRecord(
     request,
     normalized,
-    'LifeIncidentInterruptCommitRequest'
+    {
+      sourceName: 'LifeIncidentInterruptCommitRequest',
+      makeError: (message) => new LifeIncidentInterruptCommitValidationError(message)
+    }
   );
   return normalized;
 }
@@ -792,7 +805,7 @@ function appendPolicyOutcomeLog(
     throw error;
   }
   return {
-    ...buildStatusResult(extractTrustedSourceIdentity(event), status),
+    ...buildIncidentStatusResult(extractTrustedSourceIdentity(event), status),
     active_incident: structuredClone(activeIncident),
     committed_log_entry_id: committedLogEntry.log_id
   };
@@ -841,39 +854,14 @@ function extractTrustedSourceIdentity(sourceEvent: unknown): SourceIdentity {
   };
 }
 
-function buildStatusResult<Status extends string>(
-  sourceIdentity: SourceIdentity,
-  status: Status
-): {
-  schema_version: SchemaVersion;
-  trace_id: string;
-  event_id: string;
-  event_type: typeof USER_MESSAGE;
-  status: Status;
-} {
-  return {
-    schema_version: SCHEMA_VERSION,
-    trace_id: sourceIdentity.trace_id,
-    event_id: sourceIdentity.event_id,
-    event_type: USER_MESSAGE,
-    status
-  };
-}
-
-function buildRejectedResult(
-  sourceIdentity: SourceIdentity,
-  failure: IncidentFailure
-): Extract<LifeIncidentInterruptCommitResult, { status: typeof LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS }> {
-  return {
-    ...buildStatusResult(sourceIdentity, LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS),
-    failure: structuredClone(failure)
-  };
-}
-
 function buildFailure(stage: FailureStage, code: string, message: string): IncidentFailure {
-  const supportedCodes = FAILURE_CODES_BY_STAGE[stage];
-  const normalizedCode = includesString(supportedCodes, code) ? code : fallbackCode(stage);
-  return { stage, code: normalizedCode, message };
+  return buildIncidentFailure({
+    stage,
+    code,
+    message,
+    supportedCodes: FAILURE_CODES_BY_STAGE[stage],
+    fallbackCode: fallbackCode(stage)
+  });
 }
 
 function fallbackCode(stage: FailureStage): string {
@@ -883,34 +871,11 @@ function fallbackCode(stage: FailureStage): string {
 }
 
 function validateFailure(failure: unknown): IncidentFailure {
-  const failureRecord = asCommitRecord(failure, 'failure');
-  wrapCommitContractError(() => {
-    rejectExtraKeys(failureRecord, ['stage', 'code', 'message'], 'failure');
+  return validateIncidentFailure<FailureStage, LifeIncidentInterruptCommitValidationError>(failure, {
+    supportedByStage: FAILURE_CODES_BY_STAGE,
+    label: 'incident-interrupt',
+    makeError: (message) => new LifeIncidentInterruptCommitValidationError(message)
   });
-  const stage = wrapCommitContractError(() =>
-    requireString(getOwnField(failureRecord, 'stage'), 'failure.stage')
-  );
-  if (!Object.hasOwn(FAILURE_CODES_BY_STAGE, stage)) {
-    throw new LifeIncidentInterruptCommitValidationError(
-      'failure.stage must be a supported incident-interrupt failure stage.'
-    );
-  }
-  const typedStage = stage as FailureStage;
-  const code = wrapCommitContractError(() =>
-    requireString(getOwnField(failureRecord, 'code'), 'failure.code')
-  );
-  if (!includesString(FAILURE_CODES_BY_STAGE[typedStage], code)) {
-    throw new LifeIncidentInterruptCommitValidationError(
-      'failure.code must be supported for failure.stage.'
-    );
-  }
-  return {
-    stage: typedStage,
-    code,
-    message: wrapCommitContractError(() =>
-      requireString(getOwnField(failureRecord, 'message'), 'failure.message')
-    )
-  };
 }
 
 function stageInterruptSuccess(
@@ -988,35 +953,6 @@ function callInterruptRawLogRequirement(
           ? 'malformed_finalize_result'
           : 'finalize_rejected'
     });
-  }
-}
-
-function copyOptionalPayloadIdentityFields(
-  event: UserMessageRuntimeEvent,
-  request: LifeIncidentInterruptCommitRequest
-): void {
-  if (event.payload.user_id !== undefined) {
-    request.user_id = event.payload.user_id;
-  }
-  if (event.payload.conversation_id !== undefined) {
-    request.conversation_id = event.payload.conversation_id;
-  }
-}
-
-function copyOptionalIdentityFieldsFromRecord(
-  input: ValueRecord,
-  output: LifeIncidentInterruptCommitRequest & { commit_time?: string },
-  sourceName: string
-): void {
-  for (const fieldName of ['user_id', 'conversation_id'] as const) {
-    if (Object.hasOwn(input, fieldName)) {
-      const value = getOwnField(input, fieldName);
-      if (value !== undefined && value !== null) {
-        output[fieldName] = wrapCommitContractError(() =>
-          requireOptionalString(value, `${sourceName}.${fieldName}`)
-        );
-      }
-    }
   }
 }
 
@@ -1173,10 +1109,6 @@ function wrapFinalizerContractError<T>(callback: () => T): T {
     }
     throw error;
   }
-}
-
-function includesString(values: readonly string[], value: string): boolean {
-  return values.includes(value);
 }
 
 function arraysEqual(left: readonly string[], right: readonly string[]): boolean {

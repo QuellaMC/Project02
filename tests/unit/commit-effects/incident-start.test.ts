@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   LifeIncidentStartFinalizerError,
+  buildLifeIncidentStartRejectedLogEntry,
   buildLifeIncidentStartCommitRequest,
   commitLifeIncidentStart
 } from '../../../src/commit-effects/incident-start.ts';
@@ -151,5 +152,23 @@ describe('life incident start commit effects', () => {
       );
     }).toThrow('storage unavailable');
     expect(rawLog.query({ trace_id: 'trace-1' }).entries).toEqual([]);
+  });
+
+  it('maps inherited failure stage names to commit validation errors', () => {
+    expect(() => {
+      buildLifeIncidentStartRejectedLogEntry(
+        normalizedUserMessage(),
+        {
+          roleModelResultSnapshot: roleModelResultWithIncident(),
+          failure: {
+            stage: '__proto__',
+            code: 'malformed_commit_input',
+            message: 'bad stage'
+          },
+          idGenerator: (kind) => `${kind}-generated`,
+          clock: () => new Date('2026-05-19T09:00:00Z')
+        }
+      );
+    }).toThrow(/supported incident-start failure stage/);
   });
 });

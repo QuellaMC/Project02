@@ -62,6 +62,17 @@ type ScopedRequest = {
   user_id?: string;
   conversation_id?: string;
 };
+type NullableIdentityFields = {
+  user_id?: string | null;
+  conversation_id?: string | null;
+};
+type NullableActiveIncidentRequest = Omit<ActiveIncidentRequest, 'user_id' | 'conversation_id'> &
+  NullableIdentityFields;
+type NullableInterruptedIncidentRequest = Omit<
+  InterruptedIncidentRequest,
+  'user_id' | 'conversation_id'
+> &
+  NullableIdentityFields;
 
 export class InMemoryLifeIncidentStore {
   readonly #rawEventLog: CommittedSuccessRawEventLog;
@@ -280,14 +291,14 @@ export class InMemoryLifeIncidentStore {
     );
   }
 
-  readActiveIncident(request: ActiveIncidentRequest): ActiveIncidentSnapshot | undefined {
+  readActiveIncident(request: NullableActiveIncidentRequest): ActiveIncidentSnapshot | undefined {
     const validatedRequest = validateActiveIncidentRequest(dropNullIdentityFields(request));
     const incident = this.#activeIncidentsByScope.get(scopeKeyFromRequest(validatedRequest));
     return incident === undefined ? undefined : structuredClone(incident);
   }
 
   readInterruptedIncident(
-    request: InterruptedIncidentRequest
+    request: NullableInterruptedIncidentRequest
   ): InterruptedIncidentSnapshot | undefined {
     const validatedRequest = validateInterruptedIncidentRequest(dropNullIdentityFields(request));
     const incident = this.#interruptedIncidentsByScope.get(scopeKeyFromRequest(validatedRequest));
@@ -499,9 +510,9 @@ function normalizeFinalizerCode(code: string): string {
   return code === 'finalize_rejected' ? code : 'malformed_finalize_result';
 }
 
-function dropNullIdentityFields<RequestType extends ActiveIncidentRequest | InterruptedIncidentRequest>(
-  request: RequestType
-): RequestType {
+function dropNullIdentityFields(
+  request: NullableActiveIncidentRequest | NullableInterruptedIncidentRequest
+): ValueRecord {
   const record = asRecord(request, 'IncidentReadRequest');
   const output: ValueRecord = {};
   for (const [key, value] of Object.entries(record)) {
@@ -510,7 +521,7 @@ function dropNullIdentityFields<RequestType extends ActiveIncidentRequest | Inte
     }
     output[key] = value;
   }
-  return output as RequestType;
+  return output;
 }
 
 function throwRawEventLogMismatch(ErrorType: FinalizerErrorConstructor): never {

@@ -36,7 +36,10 @@
       The shadow port was complete and the final parity blockers were fixed in
       the prior commit. The user chose a two-branch model: keep the Python
       implementation on a legacy branch and convert the TypeScript branch into
-      the maintained runtime line.
+      the maintained runtime line. This intentionally changes the local branch
+      plan from the original Notion shadow-port-only wording; the PR body must
+      call out that approved exception rather than presenting it as the original
+      migration scope.
     </p>
 
     <h2>Tests Run</h2>
@@ -54,6 +57,7 @@
     <h2>Review Notes</h2>
     <ul>
       <li>The cutover intentionally changes repository ownership and layout, not runtime behavior.</li>
+      <li>The original Notion migration goal remains useful history for stage scope, but the final PR uses the user-approved two-branch cutover as the local implementation decision.</li>
       <li>Historical stage journals still mention shadow-port paths and Python oracle commands because they describe the pre-cutover migration process.</li>
       <li>Review agents found no layout, CI, or deletion blockers. The doc review follow-up kept an old tracker compatibility page and redirected historical stage links to a completed migration page.</li>
       <li>Future work should add production entry points only when a concrete caller, CLI, service, or package consumer requires them.</li>
