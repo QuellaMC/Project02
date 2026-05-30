@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-30 - TypeScript shadow port Stage 7A</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-30 - TypeScript Shadow Port Stage 7A</h1>
+
+    <h2>Source Context Read</h2>
+    <p>
+      Re-read the Notion migration goal, <a href="../../plan/active-slice.html">the active TypeScript shadow-port slice</a>,
+      <a href="../../plan/typescript-shadow-port-goal.html">the local goal tracker</a>,
+      Python <code>src/commit_effects/visible_reply.py</code>, Python visible-reply
+      unit and integration tests, and the current TypeScript runtime contracts,
+      raw logging, and Stage 6 role-model result types.
+    </p>
+
+    <h2>Subagent Findings</h2>
+    <ul>
+      <li>Stage 7 analysis agents agreed that the safe continuation is Stage 7A: visible conversation Commit Effects only.</li>
+      <li>Living-state patch commits, incident lifecycle commits, incident completion event commits, interruption commits, atomic finalizers, and user-turn orchestration were judged too broad for the same coherent stage.</li>
+      <li>The required Stage 7A test matrix covers exact visible output/message shapes, committed/rejected raw logs, validation failure codes, trusted identity behavior, append ordering, append failures, deterministic ID/clock behavior, and copy safety.</li>
+    </ul>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Added <code>src-ts/commit-effects/visible-reply.ts</code> for TypeScript shadow visible conversation Commit Effects.</li>
+      <li>Added unit tests in <code>tests-ts/unit/commit-effects/visible-reply.test.ts</code>.</li>
+      <li>Added integration tests in <code>tests-ts/integration/visible-reply-commit.test.ts</code>.</li>
+      <li>Updated <a href="../../plan/active-slice.html">active-slice.html</a> with Stage 7A scope, minimal schema, functional requirement, acceptance criteria, test plan, and boundaries.</li>
+    </ul>
+
+    <h2>TypeScript-Native Decisions</h2>
+    <ul>
+      <li>Use camelCase TypeScript exports while preserving Python string constants, log kinds, statuses, stages, and payload shapes exactly at runtime.</li>
+      <li>Keep visible side effects behind an injected <code>VisibleConversationLog</code> interface and raw-log writes behind an injected <code>RawEventLog</code> interface.</li>
+      <li>Preserve Python append ordering: raw committed/rejected log first, visible conversation append second.</li>
+      <li>Normalize contract validation errors into <code>CommitValidationError</code> with Python-compatible failure codes and visible rejection messages.</li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>pnpm test -- tests-ts/unit/commit-effects/visible-reply.test.ts tests-ts/integration/visible-reply-commit.test.ts</code> - failed before implementation because the module did not exist; passed after implementation: 11 files, 99 tests.</li>
+      <li><code>pnpm test -- tests-ts/unit/commit-effects/visible-reply.test.ts tests-ts/integration/visible-reply-commit.test.ts</code> after review fixes - passed: 11 files, 105 tests.</li>
+      <li><code>pnpm typecheck</code> - passed after strict type fixes.</li>
+      <li><code>pnpm lint</code> - passed after formatting callback bodies.</li>
+      <li><code>python3 -m unittest tests.unit.test_visible_reply_commit tests.integration.test_visible_reply_commit</code> - passed: 25 tests.</li>
+      <li><code>pnpm test</code> after review fixes - passed: 11 files, 105 tests.</li>
+      <li><code>python3 -m unittest discover</code> after review fixes - passed: 361 tests.</li>
+      <li>Changed HTML docs parsed with <code>python3 -m html.parser</code>; <code>git diff --check</code> passed.</li>
+    </ul>
+
+    <h2>Review Gate</h2>
+    <p>
+      Stage 7A initially received P2 findings for append-time
+      <code>CommitValidationError</code> propagation, missing extra-key and
+      validation-matrix regressions, and stale plan wording. Those were patched.
+      Fresh re-review agents Huygens the 2nd
+      (<code>019e7545-8b2c-78e2-8c4d-f0bf76ba2008</code>), Schrodinger the 2nd
+      (<code>019e7545-8c04-70c0-9c70-0d9f6662767c</code>), and Planck the 2nd
+      (<code>019e7545-8cfa-7c71-a68d-cd272bb3b8cc</code>) passed with no
+      P0/P1/P2 findings. Stage 7A is review-gate clean. Stage 7A is not full
+      Stage 7; it is the visible conversation subset only.
+    </p>
+
+    <h2>Final Review Follow-Up</h2>
+    <p>
+      The first full final-review gate found a P2 from Dalton the 2nd:
+      malformed-output snapshot logic had drifted into duplicate Python-like
+      repr implementations across Stage 6 and Stage 7A. The fix extracted
+      shared <code>snapshotRawValue</code> behavior into
+      <code>src-ts/runtime/logging.ts</code> and routed role-model and
+      visible-reply rejected snapshots through that helper.
+    </p>
+    <p>
+      A later final-review pass found a P2 from Erdos the 2nd: the shared
+      helper still needed to handle nested uncloneable values and cycles without
+      throwing or recursing forever. The helper now builds clone-safe recursive
+      snapshots for plain records and nested arrays, converts functions and
+      cycles to explicit <code>raw_value</code> evidence, and keeps top-level
+      primitive snapshots Python-like. Regression coverage was added to
+      <code>tests-ts/unit/role-model/loop.test.ts</code> and
+      <code>tests-ts/unit/commit-effects/visible-reply.test.ts</code>.
+    </p>
+    <p>
+      Copernicus the 2nd separately flagged that the durable docs did not yet
+      record the final-review fixes. This section and the goal tracker update
+      are the documentation fix. Fresh final-review agents Newton the 2nd
+      (<code>019e755c-037e-7033-ba0b-5d7e4a82e77d</code>), Kuhn the 2nd
+      (<code>019e755c-283f-7350-84e7-29dd2d6a774d</code>), and Locke the 2nd
+      (<code>019e755c-3d72-79e2-ad25-d7159035f814</code>) passed with no
+      P0/P1/P2 findings after the snapshot-helper and documentation fixes.
+    </p>
+
+    <h2>Known Gaps and Next Action</h2>
+    <p>
+      Living-state patch commits, incident lifecycle commits, incident completion
+      event commits, interruption commits, and user-turn orchestration remain
+      dependency-gated future work. The next recommended slice is Stage 7B:
+      living-state patch Commit Effects with atomic finalizer visibility, unless
+      a smaller documentation-only closure is preferred for this migration run.
+    </p>
+  </main>
+</body>
+</html>

@@ -24,7 +24,7 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while <a href="active-slice.html">MVP-021</a> is active.
+      Do not implement these while the <a href="active-slice.html">TypeScript shadow-port slice</a> is active.
     </p>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
@@ -753,7 +753,7 @@
       <dd>Likely adds concrete persistence concerns such as storage keys, ordering, and transaction boundaries.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-021 slice introduces only an in-memory interrupted-incident slot for interruptible transitions and query-visible interruption policy logs, with no concrete database.</dd>
+      <dd>The completed MVP-021 slice introduced only an in-memory interrupted-incident slot for interruptible transitions and query-visible interruption policy logs, with no concrete database. The active TypeScript shadow-port slice must not broaden persistence behavior.</dd>
     </dl>
 
     <h2>Shared Visible Conversation Message Contract</h2>
@@ -780,7 +780,7 @@
       <dd>Likely adds a shared <code>role</code> / <code>message_id</code> visible transcript contract while preserving compatibility with existing assistant output records.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active MVP-021 slice should only add the minimal interruption policy boundary without unifying durable visible-message schemas.</dd>
+      <dd>The completed MVP-021 slice only added the minimal interruption policy boundary. The active TypeScript shadow-port slice should preserve existing visible-message contracts rather than unify them.</dd>
     </dl>
 
     <h2>Recent Source Backed By Visible Conversation Records</h2>
@@ -836,6 +836,114 @@
 
       <dt>Do Not Implement Now Because</dt>
       <dd>MVP-005 has no concrete storage, worker, scheduler, or replay boundary.</dd>
+    </dl>
+
+    <h2>Completed: TypeScript Shadow Port Remaining Commit Effects</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Port the remaining TypeScript shadow Commit Effects modules after Stage 7B: incident lifecycle helper, incident start/cancel/complete commits, incident completion event commit, and interruption commit.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The Notion migration goal calls for a serious TypeScript shadow foundation, but Stage 7B intentionally covers only living-state patch commits.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Recorded while closing the Stage 7B living-state patch Commit Effects slice.</dd>
+
+      <dt>Dependency</dt>
+      <dd>Stage 7B living-state commit parity must be tested, typecheck-clean, and review-gate clean first.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>TypeScript shadow port Stage 7C - incident Commit Effects</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Incident commits share atomic finalizer visibility patterns but have different lifecycle invariants; porting them in the same slice as living-state commits would make review too broad.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>No new schema is intended; the TypeScript port should preserve the existing Python incident commit and raw-log shapes.</dd>
+
+      <dt>Status</dt>
+      <dd>Completed in Stage 7C. Kept here as historical parking-lot context; do not treat this as open future work.</dd>
+    </dl>
+
+    <h2>Completed: TypeScript Shadow Port User Turn Orchestration</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Port <code>run_user_message_turn</code> after all needed TypeScript Commit Effects boundaries exist and are review-gate clean.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>User-turn orchestration is the eventual integration point for intake, visible user message projection, role-model calls, optional write-action commits, and visible replies.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Recorded while keeping Stage 7B narrow and avoiding a premature Stage 8 port.</dd>
+
+      <dt>Dependency</dt>
+      <dd>TypeScript Stage 7 Commit Effects parity must be complete enough to support one-write-action orchestration without inventing new behavior.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>TypeScript shadow port Stage 8 - user turn orchestration</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Orchestration can hide ordering drift between user visible messages, role-model logs, state commits, incident commits, and assistant visible replies if dependencies are not proven first.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>No new schema is intended; the TypeScript port should preserve Python user-turn result, stopped-result, failure, and raw-log ordering contracts.</dd>
+
+      <dt>Status</dt>
+      <dd>Completed in Stage 8. Kept here as historical parking-lot context; do not treat this as open future work.</dd>
+    </dl>
+
+    <h2>Raw Log Pending Success Discard Hardening</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Require <code>discard_committed_success_entry</code> to match the pending success entry data before removing it.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>A forged atomic success entry with the same <code>log_id</code> but different data can currently discard a staged success entry.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered during the TypeScript shadow-port Stage 3 review. The TypeScript port preserves current Python discard-by-<code>log_id</code> behavior for parity.</dd>
+
+      <dt>Dependency</dt>
+      <dd>Change the Python Raw Event Log oracle first, then update the TypeScript shadow port and both test suites together.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Raw Log pending success discard hardening v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Hardening only the TypeScript shadow port would create migration drift from the current production Python runtime.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>No persisted schema change is expected; this is validation behavior around pending in-memory visibility.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active TypeScript shadow-port slice must mirror the current Python runtime foundation, not improve semantics in TypeScript first.</dd>
+    </dl>
+
+    <h2>TypeScript Production Cutover and Python Removal</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Promote the TypeScript runtime from shadow implementation to production source of truth, then remove or archive the Python runtime foundation from the main development branch.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The final migration intent is to make TypeScript the maintained runtime foundation rather than carrying two implementations indefinitely.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Recorded during the TypeScript shadow-port final review follow-up, when the user asked whether Python can be removed and branches renamed.</dd>
+
+      <dt>Dependency</dt>
+      <dd>The shadow-port branch must merge cleanly with green TypeScript, Python-oracle, docs, and diff-hygiene checks. A cutover spec must also decide source layout, package entry points, required CI checks, branch protection changes, documentation ownership, and rollback behavior.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>TypeScript production cutover v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Deleting Python on the shadow-port branch would remove the behavior oracle before the production TypeScript entry points, CI policy, and branch protection strategy are explicitly reviewed.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>No runtime record schema change is intended. Import paths, package names, and CI job names may change and must be documented as operational migration details.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active slice is a shadow port. Production deletion and branch renaming are release-management actions and need their own reviewed cutover plan.</dd>
     </dl>
   </main>
 </body>

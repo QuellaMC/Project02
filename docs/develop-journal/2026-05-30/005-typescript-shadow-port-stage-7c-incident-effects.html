@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-30 - TypeScript shadow port Stage 7C</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-30 - TypeScript Shadow Port Stage 7C</h1>
+
+    <h2>Source Context Read</h2>
+    <p>
+      Re-read <a href="../../plan/active-slice.html">the active TypeScript
+      shadow-port slice</a>, <a href="../../plan/typescript-shadow-port-goal.html">the
+      local goal tracker</a>, Python incident Commit Effects modules,
+      Python <code>InMemoryLifeIncidentStore</code>, and the focused Python
+      incident lifecycle, interruption, store, and completion-event tests.
+      Stages 1-6, Stage 7A, and Stage 7B were already review-gate clean before
+      this stage started.
+    </p>
+
+    <h2>Subagent Findings</h2>
+    <ul>
+      <li>The test-oracle agent identified start, cancel, complete, incident-completion-event, interruption, and in-memory store behavior as the Stage 7C parity surface.</li>
+      <li>The risk agent called out atomic raw-log visibility, post-visible finalizer failure differences, active-incident mismatch handling, and no-user-turn-before-review as the highest-risk points.</li>
+      <li>The tooling agent found no new dependency or configuration need; existing TypeScript, Vitest, ESLint, and Python unittest checks cover this stage.</li>
+    </ul>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Added TypeScript shadow Commit Effects for incident start, cancel, complete, incident-completion-event, and interruption under <code>src-ts/commit-effects/</code>.</li>
+      <li>Added <code>src-ts/commit-effects/incident-lifecycle.ts</code> for shared committed raw-log entry validation across incident lifecycle modules.</li>
+      <li>Added <code>src-ts/character/state/incidents.ts</code> for the scoped in-memory incident store/finalizer boundary.</li>
+      <li>Added focused TypeScript unit tests for incident start, cancel, complete, interruption, and in-memory store behavior.</li>
+      <li>Added <code>tests-ts/integration/incident-completion-event.test.ts</code> to prove an incident completion event completes an active incident without role-model data.</li>
+      <li>Fixed the start post-visible completion behavior so a completion hook failure after success-log visibility keeps the successful start result and does not append a contradictory rejection.</li>
+      <li>Fixed class-method finalizer requirement calls in cancel, complete, and interruption commits by preserving the finalizer receiver.</li>
+      <li>Fixed cancel finalizer runtime-error parity so unexpected finalizer failures return <code>life_incident_cancel_rejected</code> and append a rejected audit log instead of escaping.</li>
+      <li>Fixed direct incident-store finalizer validation so malformed committed raw-log entries map to <code>malformed_finalize_result</code>, matching the Python store boundary.</li>
+      <li>Fixed incident-store reads so explicit <code>null</code> identity fields are dropped before read validation, preserving Python default-scope parity.</li>
+      <li>Fixed incident-start finalizer parity so unexpected <code>requireRawEventLog</code> and <code>finalizeLifeIncidentStart</code> failures propagate without appending rejected lifecycle logs; only raw-log query validation is converted to <code>malformed_finalize_result</code>.</li>
+    </ul>
+
+    <h2>TypeScript-Native Decisions</h2>
+    <ul>
+      <li>Keep runtime records in snake_case while exposing TypeScript structural interfaces with camelCase method names.</li>
+      <li>Use explicit committed, skipped, protected/background, and rejected result unions rather than broad untyped objects.</li>
+      <li>Use injected clock and ID generators for deterministic commit times and raw-log IDs.</li>
+      <li>Use <code>InMemoryRawEventLog</code> atomic expose/confirm/discard behavior for committed success logs instead of appending success entries directly.</li>
+      <li>Use handwritten validators and existing contract helpers to preserve Python extra-key rejection and runtime validation semantics.</li>
+    </ul>
+
+    <h2>Tests Run Before Review Gate</h2>
+    <ul>
+      <li><code>pnpm test -- tests-ts/unit/commit-effects/incident-complete.test.ts</code> - failed before implementation because the module did not exist; passed after implementation.</li>
+      <li><code>pnpm test -- tests-ts/unit/commit-effects/incident-interrupt.test.ts</code> - failed before implementation because the module did not exist; passed after implementation.</li>
+      <li><code>pnpm test -- tests-ts/unit/character/state/incidents.test.ts</code> - failed before implementation because the module did not exist; passed after implementation.</li>
+      <li><code>pnpm test -- tests-ts/integration/incident-completion-event.test.ts</code> - failed before the class-method receiver fix; passed after the fix.</li>
+      <li><code>pnpm test</code> - passed after review follow-up coverage: 18 files, 142 tests.</li>
+      <li><code>pnpm typecheck</code> - passed.</li>
+      <li><code>pnpm lint</code> - passed after lint follow-up edits.</li>
+      <li><code>python3 -m unittest tests.unit.test_incident_start_commit tests.unit.test_incident_cancel_commit tests.unit.test_incident_complete_commit tests.unit.test_incident_interrupt_commit tests.unit.test_life_incident_store tests.integration.test_incident_completion_event</code> - passed: 97 tests.</li>
+      <li><code>python3 -m unittest discover</code> - passed: 361 tests.</li>
+      <li><code>python3 -m compileall src tests</code> - passed.</li>
+      <li><code>python3 -c 'from html.parser import HTMLParser; import pathlib, sys; parser = HTMLParser(); [parser.feed(pathlib.Path(path).read_text()) for path in sys.argv[1:]]' docs/plan/active-slice.html docs/plan/typescript-shadow-port-goal.html docs/develop-journal/index.html docs/develop-journal/2026-05-30/005-typescript-shadow-port-stage-7c-incident-effects.html</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Out-of-Scope Worktree Note</h2>
+    <p>
+      <code>AGENTS.md</code> remains dirty with a pre-existing TypeScript
+      quality-policy addition and duplicate <code>## 18</code> heading. It was
+      not changed for Stage 7C and should stay out of the shadow-port PR unless
+      reviewed separately.
+    </p>
+
+    <h2>Review Gate Follow-Up</h2>
+    <p>
+      The first Stage 7C review gate found no P0 issues, but did find blocking
+      coverage and parity gaps: cancel finalizer runtime errors escaped instead
+      of becoming structured rejected results, finalize-request builders did
+      not validate full raw-log entry shape, and commit-level tests did not yet
+      satisfy the active-slice Stage 7C checklist. Follow-up changes added
+      commit-level tests for cancel, complete, completion-event failures,
+      interruption policy outcomes, post-visible interruption behavior, and
+      store interruption movement. The incident lifecycle modules now share
+      full committed raw-log validation through
+      <code>src-ts/commit-effects/incident-lifecycle.ts</code>.
+      A fresh TypeScript-quality reviewer questioned the interruption
+      post-visible failure shape; this is intentionally retained as Python
+      parity with <code>tests/unit/test_incident_interrupt_commit.py</code>:
+      after <code>life_incident_interrupted</code> is visible, the caller gets a
+      rejected result for the post-visible completion failure but no
+      contradictory rejected raw-log entry is appended.
+      A later re-review found the start finalizer error boundary was too broad
+      in TypeScript. Follow-up tests now prove unexpected start finalizer
+      failures escape without rejected lifecycle logs, and direct store tests
+      cover malformed finalizer result code mapping plus explicit-null identity
+      read parity.
+    </p>
+
+    <h2>Review Gate Status</h2>
+    <p>
+      Stage 7C passed the replacement three-agent read-only review gate after
+      the start-finalizer parity fix. Rawls, Pascal, and Ampere reported no
+      P0/P1/P2/P3 findings, and Ampere confirmed Stage 7C is clean enough to
+      unblock Stage 8 user-turn orchestration.
+    </p>
+
+    <h2>Known Gaps and Next Action</h2>
+    <p>
+      Stage 7C does not port user-turn orchestration, retrieval, tools,
+      scheduled directives, external persistence, or production routing to
+      TypeScript. If the review gate is clean, the next implementation stage is
+      Stage 8: the smallest TypeScript user-turn orchestration that wires the
+      already-ported runtime intake, visible message commit, interruption,
+      role-model loop, and one optional write action.
+    </p>
+  </main>
+</body>
+</html>
