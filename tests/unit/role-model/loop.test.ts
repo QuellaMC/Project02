@@ -22,6 +22,7 @@ import type {
   ActiveIncidentRequest,
   CurrentCharacterStateRequest
 } from '../../../src/character/state/current.ts';
+import type { DecisionContextSectionRequest } from '../../../src/character/state/context.ts';
 import type { UserMessageRuntimeEvent } from '../../../src/runtime/contracts.ts';
 import type { IdGenerator } from '../../../src/runtime/logging.ts';
 
@@ -139,6 +140,23 @@ class RecordingActiveIncidentSource {
   }
 }
 
+class RecordingDecisionContextSectionProvider {
+  readonly requests: DecisionContextSectionRequest[] = [];
+
+  buildDecisionContextSections(request: DecisionContextSectionRequest): unknown {
+    this.requests.push(structuredClone(request));
+    return [
+      {
+        schema_version: '0.1',
+        section_id: 'runtime-note-1',
+        section_type: 'runtime_note',
+        content: { summary: 'User is asking about prior work.' },
+        source_event_ids: ['event-1']
+      }
+    ];
+  }
+}
+
 function mutableRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('expected mutable record');
@@ -184,6 +202,39 @@ describe('role model input envelope', () => {
       text: 'previous reply'
     });
     expect(modelInput.decision_context.character_snapshot.recent_visible_messages).toEqual([]);
+  });
+
+  it('renders provider sections through the role-model context boundary', () => {
+    const event = normalizedUserMessage();
+    const sectionProvider = new RecordingDecisionContextSectionProvider();
+    const context = buildDecisionContext(event, {
+      contextSectionProviders: [sectionProvider]
+    });
+
+    const modelInput = renderRoleModelInput(event, context);
+
+    expect(sectionProvider.requests).toHaveLength(1);
+    expect(modelInput.decision_context.character_snapshot).toEqual({
+      recent_visible_messages: []
+    });
+    expect(modelInput.decision_context.context_sections).toEqual([
+      {
+        schema_version: '0.1',
+        section_id: 'runtime-note-1',
+        section_type: 'runtime_note',
+        content: { summary: 'User is asking about prior work.' },
+        source_event_ids: ['event-1']
+      }
+    ]);
+
+    const [section] = context.context_sections ?? [];
+    if (section === undefined) {
+      throw new Error('expected context section');
+    }
+    section.content['summary'] = 'mutated after render';
+    expect(modelInput.decision_context.context_sections?.[0]?.content).toEqual({
+      summary: 'User is asking about prior work.'
+    });
   });
 
   it('renders state patch and life action opt-in envelopes with exact instructions', () => {

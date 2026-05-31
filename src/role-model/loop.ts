@@ -720,6 +720,9 @@ function buildCharacterContextOptions(options: RoleModelOptions): BuildCharacter
   if (options.interruptedIncidentSource !== undefined) {
     contextOptions.interruptedIncidentSource = options.interruptedIncidentSource;
   }
+  if (options.contextSectionProviders !== undefined) {
+    contextOptions.contextSectionProviders = options.contextSectionProviders;
+  }
   return contextOptions;
 }
 
