@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TypeScript Runtime Source of Truth Cutover</title>
+  <title>Context Provider Sections</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 960px; margin: 0 auto; padding: 44px 24px; }
@@ -14,133 +14,133 @@
     ul { padding-left: 22px; }
     code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
     a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-    .status { display: inline-block; background: #e7f1e9; border: 1px solid #b7ccb9; border-radius: 999px; padding: 2px 10px; font-size: 0.9rem; }
+    .status { display: inline-block; background: #fff8e6; border: 1px solid #d2b46d; border-radius: 999px; padding: 2px 10px; font-size: 0.9rem; }
   </style>
 </head>
 <body>
   <main>
-    <h1>TypeScript Runtime Source of Truth Cutover</h1>
+    <h1>Context Provider Sections</h1>
     <p><span class="status">Status: active implementation slice</span></p>
     <p>
-      Created: 2026-05-30. Active branch:
-      <code>mvp-typescript-shadow-port</code>. Preserved Python branch:
-      <code>legacy-python-main</code> created from local <code>main</code> before
-      Python removal.
+      Created: 2026-05-31. Active branch:
+      <code>feature/context-provider-sections</code>.
     </p>
 
     <h2>Source Context</h2>
     <p>
       Product direction remains the Notion project hub
-      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>
-      and the
-      <a href="https://www.notion.so/36f8995c0c5e80a5be6aee4982f0e23a">original TypeScript migration goal</a>.
-      Local implementation truth for the completed port is recorded in
-      <a href="typescript-source-of-truth.html">the TypeScript source-of-truth tracker</a>
-      and the 2026-05-29/2026-05-30 development journals.
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>,
+      especially
+      <a href="https://www.notion.so/35f8995c0c5e818f948dfbf3944f52ce">01 - Framework Overview</a>
+      and
+      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine and Retrieval Management</a>.
+      The Notion source says the Character State Engine builds compact
+      <code>DecisionContext</code> and that retrieval results should arrive as
+      selected context, not as raw store contents.
     </p>
     <p>
-      Source-of-truth note: the original Notion migration goal framed the work
-      as a shadow port with Python remaining production truth. After the
-      complete port passed review gates, the user approved a two-branch cutover:
-      keep Python on <code>legacy-python-main</code> and make this branch the
-      TypeScript source-of-truth line. This PR must call out that approved
-      exception explicitly because it intentionally exceeds the original
-      shadow-port-only wording.
+      Local trigger: issue 2 from the architecture-risk list. The current
+      <code>DecisionContext</code> exposes one fixed
+      <code>character_snapshot</code> object with recent visible messages,
+      living-state, active incident, interrupted incident, and an interruption
+      flag. Future context producers would either have to add more
+      character-specific fields or create parallel plumbing.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Promote the completed TypeScript runtime from a shadow implementation to
-      the branch's source of truth. The production tree should use
-      <code>src/</code> and <code>tests/</code> for TypeScript, CI should run
-      TypeScript-only gates, package metadata should describe the TypeScript
-      runtime, and local docs should make clear that the Python implementation
-      now lives on <code>legacy-python-main</code>.
+      Add the smallest context-provider boundary that lets future systems attach
+      named model-facing context sections without rewriting
+      <code>buildCharacterDecisionContext</code> for every new source type.
+      Preserve existing <code>character_snapshot</code> behavior and current
+      rendered model input when no extra provider is configured.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>Create <code>legacy-python-main</code> from current local <code>main</code>.</li>
-      <li>Remove the Python <code>src/</code> and <code>tests/</code> trees from this TypeScript branch.</li>
-      <li>Remove stale Python-only tooling metadata from this TypeScript branch.</li>
-      <li>Move TypeScript source from <code>src-ts/</code> to <code>src/</code>.</li>
-      <li>Move TypeScript tests from <code>tests-ts/</code> to <code>tests/</code>.</li>
-      <li>Update imports, TypeScript config, Vitest config, ESLint config, and package scripts for the new paths.</li>
-      <li>Update CI so the existing <code>lint</code>, <code>typecheck</code>, and <code>test</code> jobs are TypeScript-only.</li>
-      <li>Update package metadata from migration wording to TypeScript runtime wording.</li>
-      <li>Update active docs, plan index, source-of-truth tracker, future-slice notes, and journal with cutover evidence.</li>
+      <li>Add an optional top-level <code>context_sections</code> envelope to <code>DecisionContext</code>.</li>
+      <li>Add a <code>DecisionContextSectionProvider</code> option that receives a deterministic request for the current user-message event.</li>
+      <li>Validate, clone, and include provider sections outside <code>character_snapshot</code>.</li>
+      <li>Forward provider options through the Role Model Loop while preserving existing source options.</li>
+      <li>Test success, malformed provider output, direct context validation, and rendered role-model input compatibility.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No runtime behavior changes beyond import path and source-layout cutover.</li>
-      <li>No model provider, database, scheduler, retrieval, tool, Live2D, asset, or UI work.</li>
-      <li>No deletion of the preserved Python branch.</li>
-      <li>No branch renaming or GitHub default-branch/protection changes in this local commit.</li>
-      <li>No PR creation unless requested after the cutover commit is verified.</li>
+      <li>No memory system, retrieval planner, vector database, keyword search, or source expansion.</li>
+      <li>No new model actions, tool calls, persistence stores, schedulers, or side effects.</li>
+      <li>No changes to existing <code>character_snapshot</code> fields or semantics.</li>
+      <li>No context-budget ranking beyond existing recent-visible-message selection.</li>
+      <li>No broad Role Model Loop prompt or instruction redesign.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
     <p>
-      Runtime record schemas remain at <code>schema_version: "0.1"</code>.
-      This slice changes repository layout and CI ownership only. It must not
-      change <code>RuntimeEvent</code>, <code>RawEventLogEntry</code>,
-      <code>CharacterDecision</code>, <code>RoleModelTurnResult</code>, incident
-      snapshots, living-state snapshots, or user-turn result contracts.
+      Runtime schema stays <code>schema_version: "0.1"</code>. The new optional
+      context section shape is:
+    </p>
+    <ul>
+      <li><code>schema_version</code>: current schema version.</li>
+      <li><code>section_id</code>: non-empty provider-stable identifier, unique within one context.</li>
+      <li><code>section_type</code>: non-empty provider-owned type label.</li>
+      <li><code>content</code>: object payload already compacted for the model.</li>
+      <li><code>source_event_ids</code>: event IDs that justify the section; empty is allowed for sections not derived from event records yet.</li>
+    </ul>
+    <p>
+      Provider request shape is deterministic and event-scoped:
+      <code>schema_version</code>, <code>trace_id</code>, <code>event_id</code>,
+      <code>event_type</code>, <code>created_at</code>, and optional
+      <code>conversation_id</code>.
     </p>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li><code>legacy-python-main</code> exists at the old Python <code>main</code> commit.</li>
-      <li>No Python source or Python tests remain under production <code>src/</code> or <code>tests/</code>.</li>
-      <li>All TypeScript imports reference <code>src/</code>, not <code>src-ts/</code>.</li>
-      <li>TypeScript tests live under <code>tests/</code>, not <code>tests-ts/</code>.</li>
-      <li>CI has no Python setup, Ruff, mypy, compileall, or unittest steps.</li>
-      <li>No root Python tooling metadata remains for Ruff or mypy.</li>
-      <li><code>package.json</code> describes <code>project02-runtime</code> as a TypeScript runtime package.</li>
-      <li><code>pnpm lint</code>, <code>pnpm typecheck</code>, and <code>pnpm test</code> pass.</li>
-      <li>Docs HTML parses and <code>git diff --check</code> passes.</li>
-      <li>The cutover is committed with a signed commit.</li>
+      <li>Default <code>buildCharacterDecisionContext</code> output remains byte-shape compatible with existing tests.</li>
+      <li>A configured provider can add a named section without changing <code>character_snapshot</code>.</li>
+      <li>Malformed provider sections are rejected with contract validation errors.</li>
+      <li>Direct <code>DecisionContext</code> validation accepts normalized sections and rejects malformed or duplicate sections.</li>
+      <li>Role Model Loop forwards provider sections into rendered input and still rejects malformed decision contexts.</li>
+      <li>No live model provider or external service is called.</li>
+      <li>Future retrieval and memory work is parked, not implemented.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <ul>
-      <li><code>pnpm lint</code></li>
-      <li><code>pnpm typecheck</code></li>
-      <li><code>pnpm test</code></li>
-      <li><code>python3 -c "from html.parser import HTMLParser; import pathlib; [HTMLParser().feed(path.read_text()) for path in pathlib.Path('docs').rglob('*.html')]"</code></li>
+      <li><code>pnpm exec vitest run tests/unit/character/state/context.test.ts</code></li>
+      <li><code>pnpm exec vitest run tests/unit/role-model/loop.test.ts</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
       <li><code>git diff --check</code></li>
+      <li>HTML parse check for docs under <code>docs/</code>.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li><strong>Runtime Kernel:</strong> TypeScript source under <code>src/runtime/</code> owns event intake, normalization, routing, IDs, clocks, and raw-log append request behavior.</li>
-      <li><strong>Character State Engine:</strong> TypeScript source under <code>src/character/state/</code> owns read-side snapshots, incident store adapters, and compact context building.</li>
-      <li><strong>Role Model Loop:</strong> TypeScript source under <code>src/role-model/</code> owns model input rendering, adapter calls, output parsing, and structured decision validation.</li>
-      <li><strong>Commit and Effects:</strong> TypeScript source under <code>src/commit-effects/</code> owns validated visible, living-state, incident, and user-turn commit effects.</li>
-      <li><strong>Legacy Python:</strong> preserved on <code>legacy-python-main</code>; not part of this TypeScript branch after cutover.</li>
+      <li><strong>Character State Engine:</strong> owns provider request construction, section validation, and final <code>DecisionContext</code> assembly.</li>
+      <li><strong>Role Model Loop:</strong> forwards provider configuration and validates rendered contexts before adapter calls and log snapshots.</li>
+      <li><strong>Runtime User Turn:</strong> only touched if an existing orchestration option must pass the provider through.</li>
+      <li><strong>Commit and Effects Engine:</strong> unchanged.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>The preceding TypeScript migration commit fixed the known parity blockers before this cutover.</li>
-      <li>Keep CI job names stable as <code>lint</code>, <code>typecheck</code>, and <code>test</code> so branch protection can keep the same required contexts after they become TS-only.</li>
-      <li>Historical journal entries may still refer to the TypeScript work as a shadow port because they describe the pre-cutover migration process.</li>
-      <li>The active branch now treats TypeScript as the implementation source of truth; Python rollback/reference uses <code>legacy-python-main</code>.</li>
+      <li>This is a compatibility schema extension, not a replacement of <code>character_snapshot</code>.</li>
+      <li><code>context_sections</code> should be omitted when empty so existing rendered input remains stable.</li>
+      <li>Provider payloads are generic only at the boundary; they still need schema version, identity, and object payload validation.</li>
+      <li>Future providers must own their own compact payload contract before being wired in.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should GitHub default branch be renamed or repointed after the PR merges?</li>
-      <li>Should remote branch <code>legacy-python-main</code> be protected as an archive branch?</li>
-      <li>Should package exports be narrowed further once external consumers exist?</li>
+      <li>Should future retrieval sections standardize <code>source_refs</code> beyond <code>source_event_ids</code>?</li>
+      <li>Should later context-budget policy rank or trim cross-provider sections?</li>
     </ul>
 
     <h2>Future Ideas</h2>
     <ul>
-      <li>Add a production runtime entry point once the first external caller or CLI/server slice exists.</li>
-      <li>Split docs into historical Python-era docs and current TypeScript runtime docs if the old MVP history becomes noisy.</li>
-      <li>Add a replay/debug-inspector slice now that the TypeScript runtime is the branch source of truth.</li>
+      <li>Implement retrieved-context sections backed by a retrieval planner and exact source expansion.</li>
+      <li>Add context-build raw log entries once replay/debug needs source-request traces.</li>
+      <li>Add section budgeting after at least two real context providers exist.</li>
     </ul>
   </main>
 </body>

@@ -83,6 +83,27 @@ export type VisibleConversationRecordSource = {
   readVisibleConversationRecords: (request: VisibleConversationRecordsRequest) => unknown;
 };
 
+export type DecisionContextSection = {
+  schema_version: SchemaVersion;
+  section_id: string;
+  section_type: string;
+  content: Record<string, unknown>;
+  source_event_ids: string[];
+};
+
+export type DecisionContextSectionRequest = {
+  schema_version: SchemaVersion;
+  trace_id: string;
+  event_id: string;
+  event_type: typeof USER_MESSAGE;
+  created_at: string;
+  conversation_id?: string;
+};
+
+export type DecisionContextSectionProvider = {
+  buildDecisionContextSections: (request: DecisionContextSectionRequest) => unknown;
+};
+
 export type DecisionContext = {
   schema_version: SchemaVersion;
   trace_id: string;
@@ -94,6 +115,7 @@ export type DecisionContext = {
     interrupted_incident?: InterruptedIncidentBrief;
     [USER_MESSAGE_INTERRUPTED_ACTIVE_INCIDENT_FIELD]?: true;
   };
+  context_sections?: DecisionContextSection[];
 };
 
 export type BuildCharacterDecisionContextOptions = {
@@ -101,6 +123,7 @@ export type BuildCharacterDecisionContextOptions = {
   currentStateSource?: CurrentCharacterStateSource;
   activeIncidentSource?: ActiveIncidentSource;
   interruptedIncidentSource?: InterruptedIncidentSource;
+  contextSectionProviders?: readonly DecisionContextSectionProvider[];
 };
 
 export type DecisionContextValidationEvent = {
@@ -147,7 +170,8 @@ export function buildCharacterDecisionContext(
     recentVisibleMessagesSource,
     currentStateSource,
     activeIncidentSource,
-    interruptedIncidentSource
+    interruptedIncidentSource,
+    contextSectionProviders
   }: BuildCharacterDecisionContextOptions = {}
 ): DecisionContext {
   const normalizedEvent = validateNormalizedUserMessageEvent(event, 'event');
@@ -174,12 +198,19 @@ export function buildCharacterDecisionContext(
   if (interruptedIncidentBrief !== undefined) {
     characterSnapshot.interrupted_incident = interruptedIncidentBrief;
   }
-  return {
+  const context: DecisionContext = {
     schema_version: SCHEMA_VERSION,
     trace_id: normalizedEvent.trace_id,
     event_id: normalizedEvent.event_id,
     character_snapshot: characterSnapshot
   };
+  const contextSections = readDecisionContextSections(normalizedEvent, {
+    contextSectionProviders
+  });
+  if (contextSections.length > 0) {
+    context.context_sections = contextSections;
+  }
+  return context;
 }
 
 export function validateCharacterDecisionContextForEvent(
@@ -189,7 +220,7 @@ export function validateCharacterDecisionContextForEvent(
   const contextRecord = asRecord(decisionContext, 'DecisionContext');
   rejectExtraKeys(
     contextRecord,
-    ['schema_version', 'trace_id', 'event_id', 'character_snapshot'],
+    ['schema_version', 'trace_id', 'event_id', 'character_snapshot', 'context_sections'],
     'DecisionContext'
   );
   requireLiteral(getOwnField(contextRecord, 'schema_version'), SCHEMA_VERSION, 'schema_version');
@@ -203,12 +234,21 @@ export function validateCharacterDecisionContextForEvent(
       eventId
     }
   );
-  return {
+  const normalizedContext: DecisionContext = {
     schema_version: SCHEMA_VERSION,
     trace_id: traceId,
     event_id: eventId,
     character_snapshot: characterSnapshot
   };
+  if (Object.hasOwn(contextRecord, 'context_sections')) {
+    const contextSections = validateDecisionContextSections(
+      getOwnField(contextRecord, 'context_sections')
+    );
+    if (contextSections.length > 0) {
+      normalizedContext.context_sections = contextSections;
+    }
+  }
+  return normalizedContext;
 }
 
 export function validateRecentVisibleMessagesRequest(
@@ -361,6 +401,32 @@ function readInterruptedIncidentBrief(
   });
 }
 
+function readDecisionContextSections(
+  event: UserMessageRuntimeEvent,
+  {
+    contextSectionProviders
+  }: { contextSectionProviders: readonly DecisionContextSectionProvider[] | undefined }
+): DecisionContextSection[] {
+  if (contextSectionProviders === undefined || contextSectionProviders.length === 0) {
+    return [];
+  }
+  const request = buildDecisionContextSectionRequest(event);
+  const sections: DecisionContextSection[] = [];
+  const seenSectionIds = new Set<string>();
+  for (const provider of contextSectionProviders) {
+    const rawSections = provider.buildDecisionContextSections(structuredClone(request));
+    if (!Array.isArray(rawSections)) {
+      throw new ContractValidationError('DecisionContextSectionProvider must return a list.');
+    }
+    for (const rawSection of rawSections) {
+      const section = validateDecisionContextSection(rawSection);
+      rejectDuplicateDecisionContextSectionId(section, { seenSectionIds });
+      sections.push(section);
+    }
+  }
+  return sections;
+}
+
 function buildRecentVisibleMessagesRequest(
   event: UserMessageRuntimeEvent,
   conversationId: string
@@ -372,6 +438,22 @@ function buildRecentVisibleMessagesRequest(
     before_created_at: event.created_at,
     max_candidate_messages: RECENT_VISIBLE_MESSAGES_MAX_CANDIDATES
   };
+}
+
+function buildDecisionContextSectionRequest(
+  event: UserMessageRuntimeEvent
+): DecisionContextSectionRequest {
+  const request: DecisionContextSectionRequest = {
+    schema_version: SCHEMA_VERSION,
+    trace_id: event.trace_id,
+    event_id: event.event_id,
+    event_type: USER_MESSAGE,
+    created_at: event.created_at
+  };
+  if (event.payload.conversation_id !== undefined) {
+    request.conversation_id = event.payload.conversation_id;
+  }
+  return request;
 }
 
 function buildVisibleConversationRecordsRequest(
@@ -681,6 +763,71 @@ function validateCharacterSnapshotForEvent(
   }
   normalizedSnapshot.recent_visible_messages = selectedMessages;
   return normalizedSnapshot;
+}
+
+function validateDecisionContextSections(sections: unknown): DecisionContextSection[] {
+  if (!Array.isArray(sections)) {
+    throw new ContractValidationError('context_sections must be a list.');
+  }
+  const normalizedSections: DecisionContextSection[] = [];
+  const seenSectionIds = new Set<string>();
+  for (const rawSection of sections) {
+    const section = validateDecisionContextSection(rawSection);
+    rejectDuplicateDecisionContextSectionId(section, { seenSectionIds });
+    normalizedSections.push(section);
+  }
+  return normalizedSections;
+}
+
+function validateDecisionContextSection(section: unknown): DecisionContextSection {
+  const sectionRecord = asRecord(section, 'DecisionContextSection');
+  rejectExtraKeys(
+    sectionRecord,
+    ['schema_version', 'section_id', 'section_type', 'content', 'source_event_ids'],
+    'DecisionContextSection'
+  );
+  requireLiteral(getOwnField(sectionRecord, 'schema_version'), SCHEMA_VERSION, 'schema_version');
+  const content = asRecord(getOwnField(sectionRecord, 'content'), 'DecisionContextSection.content');
+  return {
+    schema_version: SCHEMA_VERSION,
+    section_id: requireString(getOwnField(sectionRecord, 'section_id'), 'section_id'),
+    section_type: requireString(getOwnField(sectionRecord, 'section_type'), 'section_type'),
+    content: cloneDecisionContextSectionContent(content),
+    source_event_ids: validateContextSectionSourceEventIds(
+      getOwnField(sectionRecord, 'source_event_ids')
+    )
+  };
+}
+
+function validateContextSectionSourceEventIds(sourceEventIds: unknown): string[] {
+  if (!Array.isArray(sourceEventIds)) {
+    throw new ContractValidationError('source_event_ids must be a list.');
+  }
+  return sourceEventIds.map((sourceEventId) =>
+    requireString(sourceEventId, 'source_event_ids item')
+  );
+}
+
+function cloneDecisionContextSectionContent(
+  content: Record<string, unknown>
+): Record<string, unknown> {
+  try {
+    return structuredClone(content);
+  } catch {
+    throw new ContractValidationError(
+      'DecisionContextSection.content must be structured-cloneable.'
+    );
+  }
+}
+
+function rejectDuplicateDecisionContextSectionId(
+  section: DecisionContextSection,
+  { seenSectionIds }: { seenSectionIds: Set<string> }
+): void {
+  if (seenSectionIds.has(section.section_id)) {
+    throw new ContractValidationError('DecisionContextSection.section_id must be unique.');
+  }
+  seenSectionIds.add(section.section_id);
 }
 
 function isCurrentEventMessage(message: RecentVisibleMessage, eventId: string): boolean {
