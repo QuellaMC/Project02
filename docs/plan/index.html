@@ -93,6 +93,8 @@
       TypeScript runtime now lives under <code>src/</code> with tests under
       <code>tests/</code>; Python is preserved on remote branch
       <code>legacy-python-main</code>.
+      The staged commit transaction helper refactor is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -140,6 +142,7 @@ flowchart LR
     IncidentCompletionEventCommit["INCIDENT_COMPLETION commit/reject&lt;br/&gt;MVP-019 implemented"]
     IncidentInterruptCommit["USER_MESSAGE interruption commit/reject&lt;br/&gt;MVP-021 implemented"]
     IncidentInterruptFinalize["Incident-interrupt finalizer protocol&lt;br/&gt;active incident moved to interrupted + log visibility&lt;br/&gt;MVP-021 implemented"]
+    StagedTransactionHelper["Staged commit transaction helper&lt;br/&gt;finalizer + success-log visibility + post-visible hooks&lt;br/&gt;PR #27"]
     IncidentStoreAdapter["Concrete in-memory incident store adapter&lt;br/&gt;start + cancel + complete implemented"]
   end
 
@@ -206,6 +209,13 @@ flowchart LR
   IncidentCancelFinalize --> IncidentStoreAdapter
   IncidentCompleteFinalize --> IncidentStoreAdapter
   IncidentInterruptFinalize --> IncidentStoreAdapter
+  IncidentStartCommit --> StagedTransactionHelper
+  IncidentCancelCommit --> StagedTransactionHelper
+  IncidentCompleteCommit --> StagedTransactionHelper
+  IncidentCompletionEventCommit --> StagedTransactionHelper
+  IncidentInterruptCommit --> StagedTransactionHelper
+  StatePatchCommit --> StagedTransactionHelper
+  StagedTransactionHelper --> LogHelper
   IncidentStoreAdapter --> RawLogQuery
   InMemoryIncidentStore -- "read contract only; no default wiring" --> ActiveIncidentSource
   IncidentStoreAdapter -- "MVP-021 read contract target" --> InterruptedIncidentSource
@@ -253,6 +263,7 @@ flowchart LR
   class IncidentCompletionEvent,IncidentCompletionRoute,IncidentCompletionEventCommit implemented;
   class InterruptionFlag implemented;
   class IncidentInterruptCommit,IncidentInterruptFinalize,InterruptedIncidentSource,InterruptedIncidentBrief implemented;
+  class StagedTransactionHelper active;
   class TSContracts,TSLogging,TSKernel,TSCharacterState,TSRoleModel,TSCommitEffects,TSUserTurn active;
       </pre>
     </div>
@@ -268,9 +279,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">TypeScript Runtime Source of Truth Cutover</a></td>
-          <td>Open in <a href="https://github.com/QuellaMC/Project02/pull/25">PR #25</a> on branch <code>mvp-typescript-shadow-port</code>.</td>
-          <td>Promote the completed TypeScript runtime to the branch source of truth: production source under <code>src/</code>, production tests under <code>tests/</code>, TypeScript-only CI, updated package metadata, and Python preserved on <code>legacy-python-main</code>.</td>
+          <td><a href="active-slice.html">Staged Commit Transaction Helper</a></td>
+          <td>Open in <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a> on branch <code>feature/staged-commit-transaction-helper</code>.</td>
+          <td>Extract the repeated Commit &amp; Effects staged transaction flow while preserving current statuses, failure stages, raw-log entries, visibility discard behavior, and rejected-log behavior.</td>
         </tr>
       </tbody>
     </table>
