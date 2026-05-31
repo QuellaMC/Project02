@@ -93,6 +93,9 @@
       TypeScript runtime now lives under <code>src/</code> with tests under
       <code>tests/</code>; Python is preserved on remote branch
       <code>legacy-python-main</code>.
+      The user-turn action registry slice is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/28">PR #28</a>
+      on branch <code>feature/user-turn-action-registry</code>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -172,6 +175,8 @@ flowchart LR
 
   subgraph UserTurn["User Turn Orchestrator - MVP-007 implemented locally"]
     Turn["Compose existing boundaries&lt;br/&gt;single USER_MESSAGE turn"]
+    ActionRegistry["Write action registry&lt;br/&gt;state patch + incident actions&lt;br/&gt;PR #28 open"]
+    ModelActionSpecs["Role-model action specs&lt;br/&gt;allowed_actions + parse policy&lt;br/&gt;PR #28 open"]
     TurnResult["UserMessageTurnResult&lt;br/&gt;committed or stopped"]
   end
 
@@ -234,8 +239,11 @@ flowchart LR
   IncidentCompletionEventCommit -. parity target .-> TSCommitEffects
   IncidentInterruptCommit -. parity target .-> TSCommitEffects
   RouteUpdate --> Turn
+  ActionRegistry --> ModelActionSpecs
+  ModelActionSpecs --> Envelope
   Turn --> UserProjection
   Turn --> VisibleRecentSource
+  Turn --> ActionRegistry
   Turn --> Render
   Turn --> Commit
   Turn --> TurnResult
@@ -254,6 +262,7 @@ flowchart LR
   class InterruptionFlag implemented;
   class IncidentInterruptCommit,IncidentInterruptFinalize,InterruptedIncidentSource,InterruptedIncidentBrief implemented;
   class TSContracts,TSLogging,TSKernel,TSCharacterState,TSRoleModel,TSCommitEffects,TSUserTurn active;
+  class ActionRegistry,ModelActionSpecs active;
       </pre>
     </div>
 
