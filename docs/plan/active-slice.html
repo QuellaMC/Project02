@@ -47,9 +47,10 @@
     </p>
     <p>
       Merge update: <a href="https://github.com/QuellaMC/Project02/pull/26">PR #26</a>
-      context provider sections are now part of <code>main</code>. This slice preserves
-      that provider-owned context infrastructure and limits its own scope to user-turn
-      write-action registration and role-model action policy registration.
+      context provider sections and <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a>
+      staged commit transaction helpers are now part of <code>main</code>. This slice
+      preserves both baselines and limits its own scope to user-turn write-action
+      registration and role-model action policy registration.
     </p>
 
     <h2>Goal</h2>
@@ -78,6 +79,7 @@
       <li>No change to raw log kind ordering or visible transcript ordering.</li>
       <li>No broad operation registry, permission matrix, background worker, or plugin system.</li>
       <li>No changes to PR #26 <code>context_sections</code> provider semantics.</li>
+      <li>No changes to PR #27 staged commit transaction helper semantics.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
@@ -115,7 +117,7 @@
       <li><strong>Runtime user-turn orchestration:</strong> keeps the fixed turn spine and delegates optional write commits to registered modules.</li>
       <li><strong>Runtime action modules:</strong> adapt existing Commit &amp; Effects implementations into user-turn write-action modules with stop code, result field, preflight, context, and rejection behavior.</li>
       <li><strong>Role Model Loop:</strong> consumes a model action spec to render instructions, allowed actions, and parse policy without one boolean per write family, while preserving PR #26 context-provider forwarding.</li>
-      <li><strong>Commit and Effects:</strong> existing commit implementations remain the only durable write/effect boundary.</li>
+      <li><strong>Commit and Effects:</strong> existing commit implementations remain the only durable write/effect boundary, now including PR #27 staged transaction helper internals.</li>
     </ul>
 
     <h2>Review Notes</h2>

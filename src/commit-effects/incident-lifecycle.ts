@@ -1,5 +1,7 @@
 import {
   RawEventLogQueryValidationError,
+  confirmCommittedSuccessEntryVisibility,
+  discardCommittedSuccessEntryVisibility,
   validateRawEventLogEntry,
   type RawEventLogEntry
 } from '../runtime/logging.ts';
@@ -44,6 +46,31 @@ export type IncidentCommitErrorFactory<ErrorType extends Error> = (
 export type IncidentOptionalIdentityFields = {
   user_id?: string;
   conversation_id?: string;
+};
+
+export type StagedCommitTransactionOptions<
+  FinalizeRequest,
+  CommittedLogEntry extends RawEventLogEntry,
+  FinalizeResult,
+  ErrorType extends Error
+> = {
+  rawEventLog: unknown;
+  committedLogEntry: CommittedLogEntry;
+  finalizeRequest: FinalizeRequest;
+  finalize: (request: FinalizeRequest) => unknown;
+  validateFinalizeResult: (finalizeResult: unknown) => FinalizeResult;
+  isTransactionError: (error: unknown) => error is ErrorType;
+  makeMalformedFinalizeError: (message: string) => ErrorType;
+  makeFinalizeRejectedError: (message: string) => ErrorType;
+  requireRawEventLog?: ((rawEventLog: unknown) => void) | undefined;
+  completeAfterLogVisible?: ((request: FinalizeRequest) => void) | undefined;
+  discardAfterLogNotVisible?: ((request: FinalizeRequest) => void) | undefined;
+  formatFinalizeUnexpectedError?: ((error: unknown) => string) | undefined;
+  formatRequirementUnexpectedError?: ((error: unknown) => string) | undefined;
+  formatPostVisibleUnexpectedError?: ((error: unknown) => string) | undefined;
+  formatDiscardUnexpectedError?: ((error: unknown) => string) | undefined;
+  ignorePostVisibleTransactionError?: boolean;
+  mapPostVisibleRawLogValidationAsMalformed?: boolean;
 };
 
 type IncidentPayloadIdentityEvent = {
@@ -223,6 +250,37 @@ export function validateCommittedIncidentLogEntry<ErrorType extends Error>(
   }
 }
 
+export function runStagedCommitTransaction<
+  FinalizeRequest,
+  CommittedLogEntry extends RawEventLogEntry,
+  FinalizeResult,
+  ErrorType extends Error
+>(
+  options: StagedCommitTransactionOptions<
+    FinalizeRequest,
+    CommittedLogEntry,
+    FinalizeResult,
+    ErrorType
+  >
+): FinalizeResult {
+  let successVisibilityConfirmed = false;
+  try {
+    callTransactionRawLogRequirement(options);
+    const finalizeResult = callTransactionFinalizer(options);
+    const validatedFinalizeResult = options.validateFinalizeResult(finalizeResult);
+    confirmTransactionVisibility(options.rawEventLog, options.committedLogEntry, options);
+    successVisibilityConfirmed = true;
+    callTransactionPostVisibleHook(options);
+    return validatedFinalizeResult;
+  } catch (error) {
+    if (!successVisibilityConfirmed && options.isTransactionError(error)) {
+      discardCommittedSuccessEntryVisibility(options.rawEventLog, options.committedLogEntry);
+      callTransactionDiscardHook(options);
+    }
+    throw error;
+  }
+}
+
 function withIncidentValidationError<Value, ErrorType extends Error>(
   operation: () => Value,
   makeError: IncidentCommitErrorFactory<ErrorType>
@@ -234,5 +292,179 @@ function withIncidentValidationError<Value, ErrorType extends Error>(
       throw makeError(error.message);
     }
     throw error;
+  }
+}
+
+function callTransactionRawLogRequirement<
+  FinalizeRequest,
+  CommittedLogEntry extends RawEventLogEntry,
+  FinalizeResult,
+  ErrorType extends Error
+>(
+  options: StagedCommitTransactionOptions<
+    FinalizeRequest,
+    CommittedLogEntry,
+    FinalizeResult,
+    ErrorType
+  >
+): void {
+  if (options.requireRawEventLog === undefined) {
+    return;
+  }
+  try {
+    options.requireRawEventLog(options.rawEventLog);
+  } catch (error) {
+    if (options.isTransactionError(error)) {
+      throw error;
+    }
+    if (error instanceof RawEventLogQueryValidationError) {
+      throw options.makeMalformedFinalizeError(error.message);
+    }
+    if (options.formatRequirementUnexpectedError === undefined) {
+      throw error;
+    }
+    throw options.makeFinalizeRejectedError(options.formatRequirementUnexpectedError(error));
+  }
+}
+
+function callTransactionFinalizer<
+  FinalizeRequest,
+  CommittedLogEntry extends RawEventLogEntry,
+  FinalizeResult,
+  ErrorType extends Error
+>(
+  options: StagedCommitTransactionOptions<
+    FinalizeRequest,
+    CommittedLogEntry,
+    FinalizeResult,
+    ErrorType
+  >
+): unknown {
+  try {
+    return options.finalize(structuredClone(options.finalizeRequest));
+  } catch (error) {
+    if (options.isTransactionError(error)) {
+      throw error;
+    }
+    if (error instanceof RawEventLogQueryValidationError) {
+      throw options.makeMalformedFinalizeError(error.message);
+    }
+    if (options.formatFinalizeUnexpectedError === undefined) {
+      throw error;
+    }
+    throw options.makeFinalizeRejectedError(options.formatFinalizeUnexpectedError(error));
+  }
+}
+
+function confirmTransactionVisibility<
+  FinalizeRequest,
+  CommittedLogEntry extends RawEventLogEntry,
+  FinalizeResult,
+  ErrorType extends Error
+>(
+  rawEventLog: unknown,
+  committedLogEntry: CommittedLogEntry,
+  options: StagedCommitTransactionOptions<
+    FinalizeRequest,
+    CommittedLogEntry,
+    FinalizeResult,
+    ErrorType
+  >
+): void {
+  try {
+    confirmCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
+  } catch (error) {
+    if (error instanceof RawEventLogQueryValidationError) {
+      throw options.makeMalformedFinalizeError(error.message);
+    }
+    throw error;
+  }
+}
+
+function callTransactionPostVisibleHook<
+  FinalizeRequest,
+  CommittedLogEntry extends RawEventLogEntry,
+  FinalizeResult,
+  ErrorType extends Error
+>(
+  options: StagedCommitTransactionOptions<
+    FinalizeRequest,
+    CommittedLogEntry,
+    FinalizeResult,
+    ErrorType
+  >
+): void {
+  if (options.completeAfterLogVisible === undefined) {
+    return;
+  }
+  try {
+    options.completeAfterLogVisible(structuredClone(options.finalizeRequest));
+  } catch (error) {
+    if (options.isTransactionError(error)) {
+      if (options.ignorePostVisibleTransactionError === true) {
+        return;
+      }
+      throw error;
+    }
+    const transactionError = buildPostVisibleTransactionError(error, options);
+    if (options.ignorePostVisibleTransactionError === true) {
+      return;
+    }
+    throw transactionError;
+  }
+}
+
+function buildPostVisibleTransactionError<
+  FinalizeRequest,
+  CommittedLogEntry extends RawEventLogEntry,
+  FinalizeResult,
+  ErrorType extends Error
+>(
+  error: unknown,
+  options: StagedCommitTransactionOptions<
+    FinalizeRequest,
+    CommittedLogEntry,
+    FinalizeResult,
+    ErrorType
+  >
+): ErrorType {
+  if (
+    error instanceof RawEventLogQueryValidationError &&
+    options.mapPostVisibleRawLogValidationAsMalformed !== false
+  ) {
+    return options.makeMalformedFinalizeError(error.message);
+  }
+  if (options.formatPostVisibleUnexpectedError === undefined) {
+    throw error;
+  }
+  return options.makeFinalizeRejectedError(options.formatPostVisibleUnexpectedError(error));
+}
+
+function callTransactionDiscardHook<
+  FinalizeRequest,
+  CommittedLogEntry extends RawEventLogEntry,
+  FinalizeResult,
+  ErrorType extends Error
+>(
+  options: StagedCommitTransactionOptions<
+    FinalizeRequest,
+    CommittedLogEntry,
+    FinalizeResult,
+    ErrorType
+  >
+): void {
+  if (options.discardAfterLogNotVisible === undefined) {
+    return;
+  }
+  try {
+    options.discardAfterLogNotVisible(structuredClone(options.finalizeRequest));
+  } catch (error) {
+    if (options.isTransactionError(error)) {
+      throw error;
+    }
+    if (options.formatDiscardUnexpectedError === undefined) {
+      throw error;
+    }
+    throw options.makeFinalizeRejectedError(options.formatDiscardUnexpectedError(error));
   }
 }

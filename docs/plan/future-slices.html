@@ -24,8 +24,89 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while the <a href="active-slice.html">active TypeScript source-of-truth cutover</a> is in progress.
+      Do not implement these while the <a href="active-slice.html">active staged commit transaction helper</a> slice is in progress.
     </p>
+
+    <h2>Shared Finalize Result Envelope Validator</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Extract a shared validator for the repeated finalize result envelope fields: <code>schema_version</code>, <code>trace_id</code>, <code>event_id</code>, <code>event_type</code>, and <code>committed_log_entry_id</code>.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The staged transaction helper now shares the finalizer/visibility sequence, but each commit-effect module still repeats similar finalize-result field validation.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while extracting the staged commit transaction helper on 2026-05-31.</dd>
+
+      <dt>Dependency</dt>
+      <dd>The transaction helper refactor should land first so a later slice can prove whether finalize-result validation remains duplicated after the control-flow duplication is removed.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Commit-effect finalize result validator v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>A shared validator could blur module-specific event type and error-class mapping if extracted too broadly.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>No schema change is expected; the slice would preserve current finalize result shapes.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active slice only addresses the staged transaction flow and deliberately leaves module-specific validation local.</dd>
+    </dl>
+
+    <h2>Living-State Raw Log Requirement Hook</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Consider whether <code>LivingStatePatchFinalizer</code> should expose a raw-log requirement hook like incident lifecycle finalizers.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Incident finalizers can assert that the caller passed the intended Raw Event Log surface before staging visibility; living-state currently relies only on finalizer behavior and confirmation.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while making the staged transaction helper work for both incident and living-state commit paths.</dd>
+
+      <dt>Dependency</dt>
+      <dd>A later living-state persistence or audit-hardening slice should define the concrete need.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Living-state finalizer raw-log requirement v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Adding the hook now would change the public finalizer contract without a current behavior need.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>No persisted schema change is expected; this would be a TypeScript interface and validation-contract change.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active refactor must preserve existing living-state observable behavior and finalizer shape.</dd>
+    </dl>
+
+    <h2>Interruption Post-Visible Semantics Audit</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Re-audit the interruption post-visible failure semantics against the active product and local specs after the staged transaction helper refactor lands.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The interruption path has had prior audit drift around whether post-visible failures should be inspectable as rejected logs after success visibility.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Preserved as an explicit non-goal of the staged transaction helper slice.</dd>
+
+      <dt>Dependency</dt>
+      <dd>The helper refactor should land first with current behavior preserved.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Interruption post-visible semantics audit v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Changing the semantics inside a refactor would make behavior review harder and could hide a real contract decision.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>No schema change is expected unless the audit finds the rejected-log contract itself needs correction.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active issue-3 scope is a P2 refactor only and must not alter interruption behavior.</dd>
+    </dl>
 
     <h2>MVP-002 - Minimal Role Model Loop with Fake Model Adapter</h2>
     <dl>

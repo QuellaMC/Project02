@@ -93,6 +93,8 @@
       TypeScript runtime now lives under <code>src/</code> with tests under
       <code>tests/</code>; Python is preserved on remote branch
       <code>legacy-python-main</code>.
+      The staged commit transaction helper refactor is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a>.
       Context provider sections are recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/26">PR #26</a>.
       The user-turn action registry slice is tracked in
@@ -145,6 +147,7 @@ flowchart LR
     IncidentCompletionEventCommit["INCIDENT_COMPLETION commit/reject&lt;br/&gt;MVP-019 implemented"]
     IncidentInterruptCommit["USER_MESSAGE interruption commit/reject&lt;br/&gt;MVP-021 implemented"]
     IncidentInterruptFinalize["Incident-interrupt finalizer protocol&lt;br/&gt;active incident moved to interrupted + log visibility&lt;br/&gt;MVP-021 implemented"]
+    StagedTransactionHelper["Staged commit transaction helper&lt;br/&gt;finalizer + success-log visibility + post-visible hooks&lt;br/&gt;PR #27"]
     IncidentStoreAdapter["Concrete in-memory incident store adapter&lt;br/&gt;start + cancel + complete implemented"]
   end
 
@@ -215,6 +218,13 @@ flowchart LR
   IncidentCancelFinalize --> IncidentStoreAdapter
   IncidentCompleteFinalize --> IncidentStoreAdapter
   IncidentInterruptFinalize --> IncidentStoreAdapter
+  IncidentStartCommit --> StagedTransactionHelper
+  IncidentCancelCommit --> StagedTransactionHelper
+  IncidentCompleteCommit --> StagedTransactionHelper
+  IncidentCompletionEventCommit --> StagedTransactionHelper
+  IncidentInterruptCommit --> StagedTransactionHelper
+  StatePatchCommit --> StagedTransactionHelper
+  StagedTransactionHelper --> LogHelper
   IncidentStoreAdapter --> RawLogQuery
   InMemoryIncidentStore -- "read contract only; no default wiring" --> ActiveIncidentSource
   IncidentStoreAdapter -- "MVP-021 read contract target" --> InterruptedIncidentSource
@@ -262,10 +272,11 @@ flowchart LR
   class LifeActionParse,IncidentCompleteCommit,IncidentCompleteFinalize implemented;
   class Envelope,IncidentStoreAdapter,InMemoryIncidentStore implemented;
   class ContextBuilder implemented;
-  class ContextSections active;
+  class ContextSections implemented;
   class IncidentCompletionEvent,IncidentCompletionRoute,IncidentCompletionEventCommit implemented;
   class InterruptionFlag implemented;
   class IncidentInterruptCommit,IncidentInterruptFinalize,InterruptedIncidentSource,InterruptedIncidentBrief implemented;
+  class StagedTransactionHelper implemented;
   class TSContracts,TSLogging,TSKernel,TSCharacterState,TSRoleModel,TSCommitEffects,TSUserTurn implemented;
   class ActionRegistry,ModelActionSpecs active;
       </pre>
