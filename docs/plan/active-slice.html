@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Context Provider Sections</title>
+  <title>Staged Commit Transaction Helper</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 960px; margin: 0 auto; padding: 44px 24px; }
@@ -14,133 +14,137 @@
     ul { padding-left: 22px; }
     code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
     a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-    .status { display: inline-block; background: #fff8e6; border: 1px solid #d2b46d; border-radius: 999px; padding: 2px 10px; font-size: 0.9rem; }
+    .status { display: inline-block; background: #e7f1e9; border: 1px solid #b7ccb9; border-radius: 999px; padding: 2px 10px; font-size: 0.9rem; }
   </style>
 </head>
 <body>
   <main>
-    <h1>Context Provider Sections</h1>
+    <h1>Staged Commit Transaction Helper</h1>
     <p><span class="status">Status: active implementation slice</span></p>
     <p>
       Created: 2026-05-31. Active branch:
-      <code>feature/context-provider-sections</code>.
+      <code>feature/staged-commit-transaction-helper</code>.
     </p>
 
     <h2>Source Context</h2>
     <p>
       Product direction remains the Notion project hub
-      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>,
-      especially
-      <a href="https://www.notion.so/35f8995c0c5e818f948dfbf3944f52ce">01 - Framework Overview</a>
-      and
-      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine and Retrieval Management</a>.
-      The Notion source says the Character State Engine builds compact
-      <code>DecisionContext</code> and that retrieval results should arrive as
-      selected context, not as raw store contents.
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.
+      The Notion runtime notes keep the Commit &amp; Effects Engine as the boundary
+      that validates, commits durable state, appends Raw Event Log entries, and emits effects.
+      Local implementation truth for this refactor comes from the current TypeScript source under
+      <code>src/commit-effects/</code>, the raw-log visibility helpers in
+      <code>src/runtime/logging.ts</code>, and the existing lifecycle helpers in
+      <code>src/commit-effects/incident-lifecycle.ts</code>.
     </p>
     <p>
-      Local trigger: issue 2 from the architecture-risk list. The current
-      <code>DecisionContext</code> exposes one fixed
-      <code>character_snapshot</code> object with recent visible messages,
-      living-state, active incident, interrupted incident, and an interruption
-      flag. Future context producers would either have to add more
-      character-specific fields or create parallel plumbing.
+      The issue target is a P2 refactor: repeated staged transaction flow in
+      <code>incident-start.ts</code>, <code>incident-cancel.ts</code>,
+      <code>incident-complete.ts</code>, <code>incident-interrupt.ts</code>, and
+      <code>living-state.ts</code>. Current behavior must remain observable through the same
+      statuses, failure stages and codes, success-log visibility, staged-visibility discard, and
+      rejected raw-log entries.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Add the smallest context-provider boundary that lets future systems attach
-      named model-facing context sections without rewriting
-      <code>buildCharacterDecisionContext</code> for every new source type.
-      Preserve existing <code>character_snapshot</code> behavior and current
-      rendered model input when no extra provider is configured.
+      Extract one concrete shared helper for the already-implemented staged commit transaction:
+      call the finalizer, validate the finalizer result, confirm committed success-log visibility,
+      run any post-visible hook, and preserve the caller's existing cleanup and rejection behavior
+      when a transaction fails before durable success visibility.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>Add an optional top-level <code>context_sections</code> envelope to <code>DecisionContext</code>.</li>
-      <li>Add a <code>DecisionContextSectionProvider</code> option that receives a deterministic request for the current user-message event.</li>
-      <li>Validate, clone, and include provider sections outside <code>character_snapshot</code>.</li>
-      <li>Forward provider options through the Role Model Loop while preserving existing source options.</li>
-      <li>Test success, malformed provider output, direct context validation, and rendered role-model input compatibility.</li>
+      <li>Add focused regression tests for one success path and one staged-visibility rejection path through the helper.</li>
+      <li>Place the helper in <code>src/commit-effects/incident-lifecycle.ts</code> if it can stay narrow and dependency-light.</li>
+      <li>Refactor the duplicated finalizer/visibility/post-visible sequence in the five target commit-effect modules.</li>
+      <li>Preserve module-specific request building, snapshot building, log-entry building, result construction, rejection-log construction, and failure-stage mapping in each caller.</li>
+      <li>Keep the helper generic enough for the current living-state and incident callers without adding a framework/plugin layer.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No memory system, retrieval planner, vector database, keyword search, or source expansion.</li>
-      <li>No new model actions, tool calls, persistence stores, schedulers, or side effects.</li>
-      <li>No changes to existing <code>character_snapshot</code> fields or semantics.</li>
-      <li>No context-budget ranking beyond existing recent-visible-message selection.</li>
-      <li>No broad Role Model Loop prompt or instruction redesign.</li>
+      <li>No user-turn orchestration changes.</li>
+      <li>No Role Model allowed-action, parser, or <code>DecisionContext</code> shape changes.</li>
+      <li>No memory, retrieval, scheduler, tool, Live2D, asset, or new runtime behavior.</li>
+      <li>No schema changes and no new persisted raw-log kinds.</li>
+      <li>No changes to the interruption semantics currently under separate audit.</li>
+      <li>No broad transaction framework, plugin system, storage abstraction, or new module tree.</li>
     </ul>
 
-    <h2>Minimal Schema</h2>
+    <h2>Minimal Schema Fields</h2>
     <p>
-      Runtime schema stays <code>schema_version: "0.1"</code>. The new optional
-      context section shape is:
+      No schema fields are added or changed. Existing <code>schema_version: "0.1"</code>
+      records, committed success log entries, rejected log entries, finalize request shapes,
+      and finalize result shapes remain unchanged.
     </p>
+
+    <h2>Functional Requirements</h2>
     <ul>
-      <li><code>schema_version</code>: current schema version.</li>
-      <li><code>section_id</code>: non-empty provider-stable identifier, unique within one context.</li>
-      <li><code>section_type</code>: non-empty provider-owned type label.</li>
-      <li><code>content</code>: object payload already compacted for the model.</li>
-      <li><code>source_event_ids</code>: event IDs that justify the section; empty is allowed for sections not derived from event records yet.</li>
+      <li>The helper must call any caller-provided raw-log requirement before finalization.</li>
+      <li>The helper must pass a defensive clone to the finalizer and post-visible hook.</li>
+      <li>The helper must validate the finalizer result through a caller-provided validator.</li>
+      <li>The helper must confirm committed success-log visibility through the shared raw-log helper after finalizer result validation.</li>
+      <li>The helper must run the caller-provided post-visible hook only after success-log visibility is confirmed.</li>
+      <li>Raw-log visibility validation errors must still map to <code>malformed_finalize_result</code> where callers currently do so.</li>
+      <li>Unexpected finalizer or post-visible hook errors must still map or propagate exactly as the current module does.</li>
+      <li>Callers must still append the same rejected log entries and return the same rejected result shape on handled failures.</li>
     </ul>
-    <p>
-      Provider request shape is deterministic and event-scoped:
-      <code>schema_version</code>, <code>trace_id</code>, <code>event_id</code>,
-      <code>event_type</code>, <code>created_at</code>, and optional
-      <code>conversation_id</code>.
-    </p>
+
+    <h2>Non-Functional Requirements</h2>
+    <ul>
+      <li>Keep the helper small, typed, and local to Commit &amp; Effects.</li>
+      <li>Avoid <code>any</code>, non-null assertions, broad casts, and unused exports.</li>
+      <li>Keep existing tests behavior-oriented and avoid coupling tests to private implementation details.</li>
+      <li>Reduce duplication without hiding caller-specific lifecycle semantics.</li>
+    </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>Default <code>buildCharacterDecisionContext</code> output remains byte-shape compatible with existing tests.</li>
-      <li>A configured provider can add a named section without changing <code>character_snapshot</code>.</li>
-      <li>Malformed provider sections are rejected with contract validation errors.</li>
-      <li>Direct <code>DecisionContext</code> validation accepts normalized sections and rejects malformed or duplicate sections.</li>
-      <li>Role Model Loop forwards provider sections into rendered input and still rejects malformed decision contexts.</li>
-      <li>No live model provider or external service is called.</li>
-      <li>Future retrieval and memory work is parked, not implemented.</li>
+      <li>The five target modules use the shared staged transaction helper for the duplicated finalizer/visibility sequence.</li>
+      <li>At least one existing success path exercises the helper and still exposes exactly one committed success log.</li>
+      <li>At least one staged-visibility failure path exercises the helper and discards staged committed success visibility before appending the rejected log.</li>
+      <li>All existing statuses, failure stages/codes, raw-log kinds, success-log visibility behavior, and rejection-log behavior are preserved.</li>
+      <li><code>pnpm check</code> passes.</li>
+      <li><code>pnpm tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code> passes.</li>
+      <li>The development journal records files changed, tests run, review notes, next action, and schema impact.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <ul>
-      <li><code>pnpm exec vitest run tests/unit/character/state/context.test.ts</code></li>
-      <li><code>pnpm exec vitest run tests/unit/role-model/loop.test.ts</code></li>
+      <li><code>pnpm test -- tests/unit/commit-effects/living-state.test.ts tests/unit/commit-effects/incident-start.test.ts tests/unit/commit-effects/incident-cancel.test.ts tests/unit/commit-effects/incident-complete.test.ts tests/unit/commit-effects/incident-interrupt.test.ts tests/integration/incident-completion-event.test.ts</code></li>
       <li><code>pnpm check</code></li>
       <li><code>pnpm tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
       <li><code>git diff --check</code></li>
-      <li>HTML parse check for docs under <code>docs/</code>.</li>
+      <li>Post-change code review against correctness, boundaries, security, performance, and unused-code risk.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li><strong>Character State Engine:</strong> owns provider request construction, section validation, and final <code>DecisionContext</code> assembly.</li>
-      <li><strong>Role Model Loop:</strong> forwards provider configuration and validates rendered contexts before adapter calls and log snapshots.</li>
-      <li><strong>Runtime User Turn:</strong> only touched if an existing orchestration option must pass the provider through.</li>
-      <li><strong>Commit and Effects Engine:</strong> unchanged.</li>
+      <li><strong>Commit and Effects:</strong> owns this helper and all changed callers.</li>
+      <li><strong>Raw Event Logging:</strong> existing visibility helpers remain the only raw-log visibility mechanism.</li>
+      <li><strong>Runtime Kernel, Character State Engine, Role Model Loop:</strong> unchanged.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>This is a compatibility schema extension, not a replacement of <code>character_snapshot</code>.</li>
-      <li><code>context_sections</code> should be omitted when empty so existing rendered input remains stable.</li>
-      <li>Provider payloads are generic only at the boundary; they still need schema version, identity, and object payload validation.</li>
-      <li>Future providers must own their own compact payload contract before being wired in.</li>
+      <li>Start incident intentionally treats post-visible hook failure as success after committed success visibility is confirmed.</li>
+      <li>Cancel and complete intentionally append a rejected log after post-visible hook failure while keeping the already confirmed success log visible.</li>
+      <li>Interrupt behavior is not being redesigned in this slice; preserve the current tested behavior even where prior audits flagged semantic drift.</li>
+      <li>Living-state has no post-visible hook; the helper must support that without inventing one.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should future retrieval sections standardize <code>source_refs</code> beyond <code>source_event_ids</code>?</li>
-      <li>Should later context-budget policy rank or trim cross-provider sections?</li>
+      <li>Should later slices split the repeated finalizer result validators into a typed shared validator?</li>
+      <li>Should living-state adopt a raw-log requirement hook like incident lifecycle finalizers?</li>
     </ul>
 
     <h2>Future Ideas</h2>
     <ul>
-      <li>Implement retrieved-context sections backed by a retrieval planner and exact source expansion.</li>
-      <li>Add context-build raw log entries once replay/debug needs source-request traces.</li>
-      <li>Add section budgeting after at least two real context providers exist.</li>
+      <li>Consider shared validation for finalize result envelopes after this helper proves the transaction sequence is stable.</li>
+      <li>Consider a follow-up audit for the interruption post-visible rejection semantics; this slice preserves current behavior only.</li>
     </ul>
   </main>
 </body>
