@@ -93,7 +93,9 @@
       TypeScript runtime now lives under <code>src/</code> with tests under
       <code>tests/</code>; Python is preserved on remote branch
       <code>legacy-python-main</code>.
-      Context provider sections are tracked in
+      The staged commit transaction helper refactor is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a>.
+      Context provider sections are recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/26">PR #26</a>.
     </p>
     <div class="graph-panel">
@@ -142,6 +144,7 @@ flowchart LR
     IncidentCompletionEventCommit["INCIDENT_COMPLETION commit/reject&lt;br/&gt;MVP-019 implemented"]
     IncidentInterruptCommit["USER_MESSAGE interruption commit/reject&lt;br/&gt;MVP-021 implemented"]
     IncidentInterruptFinalize["Incident-interrupt finalizer protocol&lt;br/&gt;active incident moved to interrupted + log visibility&lt;br/&gt;MVP-021 implemented"]
+    StagedTransactionHelper["Staged commit transaction helper&lt;br/&gt;finalizer + success-log visibility + post-visible hooks&lt;br/&gt;PR #27"]
     IncidentStoreAdapter["Concrete in-memory incident store adapter&lt;br/&gt;start + cancel + complete implemented"]
   end
 
@@ -210,6 +213,13 @@ flowchart LR
   IncidentCancelFinalize --> IncidentStoreAdapter
   IncidentCompleteFinalize --> IncidentStoreAdapter
   IncidentInterruptFinalize --> IncidentStoreAdapter
+  IncidentStartCommit --> StagedTransactionHelper
+  IncidentCancelCommit --> StagedTransactionHelper
+  IncidentCompleteCommit --> StagedTransactionHelper
+  IncidentCompletionEventCommit --> StagedTransactionHelper
+  IncidentInterruptCommit --> StagedTransactionHelper
+  StatePatchCommit --> StagedTransactionHelper
+  StagedTransactionHelper --> LogHelper
   IncidentStoreAdapter --> RawLogQuery
   InMemoryIncidentStore -- "read contract only; no default wiring" --> ActiveIncidentSource
   IncidentStoreAdapter -- "MVP-021 read contract target" --> InterruptedIncidentSource
@@ -254,10 +264,11 @@ flowchart LR
   class LifeActionParse,IncidentCompleteCommit,IncidentCompleteFinalize implemented;
   class Envelope,IncidentStoreAdapter,InMemoryIncidentStore implemented;
   class ContextBuilder implemented;
-  class ContextSections active;
+  class ContextSections implemented;
   class IncidentCompletionEvent,IncidentCompletionRoute,IncidentCompletionEventCommit implemented;
   class InterruptionFlag implemented;
   class IncidentInterruptCommit,IncidentInterruptFinalize,InterruptedIncidentSource,InterruptedIncidentBrief implemented;
+  class StagedTransactionHelper active;
   class TSContracts,TSLogging,TSKernel,TSCharacterState,TSRoleModel,TSCommitEffects,TSUserTurn implemented;
       </pre>
     </div>
@@ -273,9 +284,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">Context Provider Sections</a></td>
-          <td>Open in <a href="https://github.com/QuellaMC/Project02/pull/26">PR #26</a> on branch <code>feature/context-provider-sections</code>.</td>
-          <td>Add an optional provider-owned <code>DecisionContext.context_sections</code> envelope outside <code>character_snapshot</code>, preserving current rendered input compatibility while parking retrieval and memory work for later slices.</td>
+          <td><a href="active-slice.html">Staged Commit Transaction Helper</a></td>
+          <td>Open in <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a> on branch <code>feature/staged-commit-transaction-helper</code>.</td>
+          <td>Extract the repeated Commit &amp; Effects staged transaction flow while preserving current statuses, failure stages, raw-log entries, visibility discard behavior, and rejected-log behavior.</td>
         </tr>
       </tbody>
     </table>

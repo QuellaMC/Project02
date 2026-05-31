@@ -22,11 +22,8 @@ import {
   type ValueRecord
 } from '../runtime/validation.ts';
 import {
-  RawEventLogQueryValidationError,
   buildRawLogEntry,
   clockTimestamp,
-  confirmCommittedSuccessEntryVisibility,
-  discardCommittedSuccessEntryVisibility,
   snapshotRawValue,
   type Clock,
   type IdGenerator,
@@ -36,6 +33,7 @@ import {
   validateCurrentCharacterStateSnapshot,
   type CharacterRuntimeStateSnapshot
 } from '../character/state/current.ts';
+import { runStagedCommitTransaction } from './incident-lifecycle.ts';
 
 export const LIVING_STATE_PATCH_COMMITTED_STATUS = 'living_state_patch_committed';
 export const LIVING_STATE_PATCH_SKIPPED_STATUS = 'living_state_patch_skipped';
@@ -275,37 +273,26 @@ export function commitLivingStatePatch(
       committedSnapshot: validatedSnapshot,
       committedLogEntry
     });
+    const transactionLogEntry = committedLogEntry;
 
-    let finalizeResult: unknown;
-    try {
-      finalizeResult = livingStatePatchFinalizer.finalizeLivingStatePatchCommit(
-        structuredClone(finalizeRequest)
-      );
-    } catch (error) {
-      if (error instanceof RawEventLogQueryValidationError) {
-        throw new LivingStatePatchFinalizerError(error.message, {
-          code: 'malformed_finalize_result'
-        });
-      }
-      throw error;
-    }
-    const validatedFinalizeResult = validateLivingStatePatchFinalizeResult(
-      finalizeResult,
-      {
-        sourceIdentity,
-        committedLogEntry
-      }
-    );
-    try {
-      confirmCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
-    } catch (error) {
-      if (error instanceof RawEventLogQueryValidationError) {
-        throw new LivingStatePatchFinalizerError(error.message, {
-          code: 'malformed_finalize_result'
-        });
-      }
-      throw error;
-    }
+    const validatedFinalizeResult = runStagedCommitTransaction({
+      rawEventLog,
+      committedLogEntry: transactionLogEntry,
+      finalizeRequest,
+      finalize: (candidateRequest) =>
+        livingStatePatchFinalizer.finalizeLivingStatePatchCommit(candidateRequest),
+      validateFinalizeResult: (candidateResult) =>
+        validateLivingStatePatchFinalizeResult(candidateResult, {
+          sourceIdentity,
+          committedLogEntry: transactionLogEntry
+        }),
+      isTransactionError: (error): error is LivingStatePatchFinalizerError =>
+        error instanceof LivingStatePatchFinalizerError,
+      makeMalformedFinalizeError: (message) =>
+        new LivingStatePatchFinalizerError(message, { code: 'malformed_finalize_result' }),
+      makeFinalizeRejectedError: (message) =>
+        new LivingStatePatchFinalizerError(message, { code: 'finalize_rejected' })
+    });
 
     return {
       schema_version: SCHEMA_VERSION,
@@ -318,7 +305,6 @@ export function commitLivingStatePatch(
     };
   } catch (error) {
     if (error instanceof LivingStatePatchFinalizerError) {
-      discardCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
       const failure = buildFailure(
         LIVING_STATE_PATCH_FINALIZE_STAGE,
         error.code,
