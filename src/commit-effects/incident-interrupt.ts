@@ -275,20 +275,7 @@ export function commitLifeIncidentInterruption(
         throw error;
       }
       successVisibilityConfirmed = true;
-      try {
-        completeAfterLogVisible(lifeIncidentInterruptFinalizer, finalizeRequest);
-      } catch (error) {
-        if (error instanceof LifeIncidentInterruptFinalizerError) {
-          // Python parity: after success visibility, surface the completion
-          // failure to the caller without appending a contradictory rejected log.
-          return buildIncidentRejectedResult(
-            sourceIdentity,
-            LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS,
-            buildFailure(LIFE_INCIDENT_INTERRUPT_FINALIZE_STAGE, error.code, error.message)
-          );
-        }
-        throw error;
-      }
+      completeAfterLogVisible(lifeIncidentInterruptFinalizer, finalizeRequest);
       return {
         ...buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_INTERRUPTED_STATUS),
         interrupted_incident: structuredClone(interruptedIncident),

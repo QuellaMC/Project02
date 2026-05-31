@@ -295,7 +295,7 @@ describe('life incident interruption commit effects', () => {
     ]);
   });
 
-  it('keeps success log without rejected log when post-visible completion fails', () => {
+  it('keeps success log and appends rejected log when post-visible completion fails', () => {
     const rawLog = new InMemoryRawEventLog();
     const result = commitLifeIncidentInterruption(normalizedUserMessage(), {
       activeIncidentSource: new RecordingActiveIncidentSource(activeIncidentSnapshot()),
@@ -316,9 +316,15 @@ describe('life incident interruption commit effects', () => {
     }
     expect(result.failure.stage).toBe('life_incident_interrupt_finalize');
     expect(result.failure.code).toBe('finalize_rejected');
-    expect(rawLog.query({ trace_id: 'trace-interrupt' }).entries.map((entry) => entry.kind)).toEqual([
-      'life_incident_interrupted'
+    const entries = rawLog.query({ trace_id: 'trace-interrupt' }).entries;
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'life_incident_interrupted',
+      'life_incident_interrupt_rejected'
     ]);
+    expect(entries[1]?.data['failure']).toMatchObject({
+      stage: 'life_incident_interrupt_finalize',
+      code: 'finalize_rejected'
+    });
   });
 
   it('maps raw-log validation errors from the interrupt finalizer to malformed finalize results', () => {
@@ -346,7 +352,7 @@ describe('life incident interruption commit effects', () => {
     ]);
   });
 
-  it('keeps Python parity for raw-log validation errors from interrupt post-visible completion', () => {
+  it('records rejected log for raw-log validation errors from interrupt post-visible completion', () => {
     const rawLog = new InMemoryRawEventLog();
     const result = commitLifeIncidentInterruption(normalizedUserMessage(), {
       activeIncidentSource: new RecordingActiveIncidentSource(activeIncidentSnapshot()),
@@ -365,8 +371,14 @@ describe('life incident interruption commit effects', () => {
     }
     expect(result.failure.stage).toBe('life_incident_interrupt_finalize');
     expect(result.failure.code).toBe('finalize_rejected');
-    expect(rawLog.query({ trace_id: 'trace-interrupt' }).entries.map((entry) => entry.kind)).toEqual([
-      'life_incident_interrupted'
+    const entries = rawLog.query({ trace_id: 'trace-interrupt' }).entries;
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'life_incident_interrupted',
+      'life_incident_interrupt_rejected'
     ]);
+    expect(entries[1]?.data['failure']).toMatchObject({
+      stage: 'life_incident_interrupt_finalize',
+      code: 'finalize_rejected'
+    });
   });
 });
