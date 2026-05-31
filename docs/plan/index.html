@@ -85,8 +85,14 @@
       <a href="https://github.com/QuellaMC/Project02/pull/22">PR #22</a>.
       MVP-020 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/23">PR #23</a>.
-      MVP-021 is tracked in
+      MVP-021 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/24">PR #24</a>.
+      The TypeScript runtime source-of-truth cutover is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/25">PR #25</a>
+      on branch <code>mvp-typescript-shadow-port</code>. The completed
+      TypeScript runtime now lives under <code>src/</code> with tests under
+      <code>tests/</code>; Python is preserved on remote branch
+      <code>legacy-python-main</code>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -108,7 +114,7 @@ flowchart LR
     RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 implemented"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015, MVP-016, MVP-017, MVP-018, MVP-020 implemented; MVP-021 PR #24 open"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015, MVP-016, MVP-017, MVP-018, MVP-020, and MVP-021 implemented"]
     Envelope["RoleModelInputEnvelope split&lt;br/&gt;MVP-016 implemented&lt;br/&gt;call_type/event/actions outside DecisionContext"]
     Render["RoleModelInput renderer&lt;br/&gt;strict envelope validation"]
     Adapter["Injected fake RoleModelAdapter"]
@@ -117,7 +123,7 @@ flowchart LR
     LifeActionParse["Optional life_action parser&lt;br/&gt;start_incident + cancel_incident + complete_incident implemented"]
   end
 
-  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012, MVP-014, MVP-017, MVP-018, MVP-019 implemented; MVP-021 PR #24 open"]
+  subgraph NextBoundary["Commit and Effects Engine - MVP-003, MVP-005, MVP-009, MVP-010, MVP-012, MVP-014, MVP-017, MVP-018, MVP-019, and MVP-021 implemented"]
     Commit["Minimal visible reply commit"]
     Conversation["Visible output record"]
     CommitLog["commit accepted/rejected raw log"]
@@ -132,8 +138,8 @@ flowchart LR
     IncidentCompleteCommit["Complete active incident commit/reject&lt;br/&gt;MVP-018 implemented"]
     IncidentCompleteFinalize["Incident-complete finalizer protocol&lt;br/&gt;active incident cleared + log visibility"]
     IncidentCompletionEventCommit["INCIDENT_COMPLETION commit/reject&lt;br/&gt;MVP-019 implemented"]
-    IncidentInterruptCommit["USER_MESSAGE interruption commit/reject&lt;br/&gt;MVP-021 PR #24"]
-    IncidentInterruptFinalize["Incident-interrupt finalizer protocol&lt;br/&gt;active incident moved to interrupted + log visibility&lt;br/&gt;MVP-021 PR #24"]
+    IncidentInterruptCommit["USER_MESSAGE interruption commit/reject&lt;br/&gt;MVP-021 implemented"]
+    IncidentInterruptFinalize["Incident-interrupt finalizer protocol&lt;br/&gt;active incident moved to interrupted + log visibility&lt;br/&gt;MVP-021 implemented"]
     IncidentStoreAdapter["Concrete in-memory incident store adapter&lt;br/&gt;start + cancel + complete implemented"]
   end
 
@@ -142,7 +148,7 @@ flowchart LR
     VisibleRecentSource["Visible conversation recent source&lt;br/&gt;maps committed records to context"]
   end
 
-  subgraph CharacterState["Character State Engine - MVP-008, MVP-011, MVP-014, MVP-015, MVP-020 implemented; MVP-021 PR #24 open"]
+  subgraph CharacterState["Character State Engine - MVP-008, MVP-011, MVP-014, MVP-015, MVP-020, and MVP-021 implemented"]
     CurrentStateSource["Read-only current-state source&lt;br/&gt;injected fake"]
     LivingStateBrief["living_state_brief&lt;br/&gt;validated compact current reality"]
     ActiveIncidentSource["Read-only active-incident source&lt;br/&gt;MVP-011 PR #12 implemented"]
@@ -150,8 +156,18 @@ flowchart LR
     InMemoryIncidentStore["In-memory LifeIncidentStore&lt;br/&gt;active incident storage&lt;br/&gt;implements ActiveIncidentSource"]
     ContextBuilder["Character State Engine context builder&lt;br/&gt;MVP-015 PR #18&lt;br/&gt;owns compact context assembly"]
     InterruptionFlag["user_message_interrupted_active_incident&lt;br/&gt;computed read-only flag&lt;br/&gt;MVP-020 implemented"]
-    InterruptedIncidentSource["Read-only interrupted-incident source&lt;br/&gt;MVP-021 PR #24"]
-    InterruptedIncidentBrief["interrupted_incident brief&lt;br/&gt;validated compact interrupted context&lt;br/&gt;MVP-021 PR #24"]
+    InterruptedIncidentSource["Read-only interrupted-incident source&lt;br/&gt;MVP-021 implemented"]
+    InterruptedIncidentBrief["interrupted_incident brief&lt;br/&gt;validated compact interrupted context&lt;br/&gt;MVP-021 implemented"]
+  end
+
+  subgraph TypeScriptRuntime["TypeScript Runtime - source of truth&lt;br/&gt;PR #25 open"]
+    TSContracts["src runtime contracts&lt;br/&gt;Stage 2 implemented&lt;br/&gt;PR #25"]
+    TSLogging["src raw logging&lt;br/&gt;Stage 3 implemented&lt;br/&gt;PR #25"]
+    TSKernel["src Runtime Kernel&lt;br/&gt;Stage 4 implemented&lt;br/&gt;PR #25"]
+    TSCharacterState["src Character State read-side&lt;br/&gt;Stage 5 implemented&lt;br/&gt;PR #25"]
+    TSRoleModel["src Role Model Loop&lt;br/&gt;Stage 6 implemented&lt;br/&gt;PR #25"]
+    TSCommitEffects["src Commit Effects&lt;br/&gt;Stage 7A visible, 7B living-state, 7C incident lifecycle implemented&lt;br/&gt;PR #25"]
+    TSUserTurn["src User Turn orchestration&lt;br/&gt;Stage 8 implemented&lt;br/&gt;PR #25"]
   end
 
   subgraph UserTurn["User Turn Orchestrator - MVP-007 implemented locally"]
@@ -200,12 +216,30 @@ flowchart LR
   RuntimeLog --> RawLogQuery
   RoleLog --> RawLogQuery
   CommitLog --> RawLogQuery
+  Normalize -. parity target .-> TSContracts
+  LogHelper -. parity target .-> TSLogging
+  SharedIntake -. parity target .-> TSKernel
+  ContextBuilder -. parity target .-> TSCharacterState
+  Envelope -. parity target .-> TSRoleModel
+  Render -. parity target .-> TSRoleModel
+  Adapter -. parity target .-> TSRoleModel
+  Parse -. parity target .-> TSRoleModel
+  UserProjection -. parity target .-> TSCommitEffects
+  Commit -. parity target .-> TSCommitEffects
+  CommitLog -. parity target .-> TSCommitEffects
+  StatePatchCommit -. parity target .-> TSCommitEffects
+  IncidentStartCommit -. parity target .-> TSCommitEffects
+  IncidentCancelCommit -. parity target .-> TSCommitEffects
+  IncidentCompleteCommit -. parity target .-> TSCommitEffects
+  IncidentCompletionEventCommit -. parity target .-> TSCommitEffects
+  IncidentInterruptCommit -. parity target .-> TSCommitEffects
   RouteUpdate --> Turn
   Turn --> UserProjection
   Turn --> VisibleRecentSource
   Turn --> Render
   Turn --> Commit
   Turn --> TurnResult
+  Turn -. parity target .-> TSUserTurn
 
   classDef implemented fill:#e7f1e9,stroke:#5c8a65,color:#172026;
   classDef active fill:#fff8e6,stroke:#b7832f,color:#172026;
@@ -218,7 +252,8 @@ flowchart LR
   class ContextBuilder implemented;
   class IncidentCompletionEvent,IncidentCompletionRoute,IncidentCompletionEventCommit implemented;
   class InterruptionFlag implemented;
-  class IncidentInterruptCommit,IncidentInterruptFinalize,InterruptedIncidentSource,InterruptedIncidentBrief active;
+  class IncidentInterruptCommit,IncidentInterruptFinalize,InterruptedIncidentSource,InterruptedIncidentBrief implemented;
+  class TSContracts,TSLogging,TSKernel,TSCharacterState,TSRoleModel,TSCommitEffects,TSUserTurn active;
       </pre>
     </div>
 
@@ -233,9 +268,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">MVP-021 - Minimal Durable User Interruption Boundary</a></td>
-          <td>Implementation PR open; <a href="https://github.com/QuellaMC/Project02/pull/24">PR #24</a>.</td>
-          <td>Commit one deterministic <code>USER_MESSAGE</code> interruption policy outcome through Commit &amp; Effects. <code>"interruptible"</code> moves the scoped <code>active_incident</code> to <code>interrupted_incident</code> and exposes <code>life_incident_interrupted</code>; <code>"background"</code> and <code>"protected"</code> expose query-visible policy logs while leaving the active incident unchanged. Resume, durable background/protected state, scheduler, body, Live2D, and proactive output stay out of scope.</td>
+          <td><a href="active-slice.html">TypeScript Runtime Source of Truth Cutover</a></td>
+          <td>Open in <a href="https://github.com/QuellaMC/Project02/pull/25">PR #25</a> on branch <code>mvp-typescript-shadow-port</code>.</td>
+          <td>Promote the completed TypeScript runtime to the branch source of truth: production source under <code>src/</code>, production tests under <code>tests/</code>, TypeScript-only CI, updated package metadata, and Python preserved on <code>legacy-python-main</code>.</td>
         </tr>
       </tbody>
     </table>
@@ -250,6 +285,11 @@ flowchart LR
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td><a href="completed/mvp-021-minimal-durable-user-interruption-boundary.html">MVP-021 - Minimal Durable User Interruption Boundary</a></td>
+          <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/24">PR #24</a>.</td>
+          <td>Commit one deterministic <code>USER_MESSAGE</code> interruption policy outcome through Commit &amp; Effects. <code>"interruptible"</code> moves the scoped <code>active_incident</code> to <code>interrupted_incident</code> and exposes <code>life_incident_interrupted</code>; <code>"background"</code> and <code>"protected"</code> expose query-visible policy logs while leaving the active incident unchanged.</td>
+        </tr>
         <tr>
           <td><a href="completed/mvp-020-computed-user-interruption-context.html">MVP-020 - Computed User Interruption Context</a></td>
           <td>Implemented and merged; <a href="https://github.com/QuellaMC/Project02/pull/23">PR #23</a>.</td>
@@ -360,7 +400,7 @@ flowchart LR
 
     <h2>Next Candidate Slice</h2>
     <p>
-      Ideas beyond the active MVP-021 durable interruption boundary are parked in
+      Ideas beyond the active TypeScript source-of-truth cutover are parked in
       <a href="future-slices.html">future-slices.html</a>.
     </p>
 

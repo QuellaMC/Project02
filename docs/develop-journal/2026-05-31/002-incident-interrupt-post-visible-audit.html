@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-31 - Incident interrupt post-visible audit</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-31 - Incident Interrupt Post-Visible Audit</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Removed the interrupt-specific post-visible finalizer early return that skipped rejected raw-log auditing.</li>
+      <li>Updated interrupt tests so post-visible completion failures preserve the visible success log and append <code>life_incident_interrupt_rejected</code>.</li>
+      <li>Asserted the rejected raw-log failure data remains inspectable with <code>stage = "life_incident_interrupt_finalize"</code> and <code>code = "finalize_rejected"</code>.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      PR review found the TypeScript cutover kept a likely MVP-021 audit drift:
+      post-visible interruption finalizer failures returned a structured
+      rejection but did not append the rejected raw-log entry required by the
+      completed MVP-021 lifecycle pattern and already used by cancel/complete.
+    </p>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>pnpm vitest run tests/unit/commit-effects/incident-interrupt.test.ts</code> - passed: 9 tests.</li>
+      <li><code>pnpm check</code> - passed: lint with <code>--max-warnings=0</code>, typecheck, and 18 Vitest files with 173 tests.</li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code> - passed.</li>
+      <li><code>python3 -c "from html.parser import HTMLParser; import pathlib; [HTMLParser().feed(path.read_text()) for path in pathlib.Path('docs').rglob('*.html')]"</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>The successful <code>life_incident_interrupted</code> log remains query-visible after post-visible completion failure.</li>
+      <li>The rejected audit entry is appended after the success log, matching the cancel and complete post-visible failure pattern.</li>
+      <li>No new lifecycle status or schema field was added.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Push the signed follow-up commit to PR #25 and let CI re-run.
+    </p>
+  </main>
+</body>
+</html>
