@@ -13,11 +13,8 @@ import {
 } from '../runtime/contracts.ts';
 import { SCHEMA_VERSION, type SchemaVersion } from '../runtime/schema.ts';
 import {
-  RawEventLogQueryValidationError,
   buildRawLogEntry,
   clockTimestamp,
-  confirmCommittedSuccessEntryVisibility,
-  discardCommittedSuccessEntryVisibility,
   generateId,
   snapshotRawValue,
   type Clock,
@@ -30,6 +27,7 @@ import {
   buildIncidentStatusResult,
   copyOptionalIdentityFieldsFromRecord,
   copyOptionalPayloadIdentityFields,
+  runStagedCommitTransaction,
   validateCommittedIncidentLogEntry,
   validateIncidentFailure,
   type IncidentFailure as LifecycleIncidentFailure,
@@ -221,7 +219,6 @@ export function commitLifeIncidentStart(
   let startedIncident: ActiveIncidentSnapshot | undefined;
   let committedLogEntry: LifeIncidentStartedLogEntry | undefined;
   let finalizeRequest: LifeIncidentStartFinalizeRequest | undefined;
-  let successVisibilityConfirmed = false;
 
   try {
     const commitRequest = buildLifeIncidentStartCommitRequest(sourceEvent, roleModelResult);
@@ -246,48 +243,52 @@ export function commitLifeIncidentStart(
       startedIncident,
       committedLogEntry
     });
-    callStartRawLogRequirement(lifeIncidentStartFinalizer, rawEventLog);
-    let finalizeResult: unknown;
-    try {
-      finalizeResult = lifeIncidentStartFinalizer.finalizeLifeIncidentStart(
-        structuredClone(finalizeRequest)
-      );
-    } catch (error) {
-      if (error instanceof LifeIncidentStartFinalizerError) {
-        throw error;
-      }
-      if (error instanceof RawEventLogQueryValidationError) {
-        throw new LifeIncidentStartFinalizerError(error.message, {
-          code: 'malformed_finalize_result'
-        });
-      }
-      throw error;
-    }
-    const validatedFinalizeResult = validateLifeIncidentStartFinalizeResult(
-      finalizeResult,
-      {
-        sourceIdentity,
-        committedLogEntry
-      }
-    );
-    try {
-      confirmCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
-    } catch (error) {
-      if (error instanceof RawEventLogQueryValidationError) {
-        throw new LifeIncidentStartFinalizerError(error.message, {
-          code: 'malformed_finalize_result'
-        });
-      }
-      throw error;
-    }
-    successVisibilityConfirmed = true;
-    try {
-      completeStartAfterLogVisible(lifeIncidentStartFinalizer, finalizeRequest);
-    } catch (error) {
-      if (!(error instanceof LifeIncidentStartFinalizerError)) {
-        throw error;
-      }
-    }
+    const validatedFinalizeResult = runStagedCommitTransaction({
+      rawEventLog,
+      committedLogEntry,
+      finalizeRequest,
+      requireRawEventLog:
+        lifeIncidentStartFinalizer.requireRawEventLog === undefined
+          ? undefined
+          : (candidateRawLog) => {
+              lifeIncidentStartFinalizer.requireRawEventLog?.(candidateRawLog as RawEventLog);
+            },
+      finalize: (candidateRequest) =>
+        lifeIncidentStartFinalizer.finalizeLifeIncidentStart(candidateRequest),
+      validateFinalizeResult: (candidateResult) =>
+        validateLifeIncidentStartFinalizeResult(candidateResult, {
+          sourceIdentity,
+          committedLogEntry
+        }),
+      completeAfterLogVisible:
+        lifeIncidentStartFinalizer.completeLifeIncidentStartAfterLogVisible === undefined
+          ? undefined
+          : (candidateRequest) => {
+              lifeIncidentStartFinalizer.completeLifeIncidentStartAfterLogVisible?.(
+                candidateRequest
+              );
+            },
+      discardAfterLogNotVisible:
+        lifeIncidentStartFinalizer.discardLifeIncidentStartAfterLogNotVisible === undefined
+          ? undefined
+          : (candidateRequest) => {
+              lifeIncidentStartFinalizer.discardLifeIncidentStartAfterLogNotVisible?.(
+                candidateRequest
+              );
+            },
+      isTransactionError: (error): error is LifeIncidentStartFinalizerError =>
+        error instanceof LifeIncidentStartFinalizerError,
+      makeMalformedFinalizeError: (message) =>
+        new LifeIncidentStartFinalizerError(message, { code: 'malformed_finalize_result' }),
+      makeFinalizeRejectedError: (message) =>
+        new LifeIncidentStartFinalizerError(message, { code: 'finalize_rejected' }),
+      formatPostVisibleUnexpectedError: (error) =>
+        `complete_life_incident_start_after_log_visible failed unexpectedly: ${errorMessage(error)}`,
+      formatDiscardUnexpectedError: (error) =>
+        `discard_life_incident_start_after_log_not_visible failed unexpectedly: ${errorMessage(error)}`,
+      ignorePostVisibleTransactionError: true,
+      mapPostVisibleRawLogValidationAsMalformed: false
+    });
     return {
       ...buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_STARTED_STATUS),
       started_incident: structuredClone(startedIncident),
@@ -295,23 +296,10 @@ export function commitLifeIncidentStart(
     };
   } catch (error) {
     if (error instanceof LifeIncidentStartFinalizerError) {
-      let failureError = error;
-      if (!successVisibilityConfirmed) {
-        discardCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
-        try {
-          discardStartAfterLogNotVisible(lifeIncidentStartFinalizer, finalizeRequest);
-        } catch (discardError) {
-          if (discardError instanceof LifeIncidentStartFinalizerError) {
-            failureError = discardError;
-          } else {
-            throw discardError;
-          }
-        }
-      }
       const failure = buildFailure(
         LIFE_INCIDENT_START_FINALIZE_STAGE,
-        failureError.code,
-        failureError.message
+        error.code,
+        error.message
       );
       rawEventLog.append(
         buildLifeIncidentStartRejectedLogEntry(sourceEvent, {
@@ -785,68 +773,6 @@ function getStartedAt(snapshot: unknown): unknown {
 
 function validateTimestampForCommit(value: unknown, fieldName: string): string {
   return wrapCommitContractError(() => validateIso8601Timestamp(value, fieldName));
-}
-
-function callStartRawLogRequirement(
-  finalizer: LifeIncidentStartFinalizer,
-  rawEventLog: RawEventLog
-): void {
-  if (finalizer.requireRawEventLog === undefined) {
-    return;
-  }
-  try {
-    finalizer.requireRawEventLog(rawEventLog);
-  } catch (error) {
-    if (error instanceof RawEventLogQueryValidationError) {
-      throw new LifeIncidentStartFinalizerError(error.message, {
-        code: 'malformed_finalize_result'
-      });
-    }
-    throw error;
-  }
-}
-
-function completeStartAfterLogVisible(
-  finalizer: LifeIncidentStartFinalizer,
-  finalizeRequest: LifeIncidentStartFinalizeRequest
-): void {
-  if (finalizer.completeLifeIncidentStartAfterLogVisible === undefined) {
-    return;
-  }
-  try {
-    finalizer.completeLifeIncidentStartAfterLogVisible(structuredClone(finalizeRequest));
-  } catch (error) {
-    if (error instanceof LifeIncidentStartFinalizerError) {
-      throw error;
-    }
-    throw new LifeIncidentStartFinalizerError(
-      `complete_life_incident_start_after_log_visible failed unexpectedly: ${errorMessage(error)}`,
-      { code: 'finalize_rejected' }
-    );
-  }
-}
-
-function discardStartAfterLogNotVisible(
-  finalizer: LifeIncidentStartFinalizer,
-  finalizeRequest: LifeIncidentStartFinalizeRequest | undefined
-): void {
-  if (
-    finalizer.discardLifeIncidentStartAfterLogNotVisible === undefined ||
-    finalizeRequest === undefined
-  ) {
-    return;
-  }
-  try {
-    finalizer.discardLifeIncidentStartAfterLogNotVisible(structuredClone(finalizeRequest));
-  } catch (error) {
-    if (error instanceof LifeIncidentStartFinalizerError) {
-      throw error;
-    }
-    throw new LifeIncidentStartFinalizerError(
-      `discard_life_incident_start_after_log_not_visible failed unexpectedly: ${errorMessage(error)}`,
-      { code: 'finalize_rejected' }
-    );
-  }
 }
 
 function clockAt(timestamp: string): Clock {

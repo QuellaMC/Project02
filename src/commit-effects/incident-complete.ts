@@ -15,11 +15,8 @@ import {
 } from '../runtime/contracts.ts';
 import { SCHEMA_VERSION, type SchemaVersion } from '../runtime/schema.ts';
 import {
-  RawEventLogQueryValidationError,
   buildRawLogEntry,
   clockTimestamp,
-  confirmCommittedSuccessEntryVisibility,
-  discardCommittedSuccessEntryVisibility,
   snapshotRawValue,
   type Clock,
   type IdGenerator,
@@ -31,6 +28,7 @@ import {
   buildIncidentStatusResult,
   copyOptionalIdentityFieldsFromRecord,
   copyOptionalPayloadIdentityFields,
+  runStagedCommitTransaction,
   validateCommittedIncidentLogEntry,
   validateIncidentFailure,
   type IncidentFailure as LifecycleIncidentFailure,
@@ -329,7 +327,6 @@ export function commitLifeIncidentComplete(
       rawEventLog,
       { sourceIdentity, committedLogEntry }
     );
-    completeAfterLogVisible(lifeIncidentCompleteFinalizer, finalizeRequest);
     return {
       ...buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_COMPLETED_STATUS),
       completed_incident: structuredClone(completedIncident),
@@ -337,7 +334,6 @@ export function commitLifeIncidentComplete(
     };
   } catch (error) {
     if (error instanceof LifeIncidentCompleteFinalizerError) {
-      discardCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
       const failure = buildModelFailure(
         LIFE_INCIDENT_COMPLETE_FINALIZE_STAGE,
         error.code,
@@ -442,7 +438,6 @@ export function commitLifeIncidentCompletionEvent(
       rawEventLog,
       { sourceIdentity, committedLogEntry }
     );
-    completeAfterLogVisible(lifeIncidentCompleteFinalizer, finalizeRequest);
     return {
       ...buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_COMPLETED_STATUS),
       completed_incident: structuredClone(completedIncident),
@@ -450,7 +445,6 @@ export function commitLifeIncidentCompletionEvent(
     };
   } catch (error) {
     if (error instanceof LifeIncidentCompleteFinalizerError) {
-      discardCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
       const failure = buildEventFailure(
         INCIDENT_COMPLETION_EVENT_FINALIZE_STAGE,
         error.code,
@@ -1211,86 +1205,40 @@ function stageCompleteSuccess(
     committedLogEntry: LifeIncidentCompletedLogEntry;
   }
 ): LifeIncidentCompleteFinalizeResult {
-  callCompleteRawLogRequirement(finalizer, rawEventLog);
-  let finalizeResult: unknown;
-  try {
-    finalizeResult = finalizer.finalizeLifeIncidentComplete(structuredClone(finalizeRequest));
-  } catch (error) {
-    if (error instanceof LifeIncidentCompleteFinalizerError) {
-      throw error;
-    }
-    if (error instanceof RawEventLogQueryValidationError) {
-      throw new LifeIncidentCompleteFinalizerError(error.message, {
-        code: 'malformed_finalize_result'
-      });
-    }
-    throw new LifeIncidentCompleteFinalizerError(
+  return runStagedCommitTransaction({
+    rawEventLog,
+    committedLogEntry,
+    finalizeRequest,
+    requireRawEventLog: (candidateRawLog) => {
+      const requireSpecific = finalizer.requireLifeIncidentCompleteRawEventLog;
+      const requireGeneric = finalizer.requireRawEventLog;
+      if (requireSpecific !== undefined) {
+        requireSpecific.call(finalizer, candidateRawLog as RawEventLog);
+      } else if (requireGeneric !== undefined) {
+        requireGeneric.call(finalizer, candidateRawLog as RawEventLog);
+      }
+    },
+    finalize: (candidateRequest) => finalizer.finalizeLifeIncidentComplete(candidateRequest),
+    validateFinalizeResult: (candidateResult) =>
+      validateLifeIncidentCompleteFinalizeResult(candidateResult, {
+        sourceIdentity,
+        committedLogEntry
+      }),
+    completeAfterLogVisible: (candidateRequest) => {
+      finalizer.completeLifeIncidentCompleteAfterLogVisible(candidateRequest);
+    },
+    isTransactionError: (error): error is LifeIncidentCompleteFinalizerError =>
+      error instanceof LifeIncidentCompleteFinalizerError,
+    makeMalformedFinalizeError: (message) =>
+      new LifeIncidentCompleteFinalizerError(message, { code: 'malformed_finalize_result' }),
+    makeFinalizeRejectedError: (message) =>
+      new LifeIncidentCompleteFinalizerError(message, { code: 'finalize_rejected' }),
+    formatRequirementUnexpectedError: errorMessage,
+    formatFinalizeUnexpectedError: (error) =>
       `finalize_life_incident_complete failed unexpectedly: ${errorMessage(error)}`,
-      { code: 'finalize_rejected' }
-    );
-  }
-  const validatedResult = validateLifeIncidentCompleteFinalizeResult(finalizeResult, {
-    sourceIdentity,
-    committedLogEntry
+    formatPostVisibleUnexpectedError: (error) =>
+      `complete_life_incident_complete_after_log_visible failed unexpectedly: ${errorMessage(error)}`
   });
-  try {
-    confirmCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
-  } catch (error) {
-    if (error instanceof RawEventLogQueryValidationError) {
-      throw new LifeIncidentCompleteFinalizerError(error.message, {
-        code: 'malformed_finalize_result'
-      });
-    }
-    throw error;
-  }
-  return validatedResult;
-}
-
-function completeAfterLogVisible(
-  finalizer: LifeIncidentCompleteFinalizer,
-  finalizeRequest: LifeIncidentCompleteFinalizeRequest
-): void {
-  try {
-    finalizer.completeLifeIncidentCompleteAfterLogVisible(structuredClone(finalizeRequest));
-  } catch (error) {
-    if (error instanceof LifeIncidentCompleteFinalizerError) {
-      throw error;
-    }
-    if (error instanceof RawEventLogQueryValidationError) {
-      throw new LifeIncidentCompleteFinalizerError(error.message, {
-        code: 'malformed_finalize_result'
-      });
-    }
-    throw new LifeIncidentCompleteFinalizerError(
-      `complete_life_incident_complete_after_log_visible failed unexpectedly: ${errorMessage(error)}`,
-      { code: 'finalize_rejected' }
-    );
-  }
-}
-
-function callCompleteRawLogRequirement(
-  finalizer: LifeIncidentCompleteFinalizer,
-  rawEventLog: RawEventLog
-): void {
-  const requireSpecific = finalizer.requireLifeIncidentCompleteRawEventLog;
-  const requireGeneric = finalizer.requireRawEventLog;
-  try {
-    if (requireSpecific !== undefined) {
-      requireSpecific.call(finalizer, rawEventLog);
-    } else if (requireGeneric !== undefined) {
-      requireGeneric.call(finalizer, rawEventLog);
-    }
-  } catch (error) {
-    if (error instanceof LifeIncidentCompleteFinalizerError) {
-      throw error;
-    }
-    throw new LifeIncidentCompleteFinalizerError(errorMessage(error), {
-      code:
-        error instanceof RawEventLogQueryValidationError
-          ? 'malformed_finalize_result'
-          : 'finalize_rejected'
-    });
-  }
 }
 
 function copyOptionalIncidentFields(

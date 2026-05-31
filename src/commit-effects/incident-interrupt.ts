@@ -9,8 +9,6 @@ import {
   RawEventLogQueryValidationError,
   buildRawLogEntry,
   clockTimestamp,
-  confirmCommittedSuccessEntryVisibility,
-  discardCommittedSuccessEntryVisibility,
   snapshotRawValue,
   type Clock,
   type IdGenerator,
@@ -22,6 +20,7 @@ import {
   buildIncidentStatusResult,
   copyOptionalIdentityFieldsFromRecord,
   copyOptionalPayloadIdentityFields,
+  runStagedCommitTransaction,
   validateCommittedIncidentLogEntry,
   validateIncidentFailure,
   type IncidentFailure as LifecycleIncidentFailure,
@@ -230,7 +229,6 @@ export function commitLifeIncidentInterruption(
   let interruptedIncident: InterruptedIncidentSnapshot | undefined;
   let committedLogEntry: LifeIncidentInterruptedLogEntry | undefined;
   let finalizeRequest: LifeIncidentInterruptFinalizeRequest | undefined;
-  let successVisibilityConfirmed = false;
 
   try {
     const event = validateSourceEvent(sourceEvent);
@@ -264,18 +262,6 @@ export function commitLifeIncidentInterruption(
         rawEventLog,
         { sourceIdentity, committedLogEntry }
       );
-      try {
-        confirmCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
-      } catch (error) {
-        if (error instanceof RawEventLogQueryValidationError) {
-          throw new LifeIncidentInterruptFinalizerError(error.message, {
-            code: 'malformed_finalize_result'
-          });
-        }
-        throw error;
-      }
-      successVisibilityConfirmed = true;
-      completeAfterLogVisible(lifeIncidentInterruptFinalizer, finalizeRequest);
       return {
         ...buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_INTERRUPTED_STATUS),
         interrupted_incident: structuredClone(interruptedIncident),
@@ -304,9 +290,6 @@ export function commitLifeIncidentInterruption(
     });
   } catch (error) {
     if (error instanceof LifeIncidentInterruptFinalizerError) {
-      if (!successVisibilityConfirmed) {
-        discardCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
-      }
       const failure = buildFailure(
         LIFE_INCIDENT_INTERRUPT_FINALIZE_STAGE,
         error.code,
@@ -877,70 +860,41 @@ function stageInterruptSuccess(
     committedLogEntry: LifeIncidentInterruptedLogEntry;
   }
 ): LifeIncidentInterruptFinalizeResult {
-  callInterruptRawLogRequirement(finalizer, rawEventLog);
-  let finalizeResult: unknown;
-  try {
-    finalizeResult = finalizer.finalizeLifeIncidentInterrupt(structuredClone(finalizeRequest));
-  } catch (error) {
-    if (error instanceof LifeIncidentInterruptFinalizerError) {
-      throw error;
-    }
-    if (error instanceof RawEventLogQueryValidationError) {
-      throw new LifeIncidentInterruptFinalizerError(error.message, {
-        code: 'malformed_finalize_result'
-      });
-    }
-    throw new LifeIncidentInterruptFinalizerError(
+  return runStagedCommitTransaction({
+    rawEventLog,
+    committedLogEntry,
+    finalizeRequest,
+    requireRawEventLog: (candidateRawLog) => {
+      const requireSpecific = finalizer.requireLifeIncidentInterruptRawEventLog;
+      const requireGeneric = finalizer.requireRawEventLog;
+      if (requireSpecific !== undefined) {
+        requireSpecific.call(finalizer, candidateRawLog as RawEventLog);
+      } else if (requireGeneric !== undefined) {
+        requireGeneric.call(finalizer, candidateRawLog as RawEventLog);
+      }
+    },
+    finalize: (candidateRequest) => finalizer.finalizeLifeIncidentInterrupt(candidateRequest),
+    validateFinalizeResult: (candidateResult) =>
+      validateLifeIncidentInterruptFinalizeResult(candidateResult, {
+        sourceIdentity,
+        committedLogEntry
+      }),
+    completeAfterLogVisible: (candidateRequest) => {
+      finalizer.completeLifeIncidentInterruptAfterLogVisible(candidateRequest);
+    },
+    isTransactionError: (error): error is LifeIncidentInterruptFinalizerError =>
+      error instanceof LifeIncidentInterruptFinalizerError,
+    makeMalformedFinalizeError: (message) =>
+      new LifeIncidentInterruptFinalizerError(message, { code: 'malformed_finalize_result' }),
+    makeFinalizeRejectedError: (message) =>
+      new LifeIncidentInterruptFinalizerError(message, { code: 'finalize_rejected' }),
+    formatRequirementUnexpectedError: errorMessage,
+    formatFinalizeUnexpectedError: (error) =>
       `finalize_life_incident_interrupt failed unexpectedly: ${errorMessage(error)}`,
-      { code: 'finalize_rejected' }
-    );
-  }
-  return validateLifeIncidentInterruptFinalizeResult(finalizeResult, {
-    sourceIdentity,
-    committedLogEntry
-  });
-}
-
-function completeAfterLogVisible(
-  finalizer: LifeIncidentInterruptFinalizer,
-  finalizeRequest: LifeIncidentInterruptFinalizeRequest
-): void {
-  try {
-    finalizer.completeLifeIncidentInterruptAfterLogVisible(structuredClone(finalizeRequest));
-  } catch (error) {
-    if (error instanceof LifeIncidentInterruptFinalizerError) {
-      throw error;
-    }
-    throw new LifeIncidentInterruptFinalizerError(
+    formatPostVisibleUnexpectedError: (error) =>
       `complete_life_incident_interrupt_after_log_visible failed unexpectedly: ${errorMessage(error)}`,
-      { code: 'finalize_rejected' }
-    );
-  }
-}
-
-function callInterruptRawLogRequirement(
-  finalizer: LifeIncidentInterruptFinalizer,
-  rawEventLog: RawEventLog
-): void {
-  const requireSpecific = finalizer.requireLifeIncidentInterruptRawEventLog;
-  const requireGeneric = finalizer.requireRawEventLog;
-  try {
-    if (requireSpecific !== undefined) {
-      requireSpecific.call(finalizer, rawEventLog);
-    } else if (requireGeneric !== undefined) {
-      requireGeneric.call(finalizer, rawEventLog);
-    }
-  } catch (error) {
-    if (error instanceof LifeIncidentInterruptFinalizerError) {
-      throw error;
-    }
-    throw new LifeIncidentInterruptFinalizerError(errorMessage(error), {
-      code:
-        error instanceof RawEventLogQueryValidationError
-          ? 'malformed_finalize_result'
-          : 'finalize_rejected'
-    });
-  }
+    mapPostVisibleRawLogValidationAsMalformed: false
+  });
 }
 
 function copyOptionalIncidentFields(

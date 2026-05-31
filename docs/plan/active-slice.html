@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TypeScript Runtime Source of Truth Cutover</title>
+  <title>Staged Commit Transaction Helper</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 960px; margin: 0 auto; padding: 44px 24px; }
@@ -19,128 +19,132 @@
 </head>
 <body>
   <main>
-    <h1>TypeScript Runtime Source of Truth Cutover</h1>
+    <h1>Staged Commit Transaction Helper</h1>
     <p><span class="status">Status: active implementation slice</span></p>
     <p>
-      Created: 2026-05-30. Active branch:
-      <code>mvp-typescript-shadow-port</code>. Preserved Python branch:
-      <code>legacy-python-main</code> created from local <code>main</code> before
-      Python removal.
+      Created: 2026-05-31. Active branch:
+      <code>feature/staged-commit-transaction-helper</code>.
     </p>
 
     <h2>Source Context</h2>
     <p>
       Product direction remains the Notion project hub
-      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>
-      and the
-      <a href="https://www.notion.so/36f8995c0c5e80a5be6aee4982f0e23a">original TypeScript migration goal</a>.
-      Local implementation truth for the completed port is recorded in
-      <a href="typescript-source-of-truth.html">the TypeScript source-of-truth tracker</a>
-      and the 2026-05-29/2026-05-30 development journals.
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.
+      The Notion runtime notes keep the Commit &amp; Effects Engine as the boundary
+      that validates, commits durable state, appends Raw Event Log entries, and emits effects.
+      Local implementation truth for this refactor comes from the current TypeScript source under
+      <code>src/commit-effects/</code>, the raw-log visibility helpers in
+      <code>src/runtime/logging.ts</code>, and the existing lifecycle helpers in
+      <code>src/commit-effects/incident-lifecycle.ts</code>.
     </p>
     <p>
-      Source-of-truth note: the original Notion migration goal framed the work
-      as a shadow port with Python remaining production truth. After the
-      complete port passed review gates, the user approved a two-branch cutover:
-      keep Python on <code>legacy-python-main</code> and make this branch the
-      TypeScript source-of-truth line. This PR must call out that approved
-      exception explicitly because it intentionally exceeds the original
-      shadow-port-only wording.
+      The issue target is a P2 refactor: repeated staged transaction flow in
+      <code>incident-start.ts</code>, <code>incident-cancel.ts</code>,
+      <code>incident-complete.ts</code>, <code>incident-interrupt.ts</code>, and
+      <code>living-state.ts</code>. Current behavior must remain observable through the same
+      statuses, failure stages and codes, success-log visibility, staged-visibility discard, and
+      rejected raw-log entries.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Promote the completed TypeScript runtime from a shadow implementation to
-      the branch's source of truth. The production tree should use
-      <code>src/</code> and <code>tests/</code> for TypeScript, CI should run
-      TypeScript-only gates, package metadata should describe the TypeScript
-      runtime, and local docs should make clear that the Python implementation
-      now lives on <code>legacy-python-main</code>.
+      Extract one concrete shared helper for the already-implemented staged commit transaction:
+      call the finalizer, validate the finalizer result, confirm committed success-log visibility,
+      run any post-visible hook, and preserve the caller's existing cleanup and rejection behavior
+      when a transaction fails before durable success visibility.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>Create <code>legacy-python-main</code> from current local <code>main</code>.</li>
-      <li>Remove the Python <code>src/</code> and <code>tests/</code> trees from this TypeScript branch.</li>
-      <li>Remove stale Python-only tooling metadata from this TypeScript branch.</li>
-      <li>Move TypeScript source from <code>src-ts/</code> to <code>src/</code>.</li>
-      <li>Move TypeScript tests from <code>tests-ts/</code> to <code>tests/</code>.</li>
-      <li>Update imports, TypeScript config, Vitest config, ESLint config, and package scripts for the new paths.</li>
-      <li>Update CI so the existing <code>lint</code>, <code>typecheck</code>, and <code>test</code> jobs are TypeScript-only.</li>
-      <li>Update package metadata from migration wording to TypeScript runtime wording.</li>
-      <li>Update active docs, plan index, source-of-truth tracker, future-slice notes, and journal with cutover evidence.</li>
+      <li>Add focused regression tests for one success path and one staged-visibility rejection path through the helper.</li>
+      <li>Place the helper in <code>src/commit-effects/incident-lifecycle.ts</code> if it can stay narrow and dependency-light.</li>
+      <li>Refactor the duplicated finalizer/visibility/post-visible sequence in the five target commit-effect modules.</li>
+      <li>Preserve module-specific request building, snapshot building, log-entry building, result construction, rejection-log construction, and failure-stage mapping in each caller.</li>
+      <li>Keep the helper generic enough for the current living-state and incident callers without adding a framework/plugin layer.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No runtime behavior changes beyond import path and source-layout cutover.</li>
-      <li>No model provider, database, scheduler, retrieval, tool, Live2D, asset, or UI work.</li>
-      <li>No deletion of the preserved Python branch.</li>
-      <li>No branch renaming or GitHub default-branch/protection changes in this local commit.</li>
-      <li>No PR creation unless requested after the cutover commit is verified.</li>
+      <li>No user-turn orchestration changes.</li>
+      <li>No Role Model allowed-action, parser, or <code>DecisionContext</code> shape changes.</li>
+      <li>No memory, retrieval, scheduler, tool, Live2D, asset, or new runtime behavior.</li>
+      <li>No schema changes and no new persisted raw-log kinds.</li>
+      <li>No changes to the interruption semantics currently under separate audit.</li>
+      <li>No broad transaction framework, plugin system, storage abstraction, or new module tree.</li>
     </ul>
 
-    <h2>Minimal Schema</h2>
+    <h2>Minimal Schema Fields</h2>
     <p>
-      Runtime record schemas remain at <code>schema_version: "0.1"</code>.
-      This slice changes repository layout and CI ownership only. It must not
-      change <code>RuntimeEvent</code>, <code>RawEventLogEntry</code>,
-      <code>CharacterDecision</code>, <code>RoleModelTurnResult</code>, incident
-      snapshots, living-state snapshots, or user-turn result contracts.
+      No schema fields are added or changed. Existing <code>schema_version: "0.1"</code>
+      records, committed success log entries, rejected log entries, finalize request shapes,
+      and finalize result shapes remain unchanged.
     </p>
+
+    <h2>Functional Requirements</h2>
+    <ul>
+      <li>The helper must call any caller-provided raw-log requirement before finalization.</li>
+      <li>The helper must pass a defensive clone to the finalizer and post-visible hook.</li>
+      <li>The helper must validate the finalizer result through a caller-provided validator.</li>
+      <li>The helper must confirm committed success-log visibility through the shared raw-log helper after finalizer result validation.</li>
+      <li>The helper must run the caller-provided post-visible hook only after success-log visibility is confirmed.</li>
+      <li>Raw-log visibility validation errors must still map to <code>malformed_finalize_result</code> where callers currently do so.</li>
+      <li>Unexpected finalizer or post-visible hook errors must still map or propagate exactly as the current module does.</li>
+      <li>Callers must still append the same rejected log entries and return the same rejected result shape on handled failures.</li>
+    </ul>
+
+    <h2>Non-Functional Requirements</h2>
+    <ul>
+      <li>Keep the helper small, typed, and local to Commit &amp; Effects.</li>
+      <li>Avoid <code>any</code>, non-null assertions, broad casts, and unused exports.</li>
+      <li>Keep existing tests behavior-oriented and avoid coupling tests to private implementation details.</li>
+      <li>Reduce duplication without hiding caller-specific lifecycle semantics.</li>
+    </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li><code>legacy-python-main</code> exists at the old Python <code>main</code> commit.</li>
-      <li>No Python source or Python tests remain under production <code>src/</code> or <code>tests/</code>.</li>
-      <li>All TypeScript imports reference <code>src/</code>, not <code>src-ts/</code>.</li>
-      <li>TypeScript tests live under <code>tests/</code>, not <code>tests-ts/</code>.</li>
-      <li>CI has no Python setup, Ruff, mypy, compileall, or unittest steps.</li>
-      <li>No root Python tooling metadata remains for Ruff or mypy.</li>
-      <li><code>package.json</code> describes <code>project02-runtime</code> as a TypeScript runtime package.</li>
-      <li><code>pnpm lint</code>, <code>pnpm typecheck</code>, and <code>pnpm test</code> pass.</li>
-      <li>Docs HTML parses and <code>git diff --check</code> passes.</li>
-      <li>The cutover is committed with a signed commit.</li>
+      <li>The five target modules use the shared staged transaction helper for the duplicated finalizer/visibility sequence.</li>
+      <li>At least one existing success path exercises the helper and still exposes exactly one committed success log.</li>
+      <li>At least one staged-visibility failure path exercises the helper and discards staged committed success visibility before appending the rejected log.</li>
+      <li>All existing statuses, failure stages/codes, raw-log kinds, success-log visibility behavior, and rejection-log behavior are preserved.</li>
+      <li><code>pnpm check</code> passes.</li>
+      <li><code>pnpm tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code> passes.</li>
+      <li>The development journal records files changed, tests run, review notes, next action, and schema impact.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <ul>
-      <li><code>pnpm lint</code></li>
-      <li><code>pnpm typecheck</code></li>
-      <li><code>pnpm test</code></li>
-      <li><code>python3 -c "from html.parser import HTMLParser; import pathlib; [HTMLParser().feed(path.read_text()) for path in pathlib.Path('docs').rglob('*.html')]"</code></li>
+      <li><code>pnpm test -- tests/unit/commit-effects/living-state.test.ts tests/unit/commit-effects/incident-start.test.ts tests/unit/commit-effects/incident-cancel.test.ts tests/unit/commit-effects/incident-complete.test.ts tests/unit/commit-effects/incident-interrupt.test.ts tests/integration/incident-completion-event.test.ts</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
       <li><code>git diff --check</code></li>
+      <li>Post-change code review against correctness, boundaries, security, performance, and unused-code risk.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li><strong>Runtime Kernel:</strong> TypeScript source under <code>src/runtime/</code> owns event intake, normalization, routing, IDs, clocks, and raw-log append request behavior.</li>
-      <li><strong>Character State Engine:</strong> TypeScript source under <code>src/character/state/</code> owns read-side snapshots, incident store adapters, and compact context building.</li>
-      <li><strong>Role Model Loop:</strong> TypeScript source under <code>src/role-model/</code> owns model input rendering, adapter calls, output parsing, and structured decision validation.</li>
-      <li><strong>Commit and Effects:</strong> TypeScript source under <code>src/commit-effects/</code> owns validated visible, living-state, incident, and user-turn commit effects.</li>
-      <li><strong>Legacy Python:</strong> preserved on <code>legacy-python-main</code>; not part of this TypeScript branch after cutover.</li>
+      <li><strong>Commit and Effects:</strong> owns this helper and all changed callers.</li>
+      <li><strong>Raw Event Logging:</strong> existing visibility helpers remain the only raw-log visibility mechanism.</li>
+      <li><strong>Runtime Kernel, Character State Engine, Role Model Loop:</strong> unchanged.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>The preceding TypeScript migration commit fixed the known parity blockers before this cutover.</li>
-      <li>Keep CI job names stable as <code>lint</code>, <code>typecheck</code>, and <code>test</code> so branch protection can keep the same required contexts after they become TS-only.</li>
-      <li>Historical journal entries may still refer to the TypeScript work as a shadow port because they describe the pre-cutover migration process.</li>
-      <li>The active branch now treats TypeScript as the implementation source of truth; Python rollback/reference uses <code>legacy-python-main</code>.</li>
+      <li>Start incident intentionally treats post-visible hook failure as success after committed success visibility is confirmed.</li>
+      <li>Cancel and complete intentionally append a rejected log after post-visible hook failure while keeping the already confirmed success log visible.</li>
+      <li>Interrupt behavior is not being redesigned in this slice; preserve the current tested behavior even where prior audits flagged semantic drift.</li>
+      <li>Living-state has no post-visible hook; the helper must support that without inventing one.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should GitHub default branch be renamed or repointed after the PR merges?</li>
-      <li>Should remote branch <code>legacy-python-main</code> be protected as an archive branch?</li>
-      <li>Should package exports be narrowed further once external consumers exist?</li>
+      <li>Should later slices split the repeated finalizer result validators into a typed shared validator?</li>
+      <li>Should living-state adopt a raw-log requirement hook like incident lifecycle finalizers?</li>
     </ul>
 
     <h2>Future Ideas</h2>
     <ul>
-      <li>Add a production runtime entry point once the first external caller or CLI/server slice exists.</li>
-      <li>Split docs into historical Python-era docs and current TypeScript runtime docs if the old MVP history becomes noisy.</li>
-      <li>Add a replay/debug-inspector slice now that the TypeScript runtime is the branch source of truth.</li>
+      <li>Consider shared validation for finalize result envelopes after this helper proves the transaction sequence is stable.</li>
+      <li>Consider a follow-up audit for the interruption post-visible rejection semantics; this slice preserves current behavior only.</li>
     </ul>
   </main>
 </body>

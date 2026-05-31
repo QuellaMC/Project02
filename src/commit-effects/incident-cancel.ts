@@ -12,11 +12,8 @@ import {
 } from '../runtime/contracts.ts';
 import { SCHEMA_VERSION, type SchemaVersion } from '../runtime/schema.ts';
 import {
-  RawEventLogQueryValidationError,
   buildRawLogEntry,
   clockTimestamp,
-  confirmCommittedSuccessEntryVisibility,
-  discardCommittedSuccessEntryVisibility,
   snapshotRawValue,
   type Clock,
   type IdGenerator,
@@ -28,6 +25,7 @@ import {
   buildIncidentStatusResult,
   copyOptionalIdentityFieldsFromRecord,
   copyOptionalPayloadIdentityFields,
+  runStagedCommitTransaction,
   validateCommittedIncidentLogEntry,
   validateIncidentFailure,
   type IncidentFailure as LifecycleIncidentFailure,
@@ -270,58 +268,41 @@ export function commitLifeIncidentCancel(
       cancelledIncident,
       committedLogEntry
     });
-    callCancelRawLogRequirement(lifeIncidentCancelFinalizer, rawEventLog);
-    let finalizeResult: unknown;
-    try {
-      finalizeResult = lifeIncidentCancelFinalizer.finalizeLifeIncidentCancel(
-        structuredClone(finalizeRequest)
-      );
-    } catch (error) {
-      if (error instanceof LifeIncidentCancelFinalizerError) {
-        throw error;
-      }
-      if (error instanceof RawEventLogQueryValidationError) {
-        throw new LifeIncidentCancelFinalizerError(error.message, {
-          code: 'malformed_finalize_result'
-        });
-      }
-      throw new LifeIncidentCancelFinalizerError(
+    const validatedFinalizeResult = runStagedCommitTransaction({
+      rawEventLog,
+      committedLogEntry,
+      finalizeRequest,
+      requireRawEventLog: (candidateRawLog) => {
+        const requireSpecific = lifeIncidentCancelFinalizer.requireLifeIncidentCancelRawEventLog;
+        const requireGeneric = lifeIncidentCancelFinalizer.requireRawEventLog;
+        if (requireSpecific !== undefined) {
+          requireSpecific.call(lifeIncidentCancelFinalizer, candidateRawLog as RawEventLog);
+        } else if (requireGeneric !== undefined) {
+          requireGeneric.call(lifeIncidentCancelFinalizer, candidateRawLog as RawEventLog);
+        }
+      },
+      finalize: (candidateRequest) =>
+        lifeIncidentCancelFinalizer.finalizeLifeIncidentCancel(candidateRequest),
+      validateFinalizeResult: (candidateResult) =>
+        validateLifeIncidentCancelFinalizeResult(candidateResult, {
+          sourceIdentity,
+          committedLogEntry
+        }),
+      completeAfterLogVisible: (candidateRequest) => {
+        lifeIncidentCancelFinalizer.completeLifeIncidentCancelAfterLogVisible(candidateRequest);
+      },
+      isTransactionError: (error): error is LifeIncidentCancelFinalizerError =>
+        error instanceof LifeIncidentCancelFinalizerError,
+      makeMalformedFinalizeError: (message) =>
+        new LifeIncidentCancelFinalizerError(message, { code: 'malformed_finalize_result' }),
+      makeFinalizeRejectedError: (message) =>
+        new LifeIncidentCancelFinalizerError(message, { code: 'finalize_rejected' }),
+      formatRequirementUnexpectedError: errorMessage,
+      formatFinalizeUnexpectedError: (error) =>
         `finalize_life_incident_cancel failed unexpectedly: ${errorMessage(error)}`,
-        { code: 'finalize_rejected' }
-      );
-    }
-    const validatedFinalizeResult = validateLifeIncidentCancelFinalizeResult(finalizeResult, {
-      sourceIdentity,
-      committedLogEntry
+      formatPostVisibleUnexpectedError: (error) =>
+        `complete_life_incident_cancel_after_log_visible failed unexpectedly: ${errorMessage(error)}`
     });
-    try {
-      confirmCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
-    } catch (error) {
-      if (error instanceof RawEventLogQueryValidationError) {
-        throw new LifeIncidentCancelFinalizerError(error.message, {
-          code: 'malformed_finalize_result'
-        });
-      }
-      throw error;
-    }
-    try {
-      lifeIncidentCancelFinalizer.completeLifeIncidentCancelAfterLogVisible(
-        structuredClone(finalizeRequest)
-      );
-    } catch (error) {
-      if (error instanceof LifeIncidentCancelFinalizerError) {
-        throw error;
-      }
-      if (error instanceof RawEventLogQueryValidationError) {
-        throw new LifeIncidentCancelFinalizerError(error.message, {
-          code: 'malformed_finalize_result'
-        });
-      }
-      throw new LifeIncidentCancelFinalizerError(
-        `complete_life_incident_cancel_after_log_visible failed unexpectedly: ${errorMessage(error)}`,
-        { code: 'finalize_rejected' }
-      );
-    }
     return {
       ...buildIncidentStatusResult(sourceIdentity, LIFE_INCIDENT_CANCELLED_STATUS),
       cancelled_incident: structuredClone(cancelledIncident),
@@ -329,7 +310,6 @@ export function commitLifeIncidentCancel(
     };
   } catch (error) {
     if (error instanceof LifeIncidentCancelFinalizerError) {
-      discardCommittedSuccessEntryVisibility(rawEventLog, committedLogEntry);
       const failure = buildFailure(
         LIFE_INCIDENT_CANCEL_FINALIZE_STAGE,
         error.code,
@@ -1020,31 +1000,6 @@ function getTransitionTime(snapshot: unknown, fieldName: string): string {
 
 function validateTimestampForCommit(value: unknown, fieldName: string): string {
   return wrapCommitContractError(() => validateIso8601Timestamp(value, fieldName));
-}
-
-function callCancelRawLogRequirement(
-  finalizer: LifeIncidentCancelFinalizer,
-  rawEventLog: RawEventLog
-): void {
-  const requireSpecific = finalizer.requireLifeIncidentCancelRawEventLog;
-  const requireGeneric = finalizer.requireRawEventLog;
-  try {
-    if (requireSpecific !== undefined) {
-      requireSpecific.call(finalizer, rawEventLog);
-    } else if (requireGeneric !== undefined) {
-      requireGeneric.call(finalizer, rawEventLog);
-    }
-  } catch (error) {
-    if (error instanceof LifeIncidentCancelFinalizerError) {
-      throw error;
-    }
-    throw new LifeIncidentCancelFinalizerError(errorMessage(error), {
-      code:
-        error instanceof RawEventLogQueryValidationError
-          ? 'malformed_finalize_result'
-          : 'finalize_rejected'
-    });
-  }
 }
 
 function clockAt(timestamp: string): Clock {
