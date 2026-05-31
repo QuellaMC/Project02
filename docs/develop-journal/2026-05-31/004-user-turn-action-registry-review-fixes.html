@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-31 - User turn action registry review fixes</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-31 - User Turn Action Registry Review Fixes</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Restored <code>RunUserMessageTurnOptions.currentStateSource</code> as context-only input for visible-reply turns.</li>
+      <li>Added a regression test proving visible-only turns include <code>living_state_brief</code> without enabling or committing <code>state_patch</code>.</li>
+      <li>Validated configured <code>ModelActionSpec</code> values against supported prompt/parse contracts before context building and adapter invocation.</li>
+      <li>Added a regression test proving malformed model action specs fail before any adapter input is sent.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      PR #28 review found two behavior-preservation gaps in the registry
+      refactor: context-only current state was no longer available for normal
+      visible replies, and malformed in-process action specs could render an
+      invalid envelope before parser validation rejected it. Both fixes preserve
+      the current action surface without adding memory, retrieval, tools, or new
+      write families.
+    </p>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>pnpm exec vitest run tests/unit/runtime/user-turn.test.ts tests/unit/role-model/loop.test.ts tests/integration/role-model-loop.test.ts</code> - passed: 3 files, 34 tests.</li>
+      <li><code>pnpm tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code> - passed.</li>
+      <li><code>pnpm check</code> - passed: lint, typecheck, and 18 Vitest files with 176 tests.</li>
+      <li><code>python3 -c "from html.parser import HTMLParser; import pathlib; [HTMLParser().feed(path.read_text()) for path in pathlib.Path('docs').rglob('*.html')]"</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>No new durable schema fields, raw-log kinds, or write-action families were added.</li>
+      <li>Malformed model action specs now fail in the context-build stage and do not reach the adapter.</li>
+      <li>Visible-only current-state context does not add <code>allowed_life_action_type</code> or a <code>living_state_patch_result</code>.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Push the review-fix commit to PR #28 and let CI re-run.
+    </p>
+  </main>
+</body>
+</html>

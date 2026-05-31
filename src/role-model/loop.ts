@@ -92,6 +92,80 @@ export const INCIDENT_COMPLETE_ROLE_MODEL_INSTRUCTIONS =
   'start_incident, cancel_incident, completed incident fields, state_patch, ' +
   'or extra fields.';
 
+type DecisionActionContract = {
+  allowStatePatch?: boolean;
+  allowLifeAction?: boolean;
+  allowedLifeActionType?: LifeAction['type'];
+};
+
+export type ModelActionSpec = {
+  id: string;
+  allowed_actions: AllowedActions;
+  instructions: string;
+  decision_contract: DecisionActionContract;
+  allowed_life_action_type?: LifeAction['type'];
+  require_living_state_brief?: boolean;
+  require_active_incident_source?: boolean;
+};
+
+export const VISIBLE_REPLY_MODEL_ACTION_SPEC: ModelActionSpec = {
+  id: VISIBLE_REPLY_ACTION,
+  allowed_actions: [VISIBLE_REPLY_ACTION],
+  instructions: ROLE_MODEL_INSTRUCTIONS,
+  decision_contract: {}
+};
+
+export const STATE_PATCH_MODEL_ACTION_SPEC: ModelActionSpec = {
+  id: STATE_PATCH_ACTION,
+  allowed_actions: [VISIBLE_REPLY_ACTION, STATE_PATCH_ACTION],
+  instructions: STATE_PATCH_ROLE_MODEL_INSTRUCTIONS,
+  decision_contract: { allowStatePatch: true },
+  require_living_state_brief: true
+};
+
+export const INCIDENT_START_MODEL_ACTION_SPEC: ModelActionSpec = {
+  id: START_INCIDENT_ACTION,
+  allowed_actions: [VISIBLE_REPLY_ACTION, LIFE_ACTION],
+  allowed_life_action_type: START_INCIDENT_ACTION,
+  instructions: INCIDENT_START_ROLE_MODEL_INSTRUCTIONS,
+  decision_contract: {
+    allowLifeAction: true,
+    allowedLifeActionType: START_INCIDENT_ACTION
+  }
+};
+
+export const INCIDENT_CANCEL_MODEL_ACTION_SPEC: ModelActionSpec = {
+  id: CANCEL_INCIDENT_ACTION,
+  allowed_actions: [VISIBLE_REPLY_ACTION, LIFE_ACTION],
+  allowed_life_action_type: CANCEL_INCIDENT_ACTION,
+  instructions: INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS,
+  decision_contract: {
+    allowLifeAction: true,
+    allowedLifeActionType: CANCEL_INCIDENT_ACTION
+  },
+  require_active_incident_source: true
+};
+
+export const INCIDENT_COMPLETE_MODEL_ACTION_SPEC: ModelActionSpec = {
+  id: COMPLETE_INCIDENT_ACTION,
+  allowed_actions: [VISIBLE_REPLY_ACTION, LIFE_ACTION],
+  allowed_life_action_type: COMPLETE_INCIDENT_ACTION,
+  instructions: INCIDENT_COMPLETE_ROLE_MODEL_INSTRUCTIONS,
+  decision_contract: {
+    allowLifeAction: true,
+    allowedLifeActionType: COMPLETE_INCIDENT_ACTION
+  },
+  require_active_incident_source: true
+};
+
+const SUPPORTED_MODEL_ACTION_SPECS = [
+  VISIBLE_REPLY_MODEL_ACTION_SPEC,
+  STATE_PATCH_MODEL_ACTION_SPEC,
+  INCIDENT_START_MODEL_ACTION_SPEC,
+  INCIDENT_CANCEL_MODEL_ACTION_SPEC,
+  INCIDENT_COMPLETE_MODEL_ACTION_SPEC
+] as const;
+
 export class RoleModelValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -157,11 +231,8 @@ type RoleModelFailure = {
   message: string;
 };
 
-type RoleModelOptions = BuildCharacterDecisionContextOptions & {
-  allowStatePatch?: boolean;
-  allowIncidentStart?: boolean;
-  allowIncidentCancel?: boolean;
-  allowIncidentComplete?: boolean;
+export type RoleModelOptions = BuildCharacterDecisionContextOptions & {
+  modelActionSpec?: ModelActionSpec;
 };
 
 const FAILURE_CODES_BY_STAGE = {
@@ -171,15 +242,18 @@ const FAILURE_CODES_BY_STAGE = {
 } as const;
 
 export function buildDecisionContext(event: unknown, options: RoleModelOptions = {}): DecisionContext {
-  requireSupportedWriteActionOptIn(options);
-  if (options.allowStatePatch === true && options.currentStateSource === undefined) {
+  const actionSpec = modelActionSpecForCall(options);
+  if (
+    actionSpec.require_living_state_brief === true &&
+    options.currentStateSource === undefined
+  ) {
     throw new RoleModelValidationError('allow_state_patch requires current_state_source.');
   }
-  if (options.allowIncidentCancel === true && options.activeIncidentSource === undefined) {
-    throw new RoleModelValidationError('allow_incident_cancel requires active_incident_source.');
-  }
-  if (options.allowIncidentComplete === true && options.activeIncidentSource === undefined) {
-    throw new RoleModelValidationError('allow_incident_complete requires active_incident_source.');
+  if (
+    actionSpec.require_active_incident_source === true &&
+    options.activeIncidentSource === undefined
+  ) {
+    throw new RoleModelValidationError(`${actionSpec.id} requires active_incident_source.`);
   }
   return wrapContractError(() =>
     buildCharacterDecisionContext(
@@ -197,12 +271,11 @@ export function buildRoleModelInputEnvelope(
   const normalizedEvent = wrapContractError(() =>
     validateNormalizedUserMessageEvent(event, 'event')
   );
-  const allowedActions = allowedActionsForCall(options);
-  const allowedLifeActionType = allowedLifeActionTypeForCall(options);
+  const actionSpec = modelActionSpecForCall(options);
   const eventContext = buildUserMessageEventContext(normalizedEvent);
   const validatedContext = validateDecisionContext(decisionContext, {
     eventContext,
-    requireLivingStateBrief: statePatchAllowed(allowedActions)
+    requireLivingStateBrief: actionSpec.require_living_state_brief === true
   });
   wrapContractError(() => {
     requireMatchingIdentity(validatedContext.trace_id, normalizedEvent.trace_id, 'trace_id');
@@ -217,14 +290,12 @@ export function buildRoleModelInputEnvelope(
     event_id: validatedContext.event_id,
     call_type: USER_MESSAGE_VISIBLE_REPLY_CALL,
     event: eventContext,
-    allowed_actions: allowedActions,
-    instructions: instructionsForAllowedActions(allowedActions, {
-      allowedLifeActionType
-    }),
+    allowed_actions: cloneAllowedActions(actionSpec.allowed_actions),
+    instructions: actionSpec.instructions,
     decision_context: structuredClone(validatedContext)
   };
-  if (allowedLifeActionType !== undefined) {
-    envelope.allowed_life_action_type = allowedLifeActionType;
+  if (actionSpec.allowed_life_action_type !== undefined) {
+    envelope.allowed_life_action_type = actionSpec.allowed_life_action_type;
   }
   return envelope;
 }
@@ -259,9 +330,7 @@ export function parseCharacterDecision(
         traceId: validatedModelInput.trace_id,
         eventId: validatedModelInput.event_id,
         requireAttachedIds: false,
-        allowStatePatch: statePatchAllowed(validatedModelInput.allowed_actions),
-        allowLifeAction: lifeActionAllowed(validatedModelInput.allowed_actions),
-        allowedLifeActionType: allowedLifeActionType(validatedModelInput)
+        ...modelActionSpecForInput(validatedModelInput).decision_contract
       },
       'model output'
     )
@@ -490,6 +559,11 @@ function validateRoleModelInput(modelInput: unknown): RoleModelInputEnvelope {
     allowedActions,
     { allowedLifeActionType: lifeActionType }
   );
+  const actionSpec = modelActionSpecForEnvelope({
+    allowedActions,
+    allowedLifeActionType: lifeActionType,
+    instructions
+  });
   const traceId = wrapContractError(() =>
     requireString(getOwnField(inputRecord, 'trace_id'), 'trace_id')
   );
@@ -510,7 +584,7 @@ function validateRoleModelInput(modelInput: unknown): RoleModelInputEnvelope {
     call_type: USER_MESSAGE_VISIBLE_REPLY_CALL,
     event: eventContext,
     allowed_actions: allowedActions,
-    instructions,
+    instructions: actionSpec.instructions,
     decision_context: decisionContext
   };
   if (lifeActionType !== undefined) {
@@ -572,9 +646,7 @@ function validateCharacterDecision(
         traceId: modelInput.trace_id,
         eventId: modelInput.event_id,
         requireAttachedIds: true,
-        allowStatePatch: statePatchAllowed(modelInput.allowed_actions),
-        allowLifeAction: lifeActionAllowed(modelInput.allowed_actions),
-        allowedLifeActionType: allowedLifeActionType(modelInput)
+        ...modelActionSpecForInput(modelInput).decision_contract
       },
       'CharacterDecision'
     )
@@ -654,47 +726,130 @@ function buildCharacterContextOptions(options: RoleModelOptions): BuildCharacter
   return contextOptions;
 }
 
-function allowedActionsForCall(options: RoleModelOptions): AllowedActions {
-  requireSupportedWriteActionOptIn(options);
-  if (options.allowStatePatch === true) {
-    return [VISIBLE_REPLY_ACTION, STATE_PATCH_ACTION];
-  }
-  if (
-    options.allowIncidentStart === true ||
-    options.allowIncidentCancel === true ||
-    options.allowIncidentComplete === true
-  ) {
-    return [VISIBLE_REPLY_ACTION, LIFE_ACTION];
-  }
-  return [VISIBLE_REPLY_ACTION];
+function modelActionSpecForCall(options: RoleModelOptions): ModelActionSpec {
+  return validateModelActionSpec(options.modelActionSpec ?? VISIBLE_REPLY_MODEL_ACTION_SPEC);
 }
 
-function requireSupportedWriteActionOptIn(options: RoleModelOptions): void {
-  const enabledCount = [
-    options.allowStatePatch,
-    options.allowIncidentStart,
-    options.allowIncidentCancel,
-    options.allowIncidentComplete
-  ].filter((enabled) => enabled === true).length;
-  if (enabledCount > 1) {
+function modelActionSpecForInput(modelInput: RoleModelInputEnvelope): ModelActionSpec {
+  return modelActionSpecForEnvelope({
+    allowedActions: modelInput.allowed_actions,
+    allowedLifeActionType: modelInput.allowed_life_action_type,
+    instructions: modelInput.instructions
+  });
+}
+
+function modelActionSpecForEnvelope({
+  allowedActions,
+  allowedLifeActionType,
+  instructions
+}: {
+  allowedActions: AllowedActions;
+  allowedLifeActionType: LifeAction['type'] | undefined;
+  instructions: string;
+}): ModelActionSpec {
+  const actionSpec = SUPPORTED_MODEL_ACTION_SPECS.find(
+    (supportedSpec) =>
+      allowedActionsEqual(supportedSpec.allowed_actions, allowedActions) &&
+      supportedSpec.allowed_life_action_type === allowedLifeActionType
+  );
+  if (actionSpec === undefined) {
     throw new RoleModelValidationError(
-      'Only one write-action opt-in may be enabled for a USER_MESSAGE turn: ' +
-        'state_patch, start_incident, cancel_incident, or complete_incident.'
+      'allowed_actions must match a supported model action spec.'
     );
   }
+  if (instructions !== actionSpec.instructions) {
+    if (allowedLifeActionType !== undefined) {
+      throw new RoleModelValidationError('instructions must match the allowed life_action subtype.');
+    }
+    throw new RoleModelValidationError('instructions must match the allowed action spec.');
+  }
+  return actionSpec;
 }
 
-function allowedLifeActionTypeForCall(options: RoleModelOptions): LifeAction['type'] | undefined {
-  if (options.allowIncidentStart === true) {
-    return START_INCIDENT_ACTION;
+function validateModelActionSpec(actionSpec: ModelActionSpec): ModelActionSpec {
+  if (!Array.isArray(actionSpec.allowed_actions)) {
+    throw new RoleModelValidationError(
+      'model action spec allowed_actions must match the supported contract.'
+    );
   }
-  if (options.allowIncidentCancel === true) {
-    return CANCEL_INCIDENT_ACTION;
+  const decisionContract: unknown = actionSpec.decision_contract;
+  if (
+    typeof decisionContract !== 'object' ||
+    decisionContract === null ||
+    Array.isArray(decisionContract)
+  ) {
+    throw new RoleModelValidationError(
+      'model action spec decision contract must match the supported contract.'
+    );
   }
-  if (options.allowIncidentComplete === true) {
-    return COMPLETE_INCIDENT_ACTION;
+  const supportedSpec = SUPPORTED_MODEL_ACTION_SPECS.find(
+    (candidate) => candidate.id === actionSpec.id
+  );
+  if (supportedSpec === undefined) {
+    throw new RoleModelValidationError('model action spec id must be supported.');
   }
-  return undefined;
+  if (!allowedActionsEqual(actionSpec.allowed_actions, supportedSpec.allowed_actions)) {
+    throw new RoleModelValidationError(
+      'model action spec allowed_actions must match the supported contract.'
+    );
+  }
+  if (actionSpec.allowed_life_action_type !== supportedSpec.allowed_life_action_type) {
+    throw new RoleModelValidationError(
+      'model action spec allowed_life_action_type must match the supported contract.'
+    );
+  }
+  if (actionSpec.instructions !== supportedSpec.instructions) {
+    throw new RoleModelValidationError(
+      'model action spec instructions must match the supported contract.'
+    );
+  }
+  if (!decisionActionContractsEqual(actionSpec.decision_contract, supportedSpec.decision_contract)) {
+    throw new RoleModelValidationError(
+      'model action spec decision contract must match the supported contract.'
+    );
+  }
+  if (
+    (actionSpec.require_living_state_brief === true) !==
+    (supportedSpec.require_living_state_brief === true)
+  ) {
+    throw new RoleModelValidationError(
+      'model action spec context requirements must match the supported contract.'
+    );
+  }
+  if (
+    (actionSpec.require_active_incident_source === true) !==
+    (supportedSpec.require_active_incident_source === true)
+  ) {
+    throw new RoleModelValidationError(
+      'model action spec context requirements must match the supported contract.'
+    );
+  }
+  return supportedSpec;
+}
+
+function decisionActionContractsEqual(
+  left: DecisionActionContract,
+  right: DecisionActionContract
+): boolean {
+  return (
+    (left.allowStatePatch === true) === (right.allowStatePatch === true) &&
+    (left.allowLifeAction === true) === (right.allowLifeAction === true) &&
+    left.allowedLifeActionType === right.allowedLifeActionType
+  );
+}
+
+function allowedActionsEqual(left: AllowedActions, right: AllowedActions): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function cloneAllowedActions(allowedActions: AllowedActions): AllowedActions {
+  if (allowedActions.length === 1) {
+    return [VISIBLE_REPLY_ACTION];
+  }
+  if (allowedActions[1] === STATE_PATCH_ACTION) {
+    return [VISIBLE_REPLY_ACTION, STATE_PATCH_ACTION];
+  }
+  return [VISIBLE_REPLY_ACTION, LIFE_ACTION];
 }
 
 function validateAllowedActions(value: unknown): AllowedActions {
@@ -755,52 +910,18 @@ function validateAllowedLifeActionType(
   );
 }
 
-function instructionsForAllowedActions(
-  allowedActions: AllowedActions,
-  { allowedLifeActionType }: { allowedLifeActionType: LifeAction['type'] | undefined }
-): string {
-  if (statePatchAllowed(allowedActions)) {
-    return STATE_PATCH_ROLE_MODEL_INSTRUCTIONS;
-  }
-  if (lifeActionAllowed(allowedActions)) {
-    if (allowedLifeActionType === CANCEL_INCIDENT_ACTION) {
-      return INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS;
-    }
-    if (allowedLifeActionType === COMPLETE_INCIDENT_ACTION) {
-      return INCIDENT_COMPLETE_ROLE_MODEL_INSTRUCTIONS;
-    }
-    return INCIDENT_START_ROLE_MODEL_INSTRUCTIONS;
-  }
-  return ROLE_MODEL_INSTRUCTIONS;
-}
-
 function validateInstructionsForAllowedActions(
   value: unknown,
   allowedActions: AllowedActions,
   { allowedLifeActionType }: { allowedLifeActionType: LifeAction['type'] | undefined }
 ): string {
-  const expectedInstructions = instructionsForAllowedActions(allowedActions, {
+  const instructions = wrapContractError(() => requireString(value, 'instructions'));
+  const actionSpec = modelActionSpecForEnvelope({
+    allowedActions,
+    instructions,
     allowedLifeActionType
   });
-  if (value === expectedInstructions) {
-    return expectedInstructions;
-  }
-  if (lifeActionAllowed(allowedActions)) {
-    throw new RoleModelValidationError('instructions must match the allowed life_action subtype.');
-  }
-  return wrapContractError(() => requireLiteral(value, expectedInstructions, 'instructions'));
-}
-
-function allowedLifeActionType(modelInput: RoleModelInputEnvelope): LifeAction['type'] {
-  if (!lifeActionAllowed(modelInput.allowed_actions)) {
-    return START_INCIDENT_ACTION;
-  }
-  if (modelInput.allowed_life_action_type === undefined) {
-    throw new RoleModelValidationError(
-      'allowed_life_action_type must match the selected life_action subtype.'
-    );
-  }
-  return modelInput.allowed_life_action_type;
+  return wrapContractError(() => requireLiteral(value, actionSpec.instructions, 'instructions'));
 }
 
 function validateFailure({

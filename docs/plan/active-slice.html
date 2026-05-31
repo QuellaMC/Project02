@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Staged Commit Transaction Helper</title>
+  <title>User Turn Action Registry</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 960px; margin: 0 auto; padding: 44px 24px; }
@@ -19,132 +19,125 @@
 </head>
 <body>
   <main>
-    <h1>Staged Commit Transaction Helper</h1>
+    <h1>User Turn Action Registry</h1>
     <p><span class="status">Status: active implementation slice</span></p>
     <p>
       Created: 2026-05-31. Active branch:
-      <code>feature/staged-commit-transaction-helper</code>.
+      <code>feature/user-turn-action-registry</code>.
     </p>
 
     <h2>Source Context</h2>
     <p>
-      Product direction remains the Notion project hub
-      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.
-      The Notion runtime notes keep the Commit &amp; Effects Engine as the boundary
-      that validates, commits durable state, appends Raw Event Log entries, and emits effects.
-      Local implementation truth for this refactor comes from the current TypeScript source under
-      <code>src/commit-effects/</code>, the raw-log visibility helpers in
-      <code>src/runtime/logging.ts</code>, and the existing lifecycle helpers in
-      <code>src/commit-effects/incident-lifecycle.ts</code>.
+      Product direction remains the Notion
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>,
+      especially
+      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
+      <a href="https://www.notion.so/3608995c0c5e817f9cd4c4c6312d6db0">02A - Runtime Kernel &amp; Operation Routing</a>,
+      <a href="https://www.notion.so/3608995c0c5e816c94fbef42ea9096f7">03 - Role Model Interface &amp; Prompting</a>,
+      and
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
+      The Notion direction says the runtime scopes allowed actions by event/call type,
+      the role model proposes structured intents, and Commit &amp; Effects remains the only durable write boundary.
     </p>
     <p>
-      The issue target is a P2 refactor: repeated staged transaction flow in
-      <code>incident-start.ts</code>, <code>incident-cancel.ts</code>,
-      <code>incident-complete.ts</code>, <code>incident-interrupt.ts</code>, and
-      <code>living-state.ts</code>. Current behavior must remain observable through the same
-      statuses, failure stages and codes, success-log visibility, staged-visibility discard, and
-      rejected raw-log entries.
+      Local trigger: issue 1 says <code>runUserMessageTurn</code> wires one option and
+      branch for every current write capability. Issue 4 says Role Model input uses
+      hard-coded allowed-action prompt/parse families. These issues share the same
+      write-action/action-policy registration seam.
+    </p>
+    <p>
+      Merge update: <a href="https://github.com/QuellaMC/Project02/pull/26">PR #26</a>
+      context provider sections and <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a>
+      staged commit transaction helpers are now part of <code>main</code>. This slice
+      preserves both baselines and limits its own scope to user-turn write-action
+      registration and role-model action policy registration.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Extract one concrete shared helper for the already-implemented staged commit transaction:
-      call the finalizer, validate the finalizer result, confirm committed success-log visibility,
-      run any post-visible hook, and preserve the caller's existing cleanup and rejection behavior
-      when a transaction fails before durable success visibility.
+      Introduce a small concrete registry/spec abstraction for the existing user-turn
+      write actions so user-turn orchestration consumes configured action modules
+      and the role-model loop consumes configured model action specs. Preserve
+      current behavior, ordering, statuses, raw logs, and public model input fields.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>Add focused regression tests for one success path and one staged-visibility rejection path through the helper.</li>
-      <li>Place the helper in <code>src/commit-effects/incident-lifecycle.ts</code> if it can stay narrow and dependency-light.</li>
-      <li>Refactor the duplicated finalizer/visibility/post-visible sequence in the five target commit-effect modules.</li>
-      <li>Preserve module-specific request building, snapshot building, log-entry building, result construction, rejection-log construction, and failure-stage mapping in each caller.</li>
-      <li>Keep the helper generic enough for the current living-state and incident callers without adding a framework/plugin layer.</li>
+      <li>Move existing user-turn write-action wiring for living-state patch, incident start, incident cancel, incident complete, and incident interruption behind registry modules.</li>
+      <li>Keep visible user-message commit, role-model call, and visible-reply commit as the fixed user-turn spine.</li>
+      <li>Replace role-model write opt-in booleans with a model action spec for the existing state-patch and incident action policies.</li>
+      <li>Keep existing <code>allowed_actions</code>, <code>allowed_life_action_type</code>, and instruction strings in the rendered role-model envelope.</li>
+      <li>Keep the one write-action opt-in rule for a <code>USER_MESSAGE</code> turn.</li>
+      <li>Add tests proving current behavior still flows through registry/spec configuration rather than core switch chains.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No user-turn orchestration changes.</li>
-      <li>No Role Model allowed-action, parser, or <code>DecisionContext</code> shape changes.</li>
-      <li>No memory, retrieval, scheduler, tool, Live2D, asset, or new runtime behavior.</li>
-      <li>No schema changes and no new persisted raw-log kinds.</li>
-      <li>No changes to the interruption semantics currently under separate audit.</li>
-      <li>No broad transaction framework, plugin system, storage abstraction, or new module tree.</li>
+      <li>No memory writes, retrieval, tools, productivity actions, Live2D, assets, scheduled directives, or new commit-effect modules.</li>
+      <li>No redesign of <code>DecisionContext</code> beyond passing current context sources from action modules.</li>
+      <li>No schema version bump and no new persisted runtime record fields.</li>
+      <li>No change to raw log kind ordering or visible transcript ordering.</li>
+      <li>No broad operation registry, permission matrix, background worker, or plugin system.</li>
+      <li>No changes to PR #26 <code>context_sections</code> provider semantics.</li>
+      <li>No changes to PR #27 staged commit transaction helper semantics.</li>
     </ul>
 
-    <h2>Minimal Schema Fields</h2>
+    <h2>Minimal Schema</h2>
     <p>
-      No schema fields are added or changed. Existing <code>schema_version: "0.1"</code>
-      records, committed success log entries, rejected log entries, finalize request shapes,
-      and finalize result shapes remain unchanged.
+      Persisted runtime records remain at <code>schema_version: "0.1"</code>.
+      This slice adds only in-process TypeScript configuration types for existing
+      write-action modules and model action specs. It must not add a new durable
+      action type or alter <code>RuntimeEvent</code>, <code>RawEventLogEntry</code>,
+      <code>CharacterDecision</code>, or user-turn result field names.
     </p>
-
-    <h2>Functional Requirements</h2>
-    <ul>
-      <li>The helper must call any caller-provided raw-log requirement before finalization.</li>
-      <li>The helper must pass a defensive clone to the finalizer and post-visible hook.</li>
-      <li>The helper must validate the finalizer result through a caller-provided validator.</li>
-      <li>The helper must confirm committed success-log visibility through the shared raw-log helper after finalizer result validation.</li>
-      <li>The helper must run the caller-provided post-visible hook only after success-log visibility is confirmed.</li>
-      <li>Raw-log visibility validation errors must still map to <code>malformed_finalize_result</code> where callers currently do so.</li>
-      <li>Unexpected finalizer or post-visible hook errors must still map or propagate exactly as the current module does.</li>
-      <li>Callers must still append the same rejected log entries and return the same rejected result shape on handled failures.</li>
-    </ul>
-
-    <h2>Non-Functional Requirements</h2>
-    <ul>
-      <li>Keep the helper small, typed, and local to Commit &amp; Effects.</li>
-      <li>Avoid <code>any</code>, non-null assertions, broad casts, and unused exports.</li>
-      <li>Keep existing tests behavior-oriented and avoid coupling tests to private implementation details.</li>
-      <li>Reduce duplication without hiding caller-specific lifecycle semantics.</li>
-    </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li>The five target modules use the shared staged transaction helper for the duplicated finalizer/visibility sequence.</li>
-      <li>At least one existing success path exercises the helper and still exposes exactly one committed success log.</li>
-      <li>At least one staged-visibility failure path exercises the helper and discards staged committed success visibility before appending the rejected log.</li>
-      <li>All existing statuses, failure stages/codes, raw-log kinds, success-log visibility behavior, and rejection-log behavior are preserved.</li>
-      <li><code>pnpm check</code> passes.</li>
-      <li><code>pnpm tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code> passes.</li>
-      <li>The development journal records files changed, tests run, review notes, next action, and schema impact.</li>
+      <li><code>runUserMessageTurn</code> no longer imports each write-action commit implementation directly.</li>
+      <li><code>RunUserMessageTurnOptions</code> exposes one write-action registry input instead of one option per write capability.</li>
+      <li>Existing state patch, incident start, incident cancel, incident complete, and incident interrupt behavior, stop codes, result fields, and log ordering are preserved.</li>
+      <li>Role-model rendering and parsing are driven by configured model action specs for existing write policies.</li>
+      <li>The rendered role-model envelope still uses the same <code>allowed_actions</code>, <code>allowed_life_action_type</code>, and instruction values as before.</li>
+      <li>The one write-action opt-in rule is enforced from registry/spec count rather than hard-coded booleans.</li>
+      <li>Future memory/tool/productivity write ideas are parked, not implemented.</li>
+      <li>Focused unit and integration tests pass, then full repo checks pass.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <ul>
-      <li><code>pnpm test -- tests/unit/commit-effects/living-state.test.ts tests/unit/commit-effects/incident-start.test.ts tests/unit/commit-effects/incident-cancel.test.ts tests/unit/commit-effects/incident-complete.test.ts tests/unit/commit-effects/incident-interrupt.test.ts tests/integration/incident-completion-event.test.ts</code></li>
+      <li><code>pnpm exec vitest run tests/unit/runtime/user-turn.test.ts tests/unit/role-model/loop.test.ts tests/integration/role-model-loop.test.ts</code></li>
       <li><code>pnpm check</code></li>
       <li><code>pnpm tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+      <li><code>python3 -c "from html.parser import HTMLParser; import pathlib; [HTMLParser().feed(path.read_text()) for path in pathlib.Path('docs').rglob('*.html')]"</code></li>
       <li><code>git diff --check</code></li>
-      <li>Post-change code review against correctness, boundaries, security, performance, and unused-code risk.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li><strong>Commit and Effects:</strong> owns this helper and all changed callers.</li>
-      <li><strong>Raw Event Logging:</strong> existing visibility helpers remain the only raw-log visibility mechanism.</li>
-      <li><strong>Runtime Kernel, Character State Engine, Role Model Loop:</strong> unchanged.</li>
+      <li><strong>Runtime user-turn orchestration:</strong> keeps the fixed turn spine and delegates optional write commits to registered modules.</li>
+      <li><strong>Runtime action modules:</strong> adapt existing Commit &amp; Effects implementations into user-turn write-action modules with stop code, result field, preflight, context, and rejection behavior.</li>
+      <li><strong>Role Model Loop:</strong> consumes a model action spec to render instructions, allowed actions, and parse policy without one boolean per write family, while preserving PR #26 context-provider forwarding.</li>
+      <li><strong>Commit and Effects:</strong> existing commit implementations remain the only durable write/effect boundary, now including PR #27 staged transaction helper internals.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>Start incident intentionally treats post-visible hook failure as success after committed success visibility is confirmed.</li>
-      <li>Cancel and complete intentionally append a rejected log after post-visible hook failure while keeping the already confirmed success log visible.</li>
-      <li>Interrupt behavior is not being redesigned in this slice; preserve the current tested behavior even where prior audits flagged semantic drift.</li>
-      <li>Living-state has no post-visible hook; the helper must support that without inventing one.</li>
+      <li>This is a refactor slice with behavior preservation tests; any behavior change must be explicitly called out and justified.</li>
+      <li>Keep registry modules concrete and boring. They should be configured from existing implementations rather than inventing generalized future operations.</li>
+      <li>Do not solve the broader DecisionContext envelope split or memory/tool policy shape in this slice.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should later slices split the repeated finalizer result validators into a typed shared validator?</li>
-      <li>Should living-state adopt a raw-log requirement hook like incident lifecycle finalizers?</li>
+      <li>Whether a later memory-write slice should add a new <code>CharacterDecision</code> field or a separate action envelope remains out of scope.</li>
+      <li>Whether action specs should eventually live in a shared runtime contract package should wait for a second event/call type.</li>
     </ul>
 
     <h2>Future Ideas</h2>
     <ul>
-      <li>Consider shared validation for finalize result envelopes after this helper proves the transaction sequence is stable.</li>
-      <li>Consider a follow-up audit for the interruption post-visible rejection semantics; this slice preserves current behavior only.</li>
+      <li>Add a memory-write action spec only when a memory commit-effect slice exists.</li>
+      <li>Add tool/productivity action specs only after a safe tool request/result slice defines permission and logging policy.</li>
+      <li>Promote the registry into a broader operation registry only after at least two event families need it.</li>
     </ul>
   </main>
 </body>

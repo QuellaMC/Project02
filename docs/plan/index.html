@@ -97,6 +97,9 @@
       <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a>.
       Context provider sections are recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/26">PR #26</a>.
+      The user-turn action registry slice is tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/28">PR #28</a>
+      on branch <code>feature/user-turn-action-registry</code>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -178,6 +181,8 @@ flowchart LR
 
   subgraph UserTurn["User Turn Orchestrator - MVP-007 implemented locally"]
     Turn["Compose existing boundaries&lt;br/&gt;single USER_MESSAGE turn"]
+    ActionRegistry["Write action registry&lt;br/&gt;state patch + incident actions&lt;br/&gt;PR #28 open"]
+    ModelActionSpecs["Role-model action specs&lt;br/&gt;allowed_actions + parse policy&lt;br/&gt;PR #28 open"]
     TurnResult["UserMessageTurnResult&lt;br/&gt;committed or stopped"]
   end
 
@@ -248,8 +253,11 @@ flowchart LR
   IncidentCompletionEventCommit -. parity target .-> TSCommitEffects
   IncidentInterruptCommit -. parity target .-> TSCommitEffects
   RouteUpdate --> Turn
+  ActionRegistry --> ModelActionSpecs
+  ModelActionSpecs --> Envelope
   Turn --> UserProjection
   Turn --> VisibleRecentSource
+  Turn --> ActionRegistry
   Turn --> Render
   Turn --> Commit
   Turn --> TurnResult
@@ -268,8 +276,9 @@ flowchart LR
   class IncidentCompletionEvent,IncidentCompletionRoute,IncidentCompletionEventCommit implemented;
   class InterruptionFlag implemented;
   class IncidentInterruptCommit,IncidentInterruptFinalize,InterruptedIncidentSource,InterruptedIncidentBrief implemented;
-  class StagedTransactionHelper active;
+  class StagedTransactionHelper implemented;
   class TSContracts,TSLogging,TSKernel,TSCharacterState,TSRoleModel,TSCommitEffects,TSUserTurn implemented;
+  class ActionRegistry,ModelActionSpecs active;
       </pre>
     </div>
 
@@ -284,9 +293,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">Staged Commit Transaction Helper</a></td>
-          <td>Open in <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a> on branch <code>feature/staged-commit-transaction-helper</code>.</td>
-          <td>Extract the repeated Commit &amp; Effects staged transaction flow while preserving current statuses, failure stages, raw-log entries, visibility discard behavior, and rejected-log behavior.</td>
+          <td><a href="active-slice.html">User Turn Action Registry</a></td>
+          <td>Open in <a href="https://github.com/QuellaMC/Project02/pull/28">PR #28</a> on branch <code>feature/user-turn-action-registry</code>.</td>
+          <td>Register existing user-turn write actions and role-model action specs without adding memory, retrieval, tools, productivity actions, or new commit-effect modules.</td>
         </tr>
       </tbody>
     </table>

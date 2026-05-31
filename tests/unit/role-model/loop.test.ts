@@ -6,6 +6,10 @@ import {
   INCIDENT_START_ROLE_MODEL_INSTRUCTIONS,
   ROLE_MODEL_INSTRUCTIONS,
   RoleModelValidationError,
+  INCIDENT_CANCEL_MODEL_ACTION_SPEC,
+  INCIDENT_COMPLETE_MODEL_ACTION_SPEC,
+  INCIDENT_START_MODEL_ACTION_SPEC,
+  STATE_PATCH_MODEL_ACTION_SPEC,
   STATE_PATCH_ROLE_MODEL_INSTRUCTIONS,
   buildDecisionContext,
   buildRoleModelContextFailedLogEntry,
@@ -238,10 +242,10 @@ describe('role model input envelope', () => {
     const currentStateSource = new RecordingCurrentStateSource();
     const stateContext = buildDecisionContext(event, {
       currentStateSource,
-      allowStatePatch: true
+      modelActionSpec: STATE_PATCH_MODEL_ACTION_SPEC
     });
     const stateModelInput = renderRoleModelInput(event, stateContext, {
-      allowStatePatch: true
+      modelActionSpec: STATE_PATCH_MODEL_ACTION_SPEC
     });
 
     expect(stateModelInput.allowed_actions).toEqual(['visible_reply', 'state_patch']);
@@ -251,9 +255,11 @@ describe('role model input envelope', () => {
     );
     expect(stateModelInput).not.toHaveProperty('allowed_life_action_type');
 
-    const startContext = buildDecisionContext(event, { allowIncidentStart: true });
+    const startContext = buildDecisionContext(event, {
+      modelActionSpec: INCIDENT_START_MODEL_ACTION_SPEC
+    });
     const startModelInput = renderRoleModelInput(event, startContext, {
-      allowIncidentStart: true
+      modelActionSpec: INCIDENT_START_MODEL_ACTION_SPEC
     });
     expect(startModelInput.allowed_actions).toEqual(['visible_reply', 'life_action']);
     expect(startModelInput.allowed_life_action_type).toBe('start_incident');
@@ -262,10 +268,10 @@ describe('role model input envelope', () => {
     const activeIncidentSource = new RecordingActiveIncidentSource();
     const cancelContext = buildDecisionContext(event, {
       activeIncidentSource,
-      allowIncidentCancel: true
+      modelActionSpec: INCIDENT_CANCEL_MODEL_ACTION_SPEC
     });
     const cancelModelInput = renderRoleModelInput(event, cancelContext, {
-      allowIncidentCancel: true
+      modelActionSpec: INCIDENT_CANCEL_MODEL_ACTION_SPEC
     });
     expect(cancelModelInput.allowed_life_action_type).toBe('cancel_incident');
     expect(cancelModelInput.instructions).toBe(INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS);
@@ -275,10 +281,10 @@ describe('role model input envelope', () => {
 
     const completeContext = buildDecisionContext(event, {
       activeIncidentSource,
-      allowIncidentComplete: true
+      modelActionSpec: INCIDENT_COMPLETE_MODEL_ACTION_SPEC
     });
     const completeModelInput = renderRoleModelInput(event, completeContext, {
-      allowIncidentComplete: true
+      modelActionSpec: INCIDENT_COMPLETE_MODEL_ACTION_SPEC
     });
     expect(completeModelInput.allowed_life_action_type).toBe('complete_incident');
     expect(completeModelInput.instructions).toBe(INCIDENT_COMPLETE_ROLE_MODEL_INSTRUCTIONS);
@@ -287,18 +293,13 @@ describe('role model input envelope', () => {
   it('rejects invalid write-action opt-ins and malformed context envelopes', () => {
     const event = normalizedUserMessage();
     expect(() =>
-      buildDecisionContext(event, {
-        currentStateSource: new RecordingCurrentStateSource(),
-        allowStatePatch: true,
-        allowIncidentStart: true
-      })
-    ).toThrow(/Only one write-action opt-in/);
-    expect(() => buildDecisionContext(event, { allowStatePatch: true })).toThrow(
+      buildDecisionContext(event, { modelActionSpec: STATE_PATCH_MODEL_ACTION_SPEC })
+    ).toThrow(
       /current_state_source/
     );
-    expect(() => buildDecisionContext(event, { allowIncidentCancel: true })).toThrow(
-      /active_incident_source/
-    );
+    expect(() =>
+      buildDecisionContext(event, { modelActionSpec: INCIDENT_CANCEL_MODEL_ACTION_SPEC })
+    ).toThrow(/active_incident_source/);
 
     const context = mutableRecord(buildDecisionContext(event));
     context['call_type'] = 'user_message_visible_reply';
@@ -342,9 +343,9 @@ describe('character decision parser', () => {
       event,
       buildDecisionContext(event, {
         currentStateSource: new RecordingCurrentStateSource(),
-        allowStatePatch: true
+        modelActionSpec: STATE_PATCH_MODEL_ACTION_SPEC
       }),
-      { allowStatePatch: true }
+      { modelActionSpec: STATE_PATCH_MODEL_ACTION_SPEC }
     );
     expect(
       parseCharacterDecision(
@@ -372,8 +373,8 @@ describe('character decision parser', () => {
 
     const startModelInput = renderRoleModelInput(
       event,
-      buildDecisionContext(event, { allowIncidentStart: true }),
-      { allowIncidentStart: true }
+      buildDecisionContext(event, { modelActionSpec: INCIDENT_START_MODEL_ACTION_SPEC }),
+      { modelActionSpec: INCIDENT_START_MODEL_ACTION_SPEC }
     );
     expect(
       parseCharacterDecision(
@@ -411,9 +412,9 @@ describe('character decision parser', () => {
       event,
       buildDecisionContext(event, {
         activeIncidentSource: new RecordingActiveIncidentSource(),
-        allowIncidentCancel: true
+        modelActionSpec: INCIDENT_CANCEL_MODEL_ACTION_SPEC
       }),
-      { allowIncidentCancel: true }
+      { modelActionSpec: INCIDENT_CANCEL_MODEL_ACTION_SPEC }
     );
     expect(
       parseCharacterDecision(
@@ -441,9 +442,9 @@ describe('character decision parser', () => {
       event,
       buildDecisionContext(event, {
         activeIncidentSource: new RecordingActiveIncidentSource(),
-        allowIncidentComplete: true
+        modelActionSpec: INCIDENT_COMPLETE_MODEL_ACTION_SPEC
       }),
-      { allowIncidentComplete: true }
+      { modelActionSpec: INCIDENT_COMPLETE_MODEL_ACTION_SPEC }
     );
     expect(
       parseCharacterDecision(
@@ -520,8 +521,8 @@ describe('character decision parser', () => {
     const startModelInput = mutableRecord(
       renderRoleModelInput(
         event,
-        buildDecisionContext(event, { allowIncidentStart: true }),
-        { allowIncidentStart: true }
+        buildDecisionContext(event, { modelActionSpec: INCIDENT_START_MODEL_ACTION_SPEC }),
+        { modelActionSpec: INCIDENT_START_MODEL_ACTION_SPEC }
       )
     );
     startModelInput['instructions'] = INCIDENT_CANCEL_ROLE_MODEL_INSTRUCTIONS;
@@ -532,8 +533,8 @@ describe('character decision parser', () => {
     const missingSubtypeInput = mutableRecord(
       renderRoleModelInput(
         event,
-        buildDecisionContext(event, { allowIncidentStart: true }),
-        { allowIncidentStart: true }
+        buildDecisionContext(event, { modelActionSpec: INCIDENT_START_MODEL_ACTION_SPEC }),
+        { modelActionSpec: INCIDENT_START_MODEL_ACTION_SPEC }
       )
     );
     delete missingSubtypeInput['allowed_life_action_type'];
@@ -559,9 +560,9 @@ describe('character decision parser', () => {
       event,
       buildDecisionContext(event, {
         activeIncidentSource: new RecordingActiveIncidentSource(),
-        allowIncidentCancel: true
+        modelActionSpec: INCIDENT_CANCEL_MODEL_ACTION_SPEC
       }),
-      { allowIncidentCancel: true }
+      { modelActionSpec: INCIDENT_CANCEL_MODEL_ACTION_SPEC }
     );
     expect(() =>
       parseCharacterDecision(
