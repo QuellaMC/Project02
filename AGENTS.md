@@ -401,6 +401,32 @@ No normal developer should bypass branch rules. Emergency bypass may be reserved
 
 ---
 
-## 18. Final Rule
+## 18. TypeScript quality policy
+
+Default behavior:
+- Follow existing project patterns.
+- Prefer simple, readable TypeScript over clever type-level programming.
+- Do not add `any`, `as any`, `@ts-ignore`, `@ts-expect-error`, broad casts, or non-null assertions unless explicitly justified.
+- Do not introduce branded types, complex conditional types, or framework-wide abstractions unless required by the task.
+- Do not change public APIs unless the task requires it.
+
+Required checks before done:
+- Run the repo’s typecheck command, or `pnpm tsc --noEmit` if no script exists.
+- Run lint.
+- Run relevant tests.
+- For behavior changes, add or update tests.
+
+Skill usage:
+- Use `$node` for Node runtime, async, streams, logging, process lifecycle, and performance-sensitive backend work.
+- Use `$linting-neostandard-eslint9` only when changing lint setup or fixing lint issues.
+- Use `$typescript-magician` only for TypeScript compiler errors, removing `any`, generic inference problems, schema-to-type inference, or type guards.
+- When using `$typescript-magician`, keep the smallest fix that makes `tsc --noEmit` pass.
+- Use `$diagnose` before making code changes for unclear bugs.
+- Use `$tdd` for new behavior unless the change is docs-only or mechanical.
+- Use `$code-review-and-quality` after non-trivial changes.
+
+---
+
+## 19. Final Rule
 
 Design the architecture globally. Implement behavior locally. Evolve schemas gradually. Keep logs and boundaries stable. Do not build the future before the current slice works.

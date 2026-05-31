@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-30 - TypeScript shadow port Stage 6</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-30 - TypeScript Shadow Port Stage 6</h1>
+
+    <h2>Source Context Read</h2>
+    <p>
+      Re-read <a href="../../../AGENTS.md">AGENTS.md</a>, the Notion migration goal,
+      <a href="../../plan/completed/typescript-runtime-migration.html">the completed TypeScript migration slice</a>,
+      <a href="../../plan/typescript-source-of-truth.html">the local TypeScript goal tracker</a>,
+      the local README/wiki/plan index, Python <code>src/role_model/loop.py</code>,
+      Python role-model tests, and the current Stage 5 TypeScript Character State implementation.
+    </p>
+
+    <h2>Subagent Findings</h2>
+    <ul>
+      <li>Parity analysis: Stage 6 must add the role-model public surface, exact envelope shape, exact allowed-action variants, adapter-output projection, success/failure logs, and parser behavior without Stage 7 commits.</li>
+      <li>TypeScript design: keep the Role Model Loop in <code>src-ts/role-model/loop.ts</code>, use explicit tuple unions for <code>allowed_actions</code>, treat adapter/model inputs as <code>unknown</code>, and reuse existing contract normalizers.</li>
+      <li>Risk/test analysis: highest-risk points are failure-log shapes, instruction selection, adapter-output extra-key projection, mutation isolation, wrong life-action subtype rejection, and no Commit Effects scope creep.</li>
+    </ul>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Added <code>src-ts/role-model/loop.ts</code> for the TypeScript shadow Role Model Loop boundary.</li>
+      <li>Added <code>validateCharacterDecisionContextForEvent</code> to <code>src-ts/character/state/context.ts</code> so Stage 6 can revalidate compact contexts without duplicating Stage 5 recent-message budgeting and incident checks.</li>
+      <li>Added Stage 6 unit and integration tests under <code>tests-ts/unit/role-model/</code> and <code>tests-ts/integration/</code>.</li>
+      <li>Updated <a href="../../plan/active-slice.html">active-slice.html</a> with the Stage 6 minimal schema, functional requirement, boundaries, and test expectations.</li>
+      <li>Added <a href="../../plan/typescript-source-of-truth.html">docs/plan/typescript-source-of-truth.html</a> because the user-requested final summary references that local artifact.</li>
+    </ul>
+
+    <h2>TypeScript-Native Decisions</h2>
+    <ul>
+      <li>Use a TypeScript-native Role Model Loop module with explicit tuple unions and small helper functions instead of a line-by-line Python-shaped function.</li>
+      <li>Keep <code>RoleModelAdapter.generate</code> returning <code>unknown</code>; adapter output is projected to <code>model_id</code>, <code>created_at</code>, and <code>raw_text</code> at runtime.</li>
+      <li>Use the existing handwritten validators and contract normalizers; no runtime validation library or runtime dependency was added.</li>
+      <li>Keep Stage 6 as model-boundary only: it returns <code>decision_ready_for_commit</code> and appends role-model logs, but it does not commit visible replies, state patches, incidents, or user-turn orchestration.</li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>pnpm test</code> before Stage 6 edits - passed: 7 files, 64 tests.</li>
+      <li><code>pnpm typecheck</code> before Stage 6 edits - passed.</li>
+      <li><code>pnpm lint</code> before Stage 6 edits - passed.</li>
+      <li><code>python3 -m unittest tests.unit.test_current_state tests.unit.test_character_context_builder tests.unit.test_role_model_loop tests.integration.test_role_model_loop</code> before Stage 6 edits - passed: 119 tests.</li>
+      <li><code>git diff --check</code> before Stage 6 edits - passed.</li>
+      <li><code>pnpm test -- tests-ts/unit/role-model/loop.test.ts tests-ts/integration/role-model-loop.test.ts</code> - failed before implementation because the TypeScript role-model module did not exist; passed after implementation: 9 files, 77 tests.</li>
+      <li><code>pnpm typecheck</code> after implementation - passed.</li>
+      <li><code>pnpm lint</code> after implementation - passed after strict TypeScript cleanup.</li>
+    </ul>
+
+    <h2>Review Gate</h2>
+    <p>
+      The Stage 6 review gate found P2 parity issues in malformed adapter-output
+      snapshots, JSON non-object parse errors, and source-name wording, plus a
+      documentation P2 that Stage 5 review evidence was not durable enough. The
+      code parity issues were patched with focused regressions, including
+      null adapter output omission and Python-style array/object repr snapshots.
+      Stage 5 review evidence is now recorded in
+      <a href="002-typescript-shadow-port-stage-5-review-gate.html">the Stage 5 review gate journal</a>.
+      Fresh Stage 5 re-review passed with no P0/P1/P2 findings. Fresh Stage 6
+      re-review agents Hubble (<code>019e7531-f0e6-7511-91c0-1ea9135e43de</code>),
+      Raman (<code>019e7531-f1af-7fc3-9d4b-e0abfe4e78e9</code>), and Kant the
+      2nd (<code>019e7531-f30a-78d1-8fcc-400e09673a02</code>) also passed with
+      no P0/P1/P2 findings.
+    </p>
+
+    <h2>Known Gaps and Next Action</h2>
+    <p>
+      Stage 7 Commit Effects is now eligible for planning and implementation
+      because Stage 6 is review-gate clean. Stage 8 user-turn orchestration
+      remains dependency-gated until Stage 7 is implemented, tested, documented,
+      and review-gate clean.
+    </p>
+  </main>
+</body>
+</html>

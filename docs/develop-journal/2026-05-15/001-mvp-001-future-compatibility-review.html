@@ -23,14 +23,14 @@
 
     <h2>What Changed</h2>
     <ul>
-      <li>Updated <a href="../../../src/runtime/kernel.py">src/runtime/kernel.py</a> so normalized events preserve the validated input event type instead of restamping the current constant.</li>
+      <li>Updated <code>src/runtime/kernel.py</code>, now preserved on <code>legacy-python-main</code>, so normalized events preserve the validated input event type instead of restamping the current constant.</li>
       <li>Replaced the logged-only route helper with <code>route_runtime_event</code>, which copies <code>event_type</code> from <code>RuntimeEvent.type</code>.</li>
       <li>Added an event-route registry so <code>model_needed</code> and <code>next_step</code> come from an event-specific route policy instead of a universal fallback.</li>
       <li>Kept accepted runtime behavior limited to <code>USER_MESSAGE</code>; unsupported event types still fail before logging.</li>
       <li>Added a payload-normalizer registry containing only the implemented <code>USER_MESSAGE</code> case.</li>
-      <li>Added a focused route regression test in <a href="../../../tests/unit/test_runtime_kernel.py">tests/unit/test_runtime_kernel.py</a>.</li>
+      <li>Added a focused route regression test in <code>tests/unit/test_runtime_kernel.py</code>, now preserved on <code>legacy-python-main</code>.</li>
       <li>Updated <a href="../../../AGENTS.md">AGENTS.md</a> with future-compatible implementation guidance that does not permit speculative behavior.</li>
-      <li>Clarified <a href="../../plan/active-slice.html">docs/plan/active-slice.html</a> so route output is derived from the normalized event record.</li>
+      <li>Clarified the then-active <code>docs/plan/active-slice.html</code> so route output is derived from the normalized event record.</li>
     </ul>
 
     <h2>Why It Changed</h2>

@@ -23,11 +23,11 @@
 
     <h2>What Changed</h2>
     <ul>
-      <li>Updated <a href="../../../src/runtime/kernel.py">src/runtime/kernel.py</a> to distinguish absent <code>created_at</code> from explicit <code>null</code>.</li>
+      <li>Updated <code>src/runtime/kernel.py</code>, now preserved on <code>legacy-python-main</code>, to distinguish absent <code>created_at</code> from explicit <code>null</code>.</li>
       <li>Rejected provided <code>created_at</code> strings that parse as date-only values without a datetime component.</li>
-      <li>Added unit coverage in <a href="../../../tests/unit/test_runtime_kernel.py">tests/unit/test_runtime_kernel.py</a> for explicit <code>null</code> and date-only <code>created_at</code>.</li>
-      <li>Added integration coverage in <a href="../../../tests/integration/test_runtime_kernel_intake_logging.py">tests/integration/test_runtime_kernel_intake_logging.py</a> so malformed event times do not append raw log entries.</li>
-      <li>Clarified the active slice normalization rule in <a href="../../plan/active-slice.html">docs/plan/active-slice.html</a>.</li>
+      <li>Added unit coverage in <code>tests/unit/test_runtime_kernel.py</code>, now preserved on <code>legacy-python-main</code>, for explicit <code>null</code> and date-only <code>created_at</code>.</li>
+      <li>Added integration coverage in <code>tests/integration/test_runtime_kernel_intake_logging.py</code>, now preserved on <code>legacy-python-main</code>, so malformed event times do not append raw log entries.</li>
+      <li>Clarified the then-active <code>docs/plan/active-slice.html</code> normalization rule.</li>
     </ul>
 
     <h2>Why It Changed</h2>

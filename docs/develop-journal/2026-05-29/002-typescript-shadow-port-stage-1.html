@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-05-29 - TypeScript shadow port stages 1-4</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-05-29 - TypeScript Shadow Port Stages 1-4</h1>
+
+    <h2>Source Context Read</h2>
+    <p>
+      Read <a href="../../plan/completed/typescript-runtime-migration.html">the completed TypeScript migration slice</a>,
+      the Notion migration goal, <a href="../../../AGENTS.md">AGENTS.md</a>,
+      <a href="../../wiki/index.html">the local wiki</a>,
+      <a href="../../plan/index.html">the plan index</a>, the MVP-021 active spec
+      before archiving it, and the current Python runtime contracts, raw logging,
+      and Runtime Kernel source/tests.
+      <code>AGENTS.md</code> was already dirty in this worktree with a TypeScript quality
+      section and duplicate <code>## 18</code> heading; that pre-existing diff is out of
+      scope for this shadow-port branch and should be excluded from staging unless reviewed
+      separately.
+    </p>
+
+    <h2>Initial Subagent Findings</h2>
+    <ul>
+      <li>Architecture mapper: Stages 1-4 should stay in <code>src-ts/runtime</code> and not add empty Character State, Role Model, Commit Effects, or user-turn TypeScript folders.</li>
+      <li>Test oracle: TypeScript tests must mirror current Python behavior; <code>USER_MESSAGE</code> routes to <code>user_turn</code>, not the old MVP-001 <code>logged_only</code> example.</li>
+      <li>TypeScript design agent: use <code>src-ts</code>/<code>tests-ts</code>, literal unions, <code>unknown</code> boundary inputs, handwritten validators, and private state only where it earns its keep.</li>
+      <li>Tooling agent: use minimal pnpm, TypeScript, Vitest, and type-aware ESLint; avoid bundlers, path aliases, and runtime validation libraries in Stage 1.</li>
+      <li>Runtime validation agent: preserve field-specific trim behavior, extra-key behavior, generated ID order, and Python-compatible ISO timestamp checks.</li>
+      <li>Migration risk reviewer: raw-log atomic visibility and mutation isolation are the highest-risk contracts for later stages.</li>
+    </ul>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Archived MVP-021 under <code>docs/plan/completed/</code> and replaced <code>docs/plan/active-slice.html</code> with the TypeScript shadow-port slice.</li>
+      <li>Added minimal TypeScript tooling: <code>package.json</code>, <code>pnpm-lock.yaml</code>, <code>tsconfig.json</code>, <code>vitest.config.ts</code>, and <code>eslint.config.mjs</code>.</li>
+      <li>Added the first TypeScript source/test pair, <code>src-ts/runtime/schema.ts</code> and <code>tests-ts/unit/runtime/schema.test.ts</code>, to pin <code>schema_version</code> parity at <code>"0.1"</code>.</li>
+      <li>Added TypeScript runtime contracts, raw logging, and Runtime Kernel modules under <code>src-ts/runtime/</code> with focused unit and integration parity tests under <code>tests-ts/</code>.</li>
+      <li>Extended the existing CI contexts to run TypeScript lint, typecheck, and tests after installing pnpm dependencies.</li>
+      <li>Updated <code>docs/plan/index.html</code> and <code>docs/plan/future-slices.html</code> so the active slice no longer points at MVP-021.</li>
+    </ul>
+
+    <h2>Review Gate Summary</h2>
+    <p>
+      Stage 1 review gate initially failed because <code>pnpm test</code> had no test files,
+      <code>@types/node</code> targeted Node 25 while CI targeted Node 24, and the plan index
+      still marked MVP-021 as active. The fixes add a real schema-version parity test,
+      pin <code>@types/node</code> to Node 24, and update the plan/future docs. The branch
+      name <code>mvp-typescript-shadow-port</code> intentionally follows the Notion goal and
+      user prompt even though the standing AGENTS branch examples normally use a prefix.
+    </p>
+    <p>
+      Stage 2 review gate found timestamp validation drift, a visible-reply error-code mismatch,
+      and an overly permissive life-action wrapper. The fixes tightened the shared validators,
+      preserved Python-compatible timestamp forms, restored the <code>empty_reply_text</code>
+      code, kept state patches out of the life-action wrapper, rejected prototype-carried
+      contract fields, and expanded timestamp parity for Python <code>datetime.fromisoformat</code>
+      forms such as fractional hour/minute values and timezone offsets with seconds.
+    </p>
+    <p>
+      Stage 3 review gate found raw-log data validation and parity gaps before the gate was
+      accepted. The fixes require raw-log <code>data</code> to be a plain record, remove unsafe
+      test casts, add parity coverage for discard, unstaged confirm, non-atomic confirm, and
+      duplicate expose conflicts, and preserve Python's current discard-by-<code>log_id</code>
+      behavior even for same-id atomic mismatch entries. The graph now marks Stage 2 contracts
+      and Stage 3 logging as implemented.
+    </p>
+    <p>
+      Stage 4 implementation ports Runtime Kernel normalization, generated ID order, clock
+      injection, raw <code>runtime_event_received</code> entry creation, append-before-route
+      intake, and deterministic routes for <code>USER_MESSAGE</code> and
+      <code>INCIDENT_COMPLETION</code>. The Stage 4 review gate initially found missing
+      blank-ID coverage, missing unsupported-route coverage, and inherited/prototype field
+      acceptance at unknown boundaries. The fixes add parity tests for blank IDs and
+      unsupported routes, require plain own-property records before reading event or payload
+      fields, and keep route dispatch defensive. Three fresh read-only reviewers then passed.
+    </p>
+    <p>
+      The first final review gate found additional Stage 2 contract-boundary and timestamp
+      parity gaps plus stale MVP-021 journal links. The fixes made shared contract validators
+      use plain own-property records, added inherited-field regression tests, broadened timestamp
+      validation to match the current Python wrapper oracle, and redirected MVP-021 journal links
+      to the archived completed spec.
+      Follow-up narrow final review gates then found and closed timestamp edge cases for
+      year zero, ISO week-date year boundaries, and mixed basic/extended date formats.
+      The final narrow review gate passed with no remaining P0/P1/P2/P3 findings.
+    </p>
+
+    <h2>TypeScript-Native Decisions</h2>
+    <ul>
+      <li>Use ESM and explicit <code>.ts</code> imports so the code remains compatible with Node's erasable TypeScript restrictions.</li>
+      <li>Use strict TypeScript settings rather than a build step or bundler.</li>
+      <li>Use handwritten runtime validators in later stages to preserve Python's exact contract semantics and extra-key behavior.</li>
+      <li>Use root package scripts so local and CI checks can share one command surface.</li>
+    </ul>
+
+    <h2>Dependencies and Tooling</h2>
+    <p>
+      Added <code>typescript</code>, <code>vitest</code>, <code>@types/node@24</code>,
+      <code>eslint</code>, <code>@eslint/js</code>, and <code>typescript-eslint</code> as
+      development dependencies. No runtime dependencies were added.
+    </p>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>pnpm lint</code> - passed after the Stage 1 fixes.</li>
+      <li><code>pnpm typecheck</code> - passed after the Stage 1 fixes.</li>
+      <li><code>pnpm test</code> - initially failed before the schema parity test existed; passed after adding <code>tests-ts/unit/runtime/schema.test.ts</code>.</li>
+      <li><code>pnpm test -- tests-ts/unit/runtime/contracts.test.ts</code> - passed after the Stage 2 contract fixes.</li>
+      <li><code>pnpm typecheck</code> and <code>pnpm lint</code> - passed after the Stage 2 contract fixes.</li>
+      <li><code>pnpm test -- tests-ts/unit/runtime/logging.test.ts</code> - passed after the Stage 3 raw logging implementation.</li>
+      <li><code>pnpm typecheck</code> and <code>pnpm lint</code> - passed after the Stage 3 raw logging implementation.</li>
+      <li><code>pnpm test -- tests-ts/unit/runtime/kernel.test.ts tests-ts/integration/runtime-kernel-intake-logging.test.ts</code> - passed after the Stage 4 Runtime Kernel implementation.</li>
+      <li><code>pnpm typecheck</code> and <code>pnpm lint</code> - passed after the Stage 4 Runtime Kernel implementation.</li>
+      <li><code>pnpm test</code> - passed as the final full TypeScript suite after final-review fixes: 5 files, 43 tests.</li>
+      <li><code>python3 -m unittest tests.unit.test_runtime_contracts tests.unit.test_raw_event_log_query tests.unit.test_runtime_kernel tests.integration.test_runtime_kernel_intake_logging</code> - passed: 53 tests.</li>
+      <li><code>python3 -m unittest discover</code> - passed: 361 tests.</li>
+      <li><code>python3 -m compileall src tests</code> - passed.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff check .</code> - passed.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/ruff format --check .</code> - passed: 42 files already formatted.</li>
+      <li><code>/private/tmp/project02-checks-venv/bin/mypy src</code> - could not run because the local launcher failed with <code>ModuleNotFoundError: No module named 'mypy.__main__'</code>.</li>
+      <li><code>python3 -m html.parser</code> over the changed HTML docs - passed after final-review link cleanup.</li>
+      <li><code>git diff --check</code> - passed after final checks.</li>
+    </ul>
+
+    <h2>Known Gaps</h2>
+    <p>
+      Stages 1-4 are implemented with focused parity tests and completed stage review gates.
+      Final full migration checks passed except for the unavailable/broken local mypy launcher.
+      The final three-agent review gate passed. Stages 5-8 remain out of scope for this slice.
+    </p>
+
+    <h2>Next Action</h2>
+    <p>
+      Prepare the branch for review while excluding the pre-existing dirty <code>AGENTS.md</code>
+      diff unless that file is reviewed separately. The next implementation slice should port the
+      Character State read-side/context builder only after this Stage 1-4 shadow port is reviewed.
+    </p>
+  </main>
+</body>
+</html>
