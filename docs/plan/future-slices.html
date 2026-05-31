@@ -243,6 +243,33 @@
       <dd>MVP-021 is explicitly limited to immediate interruption policy outcomes, the interruptible active-to-interrupted store move, and one interrupted-incident context read. Dedicated context-build logs are deferred until debug/replay or context observability needs source-request traces.</dd>
     </dl>
 
+    <h2>Retrieved Context Provider Section</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a real provider that turns Retrieval Planner output into compact <code>DecisionContext.context_sections</code> entries.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Notion describes retrieval results as selected model-facing context, not raw memory-store contents. The context-provider section boundary can host that later without expanding <code>character_snapshot</code>.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while addressing the context extensibility architecture risk on 2026-05-31.</dd>
+
+      <dt>Dependency</dt>
+      <dd>The minimal <code>DecisionContextSectionProvider</code> boundary must land first, followed by a reviewed retrieval planner/source contract.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Retrieved context provider v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Implementing retrieval too early could create vector/search, permission, ranking, exact-source, and context-budget decisions before the runtime needs them.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds provider-owned retrieved-context payload fields under <code>context_sections[].content</code>, while preserving existing <code>character_snapshot</code> fields.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active context-provider slice only proves generic section registration and validation. It must not implement memory, retrieval, indexing, source expansion, or ranking.</dd>
+    </dl>
+
     <h2>MVP-015 - Character State Engine Context Builder Boundary v0.1</h2>
     <dl>
       <dt>Idea</dt>
