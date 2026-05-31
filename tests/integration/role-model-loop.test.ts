@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  STATE_PATCH_MODEL_ACTION_SPEC,
   RoleModelValidationError,
   buildDecisionContext,
   renderRoleModelInput,
   runRoleModelTurn,
+  type ModelActionSpec,
   type RoleModelAdapter,
   type RoleModelInputEnvelope
 } from '../../src/role-model/loop.ts';
@@ -212,6 +214,51 @@ describe('role model turn integration', () => {
       failure: {
         stage: 'context_build',
         code: 'malformed_context'
+      }
+    });
+    expect(rawLog.entries[0]?.data).not.toHaveProperty('model_input');
+  });
+
+  it.each([
+    {
+      actionSpec: {
+        ...STATE_PATCH_MODEL_ACTION_SPEC,
+        instructions: 'typo in prompt contract'
+      },
+      message: 'model action spec instructions must match the supported contract.'
+    },
+    {
+      actionSpec: {
+        ...STATE_PATCH_MODEL_ACTION_SPEC,
+        allowed_actions: ['visible_reply', 'memory_write']
+      } as unknown as ModelActionSpec,
+      message: 'model action spec allowed_actions must match the supported contract.'
+    }
+  ])('rejects malformed model action specs before adapter invocation', ({ actionSpec, message }) => {
+    const rawLog = new RecordingRawEventLog();
+    const ids = new SequenceIdGenerator();
+    const adapter = new FakeRoleModelAdapter(visibleReplyRaw());
+
+    expect(() =>
+      runRoleModelTurn(normalizedUserMessage(), {
+        adapter,
+        rawEventLog: rawLog,
+        idGenerator: ids.generate,
+        clock: fixedClock,
+        modelActionSpec: actionSpec
+      })
+    ).toThrow(message);
+
+    expect(adapter.inputs).toEqual([]);
+    expect(ids.calls).toEqual(['log']);
+    expect(rawLog.entries).toHaveLength(1);
+    expect(rawLog.entries[0]?.kind).toBe('role_model_turn_failed');
+    expect(rawLog.entries[0]?.data).toMatchObject({
+      event: normalizedUserMessage(),
+      failure: {
+        stage: 'context_build',
+        code: 'malformed_context',
+        message
       }
     });
     expect(rawLog.entries[0]?.data).not.toHaveProperty('model_input');

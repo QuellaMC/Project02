@@ -27,6 +27,7 @@ import {
 } from '../character/state/context.ts';
 import {
   type ActiveIncidentSource,
+  type CurrentCharacterStateSource,
   type InterruptedIncidentSource
 } from '../character/state/current.ts';
 import {
@@ -119,6 +120,7 @@ export type RunUserMessageTurnOptions = {
   visibleConversation: VisibleConversationBoundary;
   idGenerator: IdGenerator;
   clock: Clock;
+  currentStateSource?: CurrentCharacterStateSource;
   activeIncidentSource?: ActiveIncidentSource;
   interruptedIncidentSource?: InterruptedIncidentSource;
   writeActions?: UserTurnWriteActionRegistry;
@@ -132,6 +134,7 @@ export function runUserMessageTurn(
     visibleConversation,
     idGenerator,
     clock,
+    currentStateSource,
     activeIncidentSource,
     interruptedIncidentSource,
     writeActions = []
@@ -233,6 +236,9 @@ export function runUserMessageTurn(
       visibleConversation
     )
   };
+  if (currentStateSource !== undefined) {
+    roleModelOptions.currentStateSource = currentStateSource;
+  }
   if (incidentContextSources.activeIncidentSource !== undefined) {
     roleModelOptions.activeIncidentSource = incidentContextSources.activeIncidentSource;
   }

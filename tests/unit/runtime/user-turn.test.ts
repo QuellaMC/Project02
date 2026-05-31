@@ -323,6 +323,44 @@ describe('user message turn orchestration', () => {
     ]);
   });
 
+  it('passes current state into visible-only turns without enabling state patches', () => {
+    const rawLog = new InMemoryRawEventLog();
+    const visibleConversation = new RecordingVisibleConversation();
+    const adapter = new FakeRoleModelAdapter(visibleReplyRaw());
+    const ids = new SequenceIdGenerator();
+
+    const result = runUserMessageTurn(normalizedUserMessage(), {
+      adapter,
+      rawEventLog: rawLog,
+      visibleConversation,
+      idGenerator: ids.next,
+      clock: fixedClock,
+      currentStateSource: currentStateSource()
+    });
+
+    expect(result.status).toBe(USER_TURN_COMMITTED_STATUS);
+    if (result.status !== USER_TURN_COMMITTED_STATUS) {
+      throw new Error('expected committed user turn');
+    }
+    expect(adapter.inputs[0]?.allowed_actions).toEqual(['visible_reply']);
+    expect(adapter.inputs[0]).not.toHaveProperty('allowed_life_action_type');
+    expect(result).not.toHaveProperty('living_state_patch_result');
+    expect(adapter.inputs[0]?.decision_context.character_snapshot.living_state_brief).toEqual({
+      character_id: 'character-1',
+      current_activity: 'writing notes',
+      mood: 'focused',
+      toward_user: 'warm',
+      updated_at: '2026-05-30T09:59:00+00:00',
+      source_event_ids: ['event-prior']
+    });
+    expect(rawLog.query({ trace_id: 'trace-1' }).entries.map((entry) => entry.kind)).toEqual([
+      'runtime_event_received',
+      'user_visible_message_committed',
+      'role_model_turn_completed',
+      'visible_reply_committed'
+    ]);
+  });
+
   it('stops conflicting write opt-ins before visible commits or model calls', () => {
     const rawLog = new InMemoryRawEventLog();
     const visibleConversation = new RecordingVisibleConversation();

@@ -724,7 +724,7 @@ function buildCharacterContextOptions(options: RoleModelOptions): BuildCharacter
 }
 
 function modelActionSpecForCall(options: RoleModelOptions): ModelActionSpec {
-  return options.modelActionSpec ?? VISIBLE_REPLY_MODEL_ACTION_SPEC;
+  return validateModelActionSpec(options.modelActionSpec ?? VISIBLE_REPLY_MODEL_ACTION_SPEC);
 }
 
 function modelActionSpecForInput(modelInput: RoleModelInputEnvelope): ModelActionSpec {
@@ -761,6 +761,78 @@ function modelActionSpecForEnvelope({
     throw new RoleModelValidationError('instructions must match the allowed action spec.');
   }
   return actionSpec;
+}
+
+function validateModelActionSpec(actionSpec: ModelActionSpec): ModelActionSpec {
+  if (!Array.isArray(actionSpec.allowed_actions)) {
+    throw new RoleModelValidationError(
+      'model action spec allowed_actions must match the supported contract.'
+    );
+  }
+  const decisionContract: unknown = actionSpec.decision_contract;
+  if (
+    typeof decisionContract !== 'object' ||
+    decisionContract === null ||
+    Array.isArray(decisionContract)
+  ) {
+    throw new RoleModelValidationError(
+      'model action spec decision contract must match the supported contract.'
+    );
+  }
+  const supportedSpec = SUPPORTED_MODEL_ACTION_SPECS.find(
+    (candidate) => candidate.id === actionSpec.id
+  );
+  if (supportedSpec === undefined) {
+    throw new RoleModelValidationError('model action spec id must be supported.');
+  }
+  if (!allowedActionsEqual(actionSpec.allowed_actions, supportedSpec.allowed_actions)) {
+    throw new RoleModelValidationError(
+      'model action spec allowed_actions must match the supported contract.'
+    );
+  }
+  if (actionSpec.allowed_life_action_type !== supportedSpec.allowed_life_action_type) {
+    throw new RoleModelValidationError(
+      'model action spec allowed_life_action_type must match the supported contract.'
+    );
+  }
+  if (actionSpec.instructions !== supportedSpec.instructions) {
+    throw new RoleModelValidationError(
+      'model action spec instructions must match the supported contract.'
+    );
+  }
+  if (!decisionActionContractsEqual(actionSpec.decision_contract, supportedSpec.decision_contract)) {
+    throw new RoleModelValidationError(
+      'model action spec decision contract must match the supported contract.'
+    );
+  }
+  if (
+    (actionSpec.require_living_state_brief === true) !==
+    (supportedSpec.require_living_state_brief === true)
+  ) {
+    throw new RoleModelValidationError(
+      'model action spec context requirements must match the supported contract.'
+    );
+  }
+  if (
+    (actionSpec.require_active_incident_source === true) !==
+    (supportedSpec.require_active_incident_source === true)
+  ) {
+    throw new RoleModelValidationError(
+      'model action spec context requirements must match the supported contract.'
+    );
+  }
+  return supportedSpec;
+}
+
+function decisionActionContractsEqual(
+  left: DecisionActionContract,
+  right: DecisionActionContract
+): boolean {
+  return (
+    (left.allowStatePatch === true) === (right.allowStatePatch === true) &&
+    (left.allowLifeAction === true) === (right.allowLifeAction === true) &&
+    left.allowedLifeActionType === right.allowedLifeActionType
+  );
 }
 
 function allowedActionsEqual(left: AllowedActions, right: AllowedActions): boolean {
