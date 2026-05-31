@@ -280,6 +280,12 @@ describe('runtime kernel normalization and routing', () => {
         type: 'FUTURE_EVENT_SENTINEL'
       })
     ).toThrow(RuntimeValidationError);
+
+    expect(() =>
+      routeRuntimeEvent({
+        type: 'FUTURE_EVENT_SENTINEL'
+      })
+    ).toThrow(/Unsupported event type for routing/);
   });
 
   it('rejects incomplete direct route inputs instead of emitting malformed routes', () => {

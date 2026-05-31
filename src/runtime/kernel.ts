@@ -57,10 +57,6 @@ export type RuntimeRouteInput = {
   type: string;
   [key: string]: unknown;
 };
-type UserMessageRouteInput = RuntimeRouteInput & { type: typeof USER_MESSAGE };
-type IncidentCompletionRouteInput = RuntimeRouteInput & {
-  type: typeof INCIDENT_COMPLETION;
-};
 
 type RuntimeDependencies = {
   idGenerator?: IdGenerator;
@@ -178,22 +174,12 @@ export function buildRawEventLogEntry(
 export function routeRuntimeEvent(event: unknown): RuntimeRouteResult {
   const routeInput = requireRecord(event, 'Runtime route input');
   const eventType = getOwnField(routeInput, 'type');
-  const eventId = requireRouteString(getOwnField(routeInput, 'event_id'), 'event_id');
-  const traceId = requireRouteString(getOwnField(routeInput, 'trace_id'), 'trace_id');
 
   switch (eventType) {
     case USER_MESSAGE:
-      return routeUserMessageEvent({
-        event_id: eventId,
-        trace_id: traceId,
-        type: USER_MESSAGE
-      });
+      return routeUserMessageEvent(routeInput);
     case INCIDENT_COMPLETION:
-      return routeIncidentCompletionEvent({
-        event_id: eventId,
-        trace_id: traceId,
-        type: INCIDENT_COMPLETION
-      });
+      return routeIncidentCompletionEvent(routeInput);
     default:
       throw new RuntimeValidationError(
         `Unsupported event type for routing: ${repr(eventType)}.`
@@ -201,25 +187,32 @@ export function routeRuntimeEvent(event: unknown): RuntimeRouteResult {
   }
 }
 
-function routeUserMessageEvent(event: UserMessageRouteInput): RuntimeRouteResult {
+function routeUserMessageEvent(event: ValueRecord): RuntimeRouteResult {
+  const identity = requireRouteIdentity(event);
   return {
-    trace_id: event.trace_id,
-    event_id: event.event_id,
-    event_type: event.type,
+    trace_id: identity.traceId,
+    event_id: identity.eventId,
+    event_type: USER_MESSAGE,
     model_needed: true,
     next_step: 'user_turn'
   };
 }
 
-function routeIncidentCompletionEvent(
-  event: IncidentCompletionRouteInput
-): RuntimeRouteResult {
+function routeIncidentCompletionEvent(event: ValueRecord): RuntimeRouteResult {
+  const identity = requireRouteIdentity(event);
   return {
-    trace_id: event.trace_id,
-    event_id: event.event_id,
-    event_type: event.type,
+    trace_id: identity.traceId,
+    event_id: identity.eventId,
+    event_type: INCIDENT_COMPLETION,
     model_needed: false,
     next_step: 'incident_completion_commit'
+  };
+}
+
+function requireRouteIdentity(event: ValueRecord): { eventId: string; traceId: string } {
+  return {
+    eventId: requireRouteString(getOwnField(event, 'event_id'), 'event_id'),
+    traceId: requireRouteString(getOwnField(event, 'trace_id'), 'trace_id')
   };
 }
 
