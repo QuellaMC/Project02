@@ -87,12 +87,14 @@
       <a href="https://github.com/QuellaMC/Project02/pull/23">PR #23</a>.
       MVP-021 is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/24">PR #24</a>.
-      The TypeScript runtime source-of-truth cutover is tracked in
+      The TypeScript runtime source-of-truth cutover is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/25">PR #25</a>
-      on branch <code>mvp-typescript-shadow-port</code>. The completed
+      from branch <code>mvp-typescript-shadow-port</code>. The completed
       TypeScript runtime now lives under <code>src/</code> with tests under
       <code>tests/</code>; Python is preserved on remote branch
       <code>legacy-python-main</code>.
+      Context provider sections are tracked in
+      <a href="https://github.com/QuellaMC/Project02/pull/26">PR #26</a>.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -114,7 +116,7 @@ flowchart LR
     RawLogQuery["Raw log query/debug surface&lt;br/&gt;MVP-013 implemented"]
   end
 
-  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015, MVP-016, MVP-017, MVP-018, MVP-020, and MVP-021 implemented"]
+  subgraph RoleModelLoop["Role Model Loop - MVP-002, MVP-004, MVP-008, MVP-009, MVP-011, MVP-012, MVP-015, MVP-016, MVP-017, MVP-018, MVP-020, MVP-021, and PR #26 implemented"]
     Envelope["RoleModelInputEnvelope split&lt;br/&gt;MVP-016 implemented&lt;br/&gt;call_type/event/actions outside DecisionContext"]
     Render["RoleModelInput renderer&lt;br/&gt;strict envelope validation"]
     Adapter["Injected fake RoleModelAdapter"]
@@ -148,19 +150,20 @@ flowchart LR
     VisibleRecentSource["Visible conversation recent source&lt;br/&gt;maps committed records to context"]
   end
 
-  subgraph CharacterState["Character State Engine - MVP-008, MVP-011, MVP-014, MVP-015, MVP-020, and MVP-021 implemented"]
+  subgraph CharacterState["Character State Engine - MVP-008, MVP-011, MVP-014, MVP-015, MVP-020, MVP-021, and PR #26 implemented"]
     CurrentStateSource["Read-only current-state source&lt;br/&gt;injected fake"]
     LivingStateBrief["living_state_brief&lt;br/&gt;validated compact current reality"]
     ActiveIncidentSource["Read-only active-incident source&lt;br/&gt;MVP-011 PR #12 implemented"]
     ActiveIncidentBrief["active_incident brief&lt;br/&gt;validated compact incident context"]
     InMemoryIncidentStore["In-memory LifeIncidentStore&lt;br/&gt;active incident storage&lt;br/&gt;implements ActiveIncidentSource"]
     ContextBuilder["Character State Engine context builder&lt;br/&gt;MVP-015 PR #18&lt;br/&gt;owns compact context assembly"]
+    ContextSections["Provider-owned context_sections&lt;br/&gt;PR #26&lt;br/&gt;optional named context envelope"]
     InterruptionFlag["user_message_interrupted_active_incident&lt;br/&gt;computed read-only flag&lt;br/&gt;MVP-020 implemented"]
     InterruptedIncidentSource["Read-only interrupted-incident source&lt;br/&gt;MVP-021 implemented"]
     InterruptedIncidentBrief["interrupted_incident brief&lt;br/&gt;validated compact interrupted context&lt;br/&gt;MVP-021 implemented"]
   end
 
-  subgraph TypeScriptRuntime["TypeScript Runtime - source of truth&lt;br/&gt;PR #25 open"]
+  subgraph TypeScriptRuntime["TypeScript Runtime - source of truth&lt;br/&gt;PR #25"]
     TSContracts["src runtime contracts&lt;br/&gt;Stage 2 implemented&lt;br/&gt;PR #25"]
     TSLogging["src raw logging&lt;br/&gt;Stage 3 implemented&lt;br/&gt;PR #25"]
     TSKernel["src Runtime Kernel&lt;br/&gt;Stage 4 implemented&lt;br/&gt;PR #25"]
@@ -189,6 +192,7 @@ flowchart LR
   Conversation --> VisibleRecentSource --> RecentMessages --> ContextBuilder
   CurrentStateSource --> LivingStateBrief --> ContextBuilder
   ActiveIncidentSource --> ActiveIncidentBrief --> ContextBuilder
+  ContextBuilder --> ContextSections --> Envelope
   StatePatchParse --> StatePatchCommit --> PatchStore --> AtomicFinalize
   StatePatchCommit --> LogHelper
   AtomicFinalize --> RawLogQuery
@@ -250,10 +254,11 @@ flowchart LR
   class LifeActionParse,IncidentCompleteCommit,IncidentCompleteFinalize implemented;
   class Envelope,IncidentStoreAdapter,InMemoryIncidentStore implemented;
   class ContextBuilder implemented;
+  class ContextSections active;
   class IncidentCompletionEvent,IncidentCompletionRoute,IncidentCompletionEventCommit implemented;
   class InterruptionFlag implemented;
   class IncidentInterruptCommit,IncidentInterruptFinalize,InterruptedIncidentSource,InterruptedIncidentBrief implemented;
-  class TSContracts,TSLogging,TSKernel,TSCharacterState,TSRoleModel,TSCommitEffects,TSUserTurn active;
+  class TSContracts,TSLogging,TSKernel,TSCharacterState,TSRoleModel,TSCommitEffects,TSUserTurn implemented;
       </pre>
     </div>
 
@@ -268,9 +273,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">TypeScript Runtime Source of Truth Cutover</a></td>
-          <td>Open in <a href="https://github.com/QuellaMC/Project02/pull/25">PR #25</a> on branch <code>mvp-typescript-shadow-port</code>.</td>
-          <td>Promote the completed TypeScript runtime to the branch source of truth: production source under <code>src/</code>, production tests under <code>tests/</code>, TypeScript-only CI, updated package metadata, and Python preserved on <code>legacy-python-main</code>.</td>
+          <td><a href="active-slice.html">Context Provider Sections</a></td>
+          <td>Open in <a href="https://github.com/QuellaMC/Project02/pull/26">PR #26</a> on branch <code>feature/context-provider-sections</code>.</td>
+          <td>Add an optional provider-owned <code>DecisionContext.context_sections</code> envelope outside <code>character_snapshot</code>, preserving current rendered input compatibility while parking retrieval and memory work for later slices.</td>
         </tr>
       </tbody>
     </table>

@@ -7,6 +7,8 @@ import {
   RECENT_VISIBLE_MESSAGES_MAX_TEXT_TOKENS,
   VisibleConversationRecentMessagesSource,
   approximateTextTokens,
+  validateCharacterDecisionContextForEvent,
+  type DecisionContextSectionRequest,
   type RecentVisibleMessage,
   type RecentVisibleMessagesRequest,
   type VisibleConversationRecord,
@@ -217,6 +219,33 @@ class RecordingVisibleConversationRecordSource {
   }
 }
 
+class RecordingDecisionContextSectionProvider {
+  readonly sections: unknown;
+  readonly requests: DecisionContextSectionRequest[] = [];
+
+  constructor(sections: unknown) {
+    this.sections = sections;
+  }
+
+  buildDecisionContextSections(request: DecisionContextSectionRequest): unknown {
+    this.requests.push(structuredClone(request));
+    return this.sections;
+  }
+}
+
+function runtimeNoteSection(sectionId = 'runtime-note-1') {
+  return {
+    schema_version: '0.1',
+    section_id: sectionId,
+    section_type: 'runtime_note',
+    content: {
+      summary: 'User is asking about prior work.',
+      priority: 1
+    },
+    source_event_ids: ['event-1']
+  };
+}
+
 describe('character decision context builder', () => {
   it('builds minimal user-message context without sources', () => {
     expect(buildCharacterDecisionContext(normalizedUserMessage())).toEqual({
@@ -256,6 +285,107 @@ describe('character decision context builder', () => {
     expect(context.character_snapshot.recent_visible_messages[0]?.text).toBe('previous reply');
     expect(context.character_snapshot.living_state_brief?.mood).toBe('focused');
     expect(context.character_snapshot.active_incident?.title).toBe('Eating lunch');
+  });
+
+  it('adds provider sections outside the character snapshot', () => {
+    const sections = [runtimeNoteSection()];
+    const sectionProvider = new RecordingDecisionContextSectionProvider(sections);
+
+    const context = buildCharacterDecisionContext(normalizedUserMessage(), {
+      contextSectionProviders: [sectionProvider]
+    });
+
+    expect(sectionProvider.requests).toEqual([
+      {
+        schema_version: '0.1',
+        trace_id: 'trace-1',
+        event_id: 'event-1',
+        event_type: 'USER_MESSAGE',
+        created_at: '2026-05-14T11:30:00+00:00',
+        conversation_id: 'conversation-1'
+      }
+    ]);
+    expect(context.character_snapshot).toEqual({ recent_visible_messages: [] });
+    expect(context.context_sections).toEqual(sections);
+
+    const [firstSection] = sections;
+    if (firstSection === undefined) {
+      throw new Error('expected context section');
+    }
+    firstSection.content.summary = 'mutated after context';
+    expect(context.context_sections?.[0]?.content).toEqual({
+      summary: 'User is asking about prior work.',
+      priority: 1
+    });
+  });
+
+  it('rejects malformed provider sections', () => {
+    expect(() =>
+      buildCharacterDecisionContext(normalizedUserMessage(), {
+        contextSectionProviders: [new RecordingDecisionContextSectionProvider({})]
+      })
+    ).toThrow(/DecisionContextSectionProvider must return a list/);
+
+    for (const sections of [
+      [{ ...runtimeNoteSection(), future_field: 'nope' }],
+      [{ ...runtimeNoteSection(), section_id: '' }],
+      [{ ...runtimeNoteSection(), content: 'not an object' }],
+      [{ ...runtimeNoteSection(), source_event_ids: ['event-1', 2] }],
+      [runtimeNoteSection(), runtimeNoteSection()]
+    ]) {
+      expect(() =>
+        buildCharacterDecisionContext(normalizedUserMessage(), {
+          contextSectionProviders: [new RecordingDecisionContextSectionProvider(sections)]
+        })
+      ).toThrow(ContractValidationError);
+    }
+  });
+
+  it('validates direct context sections and rejects malformed section envelopes', () => {
+    const context = {
+      schema_version: '0.1',
+      trace_id: 'trace-1',
+      event_id: 'event-1',
+      character_snapshot: { recent_visible_messages: [] },
+      context_sections: [runtimeNoteSection()]
+    };
+
+    const validatedContext = validateCharacterDecisionContextForEvent(context, {
+      event: {
+        trace_id: 'trace-1',
+        event_id: 'event-1',
+        created_at: '2026-05-14T11:30:00+00:00',
+        conversation_id: 'conversation-1'
+      }
+    });
+
+    expect(validatedContext.context_sections).toEqual([runtimeNoteSection()]);
+
+    const [firstContextSection] = context.context_sections;
+    if (firstContextSection === undefined) {
+      throw new Error('expected context section');
+    }
+    firstContextSection.content.summary = 'mutated after validation';
+    expect(validatedContext.context_sections?.[0]?.content).toEqual({
+      summary: 'User is asking about prior work.',
+      priority: 1
+    });
+    expect(() =>
+      validateCharacterDecisionContextForEvent(
+        {
+          ...context,
+          context_sections: [runtimeNoteSection(), runtimeNoteSection()]
+        },
+        {
+          event: {
+            trace_id: 'trace-1',
+            event_id: 'event-1',
+            created_at: '2026-05-14T11:30:00+00:00',
+            conversation_id: 'conversation-1'
+          }
+        }
+      )
+    ).toThrow(/section_id/);
   });
 
   it('prefers active incident context and omits stale interrupted incidents', () => {
