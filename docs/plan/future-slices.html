@@ -945,6 +945,33 @@
       <dt>Status</dt>
       <dd>Completed locally on <code>mvp-typescript-shadow-port</code>. GitHub default-branch and branch-protection changes remain external release-management steps.</dd>
     </dl>
+
+    <h2>Memory and Tool Write Action Specs</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add future action specs for memory writes, tool requests, productivity actions, and other non-visible write intents.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The Notion architecture expects the role model to propose memory/tool/action intents while runtime policy and Commit &amp; Effects decide what can be committed or executed.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while addressing the user-turn action registry slice for current state-patch and incident write actions.</dd>
+
+      <dt>Dependency</dt>
+      <dd>A concrete commit-effect boundary, permission policy, logging contract, and tests for each new write family must exist first.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Memory write action spec v0.1</code> or <code>Safe tool request action spec v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Adding future action names before their commit/effect behavior exists would let the model propose unsupported writes and blur the current runtime safety boundary.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely introduces new <code>CharacterDecision</code> fields and raw-log commit/reject records, but no schema is defined by the current registry refactor.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active slice only moves existing state-patch and incident actions behind concrete registry/spec wiring.</dd>
+    </dl>
   </main>
 </body>
 </html>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TypeScript Runtime Source of Truth Cutover</title>
+  <title>User Turn Action Registry</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 960px; margin: 0 auto; padding: 44px 24px; }
@@ -19,128 +19,116 @@
 </head>
 <body>
   <main>
-    <h1>TypeScript Runtime Source of Truth Cutover</h1>
+    <h1>User Turn Action Registry</h1>
     <p><span class="status">Status: active implementation slice</span></p>
     <p>
-      Created: 2026-05-30. Active branch:
-      <code>mvp-typescript-shadow-port</code>. Preserved Python branch:
-      <code>legacy-python-main</code> created from local <code>main</code> before
-      Python removal.
+      Created: 2026-05-31. Active branch:
+      <code>feature/user-turn-action-registry</code>.
     </p>
 
     <h2>Source Context</h2>
     <p>
-      Product direction remains the Notion project hub
-      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>
-      and the
-      <a href="https://www.notion.so/36f8995c0c5e80a5be6aee4982f0e23a">original TypeScript migration goal</a>.
-      Local implementation truth for the completed port is recorded in
-      <a href="typescript-source-of-truth.html">the TypeScript source-of-truth tracker</a>
-      and the 2026-05-29/2026-05-30 development journals.
+      Product direction remains the Notion
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>,
+      especially
+      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
+      <a href="https://www.notion.so/3608995c0c5e817f9cd4c4c6312d6db0">02A - Runtime Kernel &amp; Operation Routing</a>,
+      <a href="https://www.notion.so/3608995c0c5e816c94fbef42ea9096f7">03 - Role Model Interface &amp; Prompting</a>,
+      and
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
+      The Notion direction says the runtime scopes allowed actions by event/call type,
+      the role model proposes structured intents, and Commit &amp; Effects remains the only durable write boundary.
     </p>
     <p>
-      Source-of-truth note: the original Notion migration goal framed the work
-      as a shadow port with Python remaining production truth. After the
-      complete port passed review gates, the user approved a two-branch cutover:
-      keep Python on <code>legacy-python-main</code> and make this branch the
-      TypeScript source-of-truth line. This PR must call out that approved
-      exception explicitly because it intentionally exceeds the original
-      shadow-port-only wording.
+      Local trigger: issue 1 says <code>runUserMessageTurn</code> wires one option and
+      branch for every current write capability. Issue 4 says Role Model input uses
+      hard-coded allowed-action prompt/parse families. These issues share the same
+      write-action/action-policy registration seam.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Promote the completed TypeScript runtime from a shadow implementation to
-      the branch's source of truth. The production tree should use
-      <code>src/</code> and <code>tests/</code> for TypeScript, CI should run
-      TypeScript-only gates, package metadata should describe the TypeScript
-      runtime, and local docs should make clear that the Python implementation
-      now lives on <code>legacy-python-main</code>.
+      Introduce a small concrete registry/spec abstraction for the existing user-turn
+      write actions so user-turn orchestration consumes configured action modules
+      and the role-model loop consumes configured model action specs. Preserve
+      current behavior, ordering, statuses, raw logs, and public model input fields.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>Create <code>legacy-python-main</code> from current local <code>main</code>.</li>
-      <li>Remove the Python <code>src/</code> and <code>tests/</code> trees from this TypeScript branch.</li>
-      <li>Remove stale Python-only tooling metadata from this TypeScript branch.</li>
-      <li>Move TypeScript source from <code>src-ts/</code> to <code>src/</code>.</li>
-      <li>Move TypeScript tests from <code>tests-ts/</code> to <code>tests/</code>.</li>
-      <li>Update imports, TypeScript config, Vitest config, ESLint config, and package scripts for the new paths.</li>
-      <li>Update CI so the existing <code>lint</code>, <code>typecheck</code>, and <code>test</code> jobs are TypeScript-only.</li>
-      <li>Update package metadata from migration wording to TypeScript runtime wording.</li>
-      <li>Update active docs, plan index, source-of-truth tracker, future-slice notes, and journal with cutover evidence.</li>
+      <li>Move existing user-turn write-action wiring for living-state patch, incident start, incident cancel, incident complete, and incident interruption behind registry modules.</li>
+      <li>Keep visible user-message commit, role-model call, and visible-reply commit as the fixed user-turn spine.</li>
+      <li>Replace role-model write opt-in booleans with a model action spec for the existing state-patch and incident action policies.</li>
+      <li>Keep existing <code>allowed_actions</code>, <code>allowed_life_action_type</code>, and instruction strings in the rendered role-model envelope.</li>
+      <li>Keep the one write-action opt-in rule for a <code>USER_MESSAGE</code> turn.</li>
+      <li>Add tests proving current behavior still flows through registry/spec configuration rather than core switch chains.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No runtime behavior changes beyond import path and source-layout cutover.</li>
-      <li>No model provider, database, scheduler, retrieval, tool, Live2D, asset, or UI work.</li>
-      <li>No deletion of the preserved Python branch.</li>
-      <li>No branch renaming or GitHub default-branch/protection changes in this local commit.</li>
-      <li>No PR creation unless requested after the cutover commit is verified.</li>
+      <li>No memory writes, retrieval, tools, productivity actions, Live2D, assets, scheduled directives, or new commit-effect modules.</li>
+      <li>No redesign of <code>DecisionContext</code> beyond passing current context sources from action modules.</li>
+      <li>No schema version bump and no new persisted runtime record fields.</li>
+      <li>No change to raw log kind ordering or visible transcript ordering.</li>
+      <li>No broad operation registry, permission matrix, background worker, or plugin system.</li>
     </ul>
 
     <h2>Minimal Schema</h2>
     <p>
-      Runtime record schemas remain at <code>schema_version: "0.1"</code>.
-      This slice changes repository layout and CI ownership only. It must not
-      change <code>RuntimeEvent</code>, <code>RawEventLogEntry</code>,
-      <code>CharacterDecision</code>, <code>RoleModelTurnResult</code>, incident
-      snapshots, living-state snapshots, or user-turn result contracts.
+      Persisted runtime records remain at <code>schema_version: "0.1"</code>.
+      This slice adds only in-process TypeScript configuration types for existing
+      write-action modules and model action specs. It must not add a new durable
+      action type or alter <code>RuntimeEvent</code>, <code>RawEventLogEntry</code>,
+      <code>CharacterDecision</code>, or user-turn result field names.
     </p>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li><code>legacy-python-main</code> exists at the old Python <code>main</code> commit.</li>
-      <li>No Python source or Python tests remain under production <code>src/</code> or <code>tests/</code>.</li>
-      <li>All TypeScript imports reference <code>src/</code>, not <code>src-ts/</code>.</li>
-      <li>TypeScript tests live under <code>tests/</code>, not <code>tests-ts/</code>.</li>
-      <li>CI has no Python setup, Ruff, mypy, compileall, or unittest steps.</li>
-      <li>No root Python tooling metadata remains for Ruff or mypy.</li>
-      <li><code>package.json</code> describes <code>project02-runtime</code> as a TypeScript runtime package.</li>
-      <li><code>pnpm lint</code>, <code>pnpm typecheck</code>, and <code>pnpm test</code> pass.</li>
-      <li>Docs HTML parses and <code>git diff --check</code> passes.</li>
-      <li>The cutover is committed with a signed commit.</li>
+      <li><code>runUserMessageTurn</code> no longer imports each write-action commit implementation directly.</li>
+      <li><code>RunUserMessageTurnOptions</code> exposes one write-action registry input instead of one option per write capability.</li>
+      <li>Existing state patch, incident start, incident cancel, incident complete, and incident interrupt behavior, stop codes, result fields, and log ordering are preserved.</li>
+      <li>Role-model rendering and parsing are driven by configured model action specs for existing write policies.</li>
+      <li>The rendered role-model envelope still uses the same <code>allowed_actions</code>, <code>allowed_life_action_type</code>, and instruction values as before.</li>
+      <li>The one write-action opt-in rule is enforced from registry/spec count rather than hard-coded booleans.</li>
+      <li>Future memory/tool/productivity write ideas are parked, not implemented.</li>
+      <li>Focused unit and integration tests pass, then full repo checks pass.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <ul>
-      <li><code>pnpm lint</code></li>
-      <li><code>pnpm typecheck</code></li>
-      <li><code>pnpm test</code></li>
+      <li><code>pnpm exec vitest run tests/unit/runtime/user-turn.test.ts tests/unit/role-model/loop.test.ts tests/integration/role-model-loop.test.ts</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
       <li><code>python3 -c "from html.parser import HTMLParser; import pathlib; [HTMLParser().feed(path.read_text()) for path in pathlib.Path('docs').rglob('*.html')]"</code></li>
       <li><code>git diff --check</code></li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li><strong>Runtime Kernel:</strong> TypeScript source under <code>src/runtime/</code> owns event intake, normalization, routing, IDs, clocks, and raw-log append request behavior.</li>
-      <li><strong>Character State Engine:</strong> TypeScript source under <code>src/character/state/</code> owns read-side snapshots, incident store adapters, and compact context building.</li>
-      <li><strong>Role Model Loop:</strong> TypeScript source under <code>src/role-model/</code> owns model input rendering, adapter calls, output parsing, and structured decision validation.</li>
-      <li><strong>Commit and Effects:</strong> TypeScript source under <code>src/commit-effects/</code> owns validated visible, living-state, incident, and user-turn commit effects.</li>
-      <li><strong>Legacy Python:</strong> preserved on <code>legacy-python-main</code>; not part of this TypeScript branch after cutover.</li>
+      <li><strong>Runtime user-turn orchestration:</strong> keeps the fixed turn spine and delegates optional write commits to registered modules.</li>
+      <li><strong>Runtime action modules:</strong> adapt existing Commit &amp; Effects implementations into user-turn write-action modules with stop code, result field, preflight, context, and rejection behavior.</li>
+      <li><strong>Role Model Loop:</strong> consumes a model action spec to render instructions, allowed actions, and parse policy without one boolean per write family.</li>
+      <li><strong>Commit and Effects:</strong> existing commit implementations remain the only durable write/effect boundary.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>The preceding TypeScript migration commit fixed the known parity blockers before this cutover.</li>
-      <li>Keep CI job names stable as <code>lint</code>, <code>typecheck</code>, and <code>test</code> so branch protection can keep the same required contexts after they become TS-only.</li>
-      <li>Historical journal entries may still refer to the TypeScript work as a shadow port because they describe the pre-cutover migration process.</li>
-      <li>The active branch now treats TypeScript as the implementation source of truth; Python rollback/reference uses <code>legacy-python-main</code>.</li>
+      <li>This is a refactor slice with behavior preservation tests; any behavior change must be explicitly called out and justified.</li>
+      <li>Keep registry modules concrete and boring. They should be configured from existing implementations rather than inventing generalized future operations.</li>
+      <li>Do not solve the broader DecisionContext envelope split or memory/tool policy shape in this slice.</li>
     </ul>
 
     <h2>Open Questions</h2>
     <ul>
-      <li>Should GitHub default branch be renamed or repointed after the PR merges?</li>
-      <li>Should remote branch <code>legacy-python-main</code> be protected as an archive branch?</li>
-      <li>Should package exports be narrowed further once external consumers exist?</li>
+      <li>Whether a later memory-write slice should add a new <code>CharacterDecision</code> field or a separate action envelope remains out of scope.</li>
+      <li>Whether action specs should eventually live in a shared runtime contract package should wait for a second event/call type.</li>
     </ul>
 
     <h2>Future Ideas</h2>
     <ul>
-      <li>Add a production runtime entry point once the first external caller or CLI/server slice exists.</li>
-      <li>Split docs into historical Python-era docs and current TypeScript runtime docs if the old MVP history becomes noisy.</li>
-      <li>Add a replay/debug-inspector slice now that the TypeScript runtime is the branch source of truth.</li>
+      <li>Add a memory-write action spec only when a memory commit-effect slice exists.</li>
+      <li>Add tool/productivity action specs only after a safe tool request/result slice defines permission and logging policy.</li>
+      <li>Promote the registry into a broader operation registry only after at least two event families need it.</li>
     </ul>
   </main>
 </body>

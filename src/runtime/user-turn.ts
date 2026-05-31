@@ -1,38 +1,15 @@
 import {
-  commitLifeIncidentCancel,
-  LIFE_INCIDENT_CANCEL_REJECTED_STATUS,
-  type LifeIncidentCancelCommitResult,
-  type LifeIncidentCancelFinalizer
-} from '../commit-effects/incident-cancel.ts';
-import {
-  commitLifeIncidentComplete,
-  LIFE_INCIDENT_COMPLETE_REJECTED_STATUS,
-  type LifeIncidentCompleteCommitResult,
-  type LifeIncidentCompleteFinalizer
-} from '../commit-effects/incident-complete.ts';
-import {
-  commitLifeIncidentInterruption,
-  LIFE_INCIDENT_CONTINUED_IN_BACKGROUND_STATUS,
-  LIFE_INCIDENT_INTERRUPTED_STATUS,
-  LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS,
-  LIFE_INCIDENT_INTERRUPT_SKIPPED_STATUS,
-  LIFE_INCIDENT_PROTECTED_FROM_INTERRUPTION_STATUS,
   type LifeIncidentInterruptCommitResult,
-  type LifeIncidentInterruptFinalizer
-} from '../commit-effects/incident-interrupt.ts';
-import {
-  commitLifeIncidentStart,
-  LIFE_INCIDENT_START_REJECTED_STATUS,
+  type LifeIncidentCancelCommitResult,
+  type LifeIncidentCompleteCommitResult,
   type LifeIncidentStartCommitResult,
-  type LifeIncidentStartFinalizer
-} from '../commit-effects/incident-start.ts';
-import {
-  commitLivingStatePatch,
-  LIVING_STATE_PATCH_REJECTED_STATUS,
   type LivingStatePatchCommitResult,
-  type LivingStatePatchFinalizer,
-  type LivingStatePatchStore
-} from '../commit-effects/living-state.ts';
+  CONFLICTING_WRITE_ACTION_OPT_IN_CODE,
+  WRITE_ACTION_OPT_IN_CONFLICT_MESSAGE,
+  type UserTurnActionResultFields,
+  type UserTurnFailure,
+  type UserTurnWriteActionRegistry
+} from './user-turn-actions.ts';
 import {
   commitUserVisibleMessage,
   commitVisibleReply,
@@ -49,18 +26,16 @@ import {
   type VisibleConversationRecordSource
 } from '../character/state/context.ts';
 import {
-  type ActiveIncidentSnapshot,
   type ActiveIncidentSource,
-  type CurrentCharacterStateSource,
-  type InterruptedIncidentSnapshot,
   type InterruptedIncidentSource
 } from '../character/state/current.ts';
 import {
   runRoleModelTurn,
   type RoleModelAdapter,
+  type RoleModelOptions,
   type RoleModelTurnResult
 } from '../role-model/loop.ts';
-import { USER_MESSAGE } from './contracts.ts';
+import { USER_MESSAGE, validateNormalizedUserMessageEvent } from './contracts.ts';
 import {
   RuntimeValidationError,
   intakeRuntimeEvent,
@@ -69,25 +44,24 @@ import {
 import { SCHEMA_VERSION, type SchemaVersion } from './schema.ts';
 import type { Clock, IdGenerator, RawEventLogEntry } from './logging.ts';
 
+export {
+  CONFLICTING_WRITE_ACTION_OPT_IN_CODE,
+  LIFE_INCIDENT_CANCEL_COMMIT_STOP,
+  LIFE_INCIDENT_COMPLETE_COMMIT_STOP,
+  LIFE_INCIDENT_INTERRUPT_COMMIT_STOP,
+  LIFE_INCIDENT_START_COMMIT_STOP,
+  LIVING_STATE_PATCH_COMMIT_STOP,
+  MISSING_INCIDENT_CANCEL_SOURCE_CODE,
+  MISSING_INCIDENT_COMPLETE_SOURCE_CODE,
+  MISSING_INCIDENT_INTERRUPT_SOURCE_CODE
+} from './user-turn-actions.ts';
+
 export const USER_TURN_COMMITTED_STATUS = 'user_turn_committed';
 export const USER_TURN_STOPPED_STATUS = 'user_turn_stopped';
 export const USER_TURN_PREFLIGHT_STOP = 'user_turn_preflight';
 export const USER_VISIBLE_MESSAGE_COMMIT_STOP = 'user_visible_message_commit';
-export const LIVING_STATE_PATCH_COMMIT_STOP = 'living_state_patch_commit';
-export const LIFE_INCIDENT_START_COMMIT_STOP = 'life_incident_start_commit';
-export const LIFE_INCIDENT_CANCEL_COMMIT_STOP = 'life_incident_cancel_commit';
-export const LIFE_INCIDENT_COMPLETE_COMMIT_STOP = 'life_incident_complete_commit';
-export const LIFE_INCIDENT_INTERRUPT_COMMIT_STOP = 'life_incident_interrupt_commit';
 export const VISIBLE_REPLY_COMMIT_STOP = 'visible_reply_commit';
 export const USER_TURN_NEXT_STEP = 'user_turn';
-export const CONFLICTING_WRITE_ACTION_OPT_IN_CODE = 'conflicting_write_action_opt_in';
-export const MISSING_INCIDENT_CANCEL_SOURCE_CODE = 'missing_incident_cancel_source';
-export const MISSING_INCIDENT_COMPLETE_SOURCE_CODE = 'missing_incident_complete_source';
-export const MISSING_INCIDENT_INTERRUPT_SOURCE_CODE = 'missing_incident_interrupt_source';
-
-const WRITE_ACTION_OPT_IN_CONFLICT_MESSAGE =
-  'Only one write-action opt-in may be enabled for a USER_MESSAGE turn: ' +
-  'state_patch, start_incident, cancel_incident, complete_incident, or interrupt_incident.';
 
 type RawEventLog = {
   append: (entry: RawEventLogEntry) => void;
@@ -95,12 +69,6 @@ type RawEventLog = {
 
 export type VisibleConversationBoundary = VisibleConversationLog &
   VisibleConversationRecordSource;
-
-type UserTurnFailure = {
-  stage: string;
-  code: string;
-  message: string;
-};
 
 type UserMessageTurnBase = {
   schema_version: SchemaVersion;
@@ -151,15 +119,9 @@ export type RunUserMessageTurnOptions = {
   visibleConversation: VisibleConversationBoundary;
   idGenerator: IdGenerator;
   clock: Clock;
-  currentStateSource?: CurrentCharacterStateSource;
   activeIncidentSource?: ActiveIncidentSource;
   interruptedIncidentSource?: InterruptedIncidentSource;
-  livingStatePatchStore?: LivingStatePatchStore;
-  livingStatePatchFinalizer?: LivingStatePatchFinalizer;
-  lifeIncidentStartFinalizer?: LifeIncidentStartFinalizer;
-  lifeIncidentCancelFinalizer?: LifeIncidentCancelFinalizer;
-  lifeIncidentCompleteFinalizer?: LifeIncidentCompleteFinalizer;
-  lifeIncidentInterruptFinalizer?: LifeIncidentInterruptFinalizer;
+  writeActions?: UserTurnWriteActionRegistry;
 };
 
 export function runUserMessageTurn(
@@ -170,15 +132,9 @@ export function runUserMessageTurn(
     visibleConversation,
     idGenerator,
     clock,
-    currentStateSource,
     activeIncidentSource,
     interruptedIncidentSource,
-    livingStatePatchStore,
-    livingStatePatchFinalizer,
-    lifeIncidentStartFinalizer,
-    lifeIncidentCancelFinalizer,
-    lifeIncidentCompleteFinalizer,
-    lifeIncidentInterruptFinalizer
+    writeActions = []
   }: RunUserMessageTurnOptions
 ): UserMessageTurnResult {
   const intakeResult = intakeRuntimeEvent(eventInput, {
@@ -189,25 +145,10 @@ export function runUserMessageTurn(
   const event = intakeResult.event;
   const route = intakeResult.route;
   requireUserTurnRoute(route);
+  const userMessageEvent = validateNormalizedUserMessageEvent(event);
 
-  const allowStatePatch =
-    currentStateSource !== undefined &&
-    livingStatePatchStore !== undefined &&
-    livingStatePatchFinalizer !== undefined;
-  const allowIncidentStart = lifeIncidentStartFinalizer !== undefined;
-  const allowIncidentCancel = lifeIncidentCancelFinalizer !== undefined;
-  const allowIncidentComplete = lifeIncidentCompleteFinalizer !== undefined;
-  const allowIncidentInterrupt = lifeIncidentInterruptFinalizer !== undefined;
-
-  const writeActionOptInCount = [
-    allowStatePatch,
-    allowIncidentStart,
-    allowIncidentCancel,
-    allowIncidentComplete,
-    allowIncidentInterrupt
-  ].filter(Boolean).length;
-  if (writeActionOptInCount > 1) {
-    return buildStoppedResult(event, route, {
+  if (writeActions.length > 1) {
+    return buildStoppedResult(userMessageEvent, route, {
       stoppedAt: USER_TURN_PREFLIGHT_STOP,
       failure: {
         stage: USER_TURN_PREFLIGHT_STOP,
@@ -216,202 +157,131 @@ export function runUserMessageTurn(
       }
     });
   }
-  if (allowIncidentComplete && activeIncidentSource === undefined) {
-    return buildStoppedResult(event, route, {
-      stoppedAt: USER_TURN_PREFLIGHT_STOP,
-      failure: {
-        stage: USER_TURN_PREFLIGHT_STOP,
-        code: MISSING_INCIDENT_COMPLETE_SOURCE_CODE,
-        message: 'incident complete requires active_incident_source.'
-      }
-    });
-  }
-  if (allowIncidentCancel && activeIncidentSource === undefined) {
-    return buildStoppedResult(event, route, {
-      stoppedAt: USER_TURN_PREFLIGHT_STOP,
-      failure: {
-        stage: USER_TURN_PREFLIGHT_STOP,
-        code: MISSING_INCIDENT_CANCEL_SOURCE_CODE,
-        message: 'incident cancel requires active_incident_source.'
-      }
-    });
-  }
-  if (allowIncidentInterrupt && activeIncidentSource === undefined) {
-    return buildStoppedResult(event, route, {
-      stoppedAt: USER_TURN_PREFLIGHT_STOP,
-      failure: {
-        stage: USER_TURN_PREFLIGHT_STOP,
-        code: MISSING_INCIDENT_INTERRUPT_SOURCE_CODE,
-        message: 'incident interrupt requires active_incident_source.'
-      }
-    });
+  for (const action of writeActions) {
+    const failure = action.preflightFailure?.();
+    if (failure !== undefined) {
+      return buildStoppedResult(userMessageEvent, route, {
+        stoppedAt: USER_TURN_PREFLIGHT_STOP,
+        failure
+      });
+    }
   }
 
-  const userVisibleMessageResult = commitUserVisibleMessage(event, {
+  const userVisibleMessageResult = commitUserVisibleMessage(userMessageEvent, {
     visibleConversationLog: visibleConversation,
     rawEventLog,
     idGenerator,
     clock
   });
   if (userVisibleMessageResult.status !== USER_VISIBLE_MESSAGE_COMMITTED_STATUS) {
-    return buildStoppedResult(event, route, {
+    return buildStoppedResult(userMessageEvent, route, {
       stoppedAt: USER_VISIBLE_MESSAGE_COMMIT_STOP,
       failure: userVisibleMessageResult.failure,
       userVisibleMessageResult
     });
   }
 
-  let lifeIncidentInterruptResult: LifeIncidentInterruptCommitResult | undefined;
-  if (allowIncidentInterrupt) {
-    const requiredActiveIncidentSource = requireConfiguredDependency(
-      activeIncidentSource,
-      'incident interrupt preflight failed unexpectedly.'
-    );
-    lifeIncidentInterruptResult = commitLifeIncidentInterruption(event, {
-      activeIncidentSource: requiredActiveIncidentSource,
-      lifeIncidentInterruptFinalizer,
+  let actionResultFields: UserTurnActionResultFields = {};
+  let incidentContextSources = optionalIncidentSources(
+    activeIncidentSource,
+    interruptedIncidentSource
+  );
+  const beforeRoleModelActions = writeActions.filter(
+    (action) => action.phase === 'before_role_model'
+  );
+  const afterRoleModelActions = writeActions.filter(
+    (action) => action.phase === 'after_role_model'
+  );
+  for (const action of beforeRoleModelActions) {
+    const actionResult = action.commit({
+      event: userMessageEvent,
       rawEventLog,
       idGenerator,
       clock
     });
-    if (lifeIncidentInterruptResult.status === LIFE_INCIDENT_INTERRUPT_REJECTED_STATUS) {
-      return buildStoppedResult(event, route, {
-        stoppedAt: LIFE_INCIDENT_INTERRUPT_COMMIT_STOP,
-        failure: lifeIncidentInterruptResult.failure,
+    actionResultFields = mergeActionResultFields(
+      actionResultFields,
+      action.resultFields(actionResult)
+    );
+    if (action.isRejected(actionResult)) {
+      return buildStoppedResult(userMessageEvent, route, {
+        stoppedAt: action.stop,
+        failure: action.failure(actionResult),
         userVisibleMessageResult,
-        lifeIncidentInterruptResult
+        actionResultFields
       });
+    }
+    if (action.contextSourcesAfterCommit !== undefined) {
+      incidentContextSources = action.contextSourcesAfterCommit(
+        actionResult,
+        incidentContextSources
+      );
     }
   }
 
-  const contextSources = buildContextIncidentSources({
-    allowIncidentInterrupt,
-    interruptResult: lifeIncidentInterruptResult,
-    activeIncidentSource,
-    interruptedIncidentSource
-  });
-
-  const roleModelOptions: Parameters<typeof runRoleModelTurn>[1] = {
+  const roleModelOptions: RoleModelOptions & {
+    adapter: RoleModelAdapter;
+    rawEventLog: RawEventLog;
+    idGenerator: IdGenerator;
+    clock: Clock;
+  } = {
     adapter,
     rawEventLog,
     idGenerator,
     clock,
     recentVisibleMessagesSource: new VisibleConversationRecentMessagesSource(
       visibleConversation
-    ),
-    allowStatePatch,
-    allowIncidentStart,
-    allowIncidentCancel,
-    allowIncidentComplete
+    )
   };
-  if (currentStateSource !== undefined) {
-    roleModelOptions.currentStateSource = currentStateSource;
+  if (incidentContextSources.activeIncidentSource !== undefined) {
+    roleModelOptions.activeIncidentSource = incidentContextSources.activeIncidentSource;
   }
-  if (contextSources.activeIncidentSource !== undefined) {
-    roleModelOptions.activeIncidentSource = contextSources.activeIncidentSource;
+  if (incidentContextSources.interruptedIncidentSource !== undefined) {
+    roleModelOptions.interruptedIncidentSource =
+      incidentContextSources.interruptedIncidentSource;
   }
-  if (contextSources.interruptedIncidentSource !== undefined) {
-    roleModelOptions.interruptedIncidentSource = contextSources.interruptedIncidentSource;
+  for (const action of afterRoleModelActions) {
+    if (action.modelActionSpec !== undefined) {
+      roleModelOptions.modelActionSpec = action.modelActionSpec;
+    }
+    const contextOptions = action.roleModelContextOptions?.();
+    if (contextOptions?.currentStateSource !== undefined) {
+      roleModelOptions.currentStateSource = contextOptions.currentStateSource;
+    }
+    if (contextOptions?.activeIncidentSource !== undefined) {
+      roleModelOptions.activeIncidentSource = contextOptions.activeIncidentSource;
+    }
+    if (contextOptions?.interruptedIncidentSource !== undefined) {
+      roleModelOptions.interruptedIncidentSource = contextOptions.interruptedIncidentSource;
+    }
   }
-  const roleModelResult = runRoleModelTurn(event, roleModelOptions);
+  const roleModelResult = runRoleModelTurn(userMessageEvent, roleModelOptions);
 
-  let livingStatePatchResult: LivingStatePatchCommitResult | undefined;
-  if (allowStatePatch) {
-    livingStatePatchResult = commitLivingStatePatch(event, roleModelResult, {
-      livingStatePatchStore,
-      livingStatePatchFinalizer,
+  for (const action of afterRoleModelActions) {
+    const actionResult = action.commit({
+      event: userMessageEvent,
+      roleModelResult,
       rawEventLog,
       idGenerator,
       clock
     });
-    if (livingStatePatchResult.status === LIVING_STATE_PATCH_REJECTED_STATUS) {
-      return buildStoppedResult(event, route, {
-        stoppedAt: LIVING_STATE_PATCH_COMMIT_STOP,
-        failure: livingStatePatchResult.failure,
-        userVisibleMessageResult,
-        roleModelResult,
-        lifeIncidentInterruptResult,
-        livingStatePatchResult
-      });
-    }
-  }
-
-  let lifeIncidentStartResult: LifeIncidentStartCommitResult | undefined;
-  let lifeIncidentCancelResult: LifeIncidentCancelCommitResult | undefined;
-  let lifeIncidentCompleteResult: LifeIncidentCompleteCommitResult | undefined;
-  if (allowIncidentStart) {
-    lifeIncidentStartResult = commitLifeIncidentStart(event, roleModelResult, {
-      lifeIncidentStartFinalizer,
-      rawEventLog,
-      idGenerator,
-      clock
-    });
-    if (lifeIncidentStartResult.status === LIFE_INCIDENT_START_REJECTED_STATUS) {
-      return buildStoppedResult(event, route, {
-        stoppedAt: LIFE_INCIDENT_START_COMMIT_STOP,
-        failure: lifeIncidentStartResult.failure,
-        userVisibleMessageResult,
-        roleModelResult,
-        lifeIncidentInterruptResult,
-        livingStatePatchResult,
-        lifeIncidentStartResult
-      });
-    }
-  }
-  if (allowIncidentCancel) {
-    const requiredActiveIncidentSource = requireConfiguredDependency(
-      activeIncidentSource,
-      'incident cancel preflight failed unexpectedly.'
+    actionResultFields = mergeActionResultFields(
+      actionResultFields,
+      action.resultFields(actionResult)
     );
-    lifeIncidentCancelResult = commitLifeIncidentCancel(event, roleModelResult, {
-      activeIncidentSource: requiredActiveIncidentSource,
-      lifeIncidentCancelFinalizer,
-      rawEventLog,
-      idGenerator,
-      clock
-    });
-    if (lifeIncidentCancelResult.status === LIFE_INCIDENT_CANCEL_REJECTED_STATUS) {
-      return buildStoppedResult(event, route, {
-        stoppedAt: LIFE_INCIDENT_CANCEL_COMMIT_STOP,
-        failure: lifeIncidentCancelResult.failure,
+    if (action.isRejected(actionResult)) {
+      return buildStoppedResult(userMessageEvent, route, {
+        stoppedAt: action.stop,
+        failure: action.failure(actionResult),
         userVisibleMessageResult,
         roleModelResult,
-        lifeIncidentInterruptResult,
-        livingStatePatchResult,
-        lifeIncidentStartResult,
-        lifeIncidentCancelResult
-      });
-    }
-  }
-  if (allowIncidentComplete) {
-    const requiredActiveIncidentSource = requireConfiguredDependency(
-      activeIncidentSource,
-      'incident complete preflight failed unexpectedly.'
-    );
-    lifeIncidentCompleteResult = commitLifeIncidentComplete(event, roleModelResult, {
-      activeIncidentSource: requiredActiveIncidentSource,
-      lifeIncidentCompleteFinalizer,
-      rawEventLog,
-      idGenerator,
-      clock
-    });
-    if (lifeIncidentCompleteResult.status === LIFE_INCIDENT_COMPLETE_REJECTED_STATUS) {
-      return buildStoppedResult(event, route, {
-        stoppedAt: LIFE_INCIDENT_COMPLETE_COMMIT_STOP,
-        failure: lifeIncidentCompleteResult.failure,
-        userVisibleMessageResult,
-        roleModelResult,
-        lifeIncidentInterruptResult,
-        livingStatePatchResult,
-        lifeIncidentStartResult,
-        lifeIncidentCancelResult,
-        lifeIncidentCompleteResult
+        actionResultFields
       });
     }
   }
 
   const visibleReplyResult = commitVisibleReply(
-    event,
+    userMessageEvent,
     projectVisibleReplyRoleModelResult(roleModelResult),
     {
       visibleConversationLog: visibleConversation,
@@ -421,24 +291,20 @@ export function runUserMessageTurn(
     }
   );
   if (visibleReplyResult.status !== VISIBLE_REPLY_COMMITTED_STATUS) {
-    return buildStoppedResult(event, route, {
+    return buildStoppedResult(userMessageEvent, route, {
       stoppedAt: VISIBLE_REPLY_COMMIT_STOP,
       failure: visibleReplyResult.failure,
       userVisibleMessageResult,
       roleModelResult,
-      lifeIncidentInterruptResult,
-      livingStatePatchResult,
-      lifeIncidentStartResult,
-      lifeIncidentCancelResult,
-      lifeIncidentCompleteResult,
+      actionResultFields,
       visibleReplyResult
     });
   }
 
   const result: UserMessageTurnCommittedResult = {
     schema_version: SCHEMA_VERSION,
-    trace_id: event.trace_id,
-    event_id: event.event_id,
+    trace_id: userMessageEvent.trace_id,
+    event_id: userMessageEvent.event_id,
     event_type: USER_MESSAGE,
     status: USER_TURN_COMMITTED_STATUS,
     kernel_route: structuredClone(route),
@@ -448,23 +314,9 @@ export function runUserMessageTurn(
     visible_record_ids: {
       user_message_id: userVisibleMessageResult.message.message_id,
       assistant_output_id: visibleReplyResult.output.output_id
-    }
+    },
+    ...cloneActionResultFields(actionResultFields)
   };
-  if (livingStatePatchResult !== undefined) {
-    result.living_state_patch_result = structuredClone(livingStatePatchResult);
-  }
-  if (lifeIncidentInterruptResult !== undefined) {
-    result.life_incident_interrupt_result = structuredClone(lifeIncidentInterruptResult);
-  }
-  if (lifeIncidentStartResult !== undefined) {
-    result.life_incident_start_result = structuredClone(lifeIncidentStartResult);
-  }
-  if (lifeIncidentCancelResult !== undefined) {
-    result.life_incident_cancel_result = structuredClone(lifeIncidentCancelResult);
-  }
-  if (lifeIncidentCompleteResult !== undefined) {
-    result.life_incident_complete_result = structuredClone(lifeIncidentCompleteResult);
-  }
   return result;
 }
 
@@ -492,11 +344,7 @@ function buildStoppedResult(
     failure,
     userVisibleMessageResult,
     roleModelResult,
-    lifeIncidentInterruptResult,
-    livingStatePatchResult,
-    lifeIncidentStartResult,
-    lifeIncidentCancelResult,
-    lifeIncidentCompleteResult,
+    actionResultFields = {},
     visibleReplyResult
   }: {
     stoppedAt: string;
@@ -506,11 +354,7 @@ function buildStoppedResult(
       | UserVisibleMessageRejectResult
       | undefined;
     roleModelResult?: RoleModelTurnResult | undefined;
-    lifeIncidentInterruptResult?: LifeIncidentInterruptCommitResult | undefined;
-    livingStatePatchResult?: LivingStatePatchCommitResult | undefined;
-    lifeIncidentStartResult?: LifeIncidentStartCommitResult | undefined;
-    lifeIncidentCancelResult?: LifeIncidentCancelCommitResult | undefined;
-    lifeIncidentCompleteResult?: LifeIncidentCompleteCommitResult | undefined;
+    actionResultFields?: UserTurnActionResultFields | undefined;
     visibleReplyResult?: VisibleReplyCommitResult | VisibleReplyRejectResult | undefined;
   }
 ): UserMessageTurnStoppedResult {
@@ -530,21 +374,7 @@ function buildStoppedResult(
   if (roleModelResult !== undefined) {
     result.role_model_result = structuredClone(roleModelResult);
   }
-  if (lifeIncidentInterruptResult !== undefined) {
-    result.life_incident_interrupt_result = structuredClone(lifeIncidentInterruptResult);
-  }
-  if (livingStatePatchResult !== undefined) {
-    result.living_state_patch_result = structuredClone(livingStatePatchResult);
-  }
-  if (lifeIncidentStartResult !== undefined) {
-    result.life_incident_start_result = structuredClone(lifeIncidentStartResult);
-  }
-  if (lifeIncidentCancelResult !== undefined) {
-    result.life_incident_cancel_result = structuredClone(lifeIncidentCancelResult);
-  }
-  if (lifeIncidentCompleteResult !== undefined) {
-    result.life_incident_complete_result = structuredClone(lifeIncidentCompleteResult);
-  }
+  Object.assign(result, cloneActionResultFields(actionResultFields));
   if (visibleReplyResult !== undefined) {
     result.visible_reply_result = structuredClone(visibleReplyResult);
   }
@@ -570,45 +400,6 @@ function projectVisibleReplyRoleModelResult(
   };
 }
 
-function buildContextIncidentSources({
-  allowIncidentInterrupt,
-  interruptResult,
-  activeIncidentSource,
-  interruptedIncidentSource
-}: {
-  allowIncidentInterrupt: boolean;
-  interruptResult: LifeIncidentInterruptCommitResult | undefined;
-  activeIncidentSource: ActiveIncidentSource | undefined;
-  interruptedIncidentSource: InterruptedIncidentSource | undefined;
-}): {
-  activeIncidentSource?: ActiveIncidentSource;
-  interruptedIncidentSource?: InterruptedIncidentSource;
-} {
-  if (!allowIncidentInterrupt || interruptResult === undefined) {
-    return optionalIncidentSources(activeIncidentSource, interruptedIncidentSource);
-  }
-
-  if (interruptResult.status === LIFE_INCIDENT_INTERRUPTED_STATUS) {
-    return {
-      interruptedIncidentSource: new SnapshotIncidentSource(
-        interruptResult.interrupted_incident
-      )
-    };
-  }
-  if (
-    interruptResult.status === LIFE_INCIDENT_CONTINUED_IN_BACKGROUND_STATUS ||
-    interruptResult.status === LIFE_INCIDENT_PROTECTED_FROM_INTERRUPTION_STATUS
-  ) {
-    return {
-      activeIncidentSource: new SnapshotIncidentSource(interruptResult.active_incident)
-    };
-  }
-  if (interruptResult.status === LIFE_INCIDENT_INTERRUPT_SKIPPED_STATUS) {
-    return {};
-  }
-  return optionalIncidentSources(activeIncidentSource, interruptedIncidentSource);
-}
-
 function optionalIncidentSources(
   activeIncidentSource: ActiveIncidentSource | undefined,
   interruptedIncidentSource: InterruptedIncidentSource | undefined
@@ -629,28 +420,38 @@ function optionalIncidentSources(
   return output;
 }
 
-class SnapshotIncidentSource implements ActiveIncidentSource, InterruptedIncidentSource {
-  readonly #snapshot: ActiveIncidentSnapshot | InterruptedIncidentSnapshot;
-
-  constructor(snapshot: ActiveIncidentSnapshot | InterruptedIncidentSnapshot) {
-    this.#snapshot = structuredClone(snapshot);
-  }
-
-  readActiveIncident(): ActiveIncidentSnapshot | InterruptedIncidentSnapshot {
-    return structuredClone(this.#snapshot);
-  }
-
-  readInterruptedIncident(): ActiveIncidentSnapshot | InterruptedIncidentSnapshot {
-    return structuredClone(this.#snapshot);
-  }
+function mergeActionResultFields(
+  left: UserTurnActionResultFields,
+  right: UserTurnActionResultFields
+): UserTurnActionResultFields {
+  return {
+    ...left,
+    ...right
+  };
 }
 
-function requireConfiguredDependency<Value>(
-  value: Value | undefined,
-  message: string
-): Value {
-  if (value === undefined) {
-    throw new RuntimeValidationError(message);
+function cloneActionResultFields(
+  fields: UserTurnActionResultFields
+): UserTurnActionResultFields {
+  const output: UserTurnActionResultFields = {};
+  if (fields.living_state_patch_result !== undefined) {
+    output.living_state_patch_result = structuredClone(fields.living_state_patch_result);
   }
-  return value;
+  if (fields.life_incident_interrupt_result !== undefined) {
+    output.life_incident_interrupt_result = structuredClone(
+      fields.life_incident_interrupt_result
+    );
+  }
+  if (fields.life_incident_start_result !== undefined) {
+    output.life_incident_start_result = structuredClone(fields.life_incident_start_result);
+  }
+  if (fields.life_incident_cancel_result !== undefined) {
+    output.life_incident_cancel_result = structuredClone(fields.life_incident_cancel_result);
+  }
+  if (fields.life_incident_complete_result !== undefined) {
+    output.life_incident_complete_result = structuredClone(
+      fields.life_incident_complete_result
+    );
+  }
+  return output;
 }

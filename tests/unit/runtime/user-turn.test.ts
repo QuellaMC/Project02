@@ -6,6 +6,14 @@ import {
   runUserMessageTurn
 } from '../../../src/runtime/user-turn.ts';
 import {
+  incidentCancelUserTurnAction,
+  incidentCompleteUserTurnAction,
+  incidentInterruptUserTurnAction,
+  incidentStartUserTurnAction,
+  livingStatePatchUserTurnAction,
+  userTurnWriteActionRegistry
+} from '../../../src/runtime/user-turn-actions.ts';
+import {
   type RoleModelAdapter,
   type RoleModelInputEnvelope
 } from '../../../src/role-model/loop.ts';
@@ -265,7 +273,9 @@ function seedActiveIncident({
       visibleConversation,
       idGenerator: ids.next,
       clock: fixedClock,
-      lifeIncidentStartFinalizer: incidentStore
+      writeActions: userTurnWriteActionRegistry(
+        incidentStartUserTurnAction({ finalizer: incidentStore })
+      )
     }
   );
   if (
@@ -324,30 +334,36 @@ describe('user message turn orchestration', () => {
       visibleConversation,
       idGenerator: new SequenceIdGenerator().next,
       clock: fixedClock,
-      currentStateSource: {
-        readCurrentState: () => ({
-          schema_version: '0.1',
-          character_id: 'character-1',
-          living_state: { mood: 'focused' },
-          updated_at: '2026-05-30T09:59:00+00:00',
-          source_event_ids: ['event-prior']
+      writeActions: userTurnWriteActionRegistry(
+        livingStatePatchUserTurnAction({
+          currentStateSource: {
+            readCurrentState: () => ({
+              schema_version: '0.1',
+              character_id: 'character-1',
+              living_state: { mood: 'focused' },
+              updated_at: '2026-05-30T09:59:00+00:00',
+              source_event_ids: ['event-prior']
+            })
+          },
+          store: {
+            prepareLivingStatePatchCommit: () => {
+              throw new Error('must not prepare state patch');
+            }
+          },
+          finalizer: {
+            finalizeLivingStatePatchCommit: () => {
+              throw new Error('must not finalize state patch');
+            }
+          }
+        }),
+        incidentStartUserTurnAction({
+          finalizer: {
+            finalizeLifeIncidentStart: () => {
+              throw new Error('must not finalize incident');
+            }
+          }
         })
-      },
-      livingStatePatchStore: {
-        prepareLivingStatePatchCommit: () => {
-          throw new Error('must not prepare state patch');
-        }
-      },
-      livingStatePatchFinalizer: {
-        finalizeLivingStatePatchCommit: () => {
-          throw new Error('must not finalize state patch');
-        }
-      },
-      lifeIncidentStartFinalizer: {
-        finalizeLifeIncidentStart: () => {
-          throw new Error('must not finalize incident');
-        }
-      }
+      )
     });
 
     expect(result.status).toBe(USER_TURN_STOPPED_STATUS);
@@ -376,14 +392,19 @@ describe('user message turn orchestration', () => {
       visibleConversation,
       idGenerator: new SequenceIdGenerator().next,
       clock: fixedClock,
-      lifeIncidentCancelFinalizer: {
-        finalizeLifeIncidentCancel: () => {
-          throw new Error('must not finalize cancel');
-        },
-        completeLifeIncidentCancelAfterLogVisible: () => {
-          throw new Error('must not complete cancel');
-        }
-      }
+      writeActions: userTurnWriteActionRegistry(
+        incidentCancelUserTurnAction({
+          activeIncidentSource: undefined,
+          finalizer: {
+            finalizeLifeIncidentCancel: () => {
+              throw new Error('must not finalize cancel');
+            },
+            completeLifeIncidentCancelAfterLogVisible: () => {
+              throw new Error('must not complete cancel');
+            }
+          }
+        })
+      )
     });
 
     expect(result.status).toBe(USER_TURN_STOPPED_STATUS);
@@ -411,14 +432,19 @@ describe('user message turn orchestration', () => {
       visibleConversation,
       idGenerator: new SequenceIdGenerator().next,
       clock: fixedClock,
-      lifeIncidentCompleteFinalizer: {
-        finalizeLifeIncidentComplete: () => {
-          throw new Error('must not finalize complete');
-        },
-        completeLifeIncidentCompleteAfterLogVisible: () => {
-          throw new Error('must not complete complete');
-        }
-      }
+      writeActions: userTurnWriteActionRegistry(
+        incidentCompleteUserTurnAction({
+          activeIncidentSource: undefined,
+          finalizer: {
+            finalizeLifeIncidentComplete: () => {
+              throw new Error('must not finalize complete');
+            },
+            completeLifeIncidentCompleteAfterLogVisible: () => {
+              throw new Error('must not complete complete');
+            }
+          }
+        })
+      )
     });
 
     expect(result.status).toBe(USER_TURN_STOPPED_STATUS);
@@ -446,14 +472,19 @@ describe('user message turn orchestration', () => {
       visibleConversation,
       idGenerator: new SequenceIdGenerator().next,
       clock: fixedClock,
-      lifeIncidentInterruptFinalizer: {
-        finalizeLifeIncidentInterrupt: () => {
-          throw new Error('must not finalize interrupt');
-        },
-        completeLifeIncidentInterruptAfterLogVisible: () => {
-          throw new Error('must not complete interrupt');
-        }
-      }
+      writeActions: userTurnWriteActionRegistry(
+        incidentInterruptUserTurnAction({
+          activeIncidentSource: undefined,
+          finalizer: {
+            finalizeLifeIncidentInterrupt: () => {
+              throw new Error('must not finalize interrupt');
+            },
+            completeLifeIncidentInterruptAfterLogVisible: () => {
+              throw new Error('must not complete interrupt');
+            }
+          }
+        })
+      )
     });
 
     expect(result.status).toBe(USER_TURN_STOPPED_STATUS);
@@ -483,9 +514,13 @@ describe('user message turn orchestration', () => {
       visibleConversation,
       idGenerator: new SequenceIdGenerator().next,
       clock: fixedClock,
-      currentStateSource: currentStateSource(),
-      livingStatePatchStore: store,
-      livingStatePatchFinalizer: finalizer
+      writeActions: userTurnWriteActionRegistry(
+        livingStatePatchUserTurnAction({
+          currentStateSource: currentStateSource(),
+          store,
+          finalizer
+        })
+      )
     });
 
     expect(result.status).toBe(USER_TURN_COMMITTED_STATUS);
@@ -524,25 +559,29 @@ describe('user message turn orchestration', () => {
       visibleConversation,
       idGenerator: new SequenceIdGenerator().next,
       clock: fixedClock,
-      currentStateSource: currentStateSource(),
-      livingStatePatchStore: {
-        prepareLivingStatePatchCommit: (request) => ({
-          schema_version: '0.1',
-          character_id: 'character-1',
-          living_state: {
-            current_activity: 'writing notes',
-            mood: 'wrong-mood',
-            toward_user: 'warm'
+      writeActions: userTurnWriteActionRegistry(
+        livingStatePatchUserTurnAction({
+          currentStateSource: currentStateSource(),
+          store: {
+            prepareLivingStatePatchCommit: (request) => ({
+              schema_version: '0.1',
+              character_id: 'character-1',
+              living_state: {
+                current_activity: 'writing notes',
+                mood: 'wrong-mood',
+                toward_user: 'warm'
+              },
+              updated_at: request.commit_time,
+              source_event_ids: ['event-prior', request.event_id]
+            })
           },
-          updated_at: request.commit_time,
-          source_event_ids: ['event-prior', request.event_id]
+          finalizer: {
+            finalizeLivingStatePatchCommit: () => {
+              throw new Error('must not finalize rejected state patch');
+            }
+          }
         })
-      },
-      livingStatePatchFinalizer: {
-        finalizeLivingStatePatchCommit: () => {
-          throw new Error('must not finalize rejected state patch');
-        }
-      }
+      )
     });
 
     expect(result.status).toBe(USER_TURN_STOPPED_STATUS);
@@ -574,7 +613,9 @@ describe('user message turn orchestration', () => {
       visibleConversation,
       idGenerator: new SequenceIdGenerator().next,
       clock: fixedClock,
-      lifeIncidentStartFinalizer: incidentStore
+      writeActions: userTurnWriteActionRegistry(
+        incidentStartUserTurnAction({ finalizer: incidentStore })
+      )
     });
 
     expect(result.status).toBe(USER_TURN_COMMITTED_STATUS);
@@ -615,7 +656,9 @@ describe('user message turn orchestration', () => {
         visibleConversation,
         idGenerator: ids.next,
         clock: () => new Date('2026-05-30T10:02:00.000Z'),
-        lifeIncidentStartFinalizer: incidentStore
+        writeActions: userTurnWriteActionRegistry(
+          incidentStartUserTurnAction({ finalizer: incidentStore })
+        )
       }
     );
 
@@ -660,8 +703,12 @@ describe('user message turn orchestration', () => {
         visibleConversation,
         idGenerator: ids.next,
         clock: () => new Date('2026-05-30T10:02:00.000Z'),
-        activeIncidentSource: incidentStore,
-        lifeIncidentInterruptFinalizer: incidentStore
+        writeActions: userTurnWriteActionRegistry(
+          incidentInterruptUserTurnAction({
+            activeIncidentSource: incidentStore,
+            finalizer: incidentStore
+          })
+        )
       }
     );
 
@@ -703,8 +750,12 @@ describe('user message turn orchestration', () => {
         visibleConversation,
         idGenerator: ids.next,
         clock: () => new Date('2026-05-30T10:02:00.000Z'),
-        activeIncidentSource: incidentStore,
-        lifeIncidentCancelFinalizer: incidentStore
+        writeActions: userTurnWriteActionRegistry(
+          incidentCancelUserTurnAction({
+            activeIncidentSource: incidentStore,
+            finalizer: incidentStore
+          })
+        )
       }
     );
 
@@ -741,8 +792,12 @@ describe('user message turn orchestration', () => {
         visibleConversation,
         idGenerator: ids.next,
         clock: () => new Date('2026-05-30T10:02:00.000Z'),
-        activeIncidentSource: incidentStore,
-        lifeIncidentCancelFinalizer: incidentStore
+        writeActions: userTurnWriteActionRegistry(
+          incidentCancelUserTurnAction({
+            activeIncidentSource: incidentStore,
+            finalizer: incidentStore
+          })
+        )
       }
     );
 
@@ -779,8 +834,12 @@ describe('user message turn orchestration', () => {
         visibleConversation,
         idGenerator: ids.next,
         clock: () => new Date('2026-05-30T10:02:00.000Z'),
-        activeIncidentSource: incidentStore,
-        lifeIncidentCompleteFinalizer: incidentStore
+        writeActions: userTurnWriteActionRegistry(
+          incidentCompleteUserTurnAction({
+            activeIncidentSource: incidentStore,
+            finalizer: incidentStore
+          })
+        )
       }
     );
 
@@ -817,8 +876,12 @@ describe('user message turn orchestration', () => {
         visibleConversation,
         idGenerator: ids.next,
         clock: () => new Date('2026-05-30T10:02:00.000Z'),
-        activeIncidentSource: incidentStore,
-        lifeIncidentCompleteFinalizer: incidentStore
+        writeActions: userTurnWriteActionRegistry(
+          incidentCompleteUserTurnAction({
+            activeIncidentSource: incidentStore,
+            finalizer: incidentStore
+          })
+        )
       }
     );
 
@@ -847,19 +910,23 @@ describe('user message turn orchestration', () => {
       visibleConversation,
       idGenerator: new SequenceIdGenerator().next,
       clock: fixedClock,
-      activeIncidentSource: {
-        readActiveIncident: () => {
-          throw new Error('incident source unavailable');
-        }
-      },
-      lifeIncidentInterruptFinalizer: {
-        finalizeLifeIncidentInterrupt: () => {
-          throw new Error('must not finalize interrupt');
-        },
-        completeLifeIncidentInterruptAfterLogVisible: () => {
-          throw new Error('must not complete interrupt');
-        }
-      }
+      writeActions: userTurnWriteActionRegistry(
+        incidentInterruptUserTurnAction({
+          activeIncidentSource: {
+            readActiveIncident: () => {
+              throw new Error('incident source unavailable');
+            }
+          },
+          finalizer: {
+            finalizeLifeIncidentInterrupt: () => {
+              throw new Error('must not finalize interrupt');
+            },
+            completeLifeIncidentInterruptAfterLogVisible: () => {
+              throw new Error('must not complete interrupt');
+            }
+          }
+        })
+      )
     });
 
     expect(result.status).toBe(USER_TURN_STOPPED_STATUS);
@@ -911,20 +978,24 @@ describe('user message turn orchestration', () => {
         visibleConversation,
         idGenerator: new SequenceIdGenerator().next,
         clock: fixedClock,
-        activeIncidentSource: {
-          readActiveIncident: () =>
-            policy === undefined
-              ? undefined
-              : activeIncidentSnapshot({ interruptPolicy: policy })
-        },
-        lifeIncidentInterruptFinalizer: {
-          finalizeLifeIncidentInterrupt: () => {
-            throw new Error('must not finalize policy interrupt');
-          },
-          completeLifeIncidentInterruptAfterLogVisible: () => {
-            throw new Error('must not complete policy interrupt');
-          }
-        }
+        writeActions: userTurnWriteActionRegistry(
+          incidentInterruptUserTurnAction({
+            activeIncidentSource: {
+              readActiveIncident: () =>
+                policy === undefined
+                  ? undefined
+                  : activeIncidentSnapshot({ interruptPolicy: policy })
+            },
+            finalizer: {
+              finalizeLifeIncidentInterrupt: () => {
+                throw new Error('must not finalize policy interrupt');
+              },
+              completeLifeIncidentInterruptAfterLogVisible: () => {
+                throw new Error('must not complete policy interrupt');
+              }
+            }
+          })
+        )
       });
 
       expect(result.status).toBe(USER_TURN_COMMITTED_STATUS);
