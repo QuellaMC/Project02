@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-06-01 - MVP-022 runtime component registry implementation</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 900px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.2rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-06-01 - MVP-022 Runtime Component Registry Implementation</h1>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Added the static <code>RuntimeComponent</code> registry with immutable derived views for operations, user-turn actions, model action specs, and context section providers.</li>
+      <li>Added <code>RuntimeOperationRegistry</code> and internal <code>RuntimeAccess.execute</code> with caller/event policy checks, input/output validators, privacy snapshots, transaction metadata, and operation audit logs.</li>
+      <li>Added built-in operation wrappers for visible conversation commits, role-model turns, recent-message reads, context builds, existing user-turn write actions, and <code>incident.complete_from_event</code>.</li>
+      <li>Refactored <code>runUserMessageTurn</code> so the current user-turn spine executes through registry-derived operations/actions/providers while preserving committed/stopped result shapes and domain log visibility.</li>
+      <li>Added <code>runIncidentCompletionEvent</code> so the deterministic <code>INCIDENT_COMPLETION</code> route executes <code>incident.complete_from_event</code> through <code>RuntimeAccess</code> without model calls or visible output.</li>
+      <li>Updated user-turn tests to assert domain log ordering separately from the new operation audit envelopes.</li>
+      <li>Applied review fixes so operation ownership must match the registering component, user-turn action operations are registered by their real owners, built-in output validators reject malformed statuses, recent-message/context-section reads go through registry-backed operations, and operation infrastructure failures return stopped user-turn results instead of throwing.</li>
+      <li>Hardened the component-system contracts after follow-up review: registry-owned component and operation definitions are frozen copies, permission/logging/transaction policies are validated as concrete contract values, and async handler results are explicitly rejected until a future queued/background executor slice exists.</li>
+      <li>Addressed post-commit audit safety: a completed-audit append failure after validated handler output now returns <code>succeeded_with_audit_failure</code> with the operation output instead of a retry-looking rejection, and malformed operation envelopes with event identity return structured <code>request_validation</code> rejections.</li>
+    </ul>
+
+    <h2>Why</h2>
+    <p>
+      MVP-022 creates one shared built-in operation path before memory, tools,
+      scheduler, Live2D, or productivity systems are added. The runtime now has
+      a concrete place to register future internal capabilities without adding
+      more one-off branches to the user-turn orchestrator or bypassing Commit
+      &amp; Effects ownership.
+    </p>
+
+    <h2>Files Touched</h2>
+    <ul>
+      <li><code>src/runtime/components.ts</code> - static component registry and duplicate checks.</li>
+      <li><code>src/runtime/operation-registry.ts</code> - operation registry, policy validation, execution, and audit logs.</li>
+      <li><code>src/runtime/built-in-components.ts</code> - built-in operation wrappers around existing boundaries.</li>
+      <li><code>src/runtime/user-turn.ts</code> and <code>src/runtime/user-turn-actions.ts</code> - registry-backed user-turn execution and operation names for existing write actions.</li>
+      <li><code>src/runtime/incident-completion.ts</code> - deterministic incident-completion runtime entrypoint.</li>
+      <li><code>src/character/state/context.ts</code> - optional context provider IDs for registry duplicate detection.</li>
+      <li><code>tests/unit/runtime/</code> and <code>tests/integration/incident-completion-event.test.ts</code> - component, operation, runtime access, user-turn, and incident-completion coverage.</li>
+      <li><code>docs/plan/active-slice.html</code> and <code>docs/plan/index.html</code> - status updated from draft to local implementation.</li>
+    </ul>
+
+    <h2>Tests Run</h2>
+    <ul>
+      <li><code>pnpm exec vitest run tests/unit/runtime/components.test.ts tests/unit/runtime/operation-registry.test.ts tests/unit/runtime/runtime-access.test.ts tests/unit/runtime/user-turn.test.ts tests/unit/runtime/kernel.test.ts tests/unit/commit-effects/incident-complete.test.ts tests/unit/role-model/loop.test.ts tests/unit/character/state/context.test.ts tests/integration/incident-completion-event.test.ts</code> - passed, 88 tests.</li>
+      <li><code>pnpm check</code> - passed, 22 files and 201 tests.</li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code> - passed.</li>
+      <li><code>python3 -c "from html.parser import HTMLParser; import pathlib; [HTMLParser().feed(path.read_text()) for path in pathlib.Path('docs').rglob('*.html')]"</code> - passed.</li>
+      <li><code>git diff --check</code> - passed.</li>
+    </ul>
+
+    <h2>Review Notes</h2>
+    <ul>
+      <li>The implementation keeps operation routing static, synchronous, in-process, and built in.</li>
+      <li>Domain commit/reject results remain owned by existing Commit &amp; Effects functions; operation rejection is reserved for registry, policy, validation, or handler infrastructure failures.</li>
+      <li>Operation audit logs are additive. Existing domain raw logs remain query-visible and preserve the domain order used by replay/debug checks.</li>
+      <li>A completed-audit append failure can no longer make callers believe a committed visible/state/life operation failed safely before effects; the result distinguishes committed-output-with-audit-failure from ordinary rejection.</li>
+      <li>Final review targeted the main drift risks: no dual production path for registered reads/context/action specs, no component/operation ownership mismatch, no identity validator pretending to be an output contract, and no unhandled audit-log append failure.</li>
+      <li>The async/background concern is intentionally not implemented as queues in this slice. The implemented contract is explicit: all MVP-022 operations are <code>sync_in_process</code>; Promise-like handler output is rejected and queued execution is parked for a dedicated future slice.</li>
+      <li>No memory retrieval, memory writes, tools, scheduler, Live2D, dynamic plugins, storage adapter, or external side-effect policy was implemented.</li>
+    </ul>
+
+    <h2>Next Action</h2>
+    <p>
+      Prepare the branch for PR with the active spec, implementation, tests,
+      journal, and future-slice notes.
+    </p>
+  </main>
+</body>
+</html>

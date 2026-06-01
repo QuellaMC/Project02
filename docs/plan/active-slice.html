@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>User Turn Action Registry</title>
+  <title>MVP-022 Runtime Component and Operation Registry v0.1</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 960px; margin: 0 auto; padding: 44px 24px; }
@@ -12,18 +12,20 @@
     h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
     p { margin: 0 0 14px; }
     ul { padding-left: 22px; }
-    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    code, pre { background: #e9ece7; border-radius: 4px; }
+    code { padding: 1px 5px; }
+    pre { padding: 14px; overflow-x: auto; }
     a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
     .status { display: inline-block; background: #e7f1e9; border: 1px solid #b7ccb9; border-radius: 999px; padding: 2px 10px; font-size: 0.9rem; }
   </style>
 </head>
 <body>
   <main>
-    <h1>User Turn Action Registry</h1>
-    <p><span class="status">Status: active implementation slice</span></p>
+    <h1>MVP-022 Runtime Component and Operation Registry v0.1</h1>
+    <p><span class="status">Status: implemented locally and verified; pending PR</span></p>
     <p>
       Created: 2026-05-31. Active branch:
-      <code>feature/user-turn-action-registry</code>.
+      <code>feature/runtime-component-registry</code>.
     </p>
 
     <h2>Source Context</h2>
@@ -33,111 +35,216 @@
       especially
       <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
       <a href="https://www.notion.so/3608995c0c5e817f9cd4c4c6312d6db0">02A - Runtime Kernel &amp; Operation Routing</a>,
-      <a href="https://www.notion.so/3608995c0c5e816c94fbef42ea9096f7">03 - Role Model Interface &amp; Prompting</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
+      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>,
       and
       <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
-      The Notion direction says the runtime scopes allowed actions by event/call type,
-      the role model proposes structured intents, and Commit &amp; Effects remains the only durable write boundary.
+      Notion allows an internal operation registry, but the registry must carry
+      schema/contract, policy, privacy/redaction, logging, transaction, and handler
+      ownership instead of being a bare dispatch table.
     </p>
     <p>
-      Local trigger: issue 1 says <code>runUserMessageTurn</code> wires one option and
-      branch for every current write capability. Issue 4 says Role Model input uses
-      hard-coded allowed-action prompt/parse families. These issues share the same
-      write-action/action-policy registration seam.
-    </p>
-    <p>
-      Merge update: <a href="https://github.com/QuellaMC/Project02/pull/26">PR #26</a>
-      context provider sections and <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a>
-      staged commit transaction helpers are now part of <code>main</code>. This slice
-      preserves both baselines and limits its own scope to user-turn write-action
-      registration and role-model action policy registration.
+      Local baseline: <a href="https://github.com/QuellaMC/Project02/pull/26">PR #26</a>
+      added provider-owned <code>DecisionContext.context_sections</code>,
+      <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a>
+      added staged commit transaction helpers, and
+      <a href="https://github.com/QuellaMC/Project02/pull/28">PR #28</a>
+      added <code>UserTurnWriteActionModule</code> and <code>ModelActionSpec</code>.
+      This slice turns those seams into a component-owned operation foundation
+      for the current user-turn and incident-completion paths before memory,
+      tools, scheduler, Live2D, or productivity actions are added.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Introduce a small concrete registry/spec abstraction for the existing user-turn
-      write actions so user-turn orchestration consumes configured action modules
-      and the role-model loop consumes configured model action specs. Preserve
-      current behavior, ordering, statuses, raw logs, and public model input fields.
+      Add a static in-process component registry plus an executable operation
+      registry for built-in runtime components. The first concrete callers are
+      <code>runUserMessageTurn</code> for <code>USER_MESSAGE</code> turns and the
+      deterministic <code>INCIDENT_COMPLETION</code> route for incident-completion
+      event commits. Both callers should consume registry-derived operation
+      handlers while preserving current observable behavior.
+    </p>
+    <p>
+      Implementation update: the v0.1 static registry, operation registry,
+      <code>RuntimeAccess</code>, user-turn operation routing, and deterministic
+      incident-completion operation routing are implemented and locally verified on
+      <code>feature/runtime-component-registry</code>. The implementation remains
+      limited to built-in in-process components and does not add memory,
+      retrieval, tools, scheduler, Live2D, dynamic plugins, or external effects.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>Move existing user-turn write-action wiring for living-state patch, incident start, incident cancel, incident complete, and incident interruption behind registry modules.</li>
-      <li>Keep visible user-message commit, role-model call, and visible-reply commit as the fixed user-turn spine.</li>
-      <li>Replace role-model write opt-in booleans with a model action spec for the existing state-patch and incident action policies.</li>
-      <li>Keep existing <code>allowed_actions</code>, <code>allowed_life_action_type</code>, and instruction strings in the rendered role-model envelope.</li>
-      <li>Keep the one write-action opt-in rule for a <code>USER_MESSAGE</code> turn.</li>
-      <li>Add tests proving current behavior still flows through registry/spec configuration rather than core switch chains.</li>
+      <li>Define <code>RuntimeComponent</code> with <code>id</code>, <code>version</code>, <code>enabled</code>, <code>operations</code>, <code>userTurnActions</code>, <code>modelActionSpecs</code>, and <code>contextSectionProviders</code>.</li>
+      <li>Define <code>RuntimeOperationRegistry</code> and an internal <code>RuntimeAccess</code> facade for validated in-process operation execution. This is not a separate top-level architecture box.</li>
+      <li>Use <code>runUserMessageTurn</code> as the first user-turn operation caller with <code>caller.component_id = "runtime.user_turn"</code> and <code>call_type = "user_turn"</code>.</li>
+      <li>Use the existing <code>INCIDENT_COMPLETION</code> route as the deterministic event-commit caller with <code>caller.component_id = "runtime.kernel"</code>, <code>call_type = "deterministic_event_commit"</code>, <code>model_needed = false</code>, and <code>next_step = "incident_completion_commit"</code>.</li>
+      <li>Register built-in components only for existing behavior: <code>visible_conversation</code>, <code>role_model</code>, <code>context_sections</code>, <code>living_state</code> when a living-state write action is enabled, and <code>incident_lifecycle</code> when an incident action or deterministic incident-completion commit is enabled. Do not add an empty core component before it owns a concrete operation.</li>
+      <li>Register executable operations that wrap existing behavior: <code>visible_conversation.commit_user_message</code>, <code>role_model.run_turn</code>, <code>visible_conversation.commit_visible_reply</code>, <code>living_state.commit_patch</code>, <code>incident.interrupt_active</code>, <code>incident.start_from_model</code>, <code>incident.cancel_from_model</code>, <code>incident.complete_from_model</code>, <code>incident.complete_from_event</code>, <code>visible_conversation.read_recent_messages</code>, and <code>character_context.build_sections</code>.</li>
+      <li>Define operation input/output contract validators for each registered operation. Contract IDs are metadata; validators are the executable contract.</li>
+      <li>Define and enforce baseline operation policy: allowed callers, allowed call types, allowed event types, operation category, permission policy ID, privacy/redaction policy, logging policy, transaction policy, and synchronous execution policy.</li>
+      <li>Switch the full user-turn integration path to registry-derived operations/actions/specs/providers instead of keeping a parallel direct-options production path.</li>
+      <li>Preserve existing user-turn result fields, stop codes, role-model envelope fields, visible transcript ordering, commit-effect semantics, and existing commit/reject raw logs unless the active spec explicitly adds operation audit logs.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
-      <li>No memory writes, retrieval, tools, productivity actions, Live2D, assets, scheduled directives, or new commit-effect modules.</li>
-      <li>No redesign of <code>DecisionContext</code> beyond passing current context sources from action modules.</li>
-      <li>No schema version bump and no new persisted runtime record fields.</li>
-      <li>No change to raw log kind ordering or visible transcript ordering.</li>
-      <li>No broad operation registry, permission matrix, background worker, or plugin system.</li>
-      <li>No changes to PR #26 <code>context_sections</code> provider semantics.</li>
-      <li>No changes to PR #27 staged commit transaction helper semantics.</li>
+      <li>No memory retrieval component implementation yet.</li>
+      <li>No memory writes, tool requests, productivity actions, Live2D, assets, scheduled directives, dynamic imports, hot-loaded plugins, marketplace modules, sandboxing, or background workers.</li>
+      <li>No public plugin API and no external component package loading.</li>
+      <li>No operation category that can touch external systems, money, accounts, user files, calendars, messages, private documents, or network services.</li>
+      <li>No database adapter, migration, durable storage technology choice, or cross-process locking.</li>
+      <li>No broad rewrite of Runtime Kernel, Character State Engine, Role Model Loop, or Commit &amp; Effects. Operations wrap existing boundaries; they do not move ownership.</li>
     </ul>
 
-    <h2>Minimal Schema</h2>
+    <h2>Minimal Types</h2>
     <p>
       Persisted runtime records remain at <code>schema_version: "0.1"</code>.
-      This slice adds only in-process TypeScript configuration types for existing
-      write-action modules and model action specs. It must not add a new durable
-      action type or alter <code>RuntimeEvent</code>, <code>RawEventLogEntry</code>,
-      <code>CharacterDecision</code>, or user-turn result field names.
+      This slice may add new raw-log kinds for operation audit records, but it
+      must not change the meaning of existing persisted fields.
     </p>
+    <pre><code>type RuntimeComponent = {
+  id: string;
+  version: string;
+  enabled: boolean;
+  operations?: RuntimeOperationDefinition[];
+  userTurnActions?: UserTurnWriteActionModule[];
+  modelActionSpecs?: ModelActionSpec[];
+  contextSectionProviders?: DecisionContextSectionProvider[];
+};
+
+type RuntimeOperationRequest = {
+  schema_version: "0.1";
+  trace_id: string;
+  event_id: string;
+  event_type: "USER_MESSAGE" | "INCIDENT_COMPLETION";
+  caller: {
+    component_id: string;
+    call_type: "user_turn" | "deterministic_event_commit" | "test";
+  };
+  op: string;
+  input: unknown;
+};
+
+type RuntimeOperationResult = {
+  schema_version: "0.1";
+  trace_id: string;
+  event_id: string;
+  op: string;
+  owner_component_id: string;
+  status: "succeeded" | "rejected" | "succeeded_with_audit_failure";
+  output?: unknown;
+  failure?: {
+    stage: string;
+    code: string;
+    message: string;
+  };
+  committed_log_entry_ids?: string[];
+};
+
+type RuntimeOperationDefinition = {
+  op: string;
+  owner_component_id: string;
+  input_contract_id: string;
+  output_contract_id: string;
+  validate_input: (request: RuntimeOperationRequest) =&gt; unknown;
+  validate_output: (output: unknown, request: RuntimeOperationRequest) =&gt; unknown;
+  policy: RuntimeOperationPolicy;
+  privacy: RuntimeOperationPrivacyPolicy;
+  logging: RuntimeOperationLoggingPolicy;
+  transaction: RuntimeOperationTransactionPolicy;
+  execution: RuntimeOperationExecutionPolicy;
+  handler: (request: RuntimeOperationRequest, input: unknown) =&gt; unknown;
+};</code></pre>
+
+    <h2>Policy Contracts</h2>
+    <ul>
+      <li><strong>Operation category:</strong> v0.1 supports <code>read</code>, <code>context_build</code>, <code>model_call</code>, <code>visible_effect</code>, <code>state_write</code>, and <code>life_action</code>. External actions are rejected in this slice.</li>
+      <li><strong>Caller policy:</strong> each operation declares exact <code>allowed_callers</code>, <code>allowed_call_types</code>, and <code>allowed_event_types</code>. Unknown caller IDs, unsupported call types, and event-type mismatches are rejected before handlers run. User-turn operations allow <code>runtime.user_turn</code>/<code>user_turn</code>/<code>USER_MESSAGE</code>; the incident-completion event operation allows only <code>runtime.kernel</code>/<code>deterministic_event_commit</code>/<code>INCIDENT_COMPLETION</code>.</li>
+      <li><strong>Permission policy:</strong> v0.1 supports only <code>internal_runtime_only</code> and <code>test_only</code>. <code>internal_runtime_only</code> rejects non-<code>runtime.</code> callers even if they appear in <code>allowed_callers</code>; <code>test_only</code> requires <code>call_type = "test"</code>. No model output or component can bypass Commit &amp; Effects validation.</li>
+      <li><strong>Privacy and redaction policy:</strong> each operation declares whether request input and handler output are logged as <code>full</code>, <code>redacted</code>, or <code>omitted</code>. Model raw output and private internal payloads must not be duplicated into operation audit logs if an existing domain log already stores them.</li>
+      <li><strong>Logging policy:</strong> every production operation uses <code>mode = "required"</code> and appends <code>runtime_operation_started</code> before handler invocation and <code>runtime_operation_completed</code> or <code>runtime_operation_rejected</code> after validation/handler result. <code>disabled_for_tests</code> is valid only with <code>test_only</code>. The audit record includes operation name, owner component, caller, policy IDs, trace ID, event ID, and redacted snapshots according to policy. Read and context-build operations log envelope metadata with input/output snapshots <code>omitted</code>; model-call operations reference existing role-model logs without duplicating full model input/output; commit/effect operations keep their existing domain logs and add only the operation envelope.</li>
+      <li><strong>Transaction policy:</strong> <code>read</code> operations must use <code>read_only</code>; <code>context_build</code> and <code>model_call</code> operations must use <code>none</code>; <code>visible_effect</code>, <code>state_write</code>, and <code>life_action</code> operations must use <code>existing_commit_effect_atomic</code> and must delegate durable mutation to the existing Commit &amp; Effects function and staged finalizer where applicable.</li>
+      <li><strong>Execution policy:</strong> v0.1 supports only <code>sync_in_process</code>. If a handler returns a Promise-like result, <code>RuntimeAccess</code> rejects the operation with <code>async_operation_not_supported</code>. Queue, background, and external tool execution modes are future slices.</li>
+      <li><strong>Failure policy:</strong> validation, policy, handler, output-validation, and pre-handler or rejection audit failures return a structured rejected operation result and append an operation rejection log when a normalized event identity is available. If <code>runtime_operation_completed</code> append fails after a handler has returned validated output, <code>RuntimeAccess.execute</code> returns <code>succeeded_with_audit_failure</code> with the validated output and logging failure instead of <code>rejected</code>; callers must not treat that path as retry-safe because durable Commit &amp; Effects work may already have happened. Malformed operation request envelopes with schema, trace, event, event-type, and operation identity return a structured <code>request_validation</code> rejection; malformed envelopes without that identity may still throw as programmer errors.</li>
+    </ul>
+
+    <h2>Functional Requirements</h2>
+    <ul>
+      <li>FR-1: Registry construction accepts readonly built-in component definitions and returns immutable derived views.</li>
+      <li>FR-2: Duplicate enabled component IDs, duplicate enabled operation names, duplicate user-turn action IDs, duplicate model action spec IDs, and duplicate context section provider IDs are rejected.</li>
+      <li>FR-3: Disabled components are omitted from all derived views and their operations cannot execute.</li>
+      <li>FR-4: <code>RuntimeAccess.execute</code> validates operation request envelope fields before lookup, and returns structured <code>request_validation</code> rejections for malformed envelopes that still carry normalized event identity.</li>
+      <li>FR-5: Operation execution validates caller, call type, event type, permission policy, input contract, output contract, logging policy, privacy policy, transaction policy, and execution policy.</li>
+      <li>FR-6: Operation execution appends operation audit logs using the active raw event log without replacing existing domain-specific raw logs. A failed completed-audit append after handler success reports <code>succeeded_with_audit_failure</code>, not operation rejection.</li>
+      <li>FR-7: Operation handlers for commit/effect behavior call existing Commit &amp; Effects functions and must not write stores or visible output directly.</li>
+      <li>FR-8: <code>runUserMessageTurn</code> uses registry-derived operations for its current spine and write-action integrations without changing committed/stopped result shape.</li>
+      <li>FR-9: Role-model action specs still render and parse the same <code>allowed_actions</code>, <code>allowed_life_action_type</code>, and instructions as PR #28.</li>
+      <li>FR-10: Context section providers still use the PR #26 request, validation, duplicate-section, and clone-safety semantics.</li>
+      <li>FR-11: Operation audit logs do not duplicate full model input/output snapshots; they reference the existing role-model log through trace/event/operation identity.</li>
+      <li>FR-12: Direct dependency injection may remain inside component factory functions and low-level tests, but production user-turn integration must not keep a second direct-options bypass for registered actions/specs/providers/operations.</li>
+      <li>FR-13: The deterministic <code>INCIDENT_COMPLETION</code> path executes <code>incident.complete_from_event</code> through the operation registry, preserves the existing <code>life_incident_completed</code>/<code>life_incident_complete_rejected</code> domain logs, and never calls the model or emits visible conversation output.</li>
+    </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
-      <li><code>runUserMessageTurn</code> no longer imports each write-action commit implementation directly.</li>
-      <li><code>RunUserMessageTurnOptions</code> exposes one write-action registry input instead of one option per write capability.</li>
-      <li>Existing state patch, incident start, incident cancel, incident complete, and incident interrupt behavior, stop codes, result fields, and log ordering are preserved.</li>
-      <li>Role-model rendering and parsing are driven by configured model action specs for existing write policies.</li>
-      <li>The rendered role-model envelope still uses the same <code>allowed_actions</code>, <code>allowed_life_action_type</code>, and instruction values as before.</li>
-      <li>The one write-action opt-in rule is enforced from registry/spec count rather than hard-coded booleans.</li>
-      <li>Future memory/tool/productivity write ideas are parked, not implemented.</li>
-      <li>Focused unit and integration tests pass, then full repo checks pass.</li>
+      <li>New runtime component and operation registry modules exist under <code>src/runtime/</code> with focused tests.</li>
+      <li>Built-in component modules exist only where current behavior justifies them; no empty component folders are added.</li>
+      <li>At least one complete user-turn success path runs through registry-derived visible conversation, role-model, and visible reply operations.</li>
+      <li>At least one existing write-action path, such as living-state patch or incident interruption, runs through registry-derived operation execution with preserved result shape.</li>
+      <li>At least one <code>INCIDENT_COMPLETION</code> success path runs through registry-derived <code>incident.complete_from_event</code> execution after Runtime Kernel routing and preserves the existing deterministic non-model result/log shape.</li>
+      <li>Policy tests cover unknown operation, disabled owner component, unsupported caller, unsupported call type, unsupported event type, permission denial, malformed policy combinations, malformed input, malformed output, handler rejection, async handler rejection, and cross-calling <code>USER_MESSAGE</code> operations from the incident-completion caller or the reverse.</li>
+      <li>Logging tests prove operation started/completed/rejected records are appended with redaction behavior, read/context snapshots are omitted, model input/output is not duplicated, and existing domain raw logs remain query-visible.</li>
+      <li>Transaction tests prove commit/effect operations still delegate to existing staged finalizer behavior instead of writing stores directly.</li>
+      <li>Future memory retrieval and memory write ideas are parked in <code>docs/plan/future-slices.html</code>, not implemented.</li>
+      <li>Focused tests pass, then full repo checks pass.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <ul>
-      <li><code>pnpm exec vitest run tests/unit/runtime/user-turn.test.ts tests/unit/role-model/loop.test.ts tests/integration/role-model-loop.test.ts</code></li>
+      <li><code>pnpm exec vitest run tests/unit/runtime/components.test.ts tests/unit/runtime/operation-registry.test.ts tests/unit/runtime/runtime-access.test.ts tests/unit/runtime/user-turn.test.ts tests/unit/runtime/kernel.test.ts tests/unit/commit-effects/incident-complete.test.ts tests/unit/role-model/loop.test.ts tests/unit/character/state/context.test.ts tests/integration/incident-completion-event.test.ts</code></li>
       <li><code>pnpm check</code></li>
-      <li><code>pnpm tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
       <li><code>python3 -c "from html.parser import HTMLParser; import pathlib; [HTMLParser().feed(path.read_text()) for path in pathlib.Path('docs').rglob('*.html')]"</code></li>
       <li><code>git diff --check</code></li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li><strong>Runtime user-turn orchestration:</strong> keeps the fixed turn spine and delegates optional write commits to registered modules.</li>
-      <li><strong>Runtime action modules:</strong> adapt existing Commit &amp; Effects implementations into user-turn write-action modules with stop code, result field, preflight, context, and rejection behavior.</li>
-      <li><strong>Role Model Loop:</strong> consumes a model action spec to render instructions, allowed actions, and parse policy without one boolean per write family, while preserving PR #26 context-provider forwarding.</li>
-      <li><strong>Commit and Effects:</strong> existing commit implementations remain the only durable write/effect boundary, now including PR #27 staged transaction helper internals.</li>
+      <li><strong>Runtime registry:</strong> owns static component validation, derived views, operation lookup, policy validation, privacy/logging enforcement, and operation execution envelopes.</li>
+      <li><strong>Runtime Kernel:</strong> remains owner of event intake, normalization, priority, route policy, and deciding user-turn route. It may call the registry but does not become a generic component host.</li>
+      <li><strong>Character State Engine:</strong> remains owner of compact context building and provider section validation.</li>
+      <li><strong>Role Model Loop:</strong> remains owner of model input rendering, adapter invocation, output parsing, and model action spec contract validation.</li>
+      <li><strong>Commit and Effects:</strong> remains the only durable commit/effect boundary. Operation handlers for writes call existing commit-effect functions.</li>
     </ul>
 
     <h2>Review Notes</h2>
     <ul>
-      <li>This is a refactor slice with behavior preservation tests; any behavior change must be explicitly called out and justified.</li>
-      <li>Keep registry modules concrete and boring. They should be configured from existing implementations rather than inventing generalized future operations.</li>
-      <li>Do not solve the broader DecisionContext envelope split or memory/tool policy shape in this slice.</li>
+      <li>This slice intentionally lays the foundation before memory/tools/scheduler/Live2D so those features register operations instead of becoming hardcoded branches.</li>
+      <li>Queued memory extraction jobs, background execution, and external tool flows are not implemented; MVP-022 marks them unsupported through the <code>sync_in_process</code> execution policy instead of silently accepting async handlers.</li>
+      <li>Keep the first callers concrete: <code>runUserMessageTurn</code> and the existing <code>INCIDENT_COMPLETION</code> deterministic route. Do not design for external plugins while implementing v0.1.</li>
+      <li>Runtime Access is an internal execute facade over the registry, not a revived top-level Runtime Access Kernel.</li>
+      <li>If a registered operation needs a policy not listed here, the behavior is outside this slice unless the active spec is reviewed again.</li>
+      <li>Memory retrieval should be the first future component after this registry, but only as compact selected context. Memory write should wait for a commit/effect boundary.</li>
     </ul>
 
     <h2>Open Questions</h2>
-    <ul>
-      <li>Whether a later memory-write slice should add a new <code>CharacterDecision</code> field or a separate action envelope remains out of scope.</li>
-      <li>Whether action specs should eventually live in a shared runtime contract package should wait for a second event/call type.</li>
-    </ul>
+    <p>
+      No scope-blocking questions remain for v0.1. The widened scope intentionally
+      includes the existing <code>INCIDENT_COMPLETION</code> deterministic commit
+      path, component-prefixed operation names, and operation envelope audit logs
+      for every registered operation with snapshots omitted or redacted according
+      to policy.
+    </p>
 
     <h2>Future Ideas</h2>
     <ul>
-      <li>Add a memory-write action spec only when a memory commit-effect slice exists.</li>
-      <li>Add tool/productivity action specs only after a safe tool request/result slice defines permission and logging policy.</li>
-      <li>Promote the registry into a broader operation registry only after at least two event families need it.</li>
+      <li>Add <code>memoryRetrievalComponent</code> after this registry, using <code>DecisionContext.context_sections</code> to pass compact retrieved context.</li>
+      <li>Add memory write specs only after a memory commit/effect slice defines validation, logging, permissions, and durable records.</li>
+      <li>Add queued/background operation execution after a concrete memory extraction or external tool slice defines scheduler ownership, durable queue records, retry policy, and result events.</li>
+      <li>Add safe tool/productivity components only after a tool request/result event flow exists.</li>
+      <li>Add external-action permission policy, user confirmation rules, and redaction adapters when the first safe external tool is implemented.</li>
+      <li>Add dynamic plugin loading, sandboxing, marketplace modules, and external component packages only after multiple built-in components prove the static contract.</li>
     </ul>
   </main>
 </body>

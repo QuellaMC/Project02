@@ -4,6 +4,10 @@ import { InMemoryLifeIncidentStore } from '../../src/character/state/incidents.t
 import { commitLifeIncidentStart } from '../../src/commit-effects/incident-start.ts';
 import { commitLifeIncidentCompletionEvent } from '../../src/commit-effects/incident-complete.ts';
 import { InMemoryRawEventLog } from '../../src/runtime/logging.ts';
+import {
+  INCIDENT_COMPLETION_COMMITTED_STATUS,
+  runIncidentCompletionEvent
+} from '../../src/runtime/incident-completion.ts';
 
 function sequenceIdGenerator(): (kind: string) => string {
   const calls: string[] = [];
@@ -114,5 +118,53 @@ describe('incident completion event integration', () => {
     expect(entries[0]?.data).not.toHaveProperty('role_model_result');
     expect(entries[0]?.data).not.toHaveProperty('life_action');
     expect(entries[0]?.data['completion_source']).toBe('incident_completion_event');
+  });
+
+  it('routes the completion event through RuntimeAccess without model or visible output', () => {
+    const rawLog = new InMemoryRawEventLog();
+    const store = new InMemoryLifeIncidentStore({ rawEventLog: rawLog });
+    const ids = sequenceIdGenerator();
+    const startResult = commitLifeIncidentStart(userMessage(), roleModelStartResult(), {
+      lifeIncidentStartFinalizer: store,
+      rawEventLog: rawLog,
+      idGenerator: ids,
+      clock: fixedClock
+    });
+    if (startResult.status !== 'life_incident_started') {
+      throw new Error('expected start to commit');
+    }
+
+    const result = runIncidentCompletionEvent(
+      incidentCompletionEvent(startResult.started_incident.incident_id),
+      {
+        activeIncidentSource: store,
+        lifeIncidentCompleteFinalizer: store,
+        rawEventLog: rawLog,
+        idGenerator: ids,
+        clock: fixedClock
+      }
+    );
+
+    expect(result.status).toBe(INCIDENT_COMPLETION_COMMITTED_STATUS);
+    if (result.status !== INCIDENT_COMPLETION_COMMITTED_STATUS) {
+      throw new Error('expected completion route to commit');
+    }
+    expect(result.kernel_route).toMatchObject({
+      event_type: 'INCIDENT_COMPLETION',
+      model_needed: false,
+      next_step: 'incident_completion_commit'
+    });
+    expect(result.incident_complete_result.status).toBe('life_incident_completed');
+
+    const entries = rawLog.query({ trace_id: 'trace-completion-due' }).entries;
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'runtime_event_received',
+      'runtime_operation_started',
+      'life_incident_completed',
+      'runtime_operation_completed'
+    ]);
+    expect(entries[2]?.data).not.toHaveProperty('role_model_result');
+    expect(entries[2]?.data).not.toHaveProperty('life_action');
+    expect(entries[2]?.data['completion_source']).toBe('incident_completion_event');
   });
 });

@@ -119,6 +119,7 @@ type UserTurnWriteActionCommitContext = {
 
 export type UserTurnWriteActionModule = {
   id: string;
+  operation?: string;
   phase: 'before_role_model' | 'after_role_model';
   stop: string;
   modelActionSpec?: ModelActionSpec;
@@ -153,6 +154,7 @@ export function livingStatePatchUserTurnAction({
 }): UserTurnWriteActionModule {
   return {
     id: 'state_patch',
+    operation: 'living_state.commit_patch',
     phase: 'after_role_model',
     stop: LIVING_STATE_PATCH_COMMIT_STOP,
     modelActionSpec: STATE_PATCH_MODEL_ACTION_SPEC,
@@ -180,6 +182,7 @@ export function incidentStartUserTurnAction({
 }): UserTurnWriteActionModule {
   return {
     id: 'start_incident',
+    operation: 'incident.start_from_model',
     phase: 'after_role_model',
     stop: LIFE_INCIDENT_START_COMMIT_STOP,
     modelActionSpec: INCIDENT_START_MODEL_ACTION_SPEC,
@@ -207,6 +210,7 @@ export function incidentCancelUserTurnAction({
 }): UserTurnWriteActionModule {
   return {
     id: 'cancel_incident',
+    operation: 'incident.cancel_from_model',
     phase: 'after_role_model',
     stop: LIFE_INCIDENT_CANCEL_COMMIT_STOP,
     modelActionSpec: INCIDENT_CANCEL_MODEL_ACTION_SPEC,
@@ -243,6 +247,7 @@ export function incidentCompleteUserTurnAction({
 }): UserTurnWriteActionModule {
   return {
     id: 'complete_incident',
+    operation: 'incident.complete_from_model',
     phase: 'after_role_model',
     stop: LIFE_INCIDENT_COMPLETE_COMMIT_STOP,
     modelActionSpec: INCIDENT_COMPLETE_MODEL_ACTION_SPEC,
@@ -279,6 +284,7 @@ export function incidentInterruptUserTurnAction({
 }): UserTurnWriteActionModule {
   return {
     id: 'interrupt_incident',
+    operation: 'incident.interrupt_active',
     phase: 'before_role_model',
     stop: LIFE_INCIDENT_INTERRUPT_COMMIT_STOP,
     preflightFailure: () =>

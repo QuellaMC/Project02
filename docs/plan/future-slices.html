@@ -24,8 +24,143 @@
     <h1>Future Slices</h1>
     <p>
       This parking lot preserves useful ideas without expanding the active implementation slice.
-      Do not implement these while the <a href="active-slice.html">active staged commit transaction helper</a> slice is in progress.
+      Do not implement these while the <a href="active-slice.html">active MVP-022 Runtime Component and Operation Registry</a> slice is in progress.
     </p>
+
+    <h2>Memory Retrieval Component</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a built-in <code>memoryRetrievalComponent</code> that contributes compact retrieved-context provider sections after the static component registry lands.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Memory, tools, scheduler, Live2D, and productivity actions need a shared registration pattern. Retrieval is the safest first memory-facing component because it can pass selected context to the model without allowing direct memory writes.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while drafting MVP-022 Runtime Component and Operation Registry v0.1 on 2026-05-31 and cross-checking Notion retrieval guidance.</dd>
+
+      <dt>Dependency</dt>
+      <dd>The static runtime component registry and the existing <code>DecisionContext.context_sections</code> provider boundary should land first.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Memory Retrieval Component v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Retrieval can become too broad if it adds vector search, ranking, exact-source expansion, permissions, storage adapters, and context budgeting in one slice.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds retrieved-context section payload fields under <code>context_sections[].content</code>; raw truth stores remain unchanged unless a later reviewed storage/indexing slice requires fields.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active slice only creates the built-in component and operation foundation and must not implement memory, retrieval, indexing, or ranking.</dd>
+    </dl>
+
+    <h2>Queued Runtime Operation Execution</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a non-<code>sync_in_process</code> execution mode for queued memory extraction, background indexing, scheduler jobs, and external tool result flows.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Memory and tool systems often cannot finish safely inside the current user turn. They need durable queue records, retry policy, result events, and replayable audit logs.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Identified during MVP-022 follow-up hardening after confirming the active registry should reject Promise-like handler outputs instead of silently accepting async work.</dd>
+
+      <dt>Dependency</dt>
+      <dd>The static operation registry should land first, then a concrete memory extraction or safe tool slice should define the first queued use case.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Queued runtime operation execution v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Adding queues without a concrete event/result contract could create speculative workers, unclear ownership, and untestable retry behavior.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds durable queue records, operation attempt logs, source event IDs, result event IDs, retry counters, and failure classifications.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-022 intentionally supports only synchronous in-process built-in operations. It now rejects async handler results so a later queued executor cannot be added accidentally.</dd>
+    </dl>
+
+    <h2>Dynamic Runtime Components</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Allow runtime components to be loaded dynamically from external packages, app configuration, or plugin bundles.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>A mature framework may eventually need third-party or separately shipped components for tools, Live2D integrations, scheduler features, or productivity actions.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Explicitly excluded from MVP-022 Runtime Component and Operation Registry v0.1.</dd>
+
+      <dt>Dependency</dt>
+      <dd>Several built-in static components should prove the component contract first. Security, sandboxing, version compatibility, and permission policy must be designed before external loading.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Dynamic runtime component loading v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Dynamic loading can bypass runtime policy, introduce unsafe side effects, complicate deterministic tests, and make replay/debug behavior unstable.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>No runtime record schema is known yet; likely operational metadata and compatibility policy would be needed before durable runtime schema changes.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active slice intentionally keeps components static, in-process, and built in.</dd>
+    </dl>
+
+    <h2>External Operation Permission Policy</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Extend the operation policy model for external tools, user data, files, calendars, accounts, messages, purchases, and network services.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>The active operation registry covers internal built-in operations. External effects need stricter permission scopes, confirmation rules, privacy review, and failure behavior before they can safely affect user data.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Explicitly excluded from MVP-022 because there is no safe tool request/result event flow yet.</dd>
+
+      <dt>Dependency</dt>
+      <dd>A safe internal or read-only tool slice should define the first concrete external-action-like behavior, including user confirmation and raw-log expectations.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>External operation permission policy v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>Adding external permissions before a concrete tool could either under-protect real user data or overfit a matrix that no operation uses.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>Likely adds permission decision records, confirmation records, or operation audit fields for external effects.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>MVP-022 is limited to built-in in-process operations and must not add tools or external side effects.</dd>
+    </dl>
+
+    <h2>Operation Replay Inspector</h2>
+    <dl>
+      <dt>Idea</dt>
+      <dd>Add a debug/replay view that reconstructs each operation request, policy decision, redacted audit payload, handler result, and downstream domain log for a trace.</dd>
+
+      <dt>Why It May Matter</dt>
+      <dd>Once operations execute through a registry, debugging needs to explain why an operation was allowed, rejected, redacted, committed, or skipped.</dd>
+
+      <dt>Source Or Trigger</dt>
+      <dd>Discovered while expanding MVP-022 to include operation policy, logging, transaction, and handler contracts.</dd>
+
+      <dt>Dependency</dt>
+      <dd>MVP-022 operation audit logs should land first so there is a stable record shape to inspect.</dd>
+
+      <dt>Possible Future Slice</dt>
+      <dd><code>Operation replay inspector v0.1</code>.</dd>
+
+      <dt>Risk Or Unknown</dt>
+      <dd>A replay UI before stable operation logs could hard-code transient shapes and make later operation policy evolution harder.</dd>
+
+      <dt>Schema Evolution Impact</dt>
+      <dd>No new source-of-truth schema is expected if it reads operation audit logs and existing domain logs.</dd>
+
+      <dt>Do Not Implement Now Because</dt>
+      <dd>The active slice should first produce the operation audit records and preserve behavior; replay UI can follow.</dd>
+    </dl>
 
     <h2>Shared Finalize Result Envelope Validator</h2>
     <dl>
@@ -1078,7 +1213,7 @@
       <dd>Likely introduces new <code>CharacterDecision</code> fields and raw-log commit/reject records, but no schema is defined by the current registry refactor.</dd>
 
       <dt>Do Not Implement Now Because</dt>
-      <dd>The active slice only moves existing state-patch and incident actions behind concrete registry/spec wiring.</dd>
+      <dd>MVP-022 only wraps existing user-turn operations and excludes new memory/tool write families until their commit/effect boundaries, policies, logging, and tests are specified.</dd>
     </dl>
   </main>
 </body>

@@ -6,13 +6,13 @@ import {
   type LivingStatePatchCommitResult,
   CONFLICTING_WRITE_ACTION_OPT_IN_CODE,
   WRITE_ACTION_OPT_IN_CONFLICT_MESSAGE,
+  type UserTurnActionResult,
   type UserTurnActionResultFields,
   type UserTurnFailure,
+  type UserTurnWriteActionModule,
   type UserTurnWriteActionRegistry
 } from './user-turn-actions.ts';
 import {
-  commitUserVisibleMessage,
-  commitVisibleReply,
   USER_VISIBLE_MESSAGE_COMMITTED_STATUS,
   VISIBLE_REPLY_COMMITTED_STATUS,
   type UserVisibleMessageCommitResult,
@@ -21,9 +21,11 @@ import {
   type VisibleReplyCommitResult,
   type VisibleReplyRejectResult
 } from '../commit-effects/visible-reply.ts';
-import {
-  VisibleConversationRecentMessagesSource,
-  type VisibleConversationRecordSource
+import type {
+  DecisionContextSectionProvider,
+  RecentVisibleMessagesRequest,
+  RecentVisibleMessagesSource,
+  VisibleConversationRecordSource
 } from '../character/state/context.ts';
 import {
   type ActiveIncidentSource,
@@ -31,12 +33,15 @@ import {
   type InterruptedIncidentSource
 } from '../character/state/current.ts';
 import {
-  runRoleModelTurn,
   type RoleModelAdapter,
   type RoleModelOptions,
   type RoleModelTurnResult
 } from '../role-model/loop.ts';
-import { USER_MESSAGE, validateNormalizedUserMessageEvent } from './contracts.ts';
+import {
+  USER_MESSAGE,
+  validateNormalizedUserMessageEvent,
+  type UserMessageRuntimeEvent
+} from './contracts.ts';
 import {
   RuntimeValidationError,
   intakeRuntimeEvent,
@@ -44,6 +49,12 @@ import {
 } from './kernel.ts';
 import { SCHEMA_VERSION, type SchemaVersion } from './schema.ts';
 import type { Clock, IdGenerator, RawEventLogEntry } from './logging.ts';
+import {
+  RuntimeAccess,
+  type RuntimeOperationResult
+} from './operation-registry.ts';
+import { createRuntimeComponentRegistry, type RuntimeComponent } from './components.ts';
+import { userTurnRuntimeComponents } from './built-in-components.ts';
 
 export {
   CONFLICTING_WRITE_ACTION_OPT_IN_CODE,
@@ -123,7 +134,9 @@ export type RunUserMessageTurnOptions = {
   currentStateSource?: CurrentCharacterStateSource;
   activeIncidentSource?: ActiveIncidentSource;
   interruptedIncidentSource?: InterruptedIncidentSource;
+  contextSectionProviders?: readonly DecisionContextSectionProvider[];
   writeActions?: UserTurnWriteActionRegistry;
+  runtimeComponents?: readonly RuntimeComponent[];
 };
 
 export function runUserMessageTurn(
@@ -137,7 +150,9 @@ export function runUserMessageTurn(
     currentStateSource,
     activeIncidentSource,
     interruptedIncidentSource,
-    writeActions = []
+    contextSectionProviders = [],
+    writeActions = [],
+    runtimeComponents = []
   }: RunUserMessageTurnOptions
 ): UserMessageTurnResult {
   const intakeResult = intakeRuntimeEvent(eventInput, {
@@ -149,8 +164,37 @@ export function runUserMessageTurn(
   const route = intakeResult.route;
   requireUserTurnRoute(route);
   const userMessageEvent = validateNormalizedUserMessageEvent(event);
+  const registryContextSectionProviders: {
+    current: readonly DecisionContextSectionProvider[];
+  } = { current: contextSectionProviders };
+  const componentRegistry = createRuntimeComponentRegistry([
+    ...userTurnRuntimeComponents({
+      adapter,
+      rawEventLog,
+      visibleConversation,
+      idGenerator,
+      clock,
+      currentStateSource,
+      activeIncidentSource,
+      interruptedIncidentSource,
+      writeActions,
+      contextSectionProviders,
+      contextSectionProviderSource: () => registryContextSectionProviders.current
+    }),
+    ...runtimeComponents
+  ]);
+  registryContextSectionProviders.current = componentRegistry.contextSectionProviders;
+  const runtimeAccess = new RuntimeAccess(componentRegistry.operationRegistry, {
+    rawEventLog,
+    idGenerator,
+    clock
+  });
+  const registryWriteActions = componentRegistry.userTurnActions;
+  const modelActionSpecsById = new Map(
+    componentRegistry.modelActionSpecs.map((spec) => [spec.id, spec])
+  );
 
-  if (writeActions.length > 1) {
+  if (registryWriteActions.length > 1) {
     return buildStoppedResult(userMessageEvent, route, {
       stoppedAt: USER_TURN_PREFLIGHT_STOP,
       failure: {
@@ -160,7 +204,7 @@ export function runUserMessageTurn(
       }
     });
   }
-  for (const action of writeActions) {
+  for (const action of registryWriteActions) {
     const failure = action.preflightFailure?.();
     if (failure !== undefined) {
       return buildStoppedResult(userMessageEvent, route, {
@@ -170,12 +214,23 @@ export function runUserMessageTurn(
     }
   }
 
-  const userVisibleMessageResult = commitUserVisibleMessage(userMessageEvent, {
-    visibleConversationLog: visibleConversation,
-    rawEventLog,
-    idGenerator,
-    clock
-  });
+  const userVisibleMessageOperationResult = runtimeAccess.execute(
+    userTurnOperationRequest(
+      userMessageEvent,
+      'visible_conversation.commit_user_message',
+      userMessageEvent
+    )
+  );
+  if (userVisibleMessageOperationResult.status === 'rejected') {
+    return buildStoppedResult(userMessageEvent, route, {
+      stoppedAt: USER_VISIBLE_MESSAGE_COMMIT_STOP,
+      failure: operationResultFailure(userVisibleMessageOperationResult)
+    });
+  }
+  const userVisibleMessageResult =
+    userVisibleMessageOperationResult.output as
+      | UserVisibleMessageCommitResult
+      | UserVisibleMessageRejectResult;
   if (userVisibleMessageResult.status !== USER_VISIBLE_MESSAGE_COMMITTED_STATUS) {
     return buildStoppedResult(userMessageEvent, route, {
       stoppedAt: USER_VISIBLE_MESSAGE_COMMIT_STOP,
@@ -189,19 +244,23 @@ export function runUserMessageTurn(
     activeIncidentSource,
     interruptedIncidentSource
   );
-  const beforeRoleModelActions = writeActions.filter(
+  const beforeRoleModelActions = registryWriteActions.filter(
     (action) => action.phase === 'before_role_model'
   );
-  const afterRoleModelActions = writeActions.filter(
+  const afterRoleModelActions = registryWriteActions.filter(
     (action) => action.phase === 'after_role_model'
   );
   for (const action of beforeRoleModelActions) {
-    const actionResult = action.commit({
-      event: userMessageEvent,
-      rawEventLog,
-      idGenerator,
-      clock
-    });
+    const actionExecution = executeUserTurnAction(runtimeAccess, userMessageEvent, action);
+    if (actionExecution.status === 'rejected') {
+      return buildStoppedResult(userMessageEvent, route, {
+        stoppedAt: action.stop,
+        failure: actionExecution.failure,
+        userVisibleMessageResult,
+        actionResultFields
+      });
+    }
+    const actionResult = actionExecution.actionResult;
     actionResultFields = mergeActionResultFields(
       actionResultFields,
       action.resultFields(actionResult)
@@ -222,20 +281,20 @@ export function runUserMessageTurn(
     }
   }
 
-  const roleModelOptions: RoleModelOptions & {
-    adapter: RoleModelAdapter;
-    rawEventLog: RawEventLog;
-    idGenerator: IdGenerator;
-    clock: Clock;
-  } = {
-    adapter,
-    rawEventLog,
-    idGenerator,
-    clock,
-    recentVisibleMessagesSource: new VisibleConversationRecentMessagesSource(
-      visibleConversation
+  const roleModelOptions: RoleModelOptions = {
+    recentVisibleMessagesSource: operationBackedRecentVisibleMessagesSource(
+      runtimeAccess,
+      userMessageEvent
     )
   };
+  const contextSectionProvider = operationBackedContextSectionProvider(
+    runtimeAccess,
+    userMessageEvent,
+    componentRegistry.contextSectionProviders
+  );
+  if (contextSectionProvider !== undefined) {
+    roleModelOptions.contextSectionProviders = [contextSectionProvider];
+  }
   if (currentStateSource !== undefined) {
     roleModelOptions.currentStateSource = currentStateSource;
   }
@@ -248,7 +307,8 @@ export function runUserMessageTurn(
   }
   for (const action of afterRoleModelActions) {
     if (action.modelActionSpec !== undefined) {
-      roleModelOptions.modelActionSpec = action.modelActionSpec;
+      roleModelOptions.modelActionSpec =
+        modelActionSpecsById.get(action.modelActionSpec.id) ?? action.modelActionSpec;
     }
     const contextOptions = action.roleModelContextOptions?.();
     if (contextOptions?.currentStateSource !== undefined) {
@@ -261,16 +321,39 @@ export function runUserMessageTurn(
       roleModelOptions.interruptedIncidentSource = contextOptions.interruptedIncidentSource;
     }
   }
-  const roleModelResult = runRoleModelTurn(userMessageEvent, roleModelOptions);
+  const roleModelOperationResult = runtimeAccess.execute(
+    userTurnOperationRequest(userMessageEvent, 'role_model.run_turn', {
+      event: userMessageEvent,
+      options: roleModelOptions
+    })
+  );
+  if (roleModelOperationResult.status === 'rejected') {
+    return buildStoppedResult(userMessageEvent, route, {
+      stoppedAt: 'role_model_run_turn',
+      failure: operationResultFailure(roleModelOperationResult),
+      userVisibleMessageResult,
+      actionResultFields
+    });
+  }
+  const roleModelResult = roleModelOperationResult.output as RoleModelTurnResult;
 
   for (const action of afterRoleModelActions) {
-    const actionResult = action.commit({
-      event: userMessageEvent,
-      roleModelResult,
-      rawEventLog,
-      idGenerator,
-      clock
-    });
+    const actionExecution = executeUserTurnAction(
+      runtimeAccess,
+      userMessageEvent,
+      action,
+      roleModelResult
+    );
+    if (actionExecution.status === 'rejected') {
+      return buildStoppedResult(userMessageEvent, route, {
+        stoppedAt: action.stop,
+        failure: actionExecution.failure,
+        userVisibleMessageResult,
+        roleModelResult,
+        actionResultFields
+      });
+    }
+    const actionResult = actionExecution.actionResult;
     actionResultFields = mergeActionResultFields(
       actionResultFields,
       action.resultFields(actionResult)
@@ -286,16 +369,23 @@ export function runUserMessageTurn(
     }
   }
 
-  const visibleReplyResult = commitVisibleReply(
-    userMessageEvent,
-    projectVisibleReplyRoleModelResult(roleModelResult),
-    {
-      visibleConversationLog: visibleConversation,
-      rawEventLog,
-      idGenerator,
-      clock
-    }
+  const visibleReplyOperationResult = runtimeAccess.execute(
+    userTurnOperationRequest(userMessageEvent, 'visible_conversation.commit_visible_reply', {
+      event: userMessageEvent,
+      roleModelResult: projectVisibleReplyRoleModelResult(roleModelResult)
+    })
   );
+  if (visibleReplyOperationResult.status === 'rejected') {
+    return buildStoppedResult(userMessageEvent, route, {
+      stoppedAt: VISIBLE_REPLY_COMMIT_STOP,
+      failure: operationResultFailure(visibleReplyOperationResult),
+      userVisibleMessageResult,
+      roleModelResult,
+      actionResultFields
+    });
+  }
+  const visibleReplyResult =
+    visibleReplyOperationResult.output as VisibleReplyCommitResult | VisibleReplyRejectResult;
   if (visibleReplyResult.status !== VISIBLE_REPLY_COMMITTED_STATUS) {
     return buildStoppedResult(userMessageEvent, route, {
       stoppedAt: VISIBLE_REPLY_COMMIT_STOP,
@@ -324,6 +414,135 @@ export function runUserMessageTurn(
     ...cloneActionResultFields(actionResultFields)
   };
   return result;
+}
+
+function userTurnOperationRequest(
+  event: UserMessageRuntimeEvent,
+  op: string,
+  input: unknown
+) {
+  return {
+    schema_version: SCHEMA_VERSION,
+    trace_id: event.trace_id,
+    event_id: event.event_id,
+    event_type: USER_MESSAGE,
+    caller: {
+      component_id: 'runtime.user_turn',
+      call_type: 'user_turn'
+    },
+    op,
+    input
+  } as const;
+}
+
+type ExecutedUserTurnAction =
+  | {
+      status: 'succeeded';
+      actionResult: UserTurnActionResult;
+    }
+  | {
+      status: 'rejected';
+      failure: UserTurnFailure;
+    };
+
+function executeUserTurnAction(
+  runtimeAccess: RuntimeAccess,
+  event: UserMessageRuntimeEvent,
+  action: UserTurnWriteActionModule,
+  roleModelResult?: RoleModelTurnResult
+): ExecutedUserTurnAction {
+  if (action.operation === undefined) {
+    return {
+      status: 'rejected',
+      failure: {
+        stage: action.stop,
+        code: 'missing_action_operation',
+        message: `User-turn action ${action.id} has no operation.`
+      }
+    };
+  }
+  const input: {
+    event: UserMessageRuntimeEvent;
+    roleModelResult?: RoleModelTurnResult;
+  } = { event };
+  if (roleModelResult !== undefined) {
+    input.roleModelResult = roleModelResult;
+  }
+  const operationResult = runtimeAccess.execute(
+    userTurnOperationRequest(event, action.operation, input)
+  );
+  if (operationResult.status === 'rejected') {
+    return {
+      status: 'rejected',
+      failure: operationResultFailure(operationResult)
+    };
+  }
+  return {
+    status: 'succeeded',
+    actionResult: operationResult.output as UserTurnActionResult
+  };
+}
+
+function operationBackedRecentVisibleMessagesSource(
+  runtimeAccess: RuntimeAccess,
+  event: UserMessageRuntimeEvent
+): RecentVisibleMessagesSource {
+  return {
+    readRecentVisibleMessages: (request: RecentVisibleMessagesRequest): unknown => {
+      const operationResult = runtimeAccess.execute(
+        userTurnOperationRequest(
+          event,
+          'visible_conversation.read_recent_messages',
+          structuredClone(request)
+        )
+      );
+      if (operationResult.status === 'rejected') {
+        throw new RuntimeValidationError(operationResultFailure(operationResult).message);
+      }
+      return operationResult.output;
+    }
+  };
+}
+
+function operationBackedContextSectionProvider(
+  runtimeAccess: RuntimeAccess,
+  event: UserMessageRuntimeEvent,
+  contextSectionProviders: readonly DecisionContextSectionProvider[]
+): DecisionContextSectionProvider | undefined {
+  if (contextSectionProviders.length === 0) {
+    return undefined;
+  }
+  return {
+    id: 'runtime.operation_backed_context_sections',
+    buildDecisionContextSections: (request): unknown => {
+      const operationResult = runtimeAccess.execute(
+        userTurnOperationRequest(
+          event,
+          'character_context.build_sections',
+          structuredClone(request)
+        )
+      );
+      if (operationResult.status === 'rejected') {
+        throw new RuntimeValidationError(operationResultFailure(operationResult).message);
+      }
+      return operationResult.output;
+    }
+  };
+}
+
+function operationResultFailure(result: RuntimeOperationResult): UserTurnFailure {
+  if (result.failure !== undefined) {
+    return {
+      stage: result.failure.stage,
+      code: result.failure.code,
+      message: result.failure.message
+    };
+  }
+  return {
+    stage: 'runtime_operation',
+    code: 'runtime_operation_rejected',
+    message: `operation ${result.op} was rejected.`
+  };
 }
 
 function requireUserTurnRoute(route: {

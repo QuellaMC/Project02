@@ -11,6 +11,7 @@ import {
   incidentInterruptUserTurnAction,
   incidentStartUserTurnAction,
   livingStatePatchUserTurnAction,
+  type UserTurnWriteActionModule,
   userTurnWriteActionRegistry
 } from '../../../src/runtime/user-turn-actions.ts';
 import {
@@ -29,6 +30,10 @@ import type {
 } from '../../../src/commit-effects/living-state.ts';
 import { InMemoryLifeIncidentStore } from '../../../src/character/state/incidents.ts';
 import type { ActiveIncidentSnapshot } from '../../../src/character/state/current.ts';
+import {
+  RUNTIME_OPERATION_COMPLETED_KIND,
+  RUNTIME_OPERATION_REJECTED_KIND
+} from '../../../src/runtime/operation-registry.ts';
 
 class SequenceIdGenerator {
   readonly calls: string[] = [];
@@ -109,6 +114,28 @@ class RawLogExposingLivingStatePatchFinalizer {
   }
 }
 
+class FailOnceOnCompletedOperationAuditRawEventLog extends InMemoryRawEventLog {
+  readonly op: string;
+  #failed = false;
+
+  constructor(op: string) {
+    super();
+    this.op = op;
+  }
+
+  override append(entry: RawEventLogEntry): void {
+    if (
+      !this.#failed &&
+      entry.kind === RUNTIME_OPERATION_COMPLETED_KIND &&
+      entry.data['op'] === this.op
+    ) {
+      this.#failed = true;
+      throw new Error(`failed ${this.op} completed audit`);
+    }
+    super.append(entry);
+  }
+}
+
 function roleModelResultDecision(entry: RawEventLogEntry | undefined): Record<string, unknown> {
   const roleModelResult = entry?.data['role_model_result'];
   if (!isRecord(roleModelResult)) {
@@ -123,6 +150,19 @@ function roleModelResultDecision(entry: RawEventLogEntry | undefined): Record<st
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function domainEntries(
+  rawLog: InMemoryRawEventLog,
+  traceId = 'trace-1'
+): RawEventLogEntry[] {
+  return rawLog
+    .query({ trace_id: traceId })
+    .entries.filter((entry) => !entry.kind.startsWith('runtime_operation_'));
+}
+
+function domainLogKinds(rawLog: InMemoryRawEventLog, traceId = 'trace-1'): string[] {
+  return domainEntries(rawLog, traceId).map((entry) => entry.kind);
 }
 
 function fixedClock(): Date {
@@ -307,20 +347,57 @@ describe('user message turn orchestration', () => {
       throw new Error('expected committed user turn');
     }
     expect(result.visible_record_ids).toEqual({
-      user_message_id: 'message-generated-2',
-      assistant_output_id: 'output-generated-5'
+      user_message_id: visibleConversation.records[0]?.['message_id'],
+      assistant_output_id: visibleConversation.records[1]?.['output_id']
     });
     expect(visibleConversation.records.map((record) => record.kind)).toEqual([
       'user_visible_message',
       'assistant_visible_reply'
     ]);
     expect(adapter.inputs[0]?.allowed_actions).toEqual(['visible_reply']);
-    expect(rawLog.query({ trace_id: 'trace-1' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog)).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
       'role_model_turn_completed',
       'visible_reply_committed'
     ]);
+  });
+
+  it('does not stop or retry after a visible commit succeeds but its completed audit fails', () => {
+    const rawLog = new FailOnceOnCompletedOperationAuditRawEventLog(
+      'visible_conversation.commit_user_message'
+    );
+    const visibleConversation = new RecordingVisibleConversation();
+    const adapter = new FakeRoleModelAdapter(visibleReplyRaw());
+    const ids = new SequenceIdGenerator();
+
+    const result = runUserMessageTurn(normalizedUserMessage(), {
+      adapter,
+      rawEventLog: rawLog,
+      visibleConversation,
+      idGenerator: ids.next,
+      clock: fixedClock
+    });
+
+    expect(result.status).toBe(USER_TURN_COMMITTED_STATUS);
+    if (result.status !== USER_TURN_COMMITTED_STATUS) {
+      throw new Error('expected committed user turn');
+    }
+    expect(visibleConversation.records.map((record) => record.kind)).toEqual([
+      'user_visible_message',
+      'assistant_visible_reply'
+    ]);
+    expect(domainLogKinds(rawLog)).toEqual([
+      'runtime_event_received',
+      'user_visible_message_committed',
+      'role_model_turn_completed',
+      'visible_reply_committed'
+    ]);
+    const completedOps = rawLog
+      .query({ trace_id: 'trace-1', kinds: [RUNTIME_OPERATION_COMPLETED_KIND] })
+      .entries.map((entry) => entry.data['op']);
+    expect(completedOps).not.toContain('visible_conversation.commit_user_message');
+    expect(completedOps).toContain('visible_conversation.commit_visible_reply');
   });
 
   it('passes current state into visible-only turns without enabling state patches', () => {
@@ -353,11 +430,155 @@ describe('user message turn orchestration', () => {
       updated_at: '2026-05-30T09:59:00+00:00',
       source_event_ids: ['event-prior']
     });
-    expect(rawLog.query({ trace_id: 'trace-1' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog)).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
       'role_model_turn_completed',
       'visible_reply_committed'
+    ]);
+  });
+
+  it('routes recent-message reads and context sections through registry operations', () => {
+    const rawLog = new InMemoryRawEventLog();
+    const visibleConversation = new RecordingVisibleConversation();
+    visibleConversation.records.push({
+      schema_version: '0.1',
+      message_id: 'message-prior',
+      trace_id: 'trace-prior',
+      source_event_id: 'event-prior',
+      kind: 'user_visible_message',
+      role: 'user',
+      conversation_id: 'conversation-1',
+      created_at: '2026-05-30T09:59:00+00:00',
+      text: 'prior hello',
+      source: {
+        runtime_event_type: 'USER_MESSAGE'
+      }
+    });
+    const adapter = new FakeRoleModelAdapter(visibleReplyRaw());
+    const ids = new SequenceIdGenerator();
+
+    const result = runUserMessageTurn(normalizedUserMessage(), {
+      adapter,
+      rawEventLog: rawLog,
+      visibleConversation,
+      idGenerator: ids.next,
+      clock: fixedClock,
+      runtimeComponents: [
+        {
+          id: 'memory_context',
+          version: '0.1',
+          enabled: true,
+          contextSectionProviders: [
+            {
+              id: 'test.context_section',
+              buildDecisionContextSections: (request) => [
+                {
+                  schema_version: '0.1',
+                  section_id: 'section-1',
+                  section_type: 'test_context',
+                  content: {
+                    event_id: request.event_id
+                  },
+                  source_event_ids: [request.event_id]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result.status).toBe(USER_TURN_COMMITTED_STATUS);
+    if (result.status !== USER_TURN_COMMITTED_STATUS) {
+      throw new Error('expected committed user turn');
+    }
+    expect(
+      adapter.inputs[0]?.decision_context.character_snapshot.recent_visible_messages
+    ).toEqual([
+      {
+        schema_version: '0.1',
+        message_id: 'message-prior',
+        trace_id: 'trace-prior',
+        source_event_id: 'event-prior',
+        conversation_id: 'conversation-1',
+        role: 'user',
+        created_at: '2026-05-30T09:59:00+00:00',
+        text: 'prior hello'
+      }
+    ]);
+    expect(adapter.inputs[0]?.decision_context.context_sections).toEqual([
+      {
+        schema_version: '0.1',
+        section_id: 'section-1',
+        section_type: 'test_context',
+        content: {
+          event_id: 'event-1'
+        },
+        source_event_ids: ['event-1']
+      }
+    ]);
+    const completedOps = rawLog
+      .query({ trace_id: 'trace-1' })
+      .entries.filter((entry) => entry.kind === RUNTIME_OPERATION_COMPLETED_KIND)
+      .map((entry) => entry.data['op']);
+    expect(completedOps).toContain('visible_conversation.read_recent_messages');
+    expect(completedOps).toContain('character_context.build_sections');
+  });
+
+  it('rejects malformed runtime-component context section output before model calls', () => {
+    const rawLog = new InMemoryRawEventLog();
+    const visibleConversation = new RecordingVisibleConversation();
+    const adapter = new FakeRoleModelAdapter(visibleReplyRaw());
+
+    const result = runUserMessageTurn(normalizedUserMessage(), {
+      adapter,
+      rawEventLog: rawLog,
+      visibleConversation,
+      idGenerator: new SequenceIdGenerator().next,
+      clock: fixedClock,
+      runtimeComponents: [
+        {
+          id: 'memory_context',
+          version: '0.1',
+          enabled: true,
+          contextSectionProviders: [
+            {
+              id: 'test.malformed_context_section',
+              buildDecisionContextSections: () => [
+                {
+                  schema_version: '0.1',
+                  section_id: 'section-1',
+                  section_type: 'test_context',
+                  source_event_ids: ['event-1']
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result.status).toBe(USER_TURN_STOPPED_STATUS);
+    if (result.status !== USER_TURN_STOPPED_STATUS) {
+      throw new Error('expected stopped user turn');
+    }
+    expect(result.stopped_at).toBe('role_model_run_turn');
+    expect(adapter.inputs).toEqual([]);
+    const rejectedContextOperation = rawLog
+      .query({ trace_id: 'trace-1' })
+      .entries.find(
+        (entry) =>
+          entry.kind === RUNTIME_OPERATION_REJECTED_KIND &&
+          entry.data['op'] === 'character_context.build_sections'
+      );
+    expect(rejectedContextOperation?.data['failure']).toMatchObject({
+      stage: 'output_validation',
+      code: 'malformed_output'
+    });
+    expect(domainLogKinds(rawLog)).toEqual([
+      'runtime_event_received',
+      'user_visible_message_committed'
     ]);
   });
 
@@ -414,8 +635,62 @@ describe('user message turn orchestration', () => {
     expect(result).not.toHaveProperty('role_model_result');
     expect(adapter.inputs).toEqual([]);
     expect(visibleConversation.records).toEqual([]);
-    expect(rawLog.query({ trace_id: 'trace-1' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog)).toEqual([
       'runtime_event_received'
+    ]);
+  });
+
+  it('stops instead of throwing when an action operation returns malformed output', () => {
+    const rawLog = new InMemoryRawEventLog();
+    const visibleConversation = new RecordingVisibleConversation();
+    const adapter = new FakeRoleModelAdapter(visibleReplyRaw());
+    const malformedAction: UserTurnWriteActionModule = {
+      id: 'malformed_incident_action',
+      operation: 'incident.start_from_model',
+      phase: 'after_role_model',
+      stop: 'malformed_action_commit',
+      commit: ({ event }) =>
+        ({
+          schema_version: '0.1',
+          trace_id: event.trace_id,
+          event_id: event.event_id,
+          event_type: event.type,
+          status: 'not_a_registered_status'
+        }) as unknown as ReturnType<UserTurnWriteActionModule['commit']>,
+      isRejected: () => {
+        throw new Error('malformed operation output must stop before action rejection checks');
+      },
+      failure: () => {
+        throw new Error('malformed operation output must not use domain failure');
+      },
+      resultFields: () => {
+        throw new Error('malformed operation output must stop before result projection');
+      }
+    };
+
+    const result = runUserMessageTurn(normalizedUserMessage(), {
+      adapter,
+      rawEventLog: rawLog,
+      visibleConversation,
+      idGenerator: new SequenceIdGenerator().next,
+      clock: fixedClock,
+      writeActions: userTurnWriteActionRegistry(malformedAction)
+    });
+
+    expect(result.status).toBe(USER_TURN_STOPPED_STATUS);
+    if (result.status !== USER_TURN_STOPPED_STATUS) {
+      throw new Error('expected stopped user turn');
+    }
+    expect(result.stopped_at).toBe('malformed_action_commit');
+    expect(result.failure).toMatchObject({
+      stage: 'output_validation',
+      code: 'malformed_output'
+    });
+    expect(result).not.toHaveProperty('visible_reply_result');
+    expect(domainLogKinds(rawLog)).toEqual([
+      'runtime_event_received',
+      'user_visible_message_committed',
+      'role_model_turn_completed'
     ]);
   });
 
@@ -454,7 +729,7 @@ describe('user message turn orchestration', () => {
     expect(result.failure.message).toContain('active_incident_source');
     expect(adapter.inputs).toEqual([]);
     expect(visibleConversation.records).toEqual([]);
-    expect(rawLog.query({ trace_id: 'trace-1' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog)).toEqual([
       'runtime_event_received'
     ]);
   });
@@ -494,7 +769,7 @@ describe('user message turn orchestration', () => {
     expect(result.failure.message).toContain('active_incident_source');
     expect(adapter.inputs).toEqual([]);
     expect(visibleConversation.records).toEqual([]);
-    expect(rawLog.query({ trace_id: 'trace-1' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog)).toEqual([
       'runtime_event_received'
     ]);
   });
@@ -534,7 +809,7 @@ describe('user message turn orchestration', () => {
     expect(result.failure.message).toContain('active_incident_source');
     expect(adapter.inputs).toEqual([]);
     expect(visibleConversation.records).toEqual([]);
-    expect(rawLog.query({ trace_id: 'trace-1' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog)).toEqual([
       'runtime_event_received'
     ]);
   });
@@ -570,7 +845,7 @@ describe('user message turn orchestration', () => {
     expect(result.living_state_patch_result?.status).toBe('living_state_patch_committed');
     expect(store.requests).toHaveLength(1);
     expect(finalizer.requests).toHaveLength(1);
-    const entries = rawLog.query({ trace_id: 'trace-1' }).entries;
+    const entries = domainEntries(rawLog);
     expect(entries.map((entry) => entry.kind)).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
@@ -631,7 +906,7 @@ describe('user message turn orchestration', () => {
     expect(visibleConversation.records.map((record) => record.kind)).toEqual([
       'user_visible_message'
     ]);
-    expect(rawLog.query({ trace_id: 'trace-1' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog)).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
       'role_model_turn_completed',
@@ -663,7 +938,7 @@ describe('user message turn orchestration', () => {
     expect(adapter.inputs[0]?.allowed_actions).toEqual(['visible_reply', 'life_action']);
     expect(adapter.inputs[0]?.allowed_life_action_type).toBe('start_incident');
     expect(result.life_incident_start_result?.status).toBe('life_incident_started');
-    const entries = rawLog.query({ trace_id: 'trace-1' }).entries;
+    const entries = domainEntries(rawLog);
     expect(entries.map((entry) => entry.kind)).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
@@ -711,7 +986,7 @@ describe('user message turn orchestration', () => {
       'assistant_visible_reply',
       'user_visible_message'
     ]);
-    expect(rawLog.query({ trace_id: 'trace-2' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog, 'trace-2')).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
       'role_model_turn_completed',
@@ -760,7 +1035,7 @@ describe('user message turn orchestration', () => {
     const characterSnapshot = adapter.inputs[0]?.decision_context.character_snapshot;
     expect(characterSnapshot).toHaveProperty('interrupted_incident');
     expect(characterSnapshot).not.toHaveProperty('active_incident');
-    expect(rawLog.query({ trace_id: 'trace-2' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog, 'trace-2')).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
       'life_incident_interrupted',
@@ -802,7 +1077,7 @@ describe('user message turn orchestration', () => {
       throw new Error('expected committed user turn');
     }
     expect(result.life_incident_cancel_result?.status).toBe('life_incident_cancelled');
-    expect(rawLog.query({ trace_id: 'trace-2' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog, 'trace-2')).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
       'role_model_turn_completed',
@@ -845,7 +1120,7 @@ describe('user message turn orchestration', () => {
     }
     expect(result.stopped_at).toBe('life_incident_cancel_commit');
     expect(result.life_incident_cancel_result?.status).toBe('life_incident_cancel_rejected');
-    expect(rawLog.query({ trace_id: 'trace-2' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog, 'trace-2')).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
       'role_model_turn_completed',
@@ -886,7 +1161,7 @@ describe('user message turn orchestration', () => {
       throw new Error('expected committed user turn');
     }
     expect(result.life_incident_complete_result?.status).toBe('life_incident_completed');
-    expect(rawLog.query({ trace_id: 'trace-2' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog, 'trace-2')).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
       'role_model_turn_completed',
@@ -929,7 +1204,7 @@ describe('user message turn orchestration', () => {
     }
     expect(result.stopped_at).toBe('life_incident_complete_commit');
     expect(result.life_incident_complete_result?.status).toBe('life_incident_complete_rejected');
-    expect(rawLog.query({ trace_id: 'trace-2' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog, 'trace-2')).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
       'role_model_turn_completed',
@@ -974,7 +1249,7 @@ describe('user message turn orchestration', () => {
     expect(result.stopped_at).toBe('life_incident_interrupt_commit');
     expect(result.life_incident_interrupt_result?.status).toBe('life_incident_interrupt_rejected');
     expect(adapter.inputs).toEqual([]);
-    expect(rawLog.query({ trace_id: 'trace-1' }).entries.map((entry) => entry.kind)).toEqual([
+    expect(domainLogKinds(rawLog)).toEqual([
       'runtime_event_received',
       'user_visible_message_committed',
       'life_incident_interrupt_rejected'
@@ -1053,7 +1328,7 @@ describe('user message turn orchestration', () => {
         'role_model_turn_completed',
         'visible_reply_committed'
       ];
-      expect(rawLog.query({ trace_id: 'trace-1' }).entries.map((entry) => entry.kind)).toEqual(
+      expect(domainLogKinds(rawLog)).toEqual(
         expectedKinds
       );
     }

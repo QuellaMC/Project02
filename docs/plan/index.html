@@ -97,9 +97,11 @@
       <a href="https://github.com/QuellaMC/Project02/pull/27">PR #27</a>.
       Context provider sections are recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/26">PR #26</a>.
-      The user-turn action registry slice is tracked in
+      The user-turn action registry slice is recorded in
       <a href="https://github.com/QuellaMC/Project02/pull/28">PR #28</a>
       on branch <code>feature/user-turn-action-registry</code>.
+      MVP-022 Runtime Component and Operation Registry is implemented and locally verified on branch
+      <code>feature/runtime-component-registry</code> and is pending PR.
     </p>
     <div class="graph-panel">
       <pre class="mermaid">
@@ -181,9 +183,16 @@ flowchart LR
 
   subgraph UserTurn["User Turn Orchestrator - MVP-007 implemented locally"]
     Turn["Compose existing boundaries&lt;br/&gt;single USER_MESSAGE turn"]
-    ActionRegistry["Write action registry&lt;br/&gt;state patch + incident actions&lt;br/&gt;PR #28 open"]
-    ModelActionSpecs["Role-model action specs&lt;br/&gt;allowed_actions + parse policy&lt;br/&gt;PR #28 open"]
+    ActionRegistry["Write action registry&lt;br/&gt;state patch + incident actions&lt;br/&gt;PR #28 implemented"]
+    ModelActionSpecs["Role-model action specs&lt;br/&gt;allowed_actions + parse policy&lt;br/&gt;PR #28 implemented"]
     TurnResult["UserMessageTurnResult&lt;br/&gt;committed or stopped"]
+  end
+
+  subgraph RuntimeComponents["MVP-022 Runtime Component and Operation Registry - implemented locally"]
+    ComponentRegistry["Static built-in component registry"]
+    ComponentViews["Registry-derived user-turn actions,&lt;br/&gt;model specs, and context providers"]
+    OperationRegistry["Executable operation registry&lt;br/&gt;schema, policy, redaction, logging, transaction"]
+    RuntimeAccess["Internal RuntimeAccess facade&lt;br/&gt;first caller: runtime.user_turn"]
   end
 
   UserMessage --> Normalize --> SharedIntake --> RouteUpdate
@@ -255,6 +264,17 @@ flowchart LR
   RouteUpdate --> Turn
   ActionRegistry --> ModelActionSpecs
   ModelActionSpecs --> Envelope
+  ComponentRegistry --> ComponentViews --> Turn
+  ComponentViews --> ActionRegistry
+  ComponentViews --> ModelActionSpecs
+  ComponentViews --> ContextSections
+  ComponentRegistry --> OperationRegistry --> RuntimeAccess --> Turn
+  RuntimeAccess --> UserProjection
+  RuntimeAccess --> Render
+  RuntimeAccess --> Commit
+  RuntimeAccess --> StatePatchCommit
+  RuntimeAccess --> IncidentInterruptCommit
+  RuntimeAccess --> IncidentCompletionEventCommit
   Turn --> UserProjection
   Turn --> VisibleRecentSource
   Turn --> ActionRegistry
@@ -278,7 +298,8 @@ flowchart LR
   class IncidentInterruptCommit,IncidentInterruptFinalize,InterruptedIncidentSource,InterruptedIncidentBrief implemented;
   class StagedTransactionHelper implemented;
   class TSContracts,TSLogging,TSKernel,TSCharacterState,TSRoleModel,TSCommitEffects,TSUserTurn implemented;
-  class ActionRegistry,ModelActionSpecs active;
+  class ActionRegistry,ModelActionSpecs implemented;
+  class ComponentRegistry,ComponentViews,OperationRegistry,RuntimeAccess active;
       </pre>
     </div>
 
@@ -293,9 +314,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td><a href="active-slice.html">User Turn Action Registry</a></td>
-          <td>Open in <a href="https://github.com/QuellaMC/Project02/pull/28">PR #28</a> on branch <code>feature/user-turn-action-registry</code>.</td>
-          <td>Register existing user-turn write actions and role-model action specs without adding memory, retrieval, tools, productivity actions, or new commit-effect modules.</td>
+          <td><a href="active-slice.html">MVP-022 Runtime Component and Operation Registry v0.1</a></td>
+          <td>Implemented locally on branch <code>feature/runtime-component-registry</code>; pending review/PR.</td>
+          <td>Register static built-in components and execute current user-turn operations through schema, policy, privacy/redaction, logging, transaction, and handler contracts without memory, tools, external side effects, dynamic plugins, or new storage adapters.</td>
         </tr>
       </tbody>
     </table>

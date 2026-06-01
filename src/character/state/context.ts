@@ -101,6 +101,7 @@ export type DecisionContextSectionRequest = {
 };
 
 export type DecisionContextSectionProvider = {
+  id?: string;
   buildDecisionContextSections: (request: DecisionContextSectionRequest) => unknown;
 };
 
@@ -765,7 +766,7 @@ function validateCharacterSnapshotForEvent(
   return normalizedSnapshot;
 }
 
-function validateDecisionContextSections(sections: unknown): DecisionContextSection[] {
+export function validateDecisionContextSections(sections: unknown): DecisionContextSection[] {
   if (!Array.isArray(sections)) {
     throw new ContractValidationError('context_sections must be a list.');
   }
