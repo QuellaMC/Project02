@@ -71,6 +71,9 @@
       <code>feature/runtime-component-registry</code>. The implementation remains
       limited to built-in in-process components and does not add memory,
       retrieval, tools, scheduler, Live2D, dynamic plugins, or external effects.
+      June 2 follow-up: current-state, active-incident, and
+      interrupted-incident read sources now use the same registry-backed
+      adapter path as recent visible messages and context sections.
     </p>
 
     <h2>Current Scope</h2>
@@ -80,7 +83,7 @@
       <li>Use <code>runUserMessageTurn</code> as the first user-turn operation caller with <code>caller.component_id = "runtime.user_turn"</code> and <code>call_type = "user_turn"</code>.</li>
       <li>Use the existing <code>INCIDENT_COMPLETION</code> route as the deterministic event-commit caller with <code>caller.component_id = "runtime.kernel"</code>, <code>call_type = "deterministic_event_commit"</code>, <code>model_needed = false</code>, and <code>next_step = "incident_completion_commit"</code>.</li>
       <li>Register built-in components only for existing behavior: <code>visible_conversation</code>, <code>role_model</code>, <code>context_sections</code>, <code>living_state</code> when a living-state write action is enabled, and <code>incident_lifecycle</code> when an incident action or deterministic incident-completion commit is enabled. Do not add an empty core component before it owns a concrete operation.</li>
-      <li>Register executable operations that wrap existing behavior: <code>visible_conversation.commit_user_message</code>, <code>role_model.run_turn</code>, <code>visible_conversation.commit_visible_reply</code>, <code>living_state.commit_patch</code>, <code>incident.interrupt_active</code>, <code>incident.start_from_model</code>, <code>incident.cancel_from_model</code>, <code>incident.complete_from_model</code>, <code>incident.complete_from_event</code>, <code>visible_conversation.read_recent_messages</code>, and <code>character_context.build_sections</code>.</li>
+      <li>Register executable operations that wrap existing behavior: <code>visible_conversation.commit_user_message</code>, <code>role_model.run_turn</code>, <code>visible_conversation.commit_visible_reply</code>, <code>living_state.commit_patch</code>, <code>incident.interrupt_active</code>, <code>incident.start_from_model</code>, <code>incident.cancel_from_model</code>, <code>incident.complete_from_model</code>, <code>incident.complete_from_event</code>, <code>visible_conversation.read_recent_messages</code>, <code>character_context.build_sections</code>, <code>character_state.read_current</code>, <code>incident_lifecycle.read_active</code>, and <code>incident_lifecycle.read_interrupted</code>.</li>
       <li>Define operation input/output contract validators for each registered operation. Contract IDs are metadata; validators are the executable contract.</li>
       <li>Define and enforce baseline operation policy: allowed callers, allowed call types, allowed event types, operation category, permission policy ID, privacy/redaction policy, logging policy, transaction policy, and synchronous execution policy.</li>
       <li>Switch the full user-turn integration path to registry-derived operations/actions/specs/providers instead of keeping a parallel direct-options production path.</li>
@@ -184,6 +187,7 @@ type RuntimeOperationDefinition = {
       <li>FR-11: Operation audit logs do not duplicate full model input/output snapshots; they reference the existing role-model log through trace/event/operation identity.</li>
       <li>FR-12: Direct dependency injection may remain inside component factory functions and low-level tests, but production user-turn integration must not keep a second direct-options bypass for registered actions/specs/providers/operations.</li>
       <li>FR-13: The deterministic <code>INCIDENT_COMPLETION</code> path executes <code>incident.complete_from_event</code> through the operation registry, preserves the existing <code>life_incident_completed</code>/<code>life_incident_complete_rejected</code> domain logs, and never calls the model or emits visible conversation output.</li>
+      <li>FR-14: User-turn context reads for current state, active incident, and interrupted incident execute through <code>RuntimeAccess</code> before reaching the existing source contracts. Malformed read outputs are rejected before model adapter invocation through the registry-backed path.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
@@ -192,6 +196,7 @@ type RuntimeOperationDefinition = {
       <li>Built-in component modules exist only where current behavior justifies them; no empty component folders are added.</li>
       <li>At least one complete user-turn success path runs through registry-derived visible conversation, role-model, and visible reply operations.</li>
       <li>At least one existing write-action path, such as living-state patch or incident interruption, runs through registry-derived operation execution with preserved result shape.</li>
+      <li>User-turn current-state, active-incident, and interrupted-incident reads append operation audit records and do not pass production source objects directly into the Role Model Loop.</li>
       <li>At least one <code>INCIDENT_COMPLETION</code> success path runs through registry-derived <code>incident.complete_from_event</code> execution after Runtime Kernel routing and preserves the existing deterministic non-model result/log shape.</li>
       <li>Policy tests cover unknown operation, disabled owner component, unsupported caller, unsupported call type, unsupported event type, permission denial, malformed policy combinations, malformed input, malformed output, handler rejection, async handler rejection, and cross-calling <code>USER_MESSAGE</code> operations from the incident-completion caller or the reverse.</li>
       <li>Logging tests prove operation started/completed/rejected records are appended with redaction behavior, read/context snapshots are omitted, model input/output is not duplicated, and existing domain raw logs remain query-visible.</li>
@@ -213,7 +218,7 @@ type RuntimeOperationDefinition = {
     <ul>
       <li><strong>Runtime registry:</strong> owns static component validation, derived views, operation lookup, policy validation, privacy/logging enforcement, and operation execution envelopes.</li>
       <li><strong>Runtime Kernel:</strong> remains owner of event intake, normalization, priority, route policy, and deciding user-turn route. It may call the registry but does not become a generic component host.</li>
-      <li><strong>Character State Engine:</strong> remains owner of compact context building and provider section validation.</li>
+      <li><strong>Character State Engine:</strong> remains owner of compact context building, provider section validation, current-state reads, active-incident reads, and interrupted-incident reads. The registry only mediates the runtime-facing call.</li>
       <li><strong>Role Model Loop:</strong> remains owner of model input rendering, adapter invocation, output parsing, and model action spec contract validation.</li>
       <li><strong>Commit and Effects:</strong> remains the only durable commit/effect boundary. Operation handlers for writes call existing commit-effect functions.</li>
     </ul>
@@ -226,6 +231,7 @@ type RuntimeOperationDefinition = {
       <li>Runtime Access is an internal execute facade over the registry, not a revived top-level Runtime Access Kernel.</li>
       <li>If a registered operation needs a policy not listed here, the behavior is outside this slice unless the active spec is reviewed again.</li>
       <li>Memory retrieval should be the first future component after this registry, but only as compact selected context. Memory write should wait for a commit/effect boundary.</li>
+      <li>The June 2 adapter migration keeps the proposed architecture staged: runtime orchestration calls <code>RuntimeAccess</code>, the built-in operation adapter validates the envelope and delegates, and the existing domain source remains responsible for the read contract. This is intentionally not a full migration of Character State Engine or incident lifecycle modules into component implementations.</li>
     </ul>
 
     <h2>Open Questions</h2>

@@ -29,7 +29,10 @@ import type {
   LivingStatePatchPrepareRequest
 } from '../../../src/commit-effects/living-state.ts';
 import { InMemoryLifeIncidentStore } from '../../../src/character/state/incidents.ts';
-import type { ActiveIncidentSnapshot } from '../../../src/character/state/current.ts';
+import type {
+  ActiveIncidentSnapshot,
+  InterruptedIncidentSnapshot
+} from '../../../src/character/state/current.ts';
 import {
   RUNTIME_OPERATION_COMPLETED_KIND,
   RUNTIME_OPERATION_REJECTED_KIND
@@ -294,6 +297,22 @@ function activeIncidentSnapshot({
   };
 }
 
+function interruptedIncidentSnapshot(): InterruptedIncidentSnapshot {
+  return {
+    schema_version: '0.1',
+    incident_id: 'incident-interrupted',
+    type: 'think',
+    status: 'interrupted',
+    title: 'Paused thought',
+    started_at: '2026-05-30T09:55:00+00:00',
+    remaining_seconds: 240,
+    interrupt_policy: 'interruptible',
+    resume_policy: 'ask_model',
+    interrupted_at: '2026-05-30T10:00:30+00:00',
+    source_event_ids: ['event-existing', 'event-1']
+  };
+}
+
 function seedActiveIncident({
   rawLog,
   visibleConversation,
@@ -436,6 +455,200 @@ describe('user message turn orchestration', () => {
       'role_model_turn_completed',
       'visible_reply_committed'
     ]);
+  });
+
+  it('routes current-state and active-incident reads through registry operations', () => {
+    const rawLog = new InMemoryRawEventLog();
+    const visibleConversation = new RecordingVisibleConversation();
+    const adapter = new FakeRoleModelAdapter(visibleReplyRaw());
+    const ids = new SequenceIdGenerator();
+
+    const result = runUserMessageTurn(normalizedUserMessage(), {
+      adapter,
+      rawEventLog: rawLog,
+      visibleConversation,
+      idGenerator: ids.next,
+      clock: fixedClock,
+      currentStateSource: currentStateSource(),
+      activeIncidentSource: {
+        readActiveIncident: () => activeIncidentSnapshot()
+      }
+    });
+
+    expect(result.status).toBe(USER_TURN_COMMITTED_STATUS);
+    if (result.status !== USER_TURN_COMMITTED_STATUS) {
+      throw new Error('expected committed user turn');
+    }
+    const characterSnapshot = adapter.inputs[0]?.decision_context.character_snapshot;
+    expect(characterSnapshot?.living_state_brief).toMatchObject({
+      character_id: 'character-1',
+      current_activity: 'writing notes'
+    });
+    expect(characterSnapshot?.active_incident).toMatchObject({
+      incident_id: 'incident-1',
+      title: 'Think through the plan'
+    });
+    const completedOps = rawLog
+      .query({ trace_id: 'trace-1' })
+      .entries.filter((entry) => entry.kind === RUNTIME_OPERATION_COMPLETED_KIND)
+      .map((entry) => entry.data['op']);
+    expect(completedOps).toContain('character_state.read_current');
+    expect(completedOps).toContain('incident_lifecycle.read_active');
+  });
+
+  it('routes interrupted-incident reads through registry operations when no active incident exists', () => {
+    const rawLog = new InMemoryRawEventLog();
+    const visibleConversation = new RecordingVisibleConversation();
+    const adapter = new FakeRoleModelAdapter(visibleReplyRaw());
+    const ids = new SequenceIdGenerator();
+
+    const result = runUserMessageTurn(normalizedUserMessage(), {
+      adapter,
+      rawEventLog: rawLog,
+      visibleConversation,
+      idGenerator: ids.next,
+      clock: fixedClock,
+      activeIncidentSource: {
+        readActiveIncident: () => undefined
+      },
+      interruptedIncidentSource: {
+        readInterruptedIncident: () => interruptedIncidentSnapshot()
+      }
+    });
+
+    expect(result.status).toBe(USER_TURN_COMMITTED_STATUS);
+    if (result.status !== USER_TURN_COMMITTED_STATUS) {
+      throw new Error('expected committed user turn');
+    }
+    const characterSnapshot = adapter.inputs[0]?.decision_context.character_snapshot;
+    expect(characterSnapshot).not.toHaveProperty('active_incident');
+    expect(characterSnapshot?.interrupted_incident).toMatchObject({
+      incident_id: 'incident-interrupted',
+      title: 'Paused thought'
+    });
+    const completedOps = rawLog
+      .query({ trace_id: 'trace-1' })
+      .entries.filter((entry) => entry.kind === RUNTIME_OPERATION_COMPLETED_KIND)
+      .map((entry) => entry.data['op']);
+    expect(completedOps).toContain('incident_lifecycle.read_active');
+    expect(completedOps).toContain('incident_lifecycle.read_interrupted');
+  });
+
+  it('rejects malformed current-state read output before model calls through the registry path', () => {
+    const rawLog = new InMemoryRawEventLog();
+    const visibleConversation = new RecordingVisibleConversation();
+    const adapter = new FakeRoleModelAdapter(visibleReplyRaw());
+
+    const result = runUserMessageTurn(normalizedUserMessage(), {
+      adapter,
+      rawEventLog: rawLog,
+      visibleConversation,
+      idGenerator: new SequenceIdGenerator().next,
+      clock: fixedClock,
+      currentStateSource: {
+        readCurrentState: () => ({
+          schema_version: '0.1',
+          character_id: 'character-1',
+          living_state: {
+            current_activity: 'writing notes',
+            toward_user: 'warm'
+          },
+          updated_at: '2026-05-30T09:59:00+00:00',
+          source_event_ids: ['event-prior']
+        })
+      }
+    });
+
+    expect(result.status).toBe(USER_TURN_STOPPED_STATUS);
+    if (result.status !== USER_TURN_STOPPED_STATUS) {
+      throw new Error('expected stopped user turn');
+    }
+    expect(result.stopped_at).toBe('role_model_run_turn');
+    expect(adapter.inputs).toEqual([]);
+    const rejectedReadOperation = rawLog
+      .query({ trace_id: 'trace-1' })
+      .entries.find(
+        (entry) =>
+          entry.kind === RUNTIME_OPERATION_REJECTED_KIND &&
+          entry.data['op'] === 'character_state.read_current'
+      );
+    expect(rejectedReadOperation?.data['failure']).toMatchObject({
+      stage: 'output_validation',
+      code: 'malformed_output'
+    });
+    expect(domainLogKinds(rawLog)).toEqual([
+      'runtime_event_received',
+      'user_visible_message_committed'
+    ]);
+  });
+
+  it('registers read operations for runtime-component user-turn action context sources', () => {
+    const rawLog = new InMemoryRawEventLog();
+    const visibleConversation = new RecordingVisibleConversation();
+    const adapter = new FakeRoleModelAdapter(visibleReplyRaw());
+    const componentContextAction: UserTurnWriteActionModule = {
+      id: 'component_state_context',
+      phase: 'after_role_model',
+      stop: 'component_state_context_commit',
+      roleModelContextOptions: () => ({
+        currentStateSource: currentStateSource(),
+        activeIncidentSource: {
+          readActiveIncident: () => activeIncidentSnapshot()
+        }
+      }),
+      commit: ({ event }) => ({
+        schema_version: '0.1',
+        trace_id: event.trace_id,
+        event_id: event.event_id,
+        event_type: event.type,
+        status: 'living_state_patch_skipped'
+      }),
+      isRejected: () => false,
+      failure: () => ({
+        stage: 'component_state_context_commit',
+        code: 'unexpected_component_context_rejection',
+        message: 'component context action should not reject.'
+      }),
+      resultFields: () => ({})
+    };
+
+    const result = runUserMessageTurn(normalizedUserMessage(), {
+      adapter,
+      rawEventLog: rawLog,
+      visibleConversation,
+      idGenerator: new SequenceIdGenerator().next,
+      clock: fixedClock,
+      runtimeComponents: [
+        {
+          id: 'reviewed_context_component',
+          version: '0.1',
+          enabled: true,
+          userTurnActions: [componentContextAction]
+        }
+      ]
+    });
+
+    expect(result.status).toBe(USER_TURN_STOPPED_STATUS);
+    if (result.status !== USER_TURN_STOPPED_STATUS) {
+      throw new Error('expected stopped user turn');
+    }
+    expect(result.stopped_at).toBe('component_state_context_commit');
+    expect(adapter.inputs[0]?.decision_context.character_snapshot.living_state_brief)
+      .toMatchObject({
+        character_id: 'character-1',
+        current_activity: 'writing notes'
+      });
+    expect(adapter.inputs[0]?.decision_context.character_snapshot.active_incident)
+      .toMatchObject({
+        incident_id: 'incident-1',
+        title: 'Think through the plan'
+      });
+    const completedOps = rawLog
+      .query({ trace_id: 'trace-1' })
+      .entries.filter((entry) => entry.kind === RUNTIME_OPERATION_COMPLETED_KIND)
+      .map((entry) => entry.data['op']);
+    expect(completedOps).toContain('character_state.read_current');
+    expect(completedOps).toContain('incident_lifecycle.read_active');
   });
 
   it('routes recent-message reads and context sections through registry operations', () => {

@@ -13,6 +13,14 @@ import type {
   InterruptedIncidentSource
 } from '../character/state/current.ts';
 import {
+  validateActiveIncidentRequest,
+  validateActiveIncidentSnapshot,
+  validateCurrentCharacterStateRequest,
+  validateCurrentCharacterStateSnapshot,
+  validateInterruptedIncidentRequest,
+  validateInterruptedIncidentSnapshot
+} from '../character/state/current.ts';
+import {
   commitLifeIncidentCompletionEvent,
   LIFE_INCIDENT_COMPLETED_STATUS,
   LIFE_INCIDENT_COMPLETE_REJECTED_STATUS,
@@ -91,6 +99,11 @@ export type UserTurnRuntimeComponentOptions = {
   currentStateSource?: CurrentCharacterStateSource | undefined;
   activeIncidentSource?: ActiveIncidentSource | undefined;
   interruptedIncidentSource?: InterruptedIncidentSource | undefined;
+  currentStateSourceProvider?: (() => CurrentCharacterStateSource | undefined) | undefined;
+  activeIncidentSourceProvider?: (() => ActiveIncidentSource | undefined) | undefined;
+  interruptedIncidentSourceProvider?:
+    | (() => InterruptedIncidentSource | undefined)
+    | undefined;
   writeActions?: readonly UserTurnWriteActionModule[];
   contextSectionProviders?: readonly DecisionContextSectionProvider[];
   contextSectionProviderSource?: (() => readonly DecisionContextSectionProvider[]) | undefined;
@@ -110,10 +123,27 @@ export function userTurnRuntimeComponents({
   visibleConversation,
   idGenerator,
   clock,
+  currentStateSource,
+  activeIncidentSource,
+  interruptedIncidentSource,
+  currentStateSourceProvider,
+  activeIncidentSourceProvider,
+  interruptedIncidentSourceProvider,
   writeActions = [],
   contextSectionProviders = [],
   contextSectionProviderSource
 }: UserTurnRuntimeComponentOptions): RuntimeComponent[] {
+  const resolvedCurrentStateSourceProvider =
+    currentStateSourceProvider ??
+    (currentStateSource === undefined ? undefined : () => currentStateSource);
+  const resolvedActiveIncidentSourceProvider =
+    activeIncidentSourceProvider ??
+    (activeIncidentSource === undefined ? undefined : () => activeIncidentSource);
+  const resolvedInterruptedIncidentSourceProvider =
+    interruptedIncidentSourceProvider ??
+    (interruptedIncidentSource === undefined
+      ? undefined
+      : () => interruptedIncidentSource);
   return [
     {
       id: 'visible_conversation',
@@ -155,11 +185,19 @@ export function userTurnRuntimeComponents({
       ],
       contextSectionProviders
     },
-    ...userTurnActionRuntimeComponents(writeActions, {
-      rawEventLog,
-      idGenerator,
-      clock
-    })
+    ...userTurnActionRuntimeComponents(
+      writeActions,
+      {
+        rawEventLog,
+        idGenerator,
+        clock
+      },
+      readOperationsByOwner({
+        currentStateSourceProvider: resolvedCurrentStateSourceProvider,
+        activeIncidentSourceProvider: resolvedActiveIncidentSourceProvider,
+        interruptedIncidentSourceProvider: resolvedInterruptedIncidentSourceProvider
+      })
+    )
   ];
 }
 
@@ -333,13 +371,130 @@ function visibleConversationReadRecentMessagesOperation({
   });
 }
 
+function readOperationsByOwner({
+  currentStateSourceProvider,
+  activeIncidentSourceProvider,
+  interruptedIncidentSourceProvider
+}: {
+  currentStateSourceProvider?: (() => CurrentCharacterStateSource | undefined) | undefined;
+  activeIncidentSourceProvider?: (() => ActiveIncidentSource | undefined) | undefined;
+  interruptedIncidentSourceProvider?:
+    | (() => InterruptedIncidentSource | undefined)
+    | undefined;
+}): Map<string, RuntimeOperationDefinition[]> {
+  const operationsByOwner = new Map<string, RuntimeOperationDefinition[]>();
+  if (currentStateSourceProvider !== undefined) {
+    operationsByOwner.set('character_state', [
+      characterStateReadCurrentOperation({
+        currentStateSourceProvider
+      })
+    ]);
+  }
+  const incidentOperations: RuntimeOperationDefinition[] = [];
+  if (activeIncidentSourceProvider !== undefined) {
+    incidentOperations.push(
+      incidentLifecycleReadActiveOperation({
+        activeIncidentSourceProvider
+      })
+    );
+  }
+  if (interruptedIncidentSourceProvider !== undefined) {
+    incidentOperations.push(
+      incidentLifecycleReadInterruptedOperation({
+        interruptedIncidentSourceProvider
+      })
+    );
+  }
+  if (incidentOperations.length > 0) {
+    operationsByOwner.set('incident_lifecycle', incidentOperations);
+  }
+  return operationsByOwner;
+}
+
+function characterStateReadCurrentOperation({
+  currentStateSourceProvider
+}: {
+  currentStateSourceProvider: () => CurrentCharacterStateSource | undefined;
+}): RuntimeOperationDefinition {
+  return operationDefinition({
+    op: 'character_state.read_current',
+    ownerComponentId: 'character_state',
+    category: 'read',
+    inputPrivacy: 'omitted',
+    outputPrivacy: 'omitted',
+    transactionMode: 'read_only',
+    validateInput: (request) => validateCurrentCharacterStateRequest(request.input),
+    validateOutput: validateOptionalCurrentStateSnapshotOutput,
+    handler: (_request, input) => {
+      const source = currentStateSourceProvider();
+      if (source === undefined) {
+        return undefined;
+      }
+      return source.readCurrentState(
+        structuredClone(validateCurrentCharacterStateRequest(input))
+      );
+    }
+  });
+}
+
+function incidentLifecycleReadActiveOperation({
+  activeIncidentSourceProvider
+}: {
+  activeIncidentSourceProvider: () => ActiveIncidentSource | undefined;
+}): RuntimeOperationDefinition {
+  return operationDefinition({
+    op: 'incident_lifecycle.read_active',
+    ownerComponentId: 'incident_lifecycle',
+    category: 'read',
+    inputPrivacy: 'omitted',
+    outputPrivacy: 'omitted',
+    transactionMode: 'read_only',
+    validateInput: (request) => validateActiveIncidentRequest(request.input),
+    validateOutput: validateOptionalActiveIncidentSnapshotOutput,
+    handler: (_request, input) => {
+      const source = activeIncidentSourceProvider();
+      if (source === undefined) {
+        return undefined;
+      }
+      return source.readActiveIncident(structuredClone(validateActiveIncidentRequest(input)));
+    }
+  });
+}
+
+function incidentLifecycleReadInterruptedOperation({
+  interruptedIncidentSourceProvider
+}: {
+  interruptedIncidentSourceProvider: () => InterruptedIncidentSource | undefined;
+}): RuntimeOperationDefinition {
+  return operationDefinition({
+    op: 'incident_lifecycle.read_interrupted',
+    ownerComponentId: 'incident_lifecycle',
+    category: 'read',
+    inputPrivacy: 'omitted',
+    outputPrivacy: 'omitted',
+    transactionMode: 'read_only',
+    validateInput: (request) => validateInterruptedIncidentRequest(request.input),
+    validateOutput: validateOptionalInterruptedIncidentSnapshotOutput,
+    handler: (_request, input) => {
+      const source = interruptedIncidentSourceProvider();
+      if (source === undefined) {
+        return undefined;
+      }
+      return source.readInterruptedIncident(
+        structuredClone(validateInterruptedIncidentRequest(input))
+      );
+    }
+  });
+}
+
 function userTurnActionRuntimeComponents(
   writeActions: readonly UserTurnWriteActionModule[],
   dependencies: {
     rawEventLog: RawEventLog;
     idGenerator: IdGenerator;
     clock: Clock;
-  }
+  },
+  operationsByOwner: ReadonlyMap<string, readonly RuntimeOperationDefinition[]> = new Map()
 ): RuntimeComponent[] {
   const actionsByOwner = new Map<string, UserTurnWriteActionModule[]>();
   for (const action of writeActions) {
@@ -349,18 +504,47 @@ function userTurnActionRuntimeComponents(
     actionsByOwner.set(ownerComponentId, ownerActions);
   }
 
-  return [...actionsByOwner.entries()].map(([ownerComponentId, ownerActions]) => ({
-    id: ownerComponentId,
-    version: '0.1',
-    enabled: true,
-    operations: ownerActions.map((action) =>
-      userTurnWriteActionOperation(action, dependencies)
-    ),
-    userTurnActions: ownerActions,
-    modelActionSpecs: ownerActions.flatMap((action) =>
-      action.modelActionSpec === undefined ? [] : [action.modelActionSpec]
-    )
-  }));
+  const ownerComponentIds = new Set([
+    ...operationsByOwner.keys(),
+    ...actionsByOwner.keys()
+  ]);
+  return [...ownerComponentIds].map((ownerComponentId) => {
+    const ownerActions = actionsByOwner.get(ownerComponentId) ?? [];
+    return {
+      id: ownerComponentId,
+      version: '0.1',
+      enabled: true,
+      operations: [
+        ...(operationsByOwner.get(ownerComponentId) ?? []),
+        ...ownerActions.map((action) => userTurnWriteActionOperation(action, dependencies))
+      ],
+      userTurnActions: ownerActions,
+      modelActionSpecs: ownerActions.flatMap((action) =>
+        action.modelActionSpec === undefined ? [] : [action.modelActionSpec]
+      )
+    };
+  });
+}
+
+function validateOptionalCurrentStateSnapshotOutput(output: unknown): unknown {
+  if (output === null || output === undefined) {
+    return undefined;
+  }
+  return validateCurrentCharacterStateSnapshot(output);
+}
+
+function validateOptionalActiveIncidentSnapshotOutput(output: unknown): unknown {
+  if (output === null || output === undefined) {
+    return undefined;
+  }
+  return validateActiveIncidentSnapshot(output);
+}
+
+function validateOptionalInterruptedIncidentSnapshotOutput(output: unknown): unknown {
+  if (output === null || output === undefined) {
+    return undefined;
+  }
+  return validateInterruptedIncidentSnapshot(output);
 }
 
 function userTurnWriteActionOperation(

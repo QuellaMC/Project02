@@ -167,6 +167,26 @@ export function runUserMessageTurn(
   const registryContextSectionProviders: {
     current: readonly DecisionContextSectionProvider[];
   } = { current: contextSectionProviders };
+  const contextReadSources: {
+    currentStateSource?: CurrentCharacterStateSource;
+    activeIncidentSource?: ActiveIncidentSource;
+    interruptedIncidentSource?: InterruptedIncidentSource;
+  } = optionalContextReadSources({
+    currentStateSource,
+    activeIncidentSource,
+    interruptedIncidentSource
+  });
+  const contextSourceActions = [
+    ...writeActions,
+    ...enabledRuntimeComponentUserTurnActions(runtimeComponents)
+  ];
+  const readProviderOptions = userTurnReadProviderOptions({
+    currentStateSource,
+    activeIncidentSource,
+    interruptedIncidentSource,
+    writeActions: contextSourceActions,
+    contextReadSources
+  });
   const componentRegistry = createRuntimeComponentRegistry([
     ...userTurnRuntimeComponents({
       adapter,
@@ -177,6 +197,7 @@ export function runUserMessageTurn(
       currentStateSource,
       activeIncidentSource,
       interruptedIncidentSource,
+      ...readProviderOptions,
       writeActions,
       contextSectionProviders,
       contextSectionProviderSource: () => registryContextSectionProviders.current
@@ -241,8 +262,8 @@ export function runUserMessageTurn(
 
   let actionResultFields: UserTurnActionResultFields = {};
   let incidentContextSources = optionalIncidentSources(
-    activeIncidentSource,
-    interruptedIncidentSource
+    contextReadSources.activeIncidentSource,
+    contextReadSources.interruptedIncidentSource
   );
   const beforeRoleModelActions = registryWriteActions.filter(
     (action) => action.phase === 'before_role_model'
@@ -278,6 +299,14 @@ export function runUserMessageTurn(
         actionResult,
         incidentContextSources
       );
+      setOptionalActiveIncidentSource(
+        contextReadSources,
+        incidentContextSources.activeIncidentSource
+      );
+      setOptionalInterruptedIncidentSource(
+        contextReadSources,
+        incidentContextSources.interruptedIncidentSource
+      );
     }
   }
 
@@ -295,15 +324,23 @@ export function runUserMessageTurn(
   if (contextSectionProvider !== undefined) {
     roleModelOptions.contextSectionProviders = [contextSectionProvider];
   }
-  if (currentStateSource !== undefined) {
-    roleModelOptions.currentStateSource = currentStateSource;
+  if (contextReadSources.currentStateSource !== undefined) {
+    roleModelOptions.currentStateSource = operationBackedCurrentStateSource(
+      runtimeAccess,
+      userMessageEvent
+    );
   }
-  if (incidentContextSources.activeIncidentSource !== undefined) {
-    roleModelOptions.activeIncidentSource = incidentContextSources.activeIncidentSource;
+  if (contextReadSources.activeIncidentSource !== undefined) {
+    roleModelOptions.activeIncidentSource = operationBackedActiveIncidentSource(
+      runtimeAccess,
+      userMessageEvent
+    );
   }
-  if (incidentContextSources.interruptedIncidentSource !== undefined) {
-    roleModelOptions.interruptedIncidentSource =
-      incidentContextSources.interruptedIncidentSource;
+  if (contextReadSources.interruptedIncidentSource !== undefined) {
+    roleModelOptions.interruptedIncidentSource = operationBackedInterruptedIncidentSource(
+      runtimeAccess,
+      userMessageEvent
+    );
   }
   for (const action of afterRoleModelActions) {
     if (action.modelActionSpec !== undefined) {
@@ -312,13 +349,26 @@ export function runUserMessageTurn(
     }
     const contextOptions = action.roleModelContextOptions?.();
     if (contextOptions?.currentStateSource !== undefined) {
-      roleModelOptions.currentStateSource = contextOptions.currentStateSource;
+      contextReadSources.currentStateSource = contextOptions.currentStateSource;
+      roleModelOptions.currentStateSource = operationBackedCurrentStateSource(
+        runtimeAccess,
+        userMessageEvent
+      );
     }
     if (contextOptions?.activeIncidentSource !== undefined) {
-      roleModelOptions.activeIncidentSource = contextOptions.activeIncidentSource;
+      contextReadSources.activeIncidentSource = contextOptions.activeIncidentSource;
+      roleModelOptions.activeIncidentSource = operationBackedActiveIncidentSource(
+        runtimeAccess,
+        userMessageEvent
+      );
     }
     if (contextOptions?.interruptedIncidentSource !== undefined) {
-      roleModelOptions.interruptedIncidentSource = contextOptions.interruptedIncidentSource;
+      contextReadSources.interruptedIncidentSource =
+        contextOptions.interruptedIncidentSource;
+      roleModelOptions.interruptedIncidentSource = operationBackedInterruptedIncidentSource(
+        runtimeAccess,
+        userMessageEvent
+      );
     }
   }
   const roleModelOperationResult = runtimeAccess.execute(
@@ -483,6 +533,69 @@ function executeUserTurnAction(
   };
 }
 
+function operationBackedCurrentStateSource(
+  runtimeAccess: RuntimeAccess,
+  event: UserMessageRuntimeEvent
+): CurrentCharacterStateSource {
+  return {
+    readCurrentState: (request): unknown => {
+      const operationResult = runtimeAccess.execute(
+        userTurnOperationRequest(
+          event,
+          'character_state.read_current',
+          structuredClone(request)
+        )
+      );
+      if (operationResult.status === 'rejected') {
+        throw new RuntimeValidationError(operationResultFailure(operationResult).message);
+      }
+      return operationResult.output;
+    }
+  };
+}
+
+function operationBackedActiveIncidentSource(
+  runtimeAccess: RuntimeAccess,
+  event: UserMessageRuntimeEvent
+): ActiveIncidentSource {
+  return {
+    readActiveIncident: (request): unknown => {
+      const operationResult = runtimeAccess.execute(
+        userTurnOperationRequest(
+          event,
+          'incident_lifecycle.read_active',
+          structuredClone(request)
+        )
+      );
+      if (operationResult.status === 'rejected') {
+        throw new RuntimeValidationError(operationResultFailure(operationResult).message);
+      }
+      return operationResult.output;
+    }
+  };
+}
+
+function operationBackedInterruptedIncidentSource(
+  runtimeAccess: RuntimeAccess,
+  event: UserMessageRuntimeEvent
+): InterruptedIncidentSource {
+  return {
+    readInterruptedIncident: (request): unknown => {
+      const operationResult = runtimeAccess.execute(
+        userTurnOperationRequest(
+          event,
+          'incident_lifecycle.read_interrupted',
+          structuredClone(request)
+        )
+      );
+      if (operationResult.status === 'rejected') {
+        throw new RuntimeValidationError(operationResultFailure(operationResult).message);
+      }
+      return operationResult.output;
+    }
+  };
+}
+
 function operationBackedRecentVisibleMessagesSource(
   runtimeAccess: RuntimeAccess,
   event: UserMessageRuntimeEvent
@@ -625,6 +738,69 @@ function projectVisibleReplyRoleModelResult(
   };
 }
 
+function userTurnReadProviderOptions({
+  currentStateSource,
+  activeIncidentSource,
+  interruptedIncidentSource,
+  writeActions,
+  contextReadSources
+}: {
+  currentStateSource: CurrentCharacterStateSource | undefined;
+  activeIncidentSource: ActiveIncidentSource | undefined;
+  interruptedIncidentSource: InterruptedIncidentSource | undefined;
+  writeActions: UserTurnWriteActionRegistry;
+  contextReadSources: {
+    currentStateSource?: CurrentCharacterStateSource;
+    activeIncidentSource?: ActiveIncidentSource;
+    interruptedIncidentSource?: InterruptedIncidentSource;
+  };
+}): {
+  currentStateSourceProvider?: () => CurrentCharacterStateSource | undefined;
+  activeIncidentSourceProvider?: () => ActiveIncidentSource | undefined;
+  interruptedIncidentSourceProvider?: () => InterruptedIncidentSource | undefined;
+} {
+  const hasRoleModelContextSource = writeActions.some(
+    (action) => action.roleModelContextOptions !== undefined
+  );
+  const hasIncidentContextSource = writeActions.some(
+    (action) =>
+      action.contextSourcesAfterCommit !== undefined ||
+      action.operation?.startsWith('incident.') === true
+  );
+  const output: {
+    currentStateSourceProvider?: () => CurrentCharacterStateSource | undefined;
+    activeIncidentSourceProvider?: () => ActiveIncidentSource | undefined;
+    interruptedIncidentSourceProvider?: () => InterruptedIncidentSource | undefined;
+  } = {};
+  if (currentStateSource !== undefined || hasRoleModelContextSource) {
+    output.currentStateSourceProvider = () => contextReadSources.currentStateSource;
+  }
+  if (
+    activeIncidentSource !== undefined ||
+    hasRoleModelContextSource ||
+    hasIncidentContextSource
+  ) {
+    output.activeIncidentSourceProvider = () => contextReadSources.activeIncidentSource;
+  }
+  if (
+    interruptedIncidentSource !== undefined ||
+    hasRoleModelContextSource ||
+    hasIncidentContextSource
+  ) {
+    output.interruptedIncidentSourceProvider = () =>
+      contextReadSources.interruptedIncidentSource;
+  }
+  return output;
+}
+
+function enabledRuntimeComponentUserTurnActions(
+  runtimeComponents: readonly RuntimeComponent[]
+): UserTurnWriteActionRegistry {
+  return runtimeComponents.flatMap((component) =>
+    component.enabled ? (component.userTurnActions ?? []) : []
+  );
+}
+
 function optionalIncidentSources(
   activeIncidentSource: ActiveIncidentSource | undefined,
   interruptedIncidentSource: InterruptedIncidentSource | undefined
@@ -636,6 +812,62 @@ function optionalIncidentSources(
     activeIncidentSource?: ActiveIncidentSource;
     interruptedIncidentSource?: InterruptedIncidentSource;
   } = {};
+  if (activeIncidentSource !== undefined) {
+    output.activeIncidentSource = activeIncidentSource;
+  }
+  if (interruptedIncidentSource !== undefined) {
+    output.interruptedIncidentSource = interruptedIncidentSource;
+  }
+  return output;
+}
+
+function setOptionalActiveIncidentSource(
+  sources: {
+    activeIncidentSource?: ActiveIncidentSource;
+  },
+  value: ActiveIncidentSource | undefined
+): void {
+  if (value === undefined) {
+    delete sources.activeIncidentSource;
+  } else {
+    sources.activeIncidentSource = value;
+  }
+}
+
+function setOptionalInterruptedIncidentSource(
+  sources: {
+    interruptedIncidentSource?: InterruptedIncidentSource;
+  },
+  value: InterruptedIncidentSource | undefined
+): void {
+  if (value === undefined) {
+    delete sources.interruptedIncidentSource;
+  } else {
+    sources.interruptedIncidentSource = value;
+  }
+}
+
+function optionalContextReadSources({
+  currentStateSource,
+  activeIncidentSource,
+  interruptedIncidentSource
+}: {
+  currentStateSource: CurrentCharacterStateSource | undefined;
+  activeIncidentSource: ActiveIncidentSource | undefined;
+  interruptedIncidentSource: InterruptedIncidentSource | undefined;
+}): {
+  currentStateSource?: CurrentCharacterStateSource;
+  activeIncidentSource?: ActiveIncidentSource;
+  interruptedIncidentSource?: InterruptedIncidentSource;
+} {
+  const output: {
+    currentStateSource?: CurrentCharacterStateSource;
+    activeIncidentSource?: ActiveIncidentSource;
+    interruptedIncidentSource?: InterruptedIncidentSource;
+  } = {};
+  if (currentStateSource !== undefined) {
+    output.currentStateSource = currentStateSource;
+  }
   if (activeIncidentSource !== undefined) {
     output.activeIncidentSource = activeIncidentSource;
   }
