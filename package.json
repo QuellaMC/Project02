@@ -1,6 +1,6 @@
 {
-  "name": "project02-runtime",
-  "description": "TypeScript runtime foundation for the Project02 Live Character Framework.",
+  "name": "project02",
+  "description": "TypeScript rebuild baseline for the Live Character Framework.",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.0",
@@ -8,10 +8,7 @@
     "node": ">=24.12.0"
   },
   "exports": {
-    "./runtime/*": "./src/runtime/*.ts",
-    "./character/state/*": "./src/character/state/*.ts",
-    "./role-model/*": "./src/role-model/*.ts",
-    "./commit-effects/*": "./src/commit-effects/*.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "lint": "eslint --max-warnings=0 --no-error-on-unmatched-pattern \"src/**/*.ts\" \"tests/**/*.ts\" \"vitest.config.ts\"",
