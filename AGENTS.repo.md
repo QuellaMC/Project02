@@ -139,6 +139,7 @@ docs/
     schema-evolution.html
   plan/
     active-slice.html
+    child-tasks/
     future-slices.html
     completed/
   develop-journal/
@@ -149,10 +150,18 @@ docs/
 Guidelines:
 
 - Keep repo operating instructions in `AGENTS.md` and `AGENTS.repo.md`.
+- For parallel Codex threads and agent coordination, follow
+  [`docs/wiki/parallel-agent-development-protocol.md`](./docs/wiki/parallel-agent-development-protocol.md).
+- Keep one active product slice at `docs/plan/active-slice.html`; subthreads
+  may create child task documents under `docs/plan/child-tasks/` only when a
+  durable task packet or sub-slice note is needed.
 - Use PR descriptions for small review summaries.
 - Use `docs/plan/active-slice.html` when a slice needs a durable active spec.
 - Use `docs/plan/future-slices.html` when future ideas start accumulating.
 - Use date-scoped HTML journal pages for non-trivial implementation history.
+- Markdown is allowed for agent-operating protocols and child task packets;
+  durable product, plan, wiki, and journal pages should otherwise keep the
+  repo's HTML style.
 - Do not recreate a broad planning site before the slice needs it.
 
 Every non-trivial change should still answer:
