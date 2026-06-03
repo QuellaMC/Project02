@@ -67,11 +67,11 @@
     <h2>Current Scope</h2>
     <ul>
       <li>One CLI entry point at <code>src/relay-cli.ts</code>, with a package-script wrapper for manual runs.</li>
-      <li>One input path: exactly one non-empty command-line message.</li>
+      <li>One input path: exactly one non-empty single-line command-line message.</li>
       <li>One output path: the CLI itself prints exactly one reply line to stdout.</li>
       <li>A small pure relay function that accepts message text and an injected agent seam.</li>
       <li>A deterministic local agent implementation for this slice.</li>
-      <li>Input trimming and validation for missing, empty, or whitespace-only messages.</li>
+      <li>Input trimming and validation for missing, empty, whitespace-only, or multi-line messages.</li>
       <li>Non-zero process exit and a clear stderr message when CLI input is invalid.</li>
       <li>Focused tests for the pure relay behavior and CLI boundary behavior.</li>
     </ul>
@@ -135,11 +135,11 @@ pnpm --silent relay -- "are you there?"</code></pre>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>The CLI accepts exactly one non-empty message from command-line arguments.</td>
+          <td>The CLI accepts exactly one non-empty single-line message from command-line arguments.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>The CLI rejects missing, empty, or whitespace-only input before calling the agent seam.</td>
+          <td>The CLI rejects missing, empty, whitespace-only, or multi-line input before calling the agent seam.</td>
         </tr>
         <tr>
           <td>FR-4</td>
@@ -215,7 +215,7 @@ pnpm --silent relay -- "are you there?"</code></pre>
         </tr>
         <tr>
           <td>AC-2</td>
-          <td>Blank input is rejected with a non-zero exit code and a stderr error.</td>
+          <td>Blank or multi-line input is rejected with a non-zero exit code and a stderr error.</td>
         </tr>
         <tr>
           <td>AC-3</td>
@@ -246,7 +246,7 @@ pnpm --silent relay -- "are you there?"</code></pre>
       <li>Relays a valid message to an injected fake agent.</li>
       <li>Trims input before passing it to the agent.</li>
       <li>Returns the fake agent reply text.</li>
-      <li>Rejects missing, empty, and whitespace-only input.</li>
+      <li>Rejects missing, empty, whitespace-only, and multi-line input.</li>
       <li>Proves rejected input does not call the agent.</li>
     </ul>
 
@@ -255,7 +255,7 @@ pnpm --silent relay -- "are you there?"</code></pre>
       <li>Successful direct Node command prints exactly one CLI-owned reply line to stdout.</li>
       <li>Successful command leaves stderr empty.</li>
       <li>Invalid command exits non-zero.</li>
-      <li>Invalid command prints a clear stderr error and no stdout reply.</li>
+      <li>Invalid or multi-line command input prints a clear stderr error and no stdout reply.</li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
@@ -269,8 +269,8 @@ pnpm --silent relay -- "are you there?"</code></pre>
 
     <h2>Failure Behavior</h2>
     <ul>
-      <li>Invalid user input returns a validation error before the agent seam is called.</li>
-      <li>An empty or whitespace-only agent reply is treated as an implementation error and should fail the relay call.</li>
+      <li>Invalid user input, including embedded line breaks, returns a validation error before the agent seam is called.</li>
+      <li>An empty, whitespace-only, or multi-line agent reply is treated as an implementation error and should fail the relay call.</li>
       <li>The CLI maps validation failures to a clear stderr message and a non-zero process exit.</li>
       <li>The CLI maps unexpected agent failures to a clear stderr message and a non-zero process exit without pretending the character answered.</li>
     </ul>

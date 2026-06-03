@@ -14,6 +14,8 @@ export type RelayResult = {
 };
 
 const inputErrorMessage = 'Provide exactly one non-empty message.';
+const inputLineErrorMessage = 'Provide exactly one non-empty single-line message.';
+const lineBreakPattern = /[\r\n]/u;
 
 export class RelayInputError extends Error {
   constructor(message = inputErrorMessage) {
@@ -31,6 +33,10 @@ export async function relayMessage(
 
   if (reply.text.trim().length === 0) {
     throw new Error('Relay agent returned an empty reply.');
+  }
+
+  if (lineBreakPattern.test(reply.text)) {
+    throw new Error('Relay agent returned a multi-line reply.');
   }
 
   return {
@@ -58,6 +64,10 @@ function normalizeMessage(message: string | undefined): string {
 
   if (normalizedMessage.length === 0) {
     throw new RelayInputError();
+  }
+
+  if (lineBreakPattern.test(normalizedMessage)) {
+    throw new RelayInputError(inputLineErrorMessage);
   }
 
   return normalizedMessage;

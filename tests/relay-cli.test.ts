@@ -38,6 +38,16 @@ describe('node src/relay-cli.ts', () => {
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('Error: Provide exactly one non-empty message.\n');
   });
+
+  it('rejects multiline input with stderr and no stdout reply', async () => {
+    const result = await runRelay(['hello\nthere']);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe(
+      'Error: Provide exactly one non-empty single-line message.\n'
+    );
+  });
 });
 
 async function runRelay(args: readonly string[]): Promise<CommandResult> {

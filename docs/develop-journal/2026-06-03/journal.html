@@ -26,6 +26,7 @@
       <li>Added a pure relay function with input trimming, validation, injected agent invocation, and deterministic reply handling.</li>
       <li>Added a small CLI boundary for argument parsing, stdout, stderr, and process exit mapping.</li>
       <li>Added Vitest behavior coverage for the relay function and CLI boundary.</li>
+      <li>Addressed PR review feedback by rejecting embedded line breaks in user input and agent replies so the CLI stdout contract remains one line.</li>
     </ul>
 
     <h2>Why It Was Needed</h2>
@@ -37,7 +38,10 @@
     <h2>How It Was Tested</h2>
     <ul>
       <li><code>pnpm check</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+      <li><code>git diff --check</code></li>
       <li><code>node src/relay-cli.ts -- hello</code></li>
+      <li><code>node src/relay-cli.ts -- $'hello\nthere'</code></li>
       <li><code>pnpm --silent relay -- hello</code></li>
     </ul>
 
