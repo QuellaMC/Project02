@@ -150,7 +150,7 @@ docs/
 Guidelines:
 
 - Keep repo operating instructions in `AGENTS.md` and `AGENTS.repo.md`.
-- For parallel Codex thread and agent coordination, follow
+- For parallel Codex threads and agent coordination, follow
   [`docs/wiki/parallel-agent-development-protocol.md`](./docs/wiki/parallel-agent-development-protocol.md).
 - Keep one active product slice at `docs/plan/active-slice.html`; subthreads
   may create child task documents under `docs/plan/child-tasks/` only when a
