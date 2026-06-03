@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MVP-001 - Basic Relay CLI</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    h3 { margin-top: 22px; font-size: 1rem; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul, ol { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    pre { overflow-x: auto; background: #202923; color: #f3f7f1; border-radius: 8px; padding: 16px; }
+    pre code { background: transparent; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; }
+    th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #edf1eb; }
+    blockquote { border-left: 4px solid #b9c6bd; margin: 16px 0; padding: 8px 14px; background: #fff; color: #34413d; }
+    .status { display: inline-block; border: 1px solid #aebbad; border-radius: 999px; padding: 2px 10px; background: #fff; font-size: 0.9rem; }
+    .meta { color: #4a5651; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-001 - Basic Relay CLI</h1>
+    <p><span class="status">Status: proposed active slice</span></p>
+    <p class="meta">
+      Created: 2026-06-03. Active spec:
+      <code>docs/plan/active-slice.html</code>. Runtime language: TypeScript.
+      Test runner: Vitest. Branch: <code>feature/mvp-001-basic-relay-cli</code>.
+    </p>
+
+    <h2>Source Context</h2>
+    <p>
+      Product direction comes from the Notion project hub
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>.
+      Relevant source pages are
+      <a href="https://www.notion.so/35f8995c0c5e818f948dfbf3944f52ce">01 - Framework Overview</a>,
+      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
+      <a href="https://www.notion.so/35f8995c0c5e813982a2dfc95071e237">04 - Event Triggers &amp; Runtime Hooks</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
+    </p>
+    <blockquote>
+      Notion direction: build toward a Live Character Framework where triggers eventually become runtime events,
+      model output proposes actions, and runtime policy commits accepted behavior.
+    </blockquote>
+    <p>
+      Local rebuild direction comes from <a href="../../AGENTS.md">AGENTS.md</a> and
+      <a href="../../AGENTS.repo.md">AGENTS.repo.md</a>. The reset main line is intentionally small.
+      The old TypeScript implementation on <code>legacy/typescript</code> is reference material only.
+      The first new product slice should be a small OpenClaw-style relay path:
+      one input, a minimal agent seam, and one output.
+    </p>
+
+    <h2>Goal</h2>
+    <p>
+      Implement the smallest runnable message relay: a user provides one message through a CLI command,
+      the command passes that message through a minimal local agent seam, and the CLI prints exactly one
+      reply to standard output.
+    </p>
+
+    <h2>Current Scope</h2>
+    <ul>
+      <li>One CLI entry point at <code>src/relay-cli.ts</code>, with a package-script wrapper for manual runs.</li>
+      <li>One input path: exactly one non-empty command-line message.</li>
+      <li>One output path: the CLI itself prints exactly one reply line to stdout.</li>
+      <li>A small pure relay function that accepts message text and an injected agent seam.</li>
+      <li>A deterministic local agent implementation for this slice.</li>
+      <li>Input trimming and validation for missing, empty, or whitespace-only messages.</li>
+      <li>Non-zero process exit and a clear stderr message when CLI input is invalid.</li>
+      <li>Focused tests for the pure relay behavior and CLI boundary behavior.</li>
+    </ul>
+
+    <h2>Explicit Non-Goals</h2>
+    <ul>
+      <li>No live model provider call.</li>
+      <li>No API key, provider config, prompt template, or model selection.</li>
+      <li>No Twilio, WhatsApp, webhook, HTTP server, browser UI, or provider edge.</li>
+      <li>No <code>RuntimeEvent</code> implementation.</li>
+      <li>No <code>RawEventLog</code>, trace store, durable persistence, or replay surface.</li>
+      <li>No Character State Engine, Role Model Loop, Commit and Effects Engine, or Runtime Kernel module.</li>
+      <li>No memory, retrieval, tools, scheduler, Live2D, assets, plugin system, or background worker.</li>
+      <li>No multi-turn conversation state or transcript storage.</li>
+      <li>No compatibility migration from the old <code>legacy/typescript</code> branch.</li>
+    </ul>
+
+    <h2>Minimal Contract</h2>
+    <h3>RelayAgent</h3>
+    <pre><code>type RelayAgent = {
+  reply(input: { message: string }): Promise&lt;{ text: string }&gt; | { text: string }
+}</code></pre>
+
+    <h3>RelayResult</h3>
+    <pre><code>type RelayResult = {
+  input: {
+    message: string
+  }
+  reply: {
+    text: string
+  }
+}</code></pre>
+
+    <h3>CLI Contract</h3>
+    <pre><code>node src/relay-cli.ts -- "are you there?"
+
+# stdout
+relay: are you there?
+
+# package-script smoke example
+pnpm --silent relay -- "are you there?"</code></pre>
+
+    <p>
+      The relay agent seam is intentionally smaller than the future role-model boundary. It is the
+      first executable pressure point for the message path. Future slices may replace or wrap it with
+      runtime events, model calls, logging, and commit/effect boundaries after this command works.
+    </p>
+
+    <h2>Functional Requirements</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Requirement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>FR-1</td>
+          <td>The repo exposes a CLI command named <code>relay</code> through <code>pnpm relay</code>.</td>
+        </tr>
+        <tr>
+          <td>FR-2</td>
+          <td>The CLI accepts exactly one non-empty message from command-line arguments.</td>
+        </tr>
+        <tr>
+          <td>FR-3</td>
+          <td>The CLI rejects missing, empty, or whitespace-only input before calling the agent seam.</td>
+        </tr>
+        <tr>
+          <td>FR-4</td>
+          <td>The pure relay function passes the normalized message to the injected agent seam.</td>
+        </tr>
+        <tr>
+          <td>FR-5</td>
+          <td>The relay function returns the agent reply text without adding durable state or side effects.</td>
+        </tr>
+        <tr>
+          <td>FR-6</td>
+          <td>The CLI prints exactly one successful reply to stdout and does not print success output to stderr.</td>
+        </tr>
+        <tr>
+          <td>FR-7</td>
+          <td>Invalid CLI input exits non-zero and prints a clear error to stderr.</td>
+        </tr>
+        <tr>
+          <td>FR-8</td>
+          <td>The deterministic local agent returns a stable reply suitable for tests and manual smoke runs.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Non-Functional Requirements</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Requirement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>NFR-1</td>
+          <td>No network call or external service is used.</td>
+        </tr>
+        <tr>
+          <td>NFR-2</td>
+          <td>No live model provider is called.</td>
+        </tr>
+        <tr>
+          <td>NFR-3</td>
+          <td>Runtime behavior is deterministic for the same CLI input.</td>
+        </tr>
+        <tr>
+          <td>NFR-4</td>
+          <td>The implementation remains small and runnable on the current TypeScript baseline.</td>
+        </tr>
+        <tr>
+          <td>NFR-5</td>
+          <td>The slice introduces no empty folders or placeholder modules for future architecture.</td>
+        </tr>
+        <tr>
+          <td>NFR-6</td>
+          <td>Tests do not depend on Notion, GitHub, local machine state, or provider credentials.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Acceptance Criteria</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Criterion</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>AC-1</td>
+          <td><code>node src/relay-cli.ts -- "hello"</code> prints exactly <code>relay: hello</code> plus a trailing newline to stdout.</td>
+        </tr>
+        <tr>
+          <td>AC-2</td>
+          <td>Blank input is rejected with a non-zero exit code and a stderr error.</td>
+        </tr>
+        <tr>
+          <td>AC-3</td>
+          <td>A unit test proves the relay function calls the injected agent seam with the normalized message.</td>
+        </tr>
+        <tr>
+          <td>AC-4</td>
+          <td>A unit test proves invalid input does not call the agent seam.</td>
+        </tr>
+        <tr>
+          <td>AC-5</td>
+          <td>A CLI boundary test proves stdout/stderr behavior for success and invalid input.</td>
+        </tr>
+        <tr>
+          <td>AC-6</td>
+          <td><code>pnpm lint</code>, <code>pnpm typecheck</code>, and <code>pnpm test</code> pass.</td>
+        </tr>
+        <tr>
+          <td>AC-7</td>
+          <td>No old runtime modules are restored from <code>legacy/typescript</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Test Plan</h2>
+    <h3>Unit Tests</h3>
+    <ul>
+      <li>Relays a valid message to an injected fake agent.</li>
+      <li>Trims input before passing it to the agent.</li>
+      <li>Returns the fake agent reply text.</li>
+      <li>Rejects missing, empty, and whitespace-only input.</li>
+      <li>Proves rejected input does not call the agent.</li>
+    </ul>
+
+    <h3>CLI Boundary Tests</h3>
+    <ul>
+      <li>Successful direct Node command prints exactly one CLI-owned reply line to stdout.</li>
+      <li>Successful command leaves stderr empty.</li>
+      <li>Invalid command exits non-zero.</li>
+      <li>Invalid command prints a clear stderr error and no stdout reply.</li>
+    </ul>
+
+    <h2>Implementation Boundaries</h2>
+    <ul>
+      <li>The CLI boundary owns argument parsing, stdout, stderr, and process exit code mapping.</li>
+      <li>The pure relay function owns message normalization, validation, agent invocation, and reply validation.</li>
+      <li>The local agent owns only a deterministic reply for this first runnable path.</li>
+      <li>The implementation may add a small CLI file and a small relay module, but should not create the future runtime directory structure.</li>
+      <li>Tests should execute the TypeScript CLI directly with <code>node src/relay-cli.ts</code> so package-manager output cannot affect the stdout contract.</li>
+    </ul>
+
+    <h2>Failure Behavior</h2>
+    <ul>
+      <li>Invalid user input returns a validation error before the agent seam is called.</li>
+      <li>An empty or whitespace-only agent reply is treated as an implementation error and should fail the relay call.</li>
+      <li>The CLI maps validation failures to a clear stderr message and a non-zero process exit.</li>
+      <li>The CLI maps unexpected agent failures to a clear stderr message and a non-zero process exit without pretending the character answered.</li>
+    </ul>
+
+    <h2>Pre-Code Review Notes</h2>
+    <ul>
+      <li>The reset branch currently contains only a callable TypeScript health baseline and one test.</li>
+      <li>This slice intentionally chooses the OpenClaw-style product path over replaying the old MVP-001 runtime-event/logging implementation.</li>
+      <li>The old <code>legacy/typescript</code> branch may be checked for naming or failure-case inspiration, but it must not be copied wholesale.</li>
+      <li>The relay agent seam is the only abstraction justified by this slice because it gives future model/provider work a small replacement point.</li>
+      <li>Runtime events and raw logs remain long-term architecture goals from Notion, but they should be introduced only when the working relay path creates real pressure for them.</li>
+    </ul>
+
+    <h2>Open Questions</h2>
+    <ul>
+      <li>No product decision is currently blocked. The implementation should proceed with an argv-based CLI unless the user chooses a different first input path.</li>
+    </ul>
+
+    <h2>Future Ideas Parking Lot</h2>
+    <ul>
+      <li>Add verbose structured logs after the CLI has enough operational pressure.</li>
+      <li>Add a live model adapter after the local relay seam is proven.</li>
+      <li>Add one provider edge, such as Twilio, after the CLI relay works.</li>
+      <li>Introduce <code>RuntimeEvent</code> and raw trace logging once the message path has a concrete event boundary to preserve.</li>
+    </ul>
+  </main>
+</body>
+</html>
