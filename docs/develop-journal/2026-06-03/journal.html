@@ -50,6 +50,21 @@
       Future slices can replace the local deterministic agent through the relay seam after the CLI path
       creates real pressure for model, provider, logging, or runtime-event boundaries.
     </p>
+
+    <h2>Parallel Agent Development Protocol</h2>
+    <p>
+      Added a docs-only operating protocol for parallel Codex thread and agent coordination.
+      The protocol lives at <code>docs/wiki/parallel-agent-development-protocol.md</code>
+      and is linked from <code>AGENTS.repo.md</code> so future threads can find it before
+      delegating work.
+    </p>
+    <ul>
+      <li>Defines the main thread as the user-facing team lead and subthreads as scoped task owners.</li>
+      <li>Introduces task packets for assigning work by goal, scope, dependencies, checks, and handoff expectations.</li>
+      <li>Allows shared-file edits while requiring unresolved semantic conflicts to escalate from subthread to main thread, and from main thread to the user when needed.</li>
+      <li>Follow-up organization added generic delegation rules to <code>AGENTS.md</code>, project-specific child task guidance to <code>AGENTS.repo.md</code>, and rewrote the protocol around one active product slice plus subthread task packets.</li>
+      <li>Records the change as docs-only; verification used Markdown review, <code>git diff --check</code>, and <code>pnpm check</code>.</li>
+    </ul>
   </main>
 </body>
 </html>

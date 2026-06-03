@@ -81,7 +81,36 @@ ideas in the repository's backlog, future-ideas document, issue, or PR notes.
 
 ---
 
-## 5. Implementation Standards
+## 5. Parallel and Delegated Work
+
+When work is split across threads or agents, keep one coordinator-facing active
+slice. The main thread owns the user conversation, intended outcome, active
+slice, task decomposition, final integration review, and user-facing progress
+report.
+
+Child threads should receive task packets derived from the active slice. A task
+packet should define goal, scope, non-goals, acceptance criteria, likely files,
+dependencies, required checks, and handoff expectations. Child threads may keep
+local notes or child task documents when the repository addendum allows it, but
+they must not create competing active slices or override the parent slice.
+
+Agents inside a child thread may implement, test, review, audit docs, or
+research. The child thread remains responsible for merging that work into one
+coherent handoff.
+
+Before handoff or PR review, a child thread should run the required checks,
+assign review agents when useful, fix all actionable findings, and clearly mark
+anything unresolved. The main thread reviews child work against the user intent,
+active slice, repository policy, tests, and sibling-thread conflicts.
+
+Resolve mechanical conflicts locally when the safe answer is clear. Escalate
+semantic conflicts to the parent thread. Escalate to the user only when the
+decision requires a product, priority, scope, or architecture call that is not
+already authorized.
+
+---
+
+## 6. Implementation Standards
 
 Write the minimum code that satisfies the current slice and tests.
 
@@ -101,7 +130,7 @@ or meaning.
 
 ---
 
-## 6. Testing
+## 7. Testing
 
 Use TDD for runtime or behavior changes when practical.
 
@@ -118,7 +147,7 @@ current slice explicitly requires it. Use fakes, mocks, stubs, or test adapters.
 
 ---
 
-## 7. Model, Persistence, Security, and Errors
+## 8. Model, Persistence, Security, and Errors
 
 Model output may propose actions, but runtime policy decides what is allowed.
 Raw model output must never directly mutate durable state.
@@ -133,7 +162,7 @@ processing fails. Do not hide runtime errors behind friendly language only.
 
 ---
 
-## 8. TypeScript Policy
+## 9. TypeScript Policy
 
 Default behavior:
 
@@ -151,7 +180,7 @@ Required checks before done:
 
 ---
 
-## 9. Git Hygiene
+## 10. Git Hygiene
 
 Follow the repository-specific branch, PR, merge, and CI policy.
 
@@ -165,7 +194,7 @@ General rules:
 
 ---
 
-## 10. Final Rule
+## 11. Final Rule
 
 Design the architecture globally. Implement behavior locally. Let schemas,
 modules, docs, and process grow only when working behavior needs them.
