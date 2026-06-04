@@ -20,7 +20,11 @@ export type LocalRuntimeStorageContractErrorCode =
   | 'invalid_session_id'
   | 'malformed_record'
   | 'malformed_schema_marker'
-  | 'unsupported_schema_version';
+  | 'missing_file'
+  | 'partial_write'
+  | 'read_failed'
+  | 'unsupported_schema_version'
+  | 'write_failed';
 
 export class LocalRuntimeStorageContractError extends Error {
   readonly code: LocalRuntimeStorageContractErrorCode;

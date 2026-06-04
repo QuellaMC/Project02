@@ -22,6 +22,7 @@ import {
   localRuntimeStorageSchemaVersion,
   normalizeLocalRuntimeSessionId,
   type ConversationLogRecord,
+  type LocalRuntimeStorageContractErrorCode,
   type RawEventLogRecord,
   type RuntimeTraceEntry
 } from '../src/index.ts';
@@ -29,6 +30,40 @@ import {
 const createdAt = '2026-06-04T00:00:00.000Z';
 
 describe('local runtime storage contract', () => {
+  it('defines shared typed errors for downstream local storage boundaries', () => {
+    const errorCodes = [
+      'invalid_session_id',
+      'malformed_record',
+      'malformed_schema_marker',
+      'missing_file',
+      'partial_write',
+      'read_failed',
+      'unsupported_schema_version',
+      'write_failed'
+    ] as const satisfies readonly LocalRuntimeStorageContractErrorCode[];
+
+    expect(errorCodes).toEqual([
+      'invalid_session_id',
+      'malformed_record',
+      'malformed_schema_marker',
+      'missing_file',
+      'partial_write',
+      'read_failed',
+      'unsupported_schema_version',
+      'write_failed'
+    ]);
+
+    for (const code of errorCodes) {
+      const error = new LocalRuntimeStorageContractError(
+        code,
+        `Example local runtime storage error: ${code}.`
+      );
+
+      expect(error.code).toBe(code);
+      expect(error.name).toBe('LocalRuntimeStorageContractError');
+    }
+  });
+
   it('defines the default store root, schema marker, and per-session path layout', () => {
     const layout = createLocalRuntimeStorageLayout();
     const sessionPaths = createLocalRuntimeSessionPaths({

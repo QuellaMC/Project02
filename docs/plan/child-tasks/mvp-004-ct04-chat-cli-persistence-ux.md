@@ -32,7 +32,8 @@ without losing the existing default chat behavior or MVP-003 trace mode.
 
 - `src/chat-cli.ts`
 - `tests/chat-cli.contract.test.ts`
-- `package.json` only if a narrow script addition is needed.
+- `package.json` only if a narrow chat-specific script adjustment is needed; CT-05 owns
+  the `pnpm inspect` script.
 
 ## Dependencies
 

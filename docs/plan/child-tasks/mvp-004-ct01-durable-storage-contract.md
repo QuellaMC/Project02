@@ -18,7 +18,8 @@ versioned file layout, session identity model, record codec, fixture set, and er
 - Define per-session directories under the store root. Runtime records should not carry duplicate `sessionId` fields unless the main thread explicitly revises the storage strategy.
 - Define append-only file names for runtime trace entries, raw event records, and visible conversation records inside each session directory.
 - Define record codecs that preserve the MVP-003 event ID, trace ID, timestamp, status, payload summary, and visible message fields.
-- Define corruption, missing-file, malformed-record, and partial-write error types.
+- Define corruption, missing-file, malformed-record, read/write failure, and partial-write
+  error codes on the shared `LocalRuntimeStorageContractError` contract.
 - Provide a thin module map and deterministic test fixtures downstream tasks can reuse.
 
 ## Explicit Non-Goals
@@ -42,6 +43,8 @@ versioned file layout, session identity model, record codec, fixture set, and er
 - Keep the contract small and concrete. Avoid unused extension points for future providers, memory, or schedulers.
 - If `.project02-runtime/` is accepted as the default dev-local root, add it to `.gitignore`.
 - Downstream tasks should not invent parallel stored record shapes.
+- Downstream tasks should use the shared error codes `missing_file`, `read_failed`,
+  `write_failed`, and `partial_write` instead of creating private IO error classes.
 - Downstream tasks should import CT-01 exports rather than duplicating store-root, session-ID, file-layout, codec, or error helpers.
 
 ## Acceptance Criteria

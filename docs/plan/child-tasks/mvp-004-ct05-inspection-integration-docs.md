@@ -31,7 +31,7 @@ integration review and documentation alignment for MVP-004.
 
 - `src/inspect-cli.ts`
 - `tests/inspect-cli.contract.test.ts`
-- `package.json`
+- `package.json` for the `pnpm inspect` script.
 - `docs/plan/active-slice.html`
 - `docs/plan/child-tasks/`
 - `docs/develop-journal/2026-06-04/journal.html`
@@ -46,6 +46,8 @@ integration review and documentation alignment for MVP-004.
 
 - Findings should lead the handoff, ordered by severity or integration risk.
 - Inspect output should be stable enough for tests but not pretend to be a replay UI.
+- This task owns the `pnpm inspect` package script; CT-04 should touch `package.json`
+  only for chat-specific needs.
 - Keep docs factual: durable local runtime truth exists; semantic memory and retrieval do not.
 - If implementation reveals a product decision not settled by the active slice, escalate it to the main thread before changing scope.
 - Stage this task in three passes when practical: early read-only integration review, inspect implementation after CT-02/CT-03, and final PR-readiness review after CT-04.

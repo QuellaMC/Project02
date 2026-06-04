@@ -296,6 +296,28 @@
       <li>Added <code>tests/local-storage.test.ts</code> to pin the CT-01 contract before broader durable-store implementation begins.</li>
       <li>Added <code>.project02-runtime/</code> to <code>.gitignore</code> as the proposed dev-local store root.</li>
     </ul>
+
+    <h2>MVP-004 Reviewer Error-Contract Adjustment</h2>
+    <p>
+      A read-only independent spec reviewer found that the MVP-004 scope and task organization were
+      coherent, but CT-01's implemented error-code union did not yet cover the missing-file,
+      read/write failure, and partial-write policies assigned to the shared storage contract.
+    </p>
+    <ul>
+      <li>Added shared <code>LocalRuntimeStorageContractError</code> codes for <code>missing_file</code>, <code>read_failed</code>, <code>write_failed</code>, and <code>partial_write</code>.</li>
+      <li>Added a focused contract regression so downstream tasks can depend on the exported error vocabulary instead of creating private IO errors.</li>
+      <li>Clarified CT-01, CT-04, and CT-05 task packets so CT-05 owns the <code>pnpm inspect</code> script and CT-04 does not touch inspect wiring.</li>
+    </ul>
+    <p>
+      Verification after the adjustment:
+    </p>
+    <ul>
+      <li><code>pnpm exec vitest tests/local-storage.test.ts --run</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+      <li><code>git diff --check</code></li>
+      <li>HTML parser check over <code>docs/plan/active-slice.html</code> and <code>docs/develop-journal/2026-06-04/journal.html</code></li>
+    </ul>
   </main>
 </body>
 </html>
