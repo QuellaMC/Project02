@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-06-04 Development Journal</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 920px; margin: 0 auto; padding: 40px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 1.8rem; }
+    h2 { margin-top: 28px; font-size: 1.15rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-06-04 Development Journal</h1>
+    <p>MVP-002 Local Character Conversation Core planning entry.</p>
+
+    <h2>What Changed</h2>
+    <ul>
+      <li>Archived MVP-001 Basic Relay CLI under <code>docs/plan/completed/mvp-001-basic-relay-cli.html</code>.</li>
+      <li>Replaced <code>docs/plan/active-slice.html</code> with the MVP-002 Local Character Conversation Core active slice.</li>
+      <li>Framed MVP-002 around product before/after, the new local conversation capability, and week-sized implementation workstreams.</li>
+    </ul>
+
+    <h2>Why It Was Needed</h2>
+    <p>
+      MVP-001 proved the smallest runnable relay path, but the product still lacked a local character
+      identity, conversation session, visible transcript, and central character turn unit. MVP-002
+      defines the next product milestone: a local character conversation core that can support a week
+      of focused implementation work.
+    </p>
+
+    <h2>How It Was Tested</h2>
+    <ul>
+      <li><code>git diff --check</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+    </ul>
+
+    <h2>Next</h2>
+    <p>
+      Coordinate the child task implementation threads, integrate their handoffs into the short-lived
+      branch, and run the required checks before preparing the PR.
+    </p>
+
+    <h2>Parallel Agent Development Started</h2>
+    <p>
+      Created short-lived branch <code>feature/mvp-002-local-character-conversation-core</code>
+      and added child task packets under <code>docs/plan/child-tasks/</code>.
+    </p>
+    <ul>
+      <li><code>mvp-002-ct01-conversation-core.md</code> owns the shared conversation core contract and implementation.</li>
+      <li><code>mvp-002-ct02-local-chat-cli.md</code> owns the local chat command and CLI boundary once the core contract is available.</li>
+      <li><code>mvp-002-ct03-review-test-plan.md</code> owns read-only contract review, MVP-001 compatibility checks, and the MVP-002 test matrix.</li>
+    </ul>
+
+    <h2>CT-01 Conversation Core Integrated</h2>
+    <p>
+      Integrated the CT-01 conversation core into the main MVP-002 branch. The core adds the built-in
+      local character profile, in-memory conversation session, visible transcript records, deterministic
+      character agent seam, shared one-line validation, and atomic character turn commits.
+    </p>
+    <ul>
+      <li>Added <code>src/conversation.ts</code> for session creation, turn execution, visible messages, and deterministic local character replies.</li>
+      <li>Added <code>src/message-validation.ts</code> so relay and conversation input validation share one boundary.</li>
+      <li>Updated <code>src/relay.ts</code> to reuse shared validation while preserving MVP-001 relay errors and behavior.</li>
+      <li>Added <code>tests/conversation.test.ts</code> for successful turns, recent visible context, invalid input, invalid replies, and failed-agent atomicity.</li>
+    </ul>
+    <p>
+      Verification after integration:
+    </p>
+    <ul>
+      <li><code>pnpm test tests/conversation.test.ts tests/relay.test.ts tests/relay-cli.test.ts</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+      <li><code>git diff --check</code></li>
+      <li>HTML parser check over edited durable HTML pages</li>
+    </ul>
+    <p>
+      Started a fresh CT-02 continuation worktree from this integrated working tree so the local chat
+      CLI can be implemented against the real conversation core rather than skipped contract tests.
+    </p>
+
+    <h2>CT-02 Local Chat CLI Integrated</h2>
+    <p>
+      Integrated the local chat CLI into the main MVP-002 branch. The CLI owns terminal input/output,
+      delegates each turn to <code>runCharacterTurn()</code>, keeps validation and transcript mutation
+      in the conversation core, and preserves the MVP-001 relay script.
+    </p>
+    <ul>
+      <li>Added <code>src/chat-cli.ts</code> with the direct command <code>node src/chat-cli.ts</code>.</li>
+      <li>Added the package script <code>pnpm chat</code>.</li>
+      <li>Added <code>tests/chat-cli.contract.test.ts</code> for two-turn chat, <code>/exit</code>, invalid input continuing without a character reply, <code>pnpm --silent chat</code>, and relay script compatibility.</li>
+    </ul>
+    <p>
+      Verification after CT-02 integration:
+    </p>
+    <ul>
+      <li><code>pnpm test tests/chat-cli.contract.test.ts tests/conversation.test.ts tests/relay.test.ts tests/relay-cli.test.ts</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+      <li><code>git diff --check</code></li>
+      <li><code>printf '/exit\n' | pnpm --silent chat</code></li>
+      <li><code>printf 'hello\nstill there?\n/exit\n' | node src/chat-cli.ts</code></li>
+    </ul>
+
+    <h2>Final Coordinator PR-Readiness Pass</h2>
+    <p>
+      The main branch worktree integrated CT-01 and CT-02, confirmed CT-03's review guidance was
+      applied, and checked the resulting MVP-002 branch as one coherent PR candidate.
+    </p>
+    <ul>
+      <li>Confirmed all child threads reached completed handoff state.</li>
+      <li>Aligned the active-slice chat example with the deterministic CLI behavior pinned by tests.</li>
+      <li>Confirmed there are no Git conflict markers, unmerged files, or ignored generated files queued for the PR.</li>
+      <li>Confirmed the branch is based on current local <code>main</code> before committing.</li>
+    </ul>
+
+    <h2>Post-Review Transcript Boundary Fix</h2>
+    <p>
+      A review agent found that <code>session.visibleTranscript</code> exposed the same mutable array
+      used by the conversation core. The core now keeps its mutable transcript private, exposes frozen
+      transcript snapshots, freezes committed visible messages, and validates malformed character
+      agent reply shapes as reply validation failures before committing a turn.
+    </p>
+    <ul>
+      <li>Added a regression proving external callers cannot push fake transcript entries or rewrite committed messages.</li>
+      <li>Added a regression proving malformed agent replies reject as <code>CharacterReplyValidationError</code> with no partial transcript commit.</li>
+      <li>Re-ran focused conversation, chat, relay tests plus the full repo gates.</li>
+    </ul>
+
+    <h2>Second Review Character Identity Fix</h2>
+    <p>
+      A later review found that a character agent could mutate the live character profile object
+      during turn generation and affect committed character metadata. The core now freezes the
+      built-in character profile, copies and freezes custom character profiles when sessions are
+      created, freezes the session object, and passes only frozen character identity to agents.
+    </p>
+    <ul>
+      <li>Added a regression proving agent-side character mutation cannot change committed speaker metadata.</li>
+      <li>Confirmed the local chat and relay contracts still pass after the identity hardening.</li>
+    </ul>
+
+    <h2>PR Review Same-Session Turn Serialization Fix</h2>
+    <p>
+      A PR review found that concurrent calls to <code>runCharacterTurn()</code> for the same session
+      could read the same pre-commit transcript and commit in reply-resolution order instead of call
+      order. The conversation core now serializes the full turn pipeline per session before reading
+      recent context, calling the agent, validating the reply, and committing visible messages.
+    </p>
+    <ul>
+      <li>Added a regression with two deferred async agent replies that resolve out of order.</li>
+      <li>Confirmed the second queued turn sees the first committed turn as recent visible context.</li>
+      <li>Confirmed failed turns still leave the queue available for later turns.</li>
+    </ul>
+  </main>
+</body>
+</html>
