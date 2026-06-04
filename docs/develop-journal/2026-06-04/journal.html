@@ -145,6 +145,19 @@
       <li>Added a regression proving agent-side character mutation cannot change committed speaker metadata.</li>
       <li>Confirmed the local chat and relay contracts still pass after the identity hardening.</li>
     </ul>
+
+    <h2>PR Review Same-Session Turn Serialization Fix</h2>
+    <p>
+      A PR review found that concurrent calls to <code>runCharacterTurn()</code> for the same session
+      could read the same pre-commit transcript and commit in reply-resolution order instead of call
+      order. The conversation core now serializes the full turn pipeline per session before reading
+      recent context, calling the agent, validating the reply, and committing visible messages.
+    </p>
+    <ul>
+      <li>Added a regression with two deferred async agent replies that resolve out of order.</li>
+      <li>Confirmed the second queued turn sees the first committed turn as recent visible context.</li>
+      <li>Confirmed failed turns still leave the queue available for later turns.</li>
+    </ul>
   </main>
 </body>
 </html>

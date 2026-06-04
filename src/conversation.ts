@@ -66,6 +66,7 @@ const localUserSpeaker = {
 const defaultSessionId = 'local-session';
 const defaultRecentMessageLimit = 8;
 const sessionTranscripts = new WeakMap<ConversationSession, VisibleMessage[]>();
+const sessionTurnQueues = new WeakMap<ConversationSession, Promise<void>>();
 
 export class CharacterInputError extends Error {
   constructor(message: string) {
@@ -106,6 +107,17 @@ export async function runCharacterTurn(
   agent: CharacterAgent = createDeterministicCharacterAgent(),
   options: CharacterTurnOptions = {}
 ): Promise<CharacterTurnResult> {
+  return await enqueueSessionTurn(session, async () => {
+    return await runSerializedCharacterTurn(session, message, agent, options);
+  });
+}
+
+async function runSerializedCharacterTurn(
+  session: ConversationSession,
+  message: string | undefined,
+  agent: CharacterAgent,
+  options: CharacterTurnOptions
+): Promise<CharacterTurnResult> {
   const normalizedMessage = normalizeCharacterInput(message);
   const transcript = getMutableTranscript(session);
   const recentVisibleMessages = selectRecentVisibleMessages(
@@ -143,6 +155,24 @@ export async function runCharacterTurn(
       text: normalizedReplyText
     }
   };
+}
+
+async function enqueueSessionTurn<T>(
+  session: ConversationSession,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previousTurn = sessionTurnQueues.get(session) ?? Promise.resolve();
+  const currentTurn = previousTurn.then(operation, operation);
+
+  sessionTurnQueues.set(
+    session,
+    currentTurn.then(
+      () => undefined,
+      () => undefined
+    )
+  );
+
+  return await currentTurn;
 }
 
 export function createDeterministicCharacterAgent(): CharacterAgent {

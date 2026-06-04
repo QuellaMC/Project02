@@ -12,6 +12,11 @@ import {
   type VisibleMessage
 } from '../src/index.ts';
 
+type DeferredReply = {
+  readonly promise: Promise<CharacterAgentReply>;
+  readonly resolve: (reply: CharacterAgentReply) => void;
+};
+
 describe('conversation core', () => {
   it('creates a local session for the built-in character with an empty visible transcript', () => {
     const session = createConversationSession();
@@ -93,6 +98,88 @@ describe('conversation core', () => {
           text: 'reply 1'
         }
       ]
+    ]);
+  });
+
+  it('serializes concurrent turns for one session before reading context and committing', async () => {
+    const session = createConversationSession();
+    const observedMessages: string[] = [];
+    const observedContexts: VisibleMessage[][] = [];
+    const firstReply = createDeferredReply();
+    const secondReply = createDeferredReply();
+    const agent: CharacterAgent = {
+      reply(input) {
+        observedMessages.push(input.message);
+        observedContexts.push([...input.recentVisibleMessages]);
+
+        if (input.message === 'first') {
+          return firstReply.promise;
+        }
+
+        return secondReply.promise;
+      }
+    };
+
+    const firstTurn = runCharacterTurn(session, 'first', agent);
+    const secondTurn = runCharacterTurn(session, 'second', agent);
+
+    await Promise.resolve();
+
+    expect(observedMessages).toEqual(['first']);
+
+    secondReply.resolve({
+      text: 'reply 2'
+    });
+    firstReply.resolve({
+      text: 'reply 1'
+    });
+
+    await expect(firstTurn).resolves.toMatchObject({
+      userMessage: {
+        id: 'local-session:message-1',
+        text: 'first'
+      },
+      characterMessage: {
+        id: 'local-session:message-2',
+        text: 'reply 1'
+      }
+    });
+    await Promise.resolve();
+    await expect(secondTurn).resolves.toMatchObject({
+      userMessage: {
+        id: 'local-session:message-3',
+        text: 'second'
+      },
+      characterMessage: {
+        id: 'local-session:message-4',
+        text: 'reply 2'
+      }
+    });
+    expect(observedMessages).toEqual(['first', 'second']);
+    expect(observedContexts).toEqual([
+      [],
+      [
+        {
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'first'
+        },
+        {
+          id: 'local-session:message-2',
+          role: 'character',
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: 'reply 1'
+        }
+      ]
+    ]);
+    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+      'first',
+      'reply 1',
+      'second',
+      'reply 2'
     ]);
   });
 
@@ -204,6 +291,39 @@ describe('conversation core', () => {
     expect(session.visibleTranscript).toEqual([]);
   });
 
+  it('continues later queued turns after an earlier queued turn fails validation', async () => {
+    const session = createConversationSession();
+    const calls: string[] = [];
+    const agent: CharacterAgent = {
+      reply(input) {
+        calls.push(input.message);
+        return {
+          text: `reply to ${input.message}`
+        };
+      }
+    };
+
+    const invalidTurn = runCharacterTurn(session, '', agent);
+    const validTurn = runCharacterTurn(session, 'hello', agent);
+
+    await expect(invalidTurn).rejects.toThrow(CharacterInputError);
+    await expect(validTurn).resolves.toMatchObject({
+      userMessage: {
+        id: 'local-session:message-1',
+        text: 'hello'
+      },
+      characterMessage: {
+        id: 'local-session:message-2',
+        text: 'reply to hello'
+      }
+    });
+    expect(calls).toEqual(['hello']);
+    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+      'hello',
+      'reply to hello'
+    ]);
+  });
+
   it('leaves the transcript unchanged when the character agent returns an invalid reply', async () => {
     const session = createConversationSession();
     const agent: CharacterAgent = {
@@ -269,3 +389,19 @@ describe('conversation core', () => {
     });
   });
 });
+
+function createDeferredReply(): DeferredReply {
+  let resolveReply: ((reply: CharacterAgentReply) => void) | undefined;
+  const promise = new Promise<CharacterAgentReply>((resolve) => {
+    resolveReply = resolve;
+  });
+
+  if (resolveReply === undefined) {
+    throw new Error('Expected deferred reply resolver.');
+  }
+
+  return {
+    promise,
+    resolve: resolveReply
+  };
+}
