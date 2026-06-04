@@ -203,6 +203,18 @@
       <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
       <li><code>git diff --check</code></li>
     </ul>
+
+    <h2>PR Review Runtime Trace Follow-Up</h2>
+    <p>
+      Addressed PR review comments on the local runtime adapter. The rejected-input helper now
+      returns a frozen identity snapshot, runtime trace start logging is serialized through the
+      same session-level adapter queue as turn execution, and unexpected agent failures append a
+      terminal rejected raw/trace outcome before the original error is rethrown.
+    </p>
+    <ul>
+      <li>Added regressions for mutable rejected-input identity, concurrent runtime turn ordering, and unexpected agent failure logging.</li>
+      <li>Verified the full repo gate after the review fixes.</li>
+    </ul>
   </main>
 </body>
 </html>

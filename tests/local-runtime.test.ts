@@ -4,12 +4,19 @@ import {
   createConversationSession,
   createRuntimeLogStore,
   createUserMessageRuntimeEvent,
+  recordLocalUserMessageInputRejection,
   runLocalUserMessageEvent,
   type CharacterAgent,
+  type CharacterAgentReply,
   type RuntimeTraceEntry,
   type RuntimeTraceStepName,
   type UserMessageRuntimeEvent
 } from '../src/index.ts';
+
+type DeferredReply = {
+  readonly promise: Promise<CharacterAgentReply>;
+  readonly resolve: (reply: CharacterAgentReply) => void;
+};
 
 describe('local runtime turn adapter', () => {
   it('runs one USER_MESSAGE event through the conversation core and records runtime logs', async () => {
@@ -133,6 +140,114 @@ describe('local runtime turn adapter', () => {
     ]);
   });
 
+  it('freezes a snapshot of rejected-input identity before returning it', () => {
+    const logStore = createRuntimeLogStore();
+    const mutableIdentity = {
+      eventId: 'evt_mutable_rejection',
+      traceId: 'trace_mutable_rejection',
+      createdAt: '2026-06-04T10:00:00.000Z'
+    };
+
+    const result = recordLocalUserMessageInputRejection({
+      identity: mutableIdentity,
+      logStore,
+      message: 'Provide exactly one non-empty message.'
+    });
+
+    mutableIdentity.eventId = 'evt_mutated_after_result';
+    mutableIdentity.traceId = 'trace_mutated_after_result';
+    mutableIdentity.createdAt = '2026-06-04T10:00:01.000Z';
+
+    expect(result.identity).toEqual({
+      eventId: 'evt_mutable_rejection',
+      traceId: 'trace_mutable_rejection',
+      createdAt: '2026-06-04T10:00:00.000Z'
+    });
+    expect(Object.isFrozen(result.identity)).toBe(true);
+    expect(logStore.rawEvents()).toContainEqual({
+      eventId: 'evt_mutable_rejection',
+      traceId: 'trace_mutable_rejection',
+      createdAt: '2026-06-04T10:00:00.000Z',
+      kind: 'runtime_turn_rejected',
+      eventType: 'USER_MESSAGE',
+      status: 'rejected',
+      reason: 'Provide exactly one non-empty message.'
+    });
+  });
+
+  it('serializes runtime trace start logging with queued turns for one session', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const firstReply = createDeferredReply();
+    const observedMessages: string[] = [];
+    const agent: CharacterAgent = {
+      reply(input) {
+        observedMessages.push(input.message);
+
+        if (input.message === 'first') {
+          return firstReply.promise;
+        }
+
+        return {
+          text: 'reply 2'
+        };
+      }
+    };
+
+    const firstTurn = runLocalUserMessageEvent({
+      event: createTestUserMessageEvent('first', 'evt_first', 'trace_first'),
+      session,
+      logStore,
+      agent
+    });
+    const secondTurn = runLocalUserMessageEvent({
+      event: createTestUserMessageEvent('second', 'evt_second', 'trace_second'),
+      session,
+      logStore,
+      agent
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(observedMessages).toEqual(['first']);
+    expect(logStore.traceEntries().map((entry) => entry.eventId)).toEqual([
+      'evt_first',
+      'evt_first',
+      'evt_first'
+    ]);
+
+    firstReply.resolve({
+      text: 'reply 1'
+    });
+
+    await expect(firstTurn).resolves.toMatchObject({
+      status: 'completed'
+    });
+    await expect(secondTurn).resolves.toMatchObject({
+      status: 'completed'
+    });
+    expect(observedMessages).toEqual(['first', 'second']);
+    expect(
+      logStore
+        .traceEntries()
+        .map((entry) => `${entry.eventId}:${entry.step}`)
+    ).toEqual([
+      'evt_first:runtime_event_received',
+      'evt_first:runtime_event_normalized',
+      'evt_first:runtime_turn_started',
+      'evt_first:visible_reply_committed',
+      'evt_first:raw_event_log_appended',
+      'evt_first:runtime_turn_completed',
+      'evt_second:runtime_event_received',
+      'evt_second:runtime_event_normalized',
+      'evt_second:runtime_turn_started',
+      'evt_second:visible_reply_committed',
+      'evt_second:raw_event_log_appended',
+      'evt_second:runtime_turn_completed'
+    ]);
+  });
+
   it('records a rejected raw outcome without visible conversation logs when event payload input is invalid', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -243,6 +358,44 @@ describe('local runtime turn adapter', () => {
       'runtime_turn_rejected'
     ]);
   });
+
+  it('records a terminal rejected trace before rethrowing unexpected agent failures', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const agent: CharacterAgent = {
+      reply() {
+        throw new Error('agent transport unavailable');
+      }
+    };
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestUserMessageEvent('hello', 'evt_throw', 'trace_throw'),
+        session,
+        logStore,
+        agent
+      })
+    ).rejects.toThrow('agent transport unavailable');
+
+    expect(session.visibleTranscript).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
+    expect(logStore.rawEvents()).toContainEqual({
+      eventId: 'evt_throw',
+      traceId: 'trace_throw',
+      createdAt: '2026-06-04T10:00:00.000Z',
+      kind: 'runtime_turn_rejected',
+      eventType: 'USER_MESSAGE',
+      status: 'rejected',
+      reason: 'Runtime turn failed before producing a reply.'
+    });
+    expect(stepNames(logStore.traceEntries())).toEqual([
+      'runtime_event_received',
+      'runtime_event_normalized',
+      'runtime_turn_started',
+      'raw_event_log_appended',
+      'runtime_turn_rejected'
+    ]);
+  });
 });
 
 function createTestUserMessageEvent(
@@ -259,4 +412,20 @@ function createTestUserMessageEvent(
 
 function stepNames(entries: readonly RuntimeTraceEntry[]): RuntimeTraceStepName[] {
   return entries.map((entry) => entry.step);
+}
+
+function createDeferredReply(): DeferredReply {
+  let resolveReply: ((reply: CharacterAgentReply) => void) | undefined;
+  const promise = new Promise<CharacterAgentReply>((resolve) => {
+    resolveReply = resolve;
+  });
+
+  if (resolveReply === undefined) {
+    throw new Error('Expected deferred reply resolver to be initialized.');
+  }
+
+  return {
+    promise,
+    resolve: resolveReply
+  };
 }

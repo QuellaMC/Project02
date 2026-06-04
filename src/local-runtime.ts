@@ -68,14 +68,19 @@ export type RecordLocalUserMessageInputRejectionOptions = {
   readonly message: string;
 };
 
+const unexpectedRuntimeTurnFailureMessage =
+  'Runtime turn failed before producing a reply.';
+const localRuntimeTurnQueues = new WeakMap<ConversationSession, Promise<void>>();
+
 export function recordLocalUserMessageInputRejection(
   options: RecordLocalUserMessageInputRejectionOptions
 ): LocalRuntimeUserMessageInputRejectedResult {
+  const identity = freezeRuntimeEventIdentity(options.identity);
   const traceEntries: RuntimeTraceEntry[] = [];
 
   function appendTrace(step: RuntimeTraceStepName): RuntimeTraceEntry {
     const traceEntry = options.logStore.appendTrace({
-      ...options.identity,
+      ...identity,
       step
     });
 
@@ -85,13 +90,13 @@ export function recordLocalUserMessageInputRejection(
 
   appendTrace('runtime_event_received');
   options.logStore.appendRawEvent({
-    ...options.identity,
+    ...identity,
     kind: 'runtime_event_received',
     eventType: 'USER_MESSAGE'
   });
   appendTrace('input_validation_rejected');
   options.logStore.appendRawEvent({
-    ...options.identity,
+    ...identity,
     kind: 'input_validation_rejected',
     eventType: 'USER_MESSAGE',
     status: 'rejected',
@@ -99,7 +104,7 @@ export function recordLocalUserMessageInputRejection(
   });
 
   const rawEvent = options.logStore.appendRawEvent({
-    ...options.identity,
+    ...identity,
     kind: 'runtime_turn_rejected',
     eventType: 'USER_MESSAGE',
     status: 'rejected',
@@ -111,7 +116,7 @@ export function recordLocalUserMessageInputRejection(
 
   return Object.freeze({
     status: 'rejected',
-    identity: options.identity,
+    identity,
     eventType: 'USER_MESSAGE',
     reason: 'input_validation_rejected',
     message: options.message,
@@ -123,12 +128,20 @@ export function recordLocalUserMessageInputRejection(
 export async function runLocalUserMessageEvent(
   options: RunLocalUserMessageEventOptions
 ): Promise<LocalRuntimeUserMessageResult> {
+  return await enqueueLocalRuntimeTurn(options.session, async () => {
+    return await runSerializedLocalUserMessageEvent(options);
+  });
+}
+
+async function runSerializedLocalUserMessageEvent(
+  options: RunLocalUserMessageEventOptions
+): Promise<LocalRuntimeUserMessageResult> {
   const traceEntries: RuntimeTraceEntry[] = [];
-  const identity = {
+  const identity = freezeRuntimeEventIdentity({
     eventId: options.event.eventId,
     traceId: options.event.traceId,
     createdAt: options.event.createdAt
-  };
+  });
 
   function appendTrace(step: RuntimeTraceStepName): RuntimeTraceEntry {
     const traceEntry = options.logStore.appendTrace({
@@ -245,6 +258,42 @@ export async function runLocalUserMessageEvent(
       return appendRejectedResult('character_reply_rejected', error.message);
     }
 
+    options.logStore.appendRawEvent({
+      ...identity,
+      kind: 'runtime_turn_rejected',
+      eventType: options.event.type,
+      status: 'rejected',
+      reason: unexpectedRuntimeTurnFailureMessage
+    });
+    appendTrace('raw_event_log_appended');
+    appendTrace('runtime_turn_rejected');
+
     throw error;
   }
+}
+
+async function enqueueLocalRuntimeTurn<T>(
+  session: ConversationSession,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previousTurn = localRuntimeTurnQueues.get(session) ?? Promise.resolve();
+  const currentTurn = previousTurn.then(operation, operation);
+
+  localRuntimeTurnQueues.set(
+    session,
+    currentTurn.then(
+      () => undefined,
+      () => undefined
+    )
+  );
+
+  return await currentTurn;
+}
+
+function freezeRuntimeEventIdentity(identity: RuntimeEventIdentity): RuntimeEventIdentity {
+  return Object.freeze({
+    eventId: identity.eventId,
+    traceId: identity.traceId,
+    createdAt: identity.createdAt
+  } satisfies RuntimeEventIdentity);
 }
