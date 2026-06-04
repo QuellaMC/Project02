@@ -1,11 +1,17 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { dirname, resolve } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { runChatCli as runChatCliInProcess } from '../src/chat-cli.ts';
-import type { CharacterAgent } from '../src/index.ts';
+import {
+  LocalRuntimeStorageContractError,
+  type CharacterAgent,
+  type RuntimeLogStore
+} from '../src/index.ts';
 
 type CommandResult = {
   readonly exitCode: number;
@@ -22,6 +28,8 @@ type TraceSummary = {
 };
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const tempStoreRoots: string[] = [];
+let tempSessionCounter = 0;
 
 const successfulTraceSteps = [
   'runtime_event_received',
@@ -48,8 +56,16 @@ const unexpectedFailureTraceSteps = [
 ] as const;
 
 describe('node src/chat-cli.ts', () => {
+  afterEach(async () => {
+    await Promise.all(
+      tempStoreRoots.splice(0).map(async (root) => {
+        await rm(root, { recursive: true, force: true });
+      })
+    );
+  });
+
   it('runs a two-turn local character session', async () => {
-    const result = await runChatCli('hello\nstill there?\n/exit\n');
+    const result = await runFreshChatCli('hello\nstill there?\n/exit\n');
 
     expect(result).toEqual({
       exitCode: 0,
@@ -63,7 +79,7 @@ describe('node src/chat-cli.ts', () => {
   });
 
   it('exits cleanly when /exit is the first input', async () => {
-    const result = await runChatCli('/exit\n');
+    const result = await runFreshChatCli('/exit\n');
 
     expect(result).toEqual({
       exitCode: 0,
@@ -73,7 +89,7 @@ describe('node src/chat-cli.ts', () => {
   });
 
   it('reports invalid input, keeps the session open, and does not emit a character reply for the invalid turn', async () => {
-    const result = await runChatCli('\nhello\n/exit\n');
+    const result = await runFreshChatCli('\nhello\n/exit\n');
 
     expect(result).toEqual({
       exitCode: 0,
@@ -86,7 +102,9 @@ describe('node src/chat-cli.ts', () => {
   });
 
   it('emits trace JSONL to stderr without changing normal chat stdout', async () => {
-    const result = await runChatCli('hello\nstill there?\n/exit\n', ['--trace']);
+    const result = await runFreshChatCli('hello\nstill there?\n/exit\n', [
+      '--trace'
+    ]);
     const traceSummaries = parseTraceSummaries(result.stderr);
 
     expect(result.exitCode).toBe(0);
@@ -117,7 +135,7 @@ describe('node src/chat-cli.ts', () => {
   });
 
   it('emits rejected trace JSONL for invalid input and keeps the session open', async () => {
-    const result = await runChatCli('\nhello\n/exit\n', ['--trace']);
+    const result = await runFreshChatCli('\nhello\n/exit\n', ['--trace']);
     const traceSummaries = parseTraceSummaries(result.stderr);
 
     expect(result.exitCode).toBe(0);
@@ -168,8 +186,26 @@ describe('node src/chat-cli.ts', () => {
     ]);
   });
 
+  it('reports storage failures during a turn without masking them as reply failures', async () => {
+    const stdout = new CapturingWritable();
+    const stderr = new CapturingWritable();
+
+    const exitCode = await runChatCliInProcess({
+      stdin: Readable.from(['hello\n']),
+      stdout,
+      stderr,
+      logStore: createWriteFailingLogStore()
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stdout.contents()).toBe('Mira is ready.\nYou: ');
+    expect(stderr.contents()).toBe(
+      'Error: Local runtime store could not be written.\n'
+    );
+  });
+
   it('does not emit a trace summary for /exit', async () => {
-    const result = await runChatCli('/exit\n', ['--trace']);
+    const result = await runFreshChatCli('/exit\n', ['--trace']);
 
     expect(result).toEqual({
       exitCode: 0,
@@ -177,11 +213,169 @@ describe('node src/chat-cli.ts', () => {
       stderr: ''
     });
   });
+
+  it('creates a durable session and resumes persisted visible context by session ID', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const first = await runChatCli('hello\n/exit\n', [
+      '--store',
+      storeRoot,
+      '--new-session',
+      'mira-local'
+    ]);
+    const second = await runChatCli('still there?\n/exit\n', [
+      '--store',
+      storeRoot,
+      '--session',
+      'mira-local'
+    ]);
+
+    expect(first).toEqual({
+      exitCode: 0,
+      stdout:
+        'Mira is ready.\n' +
+        "You: Mira: I'm here. Tell me what you need.\n" +
+        'You: ',
+      stderr: ''
+    });
+    expect(second).toEqual({
+      exitCode: 0,
+      stdout:
+        'Mira is ready.\n' +
+        'You: Mira: I remember you said "hello" Stay with me for a minute.\n' +
+        'You: ',
+      stderr: ''
+    });
+  });
+
+  it('creates and resumes the default session in a selected durable store', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const first = await runChatCli('hello\n/exit\n', ['--store', storeRoot]);
+    const second = await runChatCli('still there?\n/exit\n', [
+      '--store',
+      storeRoot
+    ]);
+
+    expect(first.exitCode).toBe(0);
+    expect(first.stderr).toBe('');
+    expect(second).toEqual({
+      exitCode: 0,
+      stdout:
+        'Mira is ready.\n' +
+        'You: Mira: I remember you said "hello" Stay with me for a minute.\n' +
+        'You: ',
+      stderr: ''
+    });
+  });
+
+  it('rejects --new-session when that session already exists', async () => {
+    const storeRoot = await createTempStoreRoot();
+
+    await expect(
+      runChatCli('/exit\n', ['--store', storeRoot, '--new-session', 'fresh'])
+    ).resolves.toMatchObject({
+      exitCode: 0
+    });
+
+    const result = await runChatCli('/exit\n', [
+      '--store',
+      storeRoot,
+      '--new-session',
+      'fresh'
+    ]);
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: Local runtime session "fresh" already exists.\n'
+    });
+  });
+
+  it('rejects --session when the selected session does not exist', async () => {
+    const storeRoot = await createTempStoreRoot();
+
+    await expect(
+      runChatCli('/exit\n', ['--store', storeRoot, '--new-session', 'existing'])
+    ).resolves.toMatchObject({
+      exitCode: 0
+    });
+
+    const result = await runChatCli('/exit\n', [
+      '--store',
+      storeRoot,
+      '--session',
+      'missing'
+    ]);
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: Local runtime session "missing" does not exist.\n'
+    });
+  });
+
+  it('rejects unsafe --session values through the CT-01 session ID validator', async () => {
+    const result = await runChatCli('/exit\n', ['--session', 'a/b']);
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr:
+        'Error: Local runtime session ID must use only letters, numbers, dots, underscores, or hyphens.\n'
+    });
+  });
+
+  it('rejects empty --store values through the CT-01 store-root validator', async () => {
+    const result = await runChatCli('/exit\n', ['--store', '']);
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: Local runtime store root must be non-empty.\n'
+    });
+  });
+
+  it('rejects ambiguous durable session creation and resume flags', async () => {
+    const result = await runChatCli('/exit\n', [
+      '--session',
+      'existing',
+      '--new-session',
+      'fresh'
+    ]);
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: Use either --session or --new-session, not both.\n'
+    });
+  });
+
+  it('rejects missing durable flag values before starting the chat loop', async () => {
+    const result = await runChatCli('/exit\n', ['--store']);
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: --store requires a value.\n'
+    });
+  });
 });
 
 describe('pnpm --silent chat', () => {
+  afterEach(async () => {
+    await Promise.all(
+      tempStoreRoots.splice(0).map(async (root) => {
+        await rm(root, { recursive: true, force: true });
+      })
+    );
+  });
+
   it('runs the chat package script without package-manager output', async () => {
-    const result = await runCommand('pnpm', ['--silent', 'chat'], '/exit\n');
+    const storeRoot = await createTempStoreRoot();
+    const result = await runCommand(
+      'pnpm',
+      ['--silent', 'chat', '--', '--store', storeRoot],
+      '/exit\n'
+    );
 
     expect(result).toEqual({
       exitCode: 0,
@@ -191,9 +385,19 @@ describe('pnpm --silent chat', () => {
   });
 
   it('passes trace mode arguments through the chat package script', async () => {
+    const storeRoot = await createTempStoreRoot();
     const result = await runCommand(
       'pnpm',
-      ['--silent', 'chat', '--', '--trace'],
+      [
+        '--silent',
+        'chat',
+        '--',
+        '--store',
+        storeRoot,
+        '--new-session',
+        'package-trace',
+        '--trace'
+      ],
       'hello\n/exit\n'
     );
     const traceSummaries = parseTraceSummaries(result.stderr);
@@ -230,6 +434,34 @@ async function runChatCli(
   args: readonly string[] = []
 ): Promise<CommandResult> {
   return await runCommand('node', ['src/chat-cli.ts', ...args], stdin);
+}
+
+async function runFreshChatCli(
+  stdin: string,
+  args: readonly string[] = []
+): Promise<CommandResult> {
+  const storeRoot = await createTempStoreRoot();
+  const sessionId = createTempSessionId();
+
+  return await runChatCli(stdin, [
+    '--store',
+    storeRoot,
+    '--new-session',
+    sessionId,
+    ...args
+  ]);
+}
+
+async function createTempStoreRoot(): Promise<string> {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'project02-chat-cli-'));
+
+  tempStoreRoots.push(storeRoot);
+  return storeRoot;
+}
+
+function createTempSessionId(): string {
+  tempSessionCounter += 1;
+  return `test-session-${String(tempSessionCounter)}`;
 }
 
 async function runCommand(
@@ -328,6 +560,38 @@ function isStringArray(value: unknown): value is readonly string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function createWriteFailingLogStore(): RuntimeLogStore {
+  return {
+    appendTrace() {
+      throw new LocalRuntimeStorageContractError(
+        'write_failed',
+        'Injected write failure.'
+      );
+    },
+    appendRawEvent() {
+      throw new LocalRuntimeStorageContractError(
+        'write_failed',
+        'Injected write failure.'
+      );
+    },
+    appendConversationMessage() {
+      throw new LocalRuntimeStorageContractError(
+        'write_failed',
+        'Injected write failure.'
+      );
+    },
+    traceEntries() {
+      return [];
+    },
+    rawEvents() {
+      return [];
+    },
+    conversationMessages() {
+      return [];
+    }
+  } satisfies RuntimeLogStore;
 }
 
 class CapturingWritable extends Writable {

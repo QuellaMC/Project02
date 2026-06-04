@@ -92,7 +92,7 @@ export function createLocalRuntimeSessionStore(
   const now = options.now ?? defaultClock;
   const configuredConversationLogReader = options.conversationLogReader;
 
-async function createSession(
+  async function createSession(
     sessionOptions: CreateLocalRuntimeSessionOptions = {}
   ): Promise<LocalRuntimeSessionMetadata> {
     const sessionId = normalizeLocalRuntimeSessionId(sessionOptions.sessionId);
