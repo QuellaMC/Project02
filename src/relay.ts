@@ -1,3 +1,9 @@
+import {
+  normalizeOneLineMessage,
+  OneLineMessageValidationError,
+  oneLineMessageMissingErrorMessage
+} from './message-validation.ts';
+
 export type RelayAgent = {
   reply(input: {
     readonly message: string;
@@ -13,12 +19,10 @@ export type RelayResult = {
   };
 };
 
-const inputErrorMessage = 'Provide exactly one non-empty message.';
-const inputLineErrorMessage = 'Provide exactly one non-empty single-line message.';
 const lineBreakPattern = /[\r\n]/u;
 
 export class RelayInputError extends Error {
-  constructor(message = inputErrorMessage) {
+  constructor(message = oneLineMessageMissingErrorMessage) {
     super(message);
     this.name = 'RelayInputError';
   }
@@ -60,15 +64,13 @@ export function createLocalRelayAgent(): RelayAgent {
 }
 
 function normalizeMessage(message: string | undefined): string {
-  const normalizedMessage = message?.trim() ?? '';
+  try {
+    return normalizeOneLineMessage(message);
+  } catch (error: unknown) {
+    if (error instanceof OneLineMessageValidationError) {
+      throw new RelayInputError(error.message);
+    }
 
-  if (normalizedMessage.length === 0) {
-    throw new RelayInputError();
+    throw error;
   }
-
-  if (lineBreakPattern.test(normalizedMessage)) {
-    throw new RelayInputError(inputLineErrorMessage);
-  }
-
-  return normalizedMessage;
 }
