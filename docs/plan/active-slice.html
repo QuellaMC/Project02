@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-002 - Local Character Conversation Core</title>
+  <title>MVP-003 - Runtime Event Trace For Local Chat</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
@@ -27,13 +27,13 @@
 </head>
 <body>
   <main>
-    <h1>MVP-002 - Local Character Conversation Core</h1>
+    <h1>MVP-003 - Runtime Event Trace For Local Chat</h1>
     <p><span class="status">Status: accepted active slice</span></p>
     <p class="meta">
       Created: 2026-06-04. Active spec:
       <code>docs/plan/active-slice.html</code>. Previous slice archived at
-      <code>docs/plan/completed/mvp-001-basic-relay-cli.html</code>.
-      Suggested implementation branch: <code>feature/mvp-002-local-character-conversation-core</code>.
+      <code>docs/plan/completed/mvp-002-local-character-conversation-core.html</code>.
+      Suggested implementation branch: <code>feature/mvp-003-runtime-event-trace-local-chat</code>.
     </p>
 
     <h2>Source Context</h2>
@@ -46,118 +46,116 @@
       <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
     </p>
     <blockquote>
-      Long-term direction: a living character runtime where user messages enter a central path,
-      character context shapes the answer, and accepted visible output is recorded as product truth.
+      Long-term direction: every trigger becomes a RuntimeEvent, the runtime handles it through
+      one path, visible conversation output is recorded, and raw logs preserve what actually
+      happened.
     </blockquote>
     <p>
       Local rebuild direction comes from <a href="../../AGENTS.md">AGENTS.md</a> and
-      <a href="../../AGENTS.repo.md">AGENTS.repo.md</a>. The repo should grow from working
-      vertical slices. MVP-001 proved a strict one-line relay command. MVP-002 turns that
-      runnable path into the first local character conversation capability.
+      <a href="../../AGENTS.repo.md">AGENTS.repo.md</a>. This slice must grow from the current
+      working local chat path. It should not restore the old runtime framework before the product
+      needs it.
     </p>
 
-    <h2>Previous Product</h2>
+    <h2>Current Product Before This Slice</h2>
     <p>
-      The current product is a one-message relay utility. It accepts one command-line message,
-      validates the boundary, calls a deterministic local relay agent, and prints one reply line.
+      MVP-002 gives the repo a local character chat session. The chat CLI reads one terminal line,
+      sends that string directly to the conversation core, receives a deterministic Mira reply, and
+      prints the reply. The conversation core keeps an in-memory visible transcript for the session.
     </p>
-    <pre><code>node src/relay-cli.ts -- "are you there?"
+    <pre><code>terminal input
+  -> chat CLI reads one line
+  -> conversation core validates the message
+  -> deterministic local character agent makes a reply
+  -> conversation core stores user message + character reply in memory
+  -> chat CLI prints the reply</code></pre>
+    <p>
+      This is enough to chat locally, but it is not yet a runtime-shaped product. There is no
+      runtime event object, event ID, trace ID, raw event log, conversation log API, or structured
+      record of what happened inside a turn.
+    </p>
 
-# stdout
-relay: are you there?</code></pre>
+    <h2>Product After This Slice</h2>
     <p>
-      That proves the command path and validation contract, but it is not yet a character product.
-      There is no local character identity, no conversation session, no visible transcript, and no
-      stable central unit for "one character turn".
+      Normal chat output should stay the same by default. The internal path changes so each user
+      input becomes a small <code>USER_MESSAGE</code> runtime event and the runtime records a trace
+      for that event while reusing the existing conversation core.
     </p>
-
-    <h2>New Product Capability</h2>
+    <pre><code>terminal input
+  -> chat CLI reads one line
+  -> create USER_MESSAGE RuntimeEvent
+  -> local runtime turn adapter handles the event
+  -> runtime trace records what is happening
+  -> conversation core validates and replies
+  -> conversation log records visible messages
+  -> raw event log records internal truth
+  -> chat CLI prints the reply</code></pre>
     <p>
-      After this slice, the local product can run a small character conversation session with one
-      built-in character. The user should be able to talk to the character across multiple turns in
-      a local CLI session, and the product should keep the visible transcript for that session.
+      The character does not need to become smarter in this slice. The important product change is
+      inspectability: the app can chat, and the runtime can explain each local turn.
     </p>
-    <pre><code>pnpm chat
-
-Mira is ready.
-You: are you there?
-Mira: I'm here. Tell me what you need.
-You: I'm tired.
-Mira: I remember you said "are you there?" Stay with me for a minute.
-You: /exit</code></pre>
-    <p>
-      The important change is not the exact sample wording. The important change is that the product
-      gains a central local conversation core:
-    </p>
-    <pre><code>user message
-  -> local character profile
-  -> recent session transcript
-  -> character turn generation
-  -> validated visible reply
-  -> committed transcript entries</code></pre>
 
     <h2>Goal</h2>
     <p>
-      Build one solid local character conversation core that can support a week of focused work:
-      character identity, session transcript, one-turn execution, multi-turn local CLI usage,
-      deterministic agent behavior, and tests around successful and failed turns.
+      Introduce the first narrow runtime event and trace layer around local chat. One local user
+      message should have a stable event identity, a trace identity, ordered trace entries, visible
+      conversation log records, raw event log records, and the same visible chat behavior the user
+      already has.
     </p>
 
     <h2>Current Scope</h2>
     <ul>
-      <li>One built-in local character profile with stable identity and display name.</li>
-      <li>One in-memory conversation session for local CLI use.</li>
-      <li>Visible message records for user messages and character replies.</li>
-      <li>A character turn runner that validates input, builds recent visible context, calls a local character agent, validates the reply, and commits the turn to the session transcript.</li>
-      <li>A deterministic local character agent that can produce stable, context-aware replies for tests and manual use.</li>
-      <li>A local chat CLI that lets a user run a short multi-turn session.</li>
-      <li>Compatibility with the existing MVP-001 relay command unless the implementation thread explicitly records why the product contract should change.</li>
-      <li>Focused unit and CLI tests covering the conversation core, transcript behavior, invalid input, invalid agent replies, and local chat behavior.</li>
+      <li>One runtime event type: <code>USER_MESSAGE</code>.</li>
+      <li>Separate <code>event_id</code> and <code>trace_id</code> values for each processed local user input.</li>
+      <li>Deterministic ID and clock injection for tests.</li>
+      <li>An in-memory runtime log store for this local session only.</li>
+      <li>A visible <code>ConversationLog</code> API that records user-visible messages committed during runtime handling.</li>
+      <li>A <code>RawEventLog</code> / <code>RuntimeTrace</code> API that records runtime internals, validation success or rejection, and final outcome.</li>
+      <li>A local runtime turn adapter that accepts a <code>USER_MESSAGE</code> event and reuses <code>runCharacterTurn()</code>.</li>
+      <li>Chat CLI routing through the local runtime adapter instead of calling the conversation core directly.</li>
+      <li>Optional diagnostic trace mode for local chat, proposed as JSON Lines written to <code>stderr</code> so normal chat <code>stdout</code> stays stable.</li>
+      <li>Compatibility with the existing MVP-001 relay command and the existing default MVP-002 chat behavior unless this draft is explicitly revised.</li>
     </ul>
 
     <h2>Explicit Non-Goals</h2>
     <ul>
       <li>No live model provider call, API key, provider config, prompt template, or model selection.</li>
       <li>No Twilio, WhatsApp, webhook, HTTP server, browser UI, or external provider edge.</li>
-      <li>No durable persistence, database, replay surface, trace store, or migration from old runtime data.</li>
+      <li>No durable persistence, database, file-backed log, replay UI, or migration from old runtime data.</li>
       <li>No memory, retrieval, tools, scheduler, Live2D, assets, plugin system, or background worker.</li>
-      <li>No Runtime Kernel, Character State Engine, Role Model Loop, Commit and Effects Engine, or old runtime module restoration from <code>legacy/typescript</code>.</li>
+      <li>No full Runtime Kernel, Character State Engine, Role Model Loop, Commit and Effects Engine, or old runtime module restoration from <code>legacy/typescript</code>.</li>
       <li>No multi-character support, account system, authentication, or cross-session continuity.</li>
+      <li>No change to Mira's deterministic local reply behavior unless required by a test-only seam.</li>
     </ul>
 
     <h2>Finished Slice</h2>
-    <p>
-      The product should feel like the smallest real local version of the Live Character Framework:
-      one user can start a local session, send a few messages, receive character-owned replies, and
-      trust that the visible transcript reflects exactly what happened in that session.
-    </p>
     <table>
       <thead>
         <tr>
-          <th>Before MVP-002</th>
-          <th>After MVP-002</th>
+          <th>Before MVP-003</th>
+          <th>After MVP-003</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>One command turns one message into an echo-style relay reply.</td>
-          <td>One local chat session turns user messages into character replies.</td>
+          <td>The chat CLI sends raw text directly to the conversation core.</td>
+          <td>The chat CLI creates a <code>USER_MESSAGE</code> event and sends it to a local runtime turn adapter.</td>
         </tr>
         <tr>
-          <td>No character identity exists in the runnable product path.</td>
-          <td>A built-in character profile owns the visible replies.</td>
+          <td>A successful turn only updates the in-memory visible transcript.</td>
+          <td>A successful turn updates the visible transcript, conversation log, raw event log, and runtime trace.</td>
         </tr>
         <tr>
-          <td>No session transcript exists after a reply is produced.</td>
-          <td>User and character messages are appended to an in-memory session transcript.</td>
+          <td>A failed turn prints an error but has no structured internal record.</td>
+          <td>A failed turn records a trace and raw rejection without committing fake visible messages.</td>
         </tr>
         <tr>
-          <td>The next message cannot use recent local context.</td>
-          <td>The character turn receives recent visible messages from the session.</td>
+          <td>There is no stable ID for one input or its processing chain.</td>
+          <td>Each processed input has an <code>event_id</code> for the trigger and a <code>trace_id</code> for the processing chain.</td>
         </tr>
         <tr>
-          <td>The only product unit is a relay result.</td>
-          <td>The central product unit is a validated character turn result.</td>
+          <td>Debugging means reading tests or stepping through code.</td>
+          <td>Trace mode can show the ordered runtime steps for a local turn.</td>
         </tr>
       </tbody>
     </table>
@@ -173,35 +171,39 @@ You: /exit</code></pre>
       <tbody>
         <tr>
           <td>FR-1</td>
-          <td>The product defines one built-in local character profile with stable ID and display name.</td>
+          <td>The product defines a minimal <code>USER_MESSAGE</code> runtime event contract with event ID, trace ID, type, creation time, and normalized payload.</td>
         </tr>
         <tr>
           <td>FR-2</td>
-          <td>The product can create an in-memory conversation session for that character.</td>
+          <td>Runtime event construction validates local chat input before runtime handling proceeds.</td>
         </tr>
         <tr>
           <td>FR-3</td>
-          <td>A successful character turn appends the normalized user message and validated character reply to the session transcript in order.</td>
+          <td>The runtime turn adapter handles one <code>USER_MESSAGE</code> event by calling the existing conversation core, not by duplicating transcript or reply logic.</td>
         </tr>
         <tr>
           <td>FR-4</td>
-          <td>The character turn runner passes recent visible transcript context to the local character agent.</td>
+          <td>A successful runtime turn records ordered trace entries from event receipt through visible reply commit.</td>
         </tr>
         <tr>
           <td>FR-5</td>
-          <td>Invalid user input fails before the character agent is called and leaves the transcript unchanged.</td>
+          <td>A successful runtime turn appends user and character messages to the conversation log with source event and trace IDs.</td>
         </tr>
         <tr>
           <td>FR-6</td>
-          <td>Invalid character replies fail before transcript commit and leave the transcript unchanged.</td>
+          <td>Failed input validation and failed reply validation append raw rejection records and leave visible conversation records unchanged for the failed turn.</td>
         </tr>
         <tr>
           <td>FR-7</td>
-          <td>The local chat CLI supports a short multi-turn session and a clear exit command.</td>
+          <td>The default chat CLI remains user-facing chat output first; trace details appear only when trace mode is enabled.</td>
         </tr>
         <tr>
           <td>FR-8</td>
-          <td>The existing relay command remains available as the MVP-001 smoke path unless a documented compatibility decision changes it.</td>
+          <td>Trace mode emits one machine-readable JSON Line per processed user input to <code>stderr</code>, including event ID, trace ID, status, and ordered trace step names.</td>
+        </tr>
+        <tr>
+          <td>FR-9</td>
+          <td>The existing relay command remains available as the MVP-001 smoke path.</td>
         </tr>
       </tbody>
     </table>
@@ -217,82 +219,91 @@ You: /exit</code></pre>
       <tbody>
         <tr>
           <td>AC-1</td>
-          <td>A user can start the local chat command and complete at least two user-message turns with one built-in character.</td>
+          <td>A test can construct a deterministic <code>USER_MESSAGE</code> event with predictable event ID, trace ID, timestamp, and payload.</td>
         </tr>
         <tr>
           <td>AC-2</td>
-          <td>The second turn can see recent visible session context from the first turn.</td>
+          <td>A successful runtime turn returns the same visible reply behavior as MVP-002 while recording trace, raw log, and conversation log entries.</td>
         </tr>
         <tr>
           <td>AC-3</td>
-          <td>Each committed successful turn records exactly one user visible message and one character visible reply.</td>
+          <td>The runtime adapter proves it reused <code>runCharacterTurn()</code> by preserving session transcript behavior and recent visible context behavior.</td>
         </tr>
         <tr>
           <td>AC-4</td>
-          <td>Failed input validation and failed reply validation are atomic: no partial transcript entries are committed.</td>
+          <td>Invalid user input is rejected before a character reply is produced and leaves the conversation log unchanged for that input.</td>
         </tr>
         <tr>
           <td>AC-5</td>
-          <td>The local character agent is deterministic under tests and requires no network or credentials.</td>
+          <td>Invalid character replies are recorded as rejected runtime outcomes and leave visible logs unchanged for the failed turn.</td>
         </tr>
         <tr>
           <td>AC-6</td>
-          <td>The implementation includes focused tests for the turn runner, session transcript, local character agent seam, and chat CLI boundary.</td>
+          <td>Default <code>pnpm chat</code> output remains compatible with MVP-002 tests unless a reviewed compatibility note changes it.</td>
         </tr>
         <tr>
           <td>AC-7</td>
+          <td><code>pnpm chat -- --trace</code> emits JSONL trace summaries on <code>stderr</code> without changing normal chat <code>stdout</code>.</td>
+        </tr>
+        <tr>
+          <td>AC-8</td>
+          <td>The MVP-001 <code>pnpm relay</code> smoke path still passes.</td>
+        </tr>
+        <tr>
+          <td>AC-9</td>
           <td><code>pnpm lint</code>, <code>pnpm typecheck</code>, <code>pnpm test</code>, strict unused-symbol TypeScript, and whitespace checks pass.</td>
         </tr>
       </tbody>
     </table>
 
-    <h2>Week-Sized Workstreams</h2>
-    <ol>
-      <li>Confirm the exact local chat command contract and transcript shape before production code.</li>
-      <li>Implement the character profile, visible message, session, and turn result data shapes.</li>
-      <li>Implement the character turn runner with atomic transcript commit behavior.</li>
-      <li>Implement the deterministic local character agent and prove it receives recent visible context.</li>
-      <li>Wire the local chat CLI to the conversation core while preserving the relay smoke path.</li>
-      <li>Add focused test coverage for successful turns, multi-turn context, validation failures, and CLI behavior.</li>
-      <li>Run the required gates, update the development journal, and prepare a concise PR summary.</li>
-    </ol>
-
     <h2>Parallel Child Tasks</h2>
     <p>
-      The main thread coordinates this slice through the repository's parallel-agent protocol.
-      Child task packets describe execution scope and point back to this active slice.
+      This draft is intentionally shaped for five week-sized subthreads. The main thread should
+      freeze the shared event/log interfaces before production work starts, then coordinate the
+      child tasks through the repository's parallel-agent protocol.
     </p>
     <ul>
-      <li><a href="child-tasks/mvp-002-ct01-conversation-core.md">CT-01 - Conversation Core</a></li>
-      <li><a href="child-tasks/mvp-002-ct02-local-chat-cli.md">CT-02 - Local Chat CLI</a></li>
-      <li><a href="child-tasks/mvp-002-ct03-review-test-plan.md">CT-03 - Contract Review And Test Plan</a></li>
+      <li><a href="child-tasks/mvp-003-ct01-runtime-event-contract.md">CT-01 - Runtime Event Contract</a></li>
+      <li><a href="child-tasks/mvp-003-ct02-trace-log-store.md">CT-02 - Trace And Log Store</a></li>
+      <li><a href="child-tasks/mvp-003-ct03-local-runtime-turn-adapter.md">CT-03 - Local Runtime Turn Adapter</a></li>
+      <li><a href="child-tasks/mvp-003-ct04-chat-cli-trace-mode.md">CT-04 - Chat CLI Trace Mode</a></li>
+      <li><a href="child-tasks/mvp-003-ct05-integration-review-docs.md">CT-05 - Integration Review, Tests, And Docs</a></li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
     <ul>
-      <li>The conversation core owns session state, visible transcript records, turn execution, validation, and atomic commit behavior.</li>
-      <li>The local character agent owns deterministic reply generation for this slice.</li>
-      <li>The chat CLI owns terminal input/output, prompting, exit handling, and mapping core failures to user-visible errors.</li>
-      <li>The existing relay module remains the compatibility smoke path unless the implementation thread records a narrower change.</li>
-      <li>Future runtime vocabulary may guide names, but this slice should introduce only the structures needed by the runnable local conversation path.</li>
+      <li>The runtime event contract owns event identity, trace identity, event type, timestamp, and payload validation.</li>
+      <li>The trace/log store owns append-only in-memory log records and immutable read snapshots.</li>
+      <li>The local runtime turn adapter owns the route from <code>USER_MESSAGE</code> event to existing conversation core result.</li>
+      <li>The conversation core remains the owner of visible transcript mutation and deterministic character replies.</li>
+      <li>The chat CLI owns terminal input/output, exit handling, and optional trace-summary emission.</li>
+      <li>The relay command remains the compatibility smoke path and should not move into the runtime layer in this slice.</li>
     </ul>
 
     <h2>Test Plan</h2>
     <ul>
-      <li>Unit tests for creating a session with the built-in character profile.</li>
-      <li>Unit tests proving successful turns append user and character visible messages in order.</li>
-      <li>Unit tests proving recent visible context is passed to the local character agent.</li>
-      <li>Unit tests proving invalid input and invalid replies leave the transcript unchanged.</li>
-      <li>CLI boundary tests for a short local chat session, exit command, stdout prompts/replies, stderr errors, and process exit code.</li>
-      <li>Regression tests proving the MVP-001 relay command still satisfies its existing contract if preserved unchanged.</li>
+      <li>Unit tests for deterministic runtime event creation, validation, and ID/clock injection.</li>
+      <li>Unit tests for append-only trace, raw log, and conversation log behavior with immutable snapshots.</li>
+      <li>Integration tests for successful local runtime turns that record trace and visible conversation output.</li>
+      <li>Integration tests for invalid user input and invalid agent reply rejection paths.</li>
+      <li>CLI boundary tests for default chat compatibility, trace mode JSONL on <code>stderr</code>, exit behavior, and error behavior.</li>
+      <li>Regression tests proving the MVP-001 relay command still satisfies its existing contract.</li>
+    </ul>
+
+    <h2>Review Decisions Requested</h2>
+    <ul>
+      <li>Trace mode format: this draft proposes JSON Lines on <code>stderr</code>, not extra human text in normal chat output.</li>
+      <li>Storage: this draft proposes in-memory logs only, with no file or database persistence.</li>
+      <li>Runtime scope: this draft proposes one local <code>USER_MESSAGE</code> event path only, not a full Runtime Kernel.</li>
+      <li>Compatibility: this draft proposes preserving default chat and relay output exactly unless implementation evidence forces a reviewed change.</li>
     </ul>
 
     <h2>Future Pressure</h2>
     <p>
-      Once this local conversation core is solid, later slices can replace the deterministic agent,
-      add trace logging, introduce persistence, connect external transports, or grow toward the
-      larger runtime architecture from Notion. Those decisions should be made from the pressure
-      created by this working conversation path.
+      Once local chat has runtime-shaped events and traces, later slices can add durable log storage,
+      replay, provider events, model-call snapshots, memory retrieval, scheduled events, or a broader
+      Runtime Kernel. Those later slices should build on this event/log seam instead of introducing
+      parallel paths.
     </p>
   </main>
 </body>
