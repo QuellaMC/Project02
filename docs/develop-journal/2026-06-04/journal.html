@@ -158,6 +158,102 @@
       <li>Confirmed the second queued turn sees the first committed turn as recent visible context.</li>
       <li>Confirmed failed turns still leave the queue available for later turns.</li>
     </ul>
+
+    <h2>MVP-003 Runtime Event Trace Drafted For Review</h2>
+    <p>
+      Archived the completed MVP-002 active slice and drafted MVP-003 as the proposed next active
+      slice for review. The draft frames the next product step as a narrow runtime event and trace
+      layer around the existing local chat path.
+    </p>
+    <ul>
+      <li>Archived <code>docs/plan/active-slice.html</code> to <code>docs/plan/completed/mvp-002-local-character-conversation-core.html</code>.</li>
+      <li>Replaced <code>docs/plan/active-slice.html</code> with <code>MVP-003 - Runtime Event Trace For Local Chat</code>.</li>
+      <li>Added five MVP-003 child task packets under <code>docs/plan/child-tasks/</code> for runtime event contract, trace/log store, local runtime adapter, chat CLI trace mode, and integration review/docs.</li>
+      <li>Kept the MVP-003 draft local and in-memory only: no persistence, provider edge, model calls, memory, scheduler, Live2D, or full runtime rebuild.</li>
+    </ul>
+
+    <h2>MVP-003 Runtime Event Trace Integrated</h2>
+    <p>
+      Integrated the MVP-003 child task work into the local chat path. Each non-exit chat input now
+      reserves runtime identity, becomes a validated <code>USER_MESSAGE</code> event when valid, runs
+      through the local runtime adapter, and records in-memory trace, raw event, and visible
+      conversation log records while preserving default chat output.
+    </p>
+    <ul>
+      <li>Added <code>src/runtime-event.ts</code> for <code>USER_MESSAGE</code> event identity, normalized payload, deterministic identity injection, and rejected-intake errors carrying reserved identity.</li>
+      <li>Added <code>src/runtime-log.ts</code> for append-only in-memory runtime trace, raw event, and conversation log snapshots.</li>
+      <li>Added <code>src/local-runtime.ts</code> so runtime handling reuses <code>runCharacterTurn()</code> instead of duplicating conversation logic.</li>
+      <li>Updated <code>src/chat-cli.ts</code> so default chat still prints the MVP-002 transcript while <code>--trace</code> emits one JSON Line per processed input to <code>stderr</code>.</li>
+      <li>Added focused runtime event, runtime log, local runtime adapter, and chat trace-mode tests while keeping relay compatibility covered.</li>
+    </ul>
+    <p>
+      Integration decisions:
+    </p>
+    <ul>
+      <li>Invalid user input rejected during event construction uses the reserved identity on <code>RuntimeEventInputError</code> and the shared local-runtime rejection helper, so the CLI does not maintain a parallel log contract.</li>
+      <li>Intermediate raw records such as receipt, normalization, and visible commit do not claim a final status; rejected validation records and final completed/rejected outcomes carry status.</li>
+      <li><code>/exit</code> remains a CLI command, not a runtime event, and therefore emits no trace summary.</li>
+    </ul>
+    <p>
+      Verification after integration:
+    </p>
+    <ul>
+      <li><code>pnpm exec vitest run tests/runtime-log.test.ts tests/local-runtime.test.ts tests/chat-cli.contract.test.ts</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+      <li><code>git diff --check</code></li>
+    </ul>
+
+    <h2>PR Review Runtime Trace Follow-Up</h2>
+    <p>
+      Addressed PR review comments on the local runtime adapter. The rejected-input helper now
+      returns a frozen identity snapshot, runtime trace start logging is serialized through the
+      same session-level adapter queue as turn execution, and unexpected agent failures append a
+      terminal rejected raw/trace outcome before the original error is rethrown.
+    </p>
+    <ul>
+      <li>Added regressions for mutable rejected-input identity, concurrent runtime turn ordering, and unexpected agent failure logging.</li>
+      <li>Verified the full repo gate after the review fixes.</li>
+    </ul>
+
+    <h2>PR Review RawEventLog Payload Summary Follow-Up</h2>
+    <p>
+      Addressed the consistency caveat that the MVP-003 raw event records were named like the
+      Notion <code>RawEventLog</code> boundary but only stored identity, kind, status, reason, and
+      visible message IDs. Raw event records now carry an immutable payload summary, preserving raw
+      CLI input when available and the normalized <code>USER_MESSAGE</code> payload details for
+      runtime-handled events.
+    </p>
+    <ul>
+      <li>Added <code>RawEventLogPayloadSummary</code> to the runtime log contract and centralized copy/freeze behavior in the log store.</li>
+      <li>Threaded raw CLI input into accepted and rejected local runtime paths without changing user-facing chat output.</li>
+      <li>Updated the active slice to clarify that this MVP implements an in-memory raw-log-shaped boundary, not the full lossless Notion <code>RawEventLog</code> retention model.</li>
+      <li>Added regressions proving payload summaries are stored with raw records and frozen as append-time snapshots.</li>
+    </ul>
+    <p>
+      Verification after follow-up:
+    </p>
+    <ul>
+      <li><code>pnpm test tests/runtime-log.test.ts tests/local-runtime.test.ts</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+      <li><code>git diff --check</code></li>
+      <li>HTML parser check over <code>docs/plan/active-slice.html</code> and <code>docs/develop-journal/2026-06-04/journal.html</code></li>
+    </ul>
+
+    <h2>Second PR Review Trace And Archive Follow-Up</h2>
+    <p>
+      Addressed the later PR review comments on the MVP-003 branch. The chat CLI now maps
+      unexpected runtime failures back into a fatal rejected runtime result so <code>--trace</code>
+      still emits one terminal JSON Line for the processed input before exiting. The archived
+      MVP-002 spec now follows the completed-slice convention instead of still identifying itself
+      as the accepted active slice.
+    </p>
+    <ul>
+      <li>Added a CLI regression for unexpected agent failure in trace mode, covering terminal rejected trace output and exit code <code>1</code>.</li>
+      <li>Updated <code>docs/plan/completed/mvp-002-local-character-conversation-core.html</code> status, archived-spec metadata, and archived-slice wording.</li>
+      <li>Verified <code>pnpm test tests/chat-cli.contract.test.ts</code>, <code>pnpm check</code>, strict unused-symbol TypeScript, whitespace, and HTML parser checks.</li>
+    </ul>
   </main>
 </body>
 </html>

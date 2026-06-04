@@ -17,6 +17,46 @@ export {
   type VisibleMessageRole
 } from './conversation.ts';
 
+export {
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent,
+  RuntimeEventInputError,
+  type RuntimeEvent,
+  type RuntimeEventIdentity,
+  type RuntimeEventIdentityOptions,
+  type RuntimeEventType,
+  type UserMessageRuntimeEvent,
+  type UserMessageRuntimeEventPayload
+} from './runtime-event.ts';
+
+export {
+  recordLocalUserMessageInputRejection,
+  runLocalUserMessageEvent,
+  type LocalRuntimeUserMessageInputRejectedResult,
+  type LocalRuntimeUserMessageCompletedResult,
+  type LocalRuntimeUserMessageRejectedResult,
+  type LocalRuntimeUserMessageRejectionReason,
+  type LocalRuntimeUserMessageResult,
+  type RunLocalUserMessageEventOptions,
+  type RecordLocalUserMessageInputRejectionOptions
+} from './local-runtime.ts';
+
+export { createRuntimeLogStore } from './runtime-log.ts';
+
+export type {
+  ConversationLogRecord,
+  ConversationLogRecordInput,
+  RawEventLogRecord,
+  RawEventLogRecordInput,
+  RawEventLogRecordKind,
+  RawEventLogPayloadSummary,
+  RuntimeLogStore,
+  RuntimeTraceEntry,
+  RuntimeTraceEntryInput,
+  RuntimeTraceStepName,
+  RuntimeTurnStatus
+} from './runtime-log.ts';
+
 export type ProjectHealth = {
   readonly status: 'ok';
   readonly runtime: 'typescript';
