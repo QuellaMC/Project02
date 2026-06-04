@@ -9,6 +9,7 @@ import {
   recordLocalUserMessageInputRejection,
   runLocalUserMessageEvent,
   RuntimeEventInputError,
+  type CharacterAgent,
   type ConversationSession,
   type LocalRuntimeUserMessageInputRejectedResult,
   type LocalRuntimeUserMessageResult,
@@ -23,6 +24,7 @@ type ChatCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
   readonly traceMode?: boolean;
+  readonly agent?: CharacterAgent;
 };
 
 type ChatTraceSummary = {
@@ -55,6 +57,7 @@ type TraceIdentity = {
 
 const exitCommand = '/exit';
 const promptText = 'You: ';
+const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
 
 export async function runChatCli(options: ChatCliOptions): Promise<number> {
   const session = createConversationSession();
@@ -76,7 +79,12 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
       }
 
       try {
-        const result = await handleUserMessageThroughRuntime(session, logStore, line);
+        const result = await handleUserMessageThroughRuntime({
+          session,
+          logStore,
+          line,
+          ...(options.agent === undefined ? {} : { agent: options.agent })
+        });
 
         if (result.status === 'completed') {
           options.stdout.write(`${session.character.displayName}: ${result.characterReplyText}\n`);
@@ -95,7 +103,7 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
           return 1;
         }
       } catch {
-        options.stderr.write('Error: Chat failed before producing a reply.\n');
+        options.stderr.write(`Error: ${chatFailedBeforeReplyMessage}\n`);
         lines.close();
         return 1;
       }
@@ -109,30 +117,44 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
   return 0;
 }
 
+type HandleUserMessageThroughRuntimeOptions = {
+  readonly session: ConversationSession;
+  readonly logStore: RuntimeLogStore;
+  readonly line: string;
+  readonly agent?: CharacterAgent;
+};
+
 async function handleUserMessageThroughRuntime(
-  session: ConversationSession,
-  logStore: RuntimeLogStore,
-  line: string
+  options: HandleUserMessageThroughRuntimeOptions
 ): Promise<ChatRuntimeTurn> {
   const identity = createRuntimeEventIdentity();
 
   try {
-    const event = createUserMessageRuntimeEvent(line, identity);
-    const result = await runLocalUserMessageEvent({
-      event,
-      session,
-      logStore,
-      rawInput: line
-    });
+    const event = createUserMessageRuntimeEvent(options.line, identity);
 
-    return mapRuntimeResult(result);
+    try {
+      const result = await runLocalUserMessageEvent({
+        event,
+        session: options.session,
+        logStore: options.logStore,
+        rawInput: options.line,
+        ...(options.agent === undefined ? {} : { agent: options.agent })
+      });
+
+      return mapRuntimeResult(result);
+    } catch {
+      return mapUnexpectedRuntimeFailureResult(
+        identity,
+        traceEntriesForIdentity(options.logStore, identity)
+      );
+    }
   } catch (error: unknown) {
     if (error instanceof RuntimeEventInputError) {
       const result = recordLocalUserMessageInputRejection({
         identity: error.identity,
-        logStore,
+        logStore: options.logStore,
         message: error.message,
-        rawInput: line
+        rawInput: options.line
       });
 
       return mapInputRejectionResult(result);
@@ -182,6 +204,37 @@ function mapInputRejectionResult(
       result.message
     )
   };
+}
+
+function mapUnexpectedRuntimeFailureResult(
+  identity: TraceIdentity,
+  traceEntries: readonly RuntimeTraceEntry[]
+): RejectedChatRuntimeTurn {
+  return {
+    status: 'rejected',
+    errorMessage: chatFailedBeforeReplyMessage,
+    fatal: true,
+    traceSummary: createTraceSummary(
+      identity,
+      'rejected',
+      traceEntries,
+      chatFailedBeforeReplyMessage
+    )
+  };
+}
+
+function traceEntriesForIdentity(
+  logStore: RuntimeLogStore,
+  identity: TraceIdentity
+): readonly RuntimeTraceEntry[] {
+  return Object.freeze(
+    logStore
+      .traceEntries()
+      .filter(
+        (entry) =>
+          entry.eventId === identity.eventId && entry.traceId === identity.traceId
+      )
+  );
 }
 
 function createTraceSummary(

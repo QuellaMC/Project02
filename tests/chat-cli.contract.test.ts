@@ -1,8 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
-import type { Readable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+
+import { runChatCli as runChatCliInProcess } from '../src/chat-cli.ts';
+import type { CharacterAgent } from '../src/index.ts';
 
 type CommandResult = {
   readonly exitCode: number;
@@ -32,6 +35,14 @@ const successfulTraceSteps = [
 const rejectedInputTraceSteps = [
   'runtime_event_received',
   'input_validation_rejected',
+  'raw_event_log_appended',
+  'runtime_turn_rejected'
+] as const;
+
+const unexpectedFailureTraceSteps = [
+  'runtime_event_received',
+  'runtime_event_normalized',
+  'runtime_turn_started',
   'raw_event_log_appended',
   'runtime_turn_rejected'
 ] as const;
@@ -124,6 +135,35 @@ describe('node src/chat-cli.ts', () => {
       expect.objectContaining({
         status: 'completed',
         steps: successfulTraceSteps
+      })
+    ]);
+  });
+
+  it('emits rejected trace JSONL before exiting when runtime handling fails unexpectedly', async () => {
+    const stdout = new CapturingWritable();
+    const stderr = new CapturingWritable();
+    const throwingAgent: CharacterAgent = {
+      reply() {
+        throw new Error('agent transport unavailable');
+      }
+    };
+
+    const exitCode = await runChatCliInProcess({
+      stdin: Readable.from(['hello\n']),
+      stdout,
+      stderr,
+      traceMode: true,
+      agent: throwingAgent
+    });
+    const traceSummaries = parseTraceSummaries(stderr.contents());
+
+    expect(exitCode).toBe(1);
+    expect(stdout.contents()).toBe('Mira is ready.\nYou: ');
+    expect(traceSummaries).toEqual([
+      expect.objectContaining({
+        status: 'rejected',
+        steps: unexpectedFailureTraceSteps,
+        error: 'Chat failed before producing a reply.'
       })
     ]);
   });
@@ -288,4 +328,23 @@ function isStringArray(value: unknown): value is readonly string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+class CapturingWritable extends Writable {
+  private readonly chunks: Buffer[] = [];
+
+  override _write(
+    chunk: Buffer | string,
+    encoding: BufferEncoding,
+    callback: (error?: Error | null) => void
+  ): void {
+    this.chunks.push(
+      typeof chunk === 'string' ? Buffer.from(chunk, encoding) : Buffer.from(chunk)
+    );
+    callback();
+  }
+
+  contents(): string {
+    return Buffer.concat(this.chunks).toString('utf8');
+  }
 }

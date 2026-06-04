@@ -240,6 +240,20 @@
       <li><code>git diff --check</code></li>
       <li>HTML parser check over <code>docs/plan/active-slice.html</code> and <code>docs/develop-journal/2026-06-04/journal.html</code></li>
     </ul>
+
+    <h2>Second PR Review Trace And Archive Follow-Up</h2>
+    <p>
+      Addressed the later PR review comments on the MVP-003 branch. The chat CLI now maps
+      unexpected runtime failures back into a fatal rejected runtime result so <code>--trace</code>
+      still emits one terminal JSON Line for the processed input before exiting. The archived
+      MVP-002 spec now follows the completed-slice convention instead of still identifying itself
+      as the accepted active slice.
+    </p>
+    <ul>
+      <li>Added a CLI regression for unexpected agent failure in trace mode, covering terminal rejected trace output and exit code <code>1</code>.</li>
+      <li>Updated <code>docs/plan/completed/mvp-002-local-character-conversation-core.html</code> status, archived-spec metadata, and archived-slice wording.</li>
+      <li>Verified <code>pnpm test tests/chat-cli.contract.test.ts</code>, <code>pnpm check</code>, strict unused-symbol TypeScript, whitespace, and HTML parser checks.</li>
+    </ul>
   </main>
 </body>
 </html>

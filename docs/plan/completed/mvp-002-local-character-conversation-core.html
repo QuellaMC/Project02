@@ -28,10 +28,11 @@
 <body>
   <main>
     <h1>MVP-002 - Local Character Conversation Core</h1>
-    <p><span class="status">Status: accepted active slice</span></p>
+    <p><span class="status">Status: completed</span></p>
     <p class="meta">
-      Created: 2026-06-04. Active spec:
-      <code>docs/plan/active-slice.html</code>. Previous slice archived at
+      Created: 2026-06-04. Completed: 2026-06-04. Archived spec:
+      <code>docs/plan/completed/mvp-002-local-character-conversation-core.html</code>.
+      Previous slice archived at
       <code>docs/plan/completed/mvp-001-basic-relay-cli.html</code>.
       Suggested implementation branch: <code>feature/mvp-002-local-character-conversation-core</code>.
     </p>
@@ -50,8 +51,8 @@
       character context shapes the answer, and accepted visible output is recorded as product truth.
     </blockquote>
     <p>
-      Local rebuild direction comes from <a href="../../AGENTS.md">AGENTS.md</a> and
-      <a href="../../AGENTS.repo.md">AGENTS.repo.md</a>. The repo should grow from working
+      Local rebuild direction comes from <a href="../../../AGENTS.md">AGENTS.md</a> and
+      <a href="../../../AGENTS.repo.md">AGENTS.repo.md</a>. The repo should grow from working
       vertical slices. MVP-001 proved a strict one-line relay command. MVP-002 turns that
       runnable path into the first local character conversation capability.
     </p>
@@ -260,12 +261,12 @@ You: /exit</code></pre>
     <h2>Parallel Child Tasks</h2>
     <p>
       The main thread coordinates this slice through the repository's parallel-agent protocol.
-      Child task packets describe execution scope and point back to this active slice.
+      Child task packets describe execution scope and point back to this archived slice.
     </p>
     <ul>
-      <li><a href="child-tasks/mvp-002-ct01-conversation-core.md">CT-01 - Conversation Core</a></li>
-      <li><a href="child-tasks/mvp-002-ct02-local-chat-cli.md">CT-02 - Local Chat CLI</a></li>
-      <li><a href="child-tasks/mvp-002-ct03-review-test-plan.md">CT-03 - Contract Review And Test Plan</a></li>
+      <li><a href="../child-tasks/mvp-002-ct01-conversation-core.md">CT-01 - Conversation Core</a></li>
+      <li><a href="../child-tasks/mvp-002-ct02-local-chat-cli.md">CT-02 - Local Chat CLI</a></li>
+      <li><a href="../child-tasks/mvp-002-ct03-review-test-plan.md">CT-03 - Contract Review And Test Plan</a></li>
     </ul>
 
     <h2>Implementation Boundaries</h2>
