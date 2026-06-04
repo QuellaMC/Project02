@@ -21,11 +21,27 @@ export {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
   RuntimeEventInputError,
+  type RuntimeEvent,
   type RuntimeEventIdentity,
   type RuntimeEventIdentityOptions,
   type RuntimeEventType,
-  type UserMessageRuntimeEvent
+  type UserMessageRuntimeEvent,
+  type UserMessageRuntimeEventPayload
 } from './runtime-event.ts';
+
+export {
+  recordLocalUserMessageInputRejection,
+  runLocalUserMessageEvent,
+  type LocalRuntimeUserMessageInputRejectedResult,
+  type LocalRuntimeUserMessageCompletedResult,
+  type LocalRuntimeUserMessageRejectedResult,
+  type LocalRuntimeUserMessageRejectionReason,
+  type LocalRuntimeUserMessageResult,
+  type RunLocalUserMessageEventOptions,
+  type RecordLocalUserMessageInputRejectionOptions
+} from './local-runtime.ts';
+
+export { createRuntimeLogStore } from './runtime-log.ts';
 
 export type {
   ConversationLogRecord,

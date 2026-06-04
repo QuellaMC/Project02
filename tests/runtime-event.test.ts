@@ -30,6 +30,23 @@ describe('runtime event contract', () => {
     expect(Object.isFrozen(event.payload)).toBe(true);
   });
 
+  it('rejects blank or duplicate identity fields before event creation', () => {
+    expect(() =>
+      createRuntimeEventIdentity({
+        eventId: '',
+        traceId: 'trace_test_001',
+        createdAt: '2026-06-04T00:00:00.000Z'
+      })
+    ).toThrow('Runtime event identity requires non-empty event and trace IDs.');
+    expect(() =>
+      createRuntimeEventIdentity({
+        eventId: 'evt_same',
+        traceId: 'evt_same',
+        createdAt: '2026-06-04T00:00:00.000Z'
+      })
+    ).toThrow('Runtime event identity requires separate event and trace IDs.');
+  });
+
   it('rejects empty input with the identity reserved for the rejected event intake', () => {
     const identity = createRuntimeEventIdentity({
       eventId: 'evt_rejected_empty',
@@ -54,8 +71,42 @@ describe('runtime event contract', () => {
 
       expect(error.reason).toBe('empty');
       expect(error.identity).toEqual(identity);
+      expect(Object.isFrozen(error.identity)).toBe(true);
       expect(error.message).toBe('Provide exactly one non-empty message.');
     }
+  });
+
+  it('snapshots caller-provided identity before rejection details are exposed', () => {
+    const mutableIdentity = {
+      eventId: 'evt_mutable_rejected',
+      traceId: 'trace_mutable_rejected',
+      createdAt: '2026-06-04T00:01:30.000Z'
+    };
+
+    try {
+      createUserMessageRuntimeEvent('', mutableIdentity);
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(RuntimeEventInputError);
+
+      if (!(error instanceof RuntimeEventInputError)) {
+        throw new Error('Expected RuntimeEventInputError.', {
+          cause: error
+        });
+      }
+
+      mutableIdentity.eventId = 'evt_mutated_after_rejection';
+      mutableIdentity.traceId = 'trace_mutated_after_rejection';
+      mutableIdentity.createdAt = '2026-06-04T00:01:31.000Z';
+
+      expect(error.identity).toEqual({
+        eventId: 'evt_mutable_rejected',
+        traceId: 'trace_mutable_rejected',
+        createdAt: '2026-06-04T00:01:30.000Z'
+      });
+      return;
+    }
+
+    throw new Error('Expected empty input to be rejected.');
   });
 
   it('rejects multiline input before a USER_MESSAGE event is created', () => {

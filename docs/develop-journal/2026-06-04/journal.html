@@ -171,6 +171,38 @@
       <li>Added five MVP-003 child task packets under <code>docs/plan/child-tasks/</code> for runtime event contract, trace/log store, local runtime adapter, chat CLI trace mode, and integration review/docs.</li>
       <li>Kept the MVP-003 draft local and in-memory only: no persistence, provider edge, model calls, memory, scheduler, Live2D, or full runtime rebuild.</li>
     </ul>
+
+    <h2>MVP-003 Runtime Event Trace Integrated</h2>
+    <p>
+      Integrated the MVP-003 child task work into the local chat path. Each non-exit chat input now
+      reserves runtime identity, becomes a validated <code>USER_MESSAGE</code> event when valid, runs
+      through the local runtime adapter, and records in-memory trace, raw event, and visible
+      conversation log records while preserving default chat output.
+    </p>
+    <ul>
+      <li>Added <code>src/runtime-event.ts</code> for <code>USER_MESSAGE</code> event identity, normalized payload, deterministic identity injection, and rejected-intake errors carrying reserved identity.</li>
+      <li>Added <code>src/runtime-log.ts</code> for append-only in-memory runtime trace, raw event, and conversation log snapshots.</li>
+      <li>Added <code>src/local-runtime.ts</code> so runtime handling reuses <code>runCharacterTurn()</code> instead of duplicating conversation logic.</li>
+      <li>Updated <code>src/chat-cli.ts</code> so default chat still prints the MVP-002 transcript while <code>--trace</code> emits one JSON Line per processed input to <code>stderr</code>.</li>
+      <li>Added focused runtime event, runtime log, local runtime adapter, and chat trace-mode tests while keeping relay compatibility covered.</li>
+    </ul>
+    <p>
+      Integration decisions:
+    </p>
+    <ul>
+      <li>Invalid user input rejected during event construction uses the reserved identity on <code>RuntimeEventInputError</code> and the shared local-runtime rejection helper, so the CLI does not maintain a parallel log contract.</li>
+      <li>Intermediate raw records such as receipt, normalization, and visible commit do not claim a final status; rejected validation records and final completed/rejected outcomes carry status.</li>
+      <li><code>/exit</code> remains a CLI command, not a runtime event, and therefore emits no trace summary.</li>
+    </ul>
+    <p>
+      Verification after integration:
+    </p>
+    <ul>
+      <li><code>pnpm exec vitest run tests/runtime-log.test.ts tests/local-runtime.test.ts tests/chat-cli.contract.test.ts</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+      <li><code>git diff --check</code></li>
+    </ul>
   </main>
 </body>
 </html>
