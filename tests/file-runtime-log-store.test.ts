@@ -1,4 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -6,11 +13,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   createFileRuntimeLogStore,
+  createLocalRuntimeSessionStore,
   createLocalRuntimeSessionPaths,
   LocalRuntimeStorageContractError,
+  LocalRuntimeSessionStoreError,
   recordLocalUserMessageInputRejection,
   type ConversationLogRecordInput,
   type LocalRuntimeStorageContractErrorCode,
+  type LocalRuntimeSessionStoreErrorCode,
   type RawEventLogRecordInput,
   type RuntimeTraceEntryInput
 } from '../src/index.ts';
@@ -32,12 +42,9 @@ describe('file-backed runtime log store', () => {
     }
   });
 
-  it('appends trace, raw event, and conversation records in order and survives reopen', () => {
+  it('appends trace, raw event, and conversation records in order and survives reopen', async () => {
     const storeRoot = createTempStoreRoot();
-    const store = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId: 'mira-local'
-    });
+    const store = await createCatalogedFileRuntimeLogStore(storeRoot, 'mira-local');
     const receivedTrace: RuntimeTraceEntryInput = {
       ...identity,
       step: 'runtime_event_received'
@@ -97,8 +104,10 @@ describe('file-backed runtime log store', () => {
     expect(reopened.conversationMessages()).toEqual([userMessage, characterMessage]);
   });
 
-  it('keeps two selected sessions separate', () => {
+  it('keeps two selected sessions separate', async () => {
     const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'alpha');
+    await createCatalogedSession(storeRoot, 'beta');
     const alpha = createFileRuntimeLogStore({
       storeRoot,
       sessionId: 'alpha'
@@ -196,12 +205,9 @@ describe('file-backed runtime log store', () => {
     ).toEqual([betaMessage]);
   });
 
-  it('protects persisted records from mutable append inputs and read snapshots', () => {
+  it('protects persisted records from mutable append inputs and read snapshots', async () => {
     const storeRoot = createTempStoreRoot();
-    const store = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId: 'mira-local'
-    });
+    const store = await createCatalogedFileRuntimeLogStore(storeRoot, 'mira-local');
     const visibleMessageIds = ['mira-local:message-1', 'mira-local:message-2'];
     const payloadSummary = {
       normalizedCurrentUserMessage: 'hello'
@@ -267,12 +273,9 @@ describe('file-backed runtime log store', () => {
     ]);
   });
 
-  it('persists rejected runtime outcomes without adding visible conversation records', () => {
+  it('persists rejected runtime outcomes without adding visible conversation records', async () => {
     const storeRoot = createTempStoreRoot();
-    const store = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId: 'mira-local'
-    });
+    const store = await createCatalogedFileRuntimeLogStore(storeRoot, 'mira-local');
 
     recordLocalUserMessageInputRejection({
       identity,
@@ -305,14 +308,38 @@ describe('file-backed runtime log store', () => {
     expect(reopened.conversationMessages()).toEqual([]);
   });
 
-  it('fails partial JSONL records with CT-01 partial-write errors', () => {
+  it('does not create orphan log files for uncataloged sessions', async () => {
     const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'existing');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'orphan'
+    });
+    const store = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'orphan'
+    });
+
+    expectSessionStoreErrorCode(
+      () =>
+        store.appendTrace({
+          ...identity,
+          step: 'runtime_event_received'
+        }),
+      'session_not_found'
+    );
+    expectSessionStoreErrorCode(() => store.traceEntries(), 'session_not_found');
+    expect(existsSync(paths.tracePath)).toBe(false);
+  });
+
+  it('fails partial JSONL records with CT-01 partial-write errors', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
     const paths = createLocalRuntimeSessionPaths({
       storeRoot,
       sessionId: 'mira-local'
     });
 
-    mkdirSync(paths.sessionRoot, { recursive: true });
     writeFileSync(
       paths.tracePath,
       JSON.stringify({
@@ -338,8 +365,9 @@ describe('file-backed runtime log store', () => {
     );
   });
 
-  it('wraps filesystem read failures with CT-01 read-failed errors', () => {
+  it('wraps filesystem read failures with CT-01 read-failed errors', async () => {
     const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
     const paths = createLocalRuntimeSessionPaths({
       storeRoot,
       sessionId: 'mira-local'
@@ -355,40 +383,43 @@ describe('file-backed runtime log store', () => {
     expectStorageErrorCode(() => store.traceEntries(), 'read_failed');
   });
 
-  it('wraps filesystem write failures with CT-01 write-failed errors', () => {
+  it('wraps filesystem write failures with CT-01 write-failed errors', async () => {
     const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
     const paths = createLocalRuntimeSessionPaths({
       storeRoot,
       sessionId: 'mira-local'
     });
-
-    mkdirSync(paths.sessionRoot, { recursive: true });
-    rmSync(paths.sessionRoot, { recursive: true, force: true });
-    writeFileSync(paths.sessionRoot, 'not a directory', 'utf8');
 
     const store = createFileRuntimeLogStore({
       storeRoot,
       sessionId: 'mira-local'
     });
 
-    expectStorageErrorCode(
-      () =>
-        store.appendTrace({
-          ...identity,
-          step: 'runtime_event_received'
-        }),
-      'write_failed'
-    );
+    chmodSync(paths.sessionRoot, 0o500);
+
+    try {
+      expectStorageErrorCode(
+        () =>
+          store.appendTrace({
+            ...identity,
+            step: 'runtime_event_received'
+          }),
+        'write_failed'
+      );
+    } finally {
+      chmodSync(paths.sessionRoot, 0o700);
+    }
   });
 
-  it('fails corrupt or malformed JSONL records with CT-01 typed errors', () => {
+  it('fails corrupt or malformed JSONL records with CT-01 typed errors', async () => {
     const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
     const paths = createLocalRuntimeSessionPaths({
       storeRoot,
       sessionId: 'mira-local'
     });
 
-    mkdirSync(paths.sessionRoot, { recursive: true });
     writeFileSync(paths.tracePath, '{"eventId":"evt_missing_fields"}\n', 'utf8');
     writeFileSync(paths.rawEventsPath, '{not json}\n', 'utf8');
     writeFileSync(
@@ -450,6 +481,34 @@ function createTempStoreRoot(): string {
   return storeRoot;
 }
 
+async function createCatalogedFileRuntimeLogStore(
+  storeRoot: string,
+  sessionId: string
+): Promise<ReturnType<typeof createFileRuntimeLogStore>> {
+  await createCatalogedSession(storeRoot, sessionId);
+
+  return createFileRuntimeLogStore({
+    storeRoot,
+    sessionId
+  });
+}
+
+async function createCatalogedSession(
+  storeRoot: string,
+  sessionId: string
+): Promise<void> {
+  const sessionStore = createLocalRuntimeSessionStore({
+    storeRoot,
+    now: () => createdAt
+  });
+
+  await sessionStore.createSession({
+    sessionId,
+    createdAt,
+    updatedAt: createdAt
+  });
+}
+
 function createConversationRecord(options: {
   readonly id: string;
   readonly role: 'user' | 'character';
@@ -488,4 +547,26 @@ function expectStorageErrorCode(
   }
 
   throw new Error(`Expected local runtime storage error code "${code}".`);
+}
+
+function expectSessionStoreErrorCode(
+  operation: () => unknown,
+  code: LocalRuntimeSessionStoreErrorCode
+): void {
+  try {
+    operation();
+  } catch (error: unknown) {
+    expect(error).toBeInstanceOf(LocalRuntimeSessionStoreError);
+
+    if (!(error instanceof LocalRuntimeSessionStoreError)) {
+      throw new Error('Expected LocalRuntimeSessionStoreError.', {
+        cause: error
+      });
+    }
+
+    expect(error.code).toBe(code);
+    return;
+  }
+
+  throw new Error(`Expected local runtime session store error code "${code}".`);
 }

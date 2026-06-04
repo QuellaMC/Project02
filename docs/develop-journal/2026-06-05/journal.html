@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-06-05 Development Journal</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 920px; margin: 0 auto; padding: 40px 24px; }
+    h1, h2 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 1.8rem; }
+    h2 { margin-top: 28px; font-size: 1.15rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    p { margin: 0 0 14px; }
+    ul { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>2026-06-05 Development Journal</h1>
+    <p>MVP-004 Durable Local Runtime Continuity PR review follow-up.</p>
+
+    <h2>MVP-004 Storage Contract Review Follow-Up</h2>
+    <p>
+      Addressed review findings around partial local stores and exported file-backed log access.
+      The durable chat path now fails loudly when existing store content is missing its schema
+      marker, and a store with existing session directories no longer treats a missing session
+      catalog as an empty catalog. The file-backed runtime log store now validates the versioned
+      schema, session catalog, and selected session directory before every read or append.
+    </p>
+    <ul>
+      <li>Added CLI regressions for orphaned default-session logs with a missing schema marker or missing session catalog.</li>
+      <li>Moved reusable session-readability validation into <code>src/session-store.ts</code> and reused it from <code>src/file-runtime-log-store.ts</code>.</li>
+      <li>Added a file-log-store regression proving uncataloged sessions cannot create orphan log files through the exported API.</li>
+      <li>Added inspect coverage proving rejected turns persist rejection evidence without fake visible messages.</li>
+      <li>Left unsupported extra-key rejection as a watch item; the current decoders continue to canonicalize known fields for this slice.</li>
+    </ul>
+    <p>
+      Verification before the full gate:
+    </p>
+    <ul>
+      <li><code>pnpm exec vitest run tests/session-store.test.ts tests/file-runtime-log-store.test.ts tests/chat-cli.contract.test.ts tests/inspect-cli.contract.test.ts</code></li>
+    </ul>
+  </main>
+</body>
+</html>

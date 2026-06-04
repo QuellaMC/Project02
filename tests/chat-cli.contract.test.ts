@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -8,6 +8,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { runChatCli as runChatCliInProcess } from '../src/chat-cli.ts';
 import {
+  createLocalRuntimeSessionPaths,
+  createLocalRuntimeStorageLayout,
+  createLocalRuntimeStorageSchemaMarker,
+  encodeStorageSchemaMarker,
   LocalRuntimeStorageContractError,
   type CharacterAgent,
   type RuntimeLogStore
@@ -264,6 +268,54 @@ describe('node src/chat-cli.ts', () => {
         'You: Mira: I remember you said "hello" Stay with me for a minute.\n' +
         'You: ',
       stderr: ''
+    });
+  });
+
+  it('fails loudly instead of repairing a partial default store with a missing schema marker', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot
+    });
+
+    await mkdir(paths.sessionRoot, { recursive: true });
+    await writeFile(paths.conversationPath, '{"orphan":true}\n', 'utf8');
+
+    const result = await runChatCli('/exit\n', ['--store', storeRoot]);
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: Local runtime store is missing required files.\n'
+    });
+  });
+
+  it('fails loudly instead of treating a missing session catalog as empty when session logs exist', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const layout = createLocalRuntimeStorageLayout({
+      storeRoot
+    });
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot
+    });
+
+    await mkdir(paths.sessionRoot, { recursive: true });
+    await writeFile(
+      layout.schemaPath,
+      `${encodeStorageSchemaMarker(
+        createLocalRuntimeStorageSchemaMarker({
+          createdAt: '2026-06-04T00:00:00.000Z'
+        })
+      )}\n`,
+      'utf8'
+    );
+    await writeFile(paths.conversationPath, '{"orphan":true}\n', 'utf8');
+
+    const result = await runChatCli('/exit\n', ['--store', storeRoot]);
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: Local runtime store is missing required files.\n'
     });
   });
 

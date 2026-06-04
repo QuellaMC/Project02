@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 import {
   createLocalRuntimeSessionPaths,
@@ -18,6 +18,7 @@ import type {
   RuntimeLogStore,
   RuntimeTraceEntry
 } from './runtime-log.ts';
+import { assertLocalRuntimeSessionReadable } from './session-store.ts';
 
 export type CreateFileRuntimeLogStoreOptions = LocalRuntimeSessionPathsOptions;
 
@@ -25,6 +26,12 @@ export function createFileRuntimeLogStore(
   options: CreateFileRuntimeLogStoreOptions = {}
 ): RuntimeLogStore {
   const paths = createLocalRuntimeSessionPaths(options);
+  const assertSessionReadable = (): void => {
+    assertLocalRuntimeSessionReadable({
+      ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+      sessionId: paths.sessionId
+    });
+  };
 
   return Object.freeze({
     appendTrace(entry) {
@@ -32,9 +39,9 @@ export function createFileRuntimeLogStore(
       const storedEntry = decodeRuntimeTraceEntry(encoded);
 
       appendJsonLine({
-        sessionRoot: paths.sessionRoot,
         filePath: paths.tracePath,
         line: encodeRuntimeTraceEntry(storedEntry),
+        assertSessionReadable,
         validateExisting: () => readRuntimeTraceEntries(paths)
       });
 
@@ -45,9 +52,9 @@ export function createFileRuntimeLogStore(
       const storedRecord = decodeRawEventLogRecord(encoded);
 
       appendJsonLine({
-        sessionRoot: paths.sessionRoot,
         filePath: paths.rawEventsPath,
         line: encodeRawEventLogRecord(storedRecord),
+        assertSessionReadable,
         validateExisting: () => readRawEventLogRecords(paths)
       });
 
@@ -58,41 +65,36 @@ export function createFileRuntimeLogStore(
       const storedRecord = decodeConversationLogRecord(encoded);
 
       appendJsonLine({
-        sessionRoot: paths.sessionRoot,
         filePath: paths.conversationPath,
         line: encodeConversationLogRecord(storedRecord),
+        assertSessionReadable,
         validateExisting: () => readConversationLogRecords(paths)
       });
 
       return storedRecord;
     },
     traceEntries() {
+      assertSessionReadable();
       return Object.freeze([...readRuntimeTraceEntries(paths)]);
     },
     rawEvents() {
+      assertSessionReadable();
       return Object.freeze([...readRawEventLogRecords(paths)]);
     },
     conversationMessages() {
+      assertSessionReadable();
       return Object.freeze([...readConversationLogRecords(paths)]);
     }
   } satisfies RuntimeLogStore);
 }
 
 function appendJsonLine(options: {
-  readonly sessionRoot: string;
   readonly filePath: string;
   readonly line: string;
+  readonly assertSessionReadable: () => void;
   readonly validateExisting: () => readonly unknown[];
 }): void {
-  try {
-    mkdirSync(options.sessionRoot, { recursive: true });
-  } catch {
-    throw new LocalRuntimeStorageContractError(
-      'write_failed',
-      `Could not prepare local runtime log directory: ${options.sessionRoot}.`
-    );
-  }
-
+  options.assertSessionReadable();
   options.validateExisting();
 
   try {

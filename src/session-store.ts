@@ -1,7 +1,9 @@
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import {
   appendFile,
   mkdir,
   readFile,
+  readdir,
   writeFile
 } from 'node:fs/promises';
 
@@ -52,6 +54,11 @@ export type CreateLocalRuntimeSessionStoreOptions =
     readonly conversationLogReader?: LocalRuntimeSessionConversationLogReader;
   };
 
+export type AssertLocalRuntimeSessionReadableOptions =
+  LocalRuntimeStorageLayoutOptions & {
+    readonly sessionId?: string;
+  };
+
 export type CreateLocalRuntimeSessionOptions = {
   readonly sessionId?: string;
   readonly createdAt?: string;
@@ -84,6 +91,28 @@ export type LocalRuntimeSessionStore = {
 };
 
 const defaultClock = (): string => new Date().toISOString();
+
+export function assertLocalRuntimeSessionReadable(
+  options: AssertLocalRuntimeSessionReadableOptions = {}
+): LocalRuntimeSessionMetadata {
+  const layout = createLocalRuntimeStorageLayout(options);
+  const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);
+
+  readStorageSchemaMarkerSync(layout);
+
+  const metadata = readSessionCatalogSync(layout).get(sessionId);
+
+  if (metadata === undefined) {
+    throw new LocalRuntimeSessionStoreError(
+      'session_not_found',
+      `Local runtime session "${sessionId}" does not exist.`
+    );
+  }
+
+  assertSessionDirectoryReadable(layout, sessionId);
+
+  return metadata;
+}
 
 export function createLocalRuntimeSessionStore(
   options: CreateLocalRuntimeSessionStoreOptions = {}
@@ -206,14 +235,7 @@ async function ensureInitializedStore(
   layout: LocalRuntimeStorageLayout,
   createdAt: string
 ): Promise<void> {
-  try {
-    await mkdir(layout.sessionsRoot, { recursive: true });
-  } catch {
-    throw new LocalRuntimeStorageContractError(
-      'write_failed',
-      `Could not prepare local runtime sessions directory: ${layout.sessionsRoot}.`
-    );
-  }
+  const storeHasExistingContent = await localRuntimeStoreHasExistingContent(layout);
 
   try {
     await readStorageSchemaMarker(layout);
@@ -222,6 +244,11 @@ async function ensureInitializedStore(
       throw error;
     }
 
+    if (storeHasExistingContent) {
+      throw error;
+    }
+
+    await createSessionsRoot(layout);
     await writeStorageFile({
       filePath: layout.schemaPath,
       content: `${encodeStorageSchemaMarker(
@@ -231,6 +258,37 @@ async function ensureInitializedStore(
       )}\n`,
       failureMessage: `Could not write local runtime storage schema marker: ${layout.schemaPath}.`
     });
+    return;
+  }
+
+  await createSessionsRoot(layout);
+}
+
+async function createSessionsRoot(layout: LocalRuntimeStorageLayout): Promise<void> {
+  try {
+    await mkdir(layout.sessionsRoot, { recursive: true });
+  } catch {
+    throw new LocalRuntimeStorageContractError(
+      'write_failed',
+      `Could not prepare local runtime sessions directory: ${layout.sessionsRoot}.`
+    );
+  }
+}
+
+async function localRuntimeStoreHasExistingContent(
+  layout: LocalRuntimeStorageLayout
+): Promise<boolean> {
+  try {
+    return (await readdir(layout.storeRoot)).length > 0;
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return false;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      `Could not inspect local runtime store root: ${layout.storeRoot}.`
+    );
   }
 }
 
@@ -249,14 +307,20 @@ async function readStorageSchemaMarker(
 async function readSessionCatalog(
   layout: LocalRuntimeStorageLayout
 ): Promise<Map<string, LocalRuntimeSessionMetadata>> {
-  const sessions = new Map<string, LocalRuntimeSessionMetadata>();
   let catalog: string;
 
   try {
     catalog = await readFile(layout.sessionCatalogPath, 'utf8');
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return sessions;
+      if (await localRuntimeSessionsRootHasExistingContent(layout)) {
+        throw new LocalRuntimeStorageContractError(
+          'missing_file',
+          `Required local runtime session catalog is missing: ${layout.sessionCatalogPath}.`
+        );
+      }
+
+      return new Map<string, LocalRuntimeSessionMetadata>();
     }
 
     throw new LocalRuntimeStorageContractError(
@@ -265,13 +329,129 @@ async function readSessionCatalog(
     );
   }
 
-  for (const line of splitJsonLines(catalog, layout.sessionCatalogPath)) {
+  return decodeSessionCatalog(catalog, layout.sessionCatalogPath);
+}
+
+function readStorageSchemaMarkerSync(layout: LocalRuntimeStorageLayout): void {
+  const schema = readStorageFileSync({
+    filePath: layout.schemaPath,
+    missingFileCode: 'missing_file',
+    failureMessage: `Could not read local runtime storage schema marker: ${layout.schemaPath}.`
+  });
+
+  decodeStorageSchemaMarker(schema);
+}
+
+function readSessionCatalogSync(
+  layout: LocalRuntimeStorageLayout
+): Map<string, LocalRuntimeSessionMetadata> {
+  let catalog: string;
+
+  try {
+    catalog = readFileSync(layout.sessionCatalogPath, 'utf8');
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      if (localRuntimeSessionsRootHasExistingContentSync(layout)) {
+        throw new LocalRuntimeStorageContractError(
+          'missing_file',
+          `Required local runtime session catalog is missing: ${layout.sessionCatalogPath}.`
+        );
+      }
+
+      return new Map<string, LocalRuntimeSessionMetadata>();
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      `Could not read local runtime session catalog: ${layout.sessionCatalogPath}.`
+    );
+  }
+
+  return decodeSessionCatalog(catalog, layout.sessionCatalogPath);
+}
+
+function decodeSessionCatalog(
+  catalog: string,
+  filePath: string
+): Map<string, LocalRuntimeSessionMetadata> {
+  const sessions = new Map<string, LocalRuntimeSessionMetadata>();
+
+  for (const line of splitJsonLines(catalog, filePath)) {
     const metadata = decodeSessionMetadata(line);
 
     sessions.set(metadata.sessionId, metadata);
   }
 
   return sessions;
+}
+
+async function localRuntimeSessionsRootHasExistingContent(
+  layout: LocalRuntimeStorageLayout
+): Promise<boolean> {
+  try {
+    return (await readdir(layout.sessionsRoot)).length > 0;
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return false;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      `Could not inspect local runtime sessions directory: ${layout.sessionsRoot}.`
+    );
+  }
+}
+
+function localRuntimeSessionsRootHasExistingContentSync(
+  layout: LocalRuntimeStorageLayout
+): boolean {
+  try {
+    return readdirSync(layout.sessionsRoot).length > 0;
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return false;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      `Could not inspect local runtime sessions directory: ${layout.sessionsRoot}.`
+    );
+  }
+}
+
+function assertSessionDirectoryReadable(
+  layout: LocalRuntimeStorageLayout,
+  sessionId: string
+): void {
+  const sessionRoot = createLocalRuntimeSessionPaths({
+    storeRoot: layout.storeRoot,
+    sessionId
+  }).sessionRoot;
+
+  try {
+    if (!statSync(sessionRoot).isDirectory()) {
+      throw new LocalRuntimeStorageContractError(
+        'read_failed',
+        `Local runtime session path is not a directory: ${sessionRoot}.`
+      );
+    }
+  } catch (error: unknown) {
+    if (error instanceof LocalRuntimeStorageContractError) {
+      throw error;
+    }
+
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      throw new LocalRuntimeStorageContractError(
+        'missing_file',
+        `Required local runtime session directory is missing: ${sessionRoot}.`
+      );
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      `Could not inspect local runtime session directory: ${sessionRoot}.`
+    );
+  }
 }
 
 async function appendSessionMetadata(
@@ -401,6 +581,25 @@ async function readStorageFile(options: {
 }): Promise<string> {
   try {
     return await readFile(options.filePath, 'utf8');
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      throw new LocalRuntimeStorageContractError(
+        options.missingFileCode,
+        `Required local runtime storage file is missing: ${options.filePath}.`
+      );
+    }
+
+    throw new LocalRuntimeStorageContractError('read_failed', options.failureMessage);
+  }
+}
+
+function readStorageFileSync(options: {
+  readonly filePath: string;
+  readonly missingFileCode: 'missing_file';
+  readonly failureMessage: string;
+}): string {
+  try {
+    return readFileSync(options.filePath, 'utf8');
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       throw new LocalRuntimeStorageContractError(

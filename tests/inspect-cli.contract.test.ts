@@ -63,6 +63,13 @@ const successfulTraceSteps = [
   'runtime_turn_completed'
 ] as const;
 
+const rejectedInputTraceSteps = [
+  'runtime_event_received',
+  'input_validation_rejected',
+  'raw_event_log_appended',
+  'runtime_turn_rejected'
+] as const;
+
 describe('node src/inspect-cli.ts', () => {
   afterEach(async () => {
     await Promise.all(
@@ -151,6 +158,51 @@ describe('node src/inspect-cli.ts', () => {
         ]
       }
     );
+  });
+
+  it('prints rejected-turn evidence without fake visible messages after the chat process exits', async () => {
+    const storeRoot = await createTempStoreRoot();
+
+    await expect(seedChatSession(storeRoot, 'mira-local', '\n/exit\n')).resolves.toMatchObject({
+      exitCode: 0,
+      stderr: 'Error: Provide exactly one non-empty message.\n'
+    });
+
+    const result = await runInspectCli([
+      '--store',
+      storeRoot,
+      '--session',
+      'mira-local'
+    ]);
+    const output = parseJson(result.stdout) as InspectSessionOutput;
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      stderr: ''
+    });
+    expect(output.counts).toEqual({
+      traceEntries: 4,
+      rawEvents: 3,
+      conversationMessages: 0
+    });
+    expect(output.turns).toHaveLength(1);
+
+    const turn = output.turns[0];
+
+    if (turn === undefined) {
+      throw new Error('Expected one inspected rejected turn.');
+    }
+
+    expect(turn.eventId).toMatch(/^evt_/u);
+    expect(turn.traceId).toMatch(/^trace_/u);
+    expect(turn).toEqual({
+      eventId: turn.eventId,
+      traceId: turn.traceId,
+      status: 'rejected',
+      steps: rejectedInputTraceSteps,
+      visibleMessages: [],
+      reason: 'Provide exactly one non-empty message.'
+    });
   });
 
   it('does not mutate session metadata or runtime logs while inspecting', async () => {
