@@ -1,6 +1,7 @@
 export {
   CharacterInputError,
   CharacterReplyValidationError,
+  ConversationRehydrationError,
   createConversationSession,
   createDeterministicCharacterAgent,
   localCharacterProfile,
@@ -94,6 +95,21 @@ export type {
   LocalRuntimeStorageLayoutOptions,
   LocalRuntimeStorageSchemaMarker
 } from './local-storage.ts';
+
+export {
+  createLocalRuntimeSessionStore,
+  LocalRuntimeSessionStoreError
+} from './session-store.ts';
+
+export type {
+  CreateLocalRuntimeSessionOptions,
+  CreateLocalRuntimeSessionStoreOptions,
+  LocalRuntimeSessionConversationLogReader,
+  LocalRuntimeSessionStore,
+  LocalRuntimeSessionStoreErrorCode,
+  RehydrateLocalRuntimeConversationSessionOptions,
+  SelectLocalRuntimeSessionOptions
+} from './session-store.ts';
 
 export type ProjectHealth = {
   readonly status: 'ok';

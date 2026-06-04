@@ -47,6 +47,7 @@ export type CharacterTurnResult = {
 export type ConversationSessionOptions = {
   readonly id?: string;
   readonly character?: CharacterProfile;
+  readonly visibleTranscript?: readonly VisibleMessage[];
 };
 
 export type CharacterTurnOptions = {
@@ -82,13 +83,28 @@ export class CharacterReplyValidationError extends Error {
   }
 }
 
+export class ConversationRehydrationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConversationRehydrationError';
+  }
+}
+
 export function createConversationSession(
   options: ConversationSessionOptions = {}
 ): ConversationSession {
-  const visibleTranscript: VisibleMessage[] = [];
+  const sessionId = options.id ?? defaultSessionId;
+  const character = freezeCharacterProfile(options.character ?? localCharacterProfile);
+  const visibleTranscript = createInitialVisibleTranscript({
+    sessionId,
+    character,
+    ...(options.visibleTranscript === undefined
+      ? {}
+      : { visibleTranscript: options.visibleTranscript })
+  });
   const session: ConversationSession = {
-    id: options.id ?? defaultSessionId,
-    character: freezeCharacterProfile(options.character ?? localCharacterProfile),
+    id: sessionId,
+    character,
     get visibleTranscript() {
       return Object.freeze([...visibleTranscript]);
     }
@@ -263,7 +279,7 @@ function getMutableTranscript(session: ConversationSession): VisibleMessage[] {
 }
 
 function createMessageId(session: ConversationSession, messageNumber: number): string {
-  return `${session.id}:message-${String(messageNumber)}`;
+  return createMessageIdForSessionId(session.id, messageNumber);
 }
 
 function findPreviousUserMessage(
@@ -278,4 +294,136 @@ function findPreviousUserMessage(
   }
 
   return undefined;
+}
+
+function createInitialVisibleTranscript(options: {
+  readonly sessionId: string;
+  readonly character: CharacterProfile;
+  readonly visibleTranscript?: readonly VisibleMessage[];
+}): VisibleMessage[] {
+  const visibleTranscript = options.visibleTranscript ?? [];
+  const restoredMessages: VisibleMessage[] = [];
+
+  visibleTranscript.forEach((message, index) => {
+    restoredMessages.push(
+      freezeValidatedRestoredVisibleMessage({
+        sessionId: options.sessionId,
+        character: options.character,
+        message,
+        expectedMessageNumber: index + 1
+      })
+    );
+  });
+
+  return restoredMessages;
+}
+
+function freezeValidatedRestoredVisibleMessage(options: {
+  readonly sessionId: string;
+  readonly character: CharacterProfile;
+  readonly message: VisibleMessage;
+  readonly expectedMessageNumber: number;
+}): VisibleMessage {
+  const expectedId = createMessageIdForSessionId(
+    options.sessionId,
+    options.expectedMessageNumber
+  );
+
+  if (options.message.id !== expectedId) {
+    throw new ConversationRehydrationError(
+      `Restored visible message must have sequential ID "${expectedId}".`
+    );
+  }
+
+  validateRestoredRoleOrder({
+    expectedMessageNumber: options.expectedMessageNumber,
+    message: options.message
+  });
+  validateRestoredSpeaker({
+    character: options.character,
+    message: options.message
+  });
+
+  let normalizedText: string;
+
+  try {
+    normalizedText = normalizeOneLineMessage(options.message.text);
+  } catch (error: unknown) {
+    if (error instanceof OneLineMessageValidationError) {
+      throw new ConversationRehydrationError(
+        'Restored visible message text must already be normalized.'
+      );
+    }
+
+    throw error;
+  }
+
+  if (normalizedText !== options.message.text) {
+    throw new ConversationRehydrationError(
+      'Restored visible message text must already be normalized.'
+    );
+  }
+
+  return Object.freeze({
+    id: options.message.id,
+    role: options.message.role,
+    speakerId: options.message.speakerId,
+    speakerName: options.message.speakerName,
+    text: options.message.text
+  } satisfies VisibleMessage);
+}
+
+function validateRestoredRoleOrder(options: {
+  readonly expectedMessageNumber: number;
+  readonly message: VisibleMessage;
+}): void {
+  const expectedRole =
+    options.expectedMessageNumber % 2 === 1 ? 'user' : 'character';
+
+  if (options.message.role !== expectedRole) {
+    throw new ConversationRehydrationError(
+      'Restored visible messages must preserve user/character commit order.'
+    );
+  }
+}
+
+function validateRestoredSpeaker(options: {
+  readonly character: CharacterProfile;
+  readonly message: VisibleMessage;
+}): void {
+  const role = options.message.role as string;
+
+  if (role === 'user') {
+    if (
+      options.message.speakerId !== localUserSpeaker.id ||
+      options.message.speakerName !== localUserSpeaker.displayName
+    ) {
+      throw new ConversationRehydrationError(
+        'Restored user message speaker metadata is malformed.'
+      );
+    }
+
+    return;
+  }
+
+  if (role === 'character') {
+    if (
+      options.message.speakerId !== options.character.id ||
+      options.message.speakerName !== options.character.displayName
+    ) {
+      throw new ConversationRehydrationError(
+        'Restored character message speaker metadata is malformed.'
+      );
+    }
+
+    return;
+  }
+
+  throw new ConversationRehydrationError(
+    'Restored visible message role is malformed.'
+  );
+}
+
+function createMessageIdForSessionId(sessionId: string, messageNumber: number): string {
+  return `${sessionId}:message-${String(messageNumber)}`;
 }
