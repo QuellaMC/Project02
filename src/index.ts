@@ -57,6 +57,38 @@ export type {
   RuntimeTurnStatus
 } from './runtime-log.ts';
 
+export {
+  createLocalRuntimeSessionMetadata,
+  createLocalRuntimeSessionPaths,
+  createLocalRuntimeStorageLayout,
+  createLocalRuntimeStorageSchemaMarker,
+  decodeConversationLogRecord,
+  decodeRawEventLogRecord,
+  decodeRuntimeTraceEntry,
+  decodeStorageSchemaMarker,
+  defaultLocalRuntimeSessionId,
+  defaultLocalRuntimeStoreRoot,
+  encodeConversationLogRecord,
+  encodeRawEventLogRecord,
+  encodeRuntimeTraceEntry,
+  encodeStorageSchemaMarker,
+  LocalRuntimeStorageContractError,
+  localRuntimeStorageSchemaVersion,
+  normalizeLocalRuntimeSessionId
+} from './local-storage.ts';
+
+export type {
+  CreateLocalRuntimeSessionMetadataOptions,
+  CreateLocalRuntimeStorageSchemaMarkerOptions,
+  LocalRuntimeSessionMetadata,
+  LocalRuntimeSessionPaths,
+  LocalRuntimeSessionPathsOptions,
+  LocalRuntimeStorageContractErrorCode,
+  LocalRuntimeStorageLayout,
+  LocalRuntimeStorageLayoutOptions,
+  LocalRuntimeStorageSchemaMarker
+} from './local-storage.ts';
+
 export type ProjectHealth = {
   readonly status: 'ok';
   readonly runtime: 'typescript';
