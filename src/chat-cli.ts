@@ -2,7 +2,6 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
 import {
-  ConversationRehydrationError,
   createConversationSession,
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
@@ -25,6 +24,11 @@ import {
   type RuntimeTraceStepName,
   type RuntimeTurnStatus
 } from './index.ts';
+import {
+  formatLocalRuntimeTerminalError,
+  isLocalRuntimeTerminalError,
+  type LocalRuntimeTerminalError
+} from './terminal-errors.ts';
 
 type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -105,9 +109,7 @@ export async function runChatCliFromArgs(
   } catch (error: unknown) {
     if (
       error instanceof ChatCliUsageError ||
-      error instanceof LocalRuntimeStorageContractError ||
-      error instanceof LocalRuntimeSessionStoreError ||
-      error instanceof ConversationRehydrationError
+      isLocalRuntimeTerminalError(error)
     ) {
       options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
       return 1;
@@ -480,51 +482,22 @@ function isMissingDefaultSessionStore(error: unknown): boolean {
 }
 
 function formatTerminalErrorMessage(
-  error:
-    | ChatCliUsageError
-    | LocalRuntimeStorageContractError
-    | LocalRuntimeSessionStoreError
-    | ConversationRehydrationError
+  error: ChatCliUsageError | LocalRuntimeTerminalError
 ): string {
-  if (error instanceof LocalRuntimeStorageContractError) {
-    return formatLocalRuntimeStorageContractError(error);
+  if (error instanceof ChatCliUsageError) {
+    return error.message;
   }
 
-  return error.message;
+  return formatLocalRuntimeTerminalError(error);
 }
 
 function isFormattedTerminalError(
   error: unknown
-): error is
-  | ChatCliUsageError
-  | LocalRuntimeStorageContractError
-  | LocalRuntimeSessionStoreError
-  | ConversationRehydrationError {
+): error is ChatCliUsageError | LocalRuntimeTerminalError {
   return (
     error instanceof ChatCliUsageError ||
-    error instanceof LocalRuntimeStorageContractError ||
-    error instanceof LocalRuntimeSessionStoreError ||
-    error instanceof ConversationRehydrationError
+    isLocalRuntimeTerminalError(error)
   );
-}
-
-function formatLocalRuntimeStorageContractError(
-  error: LocalRuntimeStorageContractError
-): string {
-  const code: string = error.code;
-
-  switch (code) {
-    case 'missing_file':
-      return 'Local runtime store is missing required files.';
-    case 'read_failed':
-      return 'Local runtime store could not be read.';
-    case 'write_failed':
-      return 'Local runtime store could not be written.';
-    case 'partial_write':
-      return 'Local runtime store write did not complete.';
-    default:
-      return error.message;
-  }
 }
 
 function isMainModule(moduleUrl: string): boolean {

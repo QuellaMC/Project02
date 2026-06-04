@@ -307,7 +307,7 @@ later process restart
     <h2>Minimal CLI Surface</h2>
     <ul>
       <li><code>pnpm chat</code> uses the default dev-local store root and a default local session, creating it if missing.</li>
-      <li><code>pnpm chat -- --store &lt;path&gt; --session &lt;session-id&gt;</code> resumes or creates the selected session in the selected store.</li>
+      <li><code>pnpm chat -- --store &lt;path&gt; --session &lt;session-id&gt;</code> resumes an existing selected session in the selected store and fails clearly if that session is missing.</li>
       <li><code>pnpm chat -- --store &lt;path&gt; --new-session &lt;session-id&gt;</code> creates a new selected session and fails clearly if that session already exists.</li>
       <li><code>pnpm chat -- --trace</code> keeps MVP-003 JSON Lines trace summaries on <code>stderr</code>.</li>
       <li><code>pnpm inspect -- --store &lt;path&gt; --sessions</code> lists local sessions without starting chat.</li>

@@ -318,6 +318,21 @@
       <li><code>git diff --check</code></li>
       <li>HTML parser check over <code>docs/plan/active-slice.html</code> and <code>docs/develop-journal/2026-06-04/journal.html</code></li>
     </ul>
+
+    <h2>MVP-004 Durable Runtime Implementation Integrated</h2>
+    <p>
+      Integrated the durable local runtime path for the existing TypeScript chat product surface.
+      Runtime trace entries, raw event records, visible conversation messages, and session metadata
+      now survive process restart under the versioned local store, and a read-only inspect command
+      can show stored sessions and selected-session turn evidence without replaying or mutating state.
+    </p>
+    <ul>
+      <li>Added <code>src/file-runtime-log-store.ts</code> for CT-02's per-session file-backed runtime log store using CT-01 paths and codecs.</li>
+      <li>Added <code>src/session-store.ts</code> for CT-03's session catalog and conversation rehydration through stored visible messages.</li>
+      <li>Updated <code>src/chat-cli.ts</code> so <code>pnpm chat</code> uses the default durable local session, <code>--session</code> resumes an existing selected session, and <code>--new-session</code> creates a selected session that must not already exist.</li>
+      <li>Added <code>src/inspect-cli.ts</code> and the <code>pnpm inspect</code> script for read-only <code>--sessions</code> and <code>--session</code> inspection.</li>
+      <li>Kept the slice local and runtime-truth focused only: no semantic memory, retrieval, scheduler, provider edge, model calls, replay mutation, cloud sync, or full Runtime Kernel work was added.</li>
+    </ul>
   </main>
 </body>
 </html>
