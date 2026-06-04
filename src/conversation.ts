@@ -315,6 +315,12 @@ function createInitialVisibleTranscript(options: {
     );
   });
 
+  if (restoredMessages.length % 2 !== 0) {
+    throw new ConversationRehydrationError(
+      'Restored visible messages must end after a complete user/character turn.'
+    );
+  }
+
   return restoredMessages;
 }
 

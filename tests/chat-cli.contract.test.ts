@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -269,6 +269,48 @@ describe('node src/chat-cli.ts', () => {
         'You: ',
       stderr: ''
     });
+  });
+
+  it('does not append selection metadata when selected-session validation fails', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const layout = createLocalRuntimeStorageLayout({
+      storeRoot
+    });
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    await expect(
+      runChatCli('hello\n/exit\n', [
+        '--store',
+        storeRoot,
+        '--new-session',
+        'mira-local'
+      ])
+    ).resolves.toMatchObject({
+      exitCode: 0
+    });
+
+    const catalogBefore = await readFile(layout.sessionCatalogPath, 'utf8');
+
+    await writeFile(paths.conversationPath, '{"eventId":"evt_partial"}', 'utf8');
+
+    const result = await runChatCli('/exit\n', [
+      '--store',
+      storeRoot,
+      '--session',
+      'mira-local'
+    ]);
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: Local runtime store write did not complete.\n'
+    });
+    await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe(
+      catalogBefore
+    );
   });
 
   it('fails loudly instead of repairing a partial default store with a missing schema marker', async () => {

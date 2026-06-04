@@ -105,6 +105,7 @@ export type {
   CreateLocalRuntimeSessionOptions,
   CreateLocalRuntimeSessionStoreOptions,
   LocalRuntimeSessionConversationLogReader,
+  LocalRuntimeSessionReadinessValidator,
   LocalRuntimeSessionStore,
   LocalRuntimeSessionStoreErrorCode,
   RehydrateLocalRuntimeConversationSessionOptions,

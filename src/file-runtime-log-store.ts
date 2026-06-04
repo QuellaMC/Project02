@@ -50,6 +50,7 @@ export function createFileRuntimeLogStore(
     appendRawEvent(record) {
       const encoded = encodeRawEventLogRecord(record);
       const storedRecord = decodeRawEventLogRecord(encoded);
+      assertReferencedConversationMessagesExist(paths, storedRecord);
 
       appendJsonLine({
         filePath: paths.rawEventsPath,
@@ -111,7 +112,11 @@ function readRuntimeTraceEntries(
   paths: LocalRuntimeSessionPaths
 ): readonly RuntimeTraceEntry[] {
   return Object.freeze(
-    readJsonLines(paths.tracePath, (line) => decodeRuntimeTraceEntry(line))
+    readJsonLines({
+      filePath: paths.tracePath,
+      decodeLine: (line) => decodeRuntimeTraceEntry(line),
+      missingFileIsAllowed: () => true
+    })
   );
 }
 
@@ -119,7 +124,11 @@ function readRawEventLogRecords(
   paths: LocalRuntimeSessionPaths
 ): readonly RawEventLogRecord[] {
   return Object.freeze(
-    readJsonLines(paths.rawEventsPath, (line) => decodeRawEventLogRecord(line))
+    readJsonLines({
+      filePath: paths.rawEventsPath,
+      decodeLine: (line) => decodeRawEventLogRecord(line),
+      missingFileIsAllowed: () => true
+    })
   );
 }
 
@@ -127,24 +136,76 @@ function readConversationLogRecords(
   paths: LocalRuntimeSessionPaths
 ): readonly ConversationLogRecord[] {
   return Object.freeze(
-    readJsonLines(paths.conversationPath, (line) => decodeConversationLogRecord(line))
+    readJsonLines({
+      filePath: paths.conversationPath,
+      decodeLine: (line) => decodeConversationLogRecord(line),
+      missingFileIsAllowed: () => !rawEventsRequireConversationLog(paths)
+    })
   );
 }
 
-function readJsonLines<T>(
-  filePath: string,
-  decodeLine: (line: string) => T
-): T[] {
-  const content = readLogFile(filePath);
+function readRequiredConversationLogRecords(
+  paths: LocalRuntimeSessionPaths
+): readonly ConversationLogRecord[] {
+  return Object.freeze(
+    readJsonLines({
+      filePath: paths.conversationPath,
+      decodeLine: (line) => decodeConversationLogRecord(line),
+      missingFileIsAllowed: () => false
+    })
+  );
+}
 
-  if (content === undefined || content.length === 0) {
+function assertReferencedConversationMessagesExist(
+  paths: LocalRuntimeSessionPaths,
+  record: RawEventLogRecord
+): void {
+  const visibleMessageIds = record.visibleMessageIds ?? [];
+
+  if (visibleMessageIds.length === 0) {
+    return;
+  }
+
+  const messagesById = new Set(
+    readRequiredConversationLogRecords(paths).map((message) => message.id)
+  );
+
+  for (const messageId of visibleMessageIds) {
+    if (!messagesById.has(messageId)) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        `Raw event references a missing visible conversation message: ${messageId}.`
+      );
+    }
+  }
+}
+
+function readJsonLines<T>(options: {
+  readonly filePath: string;
+  readonly decodeLine: (line: string) => T;
+  readonly missingFileIsAllowed: () => boolean;
+}): T[] {
+  const content = readLogFile(options.filePath);
+
+  if (content === undefined) {
+    if (!options.missingFileIsAllowed()) {
+      throw new LocalRuntimeStorageContractError(
+        'missing_file',
+        `Required local runtime log file is missing: ${options.filePath}.`
+      );
+    }
+
+    return [];
+  }
+
+  if (content.length === 0) {
     return [];
   }
 
   if (!content.endsWith('\n')) {
     throw new LocalRuntimeStorageContractError(
       'partial_write',
-      `Local runtime log file ended without a complete JSONL record: ${filePath}.`
+      `Local runtime log file ended without a complete JSONL record: ${options.filePath}.`
     );
   }
 
@@ -158,10 +219,19 @@ function readJsonLines<T>(
       continue;
     }
 
-    records.push(decodeLine(normalizedLine));
+    records.push(options.decodeLine(normalizedLine));
   }
 
   return records;
+}
+
+function rawEventsRequireConversationLog(paths: LocalRuntimeSessionPaths): boolean {
+  return readRawEventLogRecords(paths).some((record) => {
+    return (
+      record.visibleMessageIds !== undefined &&
+      record.visibleMessageIds.length > 0
+    );
+  });
 }
 
 function readLogFile(filePath: string): string | undefined {

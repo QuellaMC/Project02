@@ -419,6 +419,22 @@ describe('conversation core', () => {
     ).toThrow(ConversationRehydrationError);
   });
 
+  it('rejects restored visible transcripts that end before the paired character reply', () => {
+    expect(() =>
+      createConversationSession({
+        visibleTranscript: [
+          {
+            id: 'local-session:message-1',
+            role: 'user',
+            speakerId: 'local-user',
+            speakerName: 'You',
+            text: 'unpaired user'
+          }
+        ]
+      })
+    ).toThrow(ConversationRehydrationError);
+  });
+
   it('leaves the transcript unchanged when the character agent returns an invalid reply', async () => {
     const session = createConversationSession();
     const agent: CharacterAgent = {

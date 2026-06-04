@@ -48,10 +48,15 @@ export type LocalRuntimeSessionConversationLogReader = {
   ): Promise<readonly ConversationLogRecord[]> | readonly ConversationLogRecord[];
 };
 
+export type LocalRuntimeSessionReadinessValidator = {
+  assertSessionReadable(sessionId: string): Promise<void> | void;
+};
+
 export type CreateLocalRuntimeSessionStoreOptions =
   LocalRuntimeStorageLayoutOptions & {
     readonly now?: () => string;
     readonly conversationLogReader?: LocalRuntimeSessionConversationLogReader;
+    readonly sessionReadinessValidator?: LocalRuntimeSessionReadinessValidator;
   };
 
 export type AssertLocalRuntimeSessionReadableOptions =
@@ -120,6 +125,7 @@ export function createLocalRuntimeSessionStore(
   const layout = createLocalRuntimeStorageLayout(options);
   const now = options.now ?? defaultClock;
   const configuredConversationLogReader = options.conversationLogReader;
+  const configuredSessionReadinessValidator = options.sessionReadinessValidator;
 
   async function createSession(
     sessionOptions: CreateLocalRuntimeSessionOptions = {}
@@ -183,6 +189,11 @@ export function createLocalRuntimeSessionStore(
     selectOptions: SelectLocalRuntimeSessionOptions = {}
   ): Promise<LocalRuntimeSessionMetadata> {
     const existing = await readSession(sessionId);
+
+    await configuredSessionReadinessValidator?.assertSessionReadable(
+      existing.sessionId
+    );
+
     const selected = createLocalRuntimeSessionMetadata({
       sessionId: existing.sessionId,
       createdAt: existing.createdAt,

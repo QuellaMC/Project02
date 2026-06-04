@@ -90,9 +90,9 @@ describe('file-backed runtime log store', () => {
     expect(store.appendTrace(receivedTrace)).toEqual(receivedTrace);
     expect(store.appendTrace(completedTrace)).toEqual(completedTrace);
     expect(store.appendRawEvent(receivedRawEvent)).toEqual(receivedRawEvent);
-    expect(store.appendRawEvent(completedRawEvent)).toEqual(completedRawEvent);
     expect(store.appendConversationMessage(userMessage)).toEqual(userMessage);
     expect(store.appendConversationMessage(characterMessage)).toEqual(characterMessage);
+    expect(store.appendRawEvent(completedRawEvent)).toEqual(completedRawEvent);
 
     const reopened = createFileRuntimeLogStore({
       storeRoot,
@@ -208,6 +208,20 @@ describe('file-backed runtime log store', () => {
   it('protects persisted records from mutable append inputs and read snapshots', async () => {
     const storeRoot = createTempStoreRoot();
     const store = await createCatalogedFileRuntimeLogStore(storeRoot, 'mira-local');
+    const userMessage = createConversationRecord({
+      id: 'mira-local:message-1',
+      role: 'user',
+      speakerId: 'local-user',
+      speakerName: 'You',
+      text: 'hello'
+    });
+    const characterMessage = createConversationRecord({
+      id: 'mira-local:message-2',
+      role: 'character',
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: "I'm here. Tell me what you need."
+    });
     const visibleMessageIds = ['mira-local:message-1', 'mira-local:message-2'];
     const payloadSummary = {
       normalizedCurrentUserMessage: 'hello'
@@ -220,6 +234,9 @@ describe('file-backed runtime log store', () => {
       visibleMessageIds,
       payloadSummary
     };
+
+    store.appendConversationMessage(userMessage);
+    store.appendConversationMessage(characterMessage);
 
     const appended = store.appendRawEvent(rawEvent);
 
@@ -330,6 +347,53 @@ describe('file-backed runtime log store', () => {
     );
     expectSessionStoreErrorCode(() => store.traceEntries(), 'session_not_found');
     expect(existsSync(paths.tracePath)).toBe(false);
+  });
+
+  it('fails missing conversation logs when prior raw events reference visible messages', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeFileSync(
+      paths.tracePath,
+      `${JSON.stringify({
+        ...identity,
+        step: 'visible_reply_committed'
+      })}\n`,
+      'utf8'
+    );
+    writeFileSync(
+      paths.rawEventsPath,
+      `${JSON.stringify({
+        ...identity,
+        kind: 'runtime_turn_completed',
+        eventType: 'USER_MESSAGE',
+        status: 'completed',
+        visibleMessageIds: ['mira-local:message-1', 'mira-local:message-2']
+      })}\n`,
+      'utf8'
+    );
+
+    const store = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    expectStorageErrorCode(() => store.conversationMessages(), 'missing_file');
+    expectStorageErrorCode(
+      () =>
+        store.appendConversationMessage(createConversationRecord({
+          id: 'mira-local:message-3',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'next'
+        })),
+      'missing_file'
+    );
   });
 
   it('fails partial JSONL records with CT-01 partial-write errors', async () => {

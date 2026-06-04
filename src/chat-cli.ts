@@ -436,6 +436,18 @@ async function createDurableChatRuntime(
           sessionId: selectedSessionId
         }).conversationMessages();
       }
+    },
+    sessionReadinessValidator: {
+      assertSessionReadable(selectedSessionId) {
+        const logStore = createFileRuntimeLogStore({
+          ...storageOptions,
+          sessionId: selectedSessionId
+        });
+
+        logStore.traceEntries();
+        logStore.rawEvents();
+        logStore.conversationMessages();
+      }
     }
   });
 
@@ -461,7 +473,7 @@ async function selectOrCreateDefaultSession(
   sessionId: string
 ): Promise<void> {
   try {
-    await sessionStore.selectSession(sessionId);
+    await sessionStore.readSession(sessionId);
   } catch (error: unknown) {
     if (isMissingDefaultSessionStore(error)) {
       await sessionStore.createSession({ sessionId });
@@ -470,6 +482,8 @@ async function selectOrCreateDefaultSession(
 
     throw error;
   }
+
+  await sessionStore.selectSession(sessionId);
 }
 
 function isMissingDefaultSessionStore(error: unknown): boolean {
