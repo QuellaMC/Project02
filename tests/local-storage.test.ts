@@ -242,6 +242,24 @@ describe('local runtime storage contract', () => {
     expect(Object.isFrozen(decodedRawEvent.payloadSummary)).toBe(true);
   });
 
+  it('preserves empty payload summary strings used by rejected runtime turns', () => {
+    const rawEvent: RawEventLogRecord = {
+      eventId: 'evt_rejected_empty',
+      traceId: 'trace_rejected_empty',
+      createdAt,
+      kind: 'runtime_turn_rejected',
+      eventType: 'USER_MESSAGE',
+      status: 'rejected',
+      reason: 'Provide exactly one non-empty message.',
+      payloadSummary: {
+        rawInput: '',
+        normalizedCurrentUserMessage: ''
+      }
+    };
+
+    expect(decodeRawEventLogRecord(encodeRawEventLogRecord(rawEvent))).toEqual(rawEvent);
+  });
+
   it('rejects malformed stored records without silently skipping them', () => {
     expect(() => decodeRuntimeTraceEntry('{not json')).toThrow(
       LocalRuntimeStorageContractError

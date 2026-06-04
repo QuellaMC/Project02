@@ -41,6 +41,12 @@ export {
   type RecordLocalUserMessageInputRejectionOptions
 } from './local-runtime.ts';
 
+export { createFileRuntimeLogStore } from './file-runtime-log-store.ts';
+
+export type {
+  CreateFileRuntimeLogStoreOptions
+} from './file-runtime-log-store.ts';
+
 export { createRuntimeLogStore } from './runtime-log.ts';
 
 export type {

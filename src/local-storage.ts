@@ -426,11 +426,10 @@ function optionalRawEventPayloadSummary(
     throwMalformedRecord('payloadSummary');
   }
 
-  const rawInput = optionalRecordString(value, 'rawInput', 'malformed_record');
-  const normalizedCurrentUserMessage = optionalRecordString(
+  const rawInput = optionalPayloadSummaryString(value, 'rawInput');
+  const normalizedCurrentUserMessage = optionalPayloadSummaryString(
     value,
-    'normalizedCurrentUserMessage',
-    'malformed_record'
+    'normalizedCurrentUserMessage'
   );
 
   return Object.freeze({
@@ -439,6 +438,23 @@ function optionalRawEventPayloadSummary(
       ? {}
       : { normalizedCurrentUserMessage })
   } satisfies RawEventLogPayloadSummary);
+}
+
+function optionalPayloadSummaryString(
+  record: Record<string, unknown>,
+  key: string
+): string | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== 'string') {
+    throwMalformedRecord(key);
+  }
+
+  return value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
