@@ -51,6 +51,13 @@
       happened.
     </blockquote>
     <p>
+      Scope note: this MVP implements a local, in-memory <code>RawEventLog</code>-shaped boundary
+      with event identity, trace identity, runtime step kind, outcome metadata, visible message IDs,
+      and payload summaries. It is not yet the full lossless Notion <code>RawEventLog</code> with
+      durable raw payloads, normalized payload snapshots, redaction policy, replay, or cross-provider
+      retention.
+    </p>
+    <p>
       Local rebuild direction comes from <a href="../../AGENTS.md">AGENTS.md</a> and
       <a href="../../AGENTS.repo.md">AGENTS.repo.md</a>. This slice must grow from the current
       working local chat path. It should not restore the old runtime framework before the product
@@ -88,7 +95,7 @@
   -> runtime trace records what is happening
   -> conversation core validates and replies
   -> conversation log records visible messages
-  -> raw event log records internal truth
+  -> raw event log records internal turn evidence
   -> chat CLI prints the reply</code></pre>
     <p>
       The character does not need to become smarter in this slice. The important product change is
@@ -110,7 +117,7 @@
       <li>Deterministic ID and clock injection for tests.</li>
       <li>An in-memory runtime log store for this local session only.</li>
       <li>A visible <code>ConversationLog</code> API that records user-visible messages committed during runtime handling.</li>
-      <li>A <code>RawEventLog</code> / <code>RuntimeTrace</code> API that records runtime internals, validation success or rejection, and final outcome.</li>
+      <li>A <code>RawEventLog</code> / <code>RuntimeTrace</code> API that records runtime internals, validation success or rejection, final outcome, and an MVP payload summary.</li>
       <li>A local runtime turn adapter that accepts a <code>USER_MESSAGE</code> event and reuses <code>runCharacterTurn()</code>.</li>
       <li>Chat CLI routing through the local runtime adapter instead of calling the conversation core directly.</li>
       <li>Optional diagnostic trace mode for local chat, proposed as JSON Lines written to <code>stderr</code> so normal chat <code>stdout</code> stays stable.</li>
@@ -122,6 +129,7 @@
       <li>No live model provider call, API key, provider config, prompt template, or model selection.</li>
       <li>No Twilio, WhatsApp, webhook, HTTP server, browser UI, or external provider edge.</li>
       <li>No durable persistence, database, file-backed log, replay UI, or migration from old runtime data.</li>
+      <li>No full lossless <code>RawEventLog</code> retention model, provider payload archive, redaction policy, or replayable raw payload store.</li>
       <li>No memory, retrieval, tools, scheduler, Live2D, assets, plugin system, or background worker.</li>
       <li>No full Runtime Kernel, Character State Engine, Role Model Loop, Commit and Effects Engine, or old runtime module restoration from <code>legacy/typescript</code>.</li>
       <li>No multi-character support, account system, authentication, or cross-session continuity.</li>
@@ -252,6 +260,10 @@
         <tr>
           <td>AC-9</td>
           <td><code>pnpm lint</code>, <code>pnpm typecheck</code>, <code>pnpm test</code>, strict unused-symbol TypeScript, and whitespace checks pass.</td>
+        </tr>
+        <tr>
+          <td>AC-10</td>
+          <td>Raw event records store frozen payload summaries with raw input when available and normalized payload details for valid <code>USER_MESSAGE</code> events.</td>
         </tr>
       </tbody>
     </table>

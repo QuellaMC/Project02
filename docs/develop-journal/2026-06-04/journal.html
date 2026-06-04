@@ -215,6 +215,31 @@
       <li>Added regressions for mutable rejected-input identity, concurrent runtime turn ordering, and unexpected agent failure logging.</li>
       <li>Verified the full repo gate after the review fixes.</li>
     </ul>
+
+    <h2>PR Review RawEventLog Payload Summary Follow-Up</h2>
+    <p>
+      Addressed the consistency caveat that the MVP-003 raw event records were named like the
+      Notion <code>RawEventLog</code> boundary but only stored identity, kind, status, reason, and
+      visible message IDs. Raw event records now carry an immutable payload summary, preserving raw
+      CLI input when available and the normalized <code>USER_MESSAGE</code> payload details for
+      runtime-handled events.
+    </p>
+    <ul>
+      <li>Added <code>RawEventLogPayloadSummary</code> to the runtime log contract and centralized copy/freeze behavior in the log store.</li>
+      <li>Threaded raw CLI input into accepted and rejected local runtime paths without changing user-facing chat output.</li>
+      <li>Updated the active slice to clarify that this MVP implements an in-memory raw-log-shaped boundary, not the full lossless Notion <code>RawEventLog</code> retention model.</li>
+      <li>Added regressions proving payload summaries are stored with raw records and frozen as append-time snapshots.</li>
+    </ul>
+    <p>
+      Verification after follow-up:
+    </p>
+    <ul>
+      <li><code>pnpm test tests/runtime-log.test.ts tests/local-runtime.test.ts</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+      <li><code>git diff --check</code></li>
+      <li>HTML parser check over <code>docs/plan/active-slice.html</code> and <code>docs/develop-journal/2026-06-04/journal.html</code></li>
+    </ul>
   </main>
 </body>
 </html>

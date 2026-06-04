@@ -49,6 +49,7 @@ export type {
   RawEventLogRecord,
   RawEventLogRecordInput,
   RawEventLogRecordKind,
+  RawEventLogPayloadSummary,
   RuntimeLogStore,
   RuntimeTraceEntry,
   RuntimeTraceEntryInput,

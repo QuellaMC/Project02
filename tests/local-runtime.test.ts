@@ -22,12 +22,13 @@ describe('local runtime turn adapter', () => {
   it('runs one USER_MESSAGE event through the conversation core and records runtime logs', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
-    const event = createTestUserMessageEvent('hello', 'evt_success', 'trace_success');
+    const event = createTestUserMessageEvent(' hello ', 'evt_success', 'trace_success');
 
     const result = await runLocalUserMessageEvent({
       event,
       session,
-      logStore
+      logStore,
+      rawInput: ' hello '
     });
 
     expect(result.status).toBe('completed');
@@ -60,14 +61,22 @@ describe('local runtime turn adapter', () => {
         traceId: 'trace_success',
         createdAt: '2026-06-04T10:00:00.000Z',
         kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE'
+        eventType: 'USER_MESSAGE',
+        payloadSummary: {
+          rawInput: ' hello ',
+          normalizedCurrentUserMessage: 'hello'
+        }
       },
       {
         eventId: 'evt_success',
         traceId: 'trace_success',
         createdAt: '2026-06-04T10:00:00.000Z',
         kind: 'runtime_event_normalized',
-        eventType: 'USER_MESSAGE'
+        eventType: 'USER_MESSAGE',
+        payloadSummary: {
+          rawInput: ' hello ',
+          normalizedCurrentUserMessage: 'hello'
+        }
       },
       {
         eventId: 'evt_success',
@@ -75,7 +84,11 @@ describe('local runtime turn adapter', () => {
         createdAt: '2026-06-04T10:00:00.000Z',
         kind: 'visible_reply_committed',
         eventType: 'USER_MESSAGE',
-        visibleMessageIds: ['local-session:message-1', 'local-session:message-2']
+        visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
+        payloadSummary: {
+          rawInput: ' hello ',
+          normalizedCurrentUserMessage: 'hello'
+        }
       },
       {
         eventId: 'evt_success',
@@ -84,9 +97,14 @@ describe('local runtime turn adapter', () => {
         kind: 'runtime_turn_completed',
         eventType: 'USER_MESSAGE',
         status: 'completed',
-        visibleMessageIds: ['local-session:message-1', 'local-session:message-2']
+        visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
+        payloadSummary: {
+          rawInput: ' hello ',
+          normalizedCurrentUserMessage: 'hello'
+        }
       }
     ]);
+    expect(Object.isFrozen(result.rawEvent.payloadSummary)).toBe(true);
     expect(stepNames(result.traceEntries)).toEqual([
       'runtime_event_received',
       'runtime_event_normalized',
@@ -151,7 +169,8 @@ describe('local runtime turn adapter', () => {
     const result = recordLocalUserMessageInputRejection({
       identity: mutableIdentity,
       logStore,
-      message: 'Provide exactly one non-empty message.'
+      message: 'Provide exactly one non-empty message.',
+      rawInput: ''
     });
 
     mutableIdentity.eventId = 'evt_mutated_after_result';
@@ -171,8 +190,12 @@ describe('local runtime turn adapter', () => {
       kind: 'runtime_turn_rejected',
       eventType: 'USER_MESSAGE',
       status: 'rejected',
-      reason: 'Provide exactly one non-empty message.'
+      reason: 'Provide exactly one non-empty message.',
+      payloadSummary: {
+        rawInput: ''
+      }
     });
+    expect(Object.isFrozen(result.rawEvent.payloadSummary)).toBe(true);
   });
 
   it('serializes runtime trace start logging with queued turns for one session', async () => {
@@ -281,7 +304,10 @@ describe('local runtime turn adapter', () => {
       kind: 'input_validation_rejected',
       eventType: 'USER_MESSAGE',
       status: 'rejected',
-      reason: 'Provide exactly one non-empty message.'
+      reason: 'Provide exactly one non-empty message.',
+      payloadSummary: {
+        normalizedCurrentUserMessage: ''
+      }
     });
     expect(logStore.rawEvents()).toContainEqual({
       eventId: 'evt_invalid_input',
@@ -290,7 +316,10 @@ describe('local runtime turn adapter', () => {
       kind: 'runtime_turn_rejected',
       eventType: 'USER_MESSAGE',
       status: 'rejected',
-      reason: 'Provide exactly one non-empty message.'
+      reason: 'Provide exactly one non-empty message.',
+      payloadSummary: {
+        normalizedCurrentUserMessage: ''
+      }
     });
     expect(stepNames(result.traceEntries)).toEqual([
       'runtime_event_received',
@@ -338,7 +367,10 @@ describe('local runtime turn adapter', () => {
       kind: 'character_reply_rejected',
       eventType: 'USER_MESSAGE',
       status: 'rejected',
-      reason: 'Character agent returned a multi-line reply.'
+      reason: 'Character agent returned a multi-line reply.',
+      payloadSummary: {
+        normalizedCurrentUserMessage: 'hello'
+      }
     });
     expect(logStore.rawEvents()).toContainEqual({
       eventId: 'evt_invalid_reply',
@@ -347,7 +379,10 @@ describe('local runtime turn adapter', () => {
       kind: 'runtime_turn_rejected',
       eventType: 'USER_MESSAGE',
       status: 'rejected',
-      reason: 'Character agent returned a multi-line reply.'
+      reason: 'Character agent returned a multi-line reply.',
+      payloadSummary: {
+        normalizedCurrentUserMessage: 'hello'
+      }
     });
     expect(stepNames(result.traceEntries)).toEqual([
       'runtime_event_received',
@@ -386,7 +421,10 @@ describe('local runtime turn adapter', () => {
       kind: 'runtime_turn_rejected',
       eventType: 'USER_MESSAGE',
       status: 'rejected',
-      reason: 'Runtime turn failed before producing a reply.'
+      reason: 'Runtime turn failed before producing a reply.',
+      payloadSummary: {
+        normalizedCurrentUserMessage: 'hello'
+      }
     });
     expect(stepNames(logStore.traceEntries())).toEqual([
       'runtime_event_received',

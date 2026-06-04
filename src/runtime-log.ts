@@ -27,12 +27,18 @@ export type RawEventLogRecordKind =
   | 'runtime_turn_completed'
   | 'runtime_turn_rejected';
 
+export type RawEventLogPayloadSummary = {
+  readonly rawInput?: string;
+  readonly normalizedCurrentUserMessage?: string;
+};
+
 export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly kind: RawEventLogRecordKind;
   readonly eventType: RuntimeEventType;
   readonly status?: RuntimeTurnStatus;
   readonly reason?: string;
   readonly visibleMessageIds?: readonly string[];
+  readonly payloadSummary?: RawEventLogPayloadSummary;
 };
 
 export type ConversationLogRecord = VisibleMessage &
@@ -50,6 +56,7 @@ export type RawEventLogRecordInput = RuntimeEventIdentity & {
   readonly status?: RuntimeTurnStatus;
   readonly reason?: string;
   readonly visibleMessageIds?: readonly string[];
+  readonly payloadSummary?: RawEventLogPayloadSummary;
 };
 
 export type ConversationLogRecordInput = VisibleMessage &
@@ -119,6 +126,7 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
     record.visibleMessageIds === undefined
       ? undefined
       : Object.freeze([...record.visibleMessageIds]);
+  const payloadSummary = freezeRawEventPayloadSummary(record.payloadSummary);
 
   return Object.freeze({
     eventId: record.eventId,
@@ -128,8 +136,29 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
     eventType: record.eventType,
     ...(record.status === undefined ? {} : { status: record.status }),
     ...(record.reason === undefined ? {} : { reason: record.reason }),
-    ...(visibleMessageIds === undefined ? {} : { visibleMessageIds })
+    ...(visibleMessageIds === undefined ? {} : { visibleMessageIds }),
+    ...(payloadSummary === undefined ? {} : { payloadSummary })
   } satisfies RawEventLogRecord);
+}
+
+function freezeRawEventPayloadSummary(
+  payloadSummary: RawEventLogPayloadSummary | undefined
+): RawEventLogPayloadSummary | undefined {
+  if (payloadSummary === undefined) {
+    return undefined;
+  }
+
+  return Object.freeze({
+    ...(payloadSummary.rawInput === undefined
+      ? {}
+      : { rawInput: payloadSummary.rawInput }),
+    ...(payloadSummary.normalizedCurrentUserMessage === undefined
+      ? {}
+      : {
+          normalizedCurrentUserMessage:
+            payloadSummary.normalizedCurrentUserMessage
+        })
+  } satisfies RawEventLogPayloadSummary);
 }
 
 function freezeConversationLogRecord(

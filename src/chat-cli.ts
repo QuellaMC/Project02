@@ -121,7 +121,8 @@ async function handleUserMessageThroughRuntime(
     const result = await runLocalUserMessageEvent({
       event,
       session,
-      logStore
+      logStore,
+      rawInput: line
     });
 
     return mapRuntimeResult(result);
@@ -130,7 +131,8 @@ async function handleUserMessageThroughRuntime(
       const result = recordLocalUserMessageInputRejection({
         identity: error.identity,
         logStore,
-        message: error.message
+        message: error.message,
+        rawInput: line
       });
 
       return mapInputRejectionResult(result);

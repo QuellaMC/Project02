@@ -12,6 +12,7 @@ import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from './runtime-ev
 import type {
   ConversationLogRecord,
   RawEventLogRecord,
+  RawEventLogPayloadSummary,
   RuntimeLogStore,
   RuntimeTraceEntry,
   RuntimeTraceStepName
@@ -25,6 +26,7 @@ export type RunLocalUserMessageEventOptions = {
   readonly event: UserMessageRuntimeEvent;
   readonly session: ConversationSession;
   readonly logStore: RuntimeLogStore;
+  readonly rawInput?: string;
   readonly agent?: CharacterAgent;
   readonly characterTurnOptions?: CharacterTurnOptions;
   readonly committedAt?: string;
@@ -66,6 +68,7 @@ export type RecordLocalUserMessageInputRejectionOptions = {
   readonly identity: RuntimeEventIdentity;
   readonly logStore: RuntimeLogStore;
   readonly message: string;
+  readonly rawInput?: string;
 };
 
 const unexpectedRuntimeTurnFailureMessage =
@@ -76,6 +79,7 @@ export function recordLocalUserMessageInputRejection(
   options: RecordLocalUserMessageInputRejectionOptions
 ): LocalRuntimeUserMessageInputRejectedResult {
   const identity = freezeRuntimeEventIdentity(options.identity);
+  const payloadSummary = createRawInputPayloadSummary(options.rawInput);
   const traceEntries: RuntimeTraceEntry[] = [];
 
   function appendTrace(step: RuntimeTraceStepName): RuntimeTraceEntry {
@@ -92,7 +96,8 @@ export function recordLocalUserMessageInputRejection(
   options.logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_event_received',
-    eventType: 'USER_MESSAGE'
+    eventType: 'USER_MESSAGE',
+    ...(payloadSummary === undefined ? {} : { payloadSummary })
   });
   appendTrace('input_validation_rejected');
   options.logStore.appendRawEvent({
@@ -100,7 +105,8 @@ export function recordLocalUserMessageInputRejection(
     kind: 'input_validation_rejected',
     eventType: 'USER_MESSAGE',
     status: 'rejected',
-    reason: options.message
+    reason: options.message,
+    ...(payloadSummary === undefined ? {} : { payloadSummary })
   });
 
   const rawEvent = options.logStore.appendRawEvent({
@@ -108,7 +114,8 @@ export function recordLocalUserMessageInputRejection(
     kind: 'runtime_turn_rejected',
     eventType: 'USER_MESSAGE',
     status: 'rejected',
-    reason: options.message
+    reason: options.message,
+    ...(payloadSummary === undefined ? {} : { payloadSummary })
   });
 
   appendTrace('raw_event_log_appended');
@@ -142,6 +149,10 @@ async function runSerializedLocalUserMessageEvent(
     traceId: options.event.traceId,
     createdAt: options.event.createdAt
   });
+  const payloadSummary = createNormalizedPayloadSummary({
+    normalizedCurrentUserMessage: options.event.payload.currentUserMessage,
+    ...(options.rawInput === undefined ? {} : { rawInput: options.rawInput })
+  });
 
   function appendTrace(step: RuntimeTraceStepName): RuntimeTraceEntry {
     const traceEntry = options.logStore.appendTrace({
@@ -163,7 +174,8 @@ async function runSerializedLocalUserMessageEvent(
       kind: reason,
       eventType: options.event.type,
       status: 'rejected',
-      reason: message
+      reason: message,
+      payloadSummary
     });
 
     const rawEvent = options.logStore.appendRawEvent({
@@ -171,7 +183,8 @@ async function runSerializedLocalUserMessageEvent(
       kind: 'runtime_turn_rejected',
       eventType: options.event.type,
       status: 'rejected',
-      reason: message
+      reason: message,
+      payloadSummary
     });
 
     appendTrace('raw_event_log_appended');
@@ -191,13 +204,15 @@ async function runSerializedLocalUserMessageEvent(
   options.logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_event_received',
-    eventType: options.event.type
+    eventType: options.event.type,
+    payloadSummary
   });
   appendTrace('runtime_event_normalized');
   options.logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_event_normalized',
-    eventType: options.event.type
+    eventType: options.event.type,
+    payloadSummary
   });
   appendTrace('runtime_turn_started');
 
@@ -227,7 +242,8 @@ async function runSerializedLocalUserMessageEvent(
       ...identity,
       kind: 'visible_reply_committed',
       eventType: options.event.type,
-      visibleMessageIds: conversationMessages.map((message) => message.id)
+      visibleMessageIds: conversationMessages.map((message) => message.id),
+      payloadSummary
     });
 
     const rawEvent = options.logStore.appendRawEvent({
@@ -235,7 +251,8 @@ async function runSerializedLocalUserMessageEvent(
       kind: 'runtime_turn_completed',
       eventType: options.event.type,
       status: 'completed',
-      visibleMessageIds: conversationMessages.map((message) => message.id)
+      visibleMessageIds: conversationMessages.map((message) => message.id),
+      payloadSummary
     });
 
     appendTrace('raw_event_log_appended');
@@ -263,7 +280,8 @@ async function runSerializedLocalUserMessageEvent(
       kind: 'runtime_turn_rejected',
       eventType: options.event.type,
       status: 'rejected',
-      reason: unexpectedRuntimeTurnFailureMessage
+      reason: unexpectedRuntimeTurnFailureMessage,
+      payloadSummary
     });
     appendTrace('raw_event_log_appended');
     appendTrace('runtime_turn_rejected');
@@ -296,4 +314,26 @@ function freezeRuntimeEventIdentity(identity: RuntimeEventIdentity): RuntimeEven
     traceId: identity.traceId,
     createdAt: identity.createdAt
   } satisfies RuntimeEventIdentity);
+}
+
+function createRawInputPayloadSummary(
+  rawInput: string | undefined
+): RawEventLogPayloadSummary | undefined {
+  if (rawInput === undefined) {
+    return undefined;
+  }
+
+  return Object.freeze({
+    rawInput
+  } satisfies RawEventLogPayloadSummary);
+}
+
+function createNormalizedPayloadSummary(options: {
+  readonly normalizedCurrentUserMessage: string;
+  readonly rawInput?: string;
+}): RawEventLogPayloadSummary {
+  return Object.freeze({
+    ...(options.rawInput === undefined ? {} : { rawInput: options.rawInput }),
+    normalizedCurrentUserMessage: options.normalizedCurrentUserMessage
+  } satisfies RawEventLogPayloadSummary);
 }

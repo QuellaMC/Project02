@@ -47,29 +47,41 @@ describe('runtime log store', () => {
     const received: RawEventLogRecordInput = {
       ...identity,
       kind: 'runtime_event_received',
-      eventType: 'USER_MESSAGE'
+      eventType: 'USER_MESSAGE',
+      payloadSummary: {
+        rawInput: ' hello '
+      }
     };
     const visibleMessageIds = ['local-session:message-1', 'local-session:message-2'];
+    const payloadSummary = {
+      normalizedCurrentUserMessage: 'hello'
+    };
     const completed: RawEventLogRecordInput = {
       ...identity,
       kind: 'runtime_turn_completed',
       eventType: 'USER_MESSAGE',
       status: 'completed',
-      visibleMessageIds
+      visibleMessageIds,
+      payloadSummary
     };
 
     const receivedRecord = store.appendRawEvent(received);
     const appended = store.appendRawEvent(completed);
 
     visibleMessageIds.push('local-session:message-3');
+    payloadSummary.normalizedCurrentUserMessage = 'mutated after append';
 
     expect(receivedRecord).toEqual(received);
     expect(appended).toEqual({
       ...completed,
-      visibleMessageIds: ['local-session:message-1', 'local-session:message-2']
+      visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
+      payloadSummary: {
+        normalizedCurrentUserMessage: 'hello'
+      }
     });
     expect(Object.isFrozen(appended)).toBe(true);
     expect(Object.isFrozen(appended.visibleMessageIds)).toBe(true);
+    expect(Object.isFrozen(appended.payloadSummary)).toBe(true);
     expect(store.rawEvents()).toEqual([receivedRecord, appended]);
   });
 
