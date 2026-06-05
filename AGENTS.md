@@ -118,6 +118,10 @@ Rules:
 
 - Follow existing project patterns.
 - Reuse existing logic.
+- Before adding a new function, constant, hard-coded value, interface, contract,
+  codec, validator, or helper, first search for similar behavior already in the
+  repo. If one exists, reuse it or merge the behavior into the appropriate
+  shared seam instead of creating a parallel implementation.
 - Create shared helpers only for a real shared boundary or a concrete next caller.
 - Keep persistence, model calls, side effects, logging, rendering, and external tools behind explicit boundaries.
 - Prefer explicit data shapes over implicit prompt behavior.
