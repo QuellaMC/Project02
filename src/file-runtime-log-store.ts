@@ -22,6 +22,7 @@ import type {
   RuntimeLogStore,
   RuntimeTraceEntry
 } from './runtime-log.ts';
+import { isTerminalRawEventLogRecord } from './runtime-log.ts';
 import { assertLocalRuntimeSessionReadable } from './session-store.ts';
 
 export type CreateFileRuntimeLogStoreOptions = LocalRuntimeSessionPathsOptions;
@@ -47,7 +48,7 @@ export function createFileRuntimeLogStore(
         filePath: paths.tracePath,
         line: encodeRuntimeTraceEntry(storedEntry),
         assertSessionReadable,
-        validateExisting: () => readRuntimeTraceEntries(paths, 'append')
+        validateExisting: () => readRuntimeTraceEntries(paths)
       });
 
       return storedEntry;
@@ -55,13 +56,12 @@ export function createFileRuntimeLogStore(
     appendRawEvent(record) {
       const encoded = encodeRawEventLogRecord(record);
       const storedRecord = decodeRawEventLogRecord(encoded);
-      assertReferencedConversationMessagesMatch(paths, storedRecord);
 
       appendJsonLine({
         filePath: paths.rawEventsPath,
         line: encodeRawEventLogRecord(storedRecord),
         assertSessionReadable,
-        validateExisting: () => readRawEventLogRecords(paths, 'append')
+        validateExisting: () => readAppendableRawEventLogRecords(paths, storedRecord)
       });
 
       return storedRecord;
@@ -113,18 +113,13 @@ function appendJsonLine(options: {
   }
 }
 
-function readRuntimeTraceEntries(
-  paths: LocalRuntimeSessionPaths,
-  mode: RuntimeLogReadMode = 'public'
-): readonly RuntimeTraceEntry[] {
+function readRuntimeTraceEntries(paths: LocalRuntimeSessionPaths): readonly RuntimeTraceEntry[] {
   return Object.freeze(
     readJsonLines({
       filePath: paths.tracePath,
       decodeLine: (line) => decodeRuntimeTraceEntry(line),
-      missingFileIsAllowed: () =>
-        mode === 'append' ||
-        (!logFileHasContent(paths.rawEventsPath) &&
-          !logFileHasContent(paths.conversationPath))
+      missingFileIsAllowed: () => isTraceLogOptional(paths),
+      emptyFileIsAllowed: () => isTraceLogOptional(paths)
     })
   );
 }
@@ -136,10 +131,8 @@ function readRawEventLogRecords(
   const records = readJsonLines({
     filePath: paths.rawEventsPath,
     decodeLine: (line) => decodeRawEventLogRecord(line),
-    missingFileIsAllowed: () =>
-      mode === 'append' ||
-      (!logFileHasContent(paths.tracePath) &&
-        !logFileHasContent(paths.conversationPath))
+    missingFileIsAllowed: () => rawEventLogMissingFileIsAllowed(paths, mode),
+    emptyFileIsAllowed: () => isRawEventLogOptional(paths)
   });
 
   if (mode === 'public') {
@@ -156,7 +149,8 @@ function readConversationLogRecords(
   const records = readJsonLines({
     filePath: paths.conversationPath,
     decodeLine: (line) => decodeConversationLogRecord(line),
-    missingFileIsAllowed: () => !rawEventsRequireConversationLog(paths)
+    missingFileIsAllowed: () => !rawEventsRequireConversationLog(paths),
+    emptyFileIsAllowed: () => !rawEventsRequireConversationLog(paths)
   });
 
   if (mode === 'public') {
@@ -173,6 +167,7 @@ function readAppendableConversationLogRecords(
   const records = readConversationLogRecords(paths, 'append');
   const rawEvents = readRawEventLogRecords(paths, 'append');
 
+  assertRawEventTerminalOrder(rawEvents);
   assertRawEventVisibleReferencesMatchConversationMessages({
     messages: records,
     rawEvents
@@ -182,6 +177,21 @@ function readAppendableConversationLogRecords(
     messages: records,
     nextRecord,
     rawEvents
+  });
+
+  return records;
+}
+
+function readAppendableRawEventLogRecords(
+  paths: LocalRuntimeSessionPaths,
+  nextRecord: RawEventLogRecord
+): readonly RawEventLogRecord[] {
+  const records = readRawEventLogRecords(paths, 'append');
+
+  assertAppendableRawEventLog({
+    paths,
+    rawEvents: records,
+    nextRecord
   });
 
   return records;
@@ -297,7 +307,8 @@ function readRequiredConversationLogRecords(
     readJsonLines({
       filePath: paths.conversationPath,
       decodeLine: (line) => decodeConversationLogRecord(line),
-      missingFileIsAllowed: () => false
+      missingFileIsAllowed: () => false,
+      emptyFileIsAllowed: () => false
     })
   );
 }
@@ -306,6 +317,8 @@ function assertRawEventLogIntegrity(
   paths: LocalRuntimeSessionPaths,
   rawEvents: readonly RawEventLogRecord[]
 ): void {
+  assertRawEventTurnTerminalCompleteness(rawEvents);
+
   if (!rawEvents.some((record) => (record.visibleMessageIds ?? []).length > 0)) {
     return;
   }
@@ -319,18 +332,157 @@ function assertRawEventLogIntegrity(
   });
 }
 
-function assertReferencedConversationMessagesMatch(
-  paths: LocalRuntimeSessionPaths,
-  record: RawEventLogRecord
-): void {
-  if (record.visibleMessageIds === undefined || record.visibleMessageIds.length === 0) {
+function assertAppendableRawEventLog(options: {
+  readonly paths: LocalRuntimeSessionPaths;
+  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly nextRecord: RawEventLogRecord;
+}): void {
+  const nextRawEvents = Object.freeze([
+    ...options.rawEvents,
+    options.nextRecord
+  ]);
+
+  assertRawEventAppendFollowsOpenTurn({
+    rawEvents: options.rawEvents,
+    nextRecord: options.nextRecord
+  });
+  assertRawEventTerminalOrder(nextRawEvents);
+  assertRawEventVisibleEvidenceMatchesConversationMessages({
+    paths: options.paths,
+    rawEvents: nextRawEvents
+  });
+}
+
+function assertRawEventVisibleEvidenceMatchesConversationMessages(options: {
+  readonly paths: LocalRuntimeSessionPaths;
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): void {
+  if (!rawEventsHaveVisibleMessageReferences(options.rawEvents)) {
     return;
   }
 
+  const messages = readRequiredConversationLogRecords(options.paths);
+
+  assertRestoredConversationInvariants(options.paths, messages);
   assertRawEventVisibleReferencesMatchConversationMessages({
-    messages: readRequiredConversationLogRecords(paths),
-    rawEvents: [record]
+    messages,
+    rawEvents: options.rawEvents
   });
+}
+
+function assertRawEventTurnTerminalCompleteness(
+  rawEvents: readonly RawEventLogRecord[]
+): void {
+  assertRawEventTerminalOrder(rawEvents);
+
+  const openTurnIdentities = startedRawEventIdentitiesWithoutTerminal(rawEvents);
+
+  if (openTurnIdentities.size > 0) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Raw event log contains a turn without terminal evidence.'
+    );
+  }
+}
+
+function assertRawEventTerminalOrder(
+  rawEvents: readonly RawEventLogRecord[]
+): void {
+  const terminalTurnIdentities = new Set<string>();
+
+  for (const rawEvent of rawEvents) {
+    const identityKey = rawEventIdentityKey(rawEvent);
+
+    if (terminalTurnIdentities.has(identityKey)) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Raw event log contains records after terminal turn evidence.'
+      );
+    }
+
+    if (isTerminalRawEventLogRecord(rawEvent)) {
+      terminalTurnIdentities.add(identityKey);
+    }
+  }
+}
+
+function assertRawEventAppendFollowsOpenTurn(options: {
+  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly nextRecord: RawEventLogRecord;
+}): void {
+  assertRawEventTerminalOrder(options.rawEvents);
+
+  const openTurnIdentities = startedRawEventIdentitiesWithoutTerminal(options.rawEvents);
+
+  if (openTurnIdentities.size === 0) {
+    return;
+  }
+
+  if (
+    openTurnIdentities.size === 1 &&
+    openTurnIdentities.has(rawEventIdentityKey(options.nextRecord))
+  ) {
+    return;
+  }
+
+  throw new LocalRuntimeStorageContractError(
+    'malformed_record',
+    'Raw event log contains an unfinished turn before the next event.'
+  );
+}
+
+function startedRawEventIdentitiesWithoutTerminal(
+  rawEvents: readonly RawEventLogRecord[]
+): ReadonlySet<string> {
+  const startedTurnIdentities = new Set<string>();
+  const terminalTurnIdentities = new Set<string>();
+
+  for (const rawEvent of rawEvents) {
+    const identityKey = rawEventIdentityKey(rawEvent);
+
+    if (isTerminalRawEventLogRecord(rawEvent)) {
+      terminalTurnIdentities.add(identityKey);
+    } else {
+      startedTurnIdentities.add(identityKey);
+    }
+  }
+
+  for (const identityKey of terminalTurnIdentities) {
+    startedTurnIdentities.delete(identityKey);
+  }
+
+  return startedTurnIdentities;
+}
+
+function rawEventsHaveVisibleMessageReferences(
+  rawEvents: readonly RawEventLogRecord[]
+): boolean {
+  return rawEvents.some((record) => (record.visibleMessageIds ?? []).length > 0);
+}
+
+function isTraceLogOptional(paths: LocalRuntimeSessionPaths): boolean {
+  return (
+    !logFileHasContent(paths.rawEventsPath) &&
+    !logFileHasContent(paths.conversationPath)
+  );
+}
+
+function isRawEventLogOptional(paths: LocalRuntimeSessionPaths): boolean {
+  return (
+    !logFileHasContent(paths.tracePath) &&
+    !logFileHasContent(paths.conversationPath)
+  );
+}
+
+function rawEventLogMissingFileIsAllowed(
+  paths: LocalRuntimeSessionPaths,
+  mode: RuntimeLogReadMode
+): boolean {
+  if (mode === 'append') {
+    return true;
+  }
+
+  return isRawEventLogOptional(paths);
 }
 
 function assertRawEventVisibleReferencesMatchConversationMessages(options: {
@@ -358,6 +510,36 @@ function assertRawEventVisibleReferencesMatchConversationMessages(options: {
           `Raw event references a visible conversation message from another event: ${messageId}.`
         );
       }
+    }
+  }
+
+  assertCompletedTerminalRawEventsMatchConversationMessages(options);
+}
+
+function assertCompletedTerminalRawEventsMatchConversationMessages(options: {
+  readonly messages: readonly ConversationLogRecord[];
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): void {
+  const messagesByTurnIdentity = new Map<string, readonly ConversationLogRecord[]>();
+
+  for (const message of options.messages) {
+    const identityKey = rawEventIdentityKey(message);
+    const messages = messagesByTurnIdentity.get(identityKey) ?? [];
+
+    messagesByTurnIdentity.set(identityKey, Object.freeze([...messages, message]));
+  }
+
+  for (const rawEvent of options.rawEvents.filter(isCompletedTerminalRawEventLogRecord)) {
+    const expectedMessageIds = (
+      messagesByTurnIdentity.get(rawEventIdentityKey(rawEvent)) ?? []
+    ).map((message) => message.id);
+    const visibleMessageIds = rawEvent.visibleMessageIds ?? [];
+
+    if (!sameOrderedValues(visibleMessageIds, expectedMessageIds)) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Completed terminal raw-event evidence must exactly match the visible conversation messages for that turn.'
+      );
     }
   }
 }
@@ -394,6 +576,13 @@ function isCompletedTerminalRawEventLogRecord(record: RawEventLogRecord): boolea
   return record.kind === 'runtime_turn_completed';
 }
 
+function rawEventIdentityKey(identity: {
+  readonly eventId: string;
+  readonly traceId: string;
+}): string {
+  return `${identity.eventId}\u0000${identity.traceId}`;
+}
+
 function visibleMessageEvidenceKey(
   identity: { readonly eventId: string; readonly traceId: string },
   messageId: string
@@ -401,10 +590,21 @@ function visibleMessageEvidenceKey(
   return `${identity.eventId}\u0000${identity.traceId}\u0000${messageId}`;
 }
 
+function sameOrderedValues(
+  actualValues: readonly string[],
+  expectedValues: readonly string[]
+): boolean {
+  return (
+    actualValues.length === expectedValues.length &&
+    actualValues.every((value, index) => value === expectedValues[index])
+  );
+}
+
 function readJsonLines<T>(options: {
   readonly filePath: string;
   readonly decodeLine: (line: string) => T;
   readonly missingFileIsAllowed: () => boolean;
+  readonly emptyFileIsAllowed: () => boolean;
 }): T[] {
   const content = readLogFile(options.filePath);
 
@@ -420,6 +620,13 @@ function readJsonLines<T>(options: {
   }
 
   if (content.length === 0) {
+    if (!options.emptyFileIsAllowed()) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        `Required local runtime log file is empty: ${options.filePath}.`
+      );
+    }
+
     return [];
   }
 
