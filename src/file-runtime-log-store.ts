@@ -18,6 +18,7 @@ import type {
   RuntimeLogStore,
   RuntimeTraceEntry
 } from './runtime-log.ts';
+import { isTerminalRawEventLogRecord } from './runtime-log.ts';
 import { assertLocalRuntimeSessionReadable } from './session-store.ts';
 
 export type CreateFileRuntimeLogStoreOptions = LocalRuntimeSessionPathsOptions;
@@ -70,7 +71,7 @@ export function createFileRuntimeLogStore(
         filePath: paths.conversationPath,
         line: encodeConversationLogRecord(storedRecord),
         assertSessionReadable,
-        validateExisting: () => readAppendableConversationLogRecords(paths)
+        validateExisting: () => readAppendableConversationLogRecords(paths, storedRecord)
       });
 
       return storedRecord;
@@ -159,13 +160,20 @@ function readConversationLogRecords(
 }
 
 function readAppendableConversationLogRecords(
-  paths: LocalRuntimeSessionPaths
+  paths: LocalRuntimeSessionPaths,
+  nextRecord: ConversationLogRecord
 ): readonly ConversationLogRecord[] {
   const records = readConversationLogRecords(paths, 'append');
+  const rawEvents = readRawEventLogRecords(paths, 'append');
 
   assertRawEventVisibleReferencesExist({
     messages: records,
-    rawEvents: readRawEventLogRecords(paths, 'append')
+    rawEvents
+  });
+  assertAppendableConversationLog({
+    messages: records,
+    nextRecord,
+    rawEvents
   });
 
   return records;
@@ -195,6 +203,47 @@ function assertCompleteConversationLog(
     return;
   }
 
+  throwIncompleteConversationLog();
+}
+
+function assertAppendableConversationLog(options: {
+  readonly messages: readonly ConversationLogRecord[];
+  readonly nextRecord: ConversationLogRecord;
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): void {
+  const completeExistingMessages =
+    options.messages.length % 2 === 0
+      ? options.messages
+      : options.messages.slice(0, -1);
+
+  assertConversationMessagesHaveTerminalRawEvidence({
+    messages: completeExistingMessages,
+    rawEvents: options.rawEvents
+  });
+
+  if (options.messages.length % 2 === 0) {
+    if (options.nextRecord.role === 'user') {
+      return;
+    }
+
+    throwIncompleteConversationLog();
+  }
+
+  const previousRecord = options.messages.at(-1);
+
+  if (
+    previousRecord?.role === 'user' &&
+    options.nextRecord.role === 'character' &&
+    previousRecord.eventId === options.nextRecord.eventId &&
+    previousRecord.traceId === options.nextRecord.traceId
+  ) {
+    return;
+  }
+
+  throwIncompleteConversationLog();
+}
+
+function throwIncompleteConversationLog(): never {
   throw new LocalRuntimeStorageContractError(
     'malformed_record',
     'Local runtime conversation log ended before a complete user/character turn.'
@@ -260,7 +309,7 @@ function assertConversationMessagesHaveTerminalRawEvidence(options: {
   }
 
   const referencedMessageIds = new Set(
-    visibleMessageIdsForRawEvents(options.rawEvents)
+    visibleMessageIdsForRawEvents(options.rawEvents.filter(isTerminalRawEventLogRecord))
   );
 
   for (const message of options.messages) {

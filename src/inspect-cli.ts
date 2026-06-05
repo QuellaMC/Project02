@@ -4,6 +4,8 @@ import {
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
   createLocalRuntimeStorageLayout,
+  isTerminalRawEventLogRecord,
+  LocalRuntimeStorageContractError,
   normalizeLocalRuntimeSessionId,
   type ConversationLogRecord,
   type LocalRuntimeSessionMetadata,
@@ -49,7 +51,7 @@ type InspectSessionOutput = {
 type InspectTurnEvidence = {
   readonly eventId: string;
   readonly traceId: string;
-  readonly status: RuntimeTurnStatus | 'unknown';
+  readonly status: RuntimeTurnStatus;
   readonly steps: readonly string[];
   readonly visibleMessages: readonly InspectVisibleMessage[];
   readonly reason?: string;
@@ -257,7 +259,7 @@ function createTurnEvidenceEntry(options: {
   return Object.freeze({
     eventId: options.rawEvent.eventId,
     traceId: options.rawEvent.traceId,
-    status: options.rawEvent.status ?? 'unknown',
+    status: terminalTurnStatus(options.rawEvent),
     steps: Object.freeze(
       options.traceEntries
         .filter(
@@ -279,9 +281,17 @@ function createTurnEvidenceEntry(options: {
 }
 
 function isTerminalTurnRawEvent(record: RawEventLogRecord): boolean {
-  return (
-    record.kind === 'runtime_turn_completed' ||
-    record.kind === 'runtime_turn_rejected'
+  return isTerminalRawEventLogRecord(record);
+}
+
+function terminalTurnStatus(record: RawEventLogRecord): RuntimeTurnStatus {
+  if (record.status !== undefined) {
+    return record.status;
+  }
+
+  throw new LocalRuntimeStorageContractError(
+    'malformed_record',
+    'Stored terminal raw event is missing a turn status.'
   );
 }
 

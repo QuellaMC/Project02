@@ -260,6 +260,40 @@ describe('local runtime storage contract', () => {
     expect(decodeRawEventLogRecord(encodeRawEventLogRecord(rawEvent))).toEqual(rawEvent);
   });
 
+  it('rejects terminal raw events without stored turn status', () => {
+    expect(() =>
+      decodeRawEventLogRecord(
+        JSON.stringify({
+          eventId: 'evt_missing_status',
+          traceId: 'trace_missing_status',
+          createdAt,
+          kind: 'runtime_turn_completed',
+          eventType: 'USER_MESSAGE'
+        })
+      )
+    ).toThrow(LocalRuntimeStorageContractError);
+  });
+
+  it('rejects stored visible message text that is not already normalized', () => {
+    for (const text of [' hello ', 'line one\nline two']) {
+      expect(() =>
+        decodeConversationLogRecord(
+          JSON.stringify({
+            eventId: 'evt_001',
+            traceId: 'trace_001',
+            createdAt,
+            id: 'local-session:message-1',
+            role: 'user',
+            speakerId: 'local-user',
+            speakerName: 'You',
+            text,
+            committedAt: '2026-06-04T00:00:01.000Z'
+          })
+        )
+      ).toThrow(LocalRuntimeStorageContractError);
+    }
+  });
+
   it('rejects malformed stored records without silently skipping them', () => {
     expect(() => decodeRuntimeTraceEntry('{not json')).toThrow(
       LocalRuntimeStorageContractError

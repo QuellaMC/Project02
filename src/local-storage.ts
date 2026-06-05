@@ -1,15 +1,20 @@
 import { join } from 'node:path';
 
 import type { VisibleMessageRole } from './conversation.ts';
+import {
+  normalizeOneLineMessage,
+  OneLineMessageValidationError
+} from './message-validation.ts';
 import type { RuntimeEventType } from './runtime-event.ts';
-import type {
-  ConversationLogRecord,
-  RawEventLogPayloadSummary,
-  RawEventLogRecord,
-  RawEventLogRecordKind,
-  RuntimeTraceEntry,
-  RuntimeTraceStepName,
-  RuntimeTurnStatus
+import {
+  isTerminalRawEventLogRecordKind,
+  type ConversationLogRecord,
+  type RawEventLogPayloadSummary,
+  type RawEventLogRecord,
+  type RawEventLogRecordKind,
+  type RuntimeTraceEntry,
+  type RuntimeTraceStepName,
+  type RuntimeTurnStatus
 } from './runtime-log.ts';
 
 export const defaultLocalRuntimeStoreRoot = '.project02-runtime';
@@ -241,16 +246,21 @@ export function encodeRawEventLogRecord(record: RawEventLogRecord): string {
 
 export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const record = parseJsonObject(line, 'malformed_record');
+  const kind = requiredRawEventKind(record['kind']);
   const status = optionalRuntimeTurnStatus(record['status']);
   const reason = optionalRecordString(record, 'reason', 'malformed_record');
   const visibleMessageIds = optionalStringArray(record['visibleMessageIds'], 'visibleMessageIds');
   const payloadSummary = optionalRawEventPayloadSummary(record['payloadSummary']);
 
+  if (isTerminalRawEventLogRecordKind(kind) && status === undefined) {
+    throwMalformedRecord('status');
+  }
+
   return Object.freeze({
     eventId: requiredRecordString(record, 'eventId', 'malformed_record'),
     traceId: requiredRecordString(record, 'traceId', 'malformed_record'),
     createdAt: requiredRecordString(record, 'createdAt', 'malformed_record'),
-    kind: requiredRawEventKind(record['kind']),
+    kind,
     eventType: requiredRuntimeEventType(record['eventType']),
     ...(status === undefined ? {} : { status }),
     ...(reason === undefined ? {} : { reason }),
@@ -274,7 +284,7 @@ export function decodeConversationLogRecord(line: string): ConversationLogRecord
     role: requiredVisibleMessageRole(record['role']),
     speakerId: requiredRecordString(record, 'speakerId', 'malformed_record'),
     speakerName: requiredRecordString(record, 'speakerName', 'malformed_record'),
-    text: requiredRecordString(record, 'text', 'malformed_record'),
+    text: requiredNormalizedVisibleMessageText(record, 'text'),
     committedAt: requiredRecordString(record, 'committedAt', 'malformed_record')
   } satisfies ConversationLogRecord);
 }
@@ -331,6 +341,30 @@ function optionalRecordString(
   }
 
   return requiredNonEmptyString(value, key, code);
+}
+
+function requiredNormalizedVisibleMessageText(
+  record: Record<string, unknown>,
+  key: string
+): string {
+  const value = requiredRecordString(record, key, 'malformed_record');
+  let normalizedValue: string;
+
+  try {
+    normalizedValue = normalizeOneLineMessage(value);
+  } catch (error: unknown) {
+    if (error instanceof OneLineMessageValidationError) {
+      throwMalformedRecord(key);
+    }
+
+    throw error;
+  }
+
+  if (normalizedValue !== value) {
+    throwMalformedRecord(key);
+  }
+
+  return value;
 }
 
 function requiredNonEmptyString(

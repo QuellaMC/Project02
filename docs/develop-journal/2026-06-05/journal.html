@@ -81,6 +81,28 @@
     <ul>
       <li><code>pnpm exec vitest run tests/file-runtime-log-store.test.ts tests/inspect-cli.contract.test.ts tests/chat-cli.contract.test.ts tests/session-store.test.ts tests/conversation.test.ts</code></li>
     </ul>
+
+    <h2>MVP-004 Terminal Evidence Review Follow-Up</h2>
+    <p>
+      Addressed the next PR review pass on terminal evidence and stored visible-message
+      normalization. Conversation records now require terminal raw-event evidence from
+      <code>runtime_turn_completed</code> or <code>runtime_turn_rejected</code> records, terminal raw
+      events must store a status, and decoded visible message text must already satisfy the
+      conversation one-line normalization rules.
+    </p>
+    <ul>
+      <li>Added a shared terminal raw-event predicate in <code>src/runtime-log.ts</code> and reused it from storage validation and inspect.</li>
+      <li>Rejected append attempts that would start another visible turn after an incomplete pair or after complete messages without terminal evidence.</li>
+      <li>Removed inspect's fabricated <code>unknown</code> status fallback for terminal raw events.</li>
+      <li>Added focused regressions for nonterminal visible evidence, append-mode corruption, malformed visible text, and missing terminal status.</li>
+    </ul>
+    <p>
+      Focused verification before the full gate:
+    </p>
+    <ul>
+      <li><code>pnpm exec vitest run tests/file-runtime-log-store.test.ts tests/local-storage.test.ts tests/inspect-cli.contract.test.ts</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+    </ul>
   </main>
 </body>
 </html>

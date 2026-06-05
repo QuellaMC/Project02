@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,7 +38,7 @@ type InspectSessionOutput = {
   readonly turns: readonly {
     readonly eventId: string;
     readonly traceId: string;
-    readonly status: 'completed' | 'rejected' | 'unknown';
+    readonly status: 'completed' | 'rejected';
     readonly steps: readonly string[];
     readonly visibleMessages: readonly {
       readonly id: string;
@@ -255,6 +255,40 @@ describe('node src/inspect-cli.ts', () => {
       exitCode: 1,
       stdout: '',
       stderr: 'Error: Use either --sessions or --session, not both.\n'
+    });
+  });
+
+  it('fails clearly when terminal raw turn evidence is missing status', async () => {
+    const storeRoot = await createTempStoreRoot();
+
+    await expect(seedChatSession(storeRoot, 'mira-local', 'hello\n/exit\n')).resolves.toMatchObject({
+      exitCode: 0
+    });
+
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    await writeFile(
+      paths.rawEventsPath,
+      `${JSON.stringify({
+        eventId: 'evt_missing_status',
+        traceId: 'trace_missing_status',
+        createdAt: '2026-06-05T00:00:00.000Z',
+        kind: 'runtime_turn_completed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: ['mira-local:message-1', 'mira-local:message-2']
+      })}\n`,
+      'utf8'
+    );
+
+    await expect(
+      runInspectCli(['--store', storeRoot, '--session', 'mira-local'])
+    ).resolves.toEqual({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: Stored local runtime field "status" is malformed.\n'
     });
   });
 });

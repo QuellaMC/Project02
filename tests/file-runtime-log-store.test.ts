@@ -483,7 +483,7 @@ describe('file-backed runtime log store', () => {
     );
   });
 
-  it('fails conversation records that do not have terminal raw-event evidence', async () => {
+  it('fails conversation records that only have nonterminal raw-event evidence', async () => {
     const storeRoot = createTempStoreRoot();
     await createCatalogedSession(storeRoot, 'mira-local');
     const paths = createLocalRuntimeSessionPaths({
@@ -496,8 +496,9 @@ describe('file-backed runtime log store', () => {
       paths.rawEventsPath,
       `${JSON.stringify({
         ...identity,
-        kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE'
+        kind: 'visible_reply_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: ['mira-local:message-1', 'mira-local:message-2']
       })}\n`,
       'utf8'
     );
@@ -508,6 +509,68 @@ describe('file-backed runtime log store', () => {
           storeRoot,
           sessionId: 'mira-local'
         }).conversationMessages(),
+      'malformed_record'
+    );
+  });
+
+  it('rejects a new append after an incomplete conversation pair', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeFileSync(
+      paths.conversationPath,
+      `${JSON.stringify(createConversationRecord({
+        id: 'mira-local:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'hello'
+      }))}\n`,
+      'utf8'
+    );
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).appendConversationMessage(createConversationRecord({
+          id: 'mira-local:message-3',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'next'
+        })),
+      'malformed_record'
+    );
+  });
+
+  it('rejects starting another visible turn before existing messages have terminal evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeConversationPair(paths);
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).appendConversationMessage(createConversationRecord({
+          id: 'mira-local:message-3',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'next'
+        })),
       'malformed_record'
     );
   });
