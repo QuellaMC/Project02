@@ -103,6 +103,27 @@
       <li><code>pnpm exec vitest run tests/file-runtime-log-store.test.ts tests/local-storage.test.ts tests/inspect-cli.contract.test.ts</code></li>
       <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
     </ul>
+
+    <h2>MVP-004 Restored Transcript Review Follow-Up</h2>
+    <p>
+      Addressed the next PR review pass on fresh-store catalog ordering and public conversation-log
+      validation. Fresh session creation now initializes the catalog before creating a per-session
+      directory, missing catalogs tolerate only empty orphan session directories, and public
+      conversation reads reuse the existing conversation rehydration validator before exposing
+      records to inspect or chat resume.
+    </p>
+    <ul>
+      <li>Added a session-store regression for an empty orphan session directory with no catalog.</li>
+      <li>Added a file-log-store regression for even-length conversation logs that violate restored message role order.</li>
+      <li>Kept malformed restored transcript handling inside the existing conversation validator instead of duplicating ID, role, and speaker rules.</li>
+    </ul>
+    <p>
+      Focused verification before independent review:
+    </p>
+    <ul>
+      <li><code>pnpm exec vitest run tests/session-store.test.ts tests/file-runtime-log-store.test.ts tests/inspect-cli.contract.test.ts tests/chat-cli.contract.test.ts</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+    </ul>
   </main>
 </body>
 </html>

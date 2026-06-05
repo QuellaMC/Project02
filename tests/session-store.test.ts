@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,9 +7,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   ConversationRehydrationError,
   createConversationSession,
+  createLocalRuntimeSessionPaths,
   createLocalRuntimeSessionStore,
+  createLocalRuntimeStorageLayout,
+  createLocalRuntimeStorageSchemaMarker,
   createRuntimeLogStore,
   createUserMessageRuntimeEvent,
+  encodeStorageSchemaMarker,
   LocalRuntimeStorageContractError,
   LocalRuntimeSessionStoreError,
   runCharacterTurn,
@@ -294,6 +298,70 @@ describe('local runtime session store', () => {
     await expectStorageErrorCode(
       async () => await store.listSessions(),
       'partial_write'
+    );
+  });
+
+  it('tolerates empty orphan session directories when the catalog was never created', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const orphanPaths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'orphan'
+    });
+
+    await mkdir(orphanPaths.sessionRoot, { recursive: true });
+    await writeFile(
+      layout.schemaPath,
+      `${encodeStorageSchemaMarker(
+        createLocalRuntimeStorageSchemaMarker({
+          createdAt: '2026-06-04T00:00:00.000Z'
+        })
+      )}\n`,
+      'utf8'
+    );
+
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['2026-06-04T00:01:00.000Z'])
+    });
+
+    await expect(store.listSessions()).resolves.toEqual([]);
+
+    const created = await store.createSession({
+      sessionId: 'fresh'
+    });
+
+    expect(created).toEqual({
+      sessionId: 'fresh',
+      createdAt: '2026-06-04T00:01:00.000Z',
+      updatedAt: '2026-06-04T00:01:00.000Z'
+    });
+    await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe(
+      `${JSON.stringify(created)}\n`
+    );
+  });
+
+  it('tolerates an empty sessions root when the schema marker was never created', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+
+    await mkdir(layout.sessionsRoot, { recursive: true });
+
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['2026-06-04T00:02:00.000Z'])
+    });
+    const created = await store.createSession({
+      sessionId: 'fresh'
+    });
+
+    expect(created).toEqual({
+      sessionId: 'fresh',
+      createdAt: '2026-06-04T00:02:00.000Z',
+      updatedAt: '2026-06-04T00:02:00.000Z'
+    });
+    await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe(
+      `${JSON.stringify(created)}\n`
     );
   });
 });

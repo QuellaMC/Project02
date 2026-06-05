@@ -1,6 +1,10 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 import {
+  ConversationRehydrationError,
+  createConversationSession
+} from './conversation.ts';
+import {
   createLocalRuntimeSessionPaths,
   decodeConversationLogRecord,
   decodeRawEventLogRecord,
@@ -190,10 +194,32 @@ function assertConversationLogIntegrity(
     messages,
     rawEvents
   });
+  assertRestoredConversationInvariants(paths, messages);
   assertConversationMessagesHaveTerminalRawEvidence({
     messages,
     rawEvents
   });
+}
+
+function assertRestoredConversationInvariants(
+  paths: LocalRuntimeSessionPaths,
+  messages: readonly ConversationLogRecord[]
+): void {
+  try {
+    createConversationSession({
+      id: paths.sessionId,
+      visibleTranscript: messages
+    });
+  } catch (error: unknown) {
+    if (error instanceof ConversationRehydrationError) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        error.message
+      );
+    }
+
+    throw error;
+  }
 }
 
 function assertCompleteConversationLog(

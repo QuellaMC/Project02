@@ -575,6 +575,57 @@ describe('file-backed runtime log store', () => {
     );
   });
 
+  it('rejects malformed restored visible-message order before exposing records', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeFileSync(
+      paths.conversationPath,
+      [
+        JSON.stringify(createConversationRecord({
+          id: 'mira-local:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'hello'
+        })),
+        JSON.stringify(createConversationRecord({
+          id: 'mira-local:message-2',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'second user'
+        })),
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+    writeFileSync(
+      paths.rawEventsPath,
+      `${JSON.stringify({
+        ...identity,
+        kind: 'runtime_turn_completed',
+        eventType: 'USER_MESSAGE',
+        status: 'completed',
+        visibleMessageIds: ['mira-local:message-1', 'mira-local:message-2']
+      })}\n`,
+      'utf8'
+    );
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).conversationMessages(),
+      'malformed_record'
+    );
+  });
+
   it('fails partial JSONL records with CT-01 partial-write errors', async () => {
     const storeRoot = createTempStoreRoot();
     await createCatalogedSession(storeRoot, 'mira-local');

@@ -6,6 +6,7 @@ import {
   readdir,
   writeFile
 } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import {
   createConversationSession,
@@ -150,6 +151,7 @@ export function createLocalRuntimeSessionStore(
       updatedAt: sessionOptions.updatedAt ?? createdAt
     });
 
+    await ensureSessionCatalogFile(layout);
     await createSessionDirectory(layout, sessionId);
     await appendSessionMetadata(layout, metadata);
 
@@ -259,7 +261,7 @@ async function ensureInitializedStore(
       throw error;
     }
 
-    await createSessionsRoot(layout);
+    await createStoreRoot(layout);
     await writeStorageFile({
       filePath: layout.schemaPath,
       content: `${encodeStorageSchemaMarker(
@@ -269,6 +271,7 @@ async function ensureInitializedStore(
       )}\n`,
       failureMessage: `Could not write local runtime storage schema marker: ${layout.schemaPath}.`
     });
+    await createSessionsRoot(layout);
     return;
   }
 
@@ -286,11 +289,57 @@ async function createSessionsRoot(layout: LocalRuntimeStorageLayout): Promise<vo
   }
 }
 
+async function createStoreRoot(layout: LocalRuntimeStorageLayout): Promise<void> {
+  try {
+    await mkdir(layout.storeRoot, { recursive: true });
+  } catch {
+    throw new LocalRuntimeStorageContractError(
+      'write_failed',
+      `Could not prepare local runtime store root: ${layout.storeRoot}.`
+    );
+  }
+}
+
+async function ensureSessionCatalogFile(layout: LocalRuntimeStorageLayout): Promise<void> {
+  try {
+    await writeFile(layout.sessionCatalogPath, '', {
+      encoding: 'utf8',
+      flag: 'wx'
+    });
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'EEXIST')) {
+      return;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'write_failed',
+      `Could not initialize local runtime session catalog: ${layout.sessionCatalogPath}.`
+    );
+  }
+}
+
 async function localRuntimeStoreHasExistingContent(
   layout: LocalRuntimeStorageLayout
 ): Promise<boolean> {
   try {
-    return (await readdir(layout.storeRoot)).length > 0;
+    const entries = await readdir(layout.storeRoot, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (
+        entry.isDirectory() &&
+        join(layout.storeRoot, entry.name) === layout.sessionsRoot
+      ) {
+        if (await localRuntimeSessionsRootHasDurableEvidence(layout)) {
+          return true;
+        }
+
+        continue;
+      }
+
+      return true;
+    }
+
+    return false;
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return false;
@@ -324,7 +373,7 @@ async function readSessionCatalog(
     catalog = await readFile(layout.sessionCatalogPath, 'utf8');
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
-      if (await localRuntimeSessionsRootHasExistingContent(layout)) {
+      if (await localRuntimeSessionsRootHasDurableEvidence(layout)) {
         throw new LocalRuntimeStorageContractError(
           'missing_file',
           `Required local runtime session catalog is missing: ${layout.sessionCatalogPath}.`
@@ -362,7 +411,7 @@ function readSessionCatalogSync(
     catalog = readFileSync(layout.sessionCatalogPath, 'utf8');
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
-      if (localRuntimeSessionsRootHasExistingContentSync(layout)) {
+      if (localRuntimeSessionsRootHasDurableEvidenceSync(layout)) {
         throw new LocalRuntimeStorageContractError(
           'missing_file',
           `Required local runtime session catalog is missing: ${layout.sessionCatalogPath}.`
@@ -396,11 +445,25 @@ function decodeSessionCatalog(
   return sessions;
 }
 
-async function localRuntimeSessionsRootHasExistingContent(
+async function localRuntimeSessionsRootHasDurableEvidence(
   layout: LocalRuntimeStorageLayout
 ): Promise<boolean> {
   try {
-    return (await readdir(layout.sessionsRoot)).length > 0;
+    const entries = await readdir(layout.sessionsRoot, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        return true;
+      }
+
+      const sessionEntries = await readdir(join(layout.sessionsRoot, entry.name));
+
+      if (sessionEntries.length > 0) {
+        return true;
+      }
+    }
+
+    return false;
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return false;
@@ -413,11 +476,23 @@ async function localRuntimeSessionsRootHasExistingContent(
   }
 }
 
-function localRuntimeSessionsRootHasExistingContentSync(
+function localRuntimeSessionsRootHasDurableEvidenceSync(
   layout: LocalRuntimeStorageLayout
 ): boolean {
   try {
-    return readdirSync(layout.sessionsRoot).length > 0;
+    const entries = readdirSync(layout.sessionsRoot, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        return true;
+      }
+
+      if (readdirSync(join(layout.sessionsRoot, entry.name)).length > 0) {
+        return true;
+      }
+    }
+
+    return false;
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return false;
