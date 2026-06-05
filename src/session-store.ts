@@ -577,11 +577,42 @@ function decodeSessionMetadata(line: string): LocalRuntimeSessionMetadata {
     );
   }
 
-  return createLocalRuntimeSessionMetadata({
-    sessionId: readRecordString(parsed, 'sessionId'),
+  const sessionId = readCanonicalStoredSessionId(parsed);
+  const metadata = createLocalRuntimeSessionMetadata({
+    sessionId,
     createdAt: readRecordString(parsed, 'createdAt'),
     updatedAt: readRecordString(parsed, 'updatedAt')
   });
+
+  return metadata;
+}
+
+function readCanonicalStoredSessionId(record: Record<string, unknown>): string {
+  const sessionId = readRecordString(record, 'sessionId');
+  let normalizedSessionId: string;
+
+  try {
+    normalizedSessionId = normalizeLocalRuntimeSessionId(sessionId);
+  } catch (error: unknown) {
+    if (isLocalRuntimeStorageErrorCode(error, 'invalid_session_id')) {
+      throwMalformedStoredSessionId();
+    }
+
+    throw error;
+  }
+
+  if (normalizedSessionId !== sessionId) {
+    throwMalformedStoredSessionId();
+  }
+
+  return sessionId;
+}
+
+function throwMalformedStoredSessionId(): never {
+  throw new LocalRuntimeStorageContractError(
+    'malformed_record',
+    'Stored local runtime session metadata field "sessionId" must be canonical.'
+  );
 }
 
 function splitJsonLines(content: string, filePath: string): readonly string[] {

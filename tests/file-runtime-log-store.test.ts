@@ -89,11 +89,11 @@ describe('file-backed runtime log store', () => {
     });
 
     expect(store.appendTrace(receivedTrace)).toEqual(receivedTrace);
-    expect(store.appendTrace(completedTrace)).toEqual(completedTrace);
     expect(store.appendRawEvent(receivedRawEvent)).toEqual(receivedRawEvent);
     expect(store.appendConversationMessage(userMessage)).toEqual(userMessage);
     expect(store.appendConversationMessage(characterMessage)).toEqual(characterMessage);
     expect(store.appendRawEvent(completedRawEvent)).toEqual(completedRawEvent);
+    expect(store.appendTrace(completedTrace)).toEqual(completedTrace);
 
     const reopened = createFileRuntimeLogStore({
       storeRoot,
@@ -127,9 +127,16 @@ describe('file-backed runtime log store', () => {
       ...identity,
       eventId: 'evt_beta',
       traceId: 'trace_beta',
-      step: 'runtime_turn_completed'
+      step: 'runtime_event_received'
     };
     const alphaRaw: RawEventLogRecordInput = {
+      ...identity,
+      eventId: 'evt_alpha',
+      traceId: 'trace_alpha',
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE'
+    };
+    const alphaCompletedRaw: RawEventLogRecordInput = {
       ...identity,
       eventId: 'evt_alpha',
       traceId: 'trace_alpha',
@@ -139,6 +146,13 @@ describe('file-backed runtime log store', () => {
       visibleMessageIds: ['alpha:message-1', 'alpha:message-2']
     };
     const betaRaw: RawEventLogRecordInput = {
+      ...identity,
+      eventId: 'evt_beta',
+      traceId: 'trace_beta',
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE'
+    };
+    const betaCompletedRaw: RawEventLogRecordInput = {
       ...identity,
       eventId: 'evt_beta',
       traceId: 'trace_beta',
@@ -185,13 +199,15 @@ describe('file-backed runtime log store', () => {
     });
 
     alpha.appendTrace(alphaTrace);
+    alpha.appendRawEvent(alphaRaw);
     alpha.appendConversationMessage(alphaMessage);
     alpha.appendConversationMessage(alphaReply);
-    alpha.appendRawEvent(alphaRaw);
+    alpha.appendRawEvent(alphaCompletedRaw);
     beta.appendTrace(betaTrace);
+    beta.appendRawEvent(betaRaw);
     beta.appendConversationMessage(betaMessage);
     beta.appendConversationMessage(betaReply);
-    beta.appendRawEvent(betaRaw);
+    beta.appendRawEvent(betaCompletedRaw);
 
     expect(
       createFileRuntimeLogStore({
@@ -204,7 +220,7 @@ describe('file-backed runtime log store', () => {
         storeRoot,
         sessionId: 'alpha'
       }).rawEvents()
-    ).toEqual([alphaRaw]);
+    ).toEqual([alphaRaw, alphaCompletedRaw]);
     expect(
       createFileRuntimeLogStore({
         storeRoot,
@@ -222,7 +238,7 @@ describe('file-backed runtime log store', () => {
         storeRoot,
         sessionId: 'beta'
       }).rawEvents()
-    ).toEqual([betaRaw]);
+    ).toEqual([betaRaw, betaCompletedRaw]);
     expect(
       createFileRuntimeLogStore({
         storeRoot,
@@ -999,6 +1015,235 @@ describe('file-backed runtime log store', () => {
           eventType: 'USER_MESSAGE'
         }),
       'malformed_record'
+    );
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).appendConversationMessage(createConversationRecord({
+          eventId: 'evt_started_second',
+          traceId: 'trace_started_second',
+          id: 'mira-local:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'next'
+        })),
+      'malformed_record'
+    );
+  });
+
+  it('rejects trace steps after terminal trace evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeFileSync(
+      paths.tracePath,
+      [
+        JSON.stringify({
+          ...identity,
+          step: 'runtime_turn_completed'
+        }),
+        JSON.stringify({
+          ...identity,
+          step: 'runtime_event_received'
+        }),
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).traceEntries(),
+      'malformed_record'
+    );
+
+    const appendStoreRoot = createTempStoreRoot();
+    const appendStore = await createCatalogedFileRuntimeLogStore(
+      appendStoreRoot,
+      'mira-local'
+    );
+
+    appendStore.appendTrace({
+      ...identity,
+      step: 'runtime_turn_rejected'
+    });
+    expectStorageErrorCode(
+      () =>
+        appendStore.appendTrace({
+          ...identity,
+          step: 'runtime_event_received'
+        }),
+      'malformed_record'
+    );
+  });
+
+  it('validates sibling logs before appending trace entries', async () => {
+    const missingRawStoreRoot = createTempStoreRoot();
+    await createCatalogedSession(missingRawStoreRoot, 'mira-local');
+    const missingRawPaths = createLocalRuntimeSessionPaths({
+      storeRoot: missingRawStoreRoot,
+      sessionId: 'mira-local'
+    });
+    const missingRawTrace = [
+      JSON.stringify({
+        ...identity,
+        eventId: 'evt_previous_trace_only',
+        traceId: 'trace_previous_trace_only',
+        step: 'runtime_event_received'
+      }),
+      JSON.stringify({
+        ...identity,
+        eventId: 'evt_previous_trace_only',
+        traceId: 'trace_previous_trace_only',
+        step: 'runtime_turn_completed'
+      }),
+      ''
+    ].join('\n');
+
+    writeFileSync(missingRawPaths.tracePath, missingRawTrace, 'utf8');
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot: missingRawStoreRoot,
+          sessionId: 'mira-local'
+        }).appendTrace({
+          ...identity,
+          eventId: 'evt_after_missing_raw',
+          traceId: 'trace_after_missing_raw',
+          step: 'runtime_event_received'
+        }),
+      'missing_file'
+    );
+    expect(readFileSync(missingRawPaths.tracePath, 'utf8')).toBe(missingRawTrace);
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot: missingRawStoreRoot,
+          sessionId: 'mira-local'
+        }).appendRawEvent({
+          ...identity,
+          eventId: 'evt_after_missing_raw',
+          traceId: 'trace_after_missing_raw',
+          kind: 'runtime_event_received',
+          eventType: 'USER_MESSAGE'
+        }),
+      'missing_file'
+    );
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot: missingRawStoreRoot,
+          sessionId: 'mira-local'
+        }).appendConversationMessage(createConversationRecord({
+          eventId: 'evt_after_missing_raw',
+          traceId: 'trace_after_missing_raw',
+          id: 'mira-local:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'next'
+        })),
+      'missing_file'
+    );
+    expect(existsSync(missingRawPaths.rawEventsPath)).toBe(false);
+    expect(existsSync(missingRawPaths.conversationPath)).toBe(false);
+
+    const partialRawStoreRoot = createTempStoreRoot();
+    await createCatalogedSession(partialRawStoreRoot, 'mira-local');
+    const partialRawPaths = createLocalRuntimeSessionPaths({
+      storeRoot: partialRawStoreRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeFileSync(
+      partialRawPaths.rawEventsPath,
+      JSON.stringify({
+        ...identity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE'
+      }),
+      'utf8'
+    );
+    const partialRawTrace = `${JSON.stringify({
+      ...identity,
+      step: 'runtime_event_received'
+    })}\n`;
+
+    writeFileSync(
+      partialRawPaths.tracePath,
+      partialRawTrace,
+      'utf8'
+    );
+
+    const partialRawStore = createFileRuntimeLogStore({
+      storeRoot: partialRawStoreRoot,
+      sessionId: 'mira-local'
+    });
+
+    expectStorageErrorCode(
+      () =>
+        partialRawStore.appendTrace({
+          ...identity,
+          eventId: 'evt_after_partial_raw',
+          traceId: 'trace_after_partial_raw',
+          step: 'runtime_event_received'
+        }),
+      'partial_write'
+    );
+    expect(readFileSync(partialRawPaths.tracePath, 'utf8')).toBe(partialRawTrace);
+
+    const incompleteRawStoreRoot = createTempStoreRoot();
+    await createCatalogedSession(incompleteRawStoreRoot, 'mira-local');
+    const incompleteRawPaths = createLocalRuntimeSessionPaths({
+      storeRoot: incompleteRawStoreRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeFileSync(
+      incompleteRawPaths.rawEventsPath,
+      `${JSON.stringify({
+        ...identity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE'
+      })}\n`,
+      'utf8'
+    );
+    const incompleteRawTrace = `${JSON.stringify({
+      ...identity,
+      step: 'runtime_event_received'
+    })}\n`;
+
+    writeFileSync(
+      incompleteRawPaths.tracePath,
+      incompleteRawTrace,
+      'utf8'
+    );
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot: incompleteRawStoreRoot,
+          sessionId: 'mira-local'
+        }).appendTrace({
+          ...identity,
+          eventId: 'evt_after_incomplete_raw',
+          traceId: 'trace_after_incomplete_raw',
+          step: 'runtime_event_received'
+      }),
+      'malformed_record'
+    );
+    expect(readFileSync(incompleteRawPaths.tracePath, 'utf8')).toBe(
+      incompleteRawTrace
     );
   });
 

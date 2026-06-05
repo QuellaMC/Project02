@@ -301,6 +301,50 @@ describe('local runtime session store', () => {
     );
   });
 
+  it('fails non-canonical session IDs in stored catalog records', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+    });
+
+    await store.createSession({
+      sessionId: 'alpha'
+    });
+    await writeFile(
+      store.layout.sessionCatalogPath,
+      `${JSON.stringify({
+        sessionId: 'alpha ',
+        createdAt: '2026-06-04T00:00:00.000Z',
+        updatedAt: '2026-06-04T00:00:00.000Z'
+      })}\n`,
+      'utf8'
+    );
+
+    await expectStorageErrorCode(
+      async () => await store.listSessions(),
+      'malformed_record'
+    );
+    await expectStorageErrorCode(
+      async () => await store.readSession('alpha'),
+      'malformed_record'
+    );
+
+    await writeFile(
+      store.layout.sessionCatalogPath,
+      `${JSON.stringify({
+        sessionId: 'alpha/beta',
+        createdAt: '2026-06-04T00:00:00.000Z',
+        updatedAt: '2026-06-04T00:00:00.000Z'
+      })}\n`,
+      'utf8'
+    );
+    await expectStorageErrorCode(
+      async () => await store.listSessions(),
+      'malformed_record'
+    );
+  });
+
   it('tolerates empty orphan session directories when the catalog was never created', async () => {
     const storeRoot = await createTempStoreRoot();
     const layout = createLocalRuntimeStorageLayout({ storeRoot });
