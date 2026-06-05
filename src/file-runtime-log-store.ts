@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 import {
   ConversationRehydrationError,
-  createConversationSession
+  validateRestoredVisibleTranscript
 } from './conversation.ts';
 import {
   createLocalRuntimeSessionPaths,
@@ -22,7 +22,6 @@ import type {
   RuntimeLogStore,
   RuntimeTraceEntry
 } from './runtime-log.ts';
-import { isTerminalRawEventLogRecord } from './runtime-log.ts';
 import { assertLocalRuntimeSessionReadable } from './session-store.ts';
 
 export type CreateFileRuntimeLogStoreOptions = LocalRuntimeSessionPathsOptions;
@@ -56,7 +55,7 @@ export function createFileRuntimeLogStore(
     appendRawEvent(record) {
       const encoded = encodeRawEventLogRecord(record);
       const storedRecord = decodeRawEventLogRecord(encoded);
-      assertReferencedConversationMessagesExist(paths, storedRecord);
+      assertReferencedConversationMessagesMatch(paths, storedRecord);
 
       appendJsonLine({
         filePath: paths.rawEventsPath,
@@ -134,16 +133,20 @@ function readRawEventLogRecords(
   paths: LocalRuntimeSessionPaths,
   mode: RuntimeLogReadMode = 'public'
 ): readonly RawEventLogRecord[] {
-  return Object.freeze(
-    readJsonLines({
-      filePath: paths.rawEventsPath,
-      decodeLine: (line) => decodeRawEventLogRecord(line),
-      missingFileIsAllowed: () =>
-        mode === 'append' ||
-        (!logFileHasContent(paths.tracePath) &&
-          !logFileHasContent(paths.conversationPath))
-    })
-  );
+  const records = readJsonLines({
+    filePath: paths.rawEventsPath,
+    decodeLine: (line) => decodeRawEventLogRecord(line),
+    missingFileIsAllowed: () =>
+      mode === 'append' ||
+      (!logFileHasContent(paths.tracePath) &&
+        !logFileHasContent(paths.conversationPath))
+  });
+
+  if (mode === 'public') {
+    assertRawEventLogIntegrity(paths, records);
+  }
+
+  return Object.freeze(records);
 }
 
 function readConversationLogRecords(
@@ -170,11 +173,12 @@ function readAppendableConversationLogRecords(
   const records = readConversationLogRecords(paths, 'append');
   const rawEvents = readRawEventLogRecords(paths, 'append');
 
-  assertRawEventVisibleReferencesExist({
+  assertRawEventVisibleReferencesMatchConversationMessages({
     messages: records,
     rawEvents
   });
   assertAppendableConversationLog({
+    paths,
     messages: records,
     nextRecord,
     rawEvents
@@ -190,7 +194,7 @@ function assertConversationLogIntegrity(
   const rawEvents = readRawEventLogRecords(paths);
 
   assertCompleteConversationLog(messages);
-  assertRawEventVisibleReferencesExist({
+  assertRawEventVisibleReferencesMatchConversationMessages({
     messages,
     rawEvents
   });
@@ -203,12 +207,14 @@ function assertConversationLogIntegrity(
 
 function assertRestoredConversationInvariants(
   paths: LocalRuntimeSessionPaths,
-  messages: readonly ConversationLogRecord[]
+  messages: readonly ConversationLogRecord[],
+  options: { readonly allowIncompleteFinalTurn?: boolean } = {}
 ): void {
   try {
-    createConversationSession({
+    validateRestoredVisibleTranscript({
       id: paths.sessionId,
-      visibleTranscript: messages
+      visibleTranscript: messages,
+      allowIncompleteFinalTurn: options.allowIncompleteFinalTurn ?? false
     });
   } catch (error: unknown) {
     if (error instanceof ConversationRehydrationError) {
@@ -233,6 +239,7 @@ function assertCompleteConversationLog(
 }
 
 function assertAppendableConversationLog(options: {
+  readonly paths: LocalRuntimeSessionPaths;
   readonly messages: readonly ConversationLogRecord[];
   readonly nextRecord: ConversationLogRecord;
   readonly rawEvents: readonly RawEventLogRecord[];
@@ -247,11 +254,17 @@ function assertAppendableConversationLog(options: {
     rawEvents: options.rawEvents
   });
 
-  if (options.messages.length % 2 === 0) {
-    if (options.nextRecord.role === 'user') {
-      return;
-    }
+  const nextMessages = Object.freeze([...options.messages, options.nextRecord]);
 
+  if (options.messages.length % 2 === 0 && options.nextRecord.role === 'user') {
+    assertRestoredConversationInvariants(options.paths, nextMessages, {
+      allowIncompleteFinalTurn: true
+    });
+
+    return;
+  }
+
+  if (options.messages.length % 2 === 0) {
     throwIncompleteConversationLog();
   }
 
@@ -263,6 +276,7 @@ function assertAppendableConversationLog(options: {
     previousRecord.eventId === options.nextRecord.eventId &&
     previousRecord.traceId === options.nextRecord.traceId
   ) {
+    assertRestoredConversationInvariants(options.paths, nextMessages);
     return;
   }
 
@@ -288,7 +302,24 @@ function readRequiredConversationLogRecords(
   );
 }
 
-function assertReferencedConversationMessagesExist(
+function assertRawEventLogIntegrity(
+  paths: LocalRuntimeSessionPaths,
+  rawEvents: readonly RawEventLogRecord[]
+): void {
+  if (!rawEvents.some((record) => (record.visibleMessageIds ?? []).length > 0)) {
+    return;
+  }
+
+  const messages = readRequiredConversationLogRecords(paths);
+
+  assertRestoredConversationInvariants(paths, messages);
+  assertRawEventVisibleReferencesMatchConversationMessages({
+    messages,
+    rawEvents
+  });
+}
+
+function assertReferencedConversationMessagesMatch(
   paths: LocalRuntimeSessionPaths,
   record: RawEventLogRecord
 ): void {
@@ -296,32 +327,37 @@ function assertReferencedConversationMessagesExist(
     return;
   }
 
-  assertRawEventVisibleReferencesExist({
+  assertRawEventVisibleReferencesMatchConversationMessages({
     messages: readRequiredConversationLogRecords(paths),
     rawEvents: [record]
   });
 }
 
-function assertRawEventVisibleReferencesExist(options: {
+function assertRawEventVisibleReferencesMatchConversationMessages(options: {
   readonly messages: readonly ConversationLogRecord[];
   readonly rawEvents: readonly RawEventLogRecord[];
 }): void {
-  const referencedMessageIds = visibleMessageIdsForRawEvents(options.rawEvents);
-
-  if (referencedMessageIds.length === 0) {
-    return;
-  }
-
-  const messagesById = new Set(
-    options.messages.map((message) => message.id)
+  const messagesById = new Map(
+    options.messages.map((message) => [message.id, message])
   );
 
-  for (const messageId of referencedMessageIds) {
-    if (!messagesById.has(messageId)) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        `Raw event references a missing visible conversation message: ${messageId}.`
-      );
+  for (const rawEvent of options.rawEvents) {
+    for (const messageId of rawEvent.visibleMessageIds ?? []) {
+      const message = messagesById.get(messageId);
+
+      if (message === undefined) {
+        throw new LocalRuntimeStorageContractError(
+          'malformed_record',
+          `Raw event references a missing visible conversation message: ${messageId}.`
+        );
+      }
+
+      if (message.eventId !== rawEvent.eventId || message.traceId !== rawEvent.traceId) {
+        throw new LocalRuntimeStorageContractError(
+          'malformed_record',
+          `Raw event references a visible conversation message from another event: ${messageId}.`
+        );
+      }
     }
   }
 }
@@ -334,12 +370,18 @@ function assertConversationMessagesHaveTerminalRawEvidence(options: {
     return;
   }
 
-  const referencedMessageIds = new Set(
-    visibleMessageIdsForRawEvents(options.rawEvents.filter(isTerminalRawEventLogRecord))
+  const completedTurnEvidence = new Set(
+    options.rawEvents
+      .filter(isCompletedTerminalRawEventLogRecord)
+      .flatMap((record) =>
+        (record.visibleMessageIds ?? []).map((messageId) =>
+          visibleMessageEvidenceKey(record, messageId)
+        )
+      )
   );
 
   for (const message of options.messages) {
-    if (!referencedMessageIds.has(message.id)) {
+    if (!completedTurnEvidence.has(visibleMessageEvidenceKey(message, message.id))) {
       throw new LocalRuntimeStorageContractError(
         'malformed_record',
         `Conversation message lacks terminal raw-event evidence: ${message.id}.`
@@ -348,10 +390,15 @@ function assertConversationMessagesHaveTerminalRawEvidence(options: {
   }
 }
 
-function visibleMessageIdsForRawEvents(
-  rawEvents: readonly RawEventLogRecord[]
-): readonly string[] {
-  return rawEvents.flatMap((record) => [...(record.visibleMessageIds ?? [])]);
+function isCompletedTerminalRawEventLogRecord(record: RawEventLogRecord): boolean {
+  return record.kind === 'runtime_turn_completed';
+}
+
+function visibleMessageEvidenceKey(
+  identity: { readonly eventId: string; readonly traceId: string },
+  messageId: string
+): string {
+  return `${identity.eventId}\u0000${identity.traceId}\u0000${messageId}`;
 }
 
 function readJsonLines<T>(options: {

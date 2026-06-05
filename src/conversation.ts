@@ -50,6 +50,10 @@ export type ConversationSessionOptions = {
   readonly visibleTranscript?: readonly VisibleMessage[];
 };
 
+export type RestoredVisibleTranscriptValidationOptions = ConversationSessionOptions & {
+  readonly allowIncompleteFinalTurn?: boolean;
+};
+
 export type CharacterTurnOptions = {
   readonly recentMessageLimit?: number;
 };
@@ -95,13 +99,15 @@ export function createConversationSession(
 ): ConversationSession {
   const sessionId = options.id ?? defaultSessionId;
   const character = freezeCharacterProfile(options.character ?? localCharacterProfile);
-  const visibleTranscript = createInitialVisibleTranscript({
-    sessionId,
-    character,
-    ...(options.visibleTranscript === undefined
-      ? {}
-      : { visibleTranscript: options.visibleTranscript })
-  });
+  const visibleTranscript = [
+    ...validateRestoredVisibleTranscript({
+      id: sessionId,
+      character,
+      ...(options.visibleTranscript === undefined
+        ? {}
+        : { visibleTranscript: options.visibleTranscript })
+    })
+  ];
   const session: ConversationSession = {
     id: sessionId,
     character,
@@ -115,6 +121,22 @@ export function createConversationSession(
   sessionTranscripts.set(frozenSession, visibleTranscript);
 
   return frozenSession;
+}
+
+export function validateRestoredVisibleTranscript(
+  options: RestoredVisibleTranscriptValidationOptions = {}
+): readonly VisibleMessage[] {
+  const sessionId = options.id ?? defaultSessionId;
+  const character = freezeCharacterProfile(options.character ?? localCharacterProfile);
+
+  return Object.freeze(createInitialVisibleTranscript({
+    sessionId,
+    character,
+    ...(options.visibleTranscript === undefined
+      ? {}
+      : { visibleTranscript: options.visibleTranscript }),
+    allowIncompleteFinalTurn: options.allowIncompleteFinalTurn ?? false
+  }));
 }
 
 export async function runCharacterTurn(
@@ -300,6 +322,7 @@ function createInitialVisibleTranscript(options: {
   readonly sessionId: string;
   readonly character: CharacterProfile;
   readonly visibleTranscript?: readonly VisibleMessage[];
+  readonly allowIncompleteFinalTurn: boolean;
 }): VisibleMessage[] {
   const visibleTranscript = options.visibleTranscript ?? [];
   const restoredMessages: VisibleMessage[] = [];
@@ -315,7 +338,7 @@ function createInitialVisibleTranscript(options: {
     );
   });
 
-  if (restoredMessages.length % 2 !== 0) {
+  if (!options.allowIncompleteFinalTurn && restoredMessages.length % 2 !== 0) {
     throw new ConversationRehydrationError(
       'Restored visible messages must end after a complete user/character turn.'
     );

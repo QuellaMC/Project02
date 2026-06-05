@@ -6,6 +6,7 @@ export {
   createDeterministicCharacterAgent,
   localCharacterProfile,
   runCharacterTurn,
+  validateRestoredVisibleTranscript,
   type CharacterAgent,
   type CharacterAgentInput,
   type CharacterAgentReply,
@@ -14,6 +15,7 @@ export {
   type CharacterTurnResult,
   type ConversationSession,
   type ConversationSessionOptions,
+  type RestoredVisibleTranscriptValidationOptions,
   type VisibleMessage,
   type VisibleMessageRole
 } from './conversation.ts';

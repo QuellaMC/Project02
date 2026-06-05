@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
@@ -147,6 +148,8 @@ describe('file-backed runtime log store', () => {
       visibleMessageIds: ['beta:message-1', 'beta:message-2']
     };
     const alphaMessage = createConversationRecord({
+      eventId: 'evt_alpha',
+      traceId: 'trace_alpha',
       id: 'alpha:message-1',
       role: 'user',
       speakerId: 'local-user',
@@ -154,6 +157,8 @@ describe('file-backed runtime log store', () => {
       text: 'alpha message'
     });
     const alphaReply = createConversationRecord({
+      eventId: 'evt_alpha',
+      traceId: 'trace_alpha',
       id: 'alpha:message-2',
       role: 'character',
       speakerId: 'mira',
@@ -161,6 +166,8 @@ describe('file-backed runtime log store', () => {
       text: 'alpha reply'
     });
     const betaMessage = createConversationRecord({
+      eventId: 'evt_beta',
+      traceId: 'trace_beta',
       id: 'beta:message-1',
       role: 'user',
       speakerId: 'local-user',
@@ -168,6 +175,8 @@ describe('file-backed runtime log store', () => {
       text: 'beta message'
     });
     const betaReply = createConversationRecord({
+      eventId: 'evt_beta',
+      traceId: 'trace_beta',
       id: 'beta:message-2',
       role: 'character',
       speakerId: 'mira',
@@ -381,6 +390,7 @@ describe('file-backed runtime log store', () => {
       sessionId: 'mira-local'
     });
 
+    expectStorageErrorCode(() => store.rawEvents(), 'missing_file');
     expectStorageErrorCode(() => store.conversationMessages(), 'missing_file');
     expectStorageErrorCode(
       () =>
@@ -575,6 +585,53 @@ describe('file-backed runtime log store', () => {
     );
   });
 
+  it('validates appended conversation records against session transcript invariants before writing', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const store = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const firstUser = createConversationRecord({
+      id: 'mira-local:message-1',
+      role: 'user',
+      speakerId: 'local-user',
+      speakerName: 'You',
+      text: 'hello'
+    });
+
+    expectStorageErrorCode(
+      () =>
+        store.appendConversationMessage(createConversationRecord({
+          id: 'mira-local:message-2',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'bad first message id'
+        })),
+      'malformed_record'
+    );
+    expect(existsSync(paths.conversationPath)).toBe(false);
+
+    expect(store.appendConversationMessage(firstUser)).toEqual(firstUser);
+    expectStorageErrorCode(
+      () =>
+        store.appendConversationMessage(createConversationRecord({
+          id: 'mira-local:message-3',
+          role: 'character',
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: 'bad paired message id'
+        })),
+      'malformed_record'
+    );
+    expect(readConversationFile(paths)).toEqual([firstUser]);
+  });
+
   it('rejects malformed restored visible-message order before exposing records', async () => {
     const storeRoot = createTempStoreRoot();
     await createCatalogedSession(storeRoot, 'mira-local');
@@ -622,6 +679,73 @@ describe('file-backed runtime log store', () => {
           storeRoot,
           sessionId: 'mira-local'
         }).conversationMessages(),
+      'malformed_record'
+    );
+  });
+
+  it('rejects terminal raw evidence that references visible messages from another event identity', async () => {
+    const appendStoreRoot = createTempStoreRoot();
+    const appendStore = await createCatalogedFileRuntimeLogStore(appendStoreRoot, 'mira-local');
+    const userMessage = createConversationRecord({
+      id: 'mira-local:message-1',
+      role: 'user',
+      speakerId: 'local-user',
+      speakerName: 'You',
+      text: 'hello'
+    });
+    const characterMessage = createConversationRecord({
+      id: 'mira-local:message-2',
+      role: 'character',
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: "I'm here. Tell me what you need."
+    });
+
+    appendStore.appendConversationMessage(userMessage);
+    appendStore.appendConversationMessage(characterMessage);
+    expectStorageErrorCode(
+      () =>
+        appendStore.appendRawEvent({
+          ...identity,
+          eventId: 'evt_other_turn',
+          traceId: 'trace_other_turn',
+          kind: 'runtime_turn_completed',
+          eventType: 'USER_MESSAGE',
+          status: 'completed',
+          visibleMessageIds: ['mira-local:message-1', 'mira-local:message-2']
+        }),
+      'malformed_record'
+    );
+
+    const readStoreRoot = createTempStoreRoot();
+    await createCatalogedSession(readStoreRoot, 'mira-local');
+    const readPaths = createLocalRuntimeSessionPaths({
+      storeRoot: readStoreRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeConversationPair(readPaths);
+    writeFileSync(
+      readPaths.rawEventsPath,
+      `${JSON.stringify({
+        ...identity,
+        eventId: 'evt_other_turn',
+        traceId: 'trace_other_turn',
+        kind: 'runtime_turn_completed',
+        eventType: 'USER_MESSAGE',
+        status: 'completed',
+        visibleMessageIds: ['mira-local:message-1', 'mira-local:message-2']
+      })}\n`,
+      'utf8'
+    );
+    const readStore = createFileRuntimeLogStore({
+      storeRoot: readStoreRoot,
+      sessionId: 'mira-local'
+    });
+
+    expectStorageErrorCode(() => readStore.rawEvents(), 'malformed_record');
+    expectStorageErrorCode(
+      () => readStore.conversationMessages(),
       'malformed_record'
     );
   });
@@ -862,13 +986,25 @@ function writeRawEventOnly(
       ...identity,
       kind: 'runtime_turn_completed',
       eventType: 'USER_MESSAGE',
-      status: 'completed'
+      status: 'completed',
+      visibleMessageIds: ['mira-local:message-1', 'mira-local:message-2']
     })}\n`,
     'utf8'
   );
 }
 
+function readConversationFile(
+  paths: ReturnType<typeof createLocalRuntimeSessionPaths>
+): readonly unknown[] {
+  return readFileSync(paths.conversationPath, 'utf8')
+    .trimEnd()
+    .split('\n')
+    .map((line) => JSON.parse(line) as unknown);
+}
+
 function createConversationRecord(options: {
+  readonly eventId?: string;
+  readonly traceId?: string;
   readonly id: string;
   readonly role: 'user' | 'character';
   readonly speakerId: string;
@@ -877,6 +1013,8 @@ function createConversationRecord(options: {
 }): ConversationLogRecordInput {
   return {
     ...identity,
+    ...(options.eventId === undefined ? {} : { eventId: options.eventId }),
+    ...(options.traceId === undefined ? {} : { traceId: options.traceId }),
     id: options.id,
     role: options.role,
     speakerId: options.speakerId,

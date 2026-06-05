@@ -252,9 +252,11 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const visibleMessageIds = optionalStringArray(record['visibleMessageIds'], 'visibleMessageIds');
   const payloadSummary = optionalRawEventPayloadSummary(record['payloadSummary']);
 
-  if (isTerminalRawEventLogRecordKind(kind) && status === undefined) {
-    throwMalformedRecord('status');
-  }
+  assertTerminalRawEventSemantics({
+    kind,
+    status,
+    visibleMessageIds
+  });
 
   return Object.freeze({
     eventId: requiredRecordString(record, 'eventId', 'malformed_record'),
@@ -424,6 +426,39 @@ function optionalRuntimeTurnStatus(value: unknown): RuntimeTurnStatus | undefine
   }
 
   throwMalformedRecord('status');
+}
+
+function assertTerminalRawEventSemantics(options: {
+  readonly kind: RawEventLogRecordKind;
+  readonly status: RuntimeTurnStatus | undefined;
+  readonly visibleMessageIds: readonly string[] | undefined;
+}): void {
+  if (!isTerminalRawEventLogRecordKind(options.kind)) {
+    return;
+  }
+
+  if (options.kind === 'runtime_turn_completed') {
+    if (options.status !== 'completed') {
+      throwMalformedRecord('status');
+    }
+
+    if (
+      options.visibleMessageIds === undefined ||
+      options.visibleMessageIds.length === 0
+    ) {
+      throwMalformedRecord('visibleMessageIds');
+    }
+
+    return;
+  }
+
+  if (options.status !== 'rejected') {
+    throwMalformedRecord('status');
+  }
+
+  if (options.visibleMessageIds !== undefined) {
+    throwMalformedRecord('visibleMessageIds');
+  }
 }
 
 function optionalStringArray(value: unknown, key: string): readonly string[] | undefined {

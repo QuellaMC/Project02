@@ -274,6 +274,67 @@ describe('local runtime storage contract', () => {
     ).toThrow(LocalRuntimeStorageContractError);
   });
 
+  it('rejects terminal raw events that contradict visible commit semantics', () => {
+    for (const rawEvent of [
+      {
+        eventId: 'evt_completed_without_messages',
+        traceId: 'trace_completed_without_messages',
+        createdAt,
+        kind: 'runtime_turn_completed',
+        eventType: 'USER_MESSAGE',
+        status: 'completed'
+      },
+      {
+        eventId: 'evt_completed_with_empty_messages',
+        traceId: 'trace_completed_with_empty_messages',
+        createdAt,
+        kind: 'runtime_turn_completed',
+        eventType: 'USER_MESSAGE',
+        status: 'completed',
+        visibleMessageIds: []
+      },
+      {
+        eventId: 'evt_completed_rejected',
+        traceId: 'trace_completed_rejected',
+        createdAt,
+        kind: 'runtime_turn_completed',
+        eventType: 'USER_MESSAGE',
+        status: 'rejected',
+        visibleMessageIds: ['local-session:message-1', 'local-session:message-2']
+      },
+      {
+        eventId: 'evt_rejected_completed',
+        traceId: 'trace_rejected_completed',
+        createdAt,
+        kind: 'runtime_turn_rejected',
+        eventType: 'USER_MESSAGE',
+        status: 'completed'
+      },
+      {
+        eventId: 'evt_rejected_with_messages',
+        traceId: 'trace_rejected_with_messages',
+        createdAt,
+        kind: 'runtime_turn_rejected',
+        eventType: 'USER_MESSAGE',
+        status: 'rejected',
+        visibleMessageIds: ['local-session:message-1']
+      },
+      {
+        eventId: 'evt_rejected_with_empty_messages',
+        traceId: 'trace_rejected_with_empty_messages',
+        createdAt,
+        kind: 'runtime_turn_rejected',
+        eventType: 'USER_MESSAGE',
+        status: 'rejected',
+        visibleMessageIds: []
+      }
+    ]) {
+      expect(() => decodeRawEventLogRecord(JSON.stringify(rawEvent))).toThrow(
+        LocalRuntimeStorageContractError
+      );
+    }
+  });
+
   it('rejects stored visible message text that is not already normalized', () => {
     for (const text of [' hello ', 'line one\nline two']) {
       expect(() =>
