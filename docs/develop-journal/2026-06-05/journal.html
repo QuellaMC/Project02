@@ -61,6 +61,26 @@
     <ul>
       <li><code>pnpm exec vitest run tests/conversation.test.ts tests/file-runtime-log-store.test.ts tests/chat-cli.contract.test.ts tests/session-store.test.ts tests/inspect-cli.contract.test.ts</code></li>
     </ul>
+
+    <h2>MVP-004 Conversation Evidence Hardening</h2>
+    <p>
+      Tightened the read-side file log invariants after a repro showed that raw events referencing
+      visible message IDs could coexist with an empty or incomplete <code>conversation.jsonl</code>.
+      Public log reads now fail if trace, raw-event, and conversation evidence disagree, while
+      append-time reads remain permissive enough for the existing write order of an in-progress turn.
+    </p>
+    <ul>
+      <li>Added regressions for empty and incomplete conversation logs when raw events reference visible messages.</li>
+      <li>Added regressions for missing trace or raw-event logs when other session evidence already exists.</li>
+      <li>Added a regression for complete-looking conversation records that lack terminal raw-event evidence.</li>
+      <li>Kept the validation inside <code>src/file-runtime-log-store.ts</code> so chat resume and inspect share the same corruption checks.</li>
+    </ul>
+    <p>
+      Focused verification before the full gate:
+    </p>
+    <ul>
+      <li><code>pnpm exec vitest run tests/file-runtime-log-store.test.ts tests/inspect-cli.contract.test.ts tests/chat-cli.contract.test.ts tests/session-store.test.ts tests/conversation.test.ts</code></li>
+    </ul>
   </main>
 </body>
 </html>

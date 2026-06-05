@@ -21,6 +21,7 @@ import type {
 import { assertLocalRuntimeSessionReadable } from './session-store.ts';
 
 export type CreateFileRuntimeLogStoreOptions = LocalRuntimeSessionPathsOptions;
+type RuntimeLogReadMode = 'append' | 'public';
 
 export function createFileRuntimeLogStore(
   options: CreateFileRuntimeLogStoreOptions = {}
@@ -42,7 +43,7 @@ export function createFileRuntimeLogStore(
         filePath: paths.tracePath,
         line: encodeRuntimeTraceEntry(storedEntry),
         assertSessionReadable,
-        validateExisting: () => readRuntimeTraceEntries(paths)
+        validateExisting: () => readRuntimeTraceEntries(paths, 'append')
       });
 
       return storedEntry;
@@ -56,7 +57,7 @@ export function createFileRuntimeLogStore(
         filePath: paths.rawEventsPath,
         line: encodeRawEventLogRecord(storedRecord),
         assertSessionReadable,
-        validateExisting: () => readRawEventLogRecords(paths)
+        validateExisting: () => readRawEventLogRecords(paths, 'append')
       });
 
       return storedRecord;
@@ -69,7 +70,7 @@ export function createFileRuntimeLogStore(
         filePath: paths.conversationPath,
         line: encodeConversationLogRecord(storedRecord),
         assertSessionReadable,
-        validateExisting: () => readConversationLogRecords(paths)
+        validateExisting: () => readAppendableConversationLogRecords(paths)
       });
 
       return storedRecord;
@@ -109,38 +110,94 @@ function appendJsonLine(options: {
 }
 
 function readRuntimeTraceEntries(
-  paths: LocalRuntimeSessionPaths
+  paths: LocalRuntimeSessionPaths,
+  mode: RuntimeLogReadMode = 'public'
 ): readonly RuntimeTraceEntry[] {
   return Object.freeze(
     readJsonLines({
       filePath: paths.tracePath,
       decodeLine: (line) => decodeRuntimeTraceEntry(line),
-      missingFileIsAllowed: () => true
+      missingFileIsAllowed: () =>
+        mode === 'append' ||
+        (!logFileHasContent(paths.rawEventsPath) &&
+          !logFileHasContent(paths.conversationPath))
     })
   );
 }
 
 function readRawEventLogRecords(
-  paths: LocalRuntimeSessionPaths
+  paths: LocalRuntimeSessionPaths,
+  mode: RuntimeLogReadMode = 'public'
 ): readonly RawEventLogRecord[] {
   return Object.freeze(
     readJsonLines({
       filePath: paths.rawEventsPath,
       decodeLine: (line) => decodeRawEventLogRecord(line),
-      missingFileIsAllowed: () => true
+      missingFileIsAllowed: () =>
+        mode === 'append' ||
+        (!logFileHasContent(paths.tracePath) &&
+          !logFileHasContent(paths.conversationPath))
     })
   );
 }
 
 function readConversationLogRecords(
+  paths: LocalRuntimeSessionPaths,
+  mode: RuntimeLogReadMode = 'public'
+): readonly ConversationLogRecord[] {
+  const records = readJsonLines({
+    filePath: paths.conversationPath,
+    decodeLine: (line) => decodeConversationLogRecord(line),
+    missingFileIsAllowed: () => !rawEventsRequireConversationLog(paths)
+  });
+
+  if (mode === 'public') {
+    assertConversationLogIntegrity(paths, records);
+  }
+
+  return Object.freeze(records);
+}
+
+function readAppendableConversationLogRecords(
   paths: LocalRuntimeSessionPaths
 ): readonly ConversationLogRecord[] {
-  return Object.freeze(
-    readJsonLines({
-      filePath: paths.conversationPath,
-      decodeLine: (line) => decodeConversationLogRecord(line),
-      missingFileIsAllowed: () => !rawEventsRequireConversationLog(paths)
-    })
+  const records = readConversationLogRecords(paths, 'append');
+
+  assertRawEventVisibleReferencesExist({
+    messages: records,
+    rawEvents: readRawEventLogRecords(paths, 'append')
+  });
+
+  return records;
+}
+
+function assertConversationLogIntegrity(
+  paths: LocalRuntimeSessionPaths,
+  messages: readonly ConversationLogRecord[]
+): void {
+  const rawEvents = readRawEventLogRecords(paths);
+
+  assertCompleteConversationLog(messages);
+  assertRawEventVisibleReferencesExist({
+    messages,
+    rawEvents
+  });
+  assertConversationMessagesHaveTerminalRawEvidence({
+    messages,
+    rawEvents
+  });
+}
+
+function assertCompleteConversationLog(
+  messages: readonly ConversationLogRecord[]
+): void {
+  if (messages.length % 2 === 0) {
+    return;
+  }
+
+  throw new LocalRuntimeStorageContractError(
+    'malformed_record',
+    'Local runtime conversation log ended before a complete user/character turn.'
   );
 }
 
@@ -160,17 +217,31 @@ function assertReferencedConversationMessagesExist(
   paths: LocalRuntimeSessionPaths,
   record: RawEventLogRecord
 ): void {
-  const visibleMessageIds = record.visibleMessageIds ?? [];
+  if (record.visibleMessageIds === undefined || record.visibleMessageIds.length === 0) {
+    return;
+  }
 
-  if (visibleMessageIds.length === 0) {
+  assertRawEventVisibleReferencesExist({
+    messages: readRequiredConversationLogRecords(paths),
+    rawEvents: [record]
+  });
+}
+
+function assertRawEventVisibleReferencesExist(options: {
+  readonly messages: readonly ConversationLogRecord[];
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): void {
+  const referencedMessageIds = visibleMessageIdsForRawEvents(options.rawEvents);
+
+  if (referencedMessageIds.length === 0) {
     return;
   }
 
   const messagesById = new Set(
-    readRequiredConversationLogRecords(paths).map((message) => message.id)
+    options.messages.map((message) => message.id)
   );
 
-  for (const messageId of visibleMessageIds) {
+  for (const messageId of referencedMessageIds) {
     if (!messagesById.has(messageId)) {
       throw new LocalRuntimeStorageContractError(
         'malformed_record',
@@ -178,6 +249,34 @@ function assertReferencedConversationMessagesExist(
       );
     }
   }
+}
+
+function assertConversationMessagesHaveTerminalRawEvidence(options: {
+  readonly messages: readonly ConversationLogRecord[];
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): void {
+  if (options.messages.length === 0) {
+    return;
+  }
+
+  const referencedMessageIds = new Set(
+    visibleMessageIdsForRawEvents(options.rawEvents)
+  );
+
+  for (const message of options.messages) {
+    if (!referencedMessageIds.has(message.id)) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        `Conversation message lacks terminal raw-event evidence: ${message.id}.`
+      );
+    }
+  }
+}
+
+function visibleMessageIdsForRawEvents(
+  rawEvents: readonly RawEventLogRecord[]
+): readonly string[] {
+  return rawEvents.flatMap((record) => [...(record.visibleMessageIds ?? [])]);
 }
 
 function readJsonLines<T>(options: {
@@ -226,12 +325,18 @@ function readJsonLines<T>(options: {
 }
 
 function rawEventsRequireConversationLog(paths: LocalRuntimeSessionPaths): boolean {
-  return readRawEventLogRecords(paths).some((record) => {
+  return readRawEventLogRecords(paths, 'append').some((record) => {
     return (
       record.visibleMessageIds !== undefined &&
       record.visibleMessageIds.length > 0
     );
   });
+}
+
+function logFileHasContent(filePath: string): boolean {
+  const content = readLogFile(filePath);
+
+  return content !== undefined && content.length > 0;
 }
 
 function readLogFile(filePath: string): string | undefined {

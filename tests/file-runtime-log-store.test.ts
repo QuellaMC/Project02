@@ -134,16 +134,17 @@ describe('file-backed runtime log store', () => {
       traceId: 'trace_alpha',
       kind: 'runtime_turn_completed',
       eventType: 'USER_MESSAGE',
-      status: 'completed'
+      status: 'completed',
+      visibleMessageIds: ['alpha:message-1', 'alpha:message-2']
     };
     const betaRaw: RawEventLogRecordInput = {
       ...identity,
       eventId: 'evt_beta',
       traceId: 'trace_beta',
-      kind: 'runtime_turn_rejected',
+      kind: 'runtime_turn_completed',
       eventType: 'USER_MESSAGE',
-      status: 'rejected',
-      reason: 'Provide exactly one non-empty message.'
+      status: 'completed',
+      visibleMessageIds: ['beta:message-1', 'beta:message-2']
     };
     const alphaMessage = createConversationRecord({
       id: 'alpha:message-1',
@@ -152,6 +153,13 @@ describe('file-backed runtime log store', () => {
       speakerName: 'You',
       text: 'alpha message'
     });
+    const alphaReply = createConversationRecord({
+      id: 'alpha:message-2',
+      role: 'character',
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: 'alpha reply'
+    });
     const betaMessage = createConversationRecord({
       id: 'beta:message-1',
       role: 'user',
@@ -159,13 +167,22 @@ describe('file-backed runtime log store', () => {
       speakerName: 'You',
       text: 'beta message'
     });
+    const betaReply = createConversationRecord({
+      id: 'beta:message-2',
+      role: 'character',
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: 'beta reply'
+    });
 
     alpha.appendTrace(alphaTrace);
-    alpha.appendRawEvent(alphaRaw);
     alpha.appendConversationMessage(alphaMessage);
+    alpha.appendConversationMessage(alphaReply);
+    alpha.appendRawEvent(alphaRaw);
     beta.appendTrace(betaTrace);
-    beta.appendRawEvent(betaRaw);
     beta.appendConversationMessage(betaMessage);
+    beta.appendConversationMessage(betaReply);
+    beta.appendRawEvent(betaRaw);
 
     expect(
       createFileRuntimeLogStore({
@@ -184,7 +201,7 @@ describe('file-backed runtime log store', () => {
         storeRoot,
         sessionId: 'alpha'
       }).conversationMessages()
-    ).toEqual([alphaMessage]);
+    ).toEqual([alphaMessage, alphaReply]);
     expect(
       createFileRuntimeLogStore({
         storeRoot,
@@ -202,7 +219,7 @@ describe('file-backed runtime log store', () => {
         storeRoot,
         sessionId: 'beta'
       }).conversationMessages()
-    ).toEqual([betaMessage]);
+    ).toEqual([betaMessage, betaReply]);
   });
 
   it('protects persisted records from mutable append inputs and read snapshots', async () => {
@@ -357,25 +374,7 @@ describe('file-backed runtime log store', () => {
       sessionId: 'mira-local'
     });
 
-    writeFileSync(
-      paths.tracePath,
-      `${JSON.stringify({
-        ...identity,
-        step: 'visible_reply_committed'
-      })}\n`,
-      'utf8'
-    );
-    writeFileSync(
-      paths.rawEventsPath,
-      `${JSON.stringify({
-        ...identity,
-        kind: 'runtime_turn_completed',
-        eventType: 'USER_MESSAGE',
-        status: 'completed',
-        visibleMessageIds: ['mira-local:message-1', 'mira-local:message-2']
-      })}\n`,
-      'utf8'
-    );
+    writeVisibleRawEvidence(paths);
 
     const store = createFileRuntimeLogStore({
       storeRoot,
@@ -393,6 +392,123 @@ describe('file-backed runtime log store', () => {
           text: 'next'
         })),
       'missing_file'
+    );
+  });
+
+  it('fails empty or incomplete conversation logs when raw events reference visible messages', async () => {
+    const emptyStoreRoot = createTempStoreRoot();
+    await createCatalogedSession(emptyStoreRoot, 'mira-local');
+    const emptyPaths = createLocalRuntimeSessionPaths({
+      storeRoot: emptyStoreRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeVisibleRawEvidence(emptyPaths);
+    writeFileSync(emptyPaths.conversationPath, '', 'utf8');
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot: emptyStoreRoot,
+          sessionId: 'mira-local'
+        }).conversationMessages(),
+      'malformed_record'
+    );
+
+    const incompleteStoreRoot = createTempStoreRoot();
+    await createCatalogedSession(incompleteStoreRoot, 'mira-local');
+    const incompletePaths = createLocalRuntimeSessionPaths({
+      storeRoot: incompleteStoreRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeVisibleRawEvidence(incompletePaths);
+    writeFileSync(
+      incompletePaths.conversationPath,
+      `${JSON.stringify(createConversationRecord({
+        id: 'mira-local:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'hello'
+      }))}\n`,
+      'utf8'
+    );
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot: incompleteStoreRoot,
+          sessionId: 'mira-local'
+        }).conversationMessages(),
+      'malformed_record'
+    );
+  });
+
+  it('fails missing raw or trace logs when a session has other durable evidence', async () => {
+    const missingRawStoreRoot = createTempStoreRoot();
+    await createCatalogedSession(missingRawStoreRoot, 'mira-local');
+    const missingRawPaths = createLocalRuntimeSessionPaths({
+      storeRoot: missingRawStoreRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeConversationPair(missingRawPaths);
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot: missingRawStoreRoot,
+          sessionId: 'mira-local'
+        }).rawEvents(),
+      'missing_file'
+    );
+
+    const missingTraceStoreRoot = createTempStoreRoot();
+    await createCatalogedSession(missingTraceStoreRoot, 'mira-local');
+    const missingTracePaths = createLocalRuntimeSessionPaths({
+      storeRoot: missingTraceStoreRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeRawEventOnly(missingTracePaths);
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot: missingTraceStoreRoot,
+          sessionId: 'mira-local'
+        }).traceEntries(),
+      'missing_file'
+    );
+  });
+
+  it('fails conversation records that do not have terminal raw-event evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeConversationPair(paths);
+    writeFileSync(
+      paths.rawEventsPath,
+      `${JSON.stringify({
+        ...identity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE'
+      })}\n`,
+      'utf8'
+    );
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).conversationMessages(),
+      'malformed_record'
     );
   });
 
@@ -571,6 +687,71 @@ async function createCatalogedSession(
     createdAt,
     updatedAt: createdAt
   });
+}
+
+function writeVisibleRawEvidence(
+  paths: ReturnType<typeof createLocalRuntimeSessionPaths>
+): void {
+  writeFileSync(
+    paths.tracePath,
+    `${JSON.stringify({
+      ...identity,
+      step: 'visible_reply_committed'
+    })}\n`,
+    'utf8'
+  );
+  writeFileSync(
+    paths.rawEventsPath,
+    `${JSON.stringify({
+      ...identity,
+      kind: 'runtime_turn_completed',
+      eventType: 'USER_MESSAGE',
+      status: 'completed',
+      visibleMessageIds: ['mira-local:message-1', 'mira-local:message-2']
+    })}\n`,
+    'utf8'
+  );
+}
+
+function writeConversationPair(
+  paths: ReturnType<typeof createLocalRuntimeSessionPaths>
+): void {
+  writeFileSync(
+    paths.conversationPath,
+    [
+      JSON.stringify(createConversationRecord({
+        id: 'mira-local:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'hello'
+      })),
+      JSON.stringify(createConversationRecord({
+        id: 'mira-local:message-2',
+        role: 'character',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: "I'm here. Tell me what you need."
+      })),
+      ''
+    ].join('\n'),
+    'utf8'
+  );
+}
+
+function writeRawEventOnly(
+  paths: ReturnType<typeof createLocalRuntimeSessionPaths>
+): void {
+  writeFileSync(
+    paths.rawEventsPath,
+    `${JSON.stringify({
+      ...identity,
+      kind: 'runtime_turn_completed',
+      eventType: 'USER_MESSAGE',
+      status: 'completed'
+    })}\n`,
+    'utf8'
+  );
 }
 
 function createConversationRecord(options: {
