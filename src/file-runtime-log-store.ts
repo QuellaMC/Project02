@@ -328,25 +328,23 @@ function throwIncompleteConversationLog(): never {
 function assertRuntimeTraceTerminalOrder(
   traceEntries: readonly RuntimeTraceEntry[]
 ): void {
-  const terminalTurnIdentities = new Set<string>();
-
-  for (const traceEntry of traceEntries) {
-    const identityKey = runtimeEventIdentityKey(traceEntry);
-
-    if (terminalTurnIdentities.has(identityKey)) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Runtime trace log contains steps after terminal turn evidence.'
-      );
-    }
-
-    if (isTerminalRuntimeTraceEntry(traceEntry)) {
-      terminalTurnIdentities.add(identityKey);
-    }
-  }
+  assertTerminalEvidenceOrder({
+    records: traceEntries,
+    isTerminalRecord: isTerminalRuntimeTraceEntry,
+    isPrerequisiteEvidence: (traceEntry) =>
+      traceEntry.step === 'runtime_event_received',
+    recordAfterTerminalMessage:
+      'Runtime trace log contains steps after terminal turn evidence.',
+    terminalWithoutPrerequisiteMessage:
+      'Runtime trace log contains terminal turn evidence without prior received trace evidence.'
+  });
 }
 
-function isTerminalRuntimeTraceEntry(entry: RuntimeTraceEntry): boolean {
+function isTerminalRuntimeTraceEntry(
+  entry: RuntimeTraceEntry
+): entry is RuntimeTraceEntry & {
+  readonly step: 'runtime_turn_completed' | 'runtime_turn_rejected';
+} {
   return (
     entry.step === 'runtime_turn_completed' ||
     entry.step === 'runtime_turn_rejected'
@@ -372,17 +370,47 @@ function assertRawEventLogIntegrity(
 ): void {
   assertRawEventTurnTerminalCompleteness(rawEvents);
 
-  if (!rawEvents.some((record) => (record.visibleMessageIds ?? []).length > 0)) {
-    return;
+  if (rawEventsHaveVisibleMessageReferences(rawEvents)) {
+    const messages = readRequiredConversationLogRecords(paths);
+
+    assertRestoredConversationInvariants(paths, messages);
+    assertRawEventVisibleReferencesMatchConversationMessages({
+      messages,
+      rawEvents
+    });
   }
 
-  const messages = readRequiredConversationLogRecords(paths);
-
-  assertRestoredConversationInvariants(paths, messages);
-  assertRawEventVisibleReferencesMatchConversationMessages({
-    messages,
+  assertTerminalRawEventsHaveMatchingTerminalTraceEvidence({
+    traceEntries: readRuntimeTraceEntries(paths),
     rawEvents
   });
+}
+
+function assertTerminalRawEventsHaveMatchingTerminalTraceEvidence(options: {
+  readonly traceEntries: readonly RuntimeTraceEntry[];
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): void {
+  const terminalTraceEvidence = new Set(
+    options.traceEntries
+      .filter(isTerminalRuntimeTraceEntry)
+      .map(terminalTraceEvidenceKey)
+  );
+
+  for (const rawEvent of options.rawEvents.filter(isTerminalRawEventLogRecord)) {
+    if (
+      terminalTraceEvidence.has(terminalTraceEvidenceKey({
+        ...rawEvent,
+        step: terminalTraceStepForRawEvent(rawEvent)
+      }))
+    ) {
+      continue;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Terminal raw-event evidence lacks matching terminal runtime trace evidence.'
+    );
+  }
 }
 
 function assertAppendableRawEventLog(options: {
@@ -545,20 +573,55 @@ function assertRawEventTurnTerminalCompleteness(
 function assertRawEventTerminalOrder(
   rawEvents: readonly RawEventLogRecord[]
 ): void {
+  assertTerminalEvidenceOrder({
+    records: rawEvents,
+    isTerminalRecord: isTerminalRawEventLogRecord,
+    isPrerequisiteEvidence: (rawEvent) =>
+      rawEvent.kind === 'runtime_event_received',
+    recordAfterTerminalMessage:
+      'Raw event log contains records after terminal turn evidence.',
+    terminalWithoutPrerequisiteMessage:
+      'Raw event log contains terminal turn evidence before start evidence.'
+  });
+}
+
+function assertTerminalEvidenceOrder<T extends {
+  readonly eventId: string;
+  readonly traceId: string;
+}>(options: {
+  readonly records: readonly T[];
+  readonly isTerminalRecord: (record: T) => boolean;
+  readonly isPrerequisiteEvidence: (record: T) => boolean;
+  readonly recordAfterTerminalMessage: string;
+  readonly terminalWithoutPrerequisiteMessage: string;
+}): void {
+  const prerequisiteEvidenceIdentities = new Set<string>();
   const terminalTurnIdentities = new Set<string>();
 
-  for (const rawEvent of rawEvents) {
-    const identityKey = runtimeEventIdentityKey(rawEvent);
+  for (const record of options.records) {
+    const identityKey = runtimeEventIdentityKey(record);
 
     if (terminalTurnIdentities.has(identityKey)) {
       throw new LocalRuntimeStorageContractError(
         'malformed_record',
-        'Raw event log contains records after terminal turn evidence.'
+        options.recordAfterTerminalMessage
       );
     }
 
-    if (isTerminalRawEventLogRecord(rawEvent)) {
+    if (options.isTerminalRecord(record)) {
+      if (!prerequisiteEvidenceIdentities.has(identityKey)) {
+        throw new LocalRuntimeStorageContractError(
+          'malformed_record',
+          options.terminalWithoutPrerequisiteMessage
+        );
+      }
+
       terminalTurnIdentities.add(identityKey);
+      continue;
+    }
+
+    if (options.isPrerequisiteEvidence(record)) {
+      prerequisiteEvidenceIdentities.add(identityKey);
     }
   }
 }
@@ -731,6 +794,31 @@ function assertConversationMessagesHaveTerminalRawEvidence(options: {
 
 function isCompletedTerminalRawEventLogRecord(record: RawEventLogRecord): boolean {
   return record.kind === 'runtime_turn_completed';
+}
+
+function terminalTraceStepForRawEvent(
+  record: RawEventLogRecord
+): 'runtime_turn_completed' | 'runtime_turn_rejected' {
+  if (record.kind === 'runtime_turn_completed') {
+    return 'runtime_turn_completed';
+  }
+
+  if (record.kind === 'runtime_turn_rejected') {
+    return 'runtime_turn_rejected';
+  }
+
+  throw new LocalRuntimeStorageContractError(
+    'malformed_record',
+    'Terminal raw-event evidence must use a terminal raw-event kind.'
+  );
+}
+
+function terminalTraceEvidenceKey(entry: {
+  readonly eventId: string;
+  readonly traceId: string;
+  readonly step: 'runtime_turn_completed' | 'runtime_turn_rejected';
+}): string {
+  return `${runtimeEventIdentityKey(entry)}\u0000${entry.step}`;
 }
 
 function runtimeEventIdentityKey(identity: {

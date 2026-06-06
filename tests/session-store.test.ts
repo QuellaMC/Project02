@@ -22,6 +22,7 @@ import {
   type LocalRuntimeStorageContractErrorCode,
   type LocalRuntimeSessionConversationLogReader
 } from '../src/index.ts';
+import { assertLocalRuntimeSessionReadable } from '../src/session-store.ts';
 
 const tempRoots: string[] = [];
 
@@ -383,6 +384,114 @@ describe('local runtime session store', () => {
     await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe(
       `${JSON.stringify(created)}\n`
     );
+  });
+
+  it('fails empty session catalogs when session directories contain durable evidence', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const orphanPaths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'orphan'
+    });
+
+    await mkdir(orphanPaths.sessionRoot, { recursive: true });
+    await writeFile(
+      layout.schemaPath,
+      `${encodeStorageSchemaMarker(
+        createLocalRuntimeStorageSchemaMarker({
+          createdAt: '2026-06-04T00:00:00.000Z'
+        })
+      )}\n`,
+      'utf8'
+    );
+    await writeFile(layout.sessionCatalogPath, '', 'utf8');
+    await writeFile(orphanPaths.conversationPath, '{"orphan":true}\n', 'utf8');
+
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['2026-06-04T00:01:00.000Z'])
+    });
+
+    await expectStorageErrorCode(
+      async () => await store.listSessions(),
+      'missing_file'
+    );
+    await expectStorageErrorCode(
+      async () =>
+        await store.createSession({
+          sessionId: 'fresh'
+        }),
+      'missing_file'
+    );
+    await expectStorageErrorCode(
+      async () =>
+        await Promise.resolve(
+          assertLocalRuntimeSessionReadable({
+            storeRoot,
+            sessionId: 'orphan'
+          })
+        ),
+      'missing_file'
+    );
+    await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe('');
+  });
+
+  it('rejects creating an uncataloged session over durable directory evidence', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock([
+        '2026-06-04T00:00:00.000Z',
+        '2026-06-04T00:01:00.000Z'
+      ])
+    });
+
+    const existing = await store.createSession({
+      sessionId: 'cataloged'
+    });
+    const orphanPaths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'orphan'
+    });
+    await mkdir(orphanPaths.sessionRoot, { recursive: true });
+    await writeFile(orphanPaths.conversationPath, '{"orphan":true}\n', 'utf8');
+
+    await expectStorageErrorCode(
+      async () =>
+        await store.createSession({
+          sessionId: 'orphan'
+        }),
+      'missing_file'
+    );
+    await expect(readFile(store.layout.sessionCatalogPath, 'utf8')).resolves.toBe(
+      `${JSON.stringify(existing)}\n`
+    );
+  });
+
+  it('creates an uncataloged session only after verifying its directory is empty', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock([
+        '2026-06-04T00:00:00.000Z',
+        '2026-06-04T00:01:00.000Z'
+      ])
+    });
+
+    const existing = await store.createSession({
+      sessionId: 'cataloged'
+    });
+    const emptyPaths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'empty-orphan'
+    });
+    await mkdir(emptyPaths.sessionRoot, { recursive: true });
+
+    const created = await store.createSession({
+      sessionId: 'empty-orphan'
+    });
+
+    expect(await store.listSessions()).toEqual([existing, created]);
   });
 
   it('tolerates an empty sessions root when the schema marker was never created', async () => {
