@@ -202,11 +202,17 @@ function assertDurableRuntimeSessionEvidence(options: {
   const nextIdentity = nextRuntimeEventIdentity(options);
 
   assertRuntimeTraceTerminalOrder(traceEntries);
+  assertTraceStartsWithReceived(traceEntries);
   assertRawEventTerminalOrder(rawEvents);
   assertRawEventStartsWithReceived(rawEvents);
+  assertRawEventTurnsDoNotOverlap(rawEvents);
   assertOpenRawTurnAllowsNextIdentity({
     rawEvents: options.evidence.rawEvents,
     nextIdentity
+  });
+  assertRawStartedTurnsHaveTraceEvidence({
+    traceEntries,
+    rawEvents
   });
   assertTraceStartedTurnsHaveRawEvidence({
     mode: options.mode,
@@ -539,6 +545,55 @@ function assertRawEventStartsWithReceived(
   }
 }
 
+function assertTraceStartsWithReceived(
+  traceEntries: readonly RuntimeTraceEntry[]
+): void {
+  const startedTraceIdentities = new Set<string>();
+
+  for (const traceEntry of traceEntries) {
+    const identityKey = runtimeEventIdentityKey(traceEntry);
+
+    if (startedTraceIdentities.has(identityKey)) {
+      continue;
+    }
+
+    if (traceEntry.step !== 'runtime_event_received') {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Runtime trace log turn evidence must start with runtime_event_received.'
+      );
+    }
+
+    startedTraceIdentities.add(identityKey);
+  }
+}
+
+function assertRawStartedTurnsHaveTraceEvidence(options: {
+  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly traceEntries: readonly RuntimeTraceEntry[];
+}): void {
+  const traceStartedIdentities = new Set(
+    options.traceEntries
+      .filter((traceEntry) => traceEntry.step === 'runtime_event_received')
+      .map(runtimeEventIdentityKey)
+  );
+
+  for (const rawEvent of options.rawEvents) {
+    if (rawEvent.kind !== 'runtime_event_received') {
+      continue;
+    }
+
+    if (traceStartedIdentities.has(runtimeEventIdentityKey(rawEvent))) {
+      continue;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Raw event log contains started turn evidence without matching runtime trace start evidence.'
+    );
+  }
+}
+
 function assertTraceStartedTurnsHaveRawEvidence(options: {
   readonly allowedTraceOnlyIdentity: string | undefined;
   readonly mode: RuntimeLogValidationMode;
@@ -618,10 +673,6 @@ function appendModeAllowsIncompleteConversationTurn(options: {
 
   if (finalMessage?.role !== 'user') {
     return false;
-  }
-
-  if (options.rawEvents.length === 0) {
-    return true;
   }
 
   return startedRawEventIdentitiesWithoutTerminal(options.rawEvents).has(
@@ -811,6 +862,30 @@ function assertRawEventAppendFollowsOpenTurn(options: {
     'malformed_record',
     'Raw event log contains an unfinished turn before the next event.'
   );
+}
+
+function assertRawEventTurnsDoNotOverlap(
+  rawEvents: readonly RawEventLogRecord[]
+): void {
+  let openTurnIdentity: string | undefined;
+
+  for (const rawEvent of rawEvents) {
+    const identityKey = runtimeEventIdentityKey(rawEvent);
+
+    if (openTurnIdentity !== undefined && openTurnIdentity !== identityKey) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Raw event log contains overlapping turn evidence.'
+      );
+    }
+
+    if (isTerminalRawEventLogRecord(rawEvent)) {
+      openTurnIdentity = undefined;
+      continue;
+    }
+
+    openTurnIdentity = identityKey;
+  }
 }
 
 function startedRawEventIdentitiesWithoutTerminal(

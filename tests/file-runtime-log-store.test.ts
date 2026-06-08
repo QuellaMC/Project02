@@ -736,6 +736,7 @@ describe('file-backed runtime log store', () => {
       text: 'hello'
     });
 
+    appendStartedTurn(store);
     expectStorageErrorCode(
       () =>
         store.appendConversationMessage(createConversationRecord({
@@ -1207,6 +1208,79 @@ describe('file-backed runtime log store', () => {
     expect(existsSync(paths.rawEventsPath)).toBe(false);
   });
 
+  it('rejects trace appends that do not start with received evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const store = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    expectStorageErrorCode(
+      () =>
+        store.appendTrace({
+          ...identity,
+          step: 'runtime_event_normalized'
+        }),
+      'malformed_record'
+    );
+    expect(existsSync(paths.tracePath)).toBe(false);
+  });
+
+  it('rejects raw event starts before matching trace evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const store = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    expectStorageErrorCode(
+      () =>
+        store.appendRawEvent({
+          ...identity,
+          kind: 'runtime_event_received',
+          eventType: 'USER_MESSAGE'
+        }),
+      'malformed_record'
+    );
+    expect(existsSync(paths.rawEventsPath)).toBe(false);
+  });
+
+  it('rejects conversation appends before raw turn evidence exists', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const store = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    expectStorageErrorCode(
+      () =>
+        store.appendConversationMessage(createConversationRecord({
+          id: 'mira-local:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'hello'
+        })),
+      'malformed_record'
+    );
+    expect(existsSync(paths.conversationPath)).toBe(false);
+  });
+
   it('rejects raw-event turns that start without terminal evidence', async () => {
     const storeRoot = createTempStoreRoot();
     await createCatalogedSession(storeRoot, 'mira-local');
@@ -1278,6 +1352,84 @@ describe('file-backed runtime log store', () => {
           speakerName: 'You',
           text: 'next'
         })),
+      'malformed_record'
+    );
+  });
+
+  it('rejects overlapping raw-event turns on public reads', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const secondIdentity = {
+      ...identity,
+      eventId: 'evt_overlapped_turn',
+      traceId: 'trace_overlapped_turn'
+    };
+
+    writeFileSync(
+      paths.tracePath,
+      [
+        JSON.stringify({
+          ...identity,
+          step: 'runtime_event_received'
+        }),
+        JSON.stringify({
+          ...secondIdentity,
+          step: 'runtime_event_received'
+        }),
+        JSON.stringify({
+          ...identity,
+          step: 'runtime_turn_rejected'
+        }),
+        JSON.stringify({
+          ...secondIdentity,
+          step: 'runtime_turn_rejected'
+        }),
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+    writeFileSync(
+      paths.rawEventsPath,
+      [
+        JSON.stringify({
+          ...identity,
+          kind: 'runtime_event_received',
+          eventType: 'USER_MESSAGE'
+        }),
+        JSON.stringify({
+          ...secondIdentity,
+          kind: 'runtime_event_received',
+          eventType: 'USER_MESSAGE'
+        }),
+        JSON.stringify({
+          ...identity,
+          kind: 'runtime_turn_rejected',
+          eventType: 'USER_MESSAGE',
+          status: 'rejected',
+          reason: 'first turn rejected'
+        }),
+        JSON.stringify({
+          ...secondIdentity,
+          kind: 'runtime_turn_rejected',
+          eventType: 'USER_MESSAGE',
+          status: 'rejected',
+          reason: 'second turn rejected'
+        }),
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).rawEvents(),
       'malformed_record'
     );
   });
