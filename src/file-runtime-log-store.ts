@@ -26,7 +26,17 @@ import { isTerminalRawEventLogRecord } from './runtime-log.ts';
 import { assertLocalRuntimeSessionReadable } from './session-store.ts';
 
 export type CreateFileRuntimeLogStoreOptions = LocalRuntimeSessionPathsOptions;
-type RuntimeLogReadMode = 'append' | 'appendTrace' | 'public';
+type RuntimeLogReadMode = 'append' | 'appendTrace' | 'public' | 'publicDecode';
+type RuntimeLogValidationMode =
+  | 'appendConversation'
+  | 'appendRawEvent'
+  | 'appendTrace'
+  | 'public';
+type DurableRuntimeSessionEvidence = {
+  readonly traceEntries: readonly RuntimeTraceEntry[];
+  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly conversationMessages: readonly ConversationLogRecord[];
+};
 
 export function createFileRuntimeLogStore(
   options: CreateFileRuntimeLogStoreOptions = {}
@@ -81,15 +91,21 @@ export function createFileRuntimeLogStore(
     },
     traceEntries() {
       assertSessionReadable();
-      return Object.freeze([...readRuntimeTraceEntries(paths)]);
+      return Object.freeze([
+        ...readValidatedRuntimeSessionEvidence(paths, 'public').traceEntries
+      ]);
     },
     rawEvents() {
       assertSessionReadable();
-      return Object.freeze([...readRawEventLogRecords(paths)]);
+      return Object.freeze([
+        ...readValidatedRuntimeSessionEvidence(paths, 'public').rawEvents
+      ]);
     },
     conversationMessages() {
       assertSessionReadable();
-      return Object.freeze([...readConversationLogRecords(paths)]);
+      return Object.freeze([
+        ...readValidatedRuntimeSessionEvidence(paths, 'public').conversationMessages
+      ]);
     }
   } satisfies RuntimeLogStore);
 }
@@ -113,12 +129,203 @@ function appendJsonLine(options: {
   }
 }
 
-function readRuntimeTraceEntries(paths: LocalRuntimeSessionPaths): readonly RuntimeTraceEntry[] {
+type RuntimeTurnEvidenceState =
+  | 'completed'
+  | 'empty'
+  | 'raw_started'
+  | 'rejected'
+  | 'trace_started';
+
+const runtimeTurnEvidenceStateRules = Object.freeze({
+  completed: { isOpen: false, isTerminal: true, requiresRawStart: false },
+  empty: { isOpen: false, isTerminal: false, requiresRawStart: false },
+  raw_started: { isOpen: true, isTerminal: false, requiresRawStart: false },
+  rejected: { isOpen: false, isTerminal: true, requiresRawStart: false },
+  trace_started: { isOpen: false, isTerminal: false, requiresRawStart: true }
+} satisfies Record<
+  RuntimeTurnEvidenceState,
+  {
+    readonly isOpen: boolean;
+    readonly isTerminal: boolean;
+    readonly requiresRawStart: boolean;
+  }
+>);
+
+function readValidatedRuntimeSessionEvidence(
+  paths: LocalRuntimeSessionPaths,
+  mode: RuntimeLogValidationMode
+): DurableRuntimeSessionEvidence {
+  const evidence = readRuntimeSessionEvidence(paths, 'publicDecode');
+
+  assertDurableRuntimeSessionEvidence({
+    paths,
+    evidence,
+    mode
+  });
+
+  return evidence;
+}
+
+function readRuntimeSessionEvidence(
+  paths: LocalRuntimeSessionPaths,
+  readMode: RuntimeLogReadMode
+): DurableRuntimeSessionEvidence {
+  return Object.freeze({
+    traceEntries: readRuntimeTraceEntries(paths, readMode),
+    rawEvents: readRawEventLogRecords(paths, readMode),
+    conversationMessages: readConversationLogRecords(paths, readMode)
+  } satisfies DurableRuntimeSessionEvidence);
+}
+
+function assertDurableRuntimeSessionEvidence(options: {
+  readonly paths: LocalRuntimeSessionPaths;
+  readonly evidence: DurableRuntimeSessionEvidence;
+  readonly mode: RuntimeLogValidationMode;
+  readonly nextConversationMessage?: ConversationLogRecord;
+  readonly nextRawEvent?: RawEventLogRecord;
+  readonly nextTraceEntry?: RuntimeTraceEntry;
+}): void {
+  const traceEntries = Object.freeze([
+    ...options.evidence.traceEntries,
+    ...(options.nextTraceEntry === undefined ? [] : [options.nextTraceEntry])
+  ]);
+  const rawEvents = Object.freeze([
+    ...options.evidence.rawEvents,
+    ...(options.nextRawEvent === undefined ? [] : [options.nextRawEvent])
+  ]);
+  const conversationMessages = Object.freeze([
+    ...options.evidence.conversationMessages,
+    ...(options.nextConversationMessage === undefined
+      ? []
+      : [options.nextConversationMessage])
+  ]);
+  const nextIdentity = nextRuntimeEventIdentity(options);
+
+  assertRuntimeTraceTerminalOrder(traceEntries);
+  assertRawEventTerminalOrder(rawEvents);
+  assertRawEventStartsWithReceived(rawEvents);
+  assertOpenRawTurnAllowsNextIdentity({
+    rawEvents: options.evidence.rawEvents,
+    nextIdentity
+  });
+  assertTraceStartedTurnsHaveRawEvidence({
+    mode: options.mode,
+    traceEntries,
+    rawEvents,
+    allowedTraceOnlyIdentity:
+      options.nextTraceEntry?.step === 'runtime_event_received'
+        ? runtimeEventIdentityKey(options.nextTraceEntry)
+        : undefined
+  });
+  assertTerminalRawEventsHaveMatchingTerminalTraceEvidence({
+    traceEntries,
+    rawEvents,
+    allowedTerminalRawWithoutTrace: allowedTerminalRawWithoutTrace(options)
+  });
+
+  if (options.mode === 'public') {
+    assertRawEventTurnTerminalCompleteness(rawEvents);
+    assertCompleteConversationLog(conversationMessages);
+  }
+
+  assertRawEventVisibleReferencesMatchConversationMessages({
+    messages: conversationMessages,
+    rawEvents
+  });
+  assertRestoredConversationInvariants(options.paths, conversationMessages, {
+    allowIncompleteFinalTurn: appendModeAllowsIncompleteConversationTurn({
+      mode: options.mode,
+      messages: conversationMessages,
+      rawEvents
+    })
+  });
+  assertConversationMessagesHaveTerminalRawEvidence({
+    messages: conversationMessages.filter((message, index) =>
+      messageRequiresTerminalRawEvidence({
+        mode: options.mode,
+        message,
+        isFinalIncompleteAppendMessage:
+          index === conversationMessages.length - 1 &&
+          appendModeAllowsIncompleteConversationTurn({
+            mode: options.mode,
+            messages: conversationMessages,
+            rawEvents
+          }),
+        rawEvents
+      })
+    ),
+    rawEvents
+  });
+}
+
+function nextRuntimeEventIdentity(options: {
+  readonly nextConversationMessage?: ConversationLogRecord;
+  readonly nextRawEvent?: RawEventLogRecord;
+  readonly nextTraceEntry?: RuntimeTraceEntry;
+}): { readonly eventId: string; readonly traceId: string } | undefined {
+  return options.nextTraceEntry ?? options.nextRawEvent ?? options.nextConversationMessage;
+}
+
+function allowedTerminalRawWithoutTrace(options: {
+  readonly evidence: DurableRuntimeSessionEvidence;
+  readonly mode: RuntimeLogValidationMode;
+  readonly nextRawEvent?: RawEventLogRecord;
+  readonly nextTraceEntry?: RuntimeTraceEntry;
+}): string | undefined {
+  if (
+    options.mode === 'appendRawEvent' &&
+    options.nextRawEvent !== undefined &&
+    isTerminalRawEventLogRecord(options.nextRawEvent)
+  ) {
+    return terminalTraceEvidenceKey({
+      ...options.nextRawEvent,
+      step: terminalTraceStepForRawEvent(options.nextRawEvent)
+    });
+  }
+
+  if (options.mode !== 'appendTrace' || options.nextTraceEntry === undefined) {
+    return undefined;
+  }
+
+  const nextTraceEntry = options.nextTraceEntry;
+
+  if (
+    nextTraceEntry.step !== 'raw_event_log_appended' &&
+    !isTerminalRuntimeTraceEntry(nextTraceEntry)
+  ) {
+    return undefined;
+  }
+
+  const terminalRawEvent = options.evidence.rawEvents
+    .filter(isTerminalRawEventLogRecord)
+    .find((rawEvent) =>
+      runtimeEventIdentityKey(rawEvent) ===
+      runtimeEventIdentityKey(nextTraceEntry)
+    );
+
+  if (terminalRawEvent === undefined) {
+    return undefined;
+  }
+
+  return terminalTraceEvidenceKey({
+    ...terminalRawEvent,
+    step: terminalTraceStepForRawEvent(terminalRawEvent)
+  });
+}
+
+function readRuntimeTraceEntries(
+  paths: LocalRuntimeSessionPaths,
+  mode: RuntimeLogReadMode = 'public'
+): readonly RuntimeTraceEntry[] {
+  if (mode === 'public') {
+    return readValidatedRuntimeSessionEvidence(paths, 'public').traceEntries;
+  }
+
   const records = readJsonLines({
     filePath: paths.tracePath,
     decodeLine: (line) => decodeRuntimeTraceEntry(line),
-    missingFileIsAllowed: () => isTraceLogOptional(paths),
-    emptyFileIsAllowed: () => isTraceLogOptional(paths)
+    missingFileIsAllowed: () => traceLogIsOptional(paths, mode),
+    emptyFileIsAllowed: () => traceLogIsOptional(paths, mode)
   });
 
   assertRuntimeTraceTerminalOrder(records);
@@ -130,31 +337,31 @@ function readAppendableRuntimeTraceEntries(
   paths: LocalRuntimeSessionPaths,
   nextEntry: RuntimeTraceEntry
 ): readonly RuntimeTraceEntry[] {
-  const records = readRuntimeTraceEntries(paths);
+  const evidence = readRuntimeSessionEvidence(paths, 'appendTrace');
 
-  assertRuntimeTraceTerminalOrder(Object.freeze([...records, nextEntry]));
   assertSiblingLogsReadableForTraceAppend({
     paths,
-    nextIdentity: nextEntry
+    evidence,
+    nextEntry
   });
 
-  return records;
+  return evidence.traceEntries;
 }
 
 function readRawEventLogRecords(
   paths: LocalRuntimeSessionPaths,
   mode: RuntimeLogReadMode = 'public'
 ): readonly RawEventLogRecord[] {
+  if (mode === 'public') {
+    return readValidatedRuntimeSessionEvidence(paths, 'public').rawEvents;
+  }
+
   const records = readJsonLines({
     filePath: paths.rawEventsPath,
     decodeLine: (line) => decodeRawEventLogRecord(line),
     missingFileIsAllowed: () => rawEventLogMissingFileIsAllowed(paths, mode),
     emptyFileIsAllowed: () => isRawEventLogOptional(paths)
   });
-
-  if (mode === 'public') {
-    assertRawEventLogIntegrity(paths, records);
-  }
 
   return Object.freeze(records);
 }
@@ -163,16 +370,16 @@ function readConversationLogRecords(
   paths: LocalRuntimeSessionPaths,
   mode: RuntimeLogReadMode = 'public'
 ): readonly ConversationLogRecord[] {
+  if (mode === 'public') {
+    return readValidatedRuntimeSessionEvidence(paths, 'public').conversationMessages;
+  }
+
   const records = readJsonLines({
     filePath: paths.conversationPath,
     decodeLine: (line) => decodeConversationLogRecord(line),
     missingFileIsAllowed: () => !rawEventsRequireConversationLog(paths),
     emptyFileIsAllowed: () => !rawEventsRequireConversationLog(paths)
   });
-
-  if (mode === 'public') {
-    assertConversationLogIntegrity(paths, records);
-  }
 
   return Object.freeze(records);
 }
@@ -183,26 +390,16 @@ function readAppendableConversationLogRecords(
 ): readonly ConversationLogRecord[] {
   assertRawEventLogPresentForConversationAppend(paths);
 
-  const records = readConversationLogRecords(paths, 'append');
-  const rawEvents = readRawEventLogRecords(paths, 'append');
+  const evidence = readRuntimeSessionEvidence(paths, 'append');
 
-  assertRawEventTerminalOrder(rawEvents);
-  assertRawEventAppendFollowsOpenTurn({
-    rawEvents,
-    nextIdentity: nextRecord
-  });
-  assertRawEventVisibleReferencesMatchConversationMessages({
-    messages: records,
-    rawEvents
-  });
-  assertAppendableConversationLog({
+  assertDurableRuntimeSessionEvidence({
     paths,
-    messages: records,
-    nextRecord,
-    rawEvents
+    evidence,
+    mode: 'appendConversation',
+    nextConversationMessage: nextRecord
   });
 
-  return records;
+  return evidence.conversationMessages;
 }
 
 function readAppendableRawEventLogRecords(
@@ -211,33 +408,15 @@ function readAppendableRawEventLogRecords(
 ): readonly RawEventLogRecord[] {
   assertMissingRawEventLogAllowsRawAppend(paths, nextRecord);
 
-  const records = readRawEventLogRecords(paths, 'append');
+  const evidence = readRuntimeSessionEvidence(paths, 'append');
 
   assertAppendableRawEventLog({
     paths,
-    rawEvents: records,
+    evidence,
     nextRecord
   });
 
-  return records;
-}
-
-function assertConversationLogIntegrity(
-  paths: LocalRuntimeSessionPaths,
-  messages: readonly ConversationLogRecord[]
-): void {
-  const rawEvents = readRawEventLogRecords(paths);
-
-  assertCompleteConversationLog(messages);
-  assertRawEventVisibleReferencesMatchConversationMessages({
-    messages,
-    rawEvents
-  });
-  assertRestoredConversationInvariants(paths, messages);
-  assertConversationMessagesHaveTerminalRawEvidence({
-    messages,
-    rawEvents
-  });
+  return evidence.rawEvents;
 }
 
 function assertRestoredConversationInvariants(
@@ -267,51 +446,6 @@ function assertCompleteConversationLog(
   messages: readonly ConversationLogRecord[]
 ): void {
   if (messages.length % 2 === 0) {
-    return;
-  }
-
-  throwIncompleteConversationLog();
-}
-
-function assertAppendableConversationLog(options: {
-  readonly paths: LocalRuntimeSessionPaths;
-  readonly messages: readonly ConversationLogRecord[];
-  readonly nextRecord: ConversationLogRecord;
-  readonly rawEvents: readonly RawEventLogRecord[];
-}): void {
-  const completeExistingMessages =
-    options.messages.length % 2 === 0
-      ? options.messages
-      : options.messages.slice(0, -1);
-
-  assertConversationMessagesHaveTerminalRawEvidence({
-    messages: completeExistingMessages,
-    rawEvents: options.rawEvents
-  });
-
-  const nextMessages = Object.freeze([...options.messages, options.nextRecord]);
-
-  if (options.messages.length % 2 === 0 && options.nextRecord.role === 'user') {
-    assertRestoredConversationInvariants(options.paths, nextMessages, {
-      allowIncompleteFinalTurn: true
-    });
-
-    return;
-  }
-
-  if (options.messages.length % 2 === 0) {
-    throwIncompleteConversationLog();
-  }
-
-  const previousRecord = options.messages.at(-1);
-
-  if (
-    previousRecord?.role === 'user' &&
-    options.nextRecord.role === 'character' &&
-    previousRecord.eventId === options.nextRecord.eventId &&
-    previousRecord.traceId === options.nextRecord.traceId
-  ) {
-    assertRestoredConversationInvariants(options.paths, nextMessages);
     return;
   }
 
@@ -351,42 +485,8 @@ function isTerminalRuntimeTraceEntry(
   );
 }
 
-function readRequiredConversationLogRecords(
-  paths: LocalRuntimeSessionPaths
-): readonly ConversationLogRecord[] {
-  return Object.freeze(
-    readJsonLines({
-      filePath: paths.conversationPath,
-      decodeLine: (line) => decodeConversationLogRecord(line),
-      missingFileIsAllowed: () => false,
-      emptyFileIsAllowed: () => false
-    })
-  );
-}
-
-function assertRawEventLogIntegrity(
-  paths: LocalRuntimeSessionPaths,
-  rawEvents: readonly RawEventLogRecord[]
-): void {
-  assertRawEventTurnTerminalCompleteness(rawEvents);
-
-  if (rawEventsHaveVisibleMessageReferences(rawEvents)) {
-    const messages = readRequiredConversationLogRecords(paths);
-
-    assertRestoredConversationInvariants(paths, messages);
-    assertRawEventVisibleReferencesMatchConversationMessages({
-      messages,
-      rawEvents
-    });
-  }
-
-  assertTerminalRawEventsHaveMatchingTerminalTraceEvidence({
-    traceEntries: readRuntimeTraceEntries(paths),
-    rawEvents
-  });
-}
-
 function assertTerminalRawEventsHaveMatchingTerminalTraceEvidence(options: {
+  readonly allowedTerminalRawWithoutTrace: string | undefined;
   readonly traceEntries: readonly RuntimeTraceEntry[];
   readonly rawEvents: readonly RawEventLogRecord[];
 }): void {
@@ -397,11 +497,14 @@ function assertTerminalRawEventsHaveMatchingTerminalTraceEvidence(options: {
   );
 
   for (const rawEvent of options.rawEvents.filter(isTerminalRawEventLogRecord)) {
+    const expectedTerminalTraceKey = terminalTraceEvidenceKey({
+      ...rawEvent,
+      step: terminalTraceStepForRawEvent(rawEvent)
+    });
+
     if (
-      terminalTraceEvidence.has(terminalTraceEvidenceKey({
-        ...rawEvent,
-        step: terminalTraceStepForRawEvent(rawEvent)
-      }))
+      terminalTraceEvidence.has(expectedTerminalTraceKey) ||
+      options.allowedTerminalRawWithoutTrace === expectedTerminalTraceKey
     ) {
       continue;
     }
@@ -413,24 +516,151 @@ function assertTerminalRawEventsHaveMatchingTerminalTraceEvidence(options: {
   }
 }
 
-function assertAppendableRawEventLog(options: {
-  readonly paths: LocalRuntimeSessionPaths;
+function assertRawEventStartsWithReceived(
+  rawEvents: readonly RawEventLogRecord[]
+): void {
+  const startedRawEventIdentities = new Set<string>();
+
+  for (const rawEvent of rawEvents) {
+    const identityKey = runtimeEventIdentityKey(rawEvent);
+
+    if (startedRawEventIdentities.has(identityKey)) {
+      continue;
+    }
+
+    if (rawEvent.kind !== 'runtime_event_received') {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Raw event log turn evidence must start with runtime_event_received.'
+      );
+    }
+
+    startedRawEventIdentities.add(identityKey);
+  }
+}
+
+function assertTraceStartedTurnsHaveRawEvidence(options: {
+  readonly allowedTraceOnlyIdentity: string | undefined;
+  readonly mode: RuntimeLogValidationMode;
   readonly rawEvents: readonly RawEventLogRecord[];
-  readonly nextRecord: RawEventLogRecord;
+  readonly traceEntries: readonly RuntimeTraceEntry[];
 }): void {
-  const nextRawEvents = Object.freeze([
-    ...options.rawEvents,
-    options.nextRecord
-  ]);
+  const rawStates = runtimeTurnEvidenceStatesForRawEvents(options.rawEvents);
+
+  for (const traceEntry of options.traceEntries) {
+    if (traceEntry.step !== 'runtime_event_received') {
+      continue;
+    }
+
+    const identityKey = runtimeEventIdentityKey(traceEntry);
+    const state = traceStartedRuntimeTurnEvidenceState(
+      rawStates.get(identityKey) ?? 'empty'
+    );
+
+    if (!runtimeTurnEvidenceStateRules[state].requiresRawStart) {
+      continue;
+    }
+
+    if (
+      options.mode === 'appendTrace' &&
+      options.allowedTraceOnlyIdentity === identityKey
+    ) {
+      continue;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Runtime trace log contains started turn evidence without matching raw-event start evidence.'
+    );
+  }
+}
+
+function traceStartedRuntimeTurnEvidenceState(
+  rawState: RuntimeTurnEvidenceState
+): RuntimeTurnEvidenceState {
+  if (rawState === 'empty') {
+    return 'trace_started';
+  }
+
+  return rawState;
+}
+
+function assertOpenRawTurnAllowsNextIdentity(options: {
+  readonly nextIdentity:
+    | { readonly eventId: string; readonly traceId: string }
+    | undefined;
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): void {
+  if (options.nextIdentity === undefined) {
+    return;
+  }
 
   assertRawEventAppendFollowsOpenTurn({
     rawEvents: options.rawEvents,
-    nextIdentity: options.nextRecord
+    nextIdentity: options.nextIdentity
   });
-  assertRawEventTerminalOrder(nextRawEvents);
-  assertRawEventVisibleEvidenceMatchesConversationMessages({
+}
+
+function appendModeAllowsIncompleteConversationTurn(options: {
+  readonly messages: readonly ConversationLogRecord[];
+  readonly mode: RuntimeLogValidationMode;
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): boolean {
+  if (options.mode !== 'appendConversation') {
+    return false;
+  }
+
+  if (options.messages.length % 2 === 0) {
+    return false;
+  }
+
+  const finalMessage = options.messages.at(-1);
+
+  if (finalMessage?.role !== 'user') {
+    return false;
+  }
+
+  if (options.rawEvents.length === 0) {
+    return true;
+  }
+
+  return startedRawEventIdentitiesWithoutTerminal(options.rawEvents).has(
+    runtimeEventIdentityKey(finalMessage)
+  );
+}
+
+function messageRequiresTerminalRawEvidence(options: {
+  readonly isFinalIncompleteAppendMessage: boolean;
+  readonly message: ConversationLogRecord;
+  readonly mode: RuntimeLogValidationMode;
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): boolean {
+  if (
+    options.mode === 'appendConversation' &&
+    options.isFinalIncompleteAppendMessage
+  ) {
+    return false;
+  }
+
+  if (options.mode === 'public') {
+    return true;
+  }
+
+  return !startedRawEventIdentitiesWithoutTerminal(options.rawEvents).has(
+    runtimeEventIdentityKey(options.message)
+  );
+}
+
+function assertAppendableRawEventLog(options: {
+  readonly paths: LocalRuntimeSessionPaths;
+  readonly evidence: DurableRuntimeSessionEvidence;
+  readonly nextRecord: RawEventLogRecord;
+}): void {
+  assertDurableRuntimeSessionEvidence({
     paths: options.paths,
-    rawEvents: nextRawEvents
+    evidence: options.evidence,
+    mode: 'appendRawEvent',
+    nextRawEvent: options.nextRecord
   });
 }
 
@@ -442,7 +672,7 @@ function assertMissingRawEventLogAllowsRawAppend(
     return;
   }
 
-  const traceEntries = readRuntimeTraceEntries(paths);
+  const traceEntries = readRuntimeTraceEntries(paths, 'appendTrace');
   const firstTraceEntry = traceEntries.at(0);
 
   if (
@@ -463,7 +693,7 @@ function assertRawEventLogPresentForConversationAppend(
     return;
   }
 
-  readRuntimeTraceEntries(paths);
+  readRuntimeTraceEntries(paths, 'appendTrace');
   throwMissingRequiredRawEventLog(paths);
 }
 
@@ -476,82 +706,14 @@ function throwMissingRequiredRawEventLog(paths: LocalRuntimeSessionPaths): never
 
 function assertSiblingLogsReadableForTraceAppend(options: {
   readonly paths: LocalRuntimeSessionPaths;
-  readonly nextIdentity: { readonly eventId: string; readonly traceId: string };
+  readonly evidence: DurableRuntimeSessionEvidence;
+  readonly nextEntry: RuntimeTraceEntry;
 }): void {
-  const rawEvents = readRawEventLogRecords(options.paths, 'appendTrace');
-
-  assertRawEventAppendFollowsOpenTurn({
-    rawEvents,
-    nextIdentity: options.nextIdentity
-  });
-  assertRawEventVisibleEvidenceMatchesConversationMessages({
+  assertDurableRuntimeSessionEvidence({
     paths: options.paths,
-    rawEvents
-  });
-  assertConversationLogReadableForTraceAppend({
-    paths: options.paths,
-    rawEvents
-  });
-}
-
-function assertConversationLogReadableForTraceAppend(options: {
-  readonly paths: LocalRuntimeSessionPaths;
-  readonly rawEvents: readonly RawEventLogRecord[];
-}): void {
-  const messages = readConversationLogRecords(options.paths, 'append');
-  const openTurnIdentities = startedRawEventIdentitiesWithoutTerminal(
-    options.rawEvents
-  );
-  const allowIncompleteFinalTurn = finalMessageBelongsToOpenRawTurn({
-    messages,
-    openTurnIdentities
-  });
-
-  if (messages.length % 2 !== 0 && !allowIncompleteFinalTurn) {
-    throwIncompleteConversationLog();
-  }
-
-  assertRawEventVisibleReferencesMatchConversationMessages({
-    messages,
-    rawEvents: options.rawEvents
-  });
-  assertRestoredConversationInvariants(options.paths, messages, {
-    allowIncompleteFinalTurn
-  });
-  assertConversationMessagesHaveTerminalRawEvidence({
-    messages: messages.filter(
-      (message) => !openTurnIdentities.has(runtimeEventIdentityKey(message))
-    ),
-    rawEvents: options.rawEvents
-  });
-}
-
-function finalMessageBelongsToOpenRawTurn(options: {
-  readonly messages: readonly ConversationLogRecord[];
-  readonly openTurnIdentities: ReadonlySet<string>;
-}): boolean {
-  const finalMessage = options.messages.at(-1);
-
-  return (
-    finalMessage !== undefined &&
-    options.openTurnIdentities.has(runtimeEventIdentityKey(finalMessage))
-  );
-}
-
-function assertRawEventVisibleEvidenceMatchesConversationMessages(options: {
-  readonly paths: LocalRuntimeSessionPaths;
-  readonly rawEvents: readonly RawEventLogRecord[];
-}): void {
-  if (!rawEventsHaveVisibleMessageReferences(options.rawEvents)) {
-    return;
-  }
-
-  const messages = readRequiredConversationLogRecords(options.paths);
-
-  assertRestoredConversationInvariants(options.paths, messages);
-  assertRawEventVisibleReferencesMatchConversationMessages({
-    messages,
-    rawEvents: options.rawEvents
+    evidence: options.evidence,
+    mode: 'appendTrace',
+    nextTraceEntry: options.nextEntry
   });
 }
 
@@ -654,33 +816,65 @@ function assertRawEventAppendFollowsOpenTurn(options: {
 function startedRawEventIdentitiesWithoutTerminal(
   rawEvents: readonly RawEventLogRecord[]
 ): ReadonlySet<string> {
-  const startedTurnIdentities = new Set<string>();
-  const terminalTurnIdentities = new Set<string>();
+  const states = runtimeTurnEvidenceStatesForRawEvents(rawEvents);
+  const openTurnIdentities = new Set<string>();
+
+  for (const [identityKey, state] of states) {
+    if (runtimeTurnEvidenceStateRules[state].isOpen) {
+      openTurnIdentities.add(identityKey);
+    }
+  }
+
+  return openTurnIdentities;
+}
+
+function runtimeTurnEvidenceStatesForRawEvents(
+  rawEvents: readonly RawEventLogRecord[]
+): ReadonlyMap<string, RuntimeTurnEvidenceState> {
+  const states = new Map<string, RuntimeTurnEvidenceState>();
 
   for (const rawEvent of rawEvents) {
     const identityKey = runtimeEventIdentityKey(rawEvent);
 
-    if (isTerminalRawEventLogRecord(rawEvent)) {
-      terminalTurnIdentities.add(identityKey);
-    } else {
-      startedTurnIdentities.add(identityKey);
-    }
+    states.set(
+      identityKey,
+      runtimeTurnEvidenceStateAfterRawEvent(
+        states.get(identityKey) ?? 'empty',
+        rawEvent
+      )
+    );
   }
 
-  for (const identityKey of terminalTurnIdentities) {
-    startedTurnIdentities.delete(identityKey);
-  }
-
-  return startedTurnIdentities;
+  return states;
 }
 
-function rawEventsHaveVisibleMessageReferences(
-  rawEvents: readonly RawEventLogRecord[]
+function runtimeTurnEvidenceStateAfterRawEvent(
+  state: RuntimeTurnEvidenceState,
+  rawEvent: RawEventLogRecord
+): RuntimeTurnEvidenceState {
+  if (rawEvent.kind === 'runtime_turn_completed') {
+    return 'completed';
+  }
+
+  if (rawEvent.kind === 'runtime_turn_rejected') {
+    return 'rejected';
+  }
+
+  if (runtimeTurnEvidenceStateRules[state].isTerminal) {
+    return state;
+  }
+
+  return 'raw_started';
+}
+
+function traceLogIsOptional(
+  paths: LocalRuntimeSessionPaths,
+  mode: RuntimeLogReadMode
 ): boolean {
-  return rawEvents.some((record) => (record.visibleMessageIds ?? []).length > 0);
-}
+  if (mode === 'append' && !logFileHasContent(paths.rawEventsPath)) {
+    return true;
+  }
 
-function isTraceLogOptional(paths: LocalRuntimeSessionPaths): boolean {
   return (
     !logFileHasContent(paths.rawEventsPath) &&
     !logFileHasContent(paths.conversationPath)

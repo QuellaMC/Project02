@@ -4,6 +4,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  stat,
   writeFile
 } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -435,6 +436,7 @@ async function decodeSessionCatalogForLayout(
   const sessions = decodeSessionCatalog(catalog, layout.sessionCatalogPath);
 
   await assertSessionCatalogCoversDurableSessionDirectories(layout, sessions);
+  await assertSessionCatalogEntriesHaveReadableDirectories(layout, sessions);
 
   return sessions;
 }
@@ -450,6 +452,7 @@ function decodeSessionCatalogForLayoutSync(
   const sessions = decodeSessionCatalog(catalog, layout.sessionCatalogPath);
 
   assertSessionCatalogCoversDurableSessionDirectoriesSync(layout, sessions);
+  assertSessionCatalogEntriesHaveReadableDirectoriesSync(layout, sessions);
 
   return sessions;
 }
@@ -545,6 +548,26 @@ function assertSessionCatalogCoversDurableSessionDirectoriesSync(
     ) {
       throwMissingSessionCatalogEntry(sessionRoot);
     }
+  }
+}
+
+async function assertSessionCatalogEntriesHaveReadableDirectories(
+  layout: LocalRuntimeStorageLayout,
+  sessions: ReadonlyMap<string, LocalRuntimeSessionMetadata>
+): Promise<void> {
+  await Promise.all(
+    [...sessions.keys()].map(async (sessionId) => {
+      await assertSessionDirectoryReadableAsync(layout, sessionId);
+    })
+  );
+}
+
+function assertSessionCatalogEntriesHaveReadableDirectoriesSync(
+  layout: LocalRuntimeStorageLayout,
+  sessions: ReadonlyMap<string, LocalRuntimeSessionMetadata>
+): void {
+  for (const sessionId of sessions.keys()) {
+    assertSessionDirectoryReadable(layout, sessionId);
   }
 }
 
@@ -660,6 +683,41 @@ function throwUnsupportedSessionRootEntry(entryPath: string): never {
     'malformed_record',
     `Local runtime sessions directory contains an unsupported entry: ${entryPath}.`
   );
+}
+
+async function assertSessionDirectoryReadableAsync(
+  layout: LocalRuntimeStorageLayout,
+  sessionId: string
+): Promise<void> {
+  const sessionRoot = createLocalRuntimeSessionPaths({
+    storeRoot: layout.storeRoot,
+    sessionId
+  }).sessionRoot;
+
+  try {
+    if (!(await stat(sessionRoot)).isDirectory()) {
+      throw new LocalRuntimeStorageContractError(
+        'read_failed',
+        `Local runtime session path is not a directory: ${sessionRoot}.`
+      );
+    }
+  } catch (error: unknown) {
+    if (error instanceof LocalRuntimeStorageContractError) {
+      throw error;
+    }
+
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      throw new LocalRuntimeStorageContractError(
+        'missing_file',
+        `Required local runtime session directory is missing: ${sessionRoot}.`
+      );
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      `Could not inspect local runtime session directory: ${sessionRoot}.`
+    );
+  }
 }
 
 function assertSessionDirectoryReadable(

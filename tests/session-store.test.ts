@@ -75,6 +75,28 @@ describe('local runtime session store', () => {
     expect(await reopened.listSessions()).toEqual([selected, second]);
   });
 
+  it('fails loudly when a cataloged session directory is missing before listing sessions', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+    });
+    const created = await store.createSession({
+      sessionId: 'mira-local'
+    });
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: created.sessionId
+    });
+
+    await rm(paths.sessionRoot, { recursive: true, force: true });
+
+    await expectStorageErrorCode(
+      async () => await store.listSessions(),
+      'missing_file'
+    );
+  });
+
   it('rehydrates persisted visible conversation messages in order through the CT-02 reader seam', async () => {
     const storeRoot = await createTempStoreRoot();
     const logStore = createRuntimeLogStore();

@@ -36,6 +36,12 @@ const identity = {
   createdAt
 } as const;
 
+type TestRuntimeIdentity = {
+  readonly createdAt: string;
+  readonly eventId: string;
+  readonly traceId: string;
+};
+
 describe('file-backed runtime log store', () => {
   afterEach(() => {
     for (const storeRoot of tempStoreRoots.splice(0)) {
@@ -559,6 +565,7 @@ describe('file-backed runtime log store', () => {
     });
 
     writeConversationPair(emptyRawPaths);
+    writeCompletedTraceEvidence(emptyRawPaths);
     writeFileSync(emptyRawPaths.rawEventsPath, '', 'utf8');
 
     expectStorageErrorCode(
@@ -626,6 +633,7 @@ describe('file-backed runtime log store', () => {
     });
 
     writeConversationPair(paths);
+    writeStartedTraceEvidence(paths);
     writeFileSync(
       paths.rawEventsPath,
       `${JSON.stringify({
@@ -785,6 +793,7 @@ describe('file-backed runtime log store', () => {
       ].join('\n'),
       'utf8'
     );
+    writeCompletedTraceEvidence(paths);
     writeFileSync(
       paths.rawEventsPath,
       [
@@ -818,29 +827,12 @@ describe('file-backed runtime log store', () => {
   it('rejects terminal raw evidence that references visible messages from another event identity', async () => {
     const appendStoreRoot = createTempStoreRoot();
     const appendStore = await createCatalogedFileRuntimeLogStore(appendStoreRoot, 'mira-local');
-    const userMessage = createConversationRecord({
-      id: 'mira-local:message-1',
-      role: 'user',
-      speakerId: 'local-user',
-      speakerName: 'You',
-      text: 'hello'
-    });
-    const characterMessage = createConversationRecord({
-      id: 'mira-local:message-2',
-      role: 'character',
-      speakerId: 'mira',
-      speakerName: 'Mira',
-      text: "I'm here. Tell me what you need."
-    });
 
-    appendStore.appendConversationMessage(userMessage);
-    appendStore.appendConversationMessage(characterMessage);
-    appendStore.appendRawEvent({
+    appendCompletedTurn(appendStore);
+    appendStartedTurn(appendStore, {
       ...identity,
       eventId: 'evt_other_turn',
-      traceId: 'trace_other_turn',
-      kind: 'runtime_event_received',
-      eventType: 'USER_MESSAGE'
+      traceId: 'trace_other_turn'
     });
     expectStorageErrorCode(
       () =>
@@ -864,6 +856,11 @@ describe('file-backed runtime log store', () => {
     });
 
     writeConversationPair(readPaths);
+    writeCompletedTraceEvidence(readPaths, {
+      ...identity,
+      eventId: 'evt_other_turn',
+      traceId: 'trace_other_turn'
+    });
     writeFileSync(
       readPaths.rawEventsPath,
       [
@@ -917,13 +914,9 @@ describe('file-backed runtime log store', () => {
       text: "I'm here. Tell me what you need."
     });
 
+    appendStartedTurn(appendStore);
     appendStore.appendConversationMessage(userMessage);
     appendStore.appendConversationMessage(characterMessage);
-    appendStore.appendRawEvent({
-      ...identity,
-      kind: 'runtime_event_received',
-      eventType: 'USER_MESSAGE'
-    });
     expectStorageErrorCode(
       () =>
         appendStore.appendRawEvent({
@@ -944,6 +937,7 @@ describe('file-backed runtime log store', () => {
     });
 
     writeConversationPair(readPaths);
+    writeCompletedTraceEvidence(readPaths);
     writeFileSync(
       readPaths.rawEventsPath,
       [
@@ -1000,6 +994,7 @@ describe('file-backed runtime log store', () => {
     } as const;
 
     writeConversationPair(paths);
+    writeCompletedTraceEvidence(paths);
     writeFileSync(
       paths.rawEventsPath,
       [
@@ -1183,6 +1178,35 @@ describe('file-backed runtime log store', () => {
     expectStorageErrorCode(() => store.conversationMessages(), 'malformed_record');
   });
 
+  it('rejects raw event appends that do not start with received evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const store = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    store.appendTrace({
+      ...identity,
+      step: 'runtime_event_received'
+    });
+
+    expectStorageErrorCode(
+      () =>
+        store.appendRawEvent({
+          ...identity,
+          kind: 'runtime_event_normalized',
+          eventType: 'USER_MESSAGE'
+        }),
+      'malformed_record'
+    );
+    expect(existsSync(paths.rawEventsPath)).toBe(false);
+  });
+
   it('rejects raw-event turns that start without terminal evidence', async () => {
     const storeRoot = createTempStoreRoot();
     await createCatalogedSession(storeRoot, 'mira-local');
@@ -1191,6 +1215,7 @@ describe('file-backed runtime log store', () => {
       sessionId: 'mira-local'
     });
 
+    writeStartedTraceEvidence(paths);
     writeFileSync(
       paths.rawEventsPath,
       [
@@ -1255,6 +1280,50 @@ describe('file-backed runtime log store', () => {
         })),
       'malformed_record'
     );
+  });
+
+  it('rejects public trace reads for trace-started turns without raw evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    writeConversationPair(paths);
+    writeVisibleRawEvidence(paths);
+    writeFileSync(
+      paths.tracePath,
+      [
+        JSON.stringify({
+          ...identity,
+          step: 'runtime_event_received'
+        }),
+        JSON.stringify({
+          ...identity,
+          step: 'visible_reply_committed'
+        }),
+        JSON.stringify({
+          ...identity,
+          step: 'runtime_turn_completed'
+        }),
+        JSON.stringify({
+          ...identity,
+          eventId: 'evt_trace_only',
+          traceId: 'trace_trace_only',
+          step: 'runtime_event_received'
+        }),
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    const store = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    expectStorageErrorCode(() => store.traceEntries(), 'malformed_record');
   });
 
   it('rejects terminal trace evidence without prior received trace evidence', async () => {
@@ -1911,6 +1980,49 @@ function writeVisibleRawEvidence(
   );
 }
 
+function writeCompletedTraceEvidence(
+  paths: ReturnType<typeof createLocalRuntimeSessionPaths>,
+  turnIdentity: TestRuntimeIdentity = identity
+): void {
+  writeFileSync(
+    paths.tracePath,
+    [
+      JSON.stringify({
+        ...turnIdentity,
+        step: 'runtime_event_received'
+      }),
+      JSON.stringify({
+        ...turnIdentity,
+        step: 'visible_reply_committed'
+      }),
+      JSON.stringify({
+        ...turnIdentity,
+        step: 'raw_event_log_appended'
+      }),
+      JSON.stringify({
+        ...turnIdentity,
+        step: 'runtime_turn_completed'
+      }),
+      ''
+    ].join('\n'),
+    'utf8'
+  );
+}
+
+function writeStartedTraceEvidence(
+  paths: ReturnType<typeof createLocalRuntimeSessionPaths>,
+  turnIdentity: TestRuntimeIdentity = identity
+): void {
+  writeFileSync(
+    paths.tracePath,
+    `${JSON.stringify({
+      ...turnIdentity,
+      step: 'runtime_event_received'
+    })}\n`,
+    'utf8'
+  );
+}
+
 function writeConversationPair(
   paths: ReturnType<typeof createLocalRuntimeSessionPaths>
 ): void {
@@ -1959,6 +2071,56 @@ function writeRawEventOnly(
     ].join('\n'),
     'utf8'
   );
+}
+
+function appendStartedTurn(
+  store: ReturnType<typeof createFileRuntimeLogStore>,
+  turnIdentity: TestRuntimeIdentity = identity
+): void {
+  store.appendTrace({
+    ...turnIdentity,
+    step: 'runtime_event_received'
+  });
+  store.appendRawEvent({
+    ...turnIdentity,
+    kind: 'runtime_event_received',
+    eventType: 'USER_MESSAGE'
+  });
+}
+
+function appendCompletedTurn(
+  store: ReturnType<typeof createFileRuntimeLogStore>
+): void {
+  appendStartedTurn(store);
+  store.appendConversationMessage(createConversationRecord({
+    id: 'mira-local:message-1',
+    role: 'user',
+    speakerId: 'local-user',
+    speakerName: 'You',
+    text: 'hello'
+  }));
+  store.appendConversationMessage(createConversationRecord({
+    id: 'mira-local:message-2',
+    role: 'character',
+    speakerId: 'mira',
+    speakerName: 'Mira',
+    text: "I'm here. Tell me what you need."
+  }));
+  store.appendRawEvent({
+    ...identity,
+    kind: 'runtime_turn_completed',
+    eventType: 'USER_MESSAGE',
+    status: 'completed',
+    visibleMessageIds: ['mira-local:message-1', 'mira-local:message-2']
+  });
+  store.appendTrace({
+    ...identity,
+    step: 'raw_event_log_appended'
+  });
+  store.appendTrace({
+    ...identity,
+    step: 'runtime_turn_completed'
+  });
 }
 
 function readConversationFile(
