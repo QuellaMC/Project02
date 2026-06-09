@@ -22,8 +22,13 @@ import {
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createVisibleReplyCharacterDecision,
+  parseRoleModelDecision,
+  roleModelAdapterRawOutputMissingTextRejectionDetails,
+  roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
   roleModelDecisionRejectionReasons,
+  roleModelInvalidVisibleReplyRejectionReason,
+  roleModelMalformedOutputRejectionReason,
   roleModelVisibleReplyActionName,
   type CharacterDecision,
   type DecisionContext,
@@ -159,6 +164,10 @@ const runtimeTurnStatuses = [
 const visibleMessageRoles = ['user', 'character'] as const satisfies readonly VisibleMessageRole[];
 const runtimeEventTypes = ['USER_MESSAGE'] as const satisfies readonly RuntimeEventType[];
 const sessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const commitOwnedRoleModelRejectionReasons = [
+  roleModelInvalidVisibleReplyRejectionReason,
+  roleModelCommitValidationFailureRejectionReason
+] as const satisfies readonly RoleModelDecisionRejectionReason[];
 
 export function createLocalRuntimeStorageLayout(
   options: LocalRuntimeStorageLayoutOptions = {}
@@ -314,6 +323,7 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
       traceId,
       createdAt
     },
+    payloadSummary,
     kind,
     reason,
     status,
@@ -697,6 +707,7 @@ function optionalRoleModelCommitValidationSnapshot(
 
 function assertRoleModelRawEventEvidenceSemantics(options: {
   readonly identity: RuntimeEventIdentity;
+  readonly payloadSummary: RawEventLogPayloadSummary | undefined;
   readonly kind: RawEventLogRecordKind;
   readonly status: RuntimeTurnStatus | undefined;
   readonly reason: string | undefined;
@@ -739,6 +750,11 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
     expected: options.identity,
     field: 'roleModelIOSnapshot.inputEnvelope.event'
   });
+  assertRoleModelInputTextMatchesPayloadSummary({
+    payloadSummary: options.payloadSummary,
+    inputText:
+      roleModelIOSnapshot.inputEnvelope.event.payload.currentUserMessage
+  });
   assertMatchingRoleModelIdentity({
     actual: parsedRoleModelDecisionSnapshot,
     expected: options.identity,
@@ -764,6 +780,10 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
     expected: roleModelIOSnapshot.sessionId,
     field: 'commitValidation.sessionId'
   });
+  assertParsedRoleModelDecisionMatchesRawOutput({
+    roleModelIOSnapshot,
+    parsedRoleModelDecisionSnapshot
+  });
   assertRoleModelCommitStatusMatchesRawEvent({
     kind: options.kind,
     status: options.status,
@@ -771,6 +791,89 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
     parsedRoleModelDecisionSnapshot,
     commitValidation
   });
+}
+
+function assertRoleModelInputTextMatchesPayloadSummary(options: {
+  readonly payloadSummary: RawEventLogPayloadSummary | undefined;
+  readonly inputText: string;
+}): void {
+  const normalizedCurrentUserMessage =
+    options.payloadSummary?.normalizedCurrentUserMessage;
+
+  if (normalizedCurrentUserMessage === undefined) {
+    return;
+  }
+
+  if (options.inputText === normalizedCurrentUserMessage) {
+    return;
+  }
+
+  throwMalformedRecord(
+    'roleModelIOSnapshot.inputEnvelope.event.payload.currentUserMessage'
+  );
+}
+
+function assertParsedRoleModelDecisionMatchesRawOutput(options: {
+  readonly roleModelIOSnapshot: RoleModelIOSnapshot;
+  readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+}): void {
+  const parsedRawOutputDecision = parseRoleModelDecision(
+    options.roleModelIOSnapshot.rawOutputText
+  );
+  const parsedSnapshotDecision =
+    options.parsedRoleModelDecisionSnapshot.result;
+
+  if (
+    roleModelDecisionResultsMatch({
+      actual: parsedSnapshotDecision,
+      expected: parsedRawOutputDecision
+    }) ||
+    isMalformedAdapterRawOutputEvidence({
+      rawOutputText: options.roleModelIOSnapshot.rawOutputText,
+      parsedSnapshotDecision
+    })
+  ) {
+    return;
+  }
+
+  throwMalformedRecord('parsedRoleModelDecisionSnapshot.result');
+}
+
+function roleModelDecisionResultsMatch(options: {
+  readonly actual: RoleModelDecisionResult;
+  readonly expected: RoleModelDecisionResult;
+}): boolean {
+  if (options.actual.status !== options.expected.status) {
+    return false;
+  }
+
+  if (options.actual.status === 'accepted') {
+    return (
+      options.expected.status === 'accepted' &&
+      options.actual.decision.action.text ===
+        options.expected.decision.action.text
+    );
+  }
+
+  return (
+    options.expected.status === 'rejected' &&
+    options.actual.rejection.reason === options.expected.rejection.reason &&
+    options.actual.rejection.details === options.expected.rejection.details
+  );
+}
+
+function isMalformedAdapterRawOutputEvidence(options: {
+  readonly rawOutputText: string;
+  readonly parsedSnapshotDecision: RoleModelDecisionResult;
+}): boolean {
+  return (
+    options.rawOutputText.length === 0 &&
+    options.parsedSnapshotDecision.status === 'rejected' &&
+    options.parsedSnapshotDecision.rejection.reason ===
+      roleModelMalformedOutputRejectionReason &&
+    options.parsedSnapshotDecision.rejection.details ===
+      roleModelAdapterRawOutputMissingTextRejectionDetails
+  );
 }
 
 function assertRoleModelCommitStatusMatchesRawEvent(options: {
@@ -832,6 +935,11 @@ function assertRoleModelCommitStatusMatchesRawEvent(options: {
   if (options.reason !== commitResult.rejection.reason) {
     throwMalformedRecord('reason');
   }
+
+  assertRejectedCommitMatchesParsedDecision({
+    parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
+    commitValidation: options.commitValidation
+  });
 }
 
 function assertAcceptedCommitTextMatchesParsedDecision(options: {
@@ -857,6 +965,64 @@ function assertAcceptedCommitTextMatchesParsedDecision(options: {
   if (options.actual !== normalizedParsedDecisionText) {
     throwMalformedRecord('commitValidation.result.acceptedVisibleReplyText');
   }
+}
+
+function assertRejectedCommitMatchesParsedDecision(options: {
+  readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+  readonly commitValidation: RoleModelCommitValidationSnapshot;
+}): void {
+  const parsedResult = options.parsedRoleModelDecisionSnapshot.result;
+  const commitResult = options.commitValidation.result;
+
+  if (commitResult.status !== 'rejected') {
+    throwMalformedRecord('commitValidation.result.status');
+  }
+
+  if (parsedResult.status === 'rejected') {
+    if (parsedResult.rejection.reason !== commitResult.rejection.reason) {
+      throwMalformedRecord('commitValidation.result.rejection.reason');
+    }
+
+    if (parsedResult.rejection.details !== commitResult.rejection.details) {
+      throwMalformedRecord('commitValidation.result.rejection.details');
+    }
+
+    return;
+  }
+
+  if (
+    !isOneOf(
+      commitResult.rejection.reason,
+      commitOwnedRoleModelRejectionReasons
+    )
+  ) {
+    throwMalformedRecord('commitValidation.result.rejection.reason');
+  }
+
+  if (
+    commitResult.rejection.reason ===
+    roleModelInvalidVisibleReplyRejectionReason
+  ) {
+    assertParsedDecisionTextFailsCommitValidation(
+      parsedResult.decision.action.text
+    );
+  }
+}
+
+function assertParsedDecisionTextFailsCommitValidation(
+  parsedDecisionText: string
+): void {
+  try {
+    normalizeOneLineMessage(parsedDecisionText);
+  } catch (error: unknown) {
+    if (error instanceof OneLineMessageValidationError) {
+      return;
+    }
+
+    throw error;
+  }
+
+  throwMalformedRecord('commitValidation.result.rejection.reason');
 }
 
 function assertMatchingRoleModelIdentity(options: {

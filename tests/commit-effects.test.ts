@@ -443,6 +443,47 @@ describe('MVP-005 commit/effects validation', () => {
     expect(() => reopened.rawEvents()).toThrow(LocalRuntimeStorageContractError);
   });
 
+  it('rejects durable role-model input text that contradicts the committed user message', async () => {
+    const storeRoot = await createDurableSession('mira-local');
+    const session = createConversationSession({
+      id: 'mira-local'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    await expect(runLocalUserMessageEvent({
+      event: createTestUserMessageEvent('hello', 'evt_commit_wrong_input'),
+      session,
+      logStore
+    })).resolves.toMatchObject({
+      status: 'completed'
+    });
+
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const rawLog = readFileSync(paths.rawEventsPath, 'utf8');
+
+    writeFileSync(
+      paths.rawEventsPath,
+      rewriteRoleModelInputTextAndPayloadSummary(rawLog, 'DIFFERENT'),
+      'utf8'
+    );
+
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    expect(() => reopened.rawEvents()).toThrow(LocalRuntimeStorageContractError);
+    expect(() => reopened.conversationMessages()).toThrow(
+      LocalRuntimeStorageContractError
+    );
+  });
+
   it('preserves deterministic second-turn replies after durable session rehydrate', async () => {
     const storeRoot = await createDurableSession('mira-local');
     const firstSession = createConversationSession({
@@ -619,6 +660,23 @@ function rewriteRoleModelEvidenceSessionIds(
   return `${records.map((record) => JSON.stringify(record)).join('\n')}\n`;
 }
 
+function rewriteRoleModelInputTextAndPayloadSummary(
+  rawLog: string,
+  currentUserMessage: string
+): string {
+  const records = rawLog
+    .trimEnd()
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map(parseJsonRecord);
+
+  for (const record of records) {
+    rewriteRoleModelInputText(record, currentUserMessage);
+  }
+
+  return `${records.map((record) => JSON.stringify(record)).join('\n')}\n`;
+}
+
 function rewriteRoleModelEvidenceSessionId(
   record: Record<string, unknown>,
   sessionId: string
@@ -653,12 +711,56 @@ function rewriteRoleModelEvidenceSessionId(
   }
 }
 
+function rewriteRoleModelInputText(
+  record: Record<string, unknown>,
+  currentUserMessage: string
+): void {
+  const ioSnapshot = optionalMutableRecord(record['roleModelIOSnapshot']);
+
+  if (ioSnapshot === undefined) {
+    return;
+  }
+
+  const inputEnvelope = requiredMutableRecord(
+    ioSnapshot['inputEnvelope'],
+    'roleModelIOSnapshot.inputEnvelope'
+  );
+  const event = requiredMutableRecord(
+    inputEnvelope['event'],
+    'roleModelIOSnapshot.inputEnvelope.event'
+  );
+  const payload = requiredMutableRecord(
+    event['payload'],
+    'roleModelIOSnapshot.inputEnvelope.event.payload'
+  );
+  const payloadSummary = optionalMutableRecord(record['payloadSummary']);
+
+  payload['currentUserMessage'] = currentUserMessage;
+
+  if (payloadSummary !== undefined) {
+    payloadSummary['normalizedCurrentUserMessage'] = currentUserMessage;
+  }
+}
+
 function parseJsonRecord(line: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(line);
   const record = optionalMutableRecord(parsed);
 
   if (record === undefined) {
     throw new Error('Expected raw event JSON line to decode to an object.');
+  }
+
+  return record;
+}
+
+function requiredMutableRecord(
+  value: unknown,
+  field: string
+): Record<string, unknown> {
+  const record = optionalMutableRecord(value);
+
+  if (record === undefined) {
+    throw new Error(`Expected mutable JSON object for ${field}.`);
   }
 
   return record;

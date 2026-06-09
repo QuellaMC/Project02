@@ -68,6 +68,8 @@ export const roleModelUnsupportedEffectRejectionReason = 'unsupported_effect';
 export const roleModelInvalidVisibleReplyRejectionReason = 'invalid_visible_reply';
 export const roleModelCommitValidationFailureRejectionReason =
   'commit_validation_failure';
+export const roleModelAdapterRawOutputMissingTextRejectionDetails =
+  'Adapter raw output must include string rawOutputText.';
 
 export type RoleModelDecisionRejectionReason =
   | typeof roleModelMalformedOutputRejectionReason
@@ -213,6 +215,94 @@ export function createParsedRoleModelDecisionSnapshot(
   } satisfies ParsedRoleModelDecisionSnapshot);
 }
 
+export function parseRoleModelDecision(
+  rawOutputText: string
+): RoleModelDecisionResult {
+  let parsedOutput: unknown;
+
+  try {
+    parsedOutput = JSON.parse(rawOutputText);
+  } catch {
+    return createMalformedOutputResult('Adapter output must be valid JSON.');
+  }
+
+  if (!isJsonRecord(parsedOutput)) {
+    return createMalformedOutputResult(
+      'Adapter output must be a CharacterDecision JSON object.'
+    );
+  }
+
+  if (hasEffectShape(parsedOutput)) {
+    return createUnsupportedOutputResult(
+      'Decision includes unsupported effect fields.'
+    );
+  }
+
+  const action = parsedOutput['action'];
+
+  if (!isJsonRecord(action)) {
+    return createMalformedOutputResult('Decision action must be an object.');
+  }
+
+  const actionType = action['type'];
+
+  if (typeof actionType !== 'string') {
+    return createMalformedOutputResult('Decision action.type must be a string.');
+  }
+
+  if (actionType !== roleModelVisibleReplyActionName) {
+    return createUnsupportedOutputResult(
+      `Decision action.type "${actionType}" is not supported.`
+    );
+  }
+
+  const replyText = action['text'];
+
+  if (typeof replyText !== 'string') {
+    return createMalformedOutputResult('Decision action.text must be a string.');
+  }
+
+  const unsupportedTopLevelKeys = findUnsupportedKeys(parsedOutput, ['action']);
+
+  if (unsupportedTopLevelKeys.length > 0) {
+    return createUnsupportedOutputResult(
+      `Decision includes unsupported fields: ${unsupportedTopLevelKeys.join(', ')}.`
+    );
+  }
+
+  const unsupportedActionKeys = findUnsupportedKeys(action, ['type', 'text']);
+
+  if (unsupportedActionKeys.length > 0) {
+    return createUnsupportedOutputResult(
+      `Decision action includes unsupported fields: ${unsupportedActionKeys.join(
+        ', '
+      )}.`
+    );
+  }
+
+  return createAcceptedRoleModelDecisionResult(
+    createVisibleReplyCharacterDecision(replyText)
+  );
+}
+
+function createMalformedOutputResult(
+  details: string
+): RejectedRoleModelDecisionResult {
+  return createRejectedRoleModelDecisionResult(
+    roleModelMalformedOutputRejectionReason,
+    details
+  );
+}
+
+function createUnsupportedOutputResult(
+  details: string
+): RejectedRoleModelDecisionResult {
+  return createRejectedRoleModelDecisionResult(
+    roleModelUnsupportedEffectRejectionReason,
+    details
+  );
+}
+
 function freezeRuntimeEventIdentitySnapshot(
   identity: RuntimeEventIdentity
 ): RuntimeEventIdentity {
@@ -306,4 +396,19 @@ function freezeRoleModelDecisionResult(
     result.rejection.reason,
     result.rejection.details
   );
+}
+
+function isJsonRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasEffectShape(record: Readonly<Record<string, unknown>>): boolean {
+  return Object.hasOwn(record, 'effect') || Object.hasOwn(record, 'effects');
+}
+
+function findUnsupportedKeys(
+  record: Readonly<Record<string, unknown>>,
+  allowedKeys: readonly string[]
+): string[] {
+  return Object.keys(record).filter((key) => !allowedKeys.includes(key));
 }

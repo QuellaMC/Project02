@@ -1004,9 +1004,41 @@ function assertRawEventVisibleReferencesMatchConversationMessages(options: {
         );
       }
     }
+
+    assertRoleModelInputTextMatchesCommittedUserMessage({
+      messagesById,
+      rawEvent
+    });
   }
 
   assertCompletedTerminalRawEventsMatchConversationMessages(options);
+}
+
+function assertRoleModelInputTextMatchesCommittedUserMessage(options: {
+  readonly messagesById: ReadonlyMap<string, ConversationLogRecord>;
+  readonly rawEvent: RawEventLogRecord;
+}): void {
+  const inputText =
+    options.rawEvent.roleModelIOSnapshot?.inputEnvelope.event.payload.currentUserMessage;
+
+  if (inputText === undefined || options.rawEvent.visibleMessageIds === undefined) {
+    return;
+  }
+
+  const userMessages = options.rawEvent.visibleMessageIds
+    .map((messageId) => options.messagesById.get(messageId))
+    .filter((message): message is ConversationLogRecord => {
+      return message?.role === 'user';
+    });
+
+  const userMessage = userMessages[0];
+
+  if (userMessages.length !== 1 || userMessage === undefined || userMessage.text !== inputText) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Role-model input text must match the committed user visible message for the turn.'
+    );
+  }
 }
 
 function assertRoleModelEvidenceMatchesSessionPath(options: {

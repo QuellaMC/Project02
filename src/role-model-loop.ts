@@ -4,14 +4,13 @@ import {
   type CharacterAgent
 } from './conversation.ts';
 import {
-  createAcceptedRoleModelDecisionResult,
   createParsedRoleModelDecisionSnapshot,
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
-  createVisibleReplyCharacterDecision,
+  parseRoleModelDecision,
+  roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelMalformedOutputRejectionReason,
-  roleModelUnsupportedEffectRejectionReason,
   roleModelVisibleReplyActionName,
   type AcceptedRoleModelDecisionResult,
   type CharacterDecision,
@@ -19,11 +18,12 @@ import {
   type ParsedRoleModelDecisionSnapshot,
   type RejectedRoleModelDecisionResult,
   type RoleModelDecisionRejection,
-  type RoleModelDecisionResult,
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot
 } from './role-model-contracts.ts';
 import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from './runtime-event.ts';
+
+export { parseRoleModelDecision } from './role-model-contracts.ts';
 
 export type RoleModelAdapterRawOutput = {
   readonly rawOutputText: string;
@@ -142,76 +142,6 @@ export async function runRoleModelLoop(
   } satisfies RejectedRoleModelLoopResult);
 }
 
-export function parseRoleModelDecision(
-  rawOutputText: string
-): RoleModelDecisionResult {
-  let parsedOutput: unknown;
-
-  try {
-    parsedOutput = JSON.parse(rawOutputText);
-  } catch {
-    return createMalformedOutputResult('Adapter output must be valid JSON.');
-  }
-
-  if (!isJsonRecord(parsedOutput)) {
-    return createMalformedOutputResult(
-      'Adapter output must be a CharacterDecision JSON object.'
-    );
-  }
-
-  if (hasEffectShape(parsedOutput)) {
-    return createUnsupportedOutputResult(
-      'Decision includes unsupported effect fields.'
-    );
-  }
-
-  const action = parsedOutput['action'];
-
-  if (!isJsonRecord(action)) {
-    return createMalformedOutputResult('Decision action must be an object.');
-  }
-
-  const actionType = action['type'];
-
-  if (typeof actionType !== 'string') {
-    return createMalformedOutputResult('Decision action.type must be a string.');
-  }
-
-  if (actionType !== roleModelVisibleReplyActionName) {
-    return createUnsupportedOutputResult(
-      `Decision action.type "${actionType}" is not supported.`
-    );
-  }
-
-  const replyText = action['text'];
-
-  if (typeof replyText !== 'string') {
-    return createMalformedOutputResult('Decision action.text must be a string.');
-  }
-
-  const unsupportedTopLevelKeys = findUnsupportedKeys(parsedOutput, ['action']);
-
-  if (unsupportedTopLevelKeys.length > 0) {
-    return createUnsupportedOutputResult(
-      `Decision includes unsupported fields: ${unsupportedTopLevelKeys.join(', ')}.`
-    );
-  }
-
-  const unsupportedActionKeys = findUnsupportedKeys(action, ['type', 'text']);
-
-  if (unsupportedActionKeys.length > 0) {
-    return createUnsupportedOutputResult(
-      `Decision action includes unsupported fields: ${unsupportedActionKeys.join(
-        ', '
-      )}.`
-    );
-  }
-
-  return createAcceptedRoleModelDecisionResult(
-    createVisibleReplyCharacterDecision(replyText)
-  );
-}
-
 function createRoleModelAdapterRawOutput(
   rawOutputText: string
 ): RoleModelAdapterRawOutput {
@@ -254,28 +184,11 @@ function createMalformedAdapterRawOutputResult(): RoleModelAdapterRawOutputValid
   return Object.freeze({
     status: 'rejected',
     rawOutputText: '',
-    decisionResult: createMalformedOutputResult(
-      'Adapter raw output must include string rawOutputText.'
+    decisionResult: createRejectedRoleModelDecisionResult(
+      roleModelMalformedOutputRejectionReason,
+      roleModelAdapterRawOutputMissingTextRejectionDetails
     )
   } satisfies RoleModelAdapterRawOutputValidationResult);
-}
-
-function createMalformedOutputResult(
-  details: string
-): RejectedRoleModelDecisionResult {
-  return createRejectedRoleModelDecisionResult(
-    roleModelMalformedOutputRejectionReason,
-    details
-  );
-}
-
-function createUnsupportedOutputResult(
-  details: string
-): RejectedRoleModelDecisionResult {
-  return createRejectedRoleModelDecisionResult(
-    roleModelUnsupportedEffectRejectionReason,
-    details
-  );
 }
 
 function createSnapshotIdentity(
@@ -290,15 +203,4 @@ function createSnapshotIdentity(
 
 function isJsonRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function hasEffectShape(record: Readonly<Record<string, unknown>>): boolean {
-  return Object.hasOwn(record, 'effect') || Object.hasOwn(record, 'effects');
-}
-
-function findUnsupportedKeys(
-  record: Readonly<Record<string, unknown>>,
-  allowedKeys: readonly string[]
-): string[] {
-  return Object.keys(record).filter((key) => !allowedKeys.includes(key));
 }
