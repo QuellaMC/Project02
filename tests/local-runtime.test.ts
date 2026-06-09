@@ -5,9 +5,13 @@ import {
   createRuntimeLogStore,
   createUserMessageRuntimeEvent,
   recordLocalUserMessageInputRejection,
+  roleModelInvalidVisibleReplyRejectionReason,
+  roleModelVisibleReplyActionName,
   runLocalUserMessageEvent,
   type CharacterAgent,
   type CharacterAgentReply,
+  type RawEventLogRecord,
+  type RawEventLogRecordKind,
   type RuntimeTraceEntry,
   type RuntimeTraceStepName,
   type UserMessageRuntimeEvent
@@ -55,7 +59,10 @@ describe('local runtime turn adapter', () => {
       }
     ]);
     expect(logStore.conversationMessages()).toEqual(result.conversationMessages);
-    expect(logStore.rawEvents()).toEqual([
+    const rawEvents = logStore.rawEvents();
+
+    expect(rawEvents).toHaveLength(4);
+    expect(rawEvents.slice(0, 2)).toEqual([
       {
         eventId: 'evt_success',
         traceId: 'trace_success',
@@ -78,32 +85,59 @@ describe('local runtime turn adapter', () => {
           normalizedCurrentUserMessage: 'hello'
         }
       },
-      {
-        eventId: 'evt_success',
-        traceId: 'trace_success',
-        createdAt: '2026-06-04T10:00:00.000Z',
-        kind: 'visible_reply_committed',
-        eventType: 'USER_MESSAGE',
-        visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
-        payloadSummary: {
-          rawInput: ' hello ',
-          normalizedCurrentUserMessage: 'hello'
+    ]);
+
+    const visibleReplyCommitted = findRawEvent(
+      rawEvents,
+      'visible_reply_committed'
+    );
+    const terminalCompleted = findRawEvent(rawEvents, 'runtime_turn_completed');
+
+    expect(visibleReplyCommitted).toMatchObject({
+      eventId: 'evt_success',
+      traceId: 'trace_success',
+      createdAt: '2026-06-04T10:00:00.000Z',
+      kind: 'visible_reply_committed',
+      eventType: 'USER_MESSAGE',
+      visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
+      payloadSummary: {
+        rawInput: ' hello ',
+        normalizedCurrentUserMessage: 'hello'
+      }
+    });
+    expect(visibleReplyCommitted.roleModelIOSnapshot).toMatchObject({
+      eventId: 'evt_success',
+      traceId: 'trace_success',
+      sessionId: 'local-session',
+      rawOutputText: JSON.stringify({
+        action: {
+          type: roleModelVisibleReplyActionName,
+          text: "I'm here. Tell me what you need."
         }
-      },
-      {
-        eventId: 'evt_success',
-        traceId: 'trace_success',
-        createdAt: '2026-06-04T10:00:00.000Z',
-        kind: 'runtime_turn_completed',
-        eventType: 'USER_MESSAGE',
-        status: 'completed',
-        visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
-        payloadSummary: {
-          rawInput: ' hello ',
-          normalizedCurrentUserMessage: 'hello'
+      })
+    });
+    expect(
+      visibleReplyCommitted.parsedRoleModelDecisionSnapshot?.result
+    ).toEqual({
+      status: 'accepted',
+      decision: {
+        action: {
+          type: roleModelVisibleReplyActionName,
+          text: "I'm here. Tell me what you need."
         }
       }
-    ]);
+    });
+    expect(visibleReplyCommitted.commitValidation?.result).toEqual({
+      status: 'accepted',
+      acceptedVisibleReplyText: "I'm here. Tell me what you need."
+    });
+    expect(terminalCompleted).toEqual({
+      ...visibleReplyCommitted,
+      kind: 'runtime_turn_completed',
+      status: 'completed'
+    });
+    expect(result.rawEvent).toEqual(terminalCompleted);
+    expect(result.rawEventLogRecords).toEqual(rawEvents);
     expect(Object.isFrozen(result.rawEvent.payloadSummary)).toBe(true);
     expect(stepNames(result.traceEntries)).toEqual([
       'runtime_event_received',
@@ -355,40 +389,54 @@ describe('local runtime turn adapter', () => {
 
     expect(result).toMatchObject({
       status: 'rejected',
-      reason: 'character_reply_rejected',
+      reason: roleModelInvalidVisibleReplyRejectionReason,
       message: 'Character agent returned a multi-line reply.'
     });
     expect(session.visibleTranscript).toEqual([]);
     expect(logStore.conversationMessages()).toEqual([]);
-    expect(logStore.rawEvents()).toContainEqual({
+    const commitValidationRejected = findRawEvent(
+      logStore.rawEvents(),
+      'commit_validation_rejected'
+    );
+    const terminalRejected = findRawEvent(
+      logStore.rawEvents(),
+      'runtime_turn_rejected'
+    );
+
+    expect(commitValidationRejected).toMatchObject({
       eventId: 'evt_invalid_reply',
       traceId: 'trace_invalid_reply',
       createdAt: '2026-06-04T10:00:00.000Z',
-      kind: 'character_reply_rejected',
+      kind: 'commit_validation_rejected',
       eventType: 'USER_MESSAGE',
       status: 'rejected',
-      reason: 'Character agent returned a multi-line reply.',
+      reason: roleModelInvalidVisibleReplyRejectionReason,
       payloadSummary: {
         normalizedCurrentUserMessage: 'hello'
       }
     });
-    expect(logStore.rawEvents()).toContainEqual({
-      eventId: 'evt_invalid_reply',
-      traceId: 'trace_invalid_reply',
-      createdAt: '2026-06-04T10:00:00.000Z',
-      kind: 'runtime_turn_rejected',
-      eventType: 'USER_MESSAGE',
+    expect(commitValidationRejected.roleModelIOSnapshot).toBeDefined();
+    expect(
+      commitValidationRejected.parsedRoleModelDecisionSnapshot?.result
+    ).toMatchObject({
+      status: 'accepted'
+    });
+    expect(commitValidationRejected.commitValidation?.result).toMatchObject({
       status: 'rejected',
-      reason: 'Character agent returned a multi-line reply.',
-      payloadSummary: {
-        normalizedCurrentUserMessage: 'hello'
+      rejection: {
+        reason: roleModelInvalidVisibleReplyRejectionReason
       }
+    });
+    expect(terminalRejected).toEqual({
+      ...commitValidationRejected,
+      kind: 'runtime_turn_rejected',
+      status: 'rejected'
     });
     expect(stepNames(result.traceEntries)).toEqual([
       'runtime_event_received',
       'runtime_event_normalized',
       'runtime_turn_started',
-      'character_reply_rejected',
+      'commit_validation_rejected',
       'raw_event_log_appended',
       'runtime_turn_rejected'
     ]);
@@ -450,6 +498,19 @@ function createTestUserMessageEvent(
 
 function stepNames(entries: readonly RuntimeTraceEntry[]): RuntimeTraceStepName[] {
   return entries.map((entry) => entry.step);
+}
+
+function findRawEvent(
+  records: readonly RawEventLogRecord[],
+  kind: RawEventLogRecordKind
+): RawEventLogRecord {
+  const record = records.find((candidate) => candidate.kind === kind);
+
+  if (record === undefined) {
+    throw new Error(`Expected raw event kind: ${kind}.`);
+  }
+
+  return record;
 }
 
 function createDeferredReply(): DeferredReply {

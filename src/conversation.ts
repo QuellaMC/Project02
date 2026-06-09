@@ -63,13 +63,14 @@ export const localCharacterProfile: CharacterProfile = freezeCharacterProfile({
   displayName: 'Mira'
 });
 
+export const defaultRecentVisibleMessageLimit = 8;
+
 const localUserSpeaker = {
   id: 'local-user',
   displayName: 'You'
 } as const;
 
 const defaultSessionId = 'local-session';
-const defaultRecentMessageLimit = 8;
 const sessionTranscripts = new WeakMap<ConversationSession, VisibleMessage[]>();
 const sessionTurnQueues = new WeakMap<ConversationSession, Promise<void>>();
 
@@ -160,7 +161,7 @@ async function runSerializedCharacterTurn(
   const transcript = getMutableTranscript(session);
   const recentVisibleMessages = selectRecentVisibleMessages(
     transcript,
-    options.recentMessageLimit ?? defaultRecentMessageLimit
+    options.recentMessageLimit ?? defaultRecentVisibleMessageLimit
   );
   const reply = await agent.reply({
     character: session.character,
@@ -279,9 +280,9 @@ function freezeCharacterProfile(character: CharacterProfile): CharacterProfile {
   } satisfies CharacterProfile);
 }
 
-function selectRecentVisibleMessages(
+export function selectRecentVisibleMessages(
   transcript: readonly VisibleMessage[],
-  recentMessageLimit: number
+  recentMessageLimit: number = defaultRecentVisibleMessageLimit
 ): readonly VisibleMessage[] {
   if (recentMessageLimit <= 0) {
     return [];

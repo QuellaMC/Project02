@@ -4,10 +4,20 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  createAcceptedRoleModelDecisionResult,
+  createDecisionContext,
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
+  createParsedRoleModelDecisionSnapshot,
+  createRejectedRoleModelDecisionResult,
+  createRoleModelCommitValidationSnapshot,
+  createRoleModelInputEnvelope,
+  createRoleModelIOSnapshot,
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent,
+  createVisibleReplyCharacterDecision,
   decodeConversationLogRecord,
   decodeRawEventLogRecord,
   decodeRuntimeTraceEntry,
@@ -21,6 +31,8 @@ import {
   LocalRuntimeStorageContractError,
   localRuntimeStorageSchemaVersion,
   normalizeLocalRuntimeSessionId,
+  roleModelMalformedOutputRejectionReason,
+  roleModelVisibleReplyActionName,
   type ConversationLogRecord,
   type LocalRuntimeStorageContractErrorCode,
   type RawEventLogRecord,
@@ -260,6 +272,61 @@ describe('local runtime storage contract', () => {
     expect(decodeRawEventLogRecord(encodeRawEventLogRecord(rawEvent))).toEqual(rawEvent);
   });
 
+  it('rejects role-model evidence whose nested identity does not match the raw event identity', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const snapshot = requiredMutableRecord(
+      record['roleModelIOSnapshot'],
+      'roleModelIOSnapshot'
+    );
+
+    snapshot['eventId'] = 'evt_other';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects partial role-model evidence on raw event records', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    delete record['parsedRoleModelDecisionSnapshot'];
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects accepted role-model commit text that does not match the parsed decision', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const commitValidation = requiredMutableRecord(
+      record['commitValidation'],
+      'commitValidation'
+    );
+    const result = requiredMutableRecord(
+      commitValidation['result'],
+      'commitValidation.result'
+    );
+
+    result['acceptedVisibleReplyText'] = 'different reply';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects role-model commit validation that contradicts terminal turn status', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const commitValidation = requiredMutableRecord(
+      record['commitValidation'],
+      'commitValidation'
+    );
+
+    commitValidation['result'] = {
+      status: 'rejected',
+      rejection: createRejectedRoleModelDecisionResult(
+        roleModelMalformedOutputRejectionReason,
+        'Adapter output must be valid JSON.'
+      ).rejection
+    };
+    record['reason'] = roleModelMalformedOutputRejectionReason;
+
+    expectMalformedRawEvent(record);
+  });
+
   it('rejects terminal raw events without stored turn status', () => {
     expect(() =>
       decodeRawEventLogRecord(
@@ -387,3 +454,86 @@ describe('local runtime storage contract', () => {
     ).toThrow(LocalRuntimeStorageContractError);
   });
 });
+
+function createRoleModelCompletedRawEvent(): RawEventLogRecord {
+  const identity = createRuntimeEventIdentity({
+    eventId: 'evt_role_model_storage',
+    traceId: 'trace_role_model_storage',
+    createdAt
+  });
+  const event = createUserMessageRuntimeEvent('hello', identity);
+  const decisionContext = createDecisionContext({
+    sessionId: 'local-session',
+    characterSnapshot: {
+      id: 'mira',
+      displayName: 'Mira'
+    }
+  });
+  const inputEnvelope = createRoleModelInputEnvelope({
+    event,
+    decisionContext
+  });
+  const decision = createVisibleReplyCharacterDecision('hello back');
+  const accepted = createAcceptedRoleModelDecisionResult(decision);
+
+  return Object.freeze({
+    ...identity,
+    kind: 'runtime_turn_completed',
+    eventType: 'USER_MESSAGE',
+    status: 'completed',
+    visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
+    roleModelIOSnapshot: createRoleModelIOSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      inputEnvelope,
+      rawOutputText: JSON.stringify({
+        action: {
+          type: roleModelVisibleReplyActionName,
+          text: 'hello back'
+        }
+      })
+    }),
+    parsedRoleModelDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: accepted
+    }),
+    commitValidation: createRoleModelCommitValidationSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: {
+        status: 'accepted',
+        acceptedVisibleReplyText: 'hello back'
+      }
+    })
+  } satisfies RawEventLogRecord);
+}
+
+function mutableRecordFromRawEvent(
+  rawEvent: RawEventLogRecord
+): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(JSON.stringify(rawEvent));
+
+  return requiredMutableRecord(parsed, 'rawEvent');
+}
+
+function requiredMutableRecord(
+  value: unknown,
+  field: string
+): Record<string, unknown> {
+  if (isMutableRecord(value)) {
+    return value;
+  }
+
+  throw new Error(`Expected mutable record for ${field}.`);
+}
+
+function isMutableRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function expectMalformedRawEvent(record: Record<string, unknown>): void {
+  expect(() => decodeRawEventLogRecord(JSON.stringify(record))).toThrow(
+    LocalRuntimeStorageContractError
+  );
+}

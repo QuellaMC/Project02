@@ -238,6 +238,10 @@ function assertDurableRuntimeSessionEvidence(options: {
     messages: conversationMessages,
     rawEvents
   });
+  assertRoleModelEvidenceMatchesSessionPath({
+    paths: options.paths,
+    rawEvents
+  });
   assertRestoredConversationInvariants(options.paths, conversationMessages, {
     allowIncompleteFinalTurn: appendModeAllowsIncompleteConversationTurn({
       mode: options.mode,
@@ -1003,6 +1007,31 @@ function assertRawEventVisibleReferencesMatchConversationMessages(options: {
   }
 
   assertCompletedTerminalRawEventsMatchConversationMessages(options);
+}
+
+function assertRoleModelEvidenceMatchesSessionPath(options: {
+  readonly paths: LocalRuntimeSessionPaths;
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): void {
+  for (const rawEvent of options.rawEvents) {
+    const sessionIds = [
+      rawEvent.roleModelIOSnapshot?.sessionId,
+      rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext.sessionId,
+      rawEvent.parsedRoleModelDecisionSnapshot?.sessionId,
+      rawEvent.commitValidation?.sessionId
+    ];
+
+    for (const sessionId of sessionIds) {
+      if (sessionId === undefined || sessionId === options.paths.sessionId) {
+        continue;
+      }
+
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Role-model evidence session identity must match the durable session path.'
+      );
+    }
+  }
 }
 
 function assertCompletedTerminalRawEventsMatchConversationMessages(options: {

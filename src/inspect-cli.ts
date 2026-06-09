@@ -10,6 +10,8 @@ import {
   type ConversationLogRecord,
   type LocalRuntimeSessionMetadata,
   type RawEventLogRecord,
+  type RoleModelCommitValidationResult,
+  type RoleModelDecisionResult,
   type RuntimeTraceEntry,
   type RuntimeTurnStatus
 } from './index.ts';
@@ -54,6 +56,7 @@ type InspectTurnEvidence = {
   readonly status: RuntimeTurnStatus;
   readonly steps: readonly string[];
   readonly visibleMessages: readonly InspectVisibleMessage[];
+  readonly roleModelEvidence?: InspectRoleModelEvidence;
   readonly reason?: string;
 };
 
@@ -63,6 +66,47 @@ type InspectVisibleMessage = {
   readonly speakerName: string;
   readonly text: string;
 };
+
+type InspectRoleModelEvidence = {
+  readonly input?: {
+    readonly sessionId: string;
+    readonly allowedActions: readonly string[];
+    readonly outputContractVersion: string;
+    readonly currentUserMessage: string;
+    readonly recentVisibleMessages: readonly InspectVisibleMessage[];
+    readonly runtimeNotes: readonly string[];
+  };
+  readonly output?: {
+    readonly rawOutputText: string;
+  };
+  readonly parsedDecision?: InspectParsedRoleModelDecision;
+  readonly commitValidation?: InspectRoleModelCommitValidation;
+};
+
+type InspectParsedRoleModelDecision =
+  | {
+      readonly status: 'accepted';
+      readonly action: {
+        readonly type: 'visible_reply';
+        readonly text: string;
+      };
+    }
+  | {
+      readonly status: 'rejected';
+      readonly rejectionReason: string;
+      readonly rejectionDetails?: string;
+    };
+
+type InspectRoleModelCommitValidation =
+  | {
+      readonly status: 'accepted';
+      readonly acceptedVisibleReplyText: string;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly rejectionReason: string;
+      readonly rejectionDetails?: string;
+    };
 
 class InspectCliUsageError extends Error {
   constructor(message: string) {
@@ -274,10 +318,108 @@ function createTurnEvidenceEntry(options: {
         visibleMessagesForId(options.conversationMessages, messageId)
       )
     ),
+    ...roleModelEvidenceForRawEvent(options.rawEvent),
     ...(options.rawEvent.reason === undefined
       ? {}
       : { reason: options.rawEvent.reason })
   } satisfies InspectTurnEvidence);
+}
+
+function roleModelEvidenceForRawEvent(
+  rawEvent: RawEventLogRecord
+): { readonly roleModelEvidence?: InspectRoleModelEvidence } {
+  if (
+    rawEvent.roleModelIOSnapshot === undefined &&
+    rawEvent.parsedRoleModelDecisionSnapshot === undefined &&
+    rawEvent.commitValidation === undefined
+  ) {
+    return {};
+  }
+
+  const inputEnvelope = rawEvent.roleModelIOSnapshot?.inputEnvelope;
+  const parsedDecision = rawEvent.parsedRoleModelDecisionSnapshot?.result;
+  const commitValidation = rawEvent.commitValidation?.result;
+
+  return {
+    roleModelEvidence: Object.freeze({
+      ...(inputEnvelope === undefined
+        ? {}
+        : {
+            input: Object.freeze({
+              sessionId: inputEnvelope.decisionContext.sessionId,
+              allowedActions: Object.freeze([...inputEnvelope.allowedActions]),
+              outputContractVersion: inputEnvelope.outputContract.version,
+              currentUserMessage:
+                inputEnvelope.event.payload.currentUserMessage,
+              recentVisibleMessages: Object.freeze(
+                inputEnvelope.decisionContext.recentVisibleMessages.map(
+                  visibleMessageFromSnapshot
+                )
+              ),
+              runtimeNotes: Object.freeze([
+                ...inputEnvelope.decisionContext.runtimeNotes
+              ])
+            })
+          }),
+      ...(rawEvent.roleModelIOSnapshot === undefined
+        ? {}
+        : {
+            output: Object.freeze({
+              rawOutputText: rawEvent.roleModelIOSnapshot.rawOutputText
+            })
+          }),
+      ...(parsedDecision === undefined
+        ? {}
+        : { parsedDecision: parsedRoleModelDecision(parsedDecision) }),
+      ...(commitValidation === undefined
+        ? {}
+        : {
+            commitValidation:
+              roleModelCommitValidation(commitValidation)
+          })
+    } satisfies InspectRoleModelEvidence)
+  };
+}
+
+function parsedRoleModelDecision(
+  result: RoleModelDecisionResult
+): InspectParsedRoleModelDecision {
+  if (result.status === 'accepted') {
+    return Object.freeze({
+      status: 'accepted',
+      action: Object.freeze({
+        type: result.decision.action.type,
+        text: result.decision.action.text
+      })
+    } satisfies InspectParsedRoleModelDecision);
+  }
+
+  return Object.freeze({
+    status: 'rejected',
+    rejectionReason: result.rejection.reason,
+    ...(result.rejection.details === undefined
+      ? {}
+      : { rejectionDetails: result.rejection.details })
+  } satisfies InspectParsedRoleModelDecision);
+}
+
+function roleModelCommitValidation(
+  result: RoleModelCommitValidationResult
+): InspectRoleModelCommitValidation {
+  if (result.status === 'accepted') {
+    return Object.freeze({
+      status: 'accepted',
+      acceptedVisibleReplyText: result.acceptedVisibleReplyText
+    } satisfies InspectRoleModelCommitValidation);
+  }
+
+  return Object.freeze({
+    status: 'rejected',
+    rejectionReason: result.rejection.reason,
+    ...(result.rejection.details === undefined
+      ? {}
+      : { rejectionDetails: result.rejection.details })
+  } satisfies InspectRoleModelCommitValidation);
 }
 
 function isTerminalTurnRawEvent(record: RawEventLogRecord): boolean {
@@ -313,6 +455,20 @@ function visibleMessagesForId(
       text: message.text
     } satisfies InspectVisibleMessage)
   ];
+}
+
+function visibleMessageFromSnapshot(message: {
+  readonly id: string;
+  readonly role: ConversationLogRecord['role'];
+  readonly speakerName: string;
+  readonly text: string;
+}): InspectVisibleMessage {
+  return Object.freeze({
+    id: message.id,
+    role: message.role,
+    speakerName: message.speakerName,
+    text: message.text
+  } satisfies InspectVisibleMessage);
 }
 
 function storageOptions(args: { readonly storeRoot?: string }): { readonly storeRoot?: string } {

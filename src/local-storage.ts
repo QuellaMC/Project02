@@ -1,17 +1,52 @@
 import { join } from 'node:path';
 
-import type { VisibleMessageRole } from './conversation.ts';
+import type {
+  CharacterProfile,
+  VisibleMessage,
+  VisibleMessageRole
+} from './conversation.ts';
 import {
   normalizeOneLineMessage,
   OneLineMessageValidationError
 } from './message-validation.ts';
-import type { RuntimeEventType } from './runtime-event.ts';
+import type {
+  RuntimeEventIdentity,
+  RuntimeEventType,
+  UserMessageRuntimeEvent
+} from './runtime-event.ts';
 import {
+  createAcceptedRoleModelDecisionResult,
+  createDecisionContext,
+  createParsedRoleModelDecisionSnapshot,
+  createRejectedRoleModelDecisionResult,
+  createRoleModelInputEnvelope,
+  createRoleModelIOSnapshot,
+  createVisibleReplyCharacterDecision,
+  roleModelDecisionContractVersion,
+  roleModelDecisionRejectionReasons,
+  roleModelVisibleReplyActionName,
+  type CharacterDecision,
+  type DecisionContext,
+  type ParsedRoleModelDecisionSnapshot,
+  type RoleModelAllowedActionName,
+  type RoleModelDecisionRejection,
+  type RoleModelDecisionRejectionReason,
+  type RoleModelDecisionResult,
+  type RoleModelInputEnvelope,
+  type RoleModelIOSnapshot,
+  type RoleModelOutputContract
+} from './role-model-contracts.ts';
+import {
+  createRoleModelCommitValidationSnapshot,
   isTerminalRawEventLogRecordKind,
+  type AcceptedRoleModelCommitValidationResult,
   type ConversationLogRecord,
   type RawEventLogPayloadSummary,
   type RawEventLogRecord,
   type RawEventLogRecordKind,
+  type RejectedRoleModelCommitValidationResult,
+  type RoleModelCommitValidationResult,
+  type RoleModelCommitValidationSnapshot,
   type RuntimeTraceEntry,
   type RuntimeTraceStepName,
   type RuntimeTurnStatus
@@ -99,6 +134,7 @@ const runtimeTraceSteps = [
   'visible_reply_committed',
   'input_validation_rejected',
   'character_reply_rejected',
+  'commit_validation_rejected',
   'raw_event_log_appended',
   'runtime_turn_completed',
   'runtime_turn_rejected'
@@ -110,6 +146,7 @@ const rawEventKinds = [
   'visible_reply_committed',
   'input_validation_rejected',
   'character_reply_rejected',
+  'commit_validation_rejected',
   'runtime_turn_completed',
   'runtime_turn_rejected'
 ] as const satisfies readonly RawEventLogRecordKind[];
@@ -246,28 +283,60 @@ export function encodeRawEventLogRecord(record: RawEventLogRecord): string {
 
 export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const record = parseJsonObject(line, 'malformed_record');
+  const eventId = requiredRecordString(record, 'eventId', 'malformed_record');
+  const traceId = requiredRecordString(record, 'traceId', 'malformed_record');
+  const createdAt = requiredRecordString(record, 'createdAt', 'malformed_record');
   const kind = requiredRawEventKind(record['kind']);
+  const eventType = requiredRuntimeEventType(record['eventType']);
   const status = optionalRuntimeTurnStatus(record['status']);
   const reason = optionalRecordString(record, 'reason', 'malformed_record');
   const visibleMessageIds = optionalStringArray(record['visibleMessageIds'], 'visibleMessageIds');
   const payloadSummary = optionalRawEventPayloadSummary(record['payloadSummary']);
+  const roleModelIOSnapshot = optionalRoleModelIOSnapshot(
+    record['roleModelIOSnapshot']
+  );
+  const parsedRoleModelDecisionSnapshot =
+    optionalParsedRoleModelDecisionSnapshot(
+      record['parsedRoleModelDecisionSnapshot']
+    );
+  const commitValidation = optionalRoleModelCommitValidationSnapshot(
+    record['commitValidation']
+  );
 
   assertTerminalRawEventSemantics({
     kind,
     status,
     visibleMessageIds
   });
+  assertRoleModelRawEventEvidenceSemantics({
+    identity: {
+      eventId,
+      traceId,
+      createdAt
+    },
+    kind,
+    reason,
+    status,
+    roleModelIOSnapshot,
+    parsedRoleModelDecisionSnapshot,
+    commitValidation
+  });
 
   return Object.freeze({
-    eventId: requiredRecordString(record, 'eventId', 'malformed_record'),
-    traceId: requiredRecordString(record, 'traceId', 'malformed_record'),
-    createdAt: requiredRecordString(record, 'createdAt', 'malformed_record'),
+    eventId,
+    traceId,
+    createdAt,
     kind,
-    eventType: requiredRuntimeEventType(record['eventType']),
+    eventType,
     ...(status === undefined ? {} : { status }),
     ...(reason === undefined ? {} : { reason }),
     ...(visibleMessageIds === undefined ? {} : { visibleMessageIds }),
-    ...(payloadSummary === undefined ? {} : { payloadSummary })
+    ...(payloadSummary === undefined ? {} : { payloadSummary }),
+    ...(roleModelIOSnapshot === undefined ? {} : { roleModelIOSnapshot }),
+    ...(parsedRoleModelDecisionSnapshot === undefined
+      ? {}
+      : { parsedRoleModelDecisionSnapshot }),
+    ...(commitValidation === undefined ? {} : { commitValidation })
   } satisfies RawEventLogRecord);
 }
 
@@ -343,6 +412,37 @@ function optionalRecordString(
   }
 
   return requiredNonEmptyString(value, key, code);
+}
+
+function requiredRecordStringAllowingEmpty(
+  record: Record<string, unknown>,
+  key: string,
+  code: LocalRuntimeStorageContractErrorCode
+): string {
+  const value = record[key];
+
+  if (typeof value !== 'string') {
+    throw new LocalRuntimeStorageContractError(
+      code,
+      `Stored local runtime field "${key}" must be a string.`
+    );
+  }
+
+  return value;
+}
+
+function optionalRecordStringAllowingEmpty(
+  record: Record<string, unknown>,
+  key: string,
+  code: LocalRuntimeStorageContractErrorCode
+): string | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return requiredRecordStringAllowingEmpty(record, key, code);
 }
 
 function requiredNormalizedVisibleMessageText(
@@ -507,6 +607,561 @@ function optionalRawEventPayloadSummary(
       ? {}
       : { normalizedCurrentUserMessage })
   } satisfies RawEventLogPayloadSummary);
+}
+
+function optionalRoleModelIOSnapshot(
+  value: unknown
+): RoleModelIOSnapshot | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throwMalformedRecord('roleModelIOSnapshot');
+  }
+
+  requiredLiteralString(
+    value,
+    'kind',
+    'role_model_io_snapshot',
+    'roleModelIOSnapshot.kind'
+  );
+
+  return createRoleModelIOSnapshot({
+    eventId: requiredRecordString(value, 'eventId', 'malformed_record'),
+    traceId: requiredRecordString(value, 'traceId', 'malformed_record'),
+    createdAt: requiredRecordString(value, 'createdAt', 'malformed_record'),
+    sessionId: requiredRecordString(value, 'sessionId', 'malformed_record'),
+    inputEnvelope: requiredRoleModelInputEnvelope(value['inputEnvelope']),
+    rawOutputText: requiredRecordStringAllowingEmpty(
+      value,
+      'rawOutputText',
+      'malformed_record'
+    )
+  });
+}
+
+function optionalParsedRoleModelDecisionSnapshot(
+  value: unknown
+): ParsedRoleModelDecisionSnapshot | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throwMalformedRecord('parsedRoleModelDecisionSnapshot');
+  }
+
+  requiredLiteralString(
+    value,
+    'kind',
+    'role_model_decision_snapshot',
+    'parsedRoleModelDecisionSnapshot.kind'
+  );
+
+  return createParsedRoleModelDecisionSnapshot({
+    eventId: requiredRecordString(value, 'eventId', 'malformed_record'),
+    traceId: requiredRecordString(value, 'traceId', 'malformed_record'),
+    createdAt: requiredRecordString(value, 'createdAt', 'malformed_record'),
+    sessionId: requiredRecordString(value, 'sessionId', 'malformed_record'),
+    result: requiredRoleModelDecisionResult(value['result'])
+  });
+}
+
+function optionalRoleModelCommitValidationSnapshot(
+  value: unknown
+): RoleModelCommitValidationSnapshot | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throwMalformedRecord('commitValidation');
+  }
+
+  requiredLiteralString(
+    value,
+    'kind',
+    'role_model_commit_validation_snapshot',
+    'commitValidation.kind'
+  );
+
+  return createRoleModelCommitValidationSnapshot({
+    eventId: requiredRecordString(value, 'eventId', 'malformed_record'),
+    traceId: requiredRecordString(value, 'traceId', 'malformed_record'),
+    createdAt: requiredRecordString(value, 'createdAt', 'malformed_record'),
+    sessionId: requiredRecordString(value, 'sessionId', 'malformed_record'),
+    result: requiredRoleModelCommitValidationResult(value['result'])
+  });
+}
+
+function assertRoleModelRawEventEvidenceSemantics(options: {
+  readonly identity: RuntimeEventIdentity;
+  readonly kind: RawEventLogRecordKind;
+  readonly status: RuntimeTurnStatus | undefined;
+  readonly reason: string | undefined;
+  readonly roleModelIOSnapshot: RoleModelIOSnapshot | undefined;
+  readonly parsedRoleModelDecisionSnapshot:
+    | ParsedRoleModelDecisionSnapshot
+    | undefined;
+  readonly commitValidation: RoleModelCommitValidationSnapshot | undefined;
+}): void {
+  const evidenceCount = [
+    options.roleModelIOSnapshot,
+    options.parsedRoleModelDecisionSnapshot,
+    options.commitValidation
+  ].filter((value) => value !== undefined).length;
+
+  if (evidenceCount === 0) {
+    return;
+  }
+
+  if (
+    options.roleModelIOSnapshot === undefined ||
+    options.parsedRoleModelDecisionSnapshot === undefined ||
+    options.commitValidation === undefined
+  ) {
+    throwMalformedRecord('roleModelEvidence');
+  }
+
+  const roleModelIOSnapshot = options.roleModelIOSnapshot;
+  const parsedRoleModelDecisionSnapshot =
+    options.parsedRoleModelDecisionSnapshot;
+  const commitValidation = options.commitValidation;
+
+  assertMatchingRoleModelIdentity({
+    actual: roleModelIOSnapshot,
+    expected: options.identity,
+    field: 'roleModelIOSnapshot'
+  });
+  assertMatchingRoleModelIdentity({
+    actual: roleModelIOSnapshot.inputEnvelope.event,
+    expected: options.identity,
+    field: 'roleModelIOSnapshot.inputEnvelope.event'
+  });
+  assertMatchingRoleModelIdentity({
+    actual: parsedRoleModelDecisionSnapshot,
+    expected: options.identity,
+    field: 'parsedRoleModelDecisionSnapshot'
+  });
+  assertMatchingRoleModelIdentity({
+    actual: commitValidation,
+    expected: options.identity,
+    field: 'commitValidation'
+  });
+  assertMatchingRoleModelSession({
+    actual: roleModelIOSnapshot.inputEnvelope.decisionContext.sessionId,
+    expected: roleModelIOSnapshot.sessionId,
+    field: 'roleModelIOSnapshot.inputEnvelope.decisionContext.sessionId'
+  });
+  assertMatchingRoleModelSession({
+    actual: parsedRoleModelDecisionSnapshot.sessionId,
+    expected: roleModelIOSnapshot.sessionId,
+    field: 'parsedRoleModelDecisionSnapshot.sessionId'
+  });
+  assertMatchingRoleModelSession({
+    actual: commitValidation.sessionId,
+    expected: roleModelIOSnapshot.sessionId,
+    field: 'commitValidation.sessionId'
+  });
+  assertRoleModelCommitStatusMatchesRawEvent({
+    kind: options.kind,
+    status: options.status,
+    reason: options.reason,
+    parsedRoleModelDecisionSnapshot,
+    commitValidation
+  });
+}
+
+function assertRoleModelCommitStatusMatchesRawEvent(options: {
+  readonly kind: RawEventLogRecordKind;
+  readonly status: RuntimeTurnStatus | undefined;
+  readonly reason: string | undefined;
+  readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+  readonly commitValidation: RoleModelCommitValidationSnapshot;
+}): void {
+  const commitResult = options.commitValidation.result;
+
+  if (commitResult.status === 'accepted') {
+    const parsedResult = options.parsedRoleModelDecisionSnapshot.result;
+
+    if (parsedResult.status !== 'accepted') {
+      throwMalformedRecord('parsedRoleModelDecisionSnapshot.result');
+    }
+
+    assertAcceptedCommitTextMatchesParsedDecision({
+      actual: commitResult.acceptedVisibleReplyText,
+      parsedDecisionText: parsedResult.decision.action.text
+    });
+
+    if (
+      options.kind !== 'visible_reply_committed' &&
+      options.kind !== 'runtime_turn_completed'
+    ) {
+      throwMalformedRecord('commitValidation');
+    }
+
+    if (
+      options.kind === 'runtime_turn_completed' &&
+      options.status !== 'completed'
+    ) {
+      throwMalformedRecord('commitValidation.result.status');
+    }
+
+    if (options.reason !== undefined) {
+      throwMalformedRecord('reason');
+    }
+
+    return;
+  }
+
+  if (
+    options.kind !== 'commit_validation_rejected' &&
+    options.kind !== 'runtime_turn_rejected'
+  ) {
+    throwMalformedRecord('commitValidation');
+  }
+
+  if (
+    options.kind === 'runtime_turn_rejected' &&
+    options.status !== 'rejected'
+  ) {
+    throwMalformedRecord('commitValidation.result.status');
+  }
+
+  if (options.reason !== commitResult.rejection.reason) {
+    throwMalformedRecord('reason');
+  }
+}
+
+function assertAcceptedCommitTextMatchesParsedDecision(options: {
+  readonly actual: string;
+  readonly parsedDecisionText: string;
+}): void {
+  let normalizedParsedDecisionText: string;
+
+  try {
+    normalizedParsedDecisionText = normalizeOneLineMessage(
+      options.parsedDecisionText
+    );
+  } catch (error: unknown) {
+    if (error instanceof OneLineMessageValidationError) {
+      throwMalformedRecord(
+        'parsedRoleModelDecisionSnapshot.result.decision.action.text'
+      );
+    }
+
+    throw error;
+  }
+
+  if (options.actual !== normalizedParsedDecisionText) {
+    throwMalformedRecord('commitValidation.result.acceptedVisibleReplyText');
+  }
+}
+
+function assertMatchingRoleModelIdentity(options: {
+  readonly actual: RuntimeEventIdentity;
+  readonly expected: RuntimeEventIdentity;
+  readonly field: string;
+}): void {
+  if (
+    options.actual.eventId === options.expected.eventId &&
+    options.actual.traceId === options.expected.traceId &&
+    options.actual.createdAt === options.expected.createdAt
+  ) {
+    return;
+  }
+
+  throwMalformedRecord(options.field);
+}
+
+function assertMatchingRoleModelSession(options: {
+  readonly actual: string;
+  readonly expected: string;
+  readonly field: string;
+}): void {
+  if (options.actual === options.expected) {
+    return;
+  }
+
+  throwMalformedRecord(options.field);
+}
+
+function requiredRoleModelInputEnvelope(
+  value: unknown
+): RoleModelInputEnvelope {
+  if (!isRecord(value)) {
+    throwMalformedRecord('roleModelInputEnvelope');
+  }
+
+  return createRoleModelInputEnvelope({
+    event: requiredUserMessageRuntimeEvent(value['event']),
+    decisionContext: requiredDecisionContext(value['decisionContext']),
+    allowedActions: requiredRoleModelAllowedActions(value['allowedActions']),
+    outputContract: requiredRoleModelOutputContract(value['outputContract'])
+  });
+}
+
+function requiredUserMessageRuntimeEvent(
+  value: unknown
+): UserMessageRuntimeEvent {
+  if (!isRecord(value)) {
+    throwMalformedRecord('event');
+  }
+
+  const payload = value['payload'];
+
+  if (!isRecord(payload)) {
+    throwMalformedRecord('event.payload');
+  }
+
+  return Object.freeze({
+    eventId: requiredRecordString(value, 'eventId', 'malformed_record'),
+    traceId: requiredRecordString(value, 'traceId', 'malformed_record'),
+    createdAt: requiredRecordString(value, 'createdAt', 'malformed_record'),
+    type: requiredRuntimeEventType(value['type']),
+    payload: Object.freeze({
+      currentUserMessage: requiredRecordString(
+        payload,
+        'currentUserMessage',
+        'malformed_record'
+      )
+    })
+  } satisfies UserMessageRuntimeEvent);
+}
+
+function requiredDecisionContext(value: unknown): DecisionContext {
+  if (!isRecord(value)) {
+    throwMalformedRecord('decisionContext');
+  }
+
+  return createDecisionContext({
+    sessionId: requiredRecordString(value, 'sessionId', 'malformed_record'),
+    characterSnapshot: requiredCharacterProfile(value['characterSnapshot']),
+    recentVisibleMessages: requiredVisibleMessages(
+      value['recentVisibleMessages'],
+      'recentVisibleMessages'
+    ),
+    runtimeNotes: requiredStringArray(value['runtimeNotes'], 'runtimeNotes')
+  });
+}
+
+function requiredCharacterProfile(value: unknown): CharacterProfile {
+  if (!isRecord(value)) {
+    throwMalformedRecord('characterSnapshot');
+  }
+
+  return Object.freeze({
+    id: requiredRecordString(value, 'id', 'malformed_record'),
+    displayName: requiredRecordString(value, 'displayName', 'malformed_record')
+  } satisfies CharacterProfile);
+}
+
+function requiredVisibleMessages(
+  value: unknown,
+  key: string
+): readonly VisibleMessage[] {
+  const messages: VisibleMessage[] = [];
+
+  for (const item of requiredArray(value, key)) {
+    messages.push(requiredVisibleMessage(item));
+  }
+
+  return Object.freeze(messages);
+}
+
+function requiredVisibleMessage(value: unknown): VisibleMessage {
+  if (!isRecord(value)) {
+    throwMalformedRecord('recentVisibleMessages');
+  }
+
+  return Object.freeze({
+    id: requiredRecordString(value, 'id', 'malformed_record'),
+    role: requiredVisibleMessageRole(value['role']),
+    speakerId: requiredRecordString(value, 'speakerId', 'malformed_record'),
+    speakerName: requiredRecordString(value, 'speakerName', 'malformed_record'),
+    text: requiredNormalizedVisibleMessageText(value, 'text')
+  } satisfies VisibleMessage);
+}
+
+function requiredStringArray(value: unknown, key: string): readonly string[] {
+  const strings: string[] = [];
+
+  for (const item of requiredArray(value, key)) {
+    if (typeof item !== 'string') {
+      throwMalformedRecord(key);
+    }
+
+    strings.push(item);
+  }
+
+  return Object.freeze(strings);
+}
+
+function requiredRoleModelAllowedActions(
+  value: unknown
+): readonly RoleModelAllowedActionName[] {
+  const actions: RoleModelAllowedActionName[] = [];
+
+  for (const item of requiredArray(value, 'allowedActions')) {
+    if (item !== roleModelVisibleReplyActionName) {
+      throwMalformedRecord('allowedActions');
+    }
+
+    actions.push(item);
+  }
+
+  return Object.freeze(actions);
+}
+
+function requiredRoleModelOutputContract(
+  value: unknown
+): RoleModelOutputContract {
+  if (!isRecord(value)) {
+    throwMalformedRecord('outputContract');
+  }
+
+  requiredLiteralString(
+    value,
+    'version',
+    roleModelDecisionContractVersion,
+    'outputContract.version'
+  );
+
+  return Object.freeze({
+    version: roleModelDecisionContractVersion,
+    text: requiredRecordString(value, 'text', 'malformed_record')
+  } satisfies RoleModelOutputContract);
+}
+
+function requiredRoleModelDecisionResult(
+  value: unknown
+): RoleModelDecisionResult {
+  if (!isRecord(value)) {
+    throwMalformedRecord('roleModelDecisionResult');
+  }
+
+  const status = requiredRecordString(value, 'status', 'malformed_record');
+
+  if (status === 'accepted') {
+    return createAcceptedRoleModelDecisionResult(
+      requiredCharacterDecision(value['decision'])
+    );
+  }
+
+  if (status === 'rejected') {
+    const rejection = requiredRoleModelDecisionRejection(value['rejection']);
+
+    return createRejectedRoleModelDecisionResult(
+      rejection.reason,
+      rejection.details
+    );
+  }
+
+  throwMalformedRecord('status');
+}
+
+function requiredCharacterDecision(value: unknown): CharacterDecision {
+  if (!isRecord(value)) {
+    throwMalformedRecord('decision');
+  }
+
+  const action = value['action'];
+
+  if (!isRecord(action)) {
+    throwMalformedRecord('decision.action');
+  }
+
+  requiredLiteralString(
+    action,
+    'type',
+    roleModelVisibleReplyActionName,
+    'decision.action.type'
+  );
+
+  return createVisibleReplyCharacterDecision(
+    requiredRecordStringAllowingEmpty(action, 'text', 'malformed_record')
+  );
+}
+
+function requiredRoleModelCommitValidationResult(
+  value: unknown
+): RoleModelCommitValidationResult {
+  if (!isRecord(value)) {
+    throwMalformedRecord('commitValidation.result');
+  }
+
+  const status = requiredRecordString(value, 'status', 'malformed_record');
+
+  if (status === 'accepted') {
+    return Object.freeze({
+      status: 'accepted',
+      acceptedVisibleReplyText: requiredNormalizedVisibleMessageText(
+        value,
+        'acceptedVisibleReplyText'
+      )
+    } satisfies AcceptedRoleModelCommitValidationResult);
+  }
+
+  if (status === 'rejected') {
+    return Object.freeze({
+      status: 'rejected',
+      rejection: requiredRoleModelDecisionRejection(value['rejection'])
+    } satisfies RejectedRoleModelCommitValidationResult);
+  }
+
+  throwMalformedRecord('status');
+}
+
+function requiredRoleModelDecisionRejection(
+  value: unknown
+): RoleModelDecisionRejection {
+  if (!isRecord(value)) {
+    throwMalformedRecord('rejection');
+  }
+
+  const reason = requiredRoleModelDecisionRejectionReason(value['reason']);
+  const details = optionalRecordStringAllowingEmpty(
+    value,
+    'details',
+    'malformed_record'
+  );
+
+  return Object.freeze({
+    reason,
+    ...(details === undefined ? {} : { details })
+  } satisfies RoleModelDecisionRejection);
+}
+
+function requiredRoleModelDecisionRejectionReason(
+  value: unknown
+): RoleModelDecisionRejectionReason {
+  if (isOneOf(value, roleModelDecisionRejectionReasons)) {
+    return value;
+  }
+
+  throwMalformedRecord('rejection.reason');
+}
+
+function requiredArray(value: unknown, key: string): readonly unknown[] {
+  if (!Array.isArray(value)) {
+    throwMalformedRecord(key);
+  }
+
+  return value;
+}
+
+function requiredLiteralString(
+  record: Record<string, unknown>,
+  key: string,
+  expectedValue: string,
+  errorField: string
+): void {
+  const value = requiredRecordString(record, key, 'malformed_record');
+
+  if (value !== expectedValue) {
+    throwMalformedRecord(errorField);
+  }
 }
 
 function optionalPayloadSummaryString(
