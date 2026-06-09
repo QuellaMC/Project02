@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  CharacterReplyValidationError,
   createConversationSession,
   createFileRuntimeLogStore,
   createLocalRuntimeSessionPaths,
@@ -24,7 +25,10 @@ import {
   type RuntimeLogStore,
   type UserMessageRuntimeEvent
 } from '../src/index.ts';
-import type { RoleModelAdapter } from '../src/role-model-loop.ts';
+import type {
+  RoleModelAdapter,
+  RoleModelAdapterRawOutput
+} from '../src/role-model-loop.ts';
 
 const tempStoreRoots: string[] = [];
 
@@ -285,6 +289,122 @@ describe('MVP-005 commit/effects validation', () => {
     expect(reopened.conversationMessages()).toEqual([]);
   });
 
+  it('persists pre-role-model reply validation rejection without partial evidence', async () => {
+    const storeRoot = await createDurableSession('mira-local');
+    const session = createConversationSession({
+      id: 'mira-local'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const agent: CharacterAgent = {
+      reply() {
+        throw new CharacterReplyValidationError(
+          'Character agent returned a multi-line reply.'
+        );
+      }
+    };
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_commit_pre_role_model_invalid_reply'
+      ),
+      session,
+      logStore,
+      agent
+    });
+
+    expect(result.status).toBe('rejected');
+
+    if (result.status !== 'rejected') {
+      throw new Error('Expected pre-role-model reply validation rejection.');
+    }
+
+    expect(result.reason).toBe(roleModelInvalidVisibleReplyRejectionReason);
+
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const characterReplyRejected = findRawEvent(
+      reopened.rawEvents(),
+      'character_reply_rejected'
+    );
+    const terminal = findRawEvent(reopened.rawEvents(), 'runtime_turn_rejected');
+
+    expect(characterReplyRejected).toMatchObject({
+      eventId: 'evt_commit_pre_role_model_invalid_reply',
+      traceId: 'trace_evt_commit_pre_role_model_invalid_reply',
+      kind: 'character_reply_rejected',
+      status: 'rejected',
+      reason: roleModelInvalidVisibleReplyRejectionReason
+    });
+    expect(characterReplyRejected.roleModelIOSnapshot).toBeUndefined();
+    expect(characterReplyRejected.parsedRoleModelDecisionSnapshot).toBeUndefined();
+    expect(characterReplyRejected.commitValidation).toBeUndefined();
+    expect(terminal).toEqual({
+      ...characterReplyRejected,
+      kind: 'runtime_turn_rejected'
+    });
+    expect(reopened.conversationMessages()).toEqual([]);
+  });
+
+  it('persists adapter raw-output shape rejection through a file-backed reopen', async () => {
+    const storeRoot = await createDurableSession('mira-local');
+    const session = createConversationSession({
+      id: 'mira-local'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent('hello', 'evt_commit_adapter_shape'),
+      session,
+      logStore,
+      roleModelAdapter: createMalformedRawOutputAdapter({})
+    });
+
+    expect(result.status).toBe('rejected');
+
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const terminal = findRawEvent(
+      reopened.rawEvents(),
+      'runtime_turn_rejected'
+    );
+
+    expect(terminal).toMatchObject({
+      eventId: 'evt_commit_adapter_shape',
+      traceId: 'trace_evt_commit_adapter_shape',
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelMalformedOutputRejectionReason
+    });
+    expect(terminal.visibleMessageIds).toBeUndefined();
+    expect(terminal.roleModelIOSnapshot?.rawOutputText).toBe('');
+    expect(terminal.parsedRoleModelDecisionSnapshot?.result).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'Adapter raw output must include string rawOutputText.'
+      }
+    });
+    expect(terminal.commitValidation?.result).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'Adapter raw output must include string rawOutputText.'
+      }
+    });
+    expect(reopened.conversationMessages()).toEqual([]);
+  });
+
   it('rejects role-model evidence copied into the wrong durable session path', async () => {
     const storeRoot = await createDurableSession('mira-local');
     const session = createConversationSession({
@@ -391,6 +511,15 @@ function createRawOutputAdapter(rawOutputText: string): RoleModelAdapter {
       return Object.freeze({
         rawOutputText
       });
+    }
+  };
+}
+
+function createMalformedRawOutputAdapter(rawOutput: unknown): RoleModelAdapter {
+  return {
+    invoke() {
+      // Bypass the static adapter contract to exercise runtime boundary validation.
+      return rawOutput as RoleModelAdapterRawOutput;
     }
   };
 }

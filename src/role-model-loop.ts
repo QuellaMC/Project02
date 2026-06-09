@@ -1,5 +1,6 @@
 import {
   createDeterministicCharacterAgent,
+  validateCharacterAgentReply,
   type CharacterAgent
 } from './conversation.ts';
 import {
@@ -78,12 +79,13 @@ export function createRoleModelAdapterFromCharacterAgent(
         message: inputEnvelope.event.payload.currentUserMessage,
         recentVisibleMessages: inputEnvelope.decisionContext.recentVisibleMessages
       });
+      const characterReply = validateCharacterAgentReply(reply);
 
       return createRoleModelAdapterRawOutput(
         JSON.stringify({
           action: {
             type: roleModelVisibleReplyActionName,
-            text: reply.text
+            text: characterReply.text
           }
         })
       );
@@ -99,16 +101,20 @@ export async function runRoleModelLoop(
     decisionContext: options.decisionContext
   });
   const adapter = options.adapter ?? createDeterministicLocalRoleModelAdapter();
-  const rawOutput = await adapter.invoke(inputEnvelope);
+  const rawOutput: unknown = await adapter.invoke(inputEnvelope);
+  const rawOutputValidation = validateRoleModelAdapterRawOutput(rawOutput);
   const identity = createSnapshotIdentity(inputEnvelope.event);
   const sessionId = inputEnvelope.decisionContext.sessionId;
   const ioSnapshot = createRoleModelIOSnapshot({
     ...identity,
     sessionId,
     inputEnvelope,
-    rawOutputText: rawOutput.rawOutputText
+    rawOutputText: rawOutputValidation.rawOutputText
   });
-  const decisionResult = parseRoleModelDecision(rawOutput.rawOutputText);
+  const decisionResult =
+    rawOutputValidation.status === 'accepted'
+      ? parseRoleModelDecision(rawOutputValidation.rawOutputText)
+      : rawOutputValidation.decisionResult;
   const parsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
     ...identity,
     sessionId,
@@ -212,6 +218,46 @@ function createRoleModelAdapterRawOutput(
   return Object.freeze({
     rawOutputText
   } satisfies RoleModelAdapterRawOutput);
+}
+
+type RoleModelAdapterRawOutputValidationResult =
+  | {
+      readonly status: 'accepted';
+      readonly rawOutputText: string;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly rawOutputText: string;
+      readonly decisionResult: RejectedRoleModelDecisionResult;
+    };
+
+function validateRoleModelAdapterRawOutput(
+  rawOutput: unknown
+): RoleModelAdapterRawOutputValidationResult {
+  if (!isJsonRecord(rawOutput)) {
+    return createMalformedAdapterRawOutputResult();
+  }
+
+  const rawOutputText = rawOutput['rawOutputText'];
+
+  if (typeof rawOutputText !== 'string') {
+    return createMalformedAdapterRawOutputResult();
+  }
+
+  return Object.freeze({
+    status: 'accepted',
+    rawOutputText
+  } satisfies RoleModelAdapterRawOutputValidationResult);
+}
+
+function createMalformedAdapterRawOutputResult(): RoleModelAdapterRawOutputValidationResult {
+  return Object.freeze({
+    status: 'rejected',
+    rawOutputText: '',
+    decisionResult: createMalformedOutputResult(
+      'Adapter raw output must include string rawOutputText.'
+    )
+  } satisfies RoleModelAdapterRawOutputValidationResult);
 }
 
 function createMalformedOutputResult(

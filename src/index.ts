@@ -8,6 +8,7 @@ export {
   defaultRecentVisibleMessageLimit,
   runCharacterTurn,
   selectRecentVisibleMessages,
+  validateCharacterAgentReply,
   validateRestoredVisibleTranscript,
   type CharacterAgent,
   type CharacterAgentInput,

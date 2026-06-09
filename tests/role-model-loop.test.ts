@@ -1,20 +1,26 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CharacterReplyValidationError,
   localCharacterProfile,
+  type CharacterAgent,
+  type CharacterAgentReply,
   type VisibleMessage
 } from '../src/conversation.ts';
 import {
   createDecisionContext,
+  createRoleModelInputEnvelope,
   roleModelMalformedOutputRejectionReason,
   roleModelUnsupportedEffectRejectionReason,
   roleModelVisibleReplyActionName
 } from '../src/role-model-contracts.ts';
 import {
   createDeterministicLocalRoleModelAdapter,
+  createRoleModelAdapterFromCharacterAgent,
   parseRoleModelDecision,
   runRoleModelLoop,
-  type RoleModelAdapter
+  type RoleModelAdapter,
+  type RoleModelAdapterRawOutput
 } from '../src/role-model-loop.ts';
 import { createUserMessageRuntimeEvent } from '../src/runtime-event.ts';
 
@@ -120,6 +126,36 @@ describe('role model loop', () => {
     });
   });
 
+  it('rejects malformed custom character-agent replies before JSON wrapping', async () => {
+    const malformedReplies: readonly unknown[] = [null, {}, { text: 42 }];
+
+    for (const [index, malformedReply] of malformedReplies.entries()) {
+      const agent: CharacterAgent = {
+        reply() {
+          // Bypass the static agent contract to exercise runtime boundary validation.
+          return malformedReply as CharacterAgentReply;
+        }
+      };
+      const adapter = createRoleModelAdapterFromCharacterAgent(agent);
+      const inputEnvelope = createRoleModelInputEnvelope({
+        event: createTestUserMessageEvent(
+          'hello',
+          `evt_role_malformed_agent_${String(index)}`
+        ),
+        decisionContext: createDecisionContext({
+          sessionId: 'local-session',
+          characterSnapshot: localCharacterProfile
+        })
+      });
+      const invokePromise = adapter.invoke(inputEnvelope);
+
+      await expect(invokePromise).rejects.toThrow(CharacterReplyValidationError);
+      await expect(invokePromise).rejects.toThrow(
+        'Character agent returned an invalid reply.'
+      );
+    }
+  });
+
   it('rejects malformed raw output before commit while keeping model I/O evidence', async () => {
     const event = createTestUserMessageEvent('hello', 'evt_role_malformed');
     const result = await runRoleModelLoop({
@@ -147,6 +183,49 @@ describe('role model loop', () => {
         details: 'Adapter output must be valid JSON.'
       }
     });
+  });
+
+  it('rejects adapter raw outputs without string rawOutputText before snapshotting evidence', async () => {
+    const malformedRawOutputs: readonly unknown[] = [
+      {},
+      {
+        rawOutputText: undefined
+      }
+    ];
+
+    for (const [index, rawOutput] of malformedRawOutputs.entries()) {
+      const result = await runRoleModelLoop({
+        event: createTestUserMessageEvent(
+          'hello',
+          `evt_role_malformed_adapter_${String(index)}`
+        ),
+        decisionContext: createDecisionContext({
+          sessionId: 'local-session',
+          characterSnapshot: localCharacterProfile
+        }),
+        adapter: createMalformedRawOutputAdapter(rawOutput)
+      });
+
+      expect(result.status).toBe('rejected');
+
+      if (result.status !== 'rejected') {
+        throw new Error('Expected rejected role model result.');
+      }
+
+      expect(result.rejection).toEqual({
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'Adapter raw output must include string rawOutputText.'
+      });
+      expect(result.ioSnapshot.rawOutputText).toBe('');
+      expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
+      expect(result.parsedDecisionSnapshot.result).toEqual({
+        status: 'rejected',
+        rejection: {
+          reason: roleModelMalformedOutputRejectionReason,
+          details: 'Adapter raw output must include string rawOutputText.'
+        }
+      });
+    }
   });
 
   it('rejects unsupported action and effect shapes with the CT-01 unsupported reason', async () => {
@@ -253,6 +332,15 @@ function createRawOutputAdapter(rawOutputText: string): RoleModelAdapter {
       return Object.freeze({
         rawOutputText
       });
+    }
+  };
+}
+
+function createMalformedRawOutputAdapter(rawOutput: unknown): RoleModelAdapter {
+  return {
+    invoke() {
+      // Bypass the static adapter contract to exercise runtime boundary validation.
+      return rawOutput as RoleModelAdapterRawOutput;
     }
   };
 }

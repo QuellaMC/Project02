@@ -244,13 +244,19 @@ function normalizeCharacterInput(message: string | undefined): string {
   }
 }
 
-function normalizeCharacterReply(reply: unknown): string {
+export function validateCharacterAgentReply(reply: unknown): CharacterAgentReply {
   if (!isCharacterAgentReply(reply)) {
     throw new CharacterReplyValidationError('Character agent returned an invalid reply.');
   }
 
+  return reply;
+}
+
+function normalizeCharacterReply(reply: unknown): string {
+  const characterReply = validateCharacterAgentReply(reply);
+
   try {
-    return normalizeOneLineMessage(reply.text);
+    return normalizeOneLineMessage(characterReply.text);
   } catch (error: unknown) {
     if (error instanceof OneLineMessageValidationError) {
       throw new CharacterReplyValidationError(

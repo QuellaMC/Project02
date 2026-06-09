@@ -10,10 +10,6 @@ import {
 } from './conversation.ts';
 import { buildUserTurnDecisionContext } from './decision-context.ts';
 import {
-  normalizeOneLineMessage,
-  OneLineMessageValidationError
-} from './message-validation.ts';
-import {
   createRejectedRoleModelDecisionResult,
   roleModelInvalidVisibleReplyRejectionReason,
   type ParsedRoleModelDecisionSnapshot,
@@ -26,7 +22,12 @@ import {
   runRoleModelLoop,
   type RoleModelAdapter
 } from './role-model-loop.ts';
-import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from './runtime-event.ts';
+import {
+  createUserMessageRuntimeEvent,
+  RuntimeEventInputError,
+  type RuntimeEventIdentity,
+  type UserMessageRuntimeEvent
+} from './runtime-event.ts';
 import { createRoleModelCommitValidationSnapshot } from './runtime-log.ts';
 import type {
   ConversationLogRecord,
@@ -181,8 +182,13 @@ async function runSerializedLocalUserMessageEvent(
     traceId: options.event.traceId,
     createdAt: options.event.createdAt
   });
+  const normalizedEventResult = normalizeUserMessageRuntimeEvent(options.event);
+  const event =
+    normalizedEventResult.status === 'accepted'
+      ? normalizedEventResult.event
+      : options.event;
   const payloadSummary = createNormalizedPayloadSummary({
-    normalizedCurrentUserMessage: options.event.payload.currentUserMessage,
+    normalizedCurrentUserMessage: event.payload.currentUserMessage,
     ...(options.rawInput === undefined ? {} : { rawInput: options.rawInput })
   });
 
@@ -217,7 +223,7 @@ async function runSerializedLocalUserMessageEvent(
     appendRawEvent({
       ...identity,
       kind: optionsForRejection.rawKind,
-      eventType: options.event.type,
+      eventType: event.type,
       status: 'rejected',
       reason: optionsForRejection.rawReason,
       payloadSummary,
@@ -227,7 +233,7 @@ async function runSerializedLocalUserMessageEvent(
     const rawEvent = appendRawEvent({
       ...identity,
       kind: 'runtime_turn_rejected',
-      eventType: options.event.type,
+      eventType: event.type,
       status: 'rejected',
       reason: optionsForRejection.rawReason,
       payloadSummary,
@@ -239,7 +245,7 @@ async function runSerializedLocalUserMessageEvent(
 
     return Object.freeze({
       status: 'rejected',
-      event: options.event,
+      event,
       reason: optionsForRejection.reason,
       message: optionsForRejection.message,
       rawEvent,
@@ -266,28 +272,24 @@ async function runSerializedLocalUserMessageEvent(
   appendRawEvent({
     ...identity,
     kind: 'runtime_event_received',
-    eventType: options.event.type,
+    eventType: event.type,
     payloadSummary
   });
   appendTrace('runtime_event_normalized');
   appendRawEvent({
     ...identity,
     kind: 'runtime_event_normalized',
-    eventType: options.event.type,
+    eventType: event.type,
     payloadSummary
   });
   appendTrace('runtime_turn_started');
 
   try {
-    const inputValidationMessage = validateEventUserMessage(
-      options.event.payload.currentUserMessage
-    );
-
-    if (inputValidationMessage !== undefined) {
+    if (normalizedEventResult.status === 'rejected') {
       return appendRejectedResult({
-        message: inputValidationMessage,
+        message: normalizedEventResult.message,
         rawKind: 'input_validation_rejected',
-        rawReason: inputValidationMessage,
+        rawReason: normalizedEventResult.message,
         reason: 'input_validation_rejected',
         traceStep: 'input_validation_rejected'
       });
@@ -302,7 +304,7 @@ async function runSerializedLocalUserMessageEvent(
           })
     });
     const roleModelResult = await runRoleModelLoop({
-      event: options.event,
+      event,
       decisionContext,
       ...roleModelLoopAdapterOption(options)
     });
@@ -329,7 +331,7 @@ async function runSerializedLocalUserMessageEvent(
     try {
       turn = await runCharacterTurn(
         options.session,
-        options.event.payload.currentUserMessage,
+        event.payload.currentUserMessage,
         createFixedReplyAgent(roleModelResult.decision.action.text),
         options.characterTurnOptions
       );
@@ -346,10 +348,7 @@ async function runSerializedLocalUserMessageEvent(
       }
 
       if (error instanceof CharacterReplyValidationError) {
-        const rejection = createRejectedRoleModelDecisionResult(
-          roleModelInvalidVisibleReplyRejectionReason,
-          error.message
-        ).rejection;
+        const rejection = createInvalidVisibleReplyRejection(error);
         const commitValidation = createRejectedCommitValidationSnapshot({
           identity,
           rejection,
@@ -395,7 +394,7 @@ async function runSerializedLocalUserMessageEvent(
     appendRawEvent({
       ...identity,
       kind: 'visible_reply_committed',
-      eventType: options.event.type,
+      eventType: event.type,
       visibleMessageIds: conversationMessages.map((message) => message.id),
       payloadSummary,
       ...acceptedEvidence
@@ -404,7 +403,7 @@ async function runSerializedLocalUserMessageEvent(
     const rawEvent = appendRawEvent({
       ...identity,
       kind: 'runtime_turn_completed',
-      eventType: options.event.type,
+      eventType: event.type,
       status: 'completed',
       visibleMessageIds: conversationMessages.map((message) => message.id),
       payloadSummary,
@@ -416,7 +415,7 @@ async function runSerializedLocalUserMessageEvent(
 
     return Object.freeze({
       status: 'completed',
-      event: options.event,
+      event,
       turn,
       conversationMessages,
       rawEvent,
@@ -435,25 +434,21 @@ async function runSerializedLocalUserMessageEvent(
     }
 
     if (error instanceof CharacterReplyValidationError) {
-      const rejection = createRejectedRoleModelDecisionResult(
-        roleModelInvalidVisibleReplyRejectionReason,
-        error.message
-      ).rejection;
-      const commitValidation = createRejectedCommitValidationSnapshot({
-        identity,
-        rejection,
-        sessionId: options.session.id
-      });
+      const rejection = createInvalidVisibleReplyRejection(error);
 
-      return appendRoleModelRejectedResult(rejection, {
-        commitValidation
+      return appendRejectedResult({
+        message: error.message,
+        rawKind: 'character_reply_rejected',
+        rawReason: rejection.reason,
+        reason: rejection.reason,
+        traceStep: 'character_reply_rejected'
       });
     }
 
     appendRawEvent({
       ...identity,
       kind: 'runtime_turn_rejected',
-      eventType: options.event.type,
+      eventType: event.type,
       status: 'rejected',
       reason: unexpectedRuntimeTurnFailureMessage,
       payloadSummary
@@ -513,13 +508,30 @@ function createNormalizedPayloadSummary(options: {
   } satisfies RawEventLogPayloadSummary);
 }
 
-function validateEventUserMessage(message: string): string | undefined {
+type NormalizeUserMessageRuntimeEventResult =
+  | {
+      readonly status: 'accepted';
+      readonly event: UserMessageRuntimeEvent;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly message: string;
+    };
+
+function normalizeUserMessageRuntimeEvent(
+  event: UserMessageRuntimeEvent
+): NormalizeUserMessageRuntimeEventResult {
   try {
-    normalizeOneLineMessage(message);
-    return undefined;
+    return Object.freeze({
+      status: 'accepted',
+      event: createUserMessageRuntimeEvent(event.payload.currentUserMessage, event)
+    } satisfies NormalizeUserMessageRuntimeEventResult);
   } catch (error: unknown) {
-    if (error instanceof OneLineMessageValidationError) {
-      return error.message;
+    if (error instanceof RuntimeEventInputError) {
+      return Object.freeze({
+        status: 'rejected',
+        message: error.message
+      } satisfies NormalizeUserMessageRuntimeEventResult);
     }
 
     throw error;
@@ -567,4 +579,13 @@ function createRejectedCommitValidationSnapshot(options: {
       rejection: options.rejection
     }
   });
+}
+
+function createInvalidVisibleReplyRejection(
+  error: CharacterReplyValidationError
+): RoleModelDecisionRejection {
+  return createRejectedRoleModelDecisionResult(
+    roleModelInvalidVisibleReplyRejectionReason,
+    error.message
+  ).rejection;
 }
