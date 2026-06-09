@@ -7,6 +7,7 @@ import {
   createDeterministicCharacterAgent,
   localCharacterProfile,
   runCharacterTurn,
+  ConversationRehydrationError,
   type CharacterAgent,
   type CharacterAgentReply,
   type VisibleMessage
@@ -322,6 +323,116 @@ describe('conversation core', () => {
       'hello',
       'reply to hello'
     ]);
+  });
+
+  it('rehydrates a validated visible transcript and allocates later message IDs after restored records', async () => {
+    const session = createConversationSession({
+      visibleTranscript: [
+        {
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'first'
+        },
+        {
+          id: 'local-session:message-2',
+          role: 'character',
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: "I'm here. Tell me what you need."
+        }
+      ]
+    });
+
+    await expect(runCharacterTurn(session, 'second')).resolves.toMatchObject({
+      userMessage: {
+        id: 'local-session:message-3',
+        text: 'second'
+      },
+      characterMessage: {
+        id: 'local-session:message-4',
+        text: 'I remember you said "first" Stay with me for a minute.'
+      }
+    });
+    expect(session.visibleTranscript.map((message) => message.id)).toEqual([
+      'local-session:message-1',
+      'local-session:message-2',
+      'local-session:message-3',
+      'local-session:message-4'
+    ]);
+  });
+
+  it('rejects restored visible messages from a different session before creating a transcript', () => {
+    expect(() =>
+      createConversationSession({
+        id: 'selected-session',
+        visibleTranscript: [
+          {
+            id: 'other-session:message-1',
+            role: 'user',
+            speakerId: 'local-user',
+            speakerName: 'You',
+            text: 'first'
+          }
+        ]
+      })
+    ).toThrow(ConversationRehydrationError);
+  });
+
+  it('rejects restored visible messages that would make the next message ID ambiguous', () => {
+    expect(() =>
+      createConversationSession({
+        visibleTranscript: [
+          {
+            id: 'local-session:message-1',
+            role: 'user',
+            speakerId: 'local-user',
+            speakerName: 'You',
+            text: 'first'
+          },
+          {
+            id: 'local-session:message-1',
+            role: 'character',
+            speakerId: 'mira',
+            speakerName: 'Mira',
+            text: 'duplicate'
+          }
+        ]
+      })
+    ).toThrow(ConversationRehydrationError);
+  });
+
+  it('rejects restored visible messages that do not preserve user and character commit order', () => {
+    expect(() =>
+      createConversationSession({
+        visibleTranscript: [
+          {
+            id: 'local-session:message-1',
+            role: 'character',
+            speakerId: 'mira',
+            speakerName: 'Mira',
+            text: 'out of order'
+          }
+        ]
+      })
+    ).toThrow(ConversationRehydrationError);
+  });
+
+  it('rejects restored visible transcripts that end before the paired character reply', () => {
+    expect(() =>
+      createConversationSession({
+        visibleTranscript: [
+          {
+            id: 'local-session:message-1',
+            role: 'user',
+            speakerId: 'local-user',
+            speakerName: 'You',
+            text: 'unpaired user'
+          }
+        ]
+      })
+    ).toThrow(ConversationRehydrationError);
   });
 
   it('leaves the transcript unchanged when the character agent returns an invalid reply', async () => {
