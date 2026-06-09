@@ -3,9 +3,15 @@ import { pathToFileURL } from 'node:url';
 
 import {
   createConversationSession,
+  createFileRuntimeLogStore,
+  createLocalRuntimeSessionStore,
   createRuntimeEventIdentity,
+  createLocalRuntimeStorageLayout,
   createRuntimeLogStore,
   createUserMessageRuntimeEvent,
+  LocalRuntimeStorageContractError,
+  LocalRuntimeSessionStoreError,
+  normalizeLocalRuntimeSessionId,
   recordLocalUserMessageInputRejection,
   runLocalUserMessageEvent,
   RuntimeEventInputError,
@@ -18,6 +24,11 @@ import {
   type RuntimeTraceStepName,
   type RuntimeTurnStatus
 } from './index.ts';
+import {
+  formatLocalRuntimeTerminalError,
+  isLocalRuntimeTerminalError,
+  type LocalRuntimeTerminalError
+} from './terminal-errors.ts';
 
 type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -25,6 +36,15 @@ type ChatCliOptions = {
   readonly stderr: NodeJS.WritableStream;
   readonly traceMode?: boolean;
   readonly agent?: CharacterAgent;
+  readonly session?: ConversationSession;
+  readonly logStore?: RuntimeLogStore;
+};
+
+type ChatCliArgs = {
+  readonly traceMode: boolean;
+  readonly storeRoot?: string;
+  readonly sessionId?: string;
+  readonly newSessionId?: string;
 };
 
 type ChatTraceSummary = {
@@ -55,13 +75,53 @@ type TraceIdentity = {
   readonly traceId: string;
 };
 
+type DurableChatRuntime = {
+  readonly session: ConversationSession;
+  readonly logStore: RuntimeLogStore;
+};
+
 const exitCommand = '/exit';
 const promptText = 'You: ';
 const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
 
+class ChatCliUsageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ChatCliUsageError';
+  }
+}
+
+export async function runChatCliFromArgs(
+  args: readonly string[],
+  options: ChatCliOptions
+): Promise<number> {
+  try {
+    const parsedArgs = parseChatCliArgs(args);
+
+    validateDurableSessionArgs(parsedArgs);
+    const durableRuntime = await createDurableChatRuntime(parsedArgs);
+
+    return await runChatCli({
+      ...options,
+      ...durableRuntime,
+      traceMode: options.traceMode === true || parsedArgs.traceMode
+    });
+  } catch (error: unknown) {
+    if (
+      error instanceof ChatCliUsageError ||
+      isLocalRuntimeTerminalError(error)
+    ) {
+      options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
+      return 1;
+    }
+
+    throw error;
+  }
+}
+
 export async function runChatCli(options: ChatCliOptions): Promise<number> {
-  const session = createConversationSession();
-  const logStore = createRuntimeLogStore();
+  const session = options.session ?? createConversationSession();
+  const logStore = options.logStore ?? createRuntimeLogStore();
   const lines = createInterface({
     input: options.stdin,
     crlfDelay: Infinity,
@@ -102,8 +162,13 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
           lines.close();
           return 1;
         }
-      } catch {
-        options.stderr.write(`Error: ${chatFailedBeforeReplyMessage}\n`);
+      } catch (error: unknown) {
+        if (isFormattedTerminalError(error)) {
+          options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
+        } else {
+          options.stderr.write(`Error: ${chatFailedBeforeReplyMessage}\n`);
+        }
+
         lines.close();
         return 1;
       }
@@ -142,7 +207,11 @@ async function handleUserMessageThroughRuntime(
       });
 
       return mapRuntimeResult(result);
-    } catch {
+    } catch (error: unknown) {
+      if (isFormattedTerminalError(error)) {
+        throw error;
+      }
+
       return mapUnexpectedRuntimeFailureResult(
         identity,
         traceEntriesForIdentity(options.logStore, identity)
@@ -259,6 +328,192 @@ function writeTraceSummary(
   stderr.write(`${JSON.stringify(summary)}\n`);
 }
 
+function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
+  let traceMode = false;
+  let storeRoot: string | undefined;
+  let sessionId: string | undefined;
+  let newSessionId: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === undefined) {
+      continue;
+    }
+
+    if (arg === '--') {
+      continue;
+    }
+
+    if (arg === '--trace') {
+      traceMode = true;
+      continue;
+    }
+
+    if (arg === '--store') {
+      if (storeRoot !== undefined) {
+        throw new ChatCliUsageError('--store can only be provided once.');
+      }
+
+      storeRoot = readFlagValue(args, index, '--store');
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--session') {
+      if (sessionId !== undefined) {
+        throw new ChatCliUsageError('--session can only be provided once.');
+      }
+
+      sessionId = readFlagValue(args, index, '--session');
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--new-session') {
+      if (newSessionId !== undefined) {
+        throw new ChatCliUsageError('--new-session can only be provided once.');
+      }
+
+      newSessionId = readFlagValue(args, index, '--new-session');
+      index += 1;
+      continue;
+    }
+
+    throw new ChatCliUsageError(`Unknown chat option: ${arg}.`);
+  }
+
+  if (sessionId !== undefined && newSessionId !== undefined) {
+    throw new ChatCliUsageError('Use either --session or --new-session, not both.');
+  }
+
+  return {
+    traceMode,
+    ...(storeRoot === undefined ? {} : { storeRoot }),
+    ...(sessionId === undefined ? {} : { sessionId }),
+    ...(newSessionId === undefined ? {} : { newSessionId })
+  } satisfies ChatCliArgs;
+}
+
+function readFlagValue(args: readonly string[], index: number, flag: string): string {
+  const value = args[index + 1];
+
+  if (value === undefined || value.startsWith('--')) {
+    throw new ChatCliUsageError(`${flag} requires a value.`);
+  }
+
+  return value;
+}
+
+function validateDurableSessionArgs(args: ChatCliArgs): void {
+  if (args.storeRoot !== undefined) {
+    createLocalRuntimeStorageLayout({ storeRoot: args.storeRoot });
+  }
+
+  if (args.sessionId !== undefined) {
+    normalizeLocalRuntimeSessionId(args.sessionId);
+  }
+
+  if (args.newSessionId !== undefined) {
+    normalizeLocalRuntimeSessionId(args.newSessionId);
+  }
+}
+
+async function createDurableChatRuntime(
+  args: ChatCliArgs
+): Promise<DurableChatRuntime> {
+  const sessionId = normalizeLocalRuntimeSessionId(
+    args.newSessionId ?? args.sessionId
+  );
+  const storageOptions =
+    args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot };
+  const sessionStore = createLocalRuntimeSessionStore({
+    ...storageOptions,
+    conversationLogReader: {
+      readConversationMessages(selectedSessionId) {
+        return createFileRuntimeLogStore({
+          ...storageOptions,
+          sessionId: selectedSessionId
+        }).conversationMessages();
+      }
+    },
+    sessionReadinessValidator: {
+      assertSessionReadable(selectedSessionId) {
+        const logStore = createFileRuntimeLogStore({
+          ...storageOptions,
+          sessionId: selectedSessionId
+        });
+
+        logStore.traceEntries();
+        logStore.rawEvents();
+        logStore.conversationMessages();
+      }
+    }
+  });
+
+  if (args.newSessionId !== undefined) {
+    await sessionStore.createSession({ sessionId });
+  } else if (args.sessionId !== undefined) {
+    await sessionStore.selectSession(sessionId);
+  } else {
+    await selectOrCreateDefaultSession(sessionStore, sessionId);
+  }
+
+  return Object.freeze({
+    session: await sessionStore.rehydrateConversationSession(sessionId),
+    logStore: createFileRuntimeLogStore({
+      ...storageOptions,
+      sessionId
+    })
+  } satisfies DurableChatRuntime);
+}
+
+async function selectOrCreateDefaultSession(
+  sessionStore: ReturnType<typeof createLocalRuntimeSessionStore>,
+  sessionId: string
+): Promise<void> {
+  try {
+    await sessionStore.readSession(sessionId);
+  } catch (error: unknown) {
+    if (isMissingDefaultSessionStore(error)) {
+      await sessionStore.createSession({ sessionId });
+      return;
+    }
+
+    throw error;
+  }
+
+  await sessionStore.selectSession(sessionId);
+}
+
+function isMissingDefaultSessionStore(error: unknown): boolean {
+  return (
+    (error instanceof LocalRuntimeStorageContractError &&
+      error.code === 'missing_file') ||
+    (error instanceof LocalRuntimeSessionStoreError &&
+      error.code === 'session_not_found')
+  );
+}
+
+function formatTerminalErrorMessage(
+  error: ChatCliUsageError | LocalRuntimeTerminalError
+): string {
+  if (error instanceof ChatCliUsageError) {
+    return error.message;
+  }
+
+  return formatLocalRuntimeTerminalError(error);
+}
+
+function isFormattedTerminalError(
+  error: unknown
+): error is ChatCliUsageError | LocalRuntimeTerminalError {
+  return (
+    error instanceof ChatCliUsageError ||
+    isLocalRuntimeTerminalError(error)
+  );
+}
+
 function isMainModule(moduleUrl: string): boolean {
   const scriptPath = process.argv[1];
 
@@ -270,10 +525,9 @@ function isMainModule(moduleUrl: string): boolean {
 }
 
 if (isMainModule(import.meta.url)) {
-  process.exitCode = await runChatCli({
+  process.exitCode = await runChatCliFromArgs(process.argv.slice(2), {
     stdin: process.stdin,
     stdout: process.stdout,
-    stderr: process.stderr,
-    traceMode: process.argv.slice(2).includes('--trace')
+    stderr: process.stderr
   });
 }

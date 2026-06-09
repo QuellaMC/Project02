@@ -1,10 +1,12 @@
 export {
   CharacterInputError,
   CharacterReplyValidationError,
+  ConversationRehydrationError,
   createConversationSession,
   createDeterministicCharacterAgent,
   localCharacterProfile,
   runCharacterTurn,
+  validateRestoredVisibleTranscript,
   type CharacterAgent,
   type CharacterAgentInput,
   type CharacterAgentReply,
@@ -13,6 +15,7 @@ export {
   type CharacterTurnResult,
   type ConversationSession,
   type ConversationSessionOptions,
+  type RestoredVisibleTranscriptValidationOptions,
   type VisibleMessage,
   type VisibleMessageRole
 } from './conversation.ts';
@@ -41,7 +44,17 @@ export {
   type RecordLocalUserMessageInputRejectionOptions
 } from './local-runtime.ts';
 
-export { createRuntimeLogStore } from './runtime-log.ts';
+export { createFileRuntimeLogStore } from './file-runtime-log-store.ts';
+
+export type {
+  CreateFileRuntimeLogStoreOptions
+} from './file-runtime-log-store.ts';
+
+export {
+  createRuntimeLogStore,
+  isTerminalRawEventLogRecord,
+  isTerminalRawEventLogRecordKind
+} from './runtime-log.ts';
 
 export type {
   ConversationLogRecord,
@@ -56,6 +69,54 @@ export type {
   RuntimeTraceStepName,
   RuntimeTurnStatus
 } from './runtime-log.ts';
+
+export {
+  createLocalRuntimeSessionMetadata,
+  createLocalRuntimeSessionPaths,
+  createLocalRuntimeStorageLayout,
+  createLocalRuntimeStorageSchemaMarker,
+  decodeConversationLogRecord,
+  decodeRawEventLogRecord,
+  decodeRuntimeTraceEntry,
+  decodeStorageSchemaMarker,
+  defaultLocalRuntimeSessionId,
+  defaultLocalRuntimeStoreRoot,
+  encodeConversationLogRecord,
+  encodeRawEventLogRecord,
+  encodeRuntimeTraceEntry,
+  encodeStorageSchemaMarker,
+  LocalRuntimeStorageContractError,
+  localRuntimeStorageSchemaVersion,
+  normalizeLocalRuntimeSessionId
+} from './local-storage.ts';
+
+export type {
+  CreateLocalRuntimeSessionMetadataOptions,
+  CreateLocalRuntimeStorageSchemaMarkerOptions,
+  LocalRuntimeSessionMetadata,
+  LocalRuntimeSessionPaths,
+  LocalRuntimeSessionPathsOptions,
+  LocalRuntimeStorageContractErrorCode,
+  LocalRuntimeStorageLayout,
+  LocalRuntimeStorageLayoutOptions,
+  LocalRuntimeStorageSchemaMarker
+} from './local-storage.ts';
+
+export {
+  createLocalRuntimeSessionStore,
+  LocalRuntimeSessionStoreError
+} from './session-store.ts';
+
+export type {
+  CreateLocalRuntimeSessionOptions,
+  CreateLocalRuntimeSessionStoreOptions,
+  LocalRuntimeSessionConversationLogReader,
+  LocalRuntimeSessionReadinessValidator,
+  LocalRuntimeSessionStore,
+  LocalRuntimeSessionStoreErrorCode,
+  RehydrateLocalRuntimeConversationSessionOptions,
+  SelectLocalRuntimeSessionOptions
+} from './session-store.ts';
 
 export type ProjectHealth = {
   readonly status: 'ok';

@@ -254,6 +254,85 @@
       <li>Updated <code>docs/plan/completed/mvp-002-local-character-conversation-core.html</code> status, archived-spec metadata, and archived-slice wording.</li>
       <li>Verified <code>pnpm test tests/chat-cli.contract.test.ts</code>, <code>pnpm check</code>, strict unused-symbol TypeScript, whitespace, and HTML parser checks.</li>
     </ul>
+
+    <h2>MVP-004 Durable Local Runtime Continuity Drafted For Review</h2>
+    <p>
+      Archived the completed MVP-003 active slice and drafted MVP-004 as the proposed next product
+      slice for review. The draft frames the next step as durable local runtime truth for the
+      existing chat path: persisted runtime events, traces, raw event records, visible conversation
+      records, session resume, and read-only inspection after process restart.
+    </p>
+    <ul>
+      <li>Archived <code>docs/plan/active-slice.html</code> to <code>docs/plan/completed/mvp-003-runtime-event-trace-local-chat.html</code>.</li>
+      <li>Replaced <code>docs/plan/active-slice.html</code> with <code>MVP-004 - Durable Local Runtime Continuity</code> in draft-for-review status.</li>
+      <li>Added five MVP-004 child task packets under <code>docs/plan/child-tasks/</code> for storage contract, file-backed runtime logs, session rehydration, chat CLI persistence UX, and inspection/integration/docs.</li>
+      <li>Kept the MVP-004 draft local and durability-focused only: no semantic memory, retrieval, scheduler, provider edge, model calls, accounts, cloud sync, or full runtime rebuild.</li>
+    </ul>
+
+    <h2>MVP-004 Independent Spec Review Follow-Up</h2>
+    <p>
+      An independent read-only reviewer found the MVP-004 scope was coherent but the draft needed
+      tighter implementation boundaries before subthreads begin. The active slice and child task
+      packets now specify per-session storage directories, a minimal conversation-core rehydration
+      seam, stricter CT-01 contract-first sequencing, concrete module ownership, and the minimal
+      <code>pnpm chat</code> / <code>pnpm inspect</code> command surface.
+    </p>
+    <ul>
+      <li>Chose per-session directories under the local store root instead of duplicate <code>sessionId</code> fields on every runtime record.</li>
+      <li>Clarified that CT-03 may add only the smallest public conversation rehydration API needed to seed persisted visible messages and preserve next message IDs.</li>
+      <li>Added module ownership for <code>src/local-storage.ts</code>, <code>src/file-runtime-log-store.ts</code>, <code>src/session-store.ts</code>, <code>src/chat-cli.ts</code>, and <code>src/inspect-cli.ts</code>.</li>
+      <li>Fixed the CLI review surface around <code>--store</code>, <code>--session</code>, <code>--new-session</code>, <code>--sessions</code>, and selected-session inspection.</li>
+    </ul>
+
+    <h2>MVP-004 Workflow Started And CT-01 Contract Frozen</h2>
+    <p>
+      Created the short-lived implementation branch
+      <code>feature/mvp-004-durable-local-runtime-continuity</code>, accepted MVP-004 as the active
+      slice, and froze the first shared storage contract needed by the downstream child tasks.
+    </p>
+    <ul>
+      <li>Added <code>src/local-storage.ts</code> for the default local runtime store root, schema marker, storage-safe session IDs, per-session paths, typed contract errors, and JSONL codecs for MVP-003 runtime records.</li>
+      <li>Exported the shared storage contract through <code>src/index.ts</code> so CT-02 through CT-05 can consume one public interface instead of inventing private helpers.</li>
+      <li>Added <code>tests/local-storage.test.ts</code> to pin the CT-01 contract before broader durable-store implementation begins.</li>
+      <li>Added <code>.project02-runtime/</code> to <code>.gitignore</code> as the proposed dev-local store root.</li>
+    </ul>
+
+    <h2>MVP-004 Reviewer Error-Contract Adjustment</h2>
+    <p>
+      A read-only independent spec reviewer found that the MVP-004 scope and task organization were
+      coherent, but CT-01's implemented error-code union did not yet cover the missing-file,
+      read/write failure, and partial-write policies assigned to the shared storage contract.
+    </p>
+    <ul>
+      <li>Added shared <code>LocalRuntimeStorageContractError</code> codes for <code>missing_file</code>, <code>read_failed</code>, <code>write_failed</code>, and <code>partial_write</code>.</li>
+      <li>Added a focused contract regression so downstream tasks can depend on the exported error vocabulary instead of creating private IO errors.</li>
+      <li>Clarified CT-01, CT-04, and CT-05 task packets so CT-05 owns the <code>pnpm inspect</code> script and CT-04 does not touch inspect wiring.</li>
+    </ul>
+    <p>
+      Verification after the adjustment:
+    </p>
+    <ul>
+      <li><code>pnpm exec vitest tests/local-storage.test.ts --run</code></li>
+      <li><code>pnpm check</code></li>
+      <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code></li>
+      <li><code>git diff --check</code></li>
+      <li>HTML parser check over <code>docs/plan/active-slice.html</code> and <code>docs/develop-journal/2026-06-04/journal.html</code></li>
+    </ul>
+
+    <h2>MVP-004 Durable Runtime Implementation Integrated</h2>
+    <p>
+      Integrated the durable local runtime path for the existing TypeScript chat product surface.
+      Runtime trace entries, raw event records, visible conversation messages, and session metadata
+      now survive process restart under the versioned local store, and a read-only inspect command
+      can show stored sessions and selected-session turn evidence without replaying or mutating state.
+    </p>
+    <ul>
+      <li>Added <code>src/file-runtime-log-store.ts</code> for CT-02's per-session file-backed runtime log store using CT-01 paths and codecs.</li>
+      <li>Added <code>src/session-store.ts</code> for CT-03's session catalog and conversation rehydration through stored visible messages.</li>
+      <li>Updated <code>src/chat-cli.ts</code> so <code>pnpm chat</code> uses the default durable local session, <code>--session</code> resumes an existing selected session, and <code>--new-session</code> creates a selected session that must not already exist.</li>
+      <li>Added <code>src/inspect-cli.ts</code> and the <code>pnpm inspect</code> script for read-only <code>--sessions</code> and <code>--session</code> inspection.</li>
+      <li>Kept the slice local and runtime-truth focused only: no semantic memory, retrieval, scheduler, provider edge, model calls, replay mutation, cloud sync, or full Runtime Kernel work was added.</li>
+    </ul>
   </main>
 </body>
 </html>

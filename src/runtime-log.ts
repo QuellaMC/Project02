@@ -73,6 +73,18 @@ export type RuntimeLogStore = {
   conversationMessages(): readonly ConversationLogRecord[];
 };
 
+export function isTerminalRawEventLogRecordKind(
+  kind: RawEventLogRecordKind
+): boolean {
+  return kind === 'runtime_turn_completed' || kind === 'runtime_turn_rejected';
+}
+
+export function isTerminalRawEventLogRecord(
+  record: Pick<RawEventLogRecord, 'kind'>
+): boolean {
+  return isTerminalRawEventLogRecordKind(record.kind);
+}
+
 export function createRuntimeLogStore(): RuntimeLogStore {
   const traceEntries: RuntimeTraceEntry[] = [];
   const rawEvents: RawEventLogRecord[] = [];

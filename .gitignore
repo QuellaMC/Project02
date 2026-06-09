@@ -12,6 +12,7 @@ node_modules/
 .vite/
 .vitest/
 .turbo/
+.project02-runtime/
 dist/
 build/
 artifacts/
