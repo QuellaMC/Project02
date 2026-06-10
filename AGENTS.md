@@ -194,6 +194,9 @@ General rules:
 - Do not mix unrelated work.
 - Sign commits when the repository requires it.
 - Use PR descriptions with real multi-line Markdown.
+- Do not include agent or platform branding in PR titles or PR bodies, and do
+  not add that branding to code files or generated artifacts unless explicitly
+  requested.
 - Run required checks before considering work done.
 
 ---
