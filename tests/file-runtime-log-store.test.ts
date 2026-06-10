@@ -13,16 +13,25 @@ import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  createConversationSession,
+  createDefaultCharacterRuntimeState,
+  createFileCharacterStateStore,
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
   createLocalRuntimeSessionPaths,
+  createUserMessageRuntimeEvent,
+  encodeCharacterRuntimeState,
   LocalRuntimeStorageContractError,
   LocalRuntimeSessionStoreError,
   recordLocalUserMessageInputRejection,
+  roleModelDecisionContractVersion,
+  roleModelVisibleReplyActionName,
+  runLocalUserMessageEvent,
   type ConversationLogRecordInput,
   type LocalRuntimeStorageContractErrorCode,
   type LocalRuntimeSessionStoreErrorCode,
   type RawEventLogRecordInput,
+  type RoleModelAdapter,
   type RuntimeTraceEntryInput
 } from '../src/index.ts';
 
@@ -109,6 +118,70 @@ describe('file-backed runtime log store', () => {
     expect(reopened.traceEntries()).toEqual([receivedTrace, completedTrace]);
     expect(reopened.rawEvents()).toEqual([receivedRawEvent, completedRawEvent]);
     expect(reopened.conversationMessages()).toEqual([userMessage, characterMessage]);
+  });
+
+  it('rejects public reads when current character state disagrees with accepted patch evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke() {
+        return {
+          rawOutputText: JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'stateful reply'
+                }
+              },
+              {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'curious'
+                }
+              }
+            ]
+          })
+        };
+      }
+    };
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('hello', identity),
+      session: createConversationSession({
+        id: 'mira-local'
+      }),
+      logStore: createFileRuntimeLogStore({
+        storeRoot,
+        sessionId: 'mira-local'
+      }),
+      characterStateStore: createFileCharacterStateStore({
+        storeRoot,
+        sessionId: 'mira-local'
+      }),
+      roleModelAdapter
+    });
+
+    expect(result.status).toBe('completed');
+
+    writeFileSync(
+      paths.characterStatePath,
+      `${encodeCharacterRuntimeState(createDefaultCharacterRuntimeState())}\n`,
+      'utf8'
+    );
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).rawEvents(),
+      'malformed_record'
+    );
   });
 
   it('keeps two selected sessions separate', async () => {

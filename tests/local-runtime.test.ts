@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   CharacterReplyValidationError,
   createConversationSession,
+  createInMemoryCharacterStateStore,
   createRuntimeLogStore,
   createUserMessageRuntimeEvent,
   recordLocalUserMessageInputRejection,
+  roleModelDecisionContractVersion,
+  roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelVisibleReplyActionName,
   runLocalUserMessageEvent,
@@ -13,6 +16,7 @@ import {
   type CharacterAgentReply,
   type RawEventLogRecord,
   type RawEventLogRecordKind,
+  type RuntimeLogStore,
   type RoleModelAdapter,
   type RuntimeTraceEntry,
   type RuntimeTraceStepName,
@@ -112,10 +116,15 @@ describe('local runtime turn adapter', () => {
       traceId: 'trace_success',
       sessionId: 'local-session',
       rawOutputText: JSON.stringify({
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: "I'm here. Tell me what you need."
-        }
+        version: 'mvp-006.tool_calls.v1',
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: "I'm here. Tell me what you need."
+            }
+          }
+        ]
       })
     });
     expect(
@@ -123,10 +132,15 @@ describe('local runtime turn adapter', () => {
     ).toEqual({
       status: 'accepted',
       decision: {
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: "I'm here. Tell me what you need."
-        }
+        version: 'mvp-006.tool_calls.v1',
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: "I'm here. Tell me what you need."
+            }
+          }
+        ]
       }
     });
     expect(visibleReplyCommitted.commitValidation?.result).toEqual({
@@ -710,6 +724,224 @@ describe('local runtime turn adapter', () => {
       'runtime_turn_rejected'
     ]);
   });
+
+  it('commits visible reply plus valid character state patch after validation', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const characterStateStore = createInMemoryCharacterStateStore();
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_state_patch',
+        'trace_state_patch'
+      ),
+      session,
+      logStore,
+      characterStateStore,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'stateful reply'
+              }
+            },
+            {
+              name: 'character_state.patch',
+              input: {
+                mood: 'curious',
+                currentActivity: 'chatting'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result.status).toBe('completed');
+
+    if (result.status !== 'completed') {
+      throw new Error('Expected completed runtime result.');
+    }
+
+    expect(characterStateStore.readCurrentState().current).toMatchObject({
+      mood: 'curious',
+      currentActivity: 'chatting'
+    });
+    expect(result.rawEvent.characterStatePatchSnapshot?.result).toMatchObject({
+      status: 'accepted',
+      patch: {
+        mood: 'curious',
+        currentActivity: 'chatting'
+      },
+      appliedChanges: [
+        {
+          field: 'mood',
+          before: 'steady',
+          after: 'curious'
+        },
+        {
+          field: 'currentActivity',
+          before: 'idle',
+          after: 'chatting'
+        }
+      ]
+    });
+  });
+
+  it('accepts no-op character state patches and logs empty applied changes', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const characterStateStore = createInMemoryCharacterStateStore();
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_state_noop',
+        'trace_state_noop'
+      ),
+      session,
+      logStore,
+      characterStateStore,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'noop reply'
+              }
+            },
+            {
+              name: 'character_state.patch',
+              input: {
+                mood: 'steady'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result.status).toBe('completed');
+
+    if (result.status !== 'completed') {
+      throw new Error('Expected completed runtime result.');
+    }
+
+    expect(result.rawEvent.characterStatePatchSnapshot?.result).toMatchObject({
+      status: 'accepted',
+      appliedChanges: []
+    });
+  });
+
+  it('rejects invalid character state patches before visible messages are committed', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const characterStateStore = createInMemoryCharacterStateStore();
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_state_rejected',
+        'trace_state_rejected'
+      ),
+      session,
+      logStore,
+      characterStateStore,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'rejected reply'
+              }
+            },
+            {
+              name: 'character_state.patch',
+              input: {
+                mood: 'ecstatic'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: roleModelInvalidCharacterStatePatchRejectionReason
+    });
+    expect(session.visibleTranscript).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
+    expect(characterStateStore.readCurrentState().current.mood).toBe('steady');
+    expect(result.rawEvent.characterStatePatchSnapshot?.result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: 'invalid_state_value'
+      }
+    });
+  });
+
+  it('does not write character state before visible conversation logging succeeds', async () => {
+    const session = createConversationSession();
+    const baseLogStore = createRuntimeLogStore();
+    const logStore = createConversationAppendFailingLogStore(baseLogStore);
+    const characterStateStore = createInMemoryCharacterStateStore();
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestUserMessageEvent(
+          'hello',
+          'evt_state_log_failure',
+          'trace_state_log_failure'
+        ),
+        session,
+        logStore,
+        characterStateStore,
+        roleModelAdapter: createRawOutputAdapter(
+          JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'stateful reply'
+                }
+              },
+              {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'curious'
+                }
+              }
+            ]
+          })
+        )
+      })
+    ).rejects.toThrow('conversation append failed');
+
+    expect(characterStateStore.readCurrentState().current.mood).toBe('steady');
+    expect(baseLogStore.conversationMessages()).toEqual([]);
+    expect(baseLogStore.rawEvents()).toContainEqual({
+      eventId: 'evt_state_log_failure',
+      traceId: 'trace_state_log_failure',
+      createdAt: '2026-06-04T10:00:00.000Z',
+      kind: 'runtime_turn_rejected',
+      eventType: 'USER_MESSAGE',
+      status: 'rejected',
+      reason: 'Runtime turn failed before producing a reply.',
+      payloadSummary: {
+        normalizedCurrentUserMessage: 'hello'
+      }
+    });
+  });
 });
 
 function createTestUserMessageEvent(
@@ -755,4 +987,39 @@ function createDeferredReply(): DeferredReply {
     promise,
     resolve: resolveReply
   };
+}
+
+function createRawOutputAdapter(rawOutputText: string): RoleModelAdapter {
+  return {
+    invoke() {
+      return Object.freeze({
+        rawOutputText
+      });
+    }
+  };
+}
+
+function createConversationAppendFailingLogStore(
+  baseLogStore: RuntimeLogStore
+): RuntimeLogStore {
+  return Object.freeze({
+    appendTrace(entry) {
+      return baseLogStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      return baseLogStore.appendRawEvent(record);
+    },
+    appendConversationMessage() {
+      throw new Error('conversation append failed');
+    },
+    traceEntries() {
+      return baseLogStore.traceEntries();
+    },
+    rawEvents() {
+      return baseLogStore.rawEvents();
+    },
+    conversationMessages() {
+      return baseLogStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
 }

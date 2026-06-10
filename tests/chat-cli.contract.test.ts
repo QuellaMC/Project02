@@ -28,6 +28,19 @@ type TraceSummary = {
   readonly traceId: string;
   readonly status: 'completed' | 'rejected';
   readonly steps: readonly string[];
+  readonly provider?: {
+    readonly name: string;
+    readonly model?: string;
+    readonly responseStatus?: number;
+    readonly errorCode?: string;
+    readonly errorMessage?: string;
+  };
+  readonly toolCalls?: readonly string[];
+  readonly characterStatePatch?: {
+    readonly status: string;
+    readonly appliedChangeCount?: number;
+    readonly rejectionReason?: string;
+  };
   readonly error?: string;
 };
 
@@ -82,6 +95,113 @@ describe('node src/chat-cli.ts', () => {
     });
   });
 
+  it('fails clearly when the NVIDIA provider is selected without an API key', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const result = await runCommand(
+      'node',
+      [
+        'src/chat-cli.ts',
+        '--store',
+        storeRoot,
+        '--new-session',
+        createTempSessionId(),
+        '--provider',
+        'nvidia'
+      ],
+      'hello\n',
+      {
+        NVIDIA_API_KEY: '',
+        PROJECT02_ROLE_MODEL_PROVIDER: ''
+      }
+    );
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: 'Mira is ready.\nYou: ',
+      stderr: 'Error: NVIDIA provider requires NVIDIA_API_KEY.\n'
+    });
+  });
+
+  it('emits provider error status in trace mode when NVIDIA configuration is missing', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const result = await runCommand(
+      'node',
+      [
+        'src/chat-cli.ts',
+        '--store',
+        storeRoot,
+        '--new-session',
+        createTempSessionId(),
+        '--trace',
+        '--provider',
+        'nvidia'
+      ],
+      'hello\n',
+      {
+        NVIDIA_API_KEY: '',
+        PROJECT02_ROLE_MODEL_PROVIDER: ''
+      }
+    );
+    const traceSummaries = parseTraceSummaries(result.stderr);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('Mira is ready.\nYou: ');
+    expect(traceSummaries).toEqual([
+      expect.objectContaining({
+        status: 'rejected',
+        provider: {
+          name: 'nvidia',
+          model: 'meta/llama-3.1-70b-instruct',
+          errorCode: 'missing_api_key',
+          errorMessage: 'NVIDIA provider requires NVIDIA_API_KEY.'
+        },
+        characterStatePatch: {
+          status: 'not_requested'
+        },
+        error: 'NVIDIA provider requires NVIDIA_API_KEY.'
+      })
+    ]);
+  });
+
+  it('uses the provider environment default but lets the CLI flag choose local', async () => {
+    const envSelected = await runCommand(
+      'node',
+      ['src/chat-cli.ts', '--store', await createTempStoreRoot()],
+      'hello\n',
+      {
+        NVIDIA_API_KEY: '',
+        PROJECT02_ROLE_MODEL_PROVIDER: 'nvidia'
+      }
+    );
+    const cliSelected = await runCommand(
+      'node',
+      [
+        'src/chat-cli.ts',
+        '--store',
+        await createTempStoreRoot(),
+        '--provider',
+        'local'
+      ],
+      'hello\n/exit\n',
+      {
+        NVIDIA_API_KEY: '',
+        PROJECT02_ROLE_MODEL_PROVIDER: 'nvidia'
+      }
+    );
+
+    expect(envSelected.stderr).toBe(
+      'Error: NVIDIA provider requires NVIDIA_API_KEY.\n'
+    );
+    expect(cliSelected).toEqual({
+      exitCode: 0,
+      stdout:
+        'Mira is ready.\n' +
+        "You: Mira: I'm here. Tell me what you need.\n" +
+        'You: ',
+      stderr: ''
+    });
+  });
+
   it('exits cleanly when /exit is the first input', async () => {
     const result = await runFreshChatCli('/exit\n');
 
@@ -122,11 +242,19 @@ describe('node src/chat-cli.ts', () => {
     expect(traceSummaries).toEqual([
       expect.objectContaining({
         status: 'completed',
-        steps: successfulTraceSteps
+        steps: successfulTraceSteps,
+        toolCalls: ['visible_reply'],
+        characterStatePatch: {
+          status: 'not_requested'
+        }
       }),
       expect.objectContaining({
         status: 'completed',
-        steps: successfulTraceSteps
+        steps: successfulTraceSteps,
+        toolCalls: ['visible_reply'],
+        characterStatePatch: {
+          status: 'not_requested'
+        }
       })
     ]);
     expect(traceSummaries[0]?.eventId).toMatch(/^evt_/u);
@@ -156,7 +284,11 @@ describe('node src/chat-cli.ts', () => {
       }),
       expect.objectContaining({
         status: 'completed',
-        steps: successfulTraceSteps
+        steps: successfulTraceSteps,
+        toolCalls: ['visible_reply'],
+        characterStatePatch: {
+          status: 'not_requested'
+        }
       })
     ]);
   });
@@ -561,10 +693,15 @@ function createTempSessionId(): string {
 async function runCommand(
   command: string,
   args: readonly string[],
-  stdin: string
+  stdin: string,
+  env: NodeJS.ProcessEnv = {}
 ): Promise<CommandResult> {
   const child = spawn(command, args, {
     cwd: projectRoot,
+    env: {
+      ...process.env,
+      ...env
+    },
     stdio: ['pipe', 'pipe', 'pipe']
   });
 

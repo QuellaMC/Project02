@@ -72,15 +72,20 @@ describe('MVP-005 commit/effects validation', () => {
       traceId: event.traceId,
       sessionId: 'local-session',
       rawOutputText: JSON.stringify({
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: "I'm here. Tell me what you need."
-        }
+        version: 'mvp-006.tool_calls.v1',
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: "I'm here. Tell me what you need."
+            }
+          }
+        ]
       })
     });
     expect(
-      visibleReplyCommitted.roleModelIOSnapshot?.inputEnvelope.allowedActions
-    ).toEqual([roleModelVisibleReplyActionName]);
+      visibleReplyCommitted.roleModelIOSnapshot?.inputEnvelope.allowedTools
+    ).toEqual([roleModelVisibleReplyActionName, 'character_state.patch']);
     expect(
       visibleReplyCommitted.roleModelIOSnapshot?.inputEnvelope.decisionContext
         .recentVisibleMessages
@@ -88,10 +93,15 @@ describe('MVP-005 commit/effects validation', () => {
     expect(visibleReplyCommitted.parsedRoleModelDecisionSnapshot?.result).toEqual({
       status: 'accepted',
       decision: {
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: "I'm here. Tell me what you need."
-        }
+        version: 'mvp-006.tool_calls.v1',
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: "I'm here. Tell me what you need."
+            }
+          }
+        ]
       }
     });
     expect(visibleReplyCommitted.commitValidation?.result).toEqual({

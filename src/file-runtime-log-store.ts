@@ -1,6 +1,11 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 import {
+  createDefaultCharacterRuntimeState,
+  decodeCharacterRuntimeState,
+  type CharacterRuntimeState
+} from './character-state.ts';
+import {
   ConversationRehydrationError,
   selectRecentVisibleMessages,
   type VisibleMessage,
@@ -234,6 +239,10 @@ function assertDurableRuntimeSessionEvidence(options: {
   if (options.mode === 'public') {
     assertRawEventTurnTerminalCompleteness(rawEvents);
     assertCompleteConversationLog(conversationMessages);
+    assertCharacterStateFileMatchesAcceptedPatchEvidence({
+      paths: options.paths,
+      rawEvents
+    });
   }
 
   assertRawEventVisibleReferencesMatchConversationMessages({
@@ -268,6 +277,96 @@ function assertDurableRuntimeSessionEvidence(options: {
     ),
     rawEvents
   });
+}
+
+function assertCharacterStateFileMatchesAcceptedPatchEvidence(options: {
+  readonly paths: LocalRuntimeSessionPaths;
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): void {
+  const expectedState = expectedCharacterStateFromAcceptedPatchEvidence(
+    options.rawEvents
+  );
+  const storedState = readDurableCharacterState(options.paths);
+
+  if (!characterRuntimeStatesEqual(storedState, expectedState)) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Stored character state does not match accepted character state patch evidence.'
+    );
+  }
+}
+
+function expectedCharacterStateFromAcceptedPatchEvidence(
+  rawEvents: readonly RawEventLogRecord[]
+): CharacterRuntimeState {
+  let expectedState = createDefaultCharacterRuntimeState();
+
+  for (const rawEvent of rawEvents) {
+    if (rawEvent.kind !== 'runtime_turn_completed') {
+      continue;
+    }
+
+    const result = rawEvent.characterStatePatchSnapshot?.result;
+
+    if (result?.status !== 'accepted') {
+      continue;
+    }
+
+    if (!characterRuntimeStatesEqual(result.before, expectedState)) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Accepted character state patch evidence does not match prior state evidence.'
+      );
+    }
+
+    expectedState = result.after;
+  }
+
+  return expectedState;
+}
+
+function readDurableCharacterState(
+  paths: LocalRuntimeSessionPaths
+): CharacterRuntimeState {
+  if (!existsSync(paths.characterStatePath)) {
+    return createDefaultCharacterRuntimeState();
+  }
+
+  try {
+    return decodeCharacterRuntimeState(
+      JSON.parse(readFileSync(paths.characterStatePath, 'utf8')) as unknown,
+      throwMalformedCharacterStateRecord
+    );
+  } catch (error: unknown) {
+    if (error instanceof LocalRuntimeStorageContractError) {
+      throw error;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Stored character state is not valid JSON.'
+    );
+  }
+}
+
+function throwMalformedCharacterStateRecord(field: string): never {
+  throw new LocalRuntimeStorageContractError(
+    'malformed_record',
+    `Stored local runtime field "${field}" is malformed.`
+  );
+}
+
+function characterRuntimeStatesEqual(
+  left: CharacterRuntimeState,
+  right: CharacterRuntimeState
+): boolean {
+  return (
+    left.current.mood === right.current.mood &&
+    left.current.energy === right.current.energy &&
+    left.current.attention === right.current.attention &&
+    left.current.currentActivity === right.current.currentActivity &&
+    left.current.socialOrientation === right.current.socialOrientation
+  );
 }
 
 function nextRuntimeEventIdentity(options: {

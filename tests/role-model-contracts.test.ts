@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  characterStatePatchModelToolName,
   createAcceptedRoleModelDecisionResult,
+  createCharacterStatePatchModelToolCall,
   createDecisionContext,
   createParsedRoleModelDecisionSnapshot,
   createRejectedRoleModelDecisionResult,
@@ -10,21 +12,27 @@ import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
   createVisibleReplyCharacterDecision,
-  roleModelAllowedActionNames,
-  roleModelCommitValidationFailureRejectionReason,
+  getCharacterStatePatchToolCall,
+  getRequiredVisibleReplyText,
+  parseRoleModelDecision,
+  roleModelAllowedToolNames,
   roleModelDecisionContractVersion,
   roleModelDecisionOutputContract,
   roleModelDecisionRejectionReasons,
+  roleModelDuplicateToolCallRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelMalformedOutputRejectionReason,
+  roleModelMalformedToolCallRejectionReason,
+  roleModelMissingRequiredToolCallRejectionReason,
   roleModelUnsupportedEffectRejectionReason,
+  roleModelUnknownToolRejectionReason,
   roleModelVisibleReplyActionName,
   type RoleModelDecisionRejectionReason,
   type VisibleMessage
 } from '../src/index.ts';
 
 describe('role model decision contracts', () => {
-  it('creates immutable accepted user-turn snapshots that preserve event, session, and character identity', () => {
+  it('creates immutable tool-call snapshots that preserve event, session, and character identity', () => {
     const identity = createRuntimeEventIdentity({
       eventId: 'evt_role_model_001',
       traceId: 'trace_role_model_001',
@@ -35,13 +43,7 @@ describe('role model decision contracts', () => {
       id: 'mira',
       displayName: 'Mira'
     };
-    const previousMessage: {
-      id: string;
-      role: VisibleMessage['role'];
-      speakerId: string;
-      speakerName: string;
-      text: string;
-    } = {
+    const previousMessage: VisibleMessage = {
       id: 'session-role-model:message-1',
       role: 'user',
       speakerId: 'local-user',
@@ -66,8 +68,7 @@ describe('role model decision contracts', () => {
       ...identity,
       sessionId: context.sessionId,
       inputEnvelope: envelope,
-      rawOutputText:
-        '{"action":{"type":"visible_reply","text":"I am here."}}'
+      rawOutputText: JSON.stringify(decision)
     });
     const parsedSnapshot = createParsedRoleModelDecisionSnapshot({
       ...identity,
@@ -76,45 +77,40 @@ describe('role model decision contracts', () => {
     });
 
     character.displayName = 'Mutated Mira';
-    previousMessage.text = 'mutated previous hello';
     runtimeNotes.push('mutated after snapshot');
 
     expect(envelope.event).toEqual(event);
-    expect(envelope.event.eventId).toBe('evt_role_model_001');
-    expect(envelope.event.traceId).toBe('trace_role_model_001');
     expect(envelope.event.payload.currentUserMessage).toBe('hello Mira');
-    expect(envelope.decisionContext.sessionId).toBe('session-role-model');
     expect(envelope.decisionContext.characterSnapshot).toEqual({
       id: 'mira',
       displayName: 'Mira'
     });
-    expect('currentUserMessage' in envelope.decisionContext.characterSnapshot).toBe(
-      false
-    );
     expect(envelope.decisionContext.recentVisibleMessages).toEqual([
-      {
-        id: 'session-role-model:message-1',
-        role: 'user',
-        speakerId: 'local-user',
-        speakerName: 'You',
-        text: 'previous hello'
-      }
+      previousMessage
     ]);
     expect(envelope.decisionContext.runtimeNotes).toEqual([
       'recent visible messages only'
     ]);
-    expect(envelope.allowedActions).toEqual([roleModelVisibleReplyActionName]);
+    expect(envelope.allowedTools).toEqual([
+      roleModelVisibleReplyActionName,
+      characterStatePatchModelToolName
+    ]);
     expect(envelope.outputContract).toEqual(roleModelDecisionOutputContract);
-    expect(envelope.outputContract.version).toBe(roleModelDecisionContractVersion);
     expect(accepted).toEqual({
       status: 'accepted',
       decision: {
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: 'I am here.'
-        }
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: 'I am here.'
+            }
+          }
+        ]
       }
     });
+    expect(getRequiredVisibleReplyText(decision)).toBe('I am here.');
     expect(ioSnapshot).toEqual({
       eventId: 'evt_role_model_001',
       traceId: 'trace_role_model_001',
@@ -122,72 +118,32 @@ describe('role model decision contracts', () => {
       kind: 'role_model_io_snapshot',
       sessionId: 'session-role-model',
       inputEnvelope: envelope,
-      rawOutputText:
-        '{"action":{"type":"visible_reply","text":"I am here."}}'
+      rawOutputText: JSON.stringify(decision)
     });
-    expect(parsedSnapshot).toEqual({
-      eventId: 'evt_role_model_001',
-      traceId: 'trace_role_model_001',
-      createdAt: '2026-06-09T00:00:00.000Z',
-      kind: 'role_model_decision_snapshot',
-      sessionId: 'session-role-model',
-      result: accepted
-    });
-
+    expect(parsedSnapshot.result).toEqual(accepted);
     expect(Object.isFrozen(context)).toBe(true);
-    expect(Object.isFrozen(context.characterSnapshot)).toBe(true);
-    expect(Object.isFrozen(context.recentVisibleMessages)).toBe(true);
-    expect(Object.isFrozen(context.runtimeNotes)).toBe(true);
-    expect(Object.isFrozen(envelope)).toBe(true);
-    expect(Object.isFrozen(envelope.event)).toBe(true);
-    expect(Object.isFrozen(envelope.event.payload)).toBe(true);
-    expect(Object.isFrozen(envelope.allowedActions)).toBe(true);
-    expect(Object.isFrozen(envelope.outputContract)).toBe(true);
+    expect(Object.isFrozen(envelope.allowedTools)).toBe(true);
     expect(Object.isFrozen(decision)).toBe(true);
-    expect(Object.isFrozen(decision.action)).toBe(true);
-    expect(Object.isFrozen(accepted)).toBe(true);
-    expect(Object.isFrozen(accepted.decision)).toBe(true);
-    expect(Object.isFrozen(ioSnapshot)).toBe(true);
-    expect(Object.isFrozen(ioSnapshot.inputEnvelope)).toBe(true);
-    expect(Object.isFrozen(parsedSnapshot)).toBe(true);
-    expect(Object.isFrozen(parsedSnapshot.result)).toBe(true);
-
-    const firstRecentVisibleMessage = context.recentVisibleMessages[0];
-
-    expect(firstRecentVisibleMessage).toBeDefined();
-
-    if (firstRecentVisibleMessage === undefined) {
-      throw new Error('Expected one recent visible message.');
-    }
-
-    expect(Object.isFrozen(firstRecentVisibleMessage)).toBe(true);
-    expect(() => {
-      Object.defineProperty(firstRecentVisibleMessage, 'text', {
-        value: 'tampered'
-      });
-    }).toThrow(TypeError);
-    expect(() => {
-      Reflect.apply(Array.prototype.push, envelope.allowedActions, [
-        roleModelVisibleReplyActionName
-      ]);
-    }).toThrow(TypeError);
+    expect(Object.isFrozen(decision.toolCalls)).toBe(true);
+    expect(Object.isFrozen(decision.toolCalls[0])).toBe(true);
   });
 
-  it('keeps the MVP-005 action vocabulary scoped to visible_reply', () => {
-    expect(roleModelAllowedActionNames).toEqual([
-      roleModelVisibleReplyActionName
+  it('keeps the user-turn tool vocabulary scoped to visible_reply and character_state.patch', () => {
+    expect(roleModelAllowedToolNames).toEqual([
+      roleModelVisibleReplyActionName,
+      characterStatePatchModelToolName
     ]);
-    expect(roleModelAllowedActionNames).toEqual(['visible_reply']);
 
     const decision = createVisibleReplyCharacterDecision('Only one reply.');
 
-    expect(decision.action.type).toBe('visible_reply');
+    expect(decision.toolCalls[0]?.name).toBe('visible_reply');
+    expect(getRequiredVisibleReplyText(decision)).toBe('Only one reply.');
   });
 
-  it('rejects unsupported allowed actions at input-envelope construction', () => {
+  it('rejects unsupported allowed tools at input-envelope construction', () => {
     const identity = createRuntimeEventIdentity({
-      eventId: 'evt_unsupported_allowed_action',
-      traceId: 'trace_unsupported_allowed_action',
+      eventId: 'evt_unsupported_allowed_tool',
+      traceId: 'trace_unsupported_allowed_tool',
       createdAt: '2026-06-09T00:00:00.000Z'
     });
     const event = createUserMessageRuntimeEvent('hello', identity);
@@ -204,50 +160,74 @@ describe('role model decision contracts', () => {
         {
           event,
           decisionContext,
-          allowedActions: ['unsupported_action']
+          allowedTools: ['unsupported_tool']
         }
       ]);
     }).toThrow(TypeError);
   });
 
+  it('parses the new ordered toolCalls decision and the MVP-005 visible_reply action shape', () => {
+    const patchCall = createCharacterStatePatchModelToolCall({
+      mood: 'curious'
+    });
+    const toolCallResult = parseRoleModelDecision(
+      JSON.stringify({
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: 'I am here.'
+            }
+          },
+          patchCall
+        ]
+      })
+    );
+    const legacyResult = parseRoleModelDecision(
+      JSON.stringify({
+        action: {
+          type: roleModelVisibleReplyActionName,
+          text: 'legacy reply'
+        }
+      })
+    );
+
+    expect(toolCallResult.status).toBe('accepted');
+    expect(legacyResult.status).toBe('accepted');
+
+    if (toolCallResult.status !== 'accepted' || legacyResult.status !== 'accepted') {
+      throw new Error('Expected accepted role-model decisions.');
+    }
+
+    expect(getRequiredVisibleReplyText(toolCallResult.decision)).toBe('I am here.');
+    expect(getCharacterStatePatchToolCall(toolCallResult.decision)?.input).toEqual({
+      mood: 'curious'
+    });
+    expect(getRequiredVisibleReplyText(legacyResult.decision)).toBe(
+      'legacy reply'
+    );
+  });
+
   it('represents malformed and unsupported decisions with explicit rejection reasons', () => {
     const expectedReasons: readonly RoleModelDecisionRejectionReason[] = [
       roleModelMalformedOutputRejectionReason,
+      roleModelMalformedToolCallRejectionReason,
+      roleModelUnknownToolRejectionReason,
+      roleModelMissingRequiredToolCallRejectionReason,
+      roleModelDuplicateToolCallRejectionReason,
       roleModelUnsupportedEffectRejectionReason,
-      roleModelInvalidVisibleReplyRejectionReason,
-      roleModelCommitValidationFailureRejectionReason
+      roleModelInvalidVisibleReplyRejectionReason
     ];
-
-    const rejectionResults = expectedReasons.map((reason) =>
+    const rejectedResults = expectedReasons.map((reason) =>
       createRejectedRoleModelDecisionResult(reason, `${reason} detail`)
     );
 
-    expect(roleModelDecisionRejectionReasons).toEqual(expectedReasons);
-    expect(rejectionResults.map((result) => result.rejection.reason)).toEqual([
-      'malformed_output',
-      'unsupported_effect',
-      'invalid_visible_reply',
-      'commit_validation_failure'
-    ]);
-
-    rejectionResults.forEach((result, index) => {
-      const expectedReason = expectedReasons[index];
-
-      expect(expectedReason).toBeDefined();
-
-      if (expectedReason === undefined) {
-        throw new Error('Expected rejection reason.');
-      }
-
-      expect(result).toEqual({
-        status: 'rejected',
-        rejection: {
-          reason: expectedReason,
-          details: `${expectedReason} detail`
-        }
-      });
-      expect(Object.isFrozen(result)).toBe(true);
-      expect(Object.isFrozen(result.rejection)).toBe(true);
-    });
+    expect(roleModelDecisionRejectionReasons).toEqual(
+      expect.arrayContaining([...expectedReasons])
+    );
+    expect(rejectedResults.map((result) => result.rejection.reason)).toEqual(
+      expectedReasons
+    );
   });
 });

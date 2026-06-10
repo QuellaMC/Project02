@@ -3,10 +3,14 @@ import { pathToFileURL } from 'node:url';
 
 import {
   createConversationSession,
+  createFileCharacterStateStore,
   createFileRuntimeLogStore,
+  createInMemoryCharacterStateStore,
   createLocalRuntimeSessionStore,
   createRuntimeEventIdentity,
   createLocalRuntimeStorageLayout,
+  createNvidiaRoleModelProviderAdapter,
+  createNvidiaRoleModelProviderConfigFromEnv,
   createRuntimeLogStore,
   createUserMessageRuntimeEvent,
   LocalRuntimeStorageContractError,
@@ -16,9 +20,12 @@ import {
   runLocalUserMessageEvent,
   RuntimeEventInputError,
   type CharacterAgent,
+  type CharacterStateStore,
   type ConversationSession,
   type LocalRuntimeUserMessageInputRejectedResult,
   type LocalRuntimeUserMessageResult,
+  type RoleModelAdapter,
+  type RawEventLogRecord,
   type RuntimeLogStore,
   type RuntimeTraceEntry,
   type RuntimeTraceStepName,
@@ -36,12 +43,17 @@ type ChatCliOptions = {
   readonly stderr: NodeJS.WritableStream;
   readonly traceMode?: boolean;
   readonly agent?: CharacterAgent;
+  readonly characterStateStore?: CharacterStateStore;
+  readonly roleModelAdapter?: RoleModelAdapter;
   readonly session?: ConversationSession;
   readonly logStore?: RuntimeLogStore;
 };
 
+type ChatProviderName = 'local' | 'nvidia';
+
 type ChatCliArgs = {
   readonly traceMode: boolean;
+  readonly provider?: ChatProviderName;
   readonly storeRoot?: string;
   readonly sessionId?: string;
   readonly newSessionId?: string;
@@ -52,8 +64,32 @@ type ChatTraceSummary = {
   readonly traceId: string;
   readonly status: RuntimeTurnStatus;
   readonly steps: readonly RuntimeTraceStepName[];
+  readonly provider?: ChatTraceProviderSummary;
+  readonly toolCalls?: readonly string[];
+  readonly characterStatePatch?: ChatTraceCharacterStatePatchSummary;
   readonly error?: string;
 };
+
+type ChatTraceProviderSummary = {
+  readonly name: 'local' | 'nvidia';
+  readonly model?: string;
+  readonly responseStatus?: number;
+  readonly errorCode?: string;
+  readonly errorMessage?: string;
+};
+
+type ChatTraceCharacterStatePatchSummary =
+  | {
+      readonly status: 'accepted';
+      readonly appliedChangeCount: number;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly rejectionReason: string;
+    }
+  | {
+      readonly status: 'not_requested';
+    };
 
 type CompletedChatRuntimeTurn = {
   readonly status: 'completed';
@@ -77,12 +113,14 @@ type TraceIdentity = {
 
 type DurableChatRuntime = {
   readonly session: ConversationSession;
+  readonly characterStateStore: CharacterStateStore;
   readonly logStore: RuntimeLogStore;
 };
 
 const exitCommand = '/exit';
 const promptText = 'You: ';
 const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
+const roleModelProviderEnvName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 
 class ChatCliUsageError extends Error {
   constructor(message: string) {
@@ -100,10 +138,12 @@ export async function runChatCliFromArgs(
 
     validateDurableSessionArgs(parsedArgs);
     const durableRuntime = await createDurableChatRuntime(parsedArgs);
+    const roleModelAdapter = createSelectedRoleModelAdapter(parsedArgs);
 
     return await runChatCli({
       ...options,
       ...durableRuntime,
+      ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
       traceMode: options.traceMode === true || parsedArgs.traceMode
     });
   } catch (error: unknown) {
@@ -122,6 +162,8 @@ export async function runChatCliFromArgs(
 export async function runChatCli(options: ChatCliOptions): Promise<number> {
   const session = options.session ?? createConversationSession();
   const logStore = options.logStore ?? createRuntimeLogStore();
+  const characterStateStore =
+    options.characterStateStore ?? createInMemoryCharacterStateStore();
   const lines = createInterface({
     input: options.stdin,
     crlfDelay: Infinity,
@@ -141,9 +183,13 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
       try {
         const result = await handleUserMessageThroughRuntime({
           session,
+          characterStateStore,
           logStore,
           line,
-          ...(options.agent === undefined ? {} : { agent: options.agent })
+          ...(options.agent === undefined ? {} : { agent: options.agent }),
+          ...(options.roleModelAdapter === undefined
+            ? {}
+            : { roleModelAdapter: options.roleModelAdapter })
         });
 
         if (result.status === 'completed') {
@@ -184,9 +230,11 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
 
 type HandleUserMessageThroughRuntimeOptions = {
   readonly session: ConversationSession;
+  readonly characterStateStore: CharacterStateStore;
   readonly logStore: RuntimeLogStore;
   readonly line: string;
   readonly agent?: CharacterAgent;
+  readonly roleModelAdapter?: RoleModelAdapter;
 };
 
 async function handleUserMessageThroughRuntime(
@@ -201,9 +249,13 @@ async function handleUserMessageThroughRuntime(
       const result = await runLocalUserMessageEvent({
         event,
         session: options.session,
+        characterStateStore: options.characterStateStore,
         logStore: options.logStore,
         rawInput: options.line,
-        ...(options.agent === undefined ? {} : { agent: options.agent })
+        ...(options.agent === undefined ? {} : { agent: options.agent }),
+        ...(options.roleModelAdapter === undefined
+          ? {}
+          : { roleModelAdapter: options.roleModelAdapter })
       });
 
       return mapRuntimeResult(result);
@@ -241,7 +293,9 @@ function mapRuntimeResult(result: LocalRuntimeUserMessageResult): ChatRuntimeTur
       traceSummary: createTraceSummary(
         result.event,
         'completed',
-        result.traceEntries
+        result.traceEntries,
+        undefined,
+        result.rawEvent
       )
     };
   }
@@ -254,7 +308,8 @@ function mapRuntimeResult(result: LocalRuntimeUserMessageResult): ChatRuntimeTur
       result.event,
       'rejected',
       result.traceEntries,
-      result.message
+      result.message,
+      result.rawEvent
     )
   };
 }
@@ -270,7 +325,8 @@ function mapInputRejectionResult(
       result.identity,
       'rejected',
       result.traceEntries,
-      result.message
+      result.message,
+      result.rawEvent
     )
   };
 }
@@ -310,15 +366,91 @@ function createTraceSummary(
   identity: TraceIdentity,
   status: RuntimeTurnStatus,
   entries: readonly RuntimeTraceEntry[],
-  error?: string
+  error?: string,
+  rawEvent?: RawEventLogRecord
 ): ChatTraceSummary {
   return Object.freeze({
     eventId: identity.eventId,
     traceId: identity.traceId,
     status,
     steps: Object.freeze(entries.map((entry) => entry.step)),
+    ...traceProviderSummaryOption(rawEvent),
+    ...traceToolCallsOption(rawEvent),
+    ...traceCharacterStatePatchSummaryOption(rawEvent),
     ...(error === undefined ? {} : { error })
   } satisfies ChatTraceSummary);
+}
+
+function traceProviderSummaryOption(
+  rawEvent: RawEventLogRecord | undefined
+): { readonly provider?: ChatTraceProviderSummary } {
+  const providerMetadata = rawEvent?.roleModelIOSnapshot?.providerMetadata;
+
+  if (providerMetadata === undefined) {
+    return {};
+  }
+
+  return {
+    provider: Object.freeze({
+      name: providerMetadata.provider,
+      ...(providerMetadata.model === undefined
+        ? {}
+        : { model: providerMetadata.model }),
+      ...(providerMetadata.response?.status === undefined
+        ? {}
+        : { responseStatus: providerMetadata.response.status }),
+      ...(providerMetadata.error === undefined
+        ? {}
+        : {
+            errorCode: providerMetadata.error.code,
+            errorMessage: providerMetadata.error.message
+          })
+    } satisfies ChatTraceProviderSummary)
+  };
+}
+
+function traceToolCallsOption(
+  rawEvent: RawEventLogRecord | undefined
+): { readonly toolCalls?: readonly string[] } {
+  const result = rawEvent?.parsedRoleModelDecisionSnapshot?.result;
+
+  if (result?.status !== 'accepted') {
+    return {};
+  }
+
+  return {
+    toolCalls: Object.freeze(result.decision.toolCalls.map((call) => call.name))
+  };
+}
+
+function traceCharacterStatePatchSummaryOption(
+  rawEvent: RawEventLogRecord | undefined
+): { readonly characterStatePatch?: ChatTraceCharacterStatePatchSummary } {
+  const result = rawEvent?.characterStatePatchSnapshot?.result;
+
+  if (result === undefined) {
+    return {
+      characterStatePatch: Object.freeze({
+        status: 'not_requested'
+      } satisfies ChatTraceCharacterStatePatchSummary)
+    };
+  }
+
+  if (result.status === 'accepted') {
+    return {
+      characterStatePatch: Object.freeze({
+        status: 'accepted',
+        appliedChangeCount: result.appliedChanges.length
+      } satisfies ChatTraceCharacterStatePatchSummary)
+    };
+  }
+
+  return {
+    characterStatePatch: Object.freeze({
+      status: 'rejected',
+      rejectionReason: result.rejection.reason
+    } satisfies ChatTraceCharacterStatePatchSummary)
+  };
 }
 
 function writeTraceSummary(
@@ -330,6 +462,7 @@ function writeTraceSummary(
 
 function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
   let traceMode = false;
+  let provider: ChatProviderName | undefined;
   let storeRoot: string | undefined;
   let sessionId: string | undefined;
   let newSessionId: string | undefined;
@@ -347,6 +480,16 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
 
     if (arg === '--trace') {
       traceMode = true;
+      continue;
+    }
+
+    if (arg === '--provider') {
+      if (provider !== undefined) {
+        throw new ChatCliUsageError('--provider can only be provided once.');
+      }
+
+      provider = parseProviderName(readFlagValue(args, index, '--provider'));
+      index += 1;
       continue;
     }
 
@@ -389,10 +532,57 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
 
   return {
     traceMode,
+    ...providerOption(provider ?? providerFromEnvironment(process.env)),
     ...(storeRoot === undefined ? {} : { storeRoot }),
     ...(sessionId === undefined ? {} : { sessionId }),
     ...(newSessionId === undefined ? {} : { newSessionId })
   } satisfies ChatCliArgs;
+}
+
+function parseProviderName(value: string): ChatProviderName {
+  if (value === 'local' || value === 'nvidia') {
+    return value;
+  }
+
+  throw new ChatCliUsageError(
+    '--provider must be either "local" or "nvidia".'
+  );
+}
+
+function providerFromEnvironment(
+  env: NodeJS.ProcessEnv
+): ChatProviderName | undefined {
+  const value = env[roleModelProviderEnvName];
+
+  if (value === undefined || value.length === 0) {
+    return undefined;
+  }
+
+  try {
+    return parseProviderName(value);
+  } catch {
+    throw new ChatCliUsageError(
+      `${roleModelProviderEnvName} must be either "local" or "nvidia".`
+    );
+  }
+}
+
+function providerOption(provider: ChatProviderName | undefined): {
+  readonly provider?: ChatProviderName;
+} {
+  return provider === undefined ? {} : { provider };
+}
+
+function createSelectedRoleModelAdapter(
+  args: ChatCliArgs
+): RoleModelAdapter | undefined {
+  if (args.provider !== 'nvidia') {
+    return undefined;
+  }
+
+  return createNvidiaRoleModelProviderAdapter(
+    createNvidiaRoleModelProviderConfigFromEnv()
+  );
 }
 
 function readFlagValue(args: readonly string[], index: number, flag: string): string {
@@ -461,6 +651,10 @@ async function createDurableChatRuntime(
 
   return Object.freeze({
     session: await sessionStore.rehydrateConversationSession(sessionId),
+    characterStateStore: createFileCharacterStateStore({
+      ...storageOptions,
+      sessionId
+    }),
     logStore: createFileRuntimeLogStore({
       ...storageOptions,
       sessionId

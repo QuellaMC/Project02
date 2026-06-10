@@ -9,7 +9,9 @@ import {
 } from '../src/conversation.ts';
 import {
   createDecisionContext,
+  getRequiredVisibleReplyText,
   createRoleModelInputEnvelope,
+  roleModelDecisionContractVersion,
   roleModelMalformedOutputRejectionReason,
   roleModelUnsupportedEffectRejectionReason,
   roleModelVisibleReplyActionName
@@ -33,10 +35,15 @@ describe('role model loop', () => {
     });
     const expectedReply = "I'm here. Tell me what you need.";
     const expectedRawOutputText = JSON.stringify({
-      action: {
-        type: roleModelVisibleReplyActionName,
-        text: expectedReply
-      }
+      version: roleModelDecisionContractVersion,
+      toolCalls: [
+        {
+          name: roleModelVisibleReplyActionName,
+          input: {
+            text: expectedReply
+          }
+        }
+      ]
     });
 
     const result = await runRoleModelLoop({
@@ -50,10 +57,7 @@ describe('role model loop', () => {
       throw new Error('Expected accepted role model result.');
     }
 
-    expect(result.decision.action).toEqual({
-      type: roleModelVisibleReplyActionName,
-      text: expectedReply
-    });
+    expect(getRequiredVisibleReplyText(result.decision)).toBe(expectedReply);
     expect(result.inputEnvelope.event).toEqual(event);
     expect(result.inputEnvelope.event.payload.currentUserMessage).toBe('hello');
     expect(result.inputEnvelope.decisionContext).toEqual(decisionContext);
@@ -117,12 +121,12 @@ describe('role model loop', () => {
       throw new Error('Expected accepted role model result.');
     }
 
-    expect(result.decision.action).toEqual({
-      type: roleModelVisibleReplyActionName,
-      text: 'I remember you said "are you there?" Stay with me for a minute.'
-    });
+    expect(getRequiredVisibleReplyText(result.decision)).toBe(
+      'I remember you said "are you there?" Stay with me for a minute.'
+    );
     expect(JSON.parse(result.ioSnapshot.rawOutputText)).toEqual({
-      action: result.decision.action
+      version: roleModelDecisionContractVersion,
+      toolCalls: result.decision.toolCalls
     });
   });
 
@@ -296,19 +300,29 @@ describe('role model loop', () => {
     expect(emptyReplyResult).toEqual({
       status: 'accepted',
       decision: {
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: ''
-        }
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: ''
+            }
+          }
+        ]
       }
     });
     expect(multilineReplyResult).toEqual({
       status: 'accepted',
       decision: {
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: 'line one\nline two'
-        }
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: 'line one\nline two'
+            }
+          }
+        ]
       }
     });
   });

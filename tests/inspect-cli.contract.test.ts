@@ -7,12 +7,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   createConversationSession,
+  createFileCharacterStateStore,
   createFileRuntimeLogStore,
   createLocalRuntimeSessionPaths,
   createLocalRuntimeSessionStore,
   createLocalRuntimeStorageLayout,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
+  roleModelDecisionContractVersion,
   roleModelMalformedOutputRejectionReason,
   roleModelVisibleReplyActionName,
   runLocalUserMessageEvent
@@ -56,6 +58,14 @@ type InspectSessionOutput = {
       readonly text: string;
     }[];
     readonly roleModelEvidence?: InspectRoleModelEvidence;
+    readonly characterStatePatchEvidence?: {
+      readonly status: 'accepted' | 'rejected';
+      readonly patch?: unknown;
+      readonly before: unknown;
+      readonly after?: unknown;
+      readonly appliedChanges?: unknown;
+      readonly rejection?: unknown;
+    };
     readonly reason?: string;
   }[];
 };
@@ -63,7 +73,7 @@ type InspectSessionOutput = {
 type InspectRoleModelEvidence = {
   readonly input?: {
     readonly sessionId: string;
-    readonly allowedActions: readonly string[];
+    readonly allowedTools: readonly string[];
     readonly outputContractVersion: string;
     readonly currentUserMessage: string;
     readonly recentVisibleMessages: readonly {
@@ -80,10 +90,10 @@ type InspectRoleModelEvidence = {
   readonly parsedDecision?:
     | {
         readonly status: 'accepted';
-        readonly action: {
-          readonly type: 'visible_reply';
-          readonly text: string;
-        };
+        readonly toolCalls: readonly {
+          readonly name: string;
+          readonly input: Readonly<Record<string, unknown>>;
+        }[];
       }
     | {
         readonly status: 'rejected';
@@ -211,26 +221,38 @@ describe('node src/inspect-cli.ts', () => {
         roleModelEvidence: {
           input: {
             sessionId: 'mira-local',
-            allowedActions: [roleModelVisibleReplyActionName],
-            outputContractVersion: 'mvp-005.visible_reply.v1',
+            allowedTools: [
+              roleModelVisibleReplyActionName,
+              'character_state.patch'
+            ],
+            outputContractVersion: 'mvp-006.tool_calls.v1',
             currentUserMessage: 'hello',
             recentVisibleMessages: [],
             runtimeNotes: []
           },
           output: {
             rawOutputText: JSON.stringify({
-              action: {
-                type: roleModelVisibleReplyActionName,
-                text: "I'm here. Tell me what you need."
-              }
+              version: 'mvp-006.tool_calls.v1',
+              toolCalls: [
+                {
+                  name: roleModelVisibleReplyActionName,
+                  input: {
+                    text: "I'm here. Tell me what you need."
+                  }
+                }
+              ]
             })
           },
           parsedDecision: {
             status: 'accepted',
-            action: {
-              type: roleModelVisibleReplyActionName,
-              text: "I'm here. Tell me what you need."
-            }
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: "I'm here. Tell me what you need."
+                }
+              }
+            ]
           },
           commitValidation: {
             status: 'accepted',
@@ -239,6 +261,87 @@ describe('node src/inspect-cli.ts', () => {
         }
       }
     );
+  });
+
+  it('prints persisted character state patch evidence without replaying a turn', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const sessionStore = createLocalRuntimeSessionStore({ storeRoot });
+
+    await sessionStore.createSession({ sessionId: 'mira-local' });
+
+    const session = createConversationSession({ id: 'mira-local' });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const characterStateStore = createFileCharacterStateStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('hello', {
+        eventId: 'evt_inspect_state',
+        traceId: 'trace_inspect_state',
+        createdAt: '2026-06-10T00:00:00.000Z'
+      }),
+      session,
+      logStore,
+      characterStateStore,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'state reply'
+              }
+            },
+            {
+              name: 'character_state.patch',
+              input: {
+                mood: 'curious'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    const inspectResult = await runInspectCli([
+      '--store',
+      storeRoot,
+      '--session',
+      'mira-local'
+    ]);
+    const parsed = parseJson(inspectResult.stdout) as InspectSessionOutput;
+    const turn = parsed.turns[0];
+
+    expect(inspectResult.exitCode).toBe(0);
+    expect(turn?.characterStatePatchEvidence).toMatchObject({
+      status: 'accepted',
+      patch: {
+        mood: 'curious'
+      },
+      before: {
+        current: {
+          mood: 'steady'
+        }
+      },
+      after: {
+        current: {
+          mood: 'curious'
+        }
+      },
+      appliedChanges: [
+        {
+          field: 'mood',
+          before: 'steady',
+          after: 'curious'
+        }
+      ]
+    });
   });
 
   it('prints rejected-turn evidence without fake visible messages after the chat process exits', async () => {
@@ -332,8 +435,11 @@ describe('node src/inspect-cli.ts', () => {
       roleModelEvidence: {
         input: {
           sessionId: 'mira-local',
-          allowedActions: [roleModelVisibleReplyActionName],
-          outputContractVersion: 'mvp-005.visible_reply.v1',
+          allowedTools: [
+            roleModelVisibleReplyActionName,
+            'character_state.patch'
+          ],
+          outputContractVersion: 'mvp-006.tool_calls.v1',
           currentUserMessage: 'hello',
           recentVisibleMessages: [],
           runtimeNotes: []

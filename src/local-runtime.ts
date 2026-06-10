@@ -8,9 +8,20 @@ import {
   type CharacterTurnResult,
   type ConversationSession
 } from './conversation.ts';
+import {
+  createCharacterStatePatchSnapshot,
+  createInMemoryCharacterStateStore,
+  createLivingStateBrief,
+  planCharacterStatePatch,
+  type CharacterStatePatchSnapshot,
+  type CharacterStateStore
+} from './character-state.ts';
 import { buildUserTurnDecisionContext } from './decision-context.ts';
 import {
   createRejectedRoleModelDecisionResult,
+  getCharacterStatePatchToolCall,
+  getRequiredVisibleReplyText,
+  roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelDecisionRejection,
@@ -51,6 +62,7 @@ export type RunLocalUserMessageEventOptions = {
   readonly logStore: RuntimeLogStore;
   readonly rawInput?: string;
   readonly agent?: CharacterAgent;
+  readonly characterStateStore?: CharacterStateStore;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly characterTurnOptions?: CharacterTurnOptions;
   readonly committedAt?: string;
@@ -105,6 +117,7 @@ type RoleModelRawEvidence = {
   readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
+  readonly characterStatePatchSnapshot?: CharacterStatePatchSnapshot;
 };
 
 export function recordLocalUserMessageInputRejection(
@@ -295,8 +308,12 @@ async function runSerializedLocalUserMessageEvent(
       });
     }
 
+    const characterStateStore =
+      options.characterStateStore ?? createInMemoryCharacterStateStore();
+    const currentCharacterState = characterStateStore.readCurrentState();
     const decisionContext = buildUserTurnDecisionContext({
       session: options.session,
+      livingStateBrief: createLivingStateBrief(currentCharacterState),
       ...(options.characterTurnOptions?.recentMessageLimit === undefined
         ? {}
         : {
@@ -326,13 +343,53 @@ async function runSerializedLocalUserMessageEvent(
       });
     }
 
+    const statePatchToolCall = getCharacterStatePatchToolCall(
+      roleModelResult.decision
+    );
+    const statePatchPlan =
+      statePatchToolCall === undefined
+        ? undefined
+        : planCharacterStatePatch({
+            before: currentCharacterState,
+            patchInput: statePatchToolCall.input
+          });
+    const statePatchSnapshot =
+      statePatchPlan === undefined
+        ? undefined
+        : createCharacterStatePatchSnapshot({
+            ...identity,
+            sessionId: decisionContext.sessionId,
+            result: statePatchPlan
+          });
+
+    if (statePatchPlan?.status === 'rejected') {
+      const rejection = createRejectedRoleModelDecisionResult(
+        roleModelInvalidCharacterStatePatchRejectionReason,
+        statePatchPlan.rejection.details
+      ).rejection;
+      const commitValidation = createRejectedCommitValidationSnapshot({
+        identity,
+        rejection,
+        sessionId: decisionContext.sessionId
+      });
+
+      return appendRoleModelRejectedResult(rejection, {
+        ...roleModelEvidence,
+        commitValidation,
+        ...(statePatchSnapshot === undefined
+          ? {}
+          : { characterStatePatchSnapshot: statePatchSnapshot })
+      });
+    }
+
     let turn: CharacterTurnResult;
+    const visibleReplyText = getRequiredVisibleReplyText(roleModelResult.decision);
 
     try {
       turn = await runCharacterTurn(
         options.session,
         event.payload.currentUserMessage,
-        createFixedReplyAgent(roleModelResult.decision.action.text),
+        createFixedReplyAgent(visibleReplyText),
         options.characterTurnOptions
       );
     } catch (error: unknown) {
@@ -375,7 +432,10 @@ async function runSerializedLocalUserMessageEvent(
     });
     const acceptedEvidence = {
       ...roleModelEvidence,
-      commitValidation: acceptedCommitValidation
+      commitValidation: acceptedCommitValidation,
+      ...(statePatchSnapshot === undefined
+        ? {}
+        : { characterStatePatchSnapshot: statePatchSnapshot })
     } satisfies RoleModelRawEvidence;
     const conversationMessages = Object.freeze([
       options.logStore.appendConversationMessage({
@@ -399,6 +459,10 @@ async function runSerializedLocalUserMessageEvent(
       payloadSummary,
       ...acceptedEvidence
     });
+
+    if (statePatchPlan?.status === 'accepted') {
+      characterStateStore.writeCurrentState(statePatchPlan.after);
+    }
 
     const rawEvent = appendRawEvent({
       ...identity,

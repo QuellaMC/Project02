@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import {
   createAcceptedRoleModelDecisionResult,
   createDecisionContext,
+  createDefaultCharacterRuntimeState,
+  createLivingStateBrief,
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
@@ -107,6 +109,12 @@ describe('local runtime storage contract', () => {
         'sessions',
         'mira-local',
         'conversation.jsonl'
+      ),
+      characterStatePath: join(
+        '.project02-runtime',
+        'sessions',
+        'mira-local',
+        'character-state.json'
       )
     });
     expect(createLocalRuntimeStorageLayout({ storeRoot: '/tmp/project02-store' })).toEqual({
@@ -351,7 +359,31 @@ describe('local runtime storage contract', () => {
       'roleModelIOSnapshot.inputEnvelope'
     );
 
-    inputEnvelope['allowedActions'] = [];
+    inputEnvelope['allowedTools'] = [];
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects stored living-state brief text that does not match its current state', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const snapshot = requiredMutableRecord(
+      record['roleModelIOSnapshot'],
+      'roleModelIOSnapshot'
+    );
+    const inputEnvelope = requiredMutableRecord(
+      snapshot['inputEnvelope'],
+      'roleModelIOSnapshot.inputEnvelope'
+    );
+    const decisionContext = requiredMutableRecord(
+      inputEnvelope['decisionContext'],
+      'roleModelIOSnapshot.inputEnvelope.decisionContext'
+    );
+    const livingStateBrief = requiredMutableRecord(
+      decisionContext['livingStateBrief'],
+      'roleModelIOSnapshot.inputEnvelope.decisionContext.livingStateBrief'
+    );
+
+    livingStateBrief['text'] = 'mood=steady; energy=high; attention=present';
 
     expectMalformedRawEvent(record);
   });
@@ -423,10 +455,15 @@ describe('local runtime storage contract', () => {
         result: {
           status: 'accepted',
           decision: {
-            action: {
-              type: roleModelVisibleReplyActionName,
-              text: ''
-            }
+            version: 'mvp-006.tool_calls.v1',
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: ''
+                }
+              }
+            ]
           }
         }
       },
@@ -651,7 +688,8 @@ function createRoleModelCompletedRawEvent(): RawEventLogRecord {
     characterSnapshot: {
       id: 'mira',
       displayName: 'Mira'
-    }
+    },
+    livingStateBrief: createLivingStateBrief(createDefaultCharacterRuntimeState())
   });
   const inputEnvelope = createRoleModelInputEnvelope({
     event,
@@ -673,12 +711,7 @@ function createRoleModelCompletedRawEvent(): RawEventLogRecord {
       ...identity,
       sessionId: 'local-session',
       inputEnvelope,
-      rawOutputText: JSON.stringify({
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: 'hello back'
-        }
-      })
+      rawOutputText: JSON.stringify(decision)
     }),
     parsedRoleModelDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
       ...identity,
@@ -736,17 +769,34 @@ function setParsedVisibleReplyText(
     result['decision'],
     'parsedRoleModelDecisionSnapshot.result.decision'
   );
-  const action = requiredMutableRecord(
-    decision['action'],
-    'parsedRoleModelDecisionSnapshot.result.decision.action'
+  const toolCalls = decision['toolCalls'];
+
+  if (!Array.isArray(toolCalls)) {
+    throw new Error(
+      'Expected mutable array for parsedRoleModelDecisionSnapshot.result.decision.toolCalls.'
+    );
+  }
+
+  const visibleReplyToolCall = requiredMutableRecord(
+    toolCalls[0],
+    'parsedRoleModelDecisionSnapshot.result.decision.toolCalls[0]'
+  );
+  const input = requiredMutableRecord(
+    visibleReplyToolCall['input'],
+    'parsedRoleModelDecisionSnapshot.result.decision.toolCalls[0].input'
   );
 
-  action['text'] = text;
+  input['text'] = text;
   setRoleModelRawOutputText(record, JSON.stringify({
-    action: {
-      type: roleModelVisibleReplyActionName,
-      text
-    }
+    version: 'mvp-006.tool_calls.v1',
+    toolCalls: [
+      {
+        name: roleModelVisibleReplyActionName,
+        input: {
+          text
+        }
+      }
+    ]
   }));
 }
 

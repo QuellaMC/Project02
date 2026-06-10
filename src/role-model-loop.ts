@@ -8,18 +8,21 @@ import {
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
+  createVisibleReplyCharacterDecision,
   parseRoleModelDecision,
   roleModelAdapterRawOutputMissingTextRejectionDetails,
+  roleModelDecisionRejectionReasons,
   roleModelMalformedOutputRejectionReason,
-  roleModelVisibleReplyActionName,
   type AcceptedRoleModelDecisionResult,
   type CharacterDecision,
   type DecisionContext,
   type ParsedRoleModelDecisionSnapshot,
   type RejectedRoleModelDecisionResult,
   type RoleModelDecisionRejection,
+  type RoleModelDecisionRejectionReason,
   type RoleModelInputEnvelope,
-  type RoleModelIOSnapshot
+  type RoleModelIOSnapshot,
+  type RoleModelProviderMetadata
 } from './role-model-contracts.ts';
 import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from './runtime-event.ts';
 
@@ -27,6 +30,8 @@ export { parseRoleModelDecision } from './role-model-contracts.ts';
 
 export type RoleModelAdapterRawOutput = {
   readonly rawOutputText: string;
+  readonly providerMetadata?: RoleModelProviderMetadata;
+  readonly rejection?: RoleModelDecisionRejection;
 };
 
 export type RoleModelAdapter = {
@@ -82,12 +87,7 @@ export function createRoleModelAdapterFromCharacterAgent(
       const characterReply = validateCharacterAgentReply(reply);
 
       return createRoleModelAdapterRawOutput(
-        JSON.stringify({
-          action: {
-            type: roleModelVisibleReplyActionName,
-            text: characterReply.text
-          }
-        })
+        JSON.stringify(createVisibleReplyCharacterDecision(characterReply.text))
       );
     }
   } satisfies RoleModelAdapter);
@@ -109,7 +109,8 @@ export async function runRoleModelLoop(
     ...identity,
     sessionId,
     inputEnvelope,
-    rawOutputText: rawOutputValidation.rawOutputText
+    rawOutputText: rawOutputValidation.rawOutputText,
+    ...providerMetadataOption(rawOutputValidation.providerMetadata)
   });
   const decisionResult =
     rawOutputValidation.status === 'accepted'
@@ -154,10 +155,12 @@ type RoleModelAdapterRawOutputValidationResult =
   | {
       readonly status: 'accepted';
       readonly rawOutputText: string;
+      readonly providerMetadata?: RoleModelProviderMetadata;
     }
   | {
       readonly status: 'rejected';
       readonly rawOutputText: string;
+      readonly providerMetadata?: RoleModelProviderMetadata;
       readonly decisionResult: RejectedRoleModelDecisionResult;
     };
 
@@ -174,9 +177,25 @@ function validateRoleModelAdapterRawOutput(
     return createMalformedAdapterRawOutputResult();
   }
 
+  const providerMetadata = optionalProviderMetadata(rawOutput['providerMetadata']);
+  const rejection = optionalRoleModelDecisionRejection(rawOutput['rejection']);
+
+  if (rejection !== undefined) {
+    return Object.freeze({
+      status: 'rejected',
+      rawOutputText,
+      ...providerMetadataOption(providerMetadata),
+      decisionResult: createRejectedRoleModelDecisionResult(
+        rejection.reason,
+        rejection.details
+      )
+    } satisfies RoleModelAdapterRawOutputValidationResult);
+  }
+
   return Object.freeze({
     status: 'accepted',
-    rawOutputText
+    rawOutputText,
+    ...providerMetadataOption(providerMetadata)
   } satisfies RoleModelAdapterRawOutputValidationResult);
 }
 
@@ -189,6 +208,120 @@ function createMalformedAdapterRawOutputResult(): RoleModelAdapterRawOutputValid
       roleModelAdapterRawOutputMissingTextRejectionDetails
     )
   } satisfies RoleModelAdapterRawOutputValidationResult);
+}
+
+function providerMetadataOption(
+  providerMetadata: RoleModelProviderMetadata | undefined
+): { readonly providerMetadata?: RoleModelProviderMetadata } {
+  return providerMetadata === undefined ? {} : { providerMetadata };
+}
+
+function optionalProviderMetadata(
+  value: unknown
+): RoleModelProviderMetadata | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isJsonRecord(value)) {
+    return undefined;
+  }
+
+  const provider = value['provider'];
+
+  if (provider !== 'local' && provider !== 'nvidia') {
+    return undefined;
+  }
+
+  const model = value['model'];
+  const request = optionalProviderRequestMetadata(value['request']);
+  const response = optionalProviderResponseMetadata(value['response']);
+  const error = optionalProviderErrorMetadata(value['error']);
+
+  return Object.freeze({
+    provider,
+    ...(typeof model === 'string' ? { model } : {}),
+    ...(request === undefined ? {} : { request }),
+    ...(response === undefined ? {} : { response }),
+    ...(error === undefined ? {} : { error })
+  } satisfies RoleModelProviderMetadata);
+}
+
+function optionalProviderRequestMetadata(
+  value: unknown
+): RoleModelProviderMetadata['request'] | undefined {
+  if (!isJsonRecord(value)) {
+    return undefined;
+  }
+
+  const endpoint = value['endpoint'];
+  const messageCount = value['messageCount'];
+
+  return Object.freeze({
+    ...(typeof endpoint === 'string' ? { endpoint } : {}),
+    ...(typeof messageCount === 'number' ? { messageCount } : {}),
+    stream: false
+  });
+}
+
+function optionalProviderResponseMetadata(
+  value: unknown
+): RoleModelProviderMetadata['response'] | undefined {
+  if (!isJsonRecord(value)) {
+    return undefined;
+  }
+
+  const status = value['status'];
+
+  return Object.freeze({
+    ...(typeof status === 'number' ? { status } : {})
+  });
+}
+
+function optionalProviderErrorMetadata(
+  value: unknown
+): RoleModelProviderMetadata['error'] | undefined {
+  if (!isJsonRecord(value)) {
+    return undefined;
+  }
+
+  const code = value['code'];
+  const message = value['message'];
+
+  if (typeof code !== 'string' || typeof message !== 'string') {
+    return undefined;
+  }
+
+  return Object.freeze({ code, message });
+}
+
+function optionalRoleModelDecisionRejection(
+  value: unknown
+): RoleModelDecisionRejection | undefined {
+  if (!isJsonRecord(value)) {
+    return undefined;
+  }
+
+  const reason = value['reason'];
+  const details = value['details'];
+
+  if (!isRoleModelDecisionRejectionReason(reason)) {
+    return undefined;
+  }
+
+  return Object.freeze({
+    reason,
+    ...(typeof details === 'string' ? { details } : {})
+  } satisfies RoleModelDecisionRejection);
+}
+
+function isRoleModelDecisionRejectionReason(
+  value: unknown
+): value is RoleModelDecisionRejectionReason {
+  return (
+    typeof value === 'string' &&
+    roleModelDecisionRejectionReasons.includes(value as RoleModelDecisionRejectionReason)
+  );
 }
 
 function createSnapshotIdentity(
