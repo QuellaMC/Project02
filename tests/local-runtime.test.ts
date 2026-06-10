@@ -14,6 +14,7 @@ import {
   runLocalUserMessageEvent,
   type CharacterAgent,
   type CharacterAgentReply,
+  type CharacterStateStore,
   type RawEventLogRecord,
   type RawEventLogRecordKind,
   type RuntimeLogStore,
@@ -889,7 +890,7 @@ describe('local runtime turn adapter', () => {
     });
   });
 
-  it('does not write character state before visible conversation logging succeeds', async () => {
+  it('rolls back character state when visible conversation logging fails', async () => {
     const session = createConversationSession();
     const baseLogStore = createRuntimeLogStore();
     const logStore = createConversationAppendFailingLogStore(baseLogStore);
@@ -932,6 +933,130 @@ describe('local runtime turn adapter', () => {
     expect(baseLogStore.rawEvents()).toContainEqual({
       eventId: 'evt_state_log_failure',
       traceId: 'trace_state_log_failure',
+      createdAt: '2026-06-04T10:00:00.000Z',
+      kind: 'runtime_turn_rejected',
+      eventType: 'USER_MESSAGE',
+      status: 'rejected',
+      reason: 'Runtime turn failed before producing a reply.',
+      payloadSummary: {
+        normalizedCurrentUserMessage: 'hello'
+      }
+    });
+  });
+
+  it('keeps the default in-memory character state store scoped to the session', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const observedMoods: string[] = [];
+    let turnIndex = 0;
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke(inputEnvelope) {
+        observedMoods.push(
+          inputEnvelope.decisionContext.livingStateBrief?.current.mood ??
+            'missing'
+        );
+        turnIndex += 1;
+
+        return {
+          rawOutputText: JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: `reply ${String(turnIndex)}`
+                }
+              },
+              ...(turnIndex === 1
+                ? [
+                    {
+                      name: 'character_state.patch',
+                      input: {
+                        mood: 'curious'
+                      }
+                    }
+                  ]
+                : [])
+            ]
+          })
+        };
+      }
+    };
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestUserMessageEvent(
+          'first',
+          'evt_default_state_first',
+          'trace_default_state_first'
+        ),
+        session,
+        logStore,
+        roleModelAdapter
+      })
+    ).resolves.toMatchObject({ status: 'completed' });
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestUserMessageEvent(
+          'second',
+          'evt_default_state_second',
+          'trace_default_state_second'
+        ),
+        session,
+        logStore,
+        roleModelAdapter
+      })
+    ).resolves.toMatchObject({ status: 'completed' });
+
+    expect(observedMoods).toEqual(['steady', 'curious']);
+  });
+
+  it('does not commit visible durable evidence when accepted state writes fail', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const characterStateStore = createWriteFailingCharacterStateStore();
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestUserMessageEvent(
+          'hello',
+          'evt_state_write_failure',
+          'trace_state_write_failure'
+        ),
+        session,
+        logStore,
+        characterStateStore,
+        roleModelAdapter: createRawOutputAdapter(
+          JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'stateful reply'
+                }
+              },
+              {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'curious'
+                }
+              }
+            ]
+          })
+        )
+      })
+    ).rejects.toThrow('state write failed');
+
+    expect(logStore.conversationMessages()).toEqual([]);
+    expect(
+      logStore
+        .rawEvents()
+        .some((record) => record.kind === 'visible_reply_committed')
+    ).toBe(false);
+    expect(logStore.rawEvents()).toContainEqual({
+      eventId: 'evt_state_write_failure',
+      traceId: 'trace_state_write_failure',
       createdAt: '2026-06-04T10:00:00.000Z',
       kind: 'runtime_turn_rejected',
       eventType: 'USER_MESSAGE',
@@ -1022,4 +1147,17 @@ function createConversationAppendFailingLogStore(
       return baseLogStore.conversationMessages();
     }
   } satisfies RuntimeLogStore);
+}
+
+function createWriteFailingCharacterStateStore(): CharacterStateStore {
+  const delegate = createInMemoryCharacterStateStore();
+
+  return Object.freeze({
+    readCurrentState() {
+      return delegate.readCurrentState();
+    },
+    writeCurrentState() {
+      throw new Error('state write failed');
+    }
+  } satisfies CharacterStateStore);
 }

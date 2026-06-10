@@ -6,9 +6,11 @@ import type {
   VisibleMessageRole
 } from './conversation.ts';
 import {
+  characterRuntimeStatesEqual,
   createLivingStateBrief,
   createCharacterStatePatchSnapshot,
   decodeCharacterRuntimeState,
+  planCharacterStatePatch,
   type AcceptedCharacterStatePatchResult,
   type CharacterRuntimeState,
   type CharacterStateAppliedChange,
@@ -36,6 +38,7 @@ import {
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
+  getCharacterStatePatchToolCall,
   getRequiredVisibleReplyText,
   isRoleModelAllowedToolName,
   parseRoleModelDecision,
@@ -367,6 +370,7 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     reason,
     status,
     commitValidation,
+    parsedRoleModelDecisionSnapshot,
     characterStatePatchSnapshot
   });
 
@@ -872,6 +876,9 @@ function assertCharacterStatePatchEvidenceSemantics(options: {
   readonly status: RuntimeTurnStatus | undefined;
   readonly reason: string | undefined;
   readonly commitValidation: RoleModelCommitValidationSnapshot | undefined;
+  readonly parsedRoleModelDecisionSnapshot:
+    | ParsedRoleModelDecisionSnapshot
+    | undefined;
   readonly characterStatePatchSnapshot: CharacterStatePatchSnapshot | undefined;
 }): void {
   if (options.characterStatePatchSnapshot === undefined) {
@@ -907,6 +914,11 @@ function assertCharacterStatePatchEvidenceSemantics(options: {
       throwMalformedRecord('commitValidation.result.status');
     }
 
+    assertAcceptedCharacterStatePatchMatchesParsedToolCall({
+      parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
+      snapshot
+    });
+
     return;
   }
 
@@ -935,6 +947,88 @@ function assertCharacterStatePatchEvidenceSemantics(options: {
   ) {
     throwMalformedRecord('commitValidation.result.rejection.reason');
   }
+}
+
+function assertAcceptedCharacterStatePatchMatchesParsedToolCall(options: {
+  readonly parsedRoleModelDecisionSnapshot:
+    | ParsedRoleModelDecisionSnapshot
+    | undefined;
+  readonly snapshot: CharacterStatePatchSnapshot;
+}): void {
+  const parsedResult = options.parsedRoleModelDecisionSnapshot?.result;
+
+  if (parsedResult?.status !== 'accepted') {
+    throwMalformedRecord('characterStatePatchSnapshot');
+  }
+
+  const toolCall = getCharacterStatePatchToolCall(parsedResult.decision);
+
+  if (toolCall === undefined) {
+    throwMalformedRecord('characterStatePatchSnapshot');
+  }
+
+  const actualResult = options.snapshot.result;
+
+  if (actualResult.status !== 'accepted') {
+    throwMalformedRecord('characterStatePatchSnapshot.result.status');
+  }
+
+  const expectedResult = planCharacterStatePatch({
+    before: actualResult.before,
+    patchInput: toolCall.input
+  });
+
+  if (
+    expectedResult.status !== 'accepted' ||
+    !acceptedCharacterStatePatchResultsEqual(actualResult, expectedResult)
+  ) {
+    throwMalformedRecord('characterStatePatchSnapshot.result');
+  }
+}
+
+function acceptedCharacterStatePatchResultsEqual(
+  left: AcceptedCharacterStatePatchResult,
+  right: AcceptedCharacterStatePatchResult
+): boolean {
+  return (
+    characterStatePatchesEqual(left.patch, right.patch) &&
+    characterRuntimeStatesEqual(left.before, right.before) &&
+    characterRuntimeStatesEqual(left.after, right.after) &&
+    characterStateAppliedChangesEqual(left.appliedChanges, right.appliedChanges)
+  );
+}
+
+function characterStatePatchesEqual(
+  left: CharacterStatePatch,
+  right: CharacterStatePatch
+): boolean {
+  return (
+    left.mood === right.mood &&
+    left.energy === right.energy &&
+    left.attention === right.attention &&
+    left.currentActivity === right.currentActivity &&
+    left.socialOrientation === right.socialOrientation
+  );
+}
+
+function characterStateAppliedChangesEqual(
+  left: readonly CharacterStateAppliedChange[],
+  right: readonly CharacterStateAppliedChange[]
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((leftChange, index) => {
+    const rightChange = right[index];
+
+    return (
+      rightChange !== undefined &&
+      leftChange.field === rightChange.field &&
+      leftChange.before === rightChange.before &&
+      leftChange.after === rightChange.after
+    );
+  });
 }
 
 function assertRoleModelInputTextMatchesPayloadSummary(options: {

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createAcceptedRoleModelDecisionResult,
+  createCharacterStatePatchSnapshot,
   createDecisionContext,
   createDefaultCharacterRuntimeState,
   createLivingStateBrief,
@@ -33,6 +34,9 @@ import {
   LocalRuntimeStorageContractError,
   localRuntimeStorageSchemaVersion,
   normalizeLocalRuntimeSessionId,
+  parseRoleModelDecision,
+  planCharacterStatePatch,
+  roleModelDecisionContractVersion,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelMalformedOutputRejectionReason,
   roleModelVisibleReplyActionName,
@@ -388,6 +392,54 @@ describe('local runtime storage contract', () => {
     expectMalformedRawEvent(record);
   });
 
+  it('rejects accepted character-state patch evidence that does not match the parsed tool call', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelCompletedRawEventWithStatePatch()
+    );
+    const snapshot = requiredMutableRecord(
+      record['characterStatePatchSnapshot'],
+      'characterStatePatchSnapshot'
+    );
+    const result = requiredMutableRecord(
+      snapshot['result'],
+      'characterStatePatchSnapshot.result'
+    );
+    const after = requiredMutableRecord(
+      result['after'],
+      'characterStatePatchSnapshot.result.after'
+    );
+    const current = requiredMutableRecord(
+      after['current'],
+      'characterStatePatchSnapshot.result.after.current'
+    );
+
+    current['mood'] = 'playful';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects accepted character-state patch metadata that does not match the parsed tool call', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelCompletedRawEventWithStatePatch()
+    );
+    const snapshot = requiredMutableRecord(
+      record['characterStatePatchSnapshot'],
+      'characterStatePatchSnapshot'
+    );
+    const result = requiredMutableRecord(
+      snapshot['result'],
+      'characterStatePatchSnapshot.result'
+    );
+    const patch = requiredMutableRecord(
+      result['patch'],
+      'characterStatePatchSnapshot.result.patch'
+    );
+
+    patch['mood'] = 'playful';
+
+    expectMalformedRawEvent(record);
+  });
+
   it('rejects accepted role-model commit text that does not match the parsed decision', () => {
     const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
     const commitValidation = requiredMutableRecord(
@@ -725,6 +777,90 @@ function createRoleModelCompletedRawEvent(): RawEventLogRecord {
         status: 'accepted',
         acceptedVisibleReplyText: 'hello back'
       }
+    })
+  } satisfies RawEventLogRecord);
+}
+
+function createRoleModelCompletedRawEventWithStatePatch(): RawEventLogRecord {
+  const identity = createRuntimeEventIdentity({
+    eventId: 'evt_role_model_storage_state_patch',
+    traceId: 'trace_role_model_storage_state_patch',
+    createdAt
+  });
+  const event = createUserMessageRuntimeEvent('hello', identity);
+  const decisionContext = createDecisionContext({
+    sessionId: 'local-session',
+    characterSnapshot: {
+      id: 'mira',
+      displayName: 'Mira'
+    },
+    livingStateBrief: createLivingStateBrief(createDefaultCharacterRuntimeState())
+  });
+  const inputEnvelope = createRoleModelInputEnvelope({
+    event,
+    decisionContext
+  });
+  const rawOutputText = JSON.stringify({
+    version: roleModelDecisionContractVersion,
+    toolCalls: [
+      {
+        name: roleModelVisibleReplyActionName,
+        input: {
+          text: 'hello back'
+        }
+      },
+      {
+        name: 'character_state.patch',
+        input: {
+          mood: 'curious'
+        }
+      }
+    ]
+  });
+  const accepted = parseRoleModelDecision(rawOutputText);
+  const statePatchPlan = planCharacterStatePatch({
+    before: createDefaultCharacterRuntimeState(),
+    patchInput: {
+      mood: 'curious'
+    }
+  });
+
+  if (accepted.status !== 'accepted' || statePatchPlan.status !== 'accepted') {
+    throw new Error('Expected accepted state-patch fixture.');
+  }
+
+  return Object.freeze({
+    ...identity,
+    kind: 'runtime_turn_completed',
+    eventType: 'USER_MESSAGE',
+    status: 'completed',
+    visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
+    payloadSummary: {
+      normalizedCurrentUserMessage: 'hello'
+    },
+    roleModelIOSnapshot: createRoleModelIOSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      inputEnvelope,
+      rawOutputText
+    }),
+    parsedRoleModelDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: accepted
+    }),
+    commitValidation: createRoleModelCommitValidationSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: {
+        status: 'accepted',
+        acceptedVisibleReplyText: 'hello back'
+      }
+    }),
+    characterStatePatchSnapshot: createCharacterStatePatchSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: statePatchPlan
     })
   } satisfies RawEventLogRecord);
 }

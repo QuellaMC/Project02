@@ -13,6 +13,7 @@ import {
   createInMemoryCharacterStateStore,
   createLivingStateBrief,
   planCharacterStatePatch,
+  type CharacterRuntimeState,
   type CharacterStatePatchSnapshot,
   type CharacterStateStore
 } from './character-state.ts';
@@ -112,6 +113,10 @@ export type RecordLocalUserMessageInputRejectionOptions = {
 const unexpectedRuntimeTurnFailureMessage =
   'Runtime turn failed before producing a reply.';
 const localRuntimeTurnQueues = new WeakMap<ConversationSession, Promise<void>>();
+const defaultCharacterStateStores = new WeakMap<
+  ConversationSession,
+  CharacterStateStore
+>();
 
 type RoleModelRawEvidence = {
   readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
@@ -297,6 +302,14 @@ async function runSerializedLocalUserMessageEvent(
   });
   appendTrace('runtime_turn_started');
 
+  let writtenCharacterStateRollback:
+    | {
+        readonly state: CharacterRuntimeState;
+        readonly store: CharacterStateStore;
+        rollbackAllowed: boolean;
+      }
+    | undefined;
+
   try {
     if (normalizedEventResult.status === 'rejected') {
       return appendRejectedResult({
@@ -308,8 +321,7 @@ async function runSerializedLocalUserMessageEvent(
       });
     }
 
-    const characterStateStore =
-      options.characterStateStore ?? createInMemoryCharacterStateStore();
+    const characterStateStore = characterStateStoreForTurn(options);
     const currentCharacterState = characterStateStore.readCurrentState();
     const decisionContext = buildUserTurnDecisionContext({
       session: options.session,
@@ -437,6 +449,16 @@ async function runSerializedLocalUserMessageEvent(
         ? {}
         : { characterStatePatchSnapshot: statePatchSnapshot })
     } satisfies RoleModelRawEvidence;
+
+    if (statePatchPlan?.status === 'accepted') {
+      characterStateStore.writeCurrentState(statePatchPlan.after);
+      writtenCharacterStateRollback = {
+        store: characterStateStore,
+        state: currentCharacterState,
+        rollbackAllowed: true
+      };
+    }
+
     const conversationMessages = Object.freeze([
       options.logStore.appendConversationMessage({
         ...turn.userMessage,
@@ -460,8 +482,8 @@ async function runSerializedLocalUserMessageEvent(
       ...acceptedEvidence
     });
 
-    if (statePatchPlan?.status === 'accepted') {
-      characterStateStore.writeCurrentState(statePatchPlan.after);
+    if (writtenCharacterStateRollback !== undefined) {
+      writtenCharacterStateRollback.rollbackAllowed = false;
     }
 
     const rawEvent = appendRawEvent({
@@ -509,6 +531,7 @@ async function runSerializedLocalUserMessageEvent(
       });
     }
 
+    rollbackWrittenCharacterStateIfSafe(writtenCharacterStateRollback);
     appendRawEvent({
       ...identity,
       kind: 'runtime_turn_rejected',
@@ -522,6 +545,41 @@ async function runSerializedLocalUserMessageEvent(
 
     throw error;
   }
+}
+
+function characterStateStoreForTurn(
+  options: RunLocalUserMessageEventOptions
+): CharacterStateStore {
+  if (options.characterStateStore !== undefined) {
+    return options.characterStateStore;
+  }
+
+  const existingStore = defaultCharacterStateStores.get(options.session);
+
+  if (existingStore !== undefined) {
+    return existingStore;
+  }
+
+  const store = createInMemoryCharacterStateStore();
+
+  defaultCharacterStateStores.set(options.session, store);
+  return store;
+}
+
+function rollbackWrittenCharacterStateIfSafe(
+  rollback:
+    | {
+        readonly state: CharacterRuntimeState;
+        readonly store: CharacterStateStore;
+        readonly rollbackAllowed: boolean;
+      }
+    | undefined
+): void {
+  if (rollback?.rollbackAllowed !== true) {
+    return;
+  }
+
+  rollback.store.writeCurrentState(rollback.state);
 }
 
 async function enqueueLocalRuntimeTurn<T>(

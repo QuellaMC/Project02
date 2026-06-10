@@ -252,6 +252,19 @@ export function freezeCharacterRuntimeState(
   return createCharacterRuntimeState(state.current);
 }
 
+export function characterRuntimeStatesEqual(
+  left: CharacterRuntimeState,
+  right: CharacterRuntimeState
+): boolean {
+  return (
+    left.current.mood === right.current.mood &&
+    left.current.energy === right.current.energy &&
+    left.current.attention === right.current.attention &&
+    left.current.currentActivity === right.current.currentActivity &&
+    left.current.socialOrientation === right.current.socialOrientation
+  );
+}
+
 export function freezeCharacterStatePatchResult(
   result: CharacterStatePatchResult
 ): CharacterStatePatchResult {

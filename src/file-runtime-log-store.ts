@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 import {
+  characterRuntimeStatesEqual,
   createDefaultCharacterRuntimeState,
   decodeCharacterRuntimeState,
   type CharacterRuntimeState
@@ -353,19 +354,6 @@ function throwMalformedCharacterStateRecord(field: string): never {
   throw new LocalRuntimeStorageContractError(
     'malformed_record',
     `Stored local runtime field "${field}" is malformed.`
-  );
-}
-
-function characterRuntimeStatesEqual(
-  left: CharacterRuntimeState,
-  right: CharacterRuntimeState
-): boolean {
-  return (
-    left.current.mood === right.current.mood &&
-    left.current.energy === right.current.energy &&
-    left.current.attention === right.current.attention &&
-    left.current.currentActivity === right.current.currentActivity &&
-    left.current.socialOrientation === right.current.socialOrientation
   );
 }
 
