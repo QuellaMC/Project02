@@ -484,6 +484,69 @@ describe('MVP-005 commit/effects validation', () => {
     );
   });
 
+  it('rejects durable role-model recent context that contradicts prior conversation messages', async () => {
+    const storeRoot = await createDurableSession('mira-local');
+    const session = createConversationSession({
+      id: 'mira-local'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    await expect(runLocalUserMessageEvent({
+      event: createTestUserMessageEvent('first', 'evt_commit_context_first'),
+      session,
+      logStore
+    })).resolves.toMatchObject({
+      status: 'completed'
+    });
+    await expect(runLocalUserMessageEvent({
+      event: createTestUserMessageEvent('second', 'evt_commit_context_second'),
+      session,
+      logStore
+    })).resolves.toMatchObject({
+      status: 'completed'
+    });
+
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const rawLog = readFileSync(paths.rawEventsPath, 'utf8');
+
+    writeFileSync(
+      paths.rawEventsPath,
+      rewriteRoleModelRecentVisibleMessages(rawLog, 'evt_commit_context_second', [
+        {
+          id: 'mira-local:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'tampered first'
+        },
+        {
+          id: 'mira-local:message-2',
+          role: 'character',
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: "I'm here. Tell me what you need."
+        }
+      ]),
+      'utf8'
+    );
+
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    expect(() => reopened.rawEvents()).toThrow(LocalRuntimeStorageContractError);
+    expect(() => reopened.conversationMessages()).toThrow(
+      LocalRuntimeStorageContractError
+    );
+  });
+
   it('preserves deterministic second-turn replies after durable session rehydrate', async () => {
     const storeRoot = await createDurableSession('mira-local');
     const firstSession = createConversationSession({
@@ -677,6 +740,29 @@ function rewriteRoleModelInputTextAndPayloadSummary(
   return `${records.map((record) => JSON.stringify(record)).join('\n')}\n`;
 }
 
+function rewriteRoleModelRecentVisibleMessages(
+  rawLog: string,
+  eventId: string,
+  recentVisibleMessages: readonly Record<string, unknown>[]
+): string {
+  const records = rawLog
+    .trimEnd()
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map(parseJsonRecord);
+
+  for (const record of records) {
+    if (record['eventId'] === eventId) {
+      rewriteRoleModelRecentVisibleMessagesOnRecord(
+        record,
+        recentVisibleMessages
+      );
+    }
+  }
+
+  return `${records.map((record) => JSON.stringify(record)).join('\n')}\n`;
+}
+
 function rewriteRoleModelEvidenceSessionId(
   record: Record<string, unknown>,
   sessionId: string
@@ -709,6 +795,30 @@ function rewriteRoleModelEvidenceSessionId(
   if (commitValidation !== undefined) {
     commitValidation['sessionId'] = sessionId;
   }
+}
+
+function rewriteRoleModelRecentVisibleMessagesOnRecord(
+  record: Record<string, unknown>,
+  recentVisibleMessages: readonly Record<string, unknown>[]
+): void {
+  const ioSnapshot = optionalMutableRecord(record['roleModelIOSnapshot']);
+
+  if (ioSnapshot === undefined) {
+    return;
+  }
+
+  const inputEnvelope = requiredMutableRecord(
+    ioSnapshot['inputEnvelope'],
+    'roleModelIOSnapshot.inputEnvelope'
+  );
+  const decisionContext = requiredMutableRecord(
+    inputEnvelope['decisionContext'],
+    'roleModelIOSnapshot.inputEnvelope.decisionContext'
+  );
+
+  decisionContext['recentVisibleMessages'] = recentVisibleMessages.map(
+    (message) => ({ ...message })
+  );
 }
 
 function rewriteRoleModelInputText(

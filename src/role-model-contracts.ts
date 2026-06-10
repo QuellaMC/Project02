@@ -13,6 +13,12 @@ export const roleModelAllowedActionNames = Object.freeze([
   roleModelVisibleReplyActionName
 ] satisfies readonly RoleModelAllowedActionName[]);
 
+export function isRoleModelAllowedActionName(
+  value: unknown
+): value is RoleModelAllowedActionName {
+  return value === roleModelVisibleReplyActionName;
+}
+
 export const roleModelDecisionOutputContractText =
   'Return exactly one CharacterDecision JSON object with action.type "visible_reply" and action.text as one visible reply line.';
 
@@ -353,9 +359,21 @@ function freezeVisibleMessageSnapshot(message: VisibleMessage): VisibleMessage {
 }
 
 function freezeAllowedActions(
-  allowedActions: readonly RoleModelAllowedActionName[]
+  allowedActions: readonly unknown[]
 ): readonly RoleModelAllowedActionName[] {
-  return Object.freeze([...allowedActions]);
+  const validatedActions: RoleModelAllowedActionName[] = [];
+
+  for (const action of allowedActions) {
+    if (!isRoleModelAllowedActionName(action)) {
+      throw new TypeError(
+        'Role-model allowedActions must contain only supported actions.'
+      );
+    }
+
+    validatedActions.push(action);
+  }
+
+  return Object.freeze(validatedActions);
 }
 
 function freezeRoleModelOutputContract(

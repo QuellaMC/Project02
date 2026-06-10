@@ -2,6 +2,8 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 import {
   ConversationRehydrationError,
+  selectRecentVisibleMessages,
+  type VisibleMessage,
   validateRestoredVisibleTranscript
 } from './conversation.ts';
 import {
@@ -985,6 +987,7 @@ function assertRawEventVisibleReferencesMatchConversationMessages(options: {
   const messagesById = new Map(
     options.messages.map((message) => [message.id, message])
   );
+  const priorVisibleMessages: ConversationLogRecord[] = [];
 
   for (const rawEvent of options.rawEvents) {
     for (const messageId of rawEvent.visibleMessageIds ?? []) {
@@ -1009,6 +1012,19 @@ function assertRawEventVisibleReferencesMatchConversationMessages(options: {
       messagesById,
       rawEvent
     });
+    assertRoleModelDecisionContextMatchesPriorConversation({
+      priorVisibleMessages,
+      rawEvent
+    });
+
+    if (rawEvent.kind === 'runtime_turn_completed') {
+      priorVisibleMessages.push(
+        ...visibleConversationMessagesForRawEvent({
+          messagesById,
+          rawEvent
+        })
+      );
+    }
   }
 
   assertCompletedTerminalRawEventsMatchConversationMessages(options);
@@ -1039,6 +1055,44 @@ function assertRoleModelInputTextMatchesCommittedUserMessage(options: {
       'Role-model input text must match the committed user visible message for the turn.'
     );
   }
+}
+
+function assertRoleModelDecisionContextMatchesPriorConversation(options: {
+  readonly priorVisibleMessages: readonly ConversationLogRecord[];
+  readonly rawEvent: RawEventLogRecord;
+}): void {
+  const recentVisibleMessages =
+    options.rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext
+      .recentVisibleMessages;
+
+  if (recentVisibleMessages === undefined) {
+    return;
+  }
+
+  const expectedVisibleMessages = selectRecentVisibleMessages(
+    options.priorVisibleMessages,
+    recentVisibleMessages.length
+  );
+
+  if (sameVisibleMessages(recentVisibleMessages, expectedVisibleMessages)) {
+    return;
+  }
+
+  throw new LocalRuntimeStorageContractError(
+    'malformed_record',
+    'Role-model recent visible context must match the durable prior conversation messages for the turn.'
+  );
+}
+
+function visibleConversationMessagesForRawEvent(options: {
+  readonly messagesById: ReadonlyMap<string, ConversationLogRecord>;
+  readonly rawEvent: RawEventLogRecord;
+}): readonly ConversationLogRecord[] {
+  return (options.rawEvent.visibleMessageIds ?? [])
+    .map((messageId) => options.messagesById.get(messageId))
+    .filter((message): message is ConversationLogRecord => {
+      return message !== undefined;
+    });
 }
 
 function assertRoleModelEvidenceMatchesSessionPath(options: {
@@ -1172,6 +1226,27 @@ function sameOrderedValues(
   return (
     actualValues.length === expectedValues.length &&
     actualValues.every((value, index) => value === expectedValues[index])
+  );
+}
+
+function sameVisibleMessages(
+  actualMessages: readonly VisibleMessage[],
+  expectedMessages: readonly VisibleMessage[]
+): boolean {
+  return (
+    actualMessages.length === expectedMessages.length &&
+    actualMessages.every((actualMessage, index) => {
+      const expectedMessage = expectedMessages[index];
+
+      return (
+        expectedMessage !== undefined &&
+        actualMessage.id === expectedMessage.id &&
+        actualMessage.role === expectedMessage.role &&
+        actualMessage.speakerId === expectedMessage.speakerId &&
+        actualMessage.speakerName === expectedMessage.speakerName &&
+        actualMessage.text === expectedMessage.text
+      );
+    })
   );
 }
 

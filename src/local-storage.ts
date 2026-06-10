@@ -22,6 +22,7 @@ import {
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createVisibleReplyCharacterDecision,
+  isRoleModelAllowedActionName,
   parseRoleModelDecision,
   roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelCommitValidationFailureRejectionReason,
@@ -1170,7 +1171,7 @@ function requiredRoleModelAllowedActions(
   const actions: RoleModelAllowedActionName[] = [];
 
   for (const item of requiredArray(value, 'allowedActions')) {
-    if (item !== roleModelVisibleReplyActionName) {
+    if (!isRoleModelAllowedActionName(item)) {
       throwMalformedRecord('allowedActions');
     }
 

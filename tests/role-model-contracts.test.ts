@@ -184,6 +184,32 @@ describe('role model decision contracts', () => {
     expect(decision.action.type).toBe('visible_reply');
   });
 
+  it('rejects unsupported allowed actions at input-envelope construction', () => {
+    const identity = createRuntimeEventIdentity({
+      eventId: 'evt_unsupported_allowed_action',
+      traceId: 'trace_unsupported_allowed_action',
+      createdAt: '2026-06-09T00:00:00.000Z'
+    });
+    const event = createUserMessageRuntimeEvent('hello', identity);
+    const decisionContext = createDecisionContext({
+      sessionId: 'session-role-model',
+      characterSnapshot: {
+        id: 'mira',
+        displayName: 'Mira'
+      }
+    });
+
+    expect(() => {
+      Reflect.apply(createRoleModelInputEnvelope, undefined, [
+        {
+          event,
+          decisionContext,
+          allowedActions: ['unsupported_action']
+        }
+      ]);
+    }).toThrow(TypeError);
+  });
+
   it('represents malformed and unsupported decisions with explicit rejection reasons', () => {
     const expectedReasons: readonly RoleModelDecisionRejectionReason[] = [
       roleModelMalformedOutputRejectionReason,
