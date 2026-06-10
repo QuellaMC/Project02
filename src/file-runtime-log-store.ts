@@ -1191,7 +1191,8 @@ function assertRoleModelEvidenceMatchesSessionPath(options: {
       rawEvent.roleModelIOSnapshot?.sessionId,
       rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext.sessionId,
       rawEvent.parsedRoleModelDecisionSnapshot?.sessionId,
-      rawEvent.commitValidation?.sessionId
+      rawEvent.commitValidation?.sessionId,
+      rawEvent.characterStatePatchSnapshot?.sessionId
     ];
 
     for (const sessionId of sessionIds) {
@@ -1201,7 +1202,7 @@ function assertRoleModelEvidenceMatchesSessionPath(options: {
 
       throw new LocalRuntimeStorageContractError(
         'malformed_record',
-        'Role-model evidence session identity must match the durable session path.'
+        'Runtime evidence session identity must match the durable session path.'
       );
     }
   }

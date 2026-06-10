@@ -184,6 +184,81 @@ describe('file-backed runtime log store', () => {
     );
   });
 
+  it('rejects public reads when patch evidence session disagrees with session path', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke() {
+        return {
+          rawOutputText: JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'stateful reply'
+                }
+              },
+              {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'curious'
+                }
+              }
+            ]
+          })
+        };
+      }
+    };
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('hello', identity),
+      session: createConversationSession({
+        id: 'mira-local'
+      }),
+      logStore: createFileRuntimeLogStore({
+        storeRoot,
+        sessionId: 'mira-local'
+      }),
+      characterStateStore: createFileCharacterStateStore({
+        storeRoot,
+        sessionId: 'mira-local'
+      }),
+      roleModelAdapter
+    });
+
+    expect(result.status).toBe('completed');
+
+    const rewrittenRawEvents = readFileSync(paths.rawEventsPath, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => {
+        const record = mutableJsonRecordFromLine(line);
+        const snapshot = record['characterStatePatchSnapshot'];
+
+        if (isMutableRecord(snapshot)) {
+          snapshot['sessionId'] = 'other-session';
+        }
+
+        return JSON.stringify(record);
+      })
+      .join('\n');
+
+    writeFileSync(paths.rawEventsPath, `${rewrittenRawEvents}\n`, 'utf8');
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).rawEvents(),
+      'malformed_record'
+    );
+  });
+
   it('keeps two selected sessions separate', async () => {
     const storeRoot = createTempStoreRoot();
     await createCatalogedSession(storeRoot, 'alpha');
@@ -2132,6 +2207,20 @@ function createTempStoreRoot(): string {
 
   tempStoreRoots.push(storeRoot);
   return storeRoot;
+}
+
+function mutableJsonRecordFromLine(line: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(line);
+
+  if (isMutableRecord(parsed)) {
+    return parsed;
+  }
+
+  throw new Error('Expected raw event log line to be a JSON object.');
+}
+
+function isMutableRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 async function createCatalogedFileRuntimeLogStore(

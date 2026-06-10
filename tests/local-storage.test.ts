@@ -37,8 +37,10 @@ import {
   parseRoleModelDecision,
   planCharacterStatePatch,
   roleModelDecisionContractVersion,
+  roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelMalformedOutputRejectionReason,
+  roleModelProviderErrorRejectionReason,
   roleModelVisibleReplyActionName,
   type ConversationLogRecord,
   type LocalRuntimeStorageContractErrorCode,
@@ -440,6 +442,64 @@ describe('local runtime storage contract', () => {
     expectMalformedRawEvent(record);
   });
 
+  it('rejects character-state patch snapshots with mismatched session identity', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelCompletedRawEventWithStatePatch()
+    );
+    const snapshot = requiredMutableRecord(
+      record['characterStatePatchSnapshot'],
+      'characterStatePatchSnapshot'
+    );
+
+    snapshot['sessionId'] = 'other-session';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects rejected character-state patch input that does not match the parsed tool call', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelRejectedRawEventWithStatePatch()
+    );
+    const snapshot = requiredMutableRecord(
+      record['characterStatePatchSnapshot'],
+      'characterStatePatchSnapshot'
+    );
+    const result = requiredMutableRecord(
+      snapshot['result'],
+      'characterStatePatchSnapshot.result'
+    );
+    const patchInput = requiredMutableRecord(
+      result['patchInput'],
+      'characterStatePatchSnapshot.result.patchInput'
+    );
+
+    patchInput['mood'] = 'playful';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects rejected character-state patch rejection that does not match the parsed tool call', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelRejectedRawEventWithStatePatch()
+    );
+    const snapshot = requiredMutableRecord(
+      record['characterStatePatchSnapshot'],
+      'characterStatePatchSnapshot'
+    );
+    const result = requiredMutableRecord(
+      snapshot['result'],
+      'characterStatePatchSnapshot.result'
+    );
+    const rejection = requiredMutableRecord(
+      result['rejection'],
+      'characterStatePatchSnapshot.result.rejection'
+    );
+
+    rejection['details'] = 'Different rejected patch details.';
+
+    expectMalformedRawEvent(record);
+  });
+
   it('rejects accepted role-model commit text that does not match the parsed decision', () => {
     const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
     const commitValidation = requiredMutableRecord(
@@ -595,6 +655,67 @@ describe('local runtime storage contract', () => {
       record,
       roleModelMalformedOutputRejectionReason,
       'Different parser details.'
+    );
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('accepts provider-error evidence when rejection details match provider metadata', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    setParsedRoleModelRejection(
+      record,
+      roleModelProviderErrorRejectionReason,
+      'Provider request failed.',
+      ''
+    );
+    setRoleModelProviderErrorMetadata(record, 'Provider request failed.');
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelProviderErrorRejectionReason,
+      'Provider request failed.'
+    );
+
+    const decoded = decodeRawEventLogRecord(JSON.stringify(record));
+
+    expect(decoded).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelProviderErrorRejectionReason,
+      roleModelIOSnapshot: {
+        rawOutputText: '',
+        providerMetadata: {
+          error: {
+            message: 'Provider request failed.'
+          }
+        }
+      },
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelProviderErrorRejectionReason,
+            details: 'Provider request failed.'
+          }
+        }
+      }
+    });
+  });
+
+  it('rejects provider-error evidence when rejection details do not match provider metadata', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    setParsedRoleModelRejection(
+      record,
+      roleModelProviderErrorRejectionReason,
+      'Different provider details.',
+      ''
+    );
+    setRoleModelProviderErrorMetadata(record, 'Provider request failed.');
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelProviderErrorRejectionReason,
+      'Different provider details.'
     );
 
     expectMalformedRawEvent(record);
@@ -865,6 +986,93 @@ function createRoleModelCompletedRawEventWithStatePatch(): RawEventLogRecord {
   } satisfies RawEventLogRecord);
 }
 
+function createRoleModelRejectedRawEventWithStatePatch(): RawEventLogRecord {
+  const identity = createRuntimeEventIdentity({
+    eventId: 'evt_role_model_storage_state_patch_rejected',
+    traceId: 'trace_role_model_storage_state_patch_rejected',
+    createdAt
+  });
+  const event = createUserMessageRuntimeEvent('hello', identity);
+  const decisionContext = createDecisionContext({
+    sessionId: 'local-session',
+    characterSnapshot: {
+      id: 'mira',
+      displayName: 'Mira'
+    },
+    livingStateBrief: createLivingStateBrief(createDefaultCharacterRuntimeState())
+  });
+  const inputEnvelope = createRoleModelInputEnvelope({
+    event,
+    decisionContext
+  });
+  const rawOutputText = JSON.stringify({
+    version: roleModelDecisionContractVersion,
+    toolCalls: [
+      {
+        name: roleModelVisibleReplyActionName,
+        input: {
+          text: 'hello back'
+        }
+      },
+      {
+        name: 'character_state.patch',
+        input: {
+          mood: 'ecstatic'
+        }
+      }
+    ]
+  });
+  const accepted = parseRoleModelDecision(rawOutputText);
+  const statePatchPlan = planCharacterStatePatch({
+    before: createDefaultCharacterRuntimeState(),
+    patchInput: {
+      mood: 'ecstatic'
+    }
+  });
+
+  if (accepted.status !== 'accepted' || statePatchPlan.status !== 'rejected') {
+    throw new Error('Expected rejected state-patch fixture.');
+  }
+
+  return Object.freeze({
+    ...identity,
+    kind: 'runtime_turn_rejected',
+    eventType: 'USER_MESSAGE',
+    status: 'rejected',
+    reason: roleModelInvalidCharacterStatePatchRejectionReason,
+    payloadSummary: {
+      normalizedCurrentUserMessage: 'hello'
+    },
+    roleModelIOSnapshot: createRoleModelIOSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      inputEnvelope,
+      rawOutputText
+    }),
+    parsedRoleModelDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: accepted
+    }),
+    commitValidation: createRoleModelCommitValidationSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: {
+        status: 'rejected',
+        rejection: createRejectedRoleModelDecisionResult(
+          roleModelInvalidCharacterStatePatchRejectionReason,
+          statePatchPlan.rejection.details
+        ).rejection
+      }
+    }),
+    characterStatePatchSnapshot: createCharacterStatePatchSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: statePatchPlan
+    })
+  } satisfies RawEventLogRecord);
+}
+
 function rewriteRawEventAsRoleModelRejection(
   record: Record<string, unknown>,
   reason: RoleModelDecisionRejectionReason,
@@ -962,6 +1170,29 @@ function setRoleModelRawOutputText(
   );
 
   roleModelIOSnapshot['rawOutputText'] = rawOutputText;
+}
+
+function setRoleModelProviderErrorMetadata(
+  record: Record<string, unknown>,
+  message: string
+): void {
+  const roleModelIOSnapshot = requiredMutableRecord(
+    record['roleModelIOSnapshot'],
+    'roleModelIOSnapshot'
+  );
+
+  roleModelIOSnapshot['providerMetadata'] = {
+    provider: 'nvidia',
+    model: 'nvidia/test-model',
+    request: {
+      endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
+      stream: false
+    },
+    error: {
+      code: 'provider_error',
+      message
+    }
+  };
 }
 
 function mutableRecordFromRawEvent(

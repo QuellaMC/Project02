@@ -370,6 +370,7 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     reason,
     status,
     commitValidation,
+    roleModelIOSnapshot,
     parsedRoleModelDecisionSnapshot,
     characterStatePatchSnapshot
   });
@@ -876,6 +877,7 @@ function assertCharacterStatePatchEvidenceSemantics(options: {
   readonly status: RuntimeTurnStatus | undefined;
   readonly reason: string | undefined;
   readonly commitValidation: RoleModelCommitValidationSnapshot | undefined;
+  readonly roleModelIOSnapshot: RoleModelIOSnapshot | undefined;
   readonly parsedRoleModelDecisionSnapshot:
     | ParsedRoleModelDecisionSnapshot
     | undefined;
@@ -891,6 +893,14 @@ function assertCharacterStatePatchEvidenceSemantics(options: {
     actual: snapshot,
     expected: options.identity,
     field: 'characterStatePatchSnapshot'
+  });
+
+  assertMatchingRoleModelSession({
+    actual: snapshot.sessionId,
+    expected: requiredPatchEvidenceRoleModelSessionId(
+      options.roleModelIOSnapshot
+    ),
+    field: 'characterStatePatchSnapshot.sessionId'
   });
 
   const result = snapshot.result;
@@ -947,6 +957,21 @@ function assertCharacterStatePatchEvidenceSemantics(options: {
   ) {
     throwMalformedRecord('commitValidation.result.rejection.reason');
   }
+
+  assertRejectedCharacterStatePatchMatchesParsedToolCall({
+    parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
+    snapshot
+  });
+}
+
+function requiredPatchEvidenceRoleModelSessionId(
+  roleModelIOSnapshot: RoleModelIOSnapshot | undefined
+): string {
+  if (roleModelIOSnapshot !== undefined) {
+    return roleModelIOSnapshot.sessionId;
+  }
+
+  throwMalformedRecord('characterStatePatchSnapshot.sessionId');
 }
 
 function assertAcceptedCharacterStatePatchMatchesParsedToolCall(options: {
@@ -955,27 +980,15 @@ function assertAcceptedCharacterStatePatchMatchesParsedToolCall(options: {
     | undefined;
   readonly snapshot: CharacterStatePatchSnapshot;
 }): void {
-  const parsedResult = options.parsedRoleModelDecisionSnapshot?.result;
-
-  if (parsedResult?.status !== 'accepted') {
-    throwMalformedRecord('characterStatePatchSnapshot');
-  }
-
-  const toolCall = getCharacterStatePatchToolCall(parsedResult.decision);
-
-  if (toolCall === undefined) {
-    throwMalformedRecord('characterStatePatchSnapshot');
-  }
-
   const actualResult = options.snapshot.result;
 
   if (actualResult.status !== 'accepted') {
     throwMalformedRecord('characterStatePatchSnapshot.result.status');
   }
 
-  const expectedResult = planCharacterStatePatch({
-    before: actualResult.before,
-    patchInput: toolCall.input
+  const expectedResult = expectedCharacterStatePatchResultFromParsedToolCall({
+    parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
+    before: actualResult.before
   });
 
   if (
@@ -995,6 +1008,67 @@ function acceptedCharacterStatePatchResultsEqual(
     characterRuntimeStatesEqual(left.before, right.before) &&
     characterRuntimeStatesEqual(left.after, right.after) &&
     characterStateAppliedChangesEqual(left.appliedChanges, right.appliedChanges)
+  );
+}
+
+function expectedCharacterStatePatchResultFromParsedToolCall(options: {
+  readonly parsedRoleModelDecisionSnapshot:
+    | ParsedRoleModelDecisionSnapshot
+    | undefined;
+  readonly before: CharacterRuntimeState;
+}): CharacterStatePatchResult {
+  const parsedResult = options.parsedRoleModelDecisionSnapshot?.result;
+
+  if (parsedResult?.status !== 'accepted') {
+    throwMalformedRecord('characterStatePatchSnapshot');
+  }
+
+  const toolCall = getCharacterStatePatchToolCall(parsedResult.decision);
+
+  if (toolCall === undefined) {
+    throwMalformedRecord('characterStatePatchSnapshot');
+  }
+
+  return planCharacterStatePatch({
+    before: options.before,
+    patchInput: toolCall.input
+  });
+}
+
+function assertRejectedCharacterStatePatchMatchesParsedToolCall(options: {
+  readonly parsedRoleModelDecisionSnapshot:
+    | ParsedRoleModelDecisionSnapshot
+    | undefined;
+  readonly snapshot: CharacterStatePatchSnapshot;
+}): void {
+  const actualResult = options.snapshot.result;
+
+  if (actualResult.status !== 'rejected') {
+    throwMalformedRecord('characterStatePatchSnapshot.result.status');
+  }
+
+  const expectedResult = expectedCharacterStatePatchResultFromParsedToolCall({
+    parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
+    before: actualResult.before
+  });
+
+  if (
+    expectedResult.status !== 'rejected' ||
+    !rejectedCharacterStatePatchResultsEqual(actualResult, expectedResult)
+  ) {
+    throwMalformedRecord('characterStatePatchSnapshot.result');
+  }
+}
+
+function rejectedCharacterStatePatchResultsEqual(
+  left: RejectedCharacterStatePatchResult,
+  right: RejectedCharacterStatePatchResult
+): boolean {
+  return (
+    JSON.stringify(left.patchInput) === JSON.stringify(right.patchInput) &&
+    characterRuntimeStatesEqual(left.before, right.before) &&
+    left.rejection.reason === right.rejection.reason &&
+    left.rejection.details === right.rejection.details
   );
 }
 
@@ -1085,12 +1159,15 @@ function isProviderErrorRawOutputEvidence(options: {
   readonly roleModelIOSnapshot: RoleModelIOSnapshot;
   readonly parsedSnapshotDecision: RoleModelDecisionResult;
 }): boolean {
+  const providerError = options.roleModelIOSnapshot.providerMetadata?.error;
+
   return (
     options.roleModelIOSnapshot.rawOutputText.length === 0 &&
-    options.roleModelIOSnapshot.providerMetadata?.error !== undefined &&
+    providerError !== undefined &&
     options.parsedSnapshotDecision.status === 'rejected' &&
     options.parsedSnapshotDecision.rejection.reason ===
-      roleModelProviderErrorRejectionReason
+      roleModelProviderErrorRejectionReason &&
+    options.parsedSnapshotDecision.rejection.details === providerError.message
   );
 }
 
