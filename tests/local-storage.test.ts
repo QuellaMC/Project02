@@ -340,6 +340,22 @@ describe('local runtime storage contract', () => {
     }
   });
 
+  it('rejects accepted role-model decisions excluded by the stored input envelope', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const snapshot = requiredMutableRecord(
+      record['roleModelIOSnapshot'],
+      'roleModelIOSnapshot'
+    );
+    const inputEnvelope = requiredMutableRecord(
+      snapshot['inputEnvelope'],
+      'roleModelIOSnapshot.inputEnvelope'
+    );
+
+    inputEnvelope['allowedActions'] = [];
+
+    expectMalformedRawEvent(record);
+  });
+
   it('rejects accepted role-model commit text that does not match the parsed decision', () => {
     const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
     const commitValidation = requiredMutableRecord(

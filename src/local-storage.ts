@@ -785,6 +785,10 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
     roleModelIOSnapshot,
     parsedRoleModelDecisionSnapshot
   });
+  assertParsedRoleModelDecisionAllowedByEnvelope({
+    roleModelIOSnapshot,
+    parsedRoleModelDecisionSnapshot
+  });
   assertRoleModelCommitStatusMatchesRawEvent({
     kind: options.kind,
     status: options.status,
@@ -838,6 +842,30 @@ function assertParsedRoleModelDecisionMatchesRawOutput(options: {
   }
 
   throwMalformedRecord('parsedRoleModelDecisionSnapshot.result');
+}
+
+function assertParsedRoleModelDecisionAllowedByEnvelope(options: {
+  readonly roleModelIOSnapshot: RoleModelIOSnapshot;
+  readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+}): void {
+  const parsedResult = options.parsedRoleModelDecisionSnapshot.result;
+
+  if (parsedResult.status === 'rejected') {
+    return;
+  }
+
+  if (
+    isOneOf(
+      parsedResult.decision.action.type,
+      options.roleModelIOSnapshot.inputEnvelope.allowedActions
+    )
+  ) {
+    return;
+  }
+
+  throwMalformedRecord(
+    'roleModelIOSnapshot.inputEnvelope.allowedActions'
+  );
 }
 
 function roleModelDecisionResultsMatch(options: {
