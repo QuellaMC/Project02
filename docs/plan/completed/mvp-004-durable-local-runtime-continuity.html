@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MVP-004 - Durable Local Runtime Continuity</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    h3 { margin-top: 22px; font-size: 1rem; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul, ol { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    pre { overflow-x: auto; background: #202923; color: #f3f7f1; border-radius: 8px; padding: 16px; }
+    pre code { background: transparent; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; }
+    th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #edf1eb; }
+    blockquote { border-left: 4px solid #b9c6bd; margin: 16px 0; padding: 8px 14px; background: #fff; color: #34413d; }
+    .status { display: inline-block; border: 1px solid #aebbad; border-radius: 999px; padding: 2px 10px; background: #fff; font-size: 0.9rem; }
+    .meta { color: #4a5651; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-004 - Durable Local Runtime Continuity</h1>
+    <p><span class="status">Status: completed archived slice</span></p>
+    <p class="meta">
+      Created: 2026-06-04. Accepted: 2026-06-04. Archived: 2026-06-09. Archived spec:
+      <code>docs/plan/completed/mvp-004-durable-local-runtime-continuity.html</code>. Previous slice archived at
+      <code>docs/plan/completed/mvp-003-runtime-event-trace-local-chat.html</code>.
+      Suggested implementation branch: <code>feature/mvp-004-durable-local-runtime-continuity</code>.
+    </p>
+
+    <h2>Source Context</h2>
+    <p>
+      Product direction comes from the Notion project hub
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>,
+      especially
+      <a href="https://www.notion.so/35f8995c0c5e818f948dfbf3944f52ce">01 - Framework Overview</a>,
+      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>.
+    </p>
+    <blockquote>
+      Long-term direction: runtime truth should be durable enough to support debugging,
+      inspection, replay, memory, retrieval, scheduling, provider edges, and future training data.
+    </blockquote>
+    <p>
+      Local rebuild direction comes from <a href="../../AGENTS.md">AGENTS.md</a> and
+      <a href="../../AGENTS.repo.md">AGENTS.repo.md</a>. This slice must grow from the current
+      working local chat path and keep the architecture pressure-driven. It should make the existing
+      runtime truth durable before adding memory, providers, schedulers, model calls, or a full
+      Runtime Kernel.
+    </p>
+
+    <h2>Current Product Before This Slice</h2>
+    <p>
+      MVP-003 gives the repo a local runtime-shaped chat path. Each non-exit chat input becomes one
+      <code>USER_MESSAGE</code> runtime event with event identity, trace identity, ordered trace
+      entries, raw event records, and visible conversation log records. The default chat output is
+      still simple and user-facing, while <code>--trace</code> can print one JSON Line summary per
+      processed input.
+    </p>
+    <pre><code>terminal input
+  -> create USER_MESSAGE RuntimeEvent
+  -> local runtime adapter handles the event
+  -> conversation core validates and replies
+  -> in-memory trace/log records explain the turn
+  -> chat CLI prints Mira's reply</code></pre>
+    <p>
+      The limitation is that the trace, raw event records, and visible conversation records are local
+      process memory. Once the chat process exits, the runtime truth is gone.
+    </p>
+
+    <h2>Product After This Slice</h2>
+    <p>
+      Local chat should become a durable local session. A user can run chat, talk to Mira, exit,
+      restart the command, and resume the same local session with recent visible context restored
+      from stored runtime truth.
+    </p>
+    <pre><code>terminal input
+  -> create USER_MESSAGE RuntimeEvent
+  -> append durable raw event and trace records
+  -> local runtime adapter handles the event
+  -> conversation core validates and replies
+  -> append durable visible conversation records
+  -> chat CLI prints Mira's reply
+
+later process restart
+  -> load the local session
+  -> rehydrate recent visible transcript
+  -> continue the conversation</code></pre>
+    <p>
+      This is not semantic memory yet. Mira does not summarize relationship history, search old
+      facts, retrieve exact memories, or call a live model in this slice. MVP-004 only makes the
+      local runtime's truth durable so later memory and retrieval slices have one real source to read.
+    </p>
+
+    <h2>Goal</h2>
+    <p>
+      Replace MVP-003's process-only runtime truth with a versioned local durable store for one
+      local character chat product path. The store should persist runtime events, traces, raw event
+      records, and visible conversation records; support session resume after process restart; and
+      provide a narrow inspection path for debugging what happened.
+    </p>
+
+    <h2>Current Scope</h2>
+    <ul>
+      <li>One local durable storage contract for the rebuilt TypeScript product path.</li>
+      <li>One default dev-local store root, proposed as <code>.project02-runtime/</code>, with tests using temporary directories.</li>
+      <li>A schema/version marker so later migrations can be explicit.</li>
+      <li>One session catalog with stable, storage-safe local session IDs and created/updated timestamps.</li>
+      <li>Per-session log directories under the store root; runtime records do not need duplicate <code>sessionId</code> fields because the durable path scopes them to one session.</li>
+      <li>File-backed append/read behavior for per-session runtime traces, raw event records, and visible conversation records.</li>
+      <li>Atomic-enough local writes for this single-process CLI slice, with clear behavior on partial/corrupt records.</li>
+      <li>Session rehydration that restores recent visible transcript context from persisted conversation records.</li>
+      <li>Chat CLI persistence options for creating, resuming, and selecting local sessions while preserving the default chat contract.</li>
+      <li>A narrow read-only local inspection command that can show stored sessions and turn evidence without requiring a running chat process.</li>
+      <li>Compatibility with MVP-001 relay, MVP-002 default chat behavior, and MVP-003 trace mode unless a reviewed compatibility note changes the contract.</li>
+    </ul>
+
+    <h2>Explicit Non-Goals</h2>
+    <ul>
+      <li>No live model provider call, API key, provider config, prompt template, or model selection.</li>
+      <li>No Twilio, WhatsApp, webhook, HTTP server, browser UI, mobile app, or external provider edge.</li>
+      <li>No semantic memory, retrieval index, summaries, embeddings, relationship model, or long-term personality adaptation.</li>
+      <li>No scheduler, reminders, due directives, background worker, cron loop, or proactive message delivery.</li>
+      <li>No tools, external side effects, documents, calendars, accounts, authentication, permissions matrix, or user-data sync.</li>
+      <li>No database server, SQLite dependency, cloud storage, encryption layer, backup system, or cross-device migration.</li>
+      <li>No full Runtime Kernel, Character State Engine, Role Model Loop, Commit and Effects Engine, or old runtime module restoration from <code>legacy/typescript</code>.</li>
+      <li>No replay UI that re-executes model calls or mutates state from old logs.</li>
+      <li>No multi-character support or multi-user account system.</li>
+    </ul>
+
+    <h2>Finished Slice</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Before MVP-004</th>
+          <th>After MVP-004</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Local chat history exists only while the Node process is running.</td>
+          <td>Local chat history can be restored from a durable local session store.</td>
+        </tr>
+        <tr>
+          <td>Runtime trace and raw event records disappear when the CLI exits.</td>
+          <td>Runtime trace and raw event records survive process restart for inspection.</td>
+        </tr>
+        <tr>
+          <td>Starting chat always creates a fresh in-memory conversation unless tests wire state manually.</td>
+          <td>Starting chat can resume a chosen local session and rebuild recent visible context.</td>
+        </tr>
+        <tr>
+          <td>There is no repo-owned storage version or local runtime file layout.</td>
+          <td>The repo has a versioned local storage contract with explicit read/write and error behavior.</td>
+        </tr>
+        <tr>
+          <td>Debugging a prior turn requires terminal output or a test reproduction.</td>
+          <td>A local inspect path can show sessions, event IDs, trace IDs, statuses, and visible messages after exit.</td>
+        </tr>
+        <tr>
+          <td>Future memory/retrieval work has no durable runtime truth to consume.</td>
+          <td>Future memory/retrieval work can build from one persisted local truth layer.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Functional Requirements</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Requirement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>FR-1</td>
+          <td>The product defines a versioned local runtime storage contract with a clear store root, session catalog, per-session directories, and append-only record files.</td>
+        </tr>
+        <tr>
+          <td>FR-2</td>
+          <td>The default dev-local store root is ignored by Git, and tests can inject temporary store roots without touching user or repository data.</td>
+        </tr>
+        <tr>
+          <td>FR-3</td>
+          <td>The durable runtime log store can append and read per-session runtime trace entries, raw event records, and conversation log records while preserving MVP-003 record identity fields.</td>
+        </tr>
+        <tr>
+          <td>FR-4</td>
+          <td>Stored snapshots are immutable from caller perspective and do not expose mutable arrays or record objects across reads.</td>
+        </tr>
+        <tr>
+          <td>FR-5</td>
+          <td>A chat session can be rehydrated from stored visible conversation records so a resumed session sees recent visible context from prior process runs.</td>
+        </tr>
+        <tr>
+          <td>FR-6</td>
+          <td>Successful turns durably append the same trace, raw event, and visible conversation evidence that MVP-003 records in memory.</td>
+        </tr>
+        <tr>
+          <td>FR-7</td>
+          <td>Rejected turns durably append rejection evidence without committing fake visible conversation messages.</td>
+        </tr>
+        <tr>
+          <td>FR-8</td>
+          <td>The chat CLI supports explicit session creation/resume/selection while keeping the existing default chat transcript and prompt behavior stable.</td>
+        </tr>
+        <tr>
+          <td>FR-9</td>
+          <td>A local inspection command can list sessions and print turn-level runtime evidence after the original chat process exits.</td>
+        </tr>
+        <tr>
+          <td>FR-10</td>
+          <td>Partial, corrupt, missing, or future-version local store data fails with clear errors and does not silently fabricate character history.</td>
+        </tr>
+        <tr>
+          <td>FR-11</td>
+          <td>The existing MVP-001 relay command, MVP-002 default chat behavior, and MVP-003 trace JSONL behavior remain covered by compatibility tests.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Acceptance Criteria</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Criterion</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>AC-1</td>
+          <td>A focused test can create a deterministic local store, append one successful turn to one session, reopen the store, and read back matching event IDs, trace IDs, raw records, trace entries, and visible messages from that session only.</td>
+        </tr>
+        <tr>
+          <td>AC-2</td>
+          <td>A resumed chat session can use visible context from a prior process run to produce the same context-aware deterministic reply behavior as an uninterrupted in-memory session, while preserving next visible message IDs without duplicating old IDs.</td>
+        </tr>
+        <tr>
+          <td>AC-3</td>
+          <td>Rejected input and rejected character replies are persisted as rejected runtime outcomes and leave persisted conversation records unchanged for the failed turn.</td>
+        </tr>
+        <tr>
+          <td>AC-4</td>
+          <td>Callers cannot mutate stored records by changing returned snapshots, input arrays, visible message objects, raw event payload summaries, or trace entries after append/read.</td>
+        </tr>
+        <tr>
+          <td>AC-5</td>
+          <td>The CLI can create a named or generated local session, resume that session after process restart, and select a different session without mixing visible transcripts or per-session logs.</td>
+        </tr>
+        <tr>
+          <td>AC-6</td>
+          <td>The local inspect command can list sessions and show event ID, trace ID, status, step names, and visible message text for a selected session without starting a chat loop.</td>
+        </tr>
+        <tr>
+          <td>AC-7</td>
+          <td>Corrupt JSONL records, missing schema markers, unsupported schema versions, and malformed stored visible messages fail loudly with tested errors.</td>
+        </tr>
+        <tr>
+          <td>AC-8</td>
+          <td>Default <code>pnpm chat</code>, <code>pnpm chat -- --trace</code>, and <code>pnpm relay</code> compatibility tests still pass.</td>
+        </tr>
+        <tr>
+          <td>AC-9</td>
+          <td><code>pnpm lint</code>, <code>pnpm typecheck</code>, <code>pnpm test</code>, strict unused-symbol TypeScript, whitespace checks, and HTML sanity checks pass.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Parallel Child Tasks</h2>
+    <p>
+      This draft is intentionally shaped for five month-sized subthreads. CT-01 must freeze the
+      shared storage contract, module map, exported types, and test fixtures first. CT-02 through
+      CT-05 should consume that exported contract; if they start before CT-01 is merged, they should
+      write contract tests or adapter-facing scaffolding rather than creating alternate production
+      record shapes.
+    </p>
+    <ul>
+      <li><a href="child-tasks/mvp-004-ct01-durable-storage-contract.md">CT-01 - Durable Storage Contract</a></li>
+      <li><a href="child-tasks/mvp-004-ct02-file-backed-runtime-log-store.md">CT-02 - File-Backed Runtime Log Store</a></li>
+      <li><a href="child-tasks/mvp-004-ct03-session-catalog-rehydration.md">CT-03 - Session Catalog And Rehydration</a></li>
+      <li><a href="child-tasks/mvp-004-ct04-chat-cli-persistence-ux.md">CT-04 - Chat CLI Persistence UX</a></li>
+      <li><a href="child-tasks/mvp-004-ct05-inspection-integration-docs.md">CT-05 - Inspection, Integration Review, And Docs</a></li>
+    </ul>
+
+    <h2>Implementation Boundaries</h2>
+    <ul>
+      <li><code>src/local-storage.ts</code> owns file layout, schema version, storage-safe session identity, record codecs, error taxonomy, and test fixtures.</li>
+      <li><code>src/file-runtime-log-store.ts</code> owns append/read behavior for per-session trace, raw event, and conversation log records.</li>
+      <li><code>src/session-store.ts</code> owns session metadata, create/list/select behavior, and rehydration of visible transcript context.</li>
+      <li>The local runtime adapter remains the owner of running one <code>USER_MESSAGE</code> event through the conversation core.</li>
+      <li>The conversation core remains the owner of character profile, turn validation, deterministic replies, transcript commit rules, and any minimal public rehydration seam needed to seed a session from persisted visible messages.</li>
+      <li><code>src/chat-cli.ts</code> owns terminal UX, session flags, default behavior compatibility, and clear error messages.</li>
+      <li><code>src/inspect-cli.ts</code> owns read-only debug output and must not mutate runtime state.</li>
+      <li>The relay command remains the MVP-001 smoke path and should not move into the durable runtime layer in this slice.</li>
+    </ul>
+
+    <h2>Minimal CLI Surface</h2>
+    <ul>
+      <li><code>pnpm chat</code> uses the default dev-local store root and a default local session, creating it if missing.</li>
+      <li><code>pnpm chat -- --store &lt;path&gt; --session &lt;session-id&gt;</code> resumes an existing selected session in the selected store and fails clearly if that session is missing.</li>
+      <li><code>pnpm chat -- --store &lt;path&gt; --new-session &lt;session-id&gt;</code> creates a new selected session and fails clearly if that session already exists.</li>
+      <li><code>pnpm chat -- --trace</code> keeps MVP-003 JSON Lines trace summaries on <code>stderr</code>.</li>
+      <li><code>pnpm inspect -- --store &lt;path&gt; --sessions</code> lists local sessions without starting chat.</li>
+      <li><code>pnpm inspect -- --store &lt;path&gt; --session &lt;session-id&gt;</code> prints read-only turn evidence for the selected session.</li>
+    </ul>
+
+    <h2>Test Plan</h2>
+    <ul>
+      <li>Contract tests for schema markers, per-session file layout, storage-safe session IDs, record codecs, and unsupported/corrupt store failures.</li>
+      <li>Unit tests for file-backed append/read behavior, immutable snapshots, raw payload summaries, trace ordering, and visible conversation record storage.</li>
+      <li>Integration tests that run a turn, reopen the store, rehydrate the session, continue with recent visible context, and append next visible message IDs without duplication.</li>
+      <li>Rejection-path tests for invalid input, invalid agent replies, unexpected runtime failures, corrupt JSONL, and malformed persisted messages.</li>
+      <li>CLI boundary tests for default chat, <code>--store</code>, <code>--session</code>, <code>--new-session</code>, trace mode, inspect output, clear errors, and relay compatibility.</li>
+      <li>Docs and HTML sanity checks for active slice, child task packets, and dated journal updates.</li>
+    </ul>
+
+    <h2>Review Decisions Requested</h2>
+    <ul>
+      <li>Storage root: this draft proposes <code>.project02-runtime/</code> as the default dev-local root, ignored by Git, with explicit CLI/test overrides.</li>
+      <li>Storage format: this draft proposes simple versioned files and JSON Lines records rather than SQLite or a database server.</li>
+      <li>Session scoping: this draft proposes per-session directories under the store root rather than adding duplicate <code>sessionId</code> fields to every runtime record.</li>
+      <li>Session behavior: this draft proposes one local session catalog, a default local session, and explicit session selection, not accounts or cross-device identity.</li>
+      <li>Inspection behavior: this draft proposes a read-only <code>pnpm inspect</code> surface for stored sessions and turn evidence, not replay that mutates state.</li>
+      <li>Runtime scope: this draft proposes durability around the existing <code>USER_MESSAGE</code> local path only, not a full Runtime Kernel.</li>
+    </ul>
+
+    <h2>Future Pressure</h2>
+    <p>
+      Once local runtime truth is durable, later slices can add semantic memory, retrieval indexing,
+      compaction, model I/O snapshots, scheduled events, provider webhooks, richer replay, or a
+      broader Runtime Kernel. Those later slices should read from this durable truth layer instead
+      of creating parallel storage for the same conversation and runtime evidence.
+    </p>
+  </main>
+</body>
+</html>

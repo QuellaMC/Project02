@@ -6,9 +6,18 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  createConversationSession,
+  createFileRuntimeLogStore,
   createLocalRuntimeSessionPaths,
-  createLocalRuntimeStorageLayout
+  createLocalRuntimeSessionStore,
+  createLocalRuntimeStorageLayout,
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent,
+  roleModelMalformedOutputRejectionReason,
+  roleModelVisibleReplyActionName,
+  runLocalUserMessageEvent
 } from '../src/index.ts';
+import type { RoleModelAdapter } from '../src/role-model-loop.ts';
 
 type CommandResult = {
   readonly exitCode: number;
@@ -46,8 +55,51 @@ type InspectSessionOutput = {
       readonly speakerName: string;
       readonly text: string;
     }[];
+    readonly roleModelEvidence?: InspectRoleModelEvidence;
     readonly reason?: string;
   }[];
+};
+
+type InspectRoleModelEvidence = {
+  readonly input?: {
+    readonly sessionId: string;
+    readonly allowedActions: readonly string[];
+    readonly outputContractVersion: string;
+    readonly currentUserMessage: string;
+    readonly recentVisibleMessages: readonly {
+      readonly id: string;
+      readonly role: 'user' | 'character';
+      readonly speakerName: string;
+      readonly text: string;
+    }[];
+    readonly runtimeNotes: readonly string[];
+  };
+  readonly output?: {
+    readonly rawOutputText: string;
+  };
+  readonly parsedDecision?:
+    | {
+        readonly status: 'accepted';
+        readonly action: {
+          readonly type: 'visible_reply';
+          readonly text: string;
+        };
+      }
+    | {
+        readonly status: 'rejected';
+        readonly rejectionReason: string;
+        readonly rejectionDetails?: string;
+      };
+  readonly commitValidation?:
+    | {
+        readonly status: 'accepted';
+        readonly acceptedVisibleReplyText: string;
+      }
+    | {
+        readonly status: 'rejected';
+        readonly rejectionReason: string;
+        readonly rejectionDetails?: string;
+      };
 };
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -155,7 +207,36 @@ describe('node src/inspect-cli.ts', () => {
             speakerName: 'Mira',
             text: "I'm here. Tell me what you need."
           }
-        ]
+        ],
+        roleModelEvidence: {
+          input: {
+            sessionId: 'mira-local',
+            allowedActions: [roleModelVisibleReplyActionName],
+            outputContractVersion: 'mvp-005.visible_reply.v1',
+            currentUserMessage: 'hello',
+            recentVisibleMessages: [],
+            runtimeNotes: []
+          },
+          output: {
+            rawOutputText: JSON.stringify({
+              action: {
+                type: roleModelVisibleReplyActionName,
+                text: "I'm here. Tell me what you need."
+              }
+            })
+          },
+          parsedDecision: {
+            status: 'accepted',
+            action: {
+              type: roleModelVisibleReplyActionName,
+              text: "I'm here. Tell me what you need."
+            }
+          },
+          commitValidation: {
+            status: 'accepted',
+            acceptedVisibleReplyText: "I'm here. Tell me what you need."
+          }
+        }
       }
     );
   });
@@ -205,6 +286,76 @@ describe('node src/inspect-cli.ts', () => {
     });
   });
 
+  it('prints rejected role-model evidence without fake visible messages after process restart', async () => {
+    const storeRoot = await createTempStoreRoot();
+
+    await seedRejectedRoleModelSession(storeRoot, 'mira-local');
+
+    const result = await runInspectCli([
+      '--store',
+      storeRoot,
+      '--session',
+      'mira-local'
+    ]);
+    const output = parseJson(result.stdout) as InspectSessionOutput;
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      stderr: ''
+    });
+    expect(output.counts).toEqual({
+      traceEntries: 6,
+      rawEvents: 4,
+      conversationMessages: 0
+    });
+    expect(output.turns).toHaveLength(1);
+
+    const turn = output.turns[0];
+
+    if (turn === undefined) {
+      throw new Error('Expected one inspected role-model rejected turn.');
+    }
+
+    expect(turn).toEqual({
+      eventId: 'evt_rejected_role_model',
+      traceId: 'trace_rejected_role_model',
+      status: 'rejected',
+      steps: [
+        'runtime_event_received',
+        'runtime_event_normalized',
+        'runtime_turn_started',
+        'commit_validation_rejected',
+        'raw_event_log_appended',
+        'runtime_turn_rejected'
+      ],
+      visibleMessages: [],
+      roleModelEvidence: {
+        input: {
+          sessionId: 'mira-local',
+          allowedActions: [roleModelVisibleReplyActionName],
+          outputContractVersion: 'mvp-005.visible_reply.v1',
+          currentUserMessage: 'hello',
+          recentVisibleMessages: [],
+          runtimeNotes: []
+        },
+        output: {
+          rawOutputText: 'not json'
+        },
+        parsedDecision: {
+          status: 'rejected',
+          rejectionReason: roleModelMalformedOutputRejectionReason,
+          rejectionDetails: 'Adapter output must be valid JSON.'
+        },
+        commitValidation: {
+          status: 'rejected',
+          rejectionReason: roleModelMalformedOutputRejectionReason,
+          rejectionDetails: 'Adapter output must be valid JSON.'
+        }
+      },
+      reason: roleModelMalformedOutputRejectionReason
+    });
+  });
+
   it('does not mutate session metadata or runtime logs while inspecting', async () => {
     const storeRoot = await createTempStoreRoot();
 
@@ -219,10 +370,25 @@ describe('node src/inspect-cli.ts', () => {
     ).resolves.toMatchObject({
       exitCode: 0
     });
-    await expect(
-      runInspectCli(['--store', storeRoot, '--session', 'mira-local'])
-    ).resolves.toMatchObject({
+    const inspectResult = await runInspectCli([
+      '--store',
+      storeRoot,
+      '--session',
+      'mira-local'
+    ]);
+    const output = parseJson(inspectResult.stdout) as InspectSessionOutput;
+
+    expect(inspectResult).toMatchObject({
       exitCode: 0
+    });
+    expect(output.turns[0]?.roleModelEvidence).toMatchObject({
+      parsedDecision: {
+        status: 'accepted'
+      },
+      commitValidation: {
+        status: 'accepted',
+        acceptedVisibleReplyText: "I'm here. Tell me what you need."
+      }
     });
 
     await expect(readDurableFiles(storeRoot, 'mira-local')).resolves.toEqual(before);
@@ -342,6 +508,54 @@ async function seedChatSession(
     ],
     stdin
   );
+}
+
+async function seedRejectedRoleModelSession(
+  storeRoot: string,
+  sessionId: string
+): Promise<void> {
+  const sessionStore = createLocalRuntimeSessionStore({
+    storeRoot,
+    now: () => '2026-06-09T00:00:00.000Z'
+  });
+  await sessionStore.createSession({
+    sessionId,
+    createdAt: '2026-06-09T00:00:00.000Z'
+  });
+
+  const session = createConversationSession({
+    id: sessionId
+  });
+  const logStore = createFileRuntimeLogStore({
+    storeRoot,
+    sessionId
+  });
+  const event = createUserMessageRuntimeEvent(
+    'hello',
+    createRuntimeEventIdentity({
+      eventId: 'evt_rejected_role_model',
+      traceId: 'trace_rejected_role_model',
+      createdAt: '2026-06-09T00:00:00.000Z'
+    })
+  );
+  const result = await runLocalUserMessageEvent({
+    event,
+    session,
+    logStore,
+    roleModelAdapter: createRawOutputAdapter('not json')
+  });
+
+  expect(result.status).toBe('rejected');
+}
+
+function createRawOutputAdapter(rawOutputText: string): RoleModelAdapter {
+  return Object.freeze({
+    invoke() {
+      return Object.freeze({
+        rawOutputText
+      });
+    }
+  } satisfies RoleModelAdapter);
 }
 
 async function runInspectCli(args: readonly string[]): Promise<CommandResult> {

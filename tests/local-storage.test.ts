@@ -4,10 +4,20 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  createAcceptedRoleModelDecisionResult,
+  createDecisionContext,
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
+  createParsedRoleModelDecisionSnapshot,
+  createRejectedRoleModelDecisionResult,
+  createRoleModelCommitValidationSnapshot,
+  createRoleModelInputEnvelope,
+  createRoleModelIOSnapshot,
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent,
+  createVisibleReplyCharacterDecision,
   decodeConversationLogRecord,
   decodeRawEventLogRecord,
   decodeRuntimeTraceEntry,
@@ -21,9 +31,13 @@ import {
   LocalRuntimeStorageContractError,
   localRuntimeStorageSchemaVersion,
   normalizeLocalRuntimeSessionId,
+  roleModelInvalidVisibleReplyRejectionReason,
+  roleModelMalformedOutputRejectionReason,
+  roleModelVisibleReplyActionName,
   type ConversationLogRecord,
   type LocalRuntimeStorageContractErrorCode,
   type RawEventLogRecord,
+  type RoleModelDecisionRejectionReason,
   type RuntimeTraceEntry
 } from '../src/index.ts';
 
@@ -260,6 +274,243 @@ describe('local runtime storage contract', () => {
     expect(decodeRawEventLogRecord(encodeRawEventLogRecord(rawEvent))).toEqual(rawEvent);
   });
 
+  it('rejects role-model evidence whose nested identity does not match the raw event identity', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const snapshot = requiredMutableRecord(
+      record['roleModelIOSnapshot'],
+      'roleModelIOSnapshot'
+    );
+
+    snapshot['eventId'] = 'evt_other';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects role-model input text that contradicts the normalized payload summary', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const snapshot = requiredMutableRecord(
+      record['roleModelIOSnapshot'],
+      'roleModelIOSnapshot'
+    );
+    const inputEnvelope = requiredMutableRecord(
+      snapshot['inputEnvelope'],
+      'roleModelIOSnapshot.inputEnvelope'
+    );
+    const event = requiredMutableRecord(
+      inputEnvelope['event'],
+      'roleModelIOSnapshot.inputEnvelope.event'
+    );
+    const payload = requiredMutableRecord(
+      event['payload'],
+      'roleModelIOSnapshot.inputEnvelope.event.payload'
+    );
+
+    payload['currentUserMessage'] = 'DIFFERENT';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects partial role-model evidence on raw event records', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    delete record['parsedRoleModelDecisionSnapshot'];
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects role-model evidence whose raw output parses to a different decision', () => {
+    for (const rawOutputText of [
+      JSON.stringify({
+        action: {
+          type: roleModelVisibleReplyActionName,
+          text: 'tampered reply'
+        }
+      }),
+      'not json'
+    ]) {
+      const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+      const snapshot = requiredMutableRecord(
+        record['roleModelIOSnapshot'],
+        'roleModelIOSnapshot'
+      );
+
+      snapshot['rawOutputText'] = rawOutputText;
+
+      expectMalformedRawEvent(record);
+    }
+  });
+
+  it('rejects accepted role-model decisions excluded by the stored input envelope', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const snapshot = requiredMutableRecord(
+      record['roleModelIOSnapshot'],
+      'roleModelIOSnapshot'
+    );
+    const inputEnvelope = requiredMutableRecord(
+      snapshot['inputEnvelope'],
+      'roleModelIOSnapshot.inputEnvelope'
+    );
+
+    inputEnvelope['allowedActions'] = [];
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects accepted role-model commit text that does not match the parsed decision', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const commitValidation = requiredMutableRecord(
+      record['commitValidation'],
+      'commitValidation'
+    );
+    const result = requiredMutableRecord(
+      commitValidation['result'],
+      'commitValidation.result'
+    );
+
+    result['acceptedVisibleReplyText'] = 'different reply';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects role-model commit validation that contradicts terminal turn status', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const commitValidation = requiredMutableRecord(
+      record['commitValidation'],
+      'commitValidation'
+    );
+
+    commitValidation['result'] = {
+      status: 'rejected',
+      rejection: createRejectedRoleModelDecisionResult(
+        roleModelMalformedOutputRejectionReason,
+        'Adapter output must be valid JSON.'
+      ).rejection
+    };
+    record['reason'] = roleModelMalformedOutputRejectionReason;
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects parser-owned commit rejections when the parsed decision was accepted', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelMalformedOutputRejectionReason,
+      'Adapter output must be valid JSON.'
+    );
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('accepts invalid visible-reply commit rejection for parsed text that fails reply validation', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    setParsedVisibleReplyText(record, '');
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelInvalidVisibleReplyRejectionReason,
+      'Character agent returned an empty reply.'
+    );
+
+    const decoded = decodeRawEventLogRecord(JSON.stringify(record));
+
+    expect(decoded).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelInvalidVisibleReplyRejectionReason,
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'accepted',
+          decision: {
+            action: {
+              type: roleModelVisibleReplyActionName,
+              text: ''
+            }
+          }
+        }
+      },
+      commitValidation: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelInvalidVisibleReplyRejectionReason
+          }
+        }
+      }
+    });
+  });
+
+  it('rejects invalid visible-reply commit rejection when parsed text would commit', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelInvalidVisibleReplyRejectionReason,
+      'Character agent returned an empty reply.'
+    );
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('accepts parser-owned commit rejection when it matches the parsed rejection', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    setParsedRoleModelRejection(
+      record,
+      roleModelMalformedOutputRejectionReason,
+      'Adapter output must be valid JSON.',
+      'not json'
+    );
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelMalformedOutputRejectionReason,
+      'Adapter output must be valid JSON.'
+    );
+
+    const decoded = decodeRawEventLogRecord(JSON.stringify(record));
+
+    expect(decoded).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelMalformedOutputRejectionReason,
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelMalformedOutputRejectionReason
+          }
+        }
+      },
+      commitValidation: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelMalformedOutputRejectionReason
+          }
+        }
+      }
+    });
+  });
+
+  it('rejects parser-owned commit rejection details that contradict the parsed rejection', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    setParsedRoleModelRejection(
+      record,
+      roleModelMalformedOutputRejectionReason,
+      'Adapter output must be valid JSON.',
+      'not json'
+    );
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelMalformedOutputRejectionReason,
+      'Different parser details.'
+    );
+
+    expectMalformedRawEvent(record);
+  });
+
   it('rejects terminal raw events without stored turn status', () => {
     expect(() =>
       decodeRawEventLogRecord(
@@ -387,3 +638,171 @@ describe('local runtime storage contract', () => {
     ).toThrow(LocalRuntimeStorageContractError);
   });
 });
+
+function createRoleModelCompletedRawEvent(): RawEventLogRecord {
+  const identity = createRuntimeEventIdentity({
+    eventId: 'evt_role_model_storage',
+    traceId: 'trace_role_model_storage',
+    createdAt
+  });
+  const event = createUserMessageRuntimeEvent('hello', identity);
+  const decisionContext = createDecisionContext({
+    sessionId: 'local-session',
+    characterSnapshot: {
+      id: 'mira',
+      displayName: 'Mira'
+    }
+  });
+  const inputEnvelope = createRoleModelInputEnvelope({
+    event,
+    decisionContext
+  });
+  const decision = createVisibleReplyCharacterDecision('hello back');
+  const accepted = createAcceptedRoleModelDecisionResult(decision);
+
+  return Object.freeze({
+    ...identity,
+    kind: 'runtime_turn_completed',
+    eventType: 'USER_MESSAGE',
+    status: 'completed',
+    visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
+    payloadSummary: {
+      normalizedCurrentUserMessage: 'hello'
+    },
+    roleModelIOSnapshot: createRoleModelIOSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      inputEnvelope,
+      rawOutputText: JSON.stringify({
+        action: {
+          type: roleModelVisibleReplyActionName,
+          text: 'hello back'
+        }
+      })
+    }),
+    parsedRoleModelDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: accepted
+    }),
+    commitValidation: createRoleModelCommitValidationSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: {
+        status: 'accepted',
+        acceptedVisibleReplyText: 'hello back'
+      }
+    })
+  } satisfies RawEventLogRecord);
+}
+
+function rewriteRawEventAsRoleModelRejection(
+  record: Record<string, unknown>,
+  reason: RoleModelDecisionRejectionReason,
+  details: string
+): void {
+  record['kind'] = 'runtime_turn_rejected';
+  record['status'] = 'rejected';
+  record['reason'] = reason;
+  delete record['visibleMessageIds'];
+
+  const commitValidation = requiredMutableRecord(
+    record['commitValidation'],
+    'commitValidation'
+  );
+
+  commitValidation['result'] = {
+    status: 'rejected',
+    rejection: createRejectedRoleModelDecisionResult(
+      reason,
+      details
+    ).rejection
+  };
+}
+
+function setParsedVisibleReplyText(
+  record: Record<string, unknown>,
+  text: string
+): void {
+  const parsedRoleModelDecisionSnapshot = requiredMutableRecord(
+    record['parsedRoleModelDecisionSnapshot'],
+    'parsedRoleModelDecisionSnapshot'
+  );
+  const result = requiredMutableRecord(
+    parsedRoleModelDecisionSnapshot['result'],
+    'parsedRoleModelDecisionSnapshot.result'
+  );
+  const decision = requiredMutableRecord(
+    result['decision'],
+    'parsedRoleModelDecisionSnapshot.result.decision'
+  );
+  const action = requiredMutableRecord(
+    decision['action'],
+    'parsedRoleModelDecisionSnapshot.result.decision.action'
+  );
+
+  action['text'] = text;
+  setRoleModelRawOutputText(record, JSON.stringify({
+    action: {
+      type: roleModelVisibleReplyActionName,
+      text
+    }
+  }));
+}
+
+function setParsedRoleModelRejection(
+  record: Record<string, unknown>,
+  reason: RoleModelDecisionRejectionReason,
+  details: string,
+  rawOutputText: string
+): void {
+  const parsedRoleModelDecisionSnapshot = requiredMutableRecord(
+    record['parsedRoleModelDecisionSnapshot'],
+    'parsedRoleModelDecisionSnapshot'
+  );
+
+  parsedRoleModelDecisionSnapshot['result'] =
+    createRejectedRoleModelDecisionResult(reason, details);
+  setRoleModelRawOutputText(record, rawOutputText);
+}
+
+function setRoleModelRawOutputText(
+  record: Record<string, unknown>,
+  rawOutputText: string
+): void {
+  const roleModelIOSnapshot = requiredMutableRecord(
+    record['roleModelIOSnapshot'],
+    'roleModelIOSnapshot'
+  );
+
+  roleModelIOSnapshot['rawOutputText'] = rawOutputText;
+}
+
+function mutableRecordFromRawEvent(
+  rawEvent: RawEventLogRecord
+): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(JSON.stringify(rawEvent));
+
+  return requiredMutableRecord(parsed, 'rawEvent');
+}
+
+function requiredMutableRecord(
+  value: unknown,
+  field: string
+): Record<string, unknown> {
+  if (isMutableRecord(value)) {
+    return value;
+  }
+
+  throw new Error(`Expected mutable record for ${field}.`);
+}
+
+function isMutableRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function expectMalformedRawEvent(record: Record<string, unknown>): void {
+  expect(() => decodeRawEventLogRecord(JSON.stringify(record))).toThrow(
+    LocalRuntimeStorageContractError
+  );
+}

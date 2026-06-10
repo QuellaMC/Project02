@@ -1,6 +1,6 @@
 # MVP-004 CT-03 - Session Catalog And Rehydration
 
-Parent active slice: [MVP-004 - Durable Local Runtime Continuity](../active-slice.html)
+Parent active slice: [MVP-004 - Durable Local Runtime Continuity](../completed/mvp-004-durable-local-runtime-continuity.html)
 
 Assigned subthread: `mvp-004-session-catalog-rehydration`
 

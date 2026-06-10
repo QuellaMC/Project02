@@ -1,4 +1,11 @@
 import type { VisibleMessage } from './conversation.ts';
+import {
+  createParsedRoleModelDecisionSnapshot,
+  createRoleModelIOSnapshot,
+  type ParsedRoleModelDecisionSnapshot,
+  type RoleModelDecisionRejection,
+  type RoleModelIOSnapshot
+} from './role-model-contracts.ts';
 import type { RuntimeEventIdentity, RuntimeEventType } from './runtime-event.ts';
 
 export type RuntimeTurnStatus = 'completed' | 'rejected';
@@ -10,6 +17,7 @@ export type RuntimeTraceStepName =
   | 'visible_reply_committed'
   | 'input_validation_rejected'
   | 'character_reply_rejected'
+  | 'commit_validation_rejected'
   | 'raw_event_log_appended'
   | 'runtime_turn_completed'
   | 'runtime_turn_rejected';
@@ -24,6 +32,7 @@ export type RawEventLogRecordKind =
   | 'visible_reply_committed'
   | 'input_validation_rejected'
   | 'character_reply_rejected'
+  | 'commit_validation_rejected'
   | 'runtime_turn_completed'
   | 'runtime_turn_rejected';
 
@@ -39,6 +48,9 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly reason?: string;
   readonly visibleMessageIds?: readonly string[];
   readonly payloadSummary?: RawEventLogPayloadSummary;
+  readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
+  readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
+  readonly commitValidation?: RoleModelCommitValidationSnapshot;
 };
 
 export type ConversationLogRecord = VisibleMessage &
@@ -57,6 +69,9 @@ export type RawEventLogRecordInput = RuntimeEventIdentity & {
   readonly reason?: string;
   readonly visibleMessageIds?: readonly string[];
   readonly payloadSummary?: RawEventLogPayloadSummary;
+  readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
+  readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
+  readonly commitValidation?: RoleModelCommitValidationSnapshot;
 };
 
 export type ConversationLogRecordInput = VisibleMessage &
@@ -72,6 +87,45 @@ export type RuntimeLogStore = {
   rawEvents(): readonly RawEventLogRecord[];
   conversationMessages(): readonly ConversationLogRecord[];
 };
+
+export type AcceptedRoleModelCommitValidationResult = {
+  readonly status: 'accepted';
+  readonly acceptedVisibleReplyText: string;
+};
+
+export type RejectedRoleModelCommitValidationResult = {
+  readonly status: 'rejected';
+  readonly rejection: RoleModelDecisionRejection;
+};
+
+export type RoleModelCommitValidationResult =
+  | AcceptedRoleModelCommitValidationResult
+  | RejectedRoleModelCommitValidationResult;
+
+export type RoleModelCommitValidationSnapshot = RuntimeEventIdentity & {
+  readonly kind: 'role_model_commit_validation_snapshot';
+  readonly sessionId: string;
+  readonly result: RoleModelCommitValidationResult;
+};
+
+export type CreateRoleModelCommitValidationSnapshotOptions =
+  RuntimeEventIdentity & {
+    readonly sessionId: string;
+    readonly result: RoleModelCommitValidationResult;
+  };
+
+export function createRoleModelCommitValidationSnapshot(
+  options: CreateRoleModelCommitValidationSnapshotOptions
+): RoleModelCommitValidationSnapshot {
+  return Object.freeze({
+    eventId: options.eventId,
+    traceId: options.traceId,
+    createdAt: options.createdAt,
+    kind: 'role_model_commit_validation_snapshot',
+    sessionId: options.sessionId,
+    result: freezeRoleModelCommitValidationResult(options.result)
+  } satisfies RoleModelCommitValidationSnapshot);
+}
 
 export function isTerminalRawEventLogRecordKind(
   kind: RawEventLogRecordKind
@@ -139,6 +193,16 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
       ? undefined
       : Object.freeze([...record.visibleMessageIds]);
   const payloadSummary = freezeRawEventPayloadSummary(record.payloadSummary);
+  const roleModelIOSnapshot = freezeRoleModelIOSnapshot(
+    record.roleModelIOSnapshot
+  );
+  const parsedRoleModelDecisionSnapshot =
+    freezeParsedRoleModelDecisionSnapshot(
+      record.parsedRoleModelDecisionSnapshot
+    );
+  const commitValidation = freezeRoleModelCommitValidationSnapshot(
+    record.commitValidation
+  );
 
   return Object.freeze({
     eventId: record.eventId,
@@ -149,7 +213,12 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
     ...(record.status === undefined ? {} : { status: record.status }),
     ...(record.reason === undefined ? {} : { reason: record.reason }),
     ...(visibleMessageIds === undefined ? {} : { visibleMessageIds }),
-    ...(payloadSummary === undefined ? {} : { payloadSummary })
+    ...(payloadSummary === undefined ? {} : { payloadSummary }),
+    ...(roleModelIOSnapshot === undefined ? {} : { roleModelIOSnapshot }),
+    ...(parsedRoleModelDecisionSnapshot === undefined
+      ? {}
+      : { parsedRoleModelDecisionSnapshot }),
+    ...(commitValidation === undefined ? {} : { commitValidation })
   } satisfies RawEventLogRecord);
 }
 
@@ -187,4 +256,55 @@ function freezeConversationLogRecord(
     text: record.text,
     committedAt: record.committedAt
   } satisfies ConversationLogRecord);
+}
+
+function freezeRoleModelIOSnapshot(
+  snapshot: RoleModelIOSnapshot | undefined
+): RoleModelIOSnapshot | undefined {
+  if (snapshot === undefined) {
+    return undefined;
+  }
+
+  return createRoleModelIOSnapshot(snapshot);
+}
+
+function freezeParsedRoleModelDecisionSnapshot(
+  snapshot: ParsedRoleModelDecisionSnapshot | undefined
+): ParsedRoleModelDecisionSnapshot | undefined {
+  if (snapshot === undefined) {
+    return undefined;
+  }
+
+  return createParsedRoleModelDecisionSnapshot(snapshot);
+}
+
+function freezeRoleModelCommitValidationSnapshot(
+  snapshot: RoleModelCommitValidationSnapshot | undefined
+): RoleModelCommitValidationSnapshot | undefined {
+  if (snapshot === undefined) {
+    return undefined;
+  }
+
+  return createRoleModelCommitValidationSnapshot(snapshot);
+}
+
+function freezeRoleModelCommitValidationResult(
+  result: RoleModelCommitValidationResult
+): RoleModelCommitValidationResult {
+  if (result.status === 'accepted') {
+    return Object.freeze({
+      status: 'accepted',
+      acceptedVisibleReplyText: result.acceptedVisibleReplyText
+    } satisfies AcceptedRoleModelCommitValidationResult);
+  }
+
+  return Object.freeze({
+    status: 'rejected',
+    rejection: Object.freeze({
+      reason: result.rejection.reason,
+      ...(result.rejection.details === undefined
+        ? {}
+        : { details: result.rejection.details })
+    } satisfies RoleModelDecisionRejection)
+  } satisfies RejectedRoleModelCommitValidationResult);
 }
