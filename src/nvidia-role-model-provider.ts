@@ -69,9 +69,12 @@ type NvidiaProviderErrorCode =
 export function createNvidiaRoleModelProviderConfigFromEnv(
   env: NvidiaRoleModelProviderEnvironment = process.env
 ): NvidiaRoleModelProviderConfig {
+  const apiKey = optionalNvidiaProviderEnvValue(env.NVIDIA_API_KEY);
+  const model = optionalNvidiaProviderEnvValue(env.NVIDIA_MODEL);
+
   return Object.freeze({
-    ...(env.NVIDIA_API_KEY === undefined ? {} : { apiKey: env.NVIDIA_API_KEY }),
-    ...(env.NVIDIA_MODEL === undefined ? {} : { model: env.NVIDIA_MODEL })
+    ...(apiKey === undefined ? {} : { apiKey }),
+    ...(model === undefined ? {} : { model })
   } satisfies NvidiaRoleModelProviderConfig);
 }
 
@@ -370,6 +373,14 @@ function redactProviderSecret(message: string, secret: string | undefined): stri
   }
 
   return message.split(secret).join('[redacted]');
+}
+
+function optionalNvidiaProviderEnvValue(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+
+  return value;
 }
 
 async function defaultFetchClient(

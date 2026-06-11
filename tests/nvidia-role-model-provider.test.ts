@@ -332,6 +332,89 @@ describe('NVIDIA role-model provider adapter', () => {
       model: 'custom-model'
     });
   });
+
+  it('ignores blank NVIDIA model overrides from environment templates', async () => {
+    expect(
+      createNvidiaRoleModelProviderConfigFromEnv({
+        NVIDIA_API_KEY: 'env-key',
+        NVIDIA_MODEL: ''
+      })
+    ).toEqual({
+      apiKey: 'env-key'
+    });
+    expect(
+      createNvidiaRoleModelProviderConfigFromEnv({
+        NVIDIA_API_KEY: 'env-key',
+        NVIDIA_MODEL: '   '
+      })
+    ).toEqual({
+      apiKey: 'env-key'
+    });
+    expect(
+      createNvidiaRoleModelProviderConfigFromEnv({
+        NVIDIA_API_KEY: 'env-key',
+        NVIDIA_MODEL: 'custom-model'
+      })
+    ).toEqual({
+      apiKey: 'env-key',
+      model: 'custom-model'
+    });
+
+    const observedRequests: NvidiaFetchRequest[] = [];
+    const fetchClientAdapter = createNvidiaRoleModelProviderAdapter({
+      ...createNvidiaRoleModelProviderConfigFromEnv({
+        NVIDIA_API_KEY: 'env-key',
+        NVIDIA_MODEL: '   '
+      }),
+      fetchClient: (_url, request) => {
+        observedRequests.push(request);
+        return Promise.resolve(createJsonResponse(200, {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  version: roleModelDecisionContractVersion,
+                  toolCalls: [
+                    {
+                      name: roleModelVisibleReplyActionName,
+                      input: {
+                        text: 'provider reply'
+                      }
+                    }
+                  ]
+                })
+              }
+            }
+          ]
+        }));
+      }
+    });
+
+    await fetchClientAdapter.invoke(createTestEnvelope());
+
+    expect(JSON.parse(observedRequests[0]?.body ?? '{}')).toMatchObject({
+      model: defaultNvidiaRoleModelName
+    });
+  });
+
+  it('ignores blank NVIDIA API keys at the provider config boundary', () => {
+    expect(
+      createNvidiaRoleModelProviderConfigFromEnv({
+        NVIDIA_API_KEY: '',
+        NVIDIA_MODEL: 'custom-model'
+      })
+    ).toEqual({
+      model: 'custom-model'
+    });
+    expect(
+      createNvidiaRoleModelProviderConfigFromEnv({
+        NVIDIA_API_KEY: '   ',
+        NVIDIA_MODEL: 'custom-model'
+      })
+    ).toEqual({
+      model: 'custom-model'
+    });
+  });
 });
 
 function createTestEnvelope(

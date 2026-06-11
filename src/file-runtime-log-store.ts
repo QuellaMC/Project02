@@ -1,10 +1,13 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 import {
+  characterRuntimeStateVersion,
   characterRuntimeStatesEqual,
   createDefaultCharacterRuntimeState,
+  createLivingStateBrief,
   decodeCharacterRuntimeState,
-  type CharacterRuntimeState
+  type CharacterRuntimeState,
+  type LivingStateBrief
 } from './character-state.ts';
 import {
   ConversationRehydrationError,
@@ -303,6 +306,11 @@ function expectedCharacterStateFromAcceptedPatchEvidence(
   let expectedState = createDefaultCharacterRuntimeState();
 
   for (const rawEvent of rawEvents) {
+    assertRoleModelLivingStateBriefMatchesExpectedState({
+      rawEvent,
+      expectedState
+    });
+
     if (rawEvent.kind !== 'runtime_turn_completed') {
       continue;
     }
@@ -324,6 +332,46 @@ function expectedCharacterStateFromAcceptedPatchEvidence(
   }
 
   return expectedState;
+}
+
+function assertRoleModelLivingStateBriefMatchesExpectedState(options: {
+  readonly rawEvent: RawEventLogRecord;
+  readonly expectedState: CharacterRuntimeState;
+}): void {
+  const livingStateBrief =
+    options.rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext
+      .livingStateBrief;
+
+  if (livingStateBrief === undefined) {
+    return;
+  }
+
+  const expectedBrief = createLivingStateBrief(options.expectedState);
+
+  if (livingStateBriefsEqual(livingStateBrief, expectedBrief)) {
+    return;
+  }
+
+  throw new LocalRuntimeStorageContractError(
+    'malformed_record',
+    'Role-model prompted living state must match the durable character state before the turn.'
+  );
+}
+
+function livingStateBriefsEqual(
+  left: LivingStateBrief,
+  right: LivingStateBrief
+): boolean {
+  return left.text === right.text && characterRuntimeStatesEqual(
+    {
+      version: characterRuntimeStateVersion,
+      current: left.current
+    },
+    {
+      version: characterRuntimeStateVersion,
+      current: right.current
+    }
+  );
 }
 
 function readDurableCharacterState(

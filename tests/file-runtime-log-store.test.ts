@@ -17,6 +17,7 @@ import {
   createDefaultCharacterRuntimeState,
   createFileCharacterStateStore,
   createFileRuntimeLogStore,
+  createLivingStateBrief,
   createLocalRuntimeSessionStore,
   createLocalRuntimeSessionPaths,
   createUserMessageRuntimeEvent,
@@ -242,6 +243,122 @@ describe('file-backed runtime log store', () => {
         if (isMutableRecord(snapshot)) {
           snapshot['sessionId'] = 'other-session';
         }
+
+        return JSON.stringify(record);
+      })
+      .join('\n');
+
+    writeFileSync(paths.rawEventsPath, `${rewrittenRawEvents}\n`, 'utf8');
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).rawEvents(),
+      'malformed_record'
+    );
+  });
+
+  it('rejects public reads when prompted living state disagrees with prior patch evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const secondIdentity = {
+      eventId: 'evt_file_log_002',
+      traceId: 'trace_file_log_002',
+      createdAt
+    } as const;
+    let invocationCount = 0;
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke() {
+        invocationCount += 1;
+
+        return {
+          rawOutputText: JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: `stateful reply ${String(invocationCount)}`
+                }
+              },
+              {
+                name: 'character_state.patch',
+                input:
+                  invocationCount === 1
+                    ? { mood: 'curious' }
+                    : { energy: 'high' }
+              }
+            ]
+          })
+        };
+      }
+    };
+    const session = createConversationSession({
+      id: 'mira-local'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const characterStateStore = createFileCharacterStateStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    const firstResult = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('hello', identity),
+      session,
+      logStore,
+      characterStateStore,
+      roleModelAdapter
+    });
+    const secondResult = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('second hello', secondIdentity),
+      session,
+      logStore,
+      characterStateStore,
+      roleModelAdapter
+    });
+
+    expect(firstResult.status).toBe('completed');
+    expect(secondResult.status).toBe('completed');
+
+    const stalePromptedBrief = createLivingStateBrief(
+      createDefaultCharacterRuntimeState()
+    );
+    const rewrittenRawEvents = readFileSync(paths.rawEventsPath, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => {
+        const record = mutableJsonRecordFromLine(line);
+
+        if (
+          record['eventId'] !== secondIdentity.eventId ||
+          record['roleModelIOSnapshot'] === undefined
+        ) {
+          return JSON.stringify(record);
+        }
+
+        const roleModelIOSnapshot = requiredMutableRecord(
+          record['roleModelIOSnapshot'],
+          'roleModelIOSnapshot'
+        );
+        const inputEnvelope = requiredMutableRecord(
+          roleModelIOSnapshot['inputEnvelope'],
+          'roleModelIOSnapshot.inputEnvelope'
+        );
+        const decisionContext = requiredMutableRecord(
+          inputEnvelope['decisionContext'],
+          'roleModelIOSnapshot.inputEnvelope.decisionContext'
+        );
+
+        decisionContext['livingStateBrief'] = stalePromptedBrief;
 
         return JSON.stringify(record);
       })
@@ -2221,6 +2338,17 @@ function mutableJsonRecordFromLine(line: string): Record<string, unknown> {
 
 function isMutableRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requiredMutableRecord(
+  value: unknown,
+  field: string
+): Record<string, unknown> {
+  if (isMutableRecord(value)) {
+    return value;
+  }
+
+  throw new Error(`Expected ${field} to be a JSON object.`);
 }
 
 async function createCatalogedFileRuntimeLogStore(
