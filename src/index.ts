@@ -116,6 +116,15 @@ export {
 } from './model-tools.ts';
 
 export {
+  createRoleModelPromptPayload,
+  renderRoleModelPromptMessages,
+  roleModelPromptResponseExample,
+  roleModelPromptSystemMessage,
+  type RoleModelPromptMessage,
+  type RoleModelPromptPayload
+} from './role-model-prompt.ts';
+
+export {
   characterAttentionValues,
   characterCurrentActivityValues,
   characterEnergyValues,

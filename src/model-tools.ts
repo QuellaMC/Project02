@@ -1,3 +1,11 @@
+import {
+  characterAttentionValues,
+  characterCurrentActivityValues,
+  characterEnergyValues,
+  characterMoodValues,
+  characterSocialOrientationValues
+} from './character-state.ts';
+
 export const visibleReplyModelToolName = 'visible_reply';
 export const characterStatePatchModelToolName = 'character_state.patch';
 
@@ -12,6 +20,7 @@ export type ModelToolInputField = {
   readonly name: string;
   readonly description: string;
   readonly required: boolean;
+  readonly allowedValues?: readonly string[];
 };
 
 export type ModelToolInputContract = {
@@ -81,8 +90,39 @@ export const builtInModelToolDefinitions = Object.freeze([
     requiredForUserTurn: false,
     inputContract: {
       type: 'object',
-      fields: [],
-      additionalFields: true
+      fields: [
+        {
+          name: 'mood',
+          description: 'Current mood.',
+          required: false,
+          allowedValues: characterMoodValues
+        },
+        {
+          name: 'energy',
+          description: 'Current energy.',
+          required: false,
+          allowedValues: characterEnergyValues
+        },
+        {
+          name: 'attention',
+          description: 'Current attention.',
+          required: false,
+          allowedValues: characterAttentionValues
+        },
+        {
+          name: 'currentActivity',
+          description: 'Current activity.',
+          required: false,
+          allowedValues: characterCurrentActivityValues
+        },
+        {
+          name: 'socialOrientation',
+          description: 'Current social orientation.',
+          required: false,
+          allowedValues: characterSocialOrientationValues
+        }
+      ],
+      additionalFields: false
     }
   })
 ] satisfies readonly BuiltInModelToolDefinition[]);
@@ -166,7 +206,10 @@ function createBuiltInModelToolDefinition(options: {
           Object.freeze({
             name: field.name,
             description: field.description,
-            required: field.required
+            required: field.required,
+            ...(field.allowedValues === undefined
+              ? {}
+              : { allowedValues: Object.freeze([...field.allowedValues]) })
           } satisfies ModelToolInputField)
         )
       ),

@@ -3,6 +3,7 @@ import {
   type RoleModelInputEnvelope,
   type RoleModelProviderMetadata
 } from './role-model-contracts.ts';
+import { renderRoleModelPromptMessages } from './role-model-prompt.ts';
 import type {
   RoleModelAdapter,
   RoleModelAdapterRawOutput
@@ -165,22 +166,14 @@ export function createNvidiaRoleModelProviderAdapter(
 export function renderNvidiaMessages(
   inputEnvelope: RoleModelInputEnvelope
 ): readonly NvidiaChatCompletionMessage[] {
-  return Object.freeze([
-    Object.freeze({
-      role: 'system',
-      content:
-        'You are Mira. Return only the CharacterDecision JSON object requested by the output contract. Each toolCalls item must use the exact shape {"name":"visible_reply","input":{"text":"..."}}. Do not use "tool", "type", "function", "arguments", markdown, or prose.'
-    } satisfies NvidiaChatCompletionMessage),
-    Object.freeze({
-      role: 'user',
-      content: JSON.stringify({
-        outputContract: inputEnvelope.outputContract,
-        allowedTools: inputEnvelope.allowedTools,
-        event: inputEnvelope.event,
-        decisionContext: inputEnvelope.decisionContext
-      })
-    } satisfies NvidiaChatCompletionMessage)
-  ]);
+  return Object.freeze(
+    renderRoleModelPromptMessages(inputEnvelope).map((message) =>
+      Object.freeze({
+        role: message.role,
+        content: message.content
+      } satisfies NvidiaChatCompletionMessage)
+    )
+  );
 }
 
 function createProviderRejectedOutput(options: {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  characterCurrentActivityValues,
   createDecisionContext,
   createNvidiaRoleModelProviderAdapter,
   createNvidiaRoleModelProviderConfigFromEnv,
@@ -11,6 +12,7 @@ import {
   nvidiaApiKeyEnvName,
   parseRoleModelDecision,
   renderNvidiaMessages,
+  roleModelCharacterStatePatchToolName,
   roleModelDecisionContractVersion,
   roleModelProviderErrorRejectionReason,
   roleModelVisibleReplyActionName,
@@ -28,17 +30,36 @@ describe('NVIDIA role-model provider adapter', () => {
         readonly version?: string;
         readonly text?: string;
       };
+      readonly responseExample?: {
+        readonly toolCalls?: readonly {
+          readonly name?: string;
+        }[];
+      };
+      readonly toolDefinitions?: readonly {
+        readonly name?: string;
+        readonly inputContract?: {
+          readonly additionalFields?: boolean;
+          readonly fields?: readonly {
+            readonly name?: string;
+            readonly allowedValues?: readonly string[];
+          }[];
+        };
+      }[];
     };
+    const characterStatePatchDefinition = userPayload.toolDefinitions?.find(
+      (definition) => definition.name === roleModelCharacterStatePatchToolName
+    );
+    const currentActivityField =
+      characterStatePatchDefinition?.inputContract?.fields?.find(
+        (field) => field.name === 'currentActivity'
+      );
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]?.content).toContain('Return only the CharacterDecision JSON object');
-    expect(messages[0]?.content).toContain(
-      '{"name":"visible_reply","input":{"text":"..."}}'
-    );
-    expect(messages[0]?.content).toContain('Do not use "tool"');
+    expect(messages[0]?.content).toContain('valid JSON parseable by JSON.parse');
+    expect(messages[0]?.content).toContain('never use "tool"');
     expect(userPayload.allowedTools).toEqual([
       roleModelVisibleReplyActionName,
-      'character_state.patch'
+      roleModelCharacterStatePatchToolName
     ]);
     expect(userPayload.outputContract?.version).toBe(
       roleModelDecisionContractVersion
@@ -47,6 +68,16 @@ describe('NVIDIA role-model provider adapter', () => {
       '{"name":"visible_reply","input":{"text":"one visible reply line"}}'
     );
     expect(userPayload.outputContract?.text).toContain('not "tool"');
+    expect(userPayload.responseExample?.toolCalls?.map((call) => call.name)).toEqual([
+      roleModelVisibleReplyActionName,
+      roleModelCharacterStatePatchToolName
+    ]);
+    expect(characterStatePatchDefinition?.inputContract?.additionalFields).toBe(
+      false
+    );
+    expect(currentActivityField?.allowedValues).toEqual(
+      characterCurrentActivityValues
+    );
   });
 
   it('returns clear provider rejection evidence when the API key is missing', async () => {
