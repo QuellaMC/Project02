@@ -24,11 +24,18 @@ describe('NVIDIA role-model provider adapter', () => {
     const messages = renderNvidiaMessages(envelope);
     const userPayload = JSON.parse(messages[1]?.content ?? '{}') as {
       readonly allowedTools?: readonly string[];
-      readonly outputContract?: { readonly version?: string };
+      readonly outputContract?: {
+        readonly version?: string;
+        readonly text?: string;
+      };
     };
 
     expect(messages).toHaveLength(2);
     expect(messages[0]?.content).toContain('Return only the CharacterDecision JSON object');
+    expect(messages[0]?.content).toContain(
+      '{"name":"visible_reply","input":{"text":"..."}}'
+    );
+    expect(messages[0]?.content).toContain('Do not use "tool"');
     expect(userPayload.allowedTools).toEqual([
       roleModelVisibleReplyActionName,
       'character_state.patch'
@@ -36,6 +43,10 @@ describe('NVIDIA role-model provider adapter', () => {
     expect(userPayload.outputContract?.version).toBe(
       roleModelDecisionContractVersion
     );
+    expect(userPayload.outputContract?.text).toContain(
+      '{"name":"visible_reply","input":{"text":"one visible reply line"}}'
+    );
+    expect(userPayload.outputContract?.text).toContain('not "tool"');
   });
 
   it('returns clear provider rejection evidence when the API key is missing', async () => {

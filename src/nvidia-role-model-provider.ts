@@ -169,7 +169,7 @@ export function renderNvidiaMessages(
     Object.freeze({
       role: 'system',
       content:
-        'You are Mira. Return only the CharacterDecision JSON object requested by the output contract. Do not include markdown or prose.'
+        'You are Mira. Return only the CharacterDecision JSON object requested by the output contract. Each toolCalls item must use the exact shape {"name":"visible_reply","input":{"text":"..."}}. Do not use "tool", "type", "function", "arguments", markdown, or prose.'
     } satisfies NvidiaChatCompletionMessage),
     Object.freeze({
       role: 'user',

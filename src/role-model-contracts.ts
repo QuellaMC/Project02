@@ -45,7 +45,7 @@ export function isRoleModelAllowedToolName(
 export const isRoleModelAllowedActionName = isRoleModelAllowedToolName;
 
 export const roleModelDecisionOutputContractText =
-  'Return exactly one CharacterDecision JSON object with version "mvp-006.tool_calls.v1" and ordered toolCalls. For a user turn, include one visible_reply call with input.text and optionally one character_state.patch call with patch fields.';
+  'Return exactly one CharacterDecision JSON object with version "mvp-006.tool_calls.v1" and ordered toolCalls. Required call shape: {"name":"visible_reply","input":{"text":"one visible reply line"}}. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". For a user turn, include one visible_reply call with input.text and optionally one character_state.patch call with patch fields.';
 
 export type RoleModelOutputContract = {
   readonly version: string;

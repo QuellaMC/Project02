@@ -133,6 +133,10 @@ describe('role model decision contracts', () => {
       roleModelVisibleReplyActionName,
       characterStatePatchModelToolName
     ]);
+    expect(roleModelDecisionOutputContract.text).toContain(
+      '{"name":"visible_reply","input":{"text":"one visible reply line"}}'
+    );
+    expect(roleModelDecisionOutputContract.text).toContain('not "tool"');
 
     const decision = createVisibleReplyCharacterDecision('Only one reply.');
 
