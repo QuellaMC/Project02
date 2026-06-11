@@ -498,10 +498,6 @@ async function runSerializedLocalUserMessageEvent(
 
     sessionTurnRollback.rollbackAllowed = false;
 
-    if (writtenCharacterStateRollback !== undefined) {
-      writtenCharacterStateRollback.rollbackAllowed = false;
-    }
-
     const rawEvent = appendRawEvent({
       ...identity,
       kind: 'runtime_turn_completed',
@@ -514,6 +510,10 @@ async function runSerializedLocalUserMessageEvent(
 
     appendTrace('raw_event_log_appended');
     appendTrace('runtime_turn_completed');
+
+    if (writtenCharacterStateRollback !== undefined) {
+      writtenCharacterStateRollback.rollbackAllowed = false;
+    }
 
     return Object.freeze({
       status: 'completed',

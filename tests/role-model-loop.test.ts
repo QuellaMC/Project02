@@ -13,6 +13,7 @@ import {
   createRoleModelInputEnvelope,
   roleModelDecisionContractVersion,
   roleModelMalformedOutputRejectionReason,
+  roleModelProviderErrorRejectionReason,
   roleModelUnsupportedEffectRejectionReason,
   roleModelVisibleReplyActionName
 } from '../src/role-model-contracts.ts';
@@ -230,6 +231,122 @@ describe('role model loop', () => {
         }
       });
     }
+  });
+
+  it('rejects empty provider-error adapter outputs without matching provider error metadata', async () => {
+    const malformedProviderErrorOutputs: readonly unknown[] = [
+      {
+        rawOutputText: '',
+        rejection: {
+          reason: roleModelProviderErrorRejectionReason,
+          details: 'Provider request failed.'
+        }
+      },
+      {
+        rawOutputText: '',
+        providerMetadata: {
+          provider: 'nvidia',
+          error: {
+            code: 'provider_error'
+          }
+        },
+        rejection: {
+          reason: roleModelProviderErrorRejectionReason,
+          details: 'Provider request failed.'
+        }
+      },
+      {
+        rawOutputText: '',
+        providerMetadata: {
+          provider: 'nvidia',
+          error: {
+            code: 'provider_error',
+            message: 'Different provider details.'
+          }
+        },
+        rejection: {
+          reason: roleModelProviderErrorRejectionReason,
+          details: 'Provider request failed.'
+        }
+      }
+    ];
+
+    for (const [index, rawOutput] of malformedProviderErrorOutputs.entries()) {
+      const result = await runRoleModelLoop({
+        event: createTestUserMessageEvent(
+          'hello',
+          `evt_role_malformed_provider_error_${String(index)}`
+        ),
+        decisionContext: createDecisionContext({
+          sessionId: 'local-session',
+          characterSnapshot: localCharacterProfile
+        }),
+        adapter: createMalformedRawOutputAdapter(rawOutput)
+      });
+
+      expect(result.status).toBe('rejected');
+
+      if (result.status !== 'rejected') {
+        throw new Error('Expected rejected role model result.');
+      }
+
+      expect(result.rejection).toEqual({
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'Adapter raw output must include string rawOutputText.'
+      });
+      expect(result.ioSnapshot.rawOutputText).toBe('');
+      expect(result.ioSnapshot.providerMetadata).toBeUndefined();
+      expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
+    }
+  });
+
+  it('preserves empty provider-error adapter outputs with matching provider error metadata', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestUserMessageEvent('hello', 'evt_role_provider_error'),
+      decisionContext: createDecisionContext({
+        sessionId: 'local-session',
+        characterSnapshot: localCharacterProfile
+      }),
+      adapter: createMalformedRawOutputAdapter({
+        rawOutputText: '',
+        providerMetadata: {
+          provider: 'nvidia',
+          model: 'nvidia/test-model',
+          request: {
+            endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
+            stream: false
+          },
+          error: {
+            code: 'provider_error',
+            message: 'Provider request failed.'
+          }
+        },
+        rejection: {
+          reason: roleModelProviderErrorRejectionReason,
+          details: 'Provider request failed.'
+        }
+      })
+    });
+
+    expect(result.status).toBe('rejected');
+
+    if (result.status !== 'rejected') {
+      throw new Error('Expected rejected role model result.');
+    }
+
+    expect(result.rejection).toEqual({
+      reason: roleModelProviderErrorRejectionReason,
+      details: 'Provider request failed.'
+    });
+    expect(result.ioSnapshot.rawOutputText).toBe('');
+    expect(result.ioSnapshot.providerMetadata).toMatchObject({
+      provider: 'nvidia',
+      error: {
+        code: 'provider_error',
+        message: 'Provider request failed.'
+      }
+    });
+    expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
   });
 
   it('rejects unsupported action and effect shapes with the CT-01 unsupported reason', async () => {

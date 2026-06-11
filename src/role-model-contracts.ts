@@ -321,6 +321,23 @@ export function parseRoleModelDecision(
   return parseRoleModelDecisionObject(parsedOutput, allowedTools);
 }
 
+export function isRoleModelProviderErrorRawOutputEvidence(options: {
+  readonly rawOutputText: string;
+  readonly providerMetadata: RoleModelProviderMetadata | undefined;
+  readonly decisionResult: RoleModelDecisionResult;
+}): boolean {
+  const providerError = options.providerMetadata?.error;
+
+  return (
+    options.rawOutputText.length === 0 &&
+    providerError !== undefined &&
+    options.decisionResult.status === 'rejected' &&
+    options.decisionResult.rejection.reason ===
+      roleModelProviderErrorRejectionReason &&
+    options.decisionResult.rejection.details === providerError.message
+  );
+}
+
 export function getRequiredVisibleReplyText(
   decision: CharacterDecision
 ): string {

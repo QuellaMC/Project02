@@ -1,9 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   CharacterReplyValidationError,
   createConversationSession,
+  createDefaultCharacterRuntimeState,
+  createFileCharacterStateStore,
+  createFileRuntimeLogStore,
   createInMemoryCharacterStateStore,
+  createLocalRuntimeSessionStore,
   createRuntimeLogStore,
   createUserMessageRuntimeEvent,
   recordLocalUserMessageInputRejection,
@@ -24,12 +32,23 @@ import {
   type UserMessageRuntimeEvent
 } from '../src/index.ts';
 
+const tempStoreRoots: string[] = [];
+
 type DeferredReply = {
   readonly promise: Promise<CharacterAgentReply>;
   readonly resolve: (reply: CharacterAgentReply) => void;
 };
 
 describe('local runtime turn adapter', () => {
+  afterEach(() => {
+    for (const storeRoot of tempStoreRoots.splice(0)) {
+      rmSync(storeRoot, {
+        recursive: true,
+        force: true
+      });
+    }
+  });
+
   it('runs one USER_MESSAGE event through the conversation core and records runtime logs', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -944,6 +963,70 @@ describe('local runtime turn adapter', () => {
     });
   });
 
+  it('rolls back durable character state when final completed raw-event append fails', async () => {
+    const storeRoot = createTempStoreRoot();
+    const sessionId = 'mira-local';
+    await createCatalogedSession(storeRoot, sessionId);
+
+    const session = createConversationSession({
+      id: sessionId
+    });
+    const baseLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const logStore = createCompletedRawEventAppendFailingLogStore(baseLogStore);
+    const characterStateStore = createFileCharacterStateStore({
+      storeRoot,
+      sessionId
+    });
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestUserMessageEvent(
+          'hello',
+          'evt_state_terminal_failure',
+          'trace_state_terminal_failure'
+        ),
+        session,
+        logStore,
+        characterStateStore,
+        roleModelAdapter: createRawOutputAdapter(
+          JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'stateful reply'
+                }
+              },
+              {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'curious'
+                }
+              }
+            ]
+          })
+        )
+      })
+    ).rejects.toThrow('Conversation message lacks terminal raw-event evidence');
+
+    expect(characterStateStore.readCurrentState()).toEqual(
+      createDefaultCharacterRuntimeState()
+    );
+    expect(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId
+        }).rawEvents()
+    ).not.toThrow(
+      'Stored character state does not match accepted character state patch evidence.'
+    );
+  });
+
   it('keeps the default in-memory character state store scoped to the session', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -1150,6 +1233,35 @@ function createConversationAppendFailingLogStore(
   } satisfies RuntimeLogStore);
 }
 
+function createCompletedRawEventAppendFailingLogStore(
+  baseLogStore: RuntimeLogStore
+): RuntimeLogStore {
+  return Object.freeze({
+    appendTrace(entry) {
+      return baseLogStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      if (record.kind === 'runtime_turn_completed') {
+        throw new Error('completed raw-event append failed');
+      }
+
+      return baseLogStore.appendRawEvent(record);
+    },
+    appendConversationMessage(record) {
+      return baseLogStore.appendConversationMessage(record);
+    },
+    traceEntries() {
+      return baseLogStore.traceEntries();
+    },
+    rawEvents() {
+      return baseLogStore.rawEvents();
+    },
+    conversationMessages() {
+      return baseLogStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
 function createWriteFailingCharacterStateStore(): CharacterStateStore {
   const delegate = createInMemoryCharacterStateStore();
 
@@ -1161,4 +1273,27 @@ function createWriteFailingCharacterStateStore(): CharacterStateStore {
       throw new Error('state write failed');
     }
   } satisfies CharacterStateStore);
+}
+
+function createTempStoreRoot(): string {
+  const storeRoot = mkdtempSync(join(tmpdir(), 'project02-local-runtime-'));
+
+  tempStoreRoots.push(storeRoot);
+  return storeRoot;
+}
+
+async function createCatalogedSession(
+  storeRoot: string,
+  sessionId: string
+): Promise<void> {
+  const sessionStore = createLocalRuntimeSessionStore({
+    storeRoot,
+    now: () => '2026-06-04T10:00:00.000Z'
+  });
+
+  await sessionStore.createSession({
+    sessionId,
+    createdAt: '2026-06-04T10:00:00.000Z',
+    updatedAt: '2026-06-04T10:00:00.000Z'
+  });
 }

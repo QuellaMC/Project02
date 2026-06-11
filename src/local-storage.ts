@@ -41,6 +41,7 @@ import {
   getCharacterStatePatchToolCall,
   getRequiredVisibleReplyText,
   isRoleModelAllowedToolName,
+  isRoleModelProviderErrorRawOutputEvidence,
   parseRoleModelDecision,
   roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelCommitValidationFailureRejectionReason,
@@ -50,7 +51,6 @@ import {
   roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelMalformedOutputRejectionReason,
-  roleModelProviderErrorRejectionReason,
   type CharacterDecision,
   type DecisionContext,
   type ParsedRoleModelDecisionSnapshot,
@@ -1178,31 +1178,16 @@ function assertParsedRoleModelDecisionMatchesRawOutput(options: {
       rawOutputText: options.roleModelIOSnapshot.rawOutputText,
       parsedSnapshotDecision
     }) ||
-    isProviderErrorRawOutputEvidence({
-      roleModelIOSnapshot: options.roleModelIOSnapshot,
-      parsedSnapshotDecision
+    isRoleModelProviderErrorRawOutputEvidence({
+      rawOutputText: options.roleModelIOSnapshot.rawOutputText,
+      providerMetadata: options.roleModelIOSnapshot.providerMetadata,
+      decisionResult: parsedSnapshotDecision
     })
   ) {
     return;
   }
 
   throwMalformedRecord('parsedRoleModelDecisionSnapshot.result');
-}
-
-function isProviderErrorRawOutputEvidence(options: {
-  readonly roleModelIOSnapshot: RoleModelIOSnapshot;
-  readonly parsedSnapshotDecision: RoleModelDecisionResult;
-}): boolean {
-  const providerError = options.roleModelIOSnapshot.providerMetadata?.error;
-
-  return (
-    options.roleModelIOSnapshot.rawOutputText.length === 0 &&
-    providerError !== undefined &&
-    options.parsedSnapshotDecision.status === 'rejected' &&
-    options.parsedSnapshotDecision.rejection.reason ===
-      roleModelProviderErrorRejectionReason &&
-    options.parsedSnapshotDecision.rejection.details === providerError.message
-  );
 }
 
 function assertParsedRoleModelDecisionAllowedByEnvelope(options: {

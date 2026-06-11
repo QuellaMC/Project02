@@ -9,10 +9,12 @@ import {
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createVisibleReplyCharacterDecision,
+  isRoleModelProviderErrorRawOutputEvidence,
   parseRoleModelDecision,
   roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelDecisionRejectionReasons,
   roleModelMalformedOutputRejectionReason,
+  roleModelProviderErrorRejectionReason,
   type AcceptedRoleModelDecisionResult,
   type CharacterDecision,
   type DecisionContext,
@@ -184,14 +186,28 @@ function validateRoleModelAdapterRawOutput(
   const rejection = optionalRoleModelDecisionRejection(rawOutput['rejection']);
 
   if (rejection !== undefined) {
+    const decisionResult = createRejectedRoleModelDecisionResult(
+      rejection.reason,
+      rejection.details
+    );
+
+    if (
+      rejection.reason === roleModelProviderErrorRejectionReason &&
+      rawOutputText.length === 0 &&
+      !isRoleModelProviderErrorRawOutputEvidence({
+        rawOutputText,
+        providerMetadata,
+        decisionResult
+      })
+    ) {
+      return createMalformedAdapterRawOutputResult();
+    }
+
     return Object.freeze({
       status: 'rejected',
       rawOutputText,
       ...providerMetadataOption(providerMetadata),
-      decisionResult: createRejectedRoleModelDecisionResult(
-        rejection.reason,
-        rejection.details
-      )
+      decisionResult
     } satisfies RoleModelAdapterRawOutputValidationResult);
   }
 
