@@ -320,25 +320,27 @@ function rejectResponse(
 async function responseErrorMessage(
   response: NvidiaFetchResponse
 ): Promise<string> {
+  let text: string;
+
   try {
-    const body = await response.json();
+    text = await response.text();
+  } catch {
+    return `NVIDIA provider HTTP ${String(response.status)}.`;
+  }
+
+  try {
+    const body: unknown = JSON.parse(text);
     const message = providerErrorMessageFromBody(body);
 
     if (message !== undefined) {
       return message;
     }
   } catch {
-    // Fall through to text fallback below.
+    // Fall through to text fallback below for non-JSON provider errors.
   }
 
-  try {
-    const text = await response.text();
-
-    if (text.length > 0) {
-      return `NVIDIA provider HTTP ${String(response.status)}: ${text}`;
-    }
-  } catch {
-    // Use final generic fallback.
+  if (text.length > 0) {
+    return `NVIDIA provider HTTP ${String(response.status)}: ${text}`;
   }
 
   return `NVIDIA provider HTTP ${String(response.status)}.`;

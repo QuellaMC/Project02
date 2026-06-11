@@ -223,6 +223,32 @@ describe('NVIDIA role-model provider adapter', () => {
     expect(JSON.stringify(output)).not.toContain('secret-token');
   });
 
+  it('preserves non-JSON provider HTTP error bodies', async () => {
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret-token',
+      fetchClient: () =>
+        Promise.resolve(
+          createTextOnlyResponse(429, 'rate limit exceeded for secret-token')
+        )
+    });
+    const output = await adapter.invoke(createTestEnvelope());
+
+    expect(output.rejection).toEqual({
+      reason: roleModelProviderErrorRejectionReason,
+      details: 'NVIDIA provider HTTP 429: rate limit exceeded for [redacted]'
+    });
+    expect(output.providerMetadata).toMatchObject({
+      response: {
+        status: 429
+      },
+      error: {
+        code: 'http_error',
+        message: 'NVIDIA provider HTTP 429: rate limit exceeded for [redacted]'
+      }
+    });
+    expect(JSON.stringify(output)).not.toContain('secret-token');
+  });
+
   it('redacts secrets from thrown client errors', async () => {
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret-token',
@@ -342,6 +368,27 @@ function createJsonResponse(status: number, body: unknown): NvidiaFetchResponse 
     },
     text() {
       return Promise.resolve(JSON.stringify(body));
+    }
+  } satisfies NvidiaFetchResponse);
+}
+
+function createTextOnlyResponse(status: number, body: string): NvidiaFetchResponse {
+  let consumed = false;
+
+  return Object.freeze({
+    ok: status >= 200 && status < 300,
+    status,
+    json() {
+      consumed = true;
+      return Promise.reject(new SyntaxError('Unexpected token'));
+    },
+    text() {
+      if (consumed) {
+        return Promise.reject(new TypeError('Body is unusable'));
+      }
+
+      consumed = true;
+      return Promise.resolve(body);
     }
   } satisfies NvidiaFetchResponse);
 }
