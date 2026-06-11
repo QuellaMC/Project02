@@ -20,8 +20,10 @@ import {
   roleModelDecisionContractVersion,
   roleModelProviderErrorRejectionReason,
   roleModelVisibleReplyActionName,
+  type CharacterProfile,
   type NvidiaFetchRequest,
-  type NvidiaFetchResponse
+  type NvidiaFetchResponse,
+  type RoleModelAllowedToolName
 } from '../src/index.ts';
 
 describe('NVIDIA role-model provider adapter', () => {
@@ -85,6 +87,36 @@ describe('NVIDIA role-model provider adapter', () => {
     expect(currentActivityField?.allowedValues).toEqual(
       characterCurrentActivityValues
     );
+  });
+
+  it('renders persona and examples from the input envelope', () => {
+    const envelope = createTestEnvelope({
+      allowedTools: [roleModelVisibleReplyActionName],
+      character: {
+        id: 'iris',
+        displayName: 'Iris'
+      }
+    });
+    const messages = renderNvidiaMessages(envelope);
+    const userPayload = JSON.parse(messages[1]?.content ?? '{}') as {
+      readonly responseExample?: {
+        readonly toolCalls?: readonly {
+          readonly name?: string;
+        }[];
+      };
+      readonly toolDefinitions?: readonly {
+        readonly name?: string;
+      }[];
+    };
+
+    expect(messages[0]?.content).toContain('You are Iris.');
+    expect(messages[0]?.content).not.toContain('You are Mira.');
+    expect(userPayload.responseExample?.toolCalls?.map((call) => call.name)).toEqual([
+      roleModelVisibleReplyActionName
+    ]);
+    expect(userPayload.toolDefinitions?.map((definition) => definition.name)).toEqual([
+      roleModelVisibleReplyActionName
+    ]);
   });
 
   it('returns clear provider rejection evidence when the API key is missing', async () => {
@@ -276,7 +308,12 @@ describe('NVIDIA role-model provider adapter', () => {
   });
 });
 
-function createTestEnvelope() {
+function createTestEnvelope(
+  options: {
+    readonly allowedTools?: readonly RoleModelAllowedToolName[];
+    readonly character?: CharacterProfile;
+  } = {}
+) {
   return createRoleModelInputEnvelope({
     event: createUserMessageRuntimeEvent('hello', {
       eventId: 'evt_provider',
@@ -285,11 +322,14 @@ function createTestEnvelope() {
     }),
     decisionContext: createDecisionContext({
       sessionId: 'mira-local',
-      characterSnapshot: {
+      characterSnapshot: options.character ?? {
         id: 'mira',
         displayName: 'Mira'
       }
-    })
+    }),
+    ...(options.allowedTools === undefined
+      ? {}
+      : { allowedTools: options.allowedTools })
   });
 }
 

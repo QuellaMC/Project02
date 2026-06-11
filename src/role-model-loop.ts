@@ -114,7 +114,10 @@ export async function runRoleModelLoop(
   });
   const decisionResult =
     rawOutputValidation.status === 'accepted'
-      ? parseRoleModelDecision(rawOutputValidation.rawOutputText)
+      ? parseRoleModelDecision(
+          rawOutputValidation.rawOutputText,
+          inputEnvelope.allowedTools
+        )
       : rawOutputValidation.decisionResult;
   const parsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
     ...identity,

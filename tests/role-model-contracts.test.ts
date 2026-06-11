@@ -19,6 +19,7 @@ import {
   roleModelDecisionContractVersion,
   roleModelDecisionOutputContract,
   roleModelDecisionRejectionReasons,
+  roleModelDisallowedToolRejectionReason,
   roleModelDuplicateToolCallRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelMalformedOutputRejectionReason,
@@ -170,6 +171,29 @@ describe('role model decision contracts', () => {
     }).toThrow(TypeError);
   });
 
+  it('honors legacy allowedActions when creating input envelopes', () => {
+    const identity = createRuntimeEventIdentity({
+      eventId: 'evt_legacy_allowed_actions',
+      traceId: 'trace_legacy_allowed_actions',
+      createdAt: '2026-06-09T00:00:00.000Z'
+    });
+    const event = createUserMessageRuntimeEvent('hello', identity);
+    const decisionContext = createDecisionContext({
+      sessionId: 'session-role-model',
+      characterSnapshot: {
+        id: 'mira',
+        displayName: 'Mira'
+      }
+    });
+    const envelope = createRoleModelInputEnvelope({
+      event,
+      decisionContext,
+      allowedActions: [roleModelVisibleReplyActionName]
+    });
+
+    expect(envelope.allowedTools).toEqual([roleModelVisibleReplyActionName]);
+  });
+
   it('parses the new ordered toolCalls decision and the MVP-005 visible_reply action shape', () => {
     const patchCall = createCharacterStatePatchModelToolCall({
       mood: 'curious'
@@ -211,6 +235,26 @@ describe('role model decision contracts', () => {
     expect(getRequiredVisibleReplyText(legacyResult.decision)).toBe(
       'legacy reply'
     );
+  });
+
+  it('enforces allowed tools for legacy visible_reply action decisions', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        action: {
+          type: roleModelVisibleReplyActionName,
+          text: 'legacy reply'
+        }
+      }),
+      [characterStatePatchModelToolName]
+    );
+
+    expect(result).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelDisallowedToolRejectionReason,
+        details: `Decision requested disallowed tool "${roleModelVisibleReplyActionName}".`
+      }
+    });
   });
 
   it('represents malformed and unsupported decisions with explicit rejection reasons', () => {

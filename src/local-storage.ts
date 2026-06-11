@@ -884,6 +884,10 @@ function assertCharacterStatePatchEvidenceSemantics(options: {
   readonly characterStatePatchSnapshot: CharacterStatePatchSnapshot | undefined;
 }): void {
   if (options.characterStatePatchSnapshot === undefined) {
+    assertNoMissingCharacterStatePatchSnapshot({
+      commitValidation: options.commitValidation,
+      parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot
+    });
     return;
   }
 
@@ -962,6 +966,35 @@ function assertCharacterStatePatchEvidenceSemantics(options: {
     parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
     snapshot
   });
+}
+
+function assertNoMissingCharacterStatePatchSnapshot(options: {
+  readonly commitValidation: RoleModelCommitValidationSnapshot | undefined;
+  readonly parsedRoleModelDecisionSnapshot:
+    | ParsedRoleModelDecisionSnapshot
+    | undefined;
+}): void {
+  const parsedResult = options.parsedRoleModelDecisionSnapshot?.result;
+
+  if (parsedResult?.status !== 'accepted') {
+    return;
+  }
+
+  if (getCharacterStatePatchToolCall(parsedResult.decision) === undefined) {
+    return;
+  }
+
+  if (options.commitValidation?.result.status === 'accepted') {
+    throwMalformedRecord('characterStatePatchSnapshot');
+  }
+
+  if (
+    options.commitValidation?.result.status === 'rejected' &&
+    options.commitValidation.result.rejection.reason ===
+      roleModelInvalidCharacterStatePatchRejectionReason
+  ) {
+    throwMalformedRecord('characterStatePatchSnapshot');
+  }
 }
 
 function requiredPatchEvidenceRoleModelSessionId(

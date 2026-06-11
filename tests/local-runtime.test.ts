@@ -1049,6 +1049,7 @@ describe('local runtime turn adapter', () => {
     ).rejects.toThrow('state write failed');
 
     expect(logStore.conversationMessages()).toEqual([]);
+    expect(session.visibleTranscript).toEqual([]);
     expect(
       logStore
         .rawEvents()

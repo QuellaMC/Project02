@@ -45,7 +45,7 @@ export function isRoleModelAllowedToolName(
 export const isRoleModelAllowedActionName = isRoleModelAllowedToolName;
 
 export const roleModelDecisionOutputContractText =
-  'Return exactly one complete valid JSON CharacterDecision object with version "mvp-006.tool_calls.v1" and ordered toolCalls. Required call shape: {"name":"visible_reply","input":{"text":"one visible reply line"}}. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". For a user turn, include one visible_reply call with input.text and optionally one character_state.patch call with patch fields.';
+  'Return exactly one complete valid JSON CharacterDecision object with version "mvp-006.tool_calls.v1" and ordered toolCalls. Required call shape: {"name":"visible_reply","input":{"text":"one visible reply line"}}. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". For a user turn, include one visible_reply call with input.text. Include character_state.patch only when it is listed in allowedTools and toolDefinitions.';
 
 export type RoleModelOutputContract = {
   readonly version: string;
@@ -101,6 +101,7 @@ export type CreateRoleModelInputEnvelopeOptions = {
   readonly event: UserMessageRuntimeEvent;
   readonly decisionContext: DecisionContext;
   readonly allowedTools?: readonly RoleModelAllowedToolName[];
+  readonly allowedActions?: readonly RoleModelAllowedActionName[];
   readonly outputContract?: RoleModelOutputContract;
 };
 
@@ -228,7 +229,7 @@ export function createRoleModelInputEnvelope(
     event: freezeUserMessageRuntimeEventSnapshot(options.event),
     decisionContext: createDecisionContext(options.decisionContext),
     allowedTools: freezeAllowedTools(
-      options.allowedTools ?? roleModelAllowedToolNames
+      options.allowedTools ?? options.allowedActions ?? roleModelAllowedToolNames
     ),
     outputContract: freezeRoleModelOutputContract(
       options.outputContract ?? roleModelDecisionOutputContract
@@ -363,7 +364,7 @@ function parseRoleModelDecisionObject(
   }
 
   if (parsedOutput['action'] !== undefined) {
-    return parseLegacyVisibleReplyDecision(parsedOutput);
+    return parseLegacyVisibleReplyDecision(parsedOutput, frozenAllowedTools);
   }
 
   const version = parsedOutput['version'];
@@ -417,7 +418,8 @@ function parseRoleModelDecisionObject(
 }
 
 function parseLegacyVisibleReplyDecision(
-  parsedOutput: Readonly<Record<string, unknown>>
+  parsedOutput: Readonly<Record<string, unknown>>,
+  allowedTools: readonly RoleModelAllowedToolName[]
 ): RoleModelDecisionResult {
   const action = parsedOutput['action'];
 
@@ -434,6 +436,13 @@ function parseLegacyVisibleReplyDecision(
   if (actionType !== roleModelVisibleReplyActionName) {
     return createUnsupportedOutputResult(
       `Decision action.type "${actionType}" is not supported.`
+    );
+  }
+
+  if (!allowedTools.includes(roleModelVisibleReplyActionName)) {
+    return createRejectedRoleModelDecisionResult(
+      roleModelDisallowedToolRejectionReason,
+      `Decision requested disallowed tool "${roleModelVisibleReplyActionName}".`
     );
   }
 

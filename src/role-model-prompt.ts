@@ -2,6 +2,7 @@ import {
   builtInModelToolDefinitionsForUserTurn,
   characterStatePatchModelToolName,
   visibleReplyModelToolName,
+  type BuiltInModelToolCall,
   type BuiltInModelToolDefinition
 } from './model-tools.ts';
 import {
@@ -29,24 +30,11 @@ export type RoleModelPromptPayload = {
 
 type RoleModelPromptResponseExample = {
   readonly version: typeof roleModelDecisionContractVersion;
-  readonly toolCalls: readonly [
-    {
-      readonly name: typeof visibleReplyModelToolName;
-      readonly input: {
-        readonly text: string;
-      };
-    },
-    {
-      readonly name: typeof characterStatePatchModelToolName;
-      readonly input: {
-        readonly currentActivity: 'chatting';
-      };
-    }
-  ];
+  readonly toolCalls: readonly BuiltInModelToolCall[];
 };
 
 export const roleModelPromptSystemMessage =
-  'You are Mira. Return exactly one complete CharacterDecision JSON object. ' +
+  'Return exactly one complete CharacterDecision JSON object. ' +
   `The top-level "version" value must be exactly "${roleModelDecisionContractVersion}"; copy that literal from outputContract.version without adding or removing characters. ` +
   'The entire response must be valid JSON parseable by JSON.parse, begin with "{", end with "}", and include no markdown, prose, comments, or partial JSON. ' +
   'Each toolCalls item must use string field "name" and object field "input"; never use "tool", "type", "function", or "arguments". ' +
@@ -76,7 +64,7 @@ export function renderRoleModelPromptMessages(
   return Object.freeze([
     Object.freeze({
       role: 'system',
-      content: roleModelPromptSystemMessage
+      content: createRoleModelPromptSystemMessage(inputEnvelope)
     } satisfies RoleModelPromptMessage),
     Object.freeze({
       role: 'user',
@@ -92,10 +80,31 @@ export function createRoleModelPromptPayload(
     outputContract: inputEnvelope.outputContract,
     allowedTools: Object.freeze([...inputEnvelope.allowedTools]),
     toolDefinitions: toolDefinitionsForAllowedTools(inputEnvelope.allowedTools),
-    responseExample: roleModelPromptResponseExample,
+    responseExample: createRoleModelPromptResponseExample(
+      inputEnvelope.allowedTools
+    ),
     event: inputEnvelope.event,
     decisionContext: inputEnvelope.decisionContext
   } satisfies RoleModelPromptPayload);
+}
+
+function createRoleModelPromptSystemMessage(
+  inputEnvelope: RoleModelInputEnvelope
+): string {
+  return `You are ${inputEnvelope.decisionContext.characterSnapshot.displayName}. ${roleModelPromptSystemMessage}`;
+}
+
+function createRoleModelPromptResponseExample(
+  allowedTools: readonly RoleModelAllowedToolName[]
+): RoleModelPromptResponseExample {
+  return Object.freeze({
+    version: roleModelDecisionContractVersion,
+    toolCalls: Object.freeze(
+      roleModelPromptResponseExample.toolCalls.filter((call) =>
+        allowedTools.includes(call.name)
+      )
+    )
+  } satisfies RoleModelPromptResponseExample);
 }
 
 function toolDefinitionsForAllowedTools(

@@ -1,6 +1,7 @@
 import {
   CharacterInputError,
   CharacterReplyValidationError,
+  rollbackLastCharacterTurn,
   runCharacterTurn,
   type CharacterAgent,
   type CharacterAgentReply,
@@ -309,6 +310,13 @@ async function runSerializedLocalUserMessageEvent(
         rollbackAllowed: boolean;
       }
     | undefined;
+  let sessionTurnRollback:
+    | {
+        readonly session: ConversationSession;
+        readonly turn: CharacterTurnResult;
+        rollbackAllowed: boolean;
+      }
+    | undefined;
 
   try {
     if (normalizedEventResult.status === 'rejected') {
@@ -433,6 +441,12 @@ async function runSerializedLocalUserMessageEvent(
       throw error;
     }
 
+    sessionTurnRollback = {
+      session: options.session,
+      turn,
+      rollbackAllowed: true
+    };
+
     const committedAt = options.committedAt ?? options.event.createdAt;
     const acceptedCommitValidation = createRoleModelCommitValidationSnapshot({
       ...identity,
@@ -481,6 +495,8 @@ async function runSerializedLocalUserMessageEvent(
       payloadSummary,
       ...acceptedEvidence
     });
+
+    sessionTurnRollback.rollbackAllowed = false;
 
     if (writtenCharacterStateRollback !== undefined) {
       writtenCharacterStateRollback.rollbackAllowed = false;
@@ -532,6 +548,7 @@ async function runSerializedLocalUserMessageEvent(
     }
 
     rollbackWrittenCharacterStateIfSafe(writtenCharacterStateRollback);
+    rollbackSessionTurnIfSafe(sessionTurnRollback);
     appendRawEvent({
       ...identity,
       kind: 'runtime_turn_rejected',
@@ -564,6 +581,22 @@ function characterStateStoreForTurn(
 
   defaultCharacterStateStores.set(options.session, store);
   return store;
+}
+
+function rollbackSessionTurnIfSafe(
+  rollback:
+    | {
+        readonly session: ConversationSession;
+        readonly turn: CharacterTurnResult;
+        readonly rollbackAllowed: boolean;
+      }
+    | undefined
+): void {
+  if (rollback?.rollbackAllowed !== true) {
+    return;
+  }
+
+  rollbackLastCharacterTurn(rollback.session, rollback.turn);
 }
 
 function rollbackWrittenCharacterStateIfSafe(

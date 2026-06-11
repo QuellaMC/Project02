@@ -447,6 +447,16 @@ describe('local runtime storage contract', () => {
     expectMalformedRawEvent(record);
   });
 
+  it('rejects accepted character-state patch decisions without patch evidence', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelCompletedRawEventWithStatePatch()
+    );
+
+    delete record['characterStatePatchSnapshot'];
+
+    expectMalformedRawEvent(record);
+  });
+
   it('rejects accepted character-state patch metadata that does not match the parsed tool call', () => {
     const record = mutableRecordFromRawEvent(
       createRoleModelCompletedRawEventWithStatePatch()
@@ -479,6 +489,16 @@ describe('local runtime storage contract', () => {
     );
 
     snapshot['sessionId'] = 'other-session';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects invalid character-state patch commit rejections without patch evidence', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelRejectedRawEventWithStatePatch()
+    );
+
+    delete record['characterStatePatchSnapshot'];
 
     expectMalformedRawEvent(record);
   });
