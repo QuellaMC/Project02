@@ -1130,7 +1130,8 @@ function assertParsedRoleModelDecisionMatchesRawOutput(options: {
   readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
 }): void {
   const parsedRawOutputDecision = parseRoleModelDecision(
-    options.roleModelIOSnapshot.rawOutputText
+    options.roleModelIOSnapshot.rawOutputText,
+    options.roleModelIOSnapshot.inputEnvelope.allowedTools
   );
   const parsedSnapshotDecision =
     options.parsedRoleModelDecisionSnapshot.result;

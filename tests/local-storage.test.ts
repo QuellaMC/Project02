@@ -37,6 +37,7 @@ import {
   parseRoleModelDecision,
   planCharacterStatePatch,
   roleModelDecisionContractVersion,
+  roleModelDisallowedToolRejectionReason,
   roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelMalformedOutputRejectionReason,
@@ -368,6 +369,32 @@ describe('local runtime storage contract', () => {
     inputEnvelope['allowedTools'] = [];
 
     expectMalformedRawEvent(record);
+  });
+
+  it('accepts parser-owned disallowed-tool rejection from stored input envelope tools', () => {
+    const decoded = decodeRawEventLogRecord(
+      JSON.stringify(createRoleModelDisallowedToolRejectedRawEvent())
+    );
+
+    expect(decoded).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelDisallowedToolRejectionReason,
+      roleModelIOSnapshot: {
+        inputEnvelope: {
+          allowedTools: [roleModelVisibleReplyActionName]
+        }
+      },
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelDisallowedToolRejectionReason,
+            details: 'Decision requested disallowed tool "character_state.patch".'
+          }
+        }
+      }
+    });
   });
 
   it('rejects stored living-state brief text that does not match its current state', () => {
@@ -1069,6 +1096,85 @@ function createRoleModelRejectedRawEventWithStatePatch(): RawEventLogRecord {
       ...identity,
       sessionId: 'local-session',
       result: statePatchPlan
+    })
+  } satisfies RawEventLogRecord);
+}
+
+function createRoleModelDisallowedToolRejectedRawEvent(): RawEventLogRecord {
+  const identity = createRuntimeEventIdentity({
+    eventId: 'evt_role_model_storage_disallowed_tool',
+    traceId: 'trace_role_model_storage_disallowed_tool',
+    createdAt
+  });
+  const event = createUserMessageRuntimeEvent('hello', identity);
+  const decisionContext = createDecisionContext({
+    sessionId: 'local-session',
+    characterSnapshot: {
+      id: 'mira',
+      displayName: 'Mira'
+    },
+    livingStateBrief: createLivingStateBrief(createDefaultCharacterRuntimeState())
+  });
+  const inputEnvelope = createRoleModelInputEnvelope({
+    event,
+    decisionContext,
+    allowedTools: [roleModelVisibleReplyActionName]
+  });
+  const rawOutputText = JSON.stringify({
+    version: roleModelDecisionContractVersion,
+    toolCalls: [
+      {
+        name: roleModelVisibleReplyActionName,
+        input: {
+          text: 'hello back'
+        }
+      },
+      {
+        name: 'character_state.patch',
+        input: {
+          mood: 'curious'
+        }
+      }
+    ]
+  });
+  const rejected = parseRoleModelDecision(rawOutputText, [
+    roleModelVisibleReplyActionName
+  ]);
+
+  if (
+    rejected.status !== 'rejected' ||
+    rejected.rejection.reason !== roleModelDisallowedToolRejectionReason
+  ) {
+    throw new Error('Expected disallowed tool fixture.');
+  }
+
+  return Object.freeze({
+    ...identity,
+    kind: 'runtime_turn_rejected',
+    eventType: 'USER_MESSAGE',
+    status: 'rejected',
+    reason: roleModelDisallowedToolRejectionReason,
+    payloadSummary: {
+      normalizedCurrentUserMessage: 'hello'
+    },
+    roleModelIOSnapshot: createRoleModelIOSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      inputEnvelope,
+      rawOutputText
+    }),
+    parsedRoleModelDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: rejected
+    }),
+    commitValidation: createRoleModelCommitValidationSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: {
+        status: 'rejected',
+        rejection: rejected.rejection
+      }
     })
   } satisfies RawEventLogRecord);
 }
