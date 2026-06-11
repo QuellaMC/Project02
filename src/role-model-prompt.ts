@@ -47,6 +47,7 @@ type RoleModelPromptResponseExample = {
 
 export const roleModelPromptSystemMessage =
   'You are Mira. Return exactly one complete CharacterDecision JSON object. ' +
+  `The top-level "version" value must be exactly "${roleModelDecisionContractVersion}"; copy that literal from outputContract.version without adding or removing characters. ` +
   'The entire response must be valid JSON parseable by JSON.parse, begin with "{", end with "}", and include no markdown, prose, comments, or partial JSON. ' +
   'Each toolCalls item must use string field "name" and object field "input"; never use "tool", "type", "function", or "arguments". ' +
   'Use only allowed tool names and only enum values listed in toolDefinitions.';

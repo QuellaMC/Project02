@@ -11,6 +11,7 @@ import {
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
+  defaultNvidiaRoleModelName,
   encodeStorageSchemaMarker,
   LocalRuntimeStorageContractError,
   type CharacterAgent,
@@ -151,7 +152,7 @@ describe('node src/chat-cli.ts', () => {
         status: 'rejected',
         provider: {
           name: 'nvidia',
-          model: 'meta/llama-3.1-70b-instruct',
+          model: defaultNvidiaRoleModelName,
           errorCode: 'missing_api_key',
           errorMessage: 'NVIDIA provider requires NVIDIA_API_KEY.'
         },

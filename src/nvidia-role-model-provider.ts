@@ -12,7 +12,11 @@ import type {
 export const nvidiaRoleModelProviderName = 'nvidia';
 export const defaultNvidiaChatCompletionsEndpoint =
   'https://integrate.api.nvidia.com/v1/chat/completions';
-export const defaultNvidiaRoleModelName = 'meta/llama-3.1-70b-instruct';
+export const defaultNvidiaRoleModelName = 'nvidia/nemotron-3-nano-30b-a3b';
+export const nvidiaRoleModelTemperature = 1;
+export const nvidiaRoleModelTopP = 1;
+export const nvidiaRoleModelMaxTokens = 16384;
+export const nvidiaRoleModelReasoningBudget = 16384;
 export const nvidiaApiKeyEnvName = 'NVIDIA_API_KEY';
 export const nvidiaModelEnvName = 'NVIDIA_MODEL';
 
@@ -93,7 +97,11 @@ export function createNvidiaRoleModelProviderAdapter(
       const body = JSON.stringify({
         model,
         messages,
-        stream: false
+        stream: false,
+        temperature: nvidiaRoleModelTemperature,
+        top_p: nvidiaRoleModelTopP,
+        max_tokens: nvidiaRoleModelMaxTokens,
+        reasoning_budget: nvidiaRoleModelReasoningBudget
       });
       const baseMetadata = createProviderMetadata({
         endpoint,

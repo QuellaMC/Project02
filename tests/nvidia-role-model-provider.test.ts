@@ -10,6 +10,10 @@ import {
   defaultNvidiaChatCompletionsEndpoint,
   defaultNvidiaRoleModelName,
   nvidiaApiKeyEnvName,
+  nvidiaRoleModelMaxTokens,
+  nvidiaRoleModelTemperature,
+  nvidiaRoleModelReasoningBudget,
+  nvidiaRoleModelTopP,
   parseRoleModelDecision,
   renderNvidiaMessages,
   roleModelCharacterStatePatchToolName,
@@ -55,6 +59,9 @@ describe('NVIDIA role-model provider adapter', () => {
       );
 
     expect(messages).toHaveLength(2);
+    expect(messages[0]?.content).toContain(
+      `version" value must be exactly "${roleModelDecisionContractVersion}"`
+    );
     expect(messages[0]?.content).toContain('valid JSON parseable by JSON.parse');
     expect(messages[0]?.content).toContain('never use "tool"');
     expect(userPayload.allowedTools).toEqual([
@@ -138,7 +145,11 @@ describe('NVIDIA role-model provider adapter', () => {
     expect(observedRequests).toHaveLength(1);
     expect(JSON.parse(observedRequests[0]?.body ?? '{}')).toMatchObject({
       model: defaultNvidiaRoleModelName,
-      stream: false
+      stream: false,
+      temperature: nvidiaRoleModelTemperature,
+      top_p: nvidiaRoleModelTopP,
+      max_tokens: nvidiaRoleModelMaxTokens,
+      reasoning_budget: nvidiaRoleModelReasoningBudget
     });
     expect(observedRequests[0]?.headers['authorization']).toBe(
       'Bearer secret-token'
