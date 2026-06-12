@@ -354,6 +354,20 @@ describe('role model decision contracts', () => {
         decisionContext,
         capabilityToolDefinitions: [
           createFakeCapabilityToolDefinition({
+            capabilityId: 'memory.fixture_a'
+          }),
+          createFakeCapabilityToolDefinition({
+            capabilityId: 'memory.fixture_b'
+          })
+        ]
+      })
+    ).toThrow('Capability tool "memory.search" is declared more than once.');
+    expect(() =>
+      createRoleModelInputEnvelope({
+        event,
+        decisionContext,
+        capabilityToolDefinitions: [
+          createFakeCapabilityToolDefinition({
             requiresConfirmation: true
           })
         ]
@@ -517,6 +531,30 @@ describe('role model decision contracts', () => {
             {
               name: 'memory.search',
               input: {
+                query: 42
+              }
+            }
+          ]
+        }),
+        allowedTools,
+        capabilityToolDefinitions
+      )
+    ).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedToolCallRejectionReason,
+        details: 'memory.search input field "query" must be a string.'
+      }
+    });
+    expect(
+      parseRoleModelDecision(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            visibleReplyCall,
+            {
+              name: 'memory.search',
+              input: {
                 query: 'preference'
               }
             },
@@ -631,7 +669,8 @@ function createFakeCapabilityToolDefinition(
         {
           name: 'query',
           description: 'Search query.',
-          required: true
+          required: true,
+          valueType: 'string'
         }
       ]
     },

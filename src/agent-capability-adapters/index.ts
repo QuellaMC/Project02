@@ -26,7 +26,11 @@ import {
   type AgentCapabilityToolValidationOwner,
   type RuntimeCapabilityContext
 } from '../agent-capabilities.ts';
+import {
+  modelToolInputFieldValueTypes
+} from '../model-tools.ts';
 import type {
+  ModelToolInputFieldValueType,
   ModelToolInputContract,
   ModelToolInputField
 } from '../model-tools.ts';
@@ -956,6 +960,9 @@ function inputFieldFromSchemaProperty(options: {
     options.property['enum'],
     `schema.properties.${options.name}.enum`
   );
+  const valueType = modelToolInputFieldValueTypeFromSchema(
+    options.property['type']
+  );
 
   return {
     name: options.name,
@@ -965,10 +972,21 @@ function inputFieldFromSchemaProperty(options: {
         `schema.properties.${options.name}.description`
       ) ?? `Input field ${options.name}.`,
     required: options.required,
+    ...(valueType === undefined ? {} : { valueType }),
     ...(allowedValues.length === 0
       ? {}
       : { allowedValues: Object.freeze([...allowedValues]) })
   };
+}
+
+function modelToolInputFieldValueTypeFromSchema(
+  value: unknown
+): ModelToolInputFieldValueType | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  return modelToolInputFieldValueTypes.find((candidate) => candidate === value);
 }
 
 function createMemoryContextItem(options: {

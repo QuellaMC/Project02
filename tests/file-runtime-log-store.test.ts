@@ -13,28 +13,35 @@ import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-  agentCapabilityContractVersion,
-  createConversationSession,
+    agentCapabilityContractVersion,
+    createAgentCapability,
+    createAgentCapabilityEvidenceSnapshot,
+    createConversationSession,
   createDefaultCharacterRuntimeState,
   createAgentCapabilityTurnEvidenceSnapshot,
   createFileCharacterStateStore,
   createFileRuntimeLogStore,
   createLivingStateBrief,
   createLocalRuntimeSessionStore,
-  createLocalRuntimeSessionPaths,
-  createUserMessageRuntimeEvent,
+    createLocalRuntimeSessionPaths,
+    createRuntimeCapabilityHost,
+    createUserMessageRuntimeEvent,
   encodeCharacterRuntimeState,
   LocalRuntimeStorageContractError,
   LocalRuntimeSessionStoreError,
-  recordLocalUserMessageInputRejection,
-  roleModelDecisionContractVersion,
+    recordLocalUserMessageInputRejection,
+    roleModelCapabilityToolRejectedRejectionReason,
+    roleModelDecisionContractVersion,
   roleModelVisibleReplyActionName,
-  runLocalUserMessageEvent,
+    runLocalUserMessageEvent,
+    type AgentCapability,
   type ConversationLogRecordInput,
   type AgentCapabilityTurnEvidenceSnapshot,
-  type LocalRuntimeStorageContractErrorCode,
-  type LocalRuntimeSessionStoreErrorCode,
-  type RawEventLogRecordInput,
+    type LocalRuntimeStorageContractErrorCode,
+    type LocalRuntimeSessionStoreErrorCode,
+    type RawEventLogRecord,
+    type RawEventLogRecordKind,
+    type RawEventLogRecordInput,
   type RoleModelAdapter,
   type RuntimeEventIdentity,
   type RuntimeTraceEntryInput
@@ -227,7 +234,7 @@ describe('file-backed runtime log store', () => {
     );
   });
 
-  it('rejects public reads when prompted living state disagrees with prior patch evidence', async () => {
+    it('rejects public reads when prompted living state disagrees with prior patch evidence', async () => {
     const storeRoot = createTempStoreRoot();
     await createCatalogedSession(storeRoot, 'mira-local');
     const paths = createLocalRuntimeSessionPaths({
@@ -333,17 +340,85 @@ describe('file-backed runtime log store', () => {
 
     writeFileSync(paths.rawEventsPath, `${rewrittenRawEvents}\n`, 'utf8');
 
-    expectStorageErrorCode(
-      () =>
-        createFileRuntimeLogStore({
-          storeRoot,
-          sessionId: 'mira-local'
-        }).rawEvents(),
-      'malformed_record'
+      expectStorageErrorCode(
+        () =>
+          createFileRuntimeLogStore({
+            storeRoot,
+            sessionId: 'mira-local'
+          }).rawEvents(),
+        'malformed_record'
+      );
+    });
+
+  it('reopens rejected capability-tool turns with replayable parsed evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [createFileRuntimeRejectedToolCapability()],
+      enabledCapabilityIds: ['memory.file_tool_rejected']
+    });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('search memory', identity),
+      session: createConversationSession({
+        id: 'mira-local'
+      }),
+      logStore: createFileRuntimeLogStore({
+        storeRoot,
+        sessionId: 'mira-local'
+      }),
+      capabilityHost,
+      roleModelAdapter: {
+        invoke() {
+          return {
+            rawOutputText: JSON.stringify({
+              version: roleModelDecisionContractVersion,
+              toolCalls: [
+                {
+                  name: roleModelVisibleReplyActionName,
+                  input: {
+                    text: 'I will check.'
+                  }
+                },
+                {
+                  name: 'memory.search',
+                  input: {
+                    query: 'preference'
+                  }
+                }
+              ]
+            })
+          };
+        }
+      }
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: roleModelCapabilityToolRejectedRejectionReason
+    });
+
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const terminalRejected = requiredRawEvent(
+      reopened.rawEvents(),
+      'runtime_turn_rejected'
     );
+
+    expect(terminalRejected.parsedRoleModelDecisionSnapshot?.result.status).toBe(
+      'accepted'
+    );
+    expect(terminalRejected.commitValidation?.result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelCapabilityToolRejectedRejectionReason
+      }
+    });
   });
 
-  it('rejects public reads when accepted intermediate patch before-state disagrees with prior evidence', async () => {
+    it('rejects public reads when accepted intermediate patch before-state disagrees with prior evidence', async () => {
     const storeRoot = createTempStoreRoot();
     await createCatalogedSession(storeRoot, 'mira-local');
     const paths = createLocalRuntimeSessionPaths({
@@ -2515,6 +2590,19 @@ function requiredMutableRecord(
   throw new Error(`Expected ${field} to be a JSON object.`);
 }
 
+function requiredRawEvent(
+  records: readonly RawEventLogRecord[],
+  kind: RawEventLogRecordKind
+): RawEventLogRecord {
+  const record = records.find((candidate) => candidate.kind === kind);
+
+  if (record === undefined) {
+    throw new Error(`Expected raw event ${kind}.`);
+  }
+
+  return record;
+}
+
 async function createCatalogedFileRuntimeLogStore(
   storeRoot: string,
   sessionId: string
@@ -2591,7 +2679,93 @@ function createStatePatchRoleModelAdapter(options: {
         })
       };
     }
-  } satisfies RoleModelAdapter);
+    } satisfies RoleModelAdapter);
+  }
+
+function createFileRuntimeRejectedToolCapability(): AgentCapability {
+  return createAgentCapability({
+    manifest: {
+      id: 'memory.file_tool_rejected',
+      displayName: 'File rejected tool',
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'File runtime rejected tool test capability.',
+      contractVersion: agentCapabilityContractVersion,
+      compatibility: {
+        hostContractVersions: [agentCapabilityContractVersion],
+        sourceSystem: 'project02'
+      },
+      declaredCapabilities: ['tool_provider', 'handle_tool_call'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'local_memory_write',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'degrade',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['file_runtime_test']
+      }
+    },
+    providedTools: [
+      {
+        name: 'memory.search',
+        description: 'Search memory.',
+        requiredForUserTurn: false,
+        maxCallsPerUserTurn: 1,
+        inputContract: {
+          type: 'object',
+          additionalFields: false,
+          fields: [
+            {
+              name: 'query',
+              description: 'Search query.',
+              required: true,
+              valueType: 'string'
+            }
+          ]
+        },
+        validationOwner: 'capability_host',
+        sideEffectLevel: 'runtime_read',
+        requiresConfirmation: false,
+        sourceReferencesRequired: false
+      }
+    ],
+    lifecycleHooks: {
+      handleToolCall(_call, context) {
+        return {
+          status: 'rejected',
+          reason: 'memory_unavailable',
+          message: 'memory fixture unavailable',
+          evidence: [
+            createAgentCapabilityEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'agent_capability_evidence_snapshot',
+              capabilityId: 'memory.file_tool_rejected',
+              evidenceKind: 'tool_invocation',
+              status: 'rejected',
+              summary: 'memory fixture unavailable',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
 }
 
 function writeVisibleRawEvidence(

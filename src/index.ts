@@ -45,6 +45,7 @@ export {
   createDecisionContext,
   createParsedRoleModelDecisionSnapshot,
   createRejectedRoleModelDecisionResult,
+  createRoleModelCapabilityToolDefinitions,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createVisibleReplyCharacterDecision,
@@ -121,6 +122,7 @@ export {
   type ModelToolDefinition,
   type ModelToolInputContract,
   type ModelToolInputField,
+  type ModelToolInputFieldValueType,
   type ModelToolInputValidationResult,
   type VisibleReplyModelToolCall,
   type VisibleReplyModelToolName,
@@ -133,6 +135,7 @@ export {
   createAgentCapabilityContextItem,
   createAgentCapabilityEvidenceSnapshot,
   createAgentCapabilityHealthSnapshot,
+  createRuntimeCapabilityAfterTurnCommittedContext,
   createAgentCapabilityListingSnapshot,
   createAgentCapabilityManifest,
   createAgentCapabilityProvidedTool,
@@ -186,6 +189,9 @@ export {
   type AgentCapabilityValidationFailureReason,
   type AgentCapabilityValidationResult,
   type CreateRuntimeCapabilityContextOptions,
+  type CreateRuntimeCapabilityAfterTurnCommittedContextOptions,
+  type RuntimeCapabilityAfterTurnCommittedContext,
+  type RuntimeCapabilityCommittedTurnSnapshot,
   type RuntimeCapabilityContext
 } from './agent-capabilities.ts';
 

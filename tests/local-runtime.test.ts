@@ -27,6 +27,7 @@ import {
   roleModelVisibleReplyActionName,
   runLocalUserMessageEvent,
   type AgentCapability,
+  type AgentCapabilityContextItem,
   type AgentCapabilityLifecycleHooks,
   type CharacterAgent,
   type CharacterAgentReply,
@@ -1543,19 +1544,97 @@ describe('local runtime turn adapter', () => {
     ]);
   });
 
+  it('rejects required capability context without source references before model call', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    let adapterCalls = 0;
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [
+        createRuntimeTestCapability({
+          id: 'memory.required_source_refs_runtime',
+          displayName: 'Required source refs runtime',
+          requiredForTurn: true,
+          sourceReferencesRequired: true,
+          beforeRoleModelCall() {
+            return {
+              contextItems: [
+                createRuntimeTestContextItem({
+                  capabilityId: 'memory.required_source_refs_runtime',
+                  sourceReferences: []
+                })
+              ],
+              runtimeNotes: [],
+              evidence: []
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_required_source_refs',
+        'trace_required_source_refs'
+      ),
+      session,
+      logStore,
+      capabilityHost,
+      roleModelAdapter: {
+        invoke() {
+          adapterCalls += 1;
+          return {
+            rawOutputText: JSON.stringify({
+              version: roleModelDecisionContractVersion,
+              toolCalls: [
+                {
+                  name: roleModelVisibleReplyActionName,
+                  input: {
+                    text: 'should not commit'
+                  }
+                }
+              ]
+            })
+          };
+        }
+      }
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: runtimeCapabilityBeforeRoleModelCallRejectionReason
+    });
+    expect(adapterCalls).toBe(0);
+    expect(session.visibleTranscript).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
+    expect(result.rawEvent.agentCapabilityEvidence).toMatchObject([
+      {
+        capabilityId: 'memory.required_source_refs_runtime',
+        status: 'rejected',
+        policyOutcome: 'required_rejected'
+      }
+    ]);
+  });
+
   it('runs after-commit hooks after visible commit evidence and keeps accepted turns on failure', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
     let observedRawKindsDuringAfter: readonly RawEventLogRecordKind[] = [];
+    let observedCommittedVisibleMessageIds: readonly string[] = [];
+    let observedCommittedVisibleTexts: readonly string[] = [];
     const capabilityHost = createRuntimeCapabilityHost({
       capabilities: [
         createRuntimeTestCapability({
           id: 'memory.after_runtime',
           displayName: 'After runtime hook',
-          afterTurnCommitted() {
+          afterTurnCommitted(context) {
             observedRawKindsDuringAfter = logStore
               .rawEvents()
               .map((record) => record.kind);
+            observedCommittedVisibleMessageIds =
+              context.committedTurn.visibleMessageIds;
+            observedCommittedVisibleTexts =
+              context.committedTurn.visibleMessages.map((message) => message.text);
             throw new Error('capture unavailable');
           }
         })
@@ -1597,6 +1676,11 @@ describe('local runtime turn adapter', () => {
       'runtime_event_normalized',
       'visible_reply_committed'
     ]);
+    expect(observedCommittedVisibleMessageIds).toHaveLength(2);
+    expect(observedCommittedVisibleTexts).toEqual([
+      'hello',
+      'committed before capture'
+    ]);
     expect(session.visibleTranscript.map((message) => message.text)).toEqual([
       'hello',
       'committed before capture'
@@ -1609,6 +1693,99 @@ describe('local runtime turn adapter', () => {
         policyOutcome: 'after_commit_failed'
       }
     ]);
+  });
+
+  it('persists full capability turn evidence with listings and context items', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [
+        createRuntimeTestCapability({
+          id: 'memory.context_runtime',
+          displayName: 'Runtime context capability',
+          beforeRoleModelCall(context) {
+            return {
+              contextItems: [
+                createRuntimeTestContextItem({
+                  capabilityId: 'memory.context_runtime'
+                })
+              ],
+              runtimeNotes: ['memory context injected'],
+              evidence: [
+                createAgentCapabilityEvidenceSnapshot({
+                  eventId: context.eventId,
+                  traceId: context.traceId,
+                  createdAt: context.timestamp,
+                  kind: 'agent_capability_evidence_snapshot',
+                  capabilityId: 'memory.context_runtime',
+                  evidenceKind: 'before_role_model_call',
+                  status: 'accepted',
+                  summary: 'memory context accepted',
+                  policyOutcome: 'available_for_turn',
+                  redactionLabels: []
+                })
+              ]
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'remember',
+        'evt_capability_turn_evidence',
+        'trace_capability_turn_evidence'
+      ),
+      session,
+      logStore,
+      capabilityHost,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'I found context.'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result.status).toBe('completed');
+
+    if (result.status !== 'completed') {
+      throw new Error('Expected completed runtime result.');
+    }
+
+    const turnEvidence = result.rawEvent.agentCapabilityTurnEvidence;
+
+    expect(turnEvidence).toMatchObject({
+      contractVersion: agentCapabilityContractVersion,
+      capabilities: [
+        {
+          capabilityId: 'memory.context_runtime',
+          enabled: true,
+          availableForTurn: true
+        }
+      ],
+      contextItems: [
+        {
+          capabilityId: 'memory.context_runtime',
+          text: 'Remembered runtime context.'
+        }
+      ]
+    });
+    expect(turnEvidence?.contextItems[0]?.sourceReferences).toEqual([
+      {
+        kind: 'memory',
+        id: 'mem_runtime'
+      }
+    ]);
+    expect(turnEvidence?.evidence).toEqual(result.rawEvent.agentCapabilityEvidence);
   });
 
   it('persists accepted capability tool invocation evidence with the committed turn', async () => {
@@ -1798,6 +1975,15 @@ describe('local runtime turn adapter', () => {
         summary: 'memory fixture unavailable'
       }
     ]);
+    expect(commitRejected.parsedRoleModelDecisionSnapshot?.result.status).toBe(
+      'accepted'
+    );
+    expect(commitRejected.commitValidation?.result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelCapabilityToolRejectedRejectionReason
+      }
+    });
     expect(terminalRejected.agentCapabilityEvidence).toEqual(
       commitRejected.agentCapabilityEvidence
     );
@@ -1923,6 +2109,8 @@ function createRuntimeTestCapability(options: {
   readonly id: string;
   readonly displayName: string;
   readonly requiredForTurn?: boolean;
+  readonly sourceReferencesRequired?: boolean;
+  readonly timeoutMs?: number;
   readonly providedTools?: readonly unknown[];
   readonly beforeRoleModelCall?: AgentCapabilityLifecycleHooks['beforeRoleModelCall'];
   readonly handleToolCall?: AgentCapabilityLifecycleHooks['handleToolCall'];
@@ -1949,8 +2137,8 @@ function createRuntimeTestCapability(options: {
         requiredForTurn: options.requiredForTurn ?? false,
         sideEffectLevel: 'local_memory_write',
         confirmation: 'not_required',
-        timeoutMs: 1000,
-        sourceReferencesRequired: false,
+        timeoutMs: options.timeoutMs ?? 1000,
+        sourceReferencesRequired: options.sourceReferencesRequired ?? false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall:
@@ -2016,7 +2204,8 @@ function createRuntimeTestTool(name: string): unknown {
         {
           name: 'query',
           description: 'Search query.',
-          required: true
+          required: true,
+          valueType: 'string'
         }
       ]
     },
@@ -2025,6 +2214,29 @@ function createRuntimeTestTool(name: string): unknown {
     requiresConfirmation: false,
     sourceReferencesRequired: true
   });
+}
+
+function createRuntimeTestContextItem(options: {
+  readonly capabilityId: string;
+  readonly sourceReferences?: AgentCapabilityContextItem['sourceReferences'];
+}): AgentCapabilityContextItem {
+  return {
+    capabilityId: options.capabilityId,
+    id: `${options.capabilityId}.item_1`,
+    kind: 'memory',
+    text: 'Remembered runtime context.',
+    budget: {
+      estimatedTokens: 4,
+      priority: 1
+    },
+    sourceReferences: options.sourceReferences ?? [
+      {
+        kind: 'memory',
+        id: 'mem_runtime'
+      }
+    ],
+    redactionLabels: []
+  };
 }
 
 function createTestUserMessageEvent(

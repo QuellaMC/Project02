@@ -713,6 +713,11 @@ describe('role model loop', () => {
       reason: roleModelCapabilityToolRejectedRejectionReason,
       details: 'memory fixture unavailable'
     });
+    expect(result.decisionResult).toEqual({
+      status: 'rejected',
+      rejection: result.rejection
+    });
+    expect(result.parsedDecisionSnapshot.result.status).toBe('accepted');
     expect(result.capabilityToolResults).toHaveLength(1);
     expect(result.capabilityToolResults[0]?.result).toMatchObject({
       status: 'rejected',

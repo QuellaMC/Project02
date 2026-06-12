@@ -21,8 +21,13 @@ import {
 import { createFileCharacterStateStore } from './file-character-state-store.ts';
 import { buildUserTurnDecisionContext } from './decision-context.ts';
 import {
+  agentCapabilityContractVersion,
+  createAgentCapabilityTurnEvidenceSnapshot,
+  createRuntimeCapabilityAfterTurnCommittedContext,
   createRuntimeCapabilityContext,
-  type AgentCapabilityEvidenceSnapshot
+  type AgentCapabilityContextItem,
+  type AgentCapabilityEvidenceSnapshot,
+  type AgentCapabilityTurnEvidenceSnapshot
 } from './agent-capabilities.ts';
 import {
   runtimeCapabilityBeforeRoleModelCallRejectionReason,
@@ -245,6 +250,7 @@ async function runSerializedLocalUserMessageEvent(
 
   function appendRejectedResult(optionsForRejection: {
     readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[];
+    readonly agentCapabilityContextItems?: readonly AgentCapabilityContextItem[];
     readonly evidence?: RoleModelRawEvidence;
     readonly message: string;
     readonly rawKind: RawEventLogRecordInput['kind'];
@@ -265,7 +271,13 @@ async function runSerializedLocalUserMessageEvent(
       ...evidence,
       ...agentCapabilityEvidenceOption(
         optionsForRejection.agentCapabilityEvidence
-      )
+      ),
+      ...agentCapabilityTurnEvidenceOption({
+        identity,
+        capabilityHost: options.capabilityHost,
+        contextItems: optionsForRejection.agentCapabilityContextItems ?? [],
+        evidence: optionsForRejection.agentCapabilityEvidence ?? []
+      })
     });
 
     const rawEvent = appendRawEvent({
@@ -278,7 +290,13 @@ async function runSerializedLocalUserMessageEvent(
       ...evidence,
       ...agentCapabilityEvidenceOption(
         optionsForRejection.agentCapabilityEvidence
-      )
+      ),
+      ...agentCapabilityTurnEvidenceOption({
+        identity,
+        capabilityHost: options.capabilityHost,
+        contextItems: optionsForRejection.agentCapabilityContextItems ?? [],
+        evidence: optionsForRejection.agentCapabilityEvidence ?? []
+      })
     });
 
     appendTrace('raw_event_log_appended');
@@ -298,11 +316,15 @@ async function runSerializedLocalUserMessageEvent(
   function appendRoleModelRejectedResult(
     rejection: RoleModelDecisionRejection,
     evidence: RoleModelRawEvidence,
-    agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[]
+    agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[],
+    agentCapabilityContextItems?: readonly AgentCapabilityContextItem[]
   ): LocalRuntimeUserMessageRejectedResult {
     return appendRejectedResult({
       evidence,
       ...(agentCapabilityEvidence === undefined ? {} : { agentCapabilityEvidence }),
+      ...(agentCapabilityContextItems === undefined
+        ? {}
+        : { agentCapabilityContextItems }),
       message: rejection.details ?? rejection.reason,
       rawKind: 'commit_validation_rejected',
       rawReason: rejection.reason,
@@ -437,7 +459,8 @@ async function runSerializedLocalUserMessageEvent(
           ...roleModelEvidence,
           commitValidation
         },
-        roleModelCapabilityEvidence
+        roleModelCapabilityEvidence,
+        beforeRoleModelCallResult.contextItems
       );
     }
 
@@ -480,7 +503,8 @@ async function runSerializedLocalUserMessageEvent(
             ? {}
             : { characterStatePatchSnapshot: statePatchSnapshot })
         },
-        roleModelCapabilityEvidence
+        roleModelCapabilityEvidence,
+        beforeRoleModelCallResult.contextItems
       );
     }
 
@@ -498,6 +522,7 @@ async function runSerializedLocalUserMessageEvent(
       if (error instanceof CharacterInputError) {
         return appendRejectedResult({
           agentCapabilityEvidence: roleModelCapabilityEvidence,
+          agentCapabilityContextItems: beforeRoleModelCallResult.contextItems,
           evidence: roleModelEvidence,
           message: error.message,
           rawKind: 'input_validation_rejected',
@@ -521,7 +546,8 @@ async function runSerializedLocalUserMessageEvent(
             ...roleModelEvidence,
             commitValidation
           },
-          roleModelCapabilityEvidence
+          roleModelCapabilityEvidence,
+          beforeRoleModelCallResult.contextItems
         );
       }
 
@@ -585,12 +611,22 @@ async function runSerializedLocalUserMessageEvent(
     });
 
     sessionTurnRollback.rollbackAllowed = false;
+    const afterCommitCapabilityContext =
+      createRuntimeCapabilityAfterTurnCommittedContext({
+        ...identity,
+        sessionId: decisionContext.sessionId,
+        eventType: event.type,
+        currentUserMessage: event.payload.currentUserMessage,
+        character: decisionContext.characterSnapshot,
+        committedAt,
+        visibleMessages: conversationMessages
+      });
 
     const afterTurnCommittedResult =
       options.capabilityHost === undefined
         ? createEmptyHookResult()
         : await options.capabilityHost.afterTurnCommitted(
-            runtimeCapabilityContext
+            afterCommitCapabilityContext
           );
     const completedCapabilityEvidence = combineAgentCapabilityEvidence(
       roleModelCapabilityEvidence,
@@ -605,7 +641,13 @@ async function runSerializedLocalUserMessageEvent(
       visibleMessageIds: conversationMessages.map((message) => message.id),
       payloadSummary,
       ...acceptedEvidence,
-      ...agentCapabilityEvidenceOption(completedCapabilityEvidence)
+      ...agentCapabilityEvidenceOption(completedCapabilityEvidence),
+      ...agentCapabilityTurnEvidenceOption({
+        identity,
+        capabilityHost: options.capabilityHost,
+        contextItems: beforeRoleModelCallResult.contextItems,
+        evidence: completedCapabilityEvidence
+      })
     });
 
     appendTrace('raw_event_log_appended');
@@ -855,6 +897,49 @@ function agentCapabilityEvidenceOption(
 
   return {
     agentCapabilityEvidence: Object.freeze([...evidence])
+  };
+}
+
+function agentCapabilityTurnEvidenceOption(options: {
+  readonly identity: RuntimeEventIdentity;
+  readonly capabilityHost: RuntimeCapabilityHost | undefined;
+  readonly contextItems: readonly AgentCapabilityContextItem[];
+  readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
+}): { readonly agentCapabilityTurnEvidence?: AgentCapabilityTurnEvidenceSnapshot } {
+  if (options.capabilityHost === undefined) {
+    return {};
+  }
+
+  const registry = options.capabilityHost.registrySnapshot();
+  const enabledCapabilityIds = new Set(options.capabilityHost.enabledCapabilityIds());
+
+  return {
+    agentCapabilityTurnEvidence: createAgentCapabilityTurnEvidenceSnapshot({
+      ...options.identity,
+      kind: 'agent_capability_turn_evidence_snapshot',
+      contractVersion: agentCapabilityContractVersion,
+      capabilities: registry.capabilities.map((registration) => {
+        const enabled = enabledCapabilityIds.has(registration.manifest.id);
+
+        return {
+          capabilityId: registration.manifest.id,
+          manifest: registration.manifest,
+          providedTools: registration.providedTools,
+          registeredLifecycleHooks: registration.registeredLifecycleHooks,
+          installed: true,
+          registered: true,
+          enabled,
+          availableForTurn: enabled,
+          redactionLabels: registration.manifest.runtimePolicy.redactionLabels,
+          ...(registration.manifest.config.fingerprint === undefined
+            ? {}
+            : { configFingerprint: registration.manifest.config.fingerprint })
+        };
+      }),
+      contextItems: options.contextItems,
+      evidence: options.evidence,
+      health: []
+    })
   };
 }
 

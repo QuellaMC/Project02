@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   agentCapabilityContractVersion,
+  createRuntimeCapabilityAfterTurnCommittedContext,
   createRuntimeCapabilityContext,
   createRuntimeCapabilityHost,
   firstPartyModelToolsCapabilityId,
@@ -58,12 +59,14 @@ describe('agent capability adapter compatibility proofs', () => {
       {
         name: 'query',
         description: 'Search query.',
-        required: true
+        required: true,
+        valueType: 'string'
       },
       {
         name: 'limit',
         description: 'Maximum result count.',
-        required: false
+        required: false,
+        valueType: 'number'
       }
     ]);
     expect(health.snapshots).toHaveLength(1);
@@ -91,7 +94,7 @@ describe('agent capability adapter compatibility proofs', () => {
       }),
       context
     );
-    const afterCommit = await host.afterTurnCommitted(context);
+    const afterCommit = await host.afterTurnCommitted(createTestAfterContext());
     const sessionEnd = await host.onSessionEnd(context);
     const health = await host.health(context);
 
@@ -186,7 +189,7 @@ describe('agent capability adapter compatibility proofs', () => {
       }),
       context
     );
-    const afterCommit = await host.afterTurnCommitted(context);
+    const afterCommit = await host.afterTurnCommitted(createTestAfterContext());
     const sessionEnd = await host.onSessionEnd(context);
     const health = await host.health(context);
 
@@ -384,6 +387,39 @@ function createTestContext() {
       displayName: 'Mira'
     },
     redactionLabels: ['private']
+  });
+}
+
+function createTestAfterContext() {
+  return createRuntimeCapabilityAfterTurnCommittedContext({
+    eventId: 'evt_adapter_fixture',
+    traceId: 'trace_adapter_fixture',
+    createdAt: '2026-06-12T00:00:00.000Z',
+    sessionId: 'session-adapter-fixture',
+    eventType: 'USER_MESSAGE',
+    currentUserMessage: 'prove adapter compatibility',
+    character: {
+      id: 'mira',
+      displayName: 'Mira'
+    },
+    redactionLabels: ['private'],
+    committedAt: '2026-06-12T00:00:01.000Z',
+    visibleMessages: [
+      {
+        id: 'evt_adapter_fixture-user',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'prove adapter compatibility'
+      },
+      {
+        id: 'evt_adapter_fixture-character',
+        role: 'character',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'adapter evidence recorded'
+      }
+    ]
   });
 }
 

@@ -36,10 +36,11 @@ import {
   LocalRuntimeStorageContractError,
   localRuntimeStorageSchemaVersion,
   normalizeLocalRuntimeSessionId,
-  parseRoleModelDecision,
-  planCharacterStatePatch,
-  roleModelAdapterRejectionNotReplayableDetails,
-  roleModelDecisionContractVersion,
+    parseRoleModelDecision,
+    planCharacterStatePatch,
+    roleModelAdapterRejectionNotReplayableDetails,
+    roleModelCapabilityToolRejectedRejectionReason,
+    roleModelDecisionContractVersion,
   roleModelDisallowedToolRejectionReason,
   roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
@@ -718,8 +719,8 @@ describe('local runtime storage contract', () => {
     });
   });
 
-  it('rejects invalid visible-reply commit rejection when parsed text would commit', () => {
-    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    it('rejects invalid visible-reply commit rejection when parsed text would commit', () => {
+      const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
 
     rewriteRawEventAsRoleModelRejection(
       record,
@@ -727,10 +728,41 @@ describe('local runtime storage contract', () => {
       'Character agent returned an empty reply.'
     );
 
-    expectMalformedRawEvent(record);
+      expectMalformedRawEvent(record);
+    });
+
+  it('accepts capability-tool commit rejection when parsed decision was accepted', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelCapabilityToolRejectedRejectionReason,
+      'memory fixture unavailable'
+    );
+
+    const decoded = decodeRawEventLogRecord(JSON.stringify(record));
+
+    expect(decoded).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelCapabilityToolRejectedRejectionReason,
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'accepted'
+        }
+      },
+      commitValidation: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelCapabilityToolRejectedRejectionReason
+          }
+        }
+      }
+    });
   });
 
-  it('accepts parser-owned commit rejection when it matches the parsed rejection', () => {
+    it('accepts parser-owned commit rejection when it matches the parsed rejection', () => {
     const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
 
     setParsedRoleModelRejection(

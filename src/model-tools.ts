@@ -16,10 +16,22 @@ export type BuiltInModelToolName =
   | VisibleReplyModelToolName
   | CharacterStatePatchModelToolName;
 
+export const modelToolInputFieldValueTypes = Object.freeze([
+  'string',
+  'number',
+  'boolean',
+  'object',
+  'array'
+] as const);
+
+export type ModelToolInputFieldValueType =
+  (typeof modelToolInputFieldValueTypes)[number];
+
 export type ModelToolInputField = {
   readonly name: string;
   readonly description: string;
   readonly required: boolean;
+  readonly valueType?: ModelToolInputFieldValueType;
   readonly allowedValues?: readonly string[];
 };
 
@@ -303,7 +315,22 @@ export function validateModelToolInputAgainstContract(options: {
       );
     }
 
-    if (fieldValue === undefined || field.allowedValues === undefined) {
+    if (fieldValue === undefined) {
+      continue;
+    }
+
+    if (
+      field.valueType !== undefined &&
+      !modelToolInputValueMatchesType(fieldValue, field.valueType)
+    ) {
+      return rejectModelToolInput(
+        `${options.toolName} input field "${field.name}" must be ${modelToolInputFieldTypeArticle(
+          field.valueType
+        )} ${field.valueType}.`
+      );
+    }
+
+    if (field.allowedValues === undefined) {
       continue;
     }
 
@@ -351,6 +378,7 @@ function freezeModelToolInputContract(
           name: field.name,
           description: field.description,
           required: field.required,
+          ...(field.valueType === undefined ? {} : { valueType: field.valueType }),
           ...(field.allowedValues === undefined
             ? {}
             : { allowedValues: Object.freeze([...field.allowedValues]) })
@@ -366,6 +394,27 @@ function rejectModelToolInput(details: string): ModelToolInputValidationResult {
     status: 'rejected',
     details
   } satisfies ModelToolInputValidationResult);
+}
+
+function modelToolInputValueMatchesType(
+  value: unknown,
+  valueType: ModelToolInputFieldValueType
+): boolean {
+  if (valueType === 'array') {
+    return Array.isArray(value);
+  }
+
+  if (valueType === 'object') {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  return typeof value === valueType;
+}
+
+function modelToolInputFieldTypeArticle(
+  valueType: ModelToolInputFieldValueType
+): 'a' | 'an' {
+  return valueType === 'array' || valueType === 'object' ? 'an' : 'a';
 }
 
 function freezeJsonRecord(

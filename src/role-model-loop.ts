@@ -179,7 +179,7 @@ export async function runRoleModelLoop(
   const parsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
     ...identity,
     sessionId,
-    result: finalDecisionResult
+    result: decisionResult
   });
 
   if (finalDecisionResult.status === 'accepted') {

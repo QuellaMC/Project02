@@ -257,7 +257,7 @@ export function createDecisionContext(
 export function createRoleModelInputEnvelope(
   options: CreateRoleModelInputEnvelopeOptions
 ): RoleModelInputEnvelope {
-  const capabilityToolDefinitions = freezeCapabilityToolDefinitions(
+  const capabilityToolDefinitions = createRoleModelCapabilityToolDefinitions(
     options.capabilityToolDefinitions ?? []
   );
   const modelToolDefinitions = modelToolDefinitionsForCapabilityToolDefinitions(
@@ -489,7 +489,7 @@ function parseRoleModelDecisionObject(
   allowedTools: readonly RoleModelAllowedToolName[],
   capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[]
 ): RoleModelDecisionResult {
-  const frozenCapabilityToolDefinitions = freezeCapabilityToolDefinitions(
+  const frozenCapabilityToolDefinitions = createRoleModelCapabilityToolDefinitions(
     capabilityToolDefinitions
   );
   const modelToolDefinitions = modelToolDefinitionsForCapabilityToolDefinitions(
@@ -936,7 +936,7 @@ function freezeCapabilityContextItems(
   return Object.freeze(contextItems.map(createAgentCapabilityContextItem));
 }
 
-function freezeCapabilityToolDefinitions(
+export function createRoleModelCapabilityToolDefinitions(
   definitions: readonly RoleModelCapabilityToolDefinition[]
 ): readonly RoleModelCapabilityToolDefinition[] {
   const frozenDefinitions: RoleModelCapabilityToolDefinition[] = [];

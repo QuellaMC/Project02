@@ -1,8 +1,10 @@
-import type { CharacterProfile } from './conversation.ts';
+import type { CharacterProfile, VisibleMessage } from './conversation.ts';
 import {
   builtInModelToolDefinitionsForUserTurn,
+  modelToolInputFieldValueTypes,
   type ModelToolInputContract,
-  type ModelToolInputField
+  type ModelToolInputField,
+  type ModelToolInputFieldValueType
 } from './model-tools.ts';
 import type {
   RuntimeEventIdentity,
@@ -311,6 +313,17 @@ export type RuntimeCapabilityContext = {
   };
 };
 
+export type RuntimeCapabilityCommittedTurnSnapshot = {
+  readonly committedAt: string;
+  readonly visibleMessageIds: readonly string[];
+  readonly visibleMessages: readonly VisibleMessage[];
+};
+
+export type RuntimeCapabilityAfterTurnCommittedContext =
+  RuntimeCapabilityContext & {
+    readonly committedTurn: RuntimeCapabilityCommittedTurnSnapshot;
+  };
+
 export type CreateRuntimeCapabilityContextOptions = RuntimeEventIdentity & {
   readonly sessionId: string;
   readonly eventType: RuntimeEventType;
@@ -318,6 +331,12 @@ export type CreateRuntimeCapabilityContextOptions = RuntimeEventIdentity & {
   readonly character: CharacterProfile;
   readonly redactionLabels?: readonly string[];
 };
+
+export type CreateRuntimeCapabilityAfterTurnCommittedContextOptions =
+  CreateRuntimeCapabilityContextOptions & {
+    readonly committedAt: string;
+    readonly visibleMessages: readonly VisibleMessage[];
+  };
 
 export type AgentCapabilityBeforeRoleModelCallResult = {
   readonly contextItems: readonly AgentCapabilityContextItem[];
@@ -360,7 +379,7 @@ export type AgentCapabilityLifecycleHooks = {
     context: RuntimeCapabilityContext
   ) => AgentCapabilityToolCallResult | Promise<AgentCapabilityToolCallResult>;
   readonly afterTurnCommitted?: (
-    context: RuntimeCapabilityContext
+    context: RuntimeCapabilityAfterTurnCommittedContext
   ) => AgentCapabilityHookResult | Promise<AgentCapabilityHookResult>;
   readonly onSessionEnd?: (
     context: RuntimeCapabilityContext
@@ -694,6 +713,46 @@ export function createRuntimeCapabilityContext(
       exposePrivateConfig: false
     })
   } satisfies RuntimeCapabilityContext);
+}
+
+export function createRuntimeCapabilityAfterTurnCommittedContext(
+  options: CreateRuntimeCapabilityAfterTurnCommittedContextOptions
+): RuntimeCapabilityAfterTurnCommittedContext {
+  const runtimeContext = createRuntimeCapabilityContext(options);
+  const visibleMessages = freezeVisibleMessages(options.visibleMessages);
+
+  return Object.freeze({
+    ...runtimeContext,
+    committedTurn: Object.freeze({
+      committedAt: requirePlainNonEmptyString(options.committedAt, 'committedAt'),
+      visibleMessageIds: Object.freeze(
+        visibleMessages.map((message) => message.id)
+      ),
+      visibleMessages
+    } satisfies RuntimeCapabilityCommittedTurnSnapshot)
+  } satisfies RuntimeCapabilityAfterTurnCommittedContext);
+}
+
+function freezeVisibleMessages(
+  messages: readonly VisibleMessage[]
+): readonly VisibleMessage[] {
+  return Object.freeze(messages.map(freezeVisibleMessage));
+}
+
+function freezeVisibleMessage(message: VisibleMessage): VisibleMessage {
+  return Object.freeze({
+    id: requirePlainNonEmptyString(message.id, 'visibleMessage.id'),
+    role: message.role,
+    speakerId: requirePlainNonEmptyString(
+      message.speakerId,
+      'visibleMessage.speakerId'
+    ),
+    speakerName: requirePlainNonEmptyString(
+      message.speakerName,
+      'visibleMessage.speakerName'
+    ),
+    text: requirePlainNonEmptyString(message.text, 'visibleMessage.text')
+  } satisfies VisibleMessage);
 }
 
 export function createAgentCapability(
@@ -1541,6 +1600,7 @@ function requiredModelToolInputField(
   const name = requiredIdentifier(value['name'], 'name');
   const description = requiredNonEmptyString(value['description'], 'description');
   const required = requiredBoolean(value['required'], 'required');
+  const valueType = optionalModelToolInputFieldValueType(value['valueType']);
   const allowedValues =
     value['allowedValues'] === undefined
       ? accept(undefined)
@@ -1550,9 +1610,10 @@ function requiredModelToolInputField(
     name.status === 'rejected' ||
     description.status === 'rejected' ||
     required.status === 'rejected' ||
+    valueType.status === 'rejected' ||
     allowedValues.status === 'rejected'
   ) {
-    return firstRejected([name, description, required, allowedValues]);
+    return firstRejected([name, description, required, valueType, allowedValues]);
   }
 
   return accept(
@@ -1560,10 +1621,28 @@ function requiredModelToolInputField(
       name: name.value,
       description: redactAgentCapabilityText(description.value),
       required: required.value,
+      ...(valueType.value === undefined ? {} : { valueType: valueType.value }),
       ...(allowedValues.value === undefined
         ? {}
         : { allowedValues: allowedValues.value })
     } satisfies ModelToolInputField)
+  );
+}
+
+function optionalModelToolInputFieldValueType(
+  value: unknown
+): AgentCapabilityValidationResult<ModelToolInputFieldValueType | undefined> {
+  if (value === undefined) {
+    return accept(undefined);
+  }
+
+  if (isOneOf(value, modelToolInputFieldValueTypes)) {
+    return accept(value);
+  }
+
+  return reject(
+    'malformed_tool_definition',
+    'Model tool inputContract field valueType is not supported.'
   );
 }
 

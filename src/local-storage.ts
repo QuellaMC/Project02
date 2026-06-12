@@ -42,7 +42,7 @@ import {
   getRequiredVisibleReplyText,
   isRoleModelAllowedToolName,
   isRoleModelRawOutputReplayableDecisionEvidence,
-  parseRoleModelDecision,
+  roleModelCapabilityToolRejectedRejectionReason,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
   roleModelLegacyDecisionContractVersion,
@@ -62,6 +62,14 @@ import {
   type RoleModelOutputContract,
   type RoleModelProviderMetadata
 } from './role-model-contracts.ts';
+import {
+  characterStatePatchModelToolName,
+  createCharacterStatePatchModelToolCall,
+  createVisibleReplyModelToolCall,
+  visibleReplyModelToolName,
+  type CapabilityModelToolCall,
+  type ModelToolCall
+} from './model-tools.ts';
 import {
   createAgentCapabilityContextItem,
   createAgentCapabilityEvidenceSnapshot,
@@ -240,6 +248,7 @@ const sessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const commitOwnedRoleModelRejectionReasons = [
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelInvalidCharacterStatePatchRejectionReason,
+  roleModelCapabilityToolRejectedRejectionReason,
   roleModelCommitValidationFailureRejectionReason
 ] as const satisfies readonly RoleModelDecisionRejectionReason[];
 
@@ -2036,13 +2045,83 @@ function requiredCharacterDecision(value: unknown): CharacterDecision {
     throwMalformedRecord('decision');
   }
 
-  const result = parseRoleModelDecision(JSON.stringify(value));
-
-  if (result.status === 'accepted') {
-    return result.decision;
+  if (value['version'] !== roleModelDecisionContractVersion) {
+    throwMalformedRecord('decision.version');
   }
 
-  throwMalformedRecord('decision');
+  return Object.freeze({
+    version: roleModelDecisionContractVersion,
+    toolCalls: Object.freeze(
+      requiredArray(value['toolCalls'], 'decision.toolCalls').map(
+        requiredModelToolCall
+      )
+    )
+  } satisfies CharacterDecision);
+}
+
+function requiredModelToolCall(value: unknown): ModelToolCall {
+  if (!isRecord(value)) {
+    throwMalformedRecord('decision.toolCalls');
+  }
+
+  const name = requiredRecordString(value, 'name', 'malformed_record');
+  const input = value['input'];
+
+  if (!isRecord(input)) {
+    throwMalformedRecord('decision.toolCalls.input');
+  }
+
+  if (name === visibleReplyModelToolName) {
+    const text = requiredRecordStringAllowingEmpty(
+      input,
+      'text',
+      'malformed_record'
+    );
+
+    return createVisibleReplyModelToolCall(text);
+  }
+
+  if (name === characterStatePatchModelToolName) {
+    return createCharacterStatePatchModelToolCall(freezeJsonRecord(input));
+  }
+
+  return Object.freeze({
+    name,
+    input: freezeJsonRecord(input)
+  } satisfies CapabilityModelToolCall);
+}
+
+function freezeJsonRecord(
+  record: Readonly<Record<string, unknown>>
+): Readonly<Record<string, unknown>> {
+  const snapshot: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(record)) {
+    snapshot[key] = freezeJsonValue(value);
+  }
+
+  return Object.freeze(snapshot);
+}
+
+function freezeJsonValue(value: unknown): unknown {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map(freezeJsonValue));
+  }
+
+  if (isRecord(value)) {
+    return freezeJsonRecord(value);
+  }
+
+  throwMalformedRecord('decision.toolCalls.input');
 }
 
 function requiredRoleModelCommitValidationResult(

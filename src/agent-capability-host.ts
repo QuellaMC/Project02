@@ -19,10 +19,14 @@ import type {
   AgentCapabilityToolCallResult,
   AgentCapabilityPolicyOutcome,
   AgentCapabilityRegistrySnapshot,
+  RuntimeCapabilityAfterTurnCommittedContext,
   RuntimeCapabilityContext
 } from './agent-capabilities.ts';
 import { isBuiltInModelToolName } from './model-tools.ts';
-import type { RoleModelCapabilityToolDefinition } from './role-model-contracts.ts';
+import {
+  createRoleModelCapabilityToolDefinitions,
+  type RoleModelCapabilityToolDefinition
+} from './role-model-contracts.ts';
 
 export const runtimeCapabilityBeforeRoleModelCallRejectionReason =
   'capability_before_role_model_call_rejected';
@@ -76,7 +80,7 @@ export type RuntimeCapabilityHost = {
     context: RuntimeCapabilityContext
   ): Promise<AgentCapabilityToolCallResult>;
   afterTurnCommitted(
-    context: RuntimeCapabilityContext
+    context: RuntimeCapabilityAfterTurnCommittedContext
   ): Promise<RuntimeCapabilityHookHostResult>;
   onSessionEnd(
     context: RuntimeCapabilityContext
@@ -89,20 +93,22 @@ type BeforeRoleModelCallInvocationResult =
       readonly status: 'accepted';
       readonly value: AgentCapabilityBeforeRoleModelCallResult;
     }
-  | {
-      readonly status: 'failed';
-      readonly message: string;
-    };
+    | {
+        readonly status: 'failed';
+        readonly message: string;
+        readonly failureKind: 'exception' | 'timeout';
+      };
 
 type HookInvocationResult =
   | {
       readonly status: 'accepted';
       readonly value: AgentCapabilityHookResult;
     }
-  | {
-      readonly status: 'failed';
-      readonly message: string;
-    };
+    | {
+        readonly status: 'failed';
+        readonly message: string;
+        readonly failureKind: 'exception' | 'timeout';
+      };
 
 export function createRuntimeCapabilityHost(
   options: CreateRuntimeCapabilityHostOptions = {}
@@ -116,6 +122,9 @@ export function createRuntimeCapabilityHost(
   const enabledCapabilities = Object.freeze(
     capabilities.filter((capability) => enabledIds.includes(capability.manifest.id))
   );
+  const capabilityToolDefinitions = createRoleModelCapabilityToolDefinitions(
+    capabilityToolDefinitionsForEnabledCapabilities(enabledCapabilities)
+  );
 
   return Object.freeze({
     registrySnapshot() {
@@ -125,7 +134,7 @@ export function createRuntimeCapabilityHost(
       return Object.freeze([...enabledIds]);
     },
     capabilityToolDefinitions() {
-      return capabilityToolDefinitionsForEnabledCapabilities(enabledCapabilities);
+      return capabilityToolDefinitions;
     },
     async beforeRoleModelCall(context) {
       return await runBeforeRoleModelCall({
@@ -145,7 +154,9 @@ export function createRuntimeCapabilityHost(
         capabilities: enabledCapabilities,
         context,
         hookName: 'afterTurnCommitted',
-        evidenceKind: 'after_turn_committed'
+        evidenceKind: 'after_turn_committed',
+        hookForCapability: (capability) =>
+          capability.lifecycleHooks.afterTurnCommitted
       });
     },
     async onSessionEnd(context) {
@@ -153,7 +164,8 @@ export function createRuntimeCapabilityHost(
         capabilities: enabledCapabilities,
         context,
         hookName: 'onSessionEnd',
-        evidenceKind: 'session_end'
+        evidenceKind: 'session_end',
+        hookForCapability: (capability) => capability.lifecycleHooks.onSessionEnd
       });
     },
     async health(context) {
@@ -194,6 +206,12 @@ async function runBeforeRoleModelCall(options: {
     }
 
     const rejectsTurn = beforeRoleModelFailureRejectsTurn(capability);
+    const policyOutcome =
+      result.failureKind === 'timeout'
+        ? 'timeout'
+        : rejectsTurn
+          ? 'required_rejected'
+          : 'optional_degraded';
     const failureEvidence = createHookFailureEvidence({
       capability,
       context: options.context,
@@ -202,7 +220,7 @@ async function runBeforeRoleModelCall(options: {
       summary: rejectsTurn
         ? `Required before-role-model capability hook rejected the turn: ${result.message}`
         : `Optional before-role-model capability hook degraded: ${result.message}`,
-      policyOutcome: rejectsTurn ? 'required_rejected' : 'optional_degraded'
+      policyOutcome
     });
 
     evidence.push(failureEvidence);
@@ -271,9 +289,24 @@ async function runHandleToolCall(options: {
   try {
     return normalizeToolCallResult({
       capability,
-      value: await hook(options.call, options.context)
+      value: await withCapabilityHookTimeout({
+        capability,
+        hookName: 'handleToolCall',
+        operation: async () => await hook(options.call, options.context)
+      })
     });
   } catch (error: unknown) {
+    if (error instanceof CapabilityHookTimeoutError) {
+      return createRejectedToolCallResult({
+        call: options.call,
+        context: options.context,
+        reason: 'handler_timeout',
+        message: error.message,
+        evidenceStatus: 'failed',
+        policyOutcome: 'timeout'
+      });
+    }
+
     return createRejectedToolCallResult({
       call: options.call,
       context: options.context,
@@ -283,17 +316,20 @@ async function runHandleToolCall(options: {
   }
 }
 
-async function runHookPhase(options: {
+async function runHookPhase<TContext extends RuntimeCapabilityContext>(options: {
   readonly capabilities: readonly AgentCapability[];
-  readonly context: RuntimeCapabilityContext;
+  readonly context: TContext;
   readonly hookName: 'afterTurnCommitted' | 'onSessionEnd';
   readonly evidenceKind: Extract<AgentCapabilityEvidenceKind, 'after_turn_committed' | 'session_end'>;
+  readonly hookForCapability: (
+    capability: AgentCapability
+  ) => ((context: TContext) => AgentCapabilityHookResult | Promise<AgentCapabilityHookResult>) | undefined;
 }): Promise<RuntimeCapabilityHookHostResult> {
   const evidence: AgentCapabilityEvidenceSnapshot[] = [];
   let failed = false;
 
   for (const capability of options.capabilities) {
-    const hook = capability.lifecycleHooks[options.hookName];
+    const hook = options.hookForCapability(capability);
 
     if (hook === undefined) {
       continue;
@@ -302,6 +338,7 @@ async function runHookPhase(options: {
     const result = await invokeHook({
       capability,
       context: options.context,
+      hookName: options.hookName,
       hook
     });
 
@@ -314,7 +351,7 @@ async function runHookPhase(options: {
           evidenceKind: options.evidenceKind,
           status: 'failed',
           summary: `${options.hookName} capability hook failed: ${result.message}`,
-          ...failurePolicyOutcomeOption(options.evidenceKind)
+          ...failurePolicyOutcomeOption(options.evidenceKind, result.failureKind)
         })
       );
       continue;
@@ -333,7 +370,7 @@ async function runHookPhase(options: {
             evidenceKind: options.evidenceKind,
             status: 'failed',
             summary: `${options.hookName} capability hook reported failure.`,
-            ...failurePolicyOutcomeOption(options.evidenceKind)
+            ...failurePolicyOutcomeOption(options.evidenceKind, 'exception')
           })
         );
       }
@@ -424,6 +461,8 @@ function createRejectedToolCallResult(options: {
   readonly context: RuntimeCapabilityContext;
   readonly reason: string;
   readonly message: string;
+  readonly evidenceStatus?: AgentCapabilityEvidenceStatus;
+  readonly policyOutcome?: AgentCapabilityPolicyOutcome;
 }): AgentCapabilityToolCallResult {
   return Object.freeze({
     status: 'rejected',
@@ -437,9 +476,9 @@ function createRejectedToolCallResult(options: {
         kind: 'agent_capability_evidence_snapshot',
         capabilityId: options.call.capabilityId,
         evidenceKind: 'tool_invocation',
-        status: 'rejected',
+        status: options.evidenceStatus ?? 'rejected',
         summary: options.message,
-        policyOutcome: 'handler_rejected',
+        policyOutcome: options.policyOutcome ?? 'handler_rejected',
         redactionLabels: options.context.privacy.redactionLabels
       })
     ])
@@ -489,7 +528,11 @@ async function runHealth(options: {
 
     try {
       const snapshot = createAgentCapabilityHealthSnapshot(
-        await hook(options.context)
+        await withCapabilityHookTimeout({
+          capability,
+          hookName: 'health',
+          operation: async () => await hook(options.context)
+        })
       );
 
       assertSnapshotCapabilityId({
@@ -500,6 +543,8 @@ async function runHealth(options: {
       snapshots.push(snapshot);
     } catch (error: unknown) {
       const message = errorMessage(error);
+      const policyOutcome =
+        error instanceof CapabilityHookTimeoutError ? 'timeout' : 'health_degraded';
 
       snapshots.push(
         createAgentCapabilityHealthSnapshot({
@@ -523,7 +568,7 @@ async function runHealth(options: {
               ? 'degraded'
               : 'failed',
           summary: `Capability health hook failed: ${message}`,
-          policyOutcome: 'health_degraded'
+          policyOutcome
         })
       );
     }
@@ -545,37 +590,47 @@ async function invokeBeforeRoleModelCallHook(options: {
       status: 'accepted',
       value: normalizeBeforeRoleModelCallResult({
         capability: options.capability,
-        value: await options.hook(options.context)
+        value: await withCapabilityHookTimeout({
+          capability: options.capability,
+          hookName: 'beforeRoleModelCall',
+          operation: async () => await options.hook(options.context)
+        })
       })
     } satisfies BeforeRoleModelCallInvocationResult);
   } catch (error: unknown) {
     return Object.freeze({
       status: 'failed',
-      message: errorMessage(error)
+      message: errorMessage(error),
+      failureKind:
+        error instanceof CapabilityHookTimeoutError ? 'timeout' : 'exception'
     } satisfies BeforeRoleModelCallInvocationResult);
   }
 }
 
-async function invokeHook(options: {
+async function invokeHook<TContext extends RuntimeCapabilityContext>(options: {
   readonly capability: AgentCapability;
-  readonly context: RuntimeCapabilityContext;
-  readonly hook: NonNullable<
-    | AgentCapability['lifecycleHooks']['afterTurnCommitted']
-    | AgentCapability['lifecycleHooks']['onSessionEnd']
-  >;
+  readonly context: TContext;
+  readonly hookName: 'afterTurnCommitted' | 'onSessionEnd';
+  readonly hook: (context: TContext) => AgentCapabilityHookResult | Promise<AgentCapabilityHookResult>;
 }): Promise<HookInvocationResult> {
   try {
     return Object.freeze({
       status: 'accepted',
       value: normalizeHookResult({
         capability: options.capability,
-        value: await options.hook(options.context)
+        value: await withCapabilityHookTimeout({
+          capability: options.capability,
+          hookName: options.hookName,
+          operation: async () => await options.hook(options.context)
+        })
       })
     } satisfies HookInvocationResult);
   } catch (error: unknown) {
     return Object.freeze({
       status: 'failed',
-      message: errorMessage(error)
+      message: errorMessage(error),
+      failureKind:
+        error instanceof CapabilityHookTimeoutError ? 'timeout' : 'exception'
     } satisfies HookInvocationResult);
   }
 }
@@ -638,6 +693,10 @@ function normalizeContextItems(options: {
         capability: options.capability,
         actualCapabilityId: contextItem.capabilityId,
         field: 'contextItems.capabilityId'
+      });
+      assertContextItemSourceReferences({
+        capability: options.capability,
+        contextItem
       });
 
       return contextItem;
@@ -709,8 +768,15 @@ function createHookFailureEvidence(options: {
 }
 
 function failurePolicyOutcomeOption(
-  evidenceKind: AgentCapabilityEvidenceKind
+  evidenceKind: AgentCapabilityEvidenceKind,
+  failureKind: 'exception' | 'timeout'
 ): { readonly policyOutcome?: AgentCapabilityPolicyOutcome } {
+  if (failureKind === 'timeout') {
+    return {
+      policyOutcome: 'timeout'
+    };
+  }
+
   if (evidenceKind === 'after_turn_committed') {
     return {
       policyOutcome: 'after_commit_failed'
@@ -776,6 +842,23 @@ function assertSnapshotCapabilityId(options: {
   );
 }
 
+function assertContextItemSourceReferences(options: {
+  readonly capability: AgentCapability;
+  readonly contextItem: AgentCapabilityContextItem;
+}): void {
+  if (!options.capability.manifest.runtimePolicy.sourceReferencesRequired) {
+    return;
+  }
+
+  if (options.contextItem.sourceReferences.length > 0) {
+    return;
+  }
+
+  throw new TypeError(
+    `Capability "${options.capability.manifest.id}" context item "${options.contextItem.id}" requires source references.`
+  );
+}
+
 function mergedRedactionLabels(options: {
   readonly capability: AgentCapability;
   readonly context: RuntimeCapabilityContext;
@@ -794,6 +877,51 @@ function requiredArray(value: unknown, field: string): readonly unknown[] {
   }
 
   return value;
+}
+
+class CapabilityHookTimeoutError extends Error {
+  constructor(options: {
+    readonly capabilityId: string;
+    readonly hookName: string;
+    readonly timeoutMs: number;
+  }) {
+    super(
+      `Capability "${options.capabilityId}" ${options.hookName} timed out after ${String(
+        options.timeoutMs
+      )}ms.`
+    );
+    this.name = 'CapabilityHookTimeoutError';
+  }
+}
+
+async function withCapabilityHookTimeout<T>(options: {
+  readonly capability: AgentCapability;
+  readonly hookName: string;
+  readonly operation: () => T | Promise<T>;
+}): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutMs = options.capability.manifest.runtimePolicy.timeoutMs;
+
+  try {
+    return await Promise.race([
+      Promise.resolve().then(options.operation),
+      new Promise<T>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(
+            new CapabilityHookTimeoutError({
+              capabilityId: options.capability.manifest.id,
+              hookName: options.hookName,
+              timeoutMs
+            })
+          );
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 function errorMessage(error: unknown): string {

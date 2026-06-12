@@ -15,6 +15,7 @@ import {
   createAgentCapabilityRegistrySnapshot,
   createAgentCapabilityTurnEvidenceSnapshot,
   createFirstPartyModelToolsCapability,
+  createRuntimeCapabilityAfterTurnCommittedContext,
   createRuntimeCapabilityContext,
   firstPartyModelToolsCapabilityId,
   validateAgentCapabilityManifest,
@@ -190,6 +191,34 @@ describe('agent capability contract gate', () => {
       redactionLabels: ['memory']
     };
     const contextItem = createAgentCapabilityContextItem(contextItemInput);
+    const visibleMessages: MutableVisibleMessageInput[] = [
+      {
+        id: 'evt_capability_context-user',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'remember this'
+      },
+      {
+        id: 'evt_capability_context-character',
+        role: 'character',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'noted'
+      }
+    ];
+    const afterContext = createRuntimeCapabilityAfterTurnCommittedContext({
+      eventId: 'evt_capability_context',
+      traceId: 'trace_capability_context',
+      createdAt: '2026-06-12T00:00:00.000Z',
+      sessionId: 'session-capability',
+      eventType: 'USER_MESSAGE',
+      currentUserMessage: 'remember this',
+      character: mutableCharacter,
+      redactionLabels: ['private'],
+      committedAt: '2026-06-12T00:00:01.000Z',
+      visibleMessages
+    });
 
     mutableCharacter.displayName = 'Mutated Mira';
     contextItemInput.text = 'mutated context';
@@ -197,6 +226,13 @@ describe('agent capability contract gate', () => {
       kind: 'memory',
       id: 'mem_mutated'
     };
+    const visibleCharacterMessage = visibleMessages[1];
+
+    if (visibleCharacterMessage === undefined) {
+      throw new Error('Expected visible character message input.');
+    }
+
+    visibleCharacterMessage.text = 'mutated';
 
     expect(runtimeContext.character).toEqual({
       id: 'mira',
@@ -204,6 +240,12 @@ describe('agent capability contract gate', () => {
     });
     expect(runtimeContext.turnId).toBe('evt_capability_context');
     expect(runtimeContext.privacy.exposePrivateConfig).toBe(false);
+    expect(afterContext.committedTurn.visibleMessageIds).toEqual([
+      'evt_capability_context-user',
+      'evt_capability_context-character'
+    ]);
+    expect(afterContext.committedTurn.visibleMessages.map((message) => message.text))
+      .toEqual(['remember this', 'noted']);
     expect(contextItem.text).toBe('Mira prefers concise answers.');
     expect(contextItem.sourceReferences).toEqual([
       {
@@ -214,6 +256,8 @@ describe('agent capability contract gate', () => {
     ]);
     expect(Object.isFrozen(runtimeContext)).toBe(true);
     expect(Object.isFrozen(runtimeContext.character)).toBe(true);
+    expect(Object.isFrozen(afterContext.committedTurn)).toBe(true);
+    expect(Object.isFrozen(afterContext.committedTurn.visibleMessages)).toBe(true);
     expect(Object.isFrozen(contextItem)).toBe(true);
     expect(Object.isFrozen(contextItem.sourceReferences)).toBe(true);
   });
@@ -406,6 +450,14 @@ type MutableContextItemInput = {
   }[];
   confidence: number;
   redactionLabels: string[];
+};
+
+type MutableVisibleMessageInput = {
+  id: string;
+  role: 'user' | 'character';
+  speakerId: string;
+  speakerName: string;
+  text: string;
 };
 
 function readJsonFixture(name: string): unknown {
