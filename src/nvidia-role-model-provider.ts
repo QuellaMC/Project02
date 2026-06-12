@@ -104,7 +104,10 @@ export function createNvidiaRoleModelProviderAdapter(
         temperature: nvidiaRoleModelTemperature,
         top_p: nvidiaRoleModelTopP,
         max_tokens: nvidiaRoleModelMaxTokens,
-        reasoning_budget: nvidiaRoleModelReasoningBudget
+        reasoning_budget: nvidiaRoleModelReasoningBudget,
+        chat_template_kwargs: {
+          enable_thinking: false
+        }
       });
       const baseMetadata = createProviderMetadata({
         endpoint,

@@ -3,9 +3,7 @@ import { pathToFileURL } from 'node:url';
 
 import {
   createConversationSession,
-  createFileCharacterStateStore,
   createFileRuntimeLogStore,
-  createInMemoryCharacterStateStore,
   createLocalRuntimeSessionStore,
   createRuntimeEventIdentity,
   createLocalRuntimeStorageLayout,
@@ -113,7 +111,6 @@ type TraceIdentity = {
 
 type DurableChatRuntime = {
   readonly session: ConversationSession;
-  readonly characterStateStore: CharacterStateStore;
   readonly logStore: RuntimeLogStore;
 };
 
@@ -162,8 +159,6 @@ export async function runChatCliFromArgs(
 export async function runChatCli(options: ChatCliOptions): Promise<number> {
   const session = options.session ?? createConversationSession();
   const logStore = options.logStore ?? createRuntimeLogStore();
-  const characterStateStore =
-    options.characterStateStore ?? createInMemoryCharacterStateStore();
   const lines = createInterface({
     input: options.stdin,
     crlfDelay: Infinity,
@@ -183,10 +178,12 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
       try {
         const result = await handleUserMessageThroughRuntime({
           session,
-          characterStateStore,
           logStore,
           line,
           ...(options.agent === undefined ? {} : { agent: options.agent }),
+          ...(options.characterStateStore === undefined
+            ? {}
+            : { characterStateStore: options.characterStateStore }),
           ...(options.roleModelAdapter === undefined
             ? {}
             : { roleModelAdapter: options.roleModelAdapter })
@@ -230,7 +227,7 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
 
 type HandleUserMessageThroughRuntimeOptions = {
   readonly session: ConversationSession;
-  readonly characterStateStore: CharacterStateStore;
+  readonly characterStateStore?: CharacterStateStore;
   readonly logStore: RuntimeLogStore;
   readonly line: string;
   readonly agent?: CharacterAgent;
@@ -249,10 +246,12 @@ async function handleUserMessageThroughRuntime(
       const result = await runLocalUserMessageEvent({
         event,
         session: options.session,
-        characterStateStore: options.characterStateStore,
         logStore: options.logStore,
         rawInput: options.line,
         ...(options.agent === undefined ? {} : { agent: options.agent }),
+        ...(options.characterStateStore === undefined
+          ? {}
+          : { characterStateStore: options.characterStateStore }),
         ...(options.roleModelAdapter === undefined
           ? {}
           : { roleModelAdapter: options.roleModelAdapter })
@@ -651,10 +650,6 @@ async function createDurableChatRuntime(
 
   return Object.freeze({
     session: await sessionStore.rehydrateConversationSession(sessionId),
-    characterStateStore: createFileCharacterStateStore({
-      ...storageOptions,
-      sessionId
-    }),
     logStore: createFileRuntimeLogStore({
       ...storageOptions,
       sessionId

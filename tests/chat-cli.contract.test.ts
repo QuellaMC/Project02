@@ -8,13 +8,20 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { runChatCli as runChatCliInProcess } from '../src/chat-cli.ts';
 import {
+  createConversationSession,
+  createFileCharacterStateStore,
+  createFileRuntimeLogStore,
+  createLocalRuntimeSessionStore,
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
   defaultNvidiaRoleModelName,
   encodeStorageSchemaMarker,
   LocalRuntimeStorageContractError,
+  roleModelDecisionContractVersion,
+  roleModelVisibleReplyActionName,
   type CharacterAgent,
+  type RoleModelAdapter,
   type RuntimeLogStore
 } from '../src/index.ts';
 
@@ -338,6 +345,66 @@ describe('node src/chat-cli.ts', () => {
     expect(stdout.contents()).toBe('Mira is ready.\nYou: ');
     expect(stderr.contents()).toBe(
       'Error: Local runtime store could not be written.\n'
+    );
+  });
+
+  it('uses file-backed state when runChatCli receives a file-backed log store', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const sessionId = createTempSessionId();
+    const sessionStore = createLocalRuntimeSessionStore({ storeRoot });
+    await sessionStore.createSession({ sessionId });
+    const session = createConversationSession({ id: sessionId });
+    const stdout = new CapturingWritable();
+    const stderr = new CapturingWritable();
+
+    const exitCode = await runChatCliInProcess({
+      stdin: Readable.from(['hello\n/exit\n']),
+      stdout,
+      stderr,
+      session,
+      logStore: createFileRuntimeLogStore({
+        storeRoot,
+        sessionId
+      }),
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'durable state reply'
+              }
+            },
+            {
+              name: 'character_state.patch',
+              input: {
+                mood: 'curious'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout.contents()).toBe(
+      'Mira is ready.\nYou: Mira: durable state reply\nYou: '
+    );
+    expect(stderr.contents()).toBe('');
+    expect(
+      createFileCharacterStateStore({
+        storeRoot,
+        sessionId
+      }).readCurrentState().current.mood
+    ).toBe('curious');
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId
+      }).rawEvents()
+    ).not.toThrow(
+      'Stored character state does not match accepted character state patch evidence.'
     );
   });
 
@@ -689,6 +756,16 @@ async function createTempStoreRoot(): Promise<string> {
 function createTempSessionId(): string {
   tempSessionCounter += 1;
   return `test-session-${String(tempSessionCounter)}`;
+}
+
+function createRawOutputAdapter(rawOutputText: string): RoleModelAdapter {
+  return {
+    invoke() {
+      return Object.freeze({
+        rawOutputText
+      });
+    }
+  };
 }
 
 async function runCommand(
