@@ -346,6 +346,15 @@ export function validateModelToolInputAgainstContract(options: {
     }
   }
 
+  const jsonValueValidation = validateModelToolInputJsonValues({
+    toolName: options.toolName,
+    input: options.input
+  });
+
+  if (jsonValueValidation !== undefined) {
+    return rejectModelToolInput(jsonValueValidation);
+  }
+
   return Object.freeze({
     status: 'accepted',
     input: freezeJsonRecord(options.input)
@@ -425,6 +434,81 @@ function modelToolInputFieldTypeLabel(
   valueType: ModelToolInputFieldValueType
 ): string {
   return valueType === 'number' ? 'finite number' : valueType;
+}
+
+function validateModelToolInputJsonValues(options: {
+  readonly toolName: string;
+  readonly input: Readonly<Record<string, unknown>>;
+}): string | undefined {
+  for (const [key, value] of Object.entries(options.input)) {
+    const result = validateModelToolInputJsonValue({
+      toolName: options.toolName,
+      fieldPath: key,
+      value
+    });
+
+    if (result !== undefined) {
+      return result;
+    }
+  }
+
+  return undefined;
+}
+
+function validateModelToolInputJsonValue(options: {
+  readonly toolName: string;
+  readonly fieldPath: string;
+  readonly value: unknown;
+}): string | undefined {
+  if (
+    options.value === null ||
+    typeof options.value === 'string' ||
+    typeof options.value === 'boolean'
+  ) {
+    return undefined;
+  }
+
+  if (typeof options.value === 'number') {
+    if (Number.isFinite(options.value)) {
+      return undefined;
+    }
+
+    return `${options.toolName} input field "${options.fieldPath}" must be finite JSON.`;
+  }
+
+  if (Array.isArray(options.value)) {
+    for (const [index, item] of options.value.entries()) {
+      const result = validateModelToolInputJsonValue({
+        toolName: options.toolName,
+        fieldPath: `${options.fieldPath}[${String(index)}]`,
+        value: item
+      });
+
+      if (result !== undefined) {
+        return result;
+      }
+    }
+
+    return undefined;
+  }
+
+  if (isJsonRecord(options.value)) {
+    for (const [key, item] of Object.entries(options.value)) {
+      const result = validateModelToolInputJsonValue({
+        toolName: options.toolName,
+        fieldPath: `${options.fieldPath}.${key}`,
+        value: item
+      });
+
+      if (result !== undefined) {
+        return result;
+      }
+    }
+
+    return undefined;
+  }
+
+  return `${options.toolName} input field "${options.fieldPath}" must be JSON serializable.`;
 }
 
 function freezeJsonRecord(

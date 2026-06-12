@@ -14,7 +14,6 @@ import {
   mapOpenClawMemoryPluginFixture,
   mapTencentDbMemoryGatewayFixture,
   visibleReplyModelToolName,
-  type AgentCapability,
   type AgentCapabilityAdapterMapping,
   type AgentCapabilityJsonObject,
   type AgentCapabilityJsonValue,
@@ -29,7 +28,7 @@ describe('agent capability adapter compatibility proofs', () => {
     const host = createEnabledHost(mapping);
     const registry = host.registrySnapshot();
     const health = await host.health(createTestContext());
-    const toolResult = await requiredHandleToolCall(mapping.capability)(
+    const toolResult = await host.handleToolCall(
       createToolCall({
         capabilityId: mapping.capability.manifest.id,
         toolName: 'memory_search',
@@ -72,6 +71,22 @@ describe('agent capability adapter compatibility proofs', () => {
     expect(health.snapshots).toHaveLength(1);
     expect(health.snapshots[0]?.status).toBe('ok');
     expect(toolResult.status).toBe('accepted');
+
+    if (toolResult.status !== 'accepted') {
+      throw new Error('Expected accepted OpenClaw tool result.');
+    }
+
+    expect(toolResult.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      sourceReferences: [
+        {
+          kind: 'external_contract',
+          id: 'openclaw.memory_core.fixture.tool.memory_search',
+          uri: 'fixture://openclaw/tools/memory_search'
+        }
+      ]
+    });
     expect(unsupportedFieldPaths(mapping)).toEqual([
       'uiHints.commands',
       'requiresPlugins',
@@ -86,7 +101,7 @@ describe('agent capability adapter compatibility proofs', () => {
     const host = createEnabledHost(mapping);
     const context = createTestContext();
     const before = await host.beforeRoleModelCall(context);
-    const search = await requiredHandleToolCall(mapping.capability)(
+    const search = await host.handleToolCall(
       createToolCall({
         capabilityId: mapping.capability.manifest.id,
         toolName: 'memory_tencentdb.memory_search',
@@ -145,6 +160,17 @@ describe('agent capability adapter compatibility proofs', () => {
     }
 
     expect(jsonObject(search.output)['path']).toBe('/search/memories');
+    expect(search.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      sourceReferences: [
+        {
+          kind: 'external_contract',
+          id: 'memory_tencentdb.gateway.fixture.endpoint.searchMemories',
+          uri: 'fixture://tencentdb/search/memories'
+        }
+      ]
+    });
     expect(afterCommit).toMatchObject({
       status: 'completed',
       evidence: [
@@ -181,7 +207,7 @@ describe('agent capability adapter compatibility proofs', () => {
     const host = createEnabledHost(mapping);
     const context = createTestContext();
     const before = await host.beforeRoleModelCall(context);
-    const search = await requiredHandleToolCall(mapping.capability)(
+    const search = await host.handleToolCall(
       createToolCall({
         capabilityId: mapping.capability.manifest.id,
         toolName: 'memory_tencentdb_memory_search',
@@ -235,6 +261,22 @@ describe('agent capability adapter compatibility proofs', () => {
     );
     expect(before.runtimeNotes[0]).toContain('circuit breaker threshold 5');
     expect(search.status).toBe('accepted');
+
+    if (search.status !== 'accepted') {
+      throw new Error('Expected accepted Hermes search result.');
+    }
+
+    expect(search.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      sourceReferences: [
+        {
+          kind: 'external_contract',
+          id: 'hermes.memory_tencentdb.fixture.tool.memory_tencentdb_memory_search',
+          uri: 'fixture://hermes/searchTools/memory_tencentdb_memory_search'
+        }
+      ]
+    });
     expect(afterCommit.evidence[0]?.summary).toContain('Mapped Hermes sync');
     expect(sessionEnd.evidence[0]?.summary).toContain(
       'Mapped Hermes session-end'
@@ -257,7 +299,7 @@ describe('agent capability adapter compatibility proofs', () => {
     const host = createEnabledHost(mapping);
     const context = createTestContext();
     const before = await host.beforeRoleModelCall(context);
-    const toolResult = await requiredHandleToolCall(mapping.capability)(
+    const toolResult = await host.handleToolCall(
       createToolCall({
         capabilityId: mapping.capability.manifest.id,
         toolName: 'knowledge.lookup',
@@ -309,6 +351,17 @@ describe('agent capability adapter compatibility proofs', () => {
         text: 'Capability adapters should expose bounded context.'
       }
     ]);
+    expect(toolResult.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      sourceReferences: [
+        {
+          kind: 'external_contract',
+          id: 'mcp.tools_resources.fixture.tool.knowledge.lookup',
+          uri: 'fixture://mcp/tools/knowledge.lookup'
+        }
+      ]
+    });
     expect(health.snapshots[0]?.status).toBe('ok');
     expect(unsupportedFieldPaths(mapping)).toEqual([
       'capabilities.prompts',
@@ -421,18 +474,6 @@ function createTestAfterContext() {
       }
     ]
   });
-}
-
-function requiredHandleToolCall(
-  capability: AgentCapability
-): NonNullable<AgentCapability['lifecycleHooks']['handleToolCall']> {
-  const hook = capability.lifecycleHooks.handleToolCall;
-
-  if (hook === undefined) {
-    throw new Error(`Capability ${capability.manifest.id} has no tool handler.`);
-  }
-
-  return hook;
 }
 
 function createToolCall(options: {

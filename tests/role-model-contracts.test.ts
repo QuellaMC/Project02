@@ -697,6 +697,115 @@ describe('role model decision contracts', () => {
     }
   });
 
+  it('rejects non-finite and non-serializable extra capability input fields before handler routing', () => {
+    const capabilityToolDefinition = createFakeCapabilityToolDefinition({
+      inputContract: {
+        type: 'object',
+        additionalFields: true,
+        fields: [
+          {
+            name: 'query',
+            description: 'Search query.',
+            required: true,
+            valueType: 'string'
+          }
+        ]
+      }
+    });
+    const capabilityToolDefinitions = [capabilityToolDefinition];
+    const allowedTools = [
+      roleModelVisibleReplyActionName,
+      'memory.search'
+    ] as const;
+
+    const finiteExtraResult = parseRoleModelDecision(
+      JSON.stringify({
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: 'I can search memory.'
+            }
+          },
+          {
+            name: 'memory.search',
+            input: {
+              query: 'preference',
+              score: 0.75,
+              filters: {
+                recencyDays: [1, 7, 30]
+              }
+            }
+          }
+        ]
+      }),
+      allowedTools,
+      capabilityToolDefinitions
+    );
+
+    expect(finiteExtraResult.status).toBe('accepted');
+
+    if (finiteExtraResult.status !== 'accepted') {
+      throw new Error('Expected finite extra capability input fields.');
+    }
+
+    expect(finiteExtraResult.decision.toolCalls[1]).toMatchObject({
+      name: 'memory.search',
+      input: {
+        query: 'preference',
+        score: 0.75,
+        filters: {
+          recencyDays: [1, 7, 30]
+        }
+      }
+    });
+
+    expect(
+      parseRoleModelDecision(
+        `{"version":"${roleModelDecisionContractVersion}","toolCalls":[{"name":"${roleModelVisibleReplyActionName}","input":{"text":"I can search memory."}},{"name":"memory.search","input":{"query":"preference","score":1e999}}]}`,
+        allowedTools,
+        capabilityToolDefinitions
+      )
+    ).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedToolCallRejectionReason,
+        details: 'memory.search input field "score" must be finite JSON.'
+      }
+    });
+
+    expect(
+      validateModelToolInputAgainstContract({
+        toolName: 'memory.search',
+        input: {
+          query: 'preference',
+          filters: {
+            scores: [1, Number.NaN]
+          }
+        },
+        inputContract: capabilityToolDefinition.inputContract
+      })
+    ).toEqual({
+      status: 'rejected',
+      details: 'memory.search input field "filters.scores[1]" must be finite JSON.'
+    });
+
+    expect(
+      validateModelToolInputAgainstContract({
+        toolName: 'memory.search',
+        input: {
+          query: 'preference',
+          extra: undefined
+        },
+        inputContract: capabilityToolDefinition.inputContract
+      })
+    ).toEqual({
+      status: 'rejected',
+      details: 'memory.search input field "extra" must be JSON serializable.'
+    });
+  });
+
   it('ignores excluded required capability tools during required-call validation', () => {
     const capabilityToolDefinitions = [
       createFakeCapabilityToolDefinition({

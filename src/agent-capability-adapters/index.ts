@@ -129,7 +129,17 @@ export function mapOpenClawMemoryPluginFixture(
             toolName: call.toolName,
             declaredBy: 'contracts.tools'
           },
-          summary: `Mapped OpenClaw tool ${call.toolName} through fixture adapter.`
+          summary: `Mapped OpenClaw tool ${call.toolName} through fixture adapter.`,
+          sourceReferences: [
+            createToolContractSourceReference({
+              capabilityId: manifestId,
+              toolName: call.toolName,
+              title: `OpenClaw contracts.tools entry ${call.toolName}`,
+              uri: `fixture://openclaw/tools/${sourceReferenceIdSegment(
+                call.toolName
+              )}`
+            })
+          ]
         });
       },
       health(context) {
@@ -273,7 +283,16 @@ export function mapTencentDbMemoryGatewayFixture(
             call,
             context,
             output: endpointToolOutput(searchMemories),
-            summary: 'Mapped TencentDB /search/memories fixture response.'
+            summary: 'Mapped TencentDB /search/memories fixture response.',
+            sourceReferences: [
+              createEndpointSourceReference({
+                capabilityId: manifestId,
+                endpointName: 'searchMemories',
+                endpoint: searchMemories,
+                titlePrefix: 'TencentDB gateway fixture',
+                uriBase: 'fixture://tencentdb'
+              })
+            ]
           });
         }
 
@@ -284,7 +303,16 @@ export function mapTencentDbMemoryGatewayFixture(
             context,
             output: endpointToolOutput(searchConversations),
             summary:
-              'Mapped TencentDB /search/conversations fixture response.'
+              'Mapped TencentDB /search/conversations fixture response.',
+            sourceReferences: [
+              createEndpointSourceReference({
+                capabilityId: manifestId,
+                endpointName: 'searchConversations',
+                endpoint: searchConversations,
+                titlePrefix: 'TencentDB gateway fixture',
+                uriBase: 'fixture://tencentdb'
+              })
+            ]
           });
         }
 
@@ -464,7 +492,17 @@ export function mapHermesMemoryProviderFixture(
           output: jsonObjectFromRecord(
             requiredRecord(tool['fixtureResponse'], 'fixtureResponse')
           ),
-          summary: `Mapped Hermes search tool ${call.toolName}.`
+          summary: `Mapped Hermes search tool ${call.toolName}.`,
+          sourceReferences: [
+            createToolContractSourceReference({
+              capabilityId: manifestId,
+              toolName: call.toolName,
+              title: `Hermes search tool ${call.toolName}`,
+              uri: `fixture://hermes/searchTools/${sourceReferenceIdSegment(
+                call.toolName
+              )}`
+            })
+          ]
         });
       },
       afterTurnCommitted(context) {
@@ -653,7 +691,17 @@ export function mapMcpToolsResourcesFixture(
           output: jsonObjectFromRecord(
             requiredRecord(tool['fixtureResponse'], 'tools.fixtureResponse')
           ),
-          summary: `Mapped MCP tool ${call.toolName}.`
+          summary: `Mapped MCP tool ${call.toolName}.`,
+          sourceReferences: [
+            createToolContractSourceReference({
+              capabilityId: manifestId,
+              toolName: call.toolName,
+              title: `MCP tool ${call.toolName}`,
+              uri: `fixture://mcp/tools/${sourceReferenceIdSegment(
+                call.toolName
+              )}`
+            })
+          ]
         });
       },
       health(context) {
@@ -1060,6 +1108,7 @@ function createAcceptedToolCallResult(options: {
   readonly context: RuntimeCapabilityContext;
   readonly output: AgentCapabilityJsonValue;
   readonly summary: string;
+  readonly sourceReferences?: readonly AgentCapabilitySourceReference[];
 }): AgentCapabilityToolCallResult {
   return Object.freeze({
     status: 'accepted',
@@ -1070,10 +1119,63 @@ function createAcceptedToolCallResult(options: {
         context: options.context,
         evidenceKind: 'tool_invocation',
         status: 'accepted',
-        summary: `${options.summary} Tool: ${options.call.toolName}.`
+        summary: `${options.summary} Tool: ${options.call.toolName}.`,
+        ...(options.sourceReferences === undefined
+          ? {}
+          : { sourceReferences: options.sourceReferences })
       })
     ])
   });
+}
+
+function createToolContractSourceReference(options: {
+  readonly capabilityId: string;
+  readonly toolName: string;
+  readonly title: string;
+  readonly uri: string;
+}): AgentCapabilitySourceReference {
+  return createAdapterExternalContractSourceReference({
+    capabilityId: options.capabilityId,
+    idSuffix: `tool.${sourceReferenceIdSegment(options.toolName)}`,
+    title: options.title,
+    uri: options.uri
+  });
+}
+
+function createEndpointSourceReference(options: {
+  readonly capabilityId: string;
+  readonly endpointName: string;
+  readonly endpoint: EndpointFixture;
+  readonly titlePrefix: string;
+  readonly uriBase: string;
+}): AgentCapabilitySourceReference {
+  return createAdapterExternalContractSourceReference({
+    capabilityId: options.capabilityId,
+    idSuffix: `endpoint.${sourceReferenceIdSegment(options.endpointName)}`,
+    title: `${options.titlePrefix} ${options.endpoint.method} ${options.endpoint.path}`,
+    uri: `${options.uriBase}${options.endpoint.path}`
+  });
+}
+
+function createAdapterExternalContractSourceReference(options: {
+  readonly capabilityId: string;
+  readonly idSuffix: string;
+  readonly title: string;
+  readonly uri: string;
+}): AgentCapabilitySourceReference {
+  return Object.freeze({
+    kind: 'external_contract',
+    id: `${options.capabilityId}.${options.idSuffix}`,
+    title: options.title,
+    uri: options.uri
+  });
+}
+
+function sourceReferenceIdSegment(value: string): string {
+  const normalized = value.replace(/[^A-Za-z0-9._-]+/gu, '-');
+  const bounded = normalized.length === 0 ? 'source' : normalized.slice(0, 64);
+
+  return /^[A-Za-z]/u.test(bounded) ? bounded : `source-${bounded}`.slice(0, 64);
 }
 
 function createRejectedToolCallResult(options: {

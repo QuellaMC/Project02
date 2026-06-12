@@ -1287,7 +1287,11 @@ function registeredLifecycleHooks(
   const hooks: AgentCapabilityDeclaration[] = [];
 
   if (capability.providedTools.length > 0) {
-    hooks.push('tool_provider', 'handle_tool_call');
+    hooks.push('tool_provider');
+  }
+
+  if (capability.lifecycleHooks.handleToolCall !== undefined) {
+    hooks.push('handle_tool_call');
   }
 
   if (capability.lifecycleHooks.beforeRoleModelCall !== undefined) {

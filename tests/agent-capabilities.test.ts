@@ -46,6 +46,9 @@ describe('agent capability contract gate', () => {
     expect(
       firstParty.providedTools.map((tool) => tool.validationOwner)
     ).toEqual(['built_in_model_tools', 'built_in_model_tools']);
+    expect(registry.capabilities[0]?.registeredLifecycleHooks).toEqual([
+      'tool_provider'
+    ]);
     expect(fakeMemory.manifest.declaredCapabilities).toEqual([
       'context_provider',
       'before_role_model_call',
@@ -56,9 +59,57 @@ describe('agent capability contract gate', () => {
       'health'
     ]);
     expect(fakeMemory.providedTools[0]?.name).toBe('memory.search');
+    expect(registry.capabilities[1]?.registeredLifecycleHooks).toEqual([
+      'tool_provider',
+      'before_role_model_call',
+      'after_turn_committed',
+      'on_session_end',
+      'health'
+    ]);
     expect(Object.isFrozen(registry)).toBe(true);
     expect(Object.isFrozen(registry.capabilities)).toBe(true);
     expect(Object.isFrozen(registry.capabilities[0]?.manifest)).toBe(true);
+  });
+
+  it('reports handle_tool_call only when a tool handler is installed', () => {
+    const toolProvider = createAgentCapability({
+      manifest: {
+        ...createBaseManifest(),
+        id: 'tool.provider.fixture',
+        declaredCapabilities: ['tool_provider', 'handle_tool_call']
+      },
+      providedTools: [createFakeSearchTool()]
+    });
+    const toolHandler = createAgentCapability({
+      manifest: {
+        ...createBaseManifest(),
+        id: 'tool.handler.fixture',
+        declaredCapabilities: ['tool_provider', 'handle_tool_call']
+      },
+      providedTools: [createFakeSearchTool()],
+      lifecycleHooks: {
+        handleToolCall() {
+          return {
+            status: 'accepted',
+            output: { results: [] },
+            evidence: []
+          };
+        }
+      }
+    });
+
+    const registry = createAgentCapabilityRegistrySnapshot([
+      toolProvider,
+      toolHandler
+    ]);
+
+    expect(registry.capabilities[0]?.registeredLifecycleHooks).toEqual([
+      'tool_provider'
+    ]);
+    expect(registry.capabilities[1]?.registeredLifecycleHooks).toEqual([
+      'tool_provider',
+      'handle_tool_call'
+    ]);
   });
 
   it('accepts normalized OpenClaw, TencentDB, Hermes, and MCP fixture manifests', () => {
