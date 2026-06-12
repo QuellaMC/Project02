@@ -313,6 +313,50 @@ describe('agent capability contract gate', () => {
     expect(Object.isFrozen(contextItem.sourceReferences)).toBe(true);
   });
 
+  it('rejects non-finite context item confidence at the capability contract boundary', () => {
+    const contextItem = {
+      capabilityId: 'memory.fixture',
+      id: 'memory.fixture.item_1',
+      kind: 'memory',
+      text: 'Mira prefers concise answers.',
+      budget: {
+        estimatedTokens: 8,
+        priority: 1
+      },
+      sourceReferences: [
+        {
+          kind: 'memory',
+          id: 'mem_1',
+          title: 'preference'
+        }
+      ],
+      redactionLabels: ['memory']
+    };
+
+    expect(() =>
+      createAgentCapabilityContextItem({
+        ...contextItem,
+        confidence: Number.NaN
+      })
+    ).toThrow(
+      'Capability context item confidence must be a finite number between 0 and 1.'
+    );
+    expect(() =>
+      createAgentCapabilityContextItem({
+        ...contextItem,
+        confidence: Number.POSITIVE_INFINITY
+      })
+    ).toThrow(
+      'Capability context item confidence must be a finite number between 0 and 1.'
+    );
+    expect(
+      createAgentCapabilityContextItem({
+        ...contextItem,
+        confidence: 1
+      }).confidence
+    ).toBe(1);
+  });
+
   it('creates redacted capability turn evidence with distinct policy outcomes', () => {
     const identity = {
       eventId: 'evt_capability_evidence',
@@ -482,6 +526,58 @@ describe('agent capability contract gate', () => {
     expect(JSON.stringify(turnEvidence)).not.toContain('secret-token');
     expect(Object.isFrozen(turnEvidence)).toBe(true);
     expect(Object.isFrozen(turnEvidence.capabilities)).toBe(true);
+  });
+
+  it('rejects non-finite context confidence while building turn evidence snapshots', () => {
+    const identity = {
+      eventId: 'evt_capability_evidence',
+      traceId: 'trace_capability_evidence',
+      createdAt: '2026-06-12T00:00:00.000Z'
+    };
+    const listing = createAgentCapabilityListingSnapshot({
+      capabilityId: 'capability.fixture',
+      manifest: createBaseManifest(),
+      providedTools: [],
+      registeredLifecycleHooks: [],
+      installed: true,
+      registered: true,
+      enabled: true,
+      availableForTurn: true,
+      redactionLabels: []
+    });
+
+    expect(() =>
+      createAgentCapabilityTurnEvidenceSnapshot({
+        ...identity,
+        kind: 'agent_capability_turn_evidence_snapshot',
+        contractVersion: agentCapabilityContractVersion,
+        capabilities: [listing],
+        contextItems: [
+          {
+            capabilityId: 'capability.fixture',
+            id: 'memory.item_1',
+            kind: 'memory',
+            text: 'Recovered memory.',
+            budget: {
+              estimatedTokens: 5,
+              priority: 1
+            },
+            sourceReferences: [
+              {
+                kind: 'memory',
+                id: 'mem_1'
+              }
+            ],
+            confidence: Number.NaN,
+            redactionLabels: ['memory']
+          }
+        ],
+        evidence: [],
+        health: []
+      })
+    ).toThrow(
+      'Capability context item confidence must be a finite number between 0 and 1.'
+    );
   });
 });
 

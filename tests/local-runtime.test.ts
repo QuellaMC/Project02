@@ -1765,13 +1765,6 @@ describe('local runtime turn adapter', () => {
 
     expect(turnEvidence).toMatchObject({
       contractVersion: agentCapabilityContractVersion,
-      capabilities: [
-        {
-          capabilityId: 'memory.context_runtime',
-          enabled: true,
-          availableForTurn: true
-        }
-      ],
       contextItems: [
         {
           capabilityId: 'memory.context_runtime',
@@ -1779,6 +1772,15 @@ describe('local runtime turn adapter', () => {
         }
       ]
     });
+    expect(turnEvidence?.capabilities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          capabilityId: 'memory.context_runtime',
+          enabled: true,
+          availableForTurn: true
+        })
+      ])
+    );
     expect(turnEvidence?.contextItems[0]?.sourceReferences).toEqual([
       {
         kind: 'memory',
@@ -1879,7 +1881,12 @@ describe('local runtime turn adapter', () => {
         redactionLabels: []
       }
     ]);
-    expect(turnEvidence?.capabilities[0]).toMatchObject({
+    expect(
+      turnEvidence?.capabilities.find(
+        (capability) =>
+          capability.capabilityId === 'memory.health_completed_runtime'
+      )
+    ).toMatchObject({
       capabilityId: 'memory.health_completed_runtime',
       enabled: true,
       availableForTurn: true,
@@ -1984,7 +1991,12 @@ describe('local runtime turn adapter', () => {
         redactionLabels: []
       }
     ]);
-    expect(turnEvidence?.capabilities[0]).toMatchObject({
+    expect(
+      turnEvidence?.capabilities.find(
+        (capability) =>
+          capability.capabilityId === 'memory.health_rejected_runtime'
+      )
+    ).toMatchObject({
       capabilityId: 'memory.health_rejected_runtime',
       healthStatus: 'unavailable'
     });
@@ -2086,7 +2098,12 @@ describe('local runtime turn adapter', () => {
         redactionLabels: []
       }
     ]);
-    expect(terminalRejected.agentCapabilityTurnEvidence?.capabilities[0])
+    expect(
+      terminalRejected.agentCapabilityTurnEvidence?.capabilities.find(
+        (capability) =>
+          capability.capabilityId === 'memory.health_required_runtime'
+      )
+    )
       .toMatchObject({
         capabilityId: 'memory.health_required_runtime',
         healthStatus: 'unavailable'
@@ -2188,7 +2205,12 @@ describe('local runtime turn adapter', () => {
         redactionLabels: []
       }
     ]);
-    expect(terminalRejected.agentCapabilityTurnEvidence?.capabilities[0])
+    expect(
+      terminalRejected.agentCapabilityTurnEvidence?.capabilities.find(
+        (capability) =>
+          capability.capabilityId === 'memory.health_unavailable_runtime'
+      )
+    )
       .toMatchObject({
         capabilityId: 'memory.health_unavailable_runtime',
         healthStatus: 'unavailable'

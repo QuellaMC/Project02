@@ -374,9 +374,12 @@ describe('agent capability adapter compatibility proofs', () => {
     const mapping = mapFirstPartyModelToolsCapability();
     const host = createEnabledHost(mapping);
     const registry = host.registrySnapshot();
+    const firstPartyRegistration = registry.capabilities.find(
+      (capability) => capability.manifest.id === firstPartyModelToolsCapabilityId
+    );
 
     expect(mapping.capability.manifest.id).toBe(firstPartyModelToolsCapabilityId);
-    expect(registry.capabilities[0]?.providedTools.map((tool) => tool.name)).toEqual([
+    expect(firstPartyRegistration?.providedTools.map((tool) => tool.name)).toEqual([
       visibleReplyModelToolName,
       'character_state.patch'
     ]);

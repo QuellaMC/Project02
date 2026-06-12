@@ -10,7 +10,9 @@ import {
   createRuntimeCapabilityHost,
   firstPartyModelToolsCapabilityId,
   localCharacterProfile,
+  roleModelCapabilityListToolName,
   runtimeCapabilityBeforeRoleModelCallRejectionReason,
+  runtimeCapabilityDiscoveryCapabilityId,
   type AgentCapability,
   type AgentCapabilityContextItem,
   type AgentCapabilityLifecycleHooks,
@@ -37,8 +39,13 @@ describe('runtime capability host', () => {
     });
 
     expect(host.registrySnapshot().capabilities.map((entry) => entry.manifest.id))
-      .toEqual([firstPartyModelToolsCapabilityId, 'memory.host_fixture']);
+      .toEqual([
+        runtimeCapabilityDiscoveryCapabilityId,
+        firstPartyModelToolsCapabilityId,
+        'memory.host_fixture'
+      ]);
     expect(host.enabledCapabilityIds()).toEqual([
+      runtimeCapabilityDiscoveryCapabilityId,
       firstPartyModelToolsCapabilityId,
       'memory.host_fixture'
     ]);
@@ -128,6 +135,10 @@ describe('runtime capability host', () => {
         }))
     ).toEqual([
       {
+        capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+        name: roleModelCapabilityListToolName
+      },
+      {
         capabilityId: 'memory.model_facing',
         name: 'memory.search'
       }
@@ -155,8 +166,106 @@ describe('runtime capability host', () => {
     });
 
     expect(host.capabilityToolDefinitions().map((definition) => definition.name)).toEqual([
+      roleModelCapabilityListToolName,
       'memory.search'
     ]);
+  });
+
+  it('routes capability.list through bounded current-turn safe summaries', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createSearchToolCapability('memory.enabled_search', 'Enabled memory'),
+        createHostTestCapability({
+          id: 'memory.disabled_secret',
+          displayName: 'Disabled memory /Users/mike secret-token',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.disabled_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read'
+            })
+          ],
+          handleToolCall() {
+            return {
+              status: 'accepted',
+              output: {
+                results: []
+              },
+              evidence: []
+            };
+          }
+        })
+      ],
+      enabledCapabilityIds: ['memory.enabled_search']
+    });
+    const context = createHostTestContext();
+    const result = await host.handleToolCall(
+      {
+        eventId: context.eventId,
+        traceId: context.traceId,
+        createdAt: context.timestamp,
+        capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+        toolName: roleModelCapabilityListToolName,
+        input: {}
+      },
+      context
+    );
+
+    expect(result.status).toBe('accepted');
+
+    if (result.status !== 'accepted') {
+      throw new Error('Expected accepted capability discovery result.');
+    }
+
+    expect(result.output).toMatchObject({
+      capabilities: [
+        {
+          id: runtimeCapabilityDiscoveryCapabilityId,
+          displayName: 'Runtime capability discovery',
+          kind: 'first_party',
+          availableForTurn: true,
+          providedTools: [
+            {
+              name: roleModelCapabilityListToolName,
+              sideEffectLevel: 'runtime_read',
+              requiredForUserTurn: false,
+              maxCallsPerUserTurn: 1
+            }
+          ],
+          toolsTruncated: false
+        },
+        {
+          id: 'memory.enabled_search',
+          displayName: 'Enabled memory',
+          kind: 'memory_provider',
+          availableForTurn: true,
+          providedTools: [
+            {
+              name: 'memory.search',
+              sideEffectLevel: 'runtime_read',
+              requiredForUserTurn: false,
+              maxCallsPerUserTurn: 1
+            }
+          ],
+          toolsTruncated: false
+        }
+      ],
+      truncated: false
+    });
+    expect(result.evidence).toMatchObject([
+      {
+        capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+        evidenceKind: 'tool_invocation',
+        status: 'accepted'
+      }
+    ]);
+
+    const serializedOutput = JSON.stringify(result.output);
+
+    expect(serializedOutput).not.toContain('memory.disabled_secret');
+    expect(serializedOutput).not.toContain('secret-token');
+    expect(serializedOutput).not.toContain('/Users/mike');
+    expect(serializedOutput).not.toContain('configFingerprint');
   });
 
   it('degrades optional before-model failures with evidence', async () => {
@@ -316,6 +425,89 @@ describe('runtime capability host', () => {
         policyOutcome: 'required_rejected'
       }
     ]);
+  });
+
+  it('bounds before-model context by estimated tokens and priority', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.low_priority_context',
+          displayName: 'Low priority context',
+          beforeRoleModelCall() {
+            return {
+              contextItems: [
+                createHostTestContextItem({
+                  capabilityId: 'memory.low_priority_context',
+                  id: 'memory.low_priority_context.large',
+                  estimatedTokens: 220,
+                  priority: 2
+                })
+              ],
+              runtimeNotes: [],
+              evidence: []
+            };
+          }
+        }),
+        createHostTestCapability({
+          id: 'memory.high_priority_context',
+          displayName: 'High priority context',
+          beforeRoleModelCall() {
+            return {
+              contextItems: [
+                createHostTestContextItem({
+                  capabilityId: 'memory.high_priority_context',
+                  id: 'memory.high_priority_context.urgent',
+                  estimatedTokens: 60,
+                  priority: 1
+                }),
+                createHostTestContextItem({
+                  capabilityId: 'memory.high_priority_context',
+                  id: 'memory.high_priority_context.compact',
+                  estimatedTokens: 20,
+                  priority: 3
+                })
+              ],
+              runtimeNotes: [],
+              evidence: []
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await host.beforeRoleModelCall(createHostTestContext());
+
+    expect(result.status).toBe('completed');
+
+    if (result.status !== 'completed') {
+      throw new Error('Expected budgeted context to complete.');
+    }
+
+    expect(result.contextItems.map((contextItem) => contextItem.id)).toEqual([
+      'memory.high_priority_context.urgent',
+      'memory.high_priority_context.compact'
+    ]);
+    expect(
+      result.contextItems.reduce(
+        (total, contextItem) => total + contextItem.budget.estimatedTokens,
+        0
+      )
+    ).toBe(80);
+    expect(result.evidence).toMatchObject([
+      {
+        capabilityId: 'memory.low_priority_context',
+        evidenceKind: 'before_role_model_call',
+        status: 'degraded',
+        policyOutcome: 'optional_degraded'
+      }
+    ]);
+    expect(result.evidence[0]?.summary).toContain(
+      'memory.low_priority_context.large'
+    );
+    expect(result.evidence[0]?.summary).toContain('kept 80/256 estimated tokens');
+    expect(result.evidence[0]?.summary).toContain(
+      'dropped 1 item(s) from 300 estimated tokens'
+    );
   });
 
   it('applies timeout policy to before-model hooks', async () => {
@@ -495,6 +687,90 @@ describe('runtime capability host', () => {
         checkedAt: '2026-06-12T00:00:00.000Z',
         summary: 'healthy',
         redactionLabels: []
+      }
+    ]);
+  });
+
+  it('persists failed hook results when supplied evidence is not failed', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.failed_after_with_note',
+          displayName: 'Failed after hook with note evidence',
+          afterTurnCommitted(context) {
+            return {
+              status: 'failed',
+              evidence: [
+                createAcceptedHostEvidence({
+                  context,
+                  capabilityId: 'memory.failed_after_with_note',
+                  evidenceKind: 'after_turn_committed'
+                })
+              ]
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await host.afterTurnCommitted(createHostTestAfterContext());
+
+    expect(result).toMatchObject({
+      status: 'completed_with_failures',
+      evidence: [
+        {
+          capabilityId: 'memory.failed_after_with_note',
+          evidenceKind: 'after_turn_committed',
+          status: 'accepted'
+        },
+        {
+          capabilityId: 'memory.failed_after_with_note',
+          evidenceKind: 'after_turn_committed',
+          status: 'failed',
+          policyOutcome: 'after_commit_failed'
+        }
+      ]
+    });
+  });
+
+  it('does not duplicate failed hook evidence when supplied evidence records failure', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.failed_session_with_evidence',
+          displayName: 'Failed session hook with failed evidence',
+          onSessionEnd(context) {
+            return {
+              status: 'failed',
+              evidence: [
+                createAgentCapabilityEvidenceSnapshot({
+                  eventId: context.eventId,
+                  traceId: context.traceId,
+                  createdAt: context.timestamp,
+                  kind: 'agent_capability_evidence_snapshot',
+                  capabilityId: 'memory.failed_session_with_evidence',
+                  evidenceKind: 'session_end',
+                  status: 'failed',
+                  summary: 'session cleanup failed',
+                  redactionLabels: []
+                })
+              ]
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await host.onSessionEnd(createHostTestContext());
+
+    expect(result.status).toBe('completed_with_failures');
+    expect(result.evidence).toHaveLength(1);
+    expect(result.evidence).toMatchObject([
+      {
+        capabilityId: 'memory.failed_session_with_evidence',
+        evidenceKind: 'session_end',
+        status: 'failed',
+        summary: 'session cleanup failed'
       }
     ]);
   });
@@ -1531,16 +1807,19 @@ function createHostTestTool(options: {
 
 function createHostTestContextItem(options: {
   readonly capabilityId: string;
+  readonly id?: string;
+  readonly estimatedTokens?: number;
+  readonly priority?: number;
   readonly sourceReferences?: AgentCapabilityContextItem['sourceReferences'];
 }): AgentCapabilityContextItem {
   return {
     capabilityId: options.capabilityId,
-    id: `${options.capabilityId}.item_1`,
+    id: options.id ?? `${options.capabilityId}.item_1`,
     kind: 'memory',
     text: 'Remembered context.',
     budget: {
-      estimatedTokens: 3,
-      priority: 1
+      estimatedTokens: options.estimatedTokens ?? 3,
+      priority: options.priority ?? 1
     },
     sourceReferences: options.sourceReferences ?? [
       {
@@ -1555,7 +1834,11 @@ function createHostTestContextItem(options: {
 function createAcceptedHostEvidence(options: {
   readonly context: RuntimeCapabilityContext;
   readonly capabilityId: string;
-  readonly evidenceKind: 'before_role_model_call' | 'tool_invocation';
+  readonly evidenceKind:
+    | 'before_role_model_call'
+    | 'tool_invocation'
+    | 'after_turn_committed'
+    | 'session_end';
   readonly eventId?: string;
   readonly traceId?: string;
   readonly createdAt?: string;

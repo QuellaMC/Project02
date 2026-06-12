@@ -198,6 +198,7 @@ export {
 export {
   createRuntimeCapabilityHost,
   runtimeCapabilityBeforeRoleModelCallRejectionReason,
+  runtimeCapabilityDiscoveryCapabilityId,
   type CreateRuntimeCapabilityHostOptions,
   type RuntimeCapabilityBeforeRoleModelCallCompletedResult,
   type RuntimeCapabilityBeforeRoleModelCallHostResult,

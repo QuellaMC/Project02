@@ -1,4 +1,6 @@
 import {
+  agentCapabilityContractVersion,
+  createAgentCapability,
   createAgentCapabilityContextItem,
   createAgentCapabilityEvidenceSnapshot,
   createAgentCapabilityHealthSnapshot,
@@ -13,6 +15,7 @@ import type {
   AgentCapabilityEvidenceStatus,
   AgentCapabilityHealthSnapshot,
   AgentCapabilityHookResult,
+  AgentCapabilityJsonObject,
   AgentCapabilityJsonValue,
   AgentCapabilityProvidedTool,
   AgentCapabilityToolCall,
@@ -26,11 +29,18 @@ import type {
 import { isBuiltInModelToolName } from './model-tools.ts';
 import {
   createRoleModelCapabilityToolDefinitions,
+  roleModelCapabilityListToolName,
   type RoleModelCapabilityToolDefinition
 } from './role-model-contracts.ts';
 
 export const runtimeCapabilityBeforeRoleModelCallRejectionReason =
   'capability_before_role_model_call_rejected';
+export const runtimeCapabilityDiscoveryCapabilityId =
+  'runtime.capability_discovery';
+
+const runtimeCapabilityDiscoveryMaxCapabilities = 16;
+const runtimeCapabilityDiscoveryMaxToolsPerCapability = 8;
+const runtimeCapabilityDiscoveryMaxTextLength = 160;
 
 export type RuntimeCapabilityBeforeRoleModelCallRejectionReason =
   typeof runtimeCapabilityBeforeRoleModelCallRejectionReason;
@@ -68,6 +78,8 @@ export type RuntimeCapabilityHealthHostResult = {
   readonly snapshots: readonly AgentCapabilityHealthSnapshot[];
   readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
 };
+
+const runtimeCapabilityContextEstimatedTokenBudget = 256;
 
 export type RuntimeCapabilityHost = {
   registrySnapshot(): AgentCapabilityRegistrySnapshot;
@@ -111,16 +123,27 @@ type HookInvocationResult =
         readonly failureKind: 'exception' | 'timeout';
       };
 
+type CollectedCapabilityContextItem = {
+  readonly capability: AgentCapability;
+  readonly item: AgentCapabilityContextItem;
+  readonly originalIndex: number;
+};
+
 export function createRuntimeCapabilityHost(
   options: CreateRuntimeCapabilityHostOptions = {}
 ): RuntimeCapabilityHost {
-  const capabilities = Object.freeze([...(options.capabilities ?? [])]);
+  const configuredCapabilities = Object.freeze([...(options.capabilities ?? [])]);
+  let enabledCapabilities: readonly AgentCapability[] = [];
+  const capabilities = Object.freeze([
+    createRuntimeCapabilityDiscoveryCapability(() => enabledCapabilities),
+    ...configuredCapabilities
+  ]);
   const registrySnapshot = createAgentCapabilityRegistrySnapshot(capabilities);
   const enabledIds = enabledCapabilityIdsForHost({
     capabilities,
     enabledCapabilityIds: options.enabledCapabilityIds
   });
-  const enabledCapabilities = Object.freeze(
+  enabledCapabilities = Object.freeze(
     capabilities.filter((capability) => enabledIds.includes(capability.manifest.id))
   );
   const capabilityToolDefinitions = createRoleModelCapabilityToolDefinitions(
@@ -178,11 +201,160 @@ export function createRuntimeCapabilityHost(
   } satisfies RuntimeCapabilityHost);
 }
 
+function createRuntimeCapabilityDiscoveryCapability(
+  enabledCapabilitiesForTurn: () => readonly AgentCapability[]
+): AgentCapability {
+  return createAgentCapability({
+    manifest: {
+      id: runtimeCapabilityDiscoveryCapabilityId,
+      displayName: 'Runtime capability discovery',
+      version: '1.0.0',
+      kind: 'first_party',
+      description:
+        'Host-owned read-only capability list for safe current-turn discovery.',
+      contractVersion: agentCapabilityContractVersion,
+      compatibility: {
+        hostContractVersions: [agentCapabilityContractVersion],
+        sourceSystem: 'project02',
+        externalContract: 'runtime_capability_discovery'
+      },
+      declaredCapabilities: ['tool_provider', 'handle_tool_call'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'first_party',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'reject_tool_call',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['host_provided_current_turn_discovery']
+      }
+    },
+    providedTools: [
+      {
+        name: roleModelCapabilityListToolName,
+        description:
+          'Return safe summaries for capabilities available in the current turn.',
+        requiredForUserTurn: false,
+        maxCallsPerUserTurn: 1,
+        inputContract: {
+          type: 'object',
+          fields: [],
+          additionalFields: false
+        },
+        validationOwner: 'capability_host',
+        sideEffectLevel: 'runtime_read',
+        requiresConfirmation: false,
+        sourceReferencesRequired: false
+      }
+    ],
+    lifecycleHooks: {
+      handleToolCall(_call, context) {
+        const output = createCapabilityDiscoveryOutput(
+          enabledCapabilitiesForTurn()
+        );
+
+        return {
+          status: 'accepted',
+          output,
+          evidence: [
+            createAgentCapabilityEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'agent_capability_evidence_snapshot',
+              capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+              evidenceKind: 'tool_invocation',
+              status: 'accepted',
+              summary: `Returned ${String(
+                output.capabilities.length
+              )} current-turn capability summaries.`,
+              redactionLabels: context.privacy.redactionLabels
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
+function createCapabilityDiscoveryOutput(
+  enabledCapabilities: readonly AgentCapability[]
+): AgentCapabilityJsonObject & {
+  readonly capabilities: readonly AgentCapabilityJsonValue[];
+} {
+  const boundedCapabilities = enabledCapabilities.slice(
+    0,
+    runtimeCapabilityDiscoveryMaxCapabilities
+  );
+
+  return Object.freeze({
+    capabilities: Object.freeze(
+      boundedCapabilities.map(createCapabilityDiscoverySummary)
+    ),
+    truncated:
+      enabledCapabilities.length > runtimeCapabilityDiscoveryMaxCapabilities
+  } satisfies AgentCapabilityJsonObject & {
+    readonly capabilities: readonly AgentCapabilityJsonValue[];
+  });
+}
+
+function createCapabilityDiscoverySummary(
+  capability: AgentCapability
+): AgentCapabilityJsonObject {
+  const safeTools = capability.providedTools
+    .filter(isModelFacingCapabilityTool)
+    .slice(0, runtimeCapabilityDiscoveryMaxToolsPerCapability)
+    .map(createCapabilityDiscoveryToolSummary);
+
+  return Object.freeze({
+    id: boundedCapabilityDiscoveryText(capability.manifest.id),
+    displayName: boundedCapabilityDiscoveryText(capability.manifest.displayName),
+    kind: capability.manifest.kind,
+    availableForTurn: true,
+    providedTools: Object.freeze(safeTools),
+    toolsTruncated:
+      capability.providedTools.filter(isModelFacingCapabilityTool).length >
+      runtimeCapabilityDiscoveryMaxToolsPerCapability
+  } satisfies AgentCapabilityJsonObject);
+}
+
+function createCapabilityDiscoveryToolSummary(
+  tool: AgentCapabilityProvidedTool
+): AgentCapabilityJsonObject {
+  return Object.freeze({
+    name: boundedCapabilityDiscoveryText(tool.name),
+    sideEffectLevel: tool.sideEffectLevel,
+    requiredForUserTurn: tool.requiredForUserTurn,
+    maxCallsPerUserTurn: tool.maxCallsPerUserTurn
+  } satisfies AgentCapabilityJsonObject);
+}
+
+function boundedCapabilityDiscoveryText(value: string): string {
+  if (value.length <= runtimeCapabilityDiscoveryMaxTextLength) {
+    return value;
+  }
+
+  return `${value.slice(0, runtimeCapabilityDiscoveryMaxTextLength - 3)}...`;
+}
+
 async function runBeforeRoleModelCall(options: {
   readonly capabilities: readonly AgentCapability[];
   readonly context: RuntimeCapabilityContext;
 }): Promise<RuntimeCapabilityBeforeRoleModelCallHostResult> {
-  const contextItems: AgentCapabilityContextItem[] = [];
+  const contextItems: CollectedCapabilityContextItem[] = [];
   const runtimeNotes: string[] = [];
   const evidence: AgentCapabilityEvidenceSnapshot[] = [];
 
@@ -200,7 +372,13 @@ async function runBeforeRoleModelCall(options: {
     });
 
     if (result.status === 'accepted') {
-      contextItems.push(...result.value.contextItems);
+      for (const contextItem of result.value.contextItems) {
+        contextItems.push({
+          capability,
+          item: contextItem,
+          originalIndex: contextItems.length
+        });
+      }
       runtimeNotes.push(...result.value.runtimeNotes);
       evidence.push(...result.value.evidence);
       continue;
@@ -237,9 +415,15 @@ async function runBeforeRoleModelCall(options: {
     }
   }
 
+  const boundedContext = boundCapabilityContextItems({
+    context: options.context,
+    contextItems
+  });
+  evidence.push(...boundedContext.evidence);
+
   return Object.freeze({
     status: 'completed',
-    contextItems: Object.freeze([...contextItems]),
+    contextItems: boundedContext.contextItems,
     runtimeNotes: Object.freeze([...runtimeNotes]),
     evidence: Object.freeze([...evidence])
   } satisfies RuntimeCapabilityBeforeRoleModelCallHostResult);
@@ -373,7 +557,12 @@ async function runHookPhase<TContext extends RuntimeCapabilityContext>(options: 
     if (result.value.status === 'failed') {
       failed = true;
 
-      if (result.value.evidence.length === 0) {
+      if (
+        !hookEvidenceRecordsFailure({
+          evidence: result.value.evidence,
+          evidenceKind: options.evidenceKind
+        })
+      ) {
         evidence.push(
           createHookFailureEvidence({
             capability,
@@ -392,6 +581,15 @@ async function runHookPhase<TContext extends RuntimeCapabilityContext>(options: 
     status: failed ? 'completed_with_failures' : 'completed',
     evidence: Object.freeze([...evidence])
   } satisfies RuntimeCapabilityHookHostResult);
+}
+
+function hookEvidenceRecordsFailure(options: {
+  readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
+  readonly evidenceKind: Extract<AgentCapabilityEvidenceKind, 'after_turn_committed' | 'session_end'>;
+}): boolean {
+  return options.evidence.some(
+    (item) => item.evidenceKind === options.evidenceKind && item.status === 'failed'
+  );
 }
 
 function capabilityToolDefinitionsForEnabledCapabilities(
@@ -740,6 +938,139 @@ function normalizeContextItems(options: {
   );
 }
 
+function boundCapabilityContextItems(options: {
+  readonly context: RuntimeCapabilityContext;
+  readonly contextItems: readonly CollectedCapabilityContextItem[];
+}): {
+  readonly contextItems: readonly AgentCapabilityContextItem[];
+  readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
+} {
+  const totalEstimatedTokens = options.contextItems.reduce(
+    (total, contextItem) => total + contextItem.item.budget.estimatedTokens,
+    0
+  );
+
+  if (totalEstimatedTokens <= runtimeCapabilityContextEstimatedTokenBudget) {
+    return Object.freeze({
+      contextItems: Object.freeze(
+        options.contextItems.map((contextItem) => contextItem.item)
+      ),
+      evidence: Object.freeze([])
+    });
+  }
+
+  const retainedIndexes = new Set<number>();
+  let retainedEstimatedTokens = 0;
+
+  for (const candidate of [...options.contextItems].sort(
+    compareCollectedContextItemPriority
+  )) {
+    const nextEstimatedTokens =
+      retainedEstimatedTokens + candidate.item.budget.estimatedTokens;
+
+    if (nextEstimatedTokens > runtimeCapabilityContextEstimatedTokenBudget) {
+      continue;
+    }
+
+    retainedIndexes.add(candidate.originalIndex);
+    retainedEstimatedTokens = nextEstimatedTokens;
+  }
+
+  const retainedContextItems = options.contextItems
+    .filter((contextItem) => retainedIndexes.has(contextItem.originalIndex))
+    .map((contextItem) => contextItem.item);
+  const droppedContextItems = options.contextItems.filter(
+    (contextItem) => !retainedIndexes.has(contextItem.originalIndex)
+  );
+
+  return Object.freeze({
+    contextItems: Object.freeze(retainedContextItems),
+    evidence: Object.freeze(
+      contextBudgetEvidence({
+        context: options.context,
+        droppedContextItems,
+        retainedEstimatedTokens,
+        totalEstimatedTokens
+      })
+    )
+  });
+}
+
+function compareCollectedContextItemPriority(
+  left: CollectedCapabilityContextItem,
+  right: CollectedCapabilityContextItem
+): number {
+  return (
+    left.item.budget.priority - right.item.budget.priority ||
+    left.originalIndex - right.originalIndex
+  );
+}
+
+function contextBudgetEvidence(options: {
+  readonly context: RuntimeCapabilityContext;
+  readonly droppedContextItems: readonly CollectedCapabilityContextItem[];
+  readonly retainedEstimatedTokens: number;
+  readonly totalEstimatedTokens: number;
+}): readonly AgentCapabilityEvidenceSnapshot[] {
+  const droppedByCapability = new Map<
+    string,
+    {
+      readonly capability: AgentCapability;
+      readonly dropped: CollectedCapabilityContextItem[];
+    }
+  >();
+
+  for (const droppedContextItem of options.droppedContextItems) {
+    const capabilityId = droppedContextItem.capability.manifest.id;
+    const entry = droppedByCapability.get(capabilityId);
+
+    if (entry === undefined) {
+      droppedByCapability.set(capabilityId, {
+        capability: droppedContextItem.capability,
+        dropped: [droppedContextItem]
+      });
+      continue;
+    }
+
+    entry.dropped.push(droppedContextItem);
+  }
+
+  return Object.freeze(
+    [...droppedByCapability.values()].map((entry) =>
+      createHookFailureEvidence({
+        capability: entry.capability,
+        context: options.context,
+        evidenceKind: 'before_role_model_call',
+        status: 'degraded',
+        summary: contextBudgetEvidenceSummary({
+          droppedContextItems: entry.dropped,
+          retainedEstimatedTokens: options.retainedEstimatedTokens,
+          totalEstimatedTokens: options.totalEstimatedTokens
+        }),
+        policyOutcome: 'optional_degraded'
+      })
+    )
+  );
+}
+
+function contextBudgetEvidenceSummary(options: {
+  readonly droppedContextItems: readonly CollectedCapabilityContextItem[];
+  readonly retainedEstimatedTokens: number;
+  readonly totalEstimatedTokens: number;
+}): string {
+  const droppedIds = options.droppedContextItems
+    .map((contextItem) => contextItem.item.id)
+    .join(', ');
+
+  return `Capability context budget kept ${String(
+    options.retainedEstimatedTokens
+  )}/${String(runtimeCapabilityContextEstimatedTokenBudget)} estimated tokens and dropped ${String(
+    options.droppedContextItems.length
+  )} item(s) from ${String(
+    options.totalEstimatedTokens
+  )} estimated tokens; dropped ids ${droppedIds}`;
+}
+
 function normalizeRuntimeNotes(value: unknown): readonly string[] {
   return Object.freeze(
     requiredArray(value, 'runtimeNotes').map((item) => {
@@ -857,6 +1188,10 @@ function enabledCapabilityIdsForHost(options: {
 
     seenEnabledIds.add(enabledId);
     enabledIds.push(enabledId);
+  }
+
+  if (!seenEnabledIds.has(runtimeCapabilityDiscoveryCapabilityId)) {
+    enabledIds.unshift(runtimeCapabilityDiscoveryCapabilityId);
   }
 
   return Object.freeze(enabledIds);

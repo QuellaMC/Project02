@@ -11,6 +11,7 @@ import {
   createDecisionContext,
   getRequiredVisibleReplyText,
   createRoleModelInputEnvelope,
+  roleModelCapabilityListToolName,
   roleModelCapabilityToolRejectedRejectionReason,
   roleModelAdapterRejectionNotReplayableDetails,
   roleModelDecisionContractVersion,
@@ -28,7 +29,10 @@ import {
   type AgentCapabilityLifecycleHooks,
   type AgentCapabilityToolCallResult
 } from '../src/agent-capabilities.ts';
-import { createRuntimeCapabilityHost } from '../src/agent-capability-host.ts';
+import {
+  createRuntimeCapabilityHost,
+  runtimeCapabilityDiscoveryCapabilityId
+} from '../src/agent-capability-host.ts';
 import {
   createDeterministicLocalRoleModelAdapter,
   createRoleModelAdapterFromCharacterAgent,
@@ -635,6 +639,118 @@ describe('role model loop', () => {
     });
   });
 
+  it('routes capability.list through the runtime capability host', async () => {
+    const event = createTestUserMessageEvent(
+      'list capabilities',
+      'evt_role_capability_list'
+    );
+    const runtimeCapabilityContext = createRuntimeCapabilityContext({
+      eventId: event.eventId,
+      traceId: event.traceId,
+      createdAt: event.createdAt,
+      sessionId: 'local-session',
+      eventType: event.type,
+      currentUserMessage: event.payload.currentUserMessage,
+      character: localCharacterProfile
+    });
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createRoutingCapability({
+          result: {
+            status: 'accepted',
+            output: {
+              results: ['Mira prefers concise answers.']
+            },
+            evidence: []
+          }
+        }),
+        createDisabledSecretCapability()
+      ],
+      enabledCapabilityIds: ['memory.fixture']
+    });
+    const result = await runRoleModelLoop({
+      event,
+      decisionContext: createDecisionContext({
+        sessionId: 'local-session',
+        characterSnapshot: localCharacterProfile
+      }),
+      adapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'Here is what I can use.'
+              }
+            },
+            {
+              name: roleModelCapabilityListToolName,
+              input: {}
+            }
+          ]
+        })
+      ),
+      capabilityToolDefinitions: host.capabilityToolDefinitions(),
+      capabilityToolHost: host,
+      runtimeCapabilityContext
+    });
+
+    expect(result.status).toBe('accepted');
+
+    if (result.status !== 'accepted') {
+      throw new Error('Expected accepted capability list result.');
+    }
+
+    const routedList = result.capabilityToolResults.find(
+      (routing) => routing.call.toolName === roleModelCapabilityListToolName
+    );
+
+    expect(routedList?.call).toMatchObject({
+      capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+      toolName: roleModelCapabilityListToolName,
+      input: {}
+    });
+    expect(routedList?.result).toMatchObject({
+      status: 'accepted',
+      output: {
+        capabilities: [
+          {
+            id: runtimeCapabilityDiscoveryCapabilityId,
+            availableForTurn: true,
+            providedTools: [
+              {
+                name: roleModelCapabilityListToolName,
+                sideEffectLevel: 'runtime_read'
+              }
+            ]
+          },
+          {
+            id: 'memory.fixture',
+            availableForTurn: true,
+            providedTools: [
+              {
+                name: 'memory.search',
+                sideEffectLevel: 'runtime_read'
+              }
+            ]
+          }
+        ],
+        truncated: false
+      }
+    });
+
+    if (routedList?.result.status !== 'accepted') {
+      throw new Error('Expected accepted capability list routing result.');
+    }
+
+    const outputText = JSON.stringify(routedList.result.output);
+
+    expect(outputText).not.toContain('memory.disabled_secret');
+    expect(outputText).not.toContain('secret-token');
+    expect(outputText).not.toContain('/Users/mike');
+  });
+
   it('rejects host-rejected capability tool calls before returning an accepted loop result', async () => {
     const event = createTestUserMessageEvent(
       'search memory',
@@ -933,6 +1049,75 @@ function createMalformedRawOutputAdapter(rawOutput: unknown): RoleModelAdapter {
       return rawOutput as RoleModelAdapterRawOutput;
     }
   };
+}
+
+function createDisabledSecretCapability(): AgentCapability {
+  return createAgentCapability({
+    manifest: {
+      id: 'memory.disabled_secret',
+      displayName: 'Disabled memory /Users/mike secret-token',
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'Disabled memory fixture with private implementation details.',
+      contractVersion: agentCapabilityContractVersion,
+      compatibility: {
+        hostContractVersions: [agentCapabilityContractVersion],
+        sourceSystem: 'project02'
+      },
+      declaredCapabilities: ['tool_provider', 'handle_tool_call'],
+      config: {
+        fields: [],
+        fingerprint: 'gateway_api_key=secret-token'
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: ['secret'],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'degrade',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: false,
+        reasons: ['role_model_loop_test_disabled']
+      }
+    },
+    providedTools: [
+      {
+        name: 'memory.disabled_search',
+        description: 'Disabled search with private implementation details.',
+        requiredForUserTurn: false,
+        maxCallsPerUserTurn: 1,
+        inputContract: {
+          type: 'object',
+          additionalFields: false,
+          fields: []
+        },
+        validationOwner: 'capability_host',
+        sideEffectLevel: 'runtime_read',
+        requiresConfirmation: false,
+        sourceReferencesRequired: false
+      }
+    ],
+    lifecycleHooks: {
+      handleToolCall() {
+        return {
+          status: 'accepted',
+          output: {
+            results: []
+          },
+          evidence: []
+        };
+      }
+    }
+  });
 }
 
 function createRoutingCapability(options: {

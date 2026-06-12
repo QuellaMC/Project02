@@ -1907,10 +1907,15 @@ function optionalConfidence(
     return accept(undefined);
   }
 
-  if (typeof value !== 'number' || value < 0 || value > 1) {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 1
+  ) {
     return reject(
       'malformed_context_item',
-      'Capability context item confidence must be between 0 and 1.'
+      'Capability context item confidence must be a finite number between 0 and 1.'
     );
   }
 
