@@ -22,16 +22,21 @@ import { createFileCharacterStateStore } from './file-character-state-store.ts';
 import { buildUserTurnDecisionContext } from './decision-context.ts';
 import {
   agentCapabilityContractVersion,
+  createAgentCapabilityToolInvocationSnapshot,
   createAgentCapabilityTurnEvidenceSnapshot,
   createRuntimeCapabilityAfterTurnCommittedContext,
   createRuntimeCapabilityContext,
   type AgentCapabilityContextItem,
   type AgentCapabilityEvidenceSnapshot,
-  type AgentCapabilityTurnEvidenceSnapshot
+  type AgentCapabilityHealthSnapshot,
+  type AgentCapabilityToolInvocationSnapshot,
+  type AgentCapabilityTurnEvidenceSnapshot,
+  type RuntimeCapabilityContext
 } from './agent-capabilities.ts';
 import {
   runtimeCapabilityBeforeRoleModelCallRejectionReason,
   type RuntimeCapabilityBeforeRoleModelCallCompletedResult,
+  type RuntimeCapabilityHealthHostResult,
   type RuntimeCapabilityHookHostResult,
   type RuntimeCapabilityHost
 } from './agent-capability-host.ts';
@@ -230,6 +235,7 @@ async function runSerializedLocalUserMessageEvent(
     normalizedCurrentUserMessage: event.payload.currentUserMessage,
     ...(options.rawInput === undefined ? {} : { rawInput: options.rawInput })
   });
+  let runtimeCapabilityContextForTurn: RuntimeCapabilityContext | undefined;
 
   function appendTrace(step: RuntimeTraceStepName): RuntimeTraceEntry {
     const traceEntry = options.logStore.appendTrace({
@@ -248,17 +254,27 @@ async function runSerializedLocalUserMessageEvent(
     return rawEvent;
   }
 
-  function appendRejectedResult(optionsForRejection: {
+  async function appendRejectedResult(optionsForRejection: {
     readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[];
     readonly agentCapabilityContextItems?: readonly AgentCapabilityContextItem[];
+    readonly agentCapabilityToolInvocations?: readonly AgentCapabilityToolInvocationSnapshot[];
     readonly evidence?: RoleModelRawEvidence;
     readonly message: string;
     readonly rawKind: RawEventLogRecordInput['kind'];
     readonly rawReason: string;
     readonly reason: LocalRuntimeUserMessageRejectionReason;
+    readonly runtimeCapabilityContext?: RuntimeCapabilityContext;
     readonly traceStep: RuntimeTraceStepName;
-  }): LocalRuntimeUserMessageRejectedResult {
+  }): Promise<LocalRuntimeUserMessageRejectedResult> {
     const evidence = optionsForRejection.evidence ?? {};
+    const healthResult = await capabilityHealthForTurn({
+      capabilityHost: options.capabilityHost,
+      runtimeCapabilityContext: optionsForRejection.runtimeCapabilityContext
+    });
+    const agentCapabilityEvidence = combineAgentCapabilityEvidence(
+      optionsForRejection.agentCapabilityEvidence ?? [],
+      healthResult.evidence
+    );
 
     appendTrace(optionsForRejection.traceStep);
     appendRawEvent({
@@ -269,14 +285,15 @@ async function runSerializedLocalUserMessageEvent(
       reason: optionsForRejection.rawReason,
       payloadSummary,
       ...evidence,
-      ...agentCapabilityEvidenceOption(
-        optionsForRejection.agentCapabilityEvidence
-      ),
+      ...agentCapabilityEvidenceOption(agentCapabilityEvidence),
       ...agentCapabilityTurnEvidenceOption({
         identity,
         capabilityHost: options.capabilityHost,
         contextItems: optionsForRejection.agentCapabilityContextItems ?? [],
-        evidence: optionsForRejection.agentCapabilityEvidence ?? []
+        toolInvocations:
+          optionsForRejection.agentCapabilityToolInvocations ?? [],
+        evidence: agentCapabilityEvidence,
+        health: healthResult.snapshots
       })
     });
 
@@ -288,14 +305,15 @@ async function runSerializedLocalUserMessageEvent(
       reason: optionsForRejection.rawReason,
       payloadSummary,
       ...evidence,
-      ...agentCapabilityEvidenceOption(
-        optionsForRejection.agentCapabilityEvidence
-      ),
+      ...agentCapabilityEvidenceOption(agentCapabilityEvidence),
       ...agentCapabilityTurnEvidenceOption({
         identity,
         capabilityHost: options.capabilityHost,
         contextItems: optionsForRejection.agentCapabilityContextItems ?? [],
-        evidence: optionsForRejection.agentCapabilityEvidence ?? []
+        toolInvocations:
+          optionsForRejection.agentCapabilityToolInvocations ?? [],
+        evidence: agentCapabilityEvidence,
+        health: healthResult.snapshots
       })
     });
 
@@ -317,18 +335,26 @@ async function runSerializedLocalUserMessageEvent(
     rejection: RoleModelDecisionRejection,
     evidence: RoleModelRawEvidence,
     agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[],
-    agentCapabilityContextItems?: readonly AgentCapabilityContextItem[]
-  ): LocalRuntimeUserMessageRejectedResult {
+    agentCapabilityContextItems?: readonly AgentCapabilityContextItem[],
+    agentCapabilityToolInvocations?: readonly AgentCapabilityToolInvocationSnapshot[],
+    runtimeCapabilityContext?: RuntimeCapabilityContext
+  ): Promise<LocalRuntimeUserMessageRejectedResult> {
     return appendRejectedResult({
       evidence,
       ...(agentCapabilityEvidence === undefined ? {} : { agentCapabilityEvidence }),
       ...(agentCapabilityContextItems === undefined
         ? {}
         : { agentCapabilityContextItems }),
+      ...(agentCapabilityToolInvocations === undefined
+        ? {}
+        : { agentCapabilityToolInvocations }),
       message: rejection.details ?? rejection.reason,
       rawKind: 'commit_validation_rejected',
       rawReason: rejection.reason,
       reason: rejection.reason,
+      ...(runtimeCapabilityContext === undefined
+        ? {}
+        : { runtimeCapabilityContext }),
       traceStep: 'commit_validation_rejected'
     });
   }
@@ -366,7 +392,7 @@ async function runSerializedLocalUserMessageEvent(
 
   try {
     if (normalizedEventResult.status === 'rejected') {
-      return appendRejectedResult({
+      return await appendRejectedResult({
         message: normalizedEventResult.message,
         rawKind: 'input_validation_rejected',
         rawReason: normalizedEventResult.message,
@@ -393,6 +419,7 @@ async function runSerializedLocalUserMessageEvent(
       currentUserMessage: event.payload.currentUserMessage,
       character: decisionContext.characterSnapshot
     });
+    runtimeCapabilityContextForTurn = runtimeCapabilityContext;
     const beforeRoleModelCallResult =
       options.capabilityHost === undefined
         ? createEmptyBeforeRoleModelCallResult()
@@ -401,12 +428,13 @@ async function runSerializedLocalUserMessageEvent(
           );
 
     if (beforeRoleModelCallResult.status === 'rejected') {
-      return appendRejectedResult({
+      return await appendRejectedResult({
         agentCapabilityEvidence: beforeRoleModelCallResult.evidence,
         message: beforeRoleModelCallResult.message,
         rawKind: runtimeCapabilityBeforeRoleModelCallRejectionReason,
         rawReason: beforeRoleModelCallResult.message,
         reason: beforeRoleModelCallResult.reason,
+        runtimeCapabilityContext,
         traceStep: runtimeCapabilityBeforeRoleModelCallRejectionReason
       });
     }
@@ -445,6 +473,8 @@ async function runSerializedLocalUserMessageEvent(
       beforeRoleModelCallResult.evidence,
       capabilityToolEvidenceFromRouting(roleModelResult.capabilityToolResults)
     );
+    const roleModelCapabilityToolInvocations =
+      capabilityToolInvocationsFromRouting(roleModelResult.capabilityToolResults);
 
     if (roleModelResult.status === 'rejected') {
       const commitValidation = createRejectedCommitValidationSnapshot({
@@ -453,14 +483,16 @@ async function runSerializedLocalUserMessageEvent(
         sessionId: decisionContext.sessionId
       });
 
-      return appendRoleModelRejectedResult(
+      return await appendRoleModelRejectedResult(
         roleModelResult.rejection,
         {
           ...roleModelEvidence,
           commitValidation
         },
         roleModelCapabilityEvidence,
-        beforeRoleModelCallResult.contextItems
+        beforeRoleModelCallResult.contextItems,
+        roleModelCapabilityToolInvocations,
+        runtimeCapabilityContext
       );
     }
 
@@ -494,7 +526,7 @@ async function runSerializedLocalUserMessageEvent(
         sessionId: decisionContext.sessionId
       });
 
-      return appendRoleModelRejectedResult(
+      return await appendRoleModelRejectedResult(
         rejection,
         {
           ...roleModelEvidence,
@@ -504,7 +536,9 @@ async function runSerializedLocalUserMessageEvent(
             : { characterStatePatchSnapshot: statePatchSnapshot })
         },
         roleModelCapabilityEvidence,
-        beforeRoleModelCallResult.contextItems
+        beforeRoleModelCallResult.contextItems,
+        roleModelCapabilityToolInvocations,
+        runtimeCapabilityContext
       );
     }
 
@@ -520,7 +554,7 @@ async function runSerializedLocalUserMessageEvent(
       );
     } catch (error: unknown) {
       if (error instanceof CharacterInputError) {
-        return appendRejectedResult({
+        return await appendRejectedResult({
           agentCapabilityEvidence: roleModelCapabilityEvidence,
           agentCapabilityContextItems: beforeRoleModelCallResult.contextItems,
           evidence: roleModelEvidence,
@@ -528,6 +562,7 @@ async function runSerializedLocalUserMessageEvent(
           rawKind: 'input_validation_rejected',
           rawReason: error.message,
           reason: 'input_validation_rejected',
+          runtimeCapabilityContext,
           traceStep: 'input_validation_rejected'
         });
       }
@@ -540,14 +575,16 @@ async function runSerializedLocalUserMessageEvent(
           sessionId: decisionContext.sessionId
         });
 
-        return appendRoleModelRejectedResult(
+        return await appendRoleModelRejectedResult(
           rejection,
           {
             ...roleModelEvidence,
             commitValidation
           },
           roleModelCapabilityEvidence,
-          beforeRoleModelCallResult.contextItems
+          beforeRoleModelCallResult.contextItems,
+          roleModelCapabilityToolInvocations,
+          runtimeCapabilityContext
         );
       }
 
@@ -628,9 +665,14 @@ async function runSerializedLocalUserMessageEvent(
         : await options.capabilityHost.afterTurnCommitted(
             afterCommitCapabilityContext
           );
+    const healthResult = await capabilityHealthForTurn({
+      capabilityHost: options.capabilityHost,
+      runtimeCapabilityContext
+    });
     const completedCapabilityEvidence = combineAgentCapabilityEvidence(
       roleModelCapabilityEvidence,
-      afterTurnCommittedResult.evidence
+      afterTurnCommittedResult.evidence,
+      healthResult.evidence
     );
 
     const rawEvent = appendRawEvent({
@@ -646,7 +688,9 @@ async function runSerializedLocalUserMessageEvent(
         identity,
         capabilityHost: options.capabilityHost,
         contextItems: beforeRoleModelCallResult.contextItems,
-        evidence: completedCapabilityEvidence
+        toolInvocations: roleModelCapabilityToolInvocations,
+        evidence: completedCapabilityEvidence,
+        health: healthResult.snapshots
       })
     });
 
@@ -668,11 +712,14 @@ async function runSerializedLocalUserMessageEvent(
     } satisfies LocalRuntimeUserMessageCompletedResult);
   } catch (error: unknown) {
     if (error instanceof CharacterInputError) {
-      return appendRejectedResult({
+      return await appendRejectedResult({
         message: error.message,
         rawKind: 'input_validation_rejected',
         rawReason: error.message,
         reason: 'input_validation_rejected',
+        ...(runtimeCapabilityContextForTurn === undefined
+          ? {}
+          : { runtimeCapabilityContext: runtimeCapabilityContextForTurn }),
         traceStep: 'input_validation_rejected'
       });
     }
@@ -680,11 +727,14 @@ async function runSerializedLocalUserMessageEvent(
     if (error instanceof CharacterReplyValidationError) {
       const rejection = createInvalidVisibleReplyRejection(error);
 
-      return appendRejectedResult({
+      return await appendRejectedResult({
         message: error.message,
         rawKind: 'character_reply_rejected',
         rawReason: rejection.reason,
         reason: rejection.reason,
+        ...(runtimeCapabilityContextForTurn === undefined
+          ? {}
+          : { runtimeCapabilityContext: runtimeCapabilityContextForTurn }),
         traceStep: 'character_reply_rejected'
       });
     }
@@ -876,10 +926,45 @@ function createEmptyHookResult(): RuntimeCapabilityHookHostResult {
   } satisfies RuntimeCapabilityHookHostResult);
 }
 
+function createEmptyHealthResult(): RuntimeCapabilityHealthHostResult {
+  return Object.freeze({
+    snapshots: Object.freeze([]),
+    evidence: Object.freeze([])
+  } satisfies RuntimeCapabilityHealthHostResult);
+}
+
+async function capabilityHealthForTurn(options: {
+  readonly capabilityHost: RuntimeCapabilityHost | undefined;
+  readonly runtimeCapabilityContext: RuntimeCapabilityContext | undefined;
+}): Promise<RuntimeCapabilityHealthHostResult> {
+  if (
+    options.capabilityHost === undefined ||
+    options.runtimeCapabilityContext === undefined
+  ) {
+    return createEmptyHealthResult();
+  }
+
+  return await options.capabilityHost.health(options.runtimeCapabilityContext);
+}
+
 function capabilityToolEvidenceFromRouting(
   results: readonly RoleModelCapabilityToolRoutingEvidence[]
 ): readonly AgentCapabilityEvidenceSnapshot[] {
   return Object.freeze(results.flatMap((routing) => routing.result.evidence));
+}
+
+function capabilityToolInvocationsFromRouting(
+  results: readonly RoleModelCapabilityToolRoutingEvidence[]
+): readonly AgentCapabilityToolInvocationSnapshot[] {
+  return Object.freeze(
+    results.map((routing) =>
+      createAgentCapabilityToolInvocationSnapshot({
+        ...routing.call,
+        kind: 'agent_capability_tool_invocation_snapshot',
+        result: routing.result
+      })
+    )
+  );
 }
 
 function combineAgentCapabilityEvidence(
@@ -904,7 +989,9 @@ function agentCapabilityTurnEvidenceOption(options: {
   readonly identity: RuntimeEventIdentity;
   readonly capabilityHost: RuntimeCapabilityHost | undefined;
   readonly contextItems: readonly AgentCapabilityContextItem[];
+  readonly toolInvocations: readonly AgentCapabilityToolInvocationSnapshot[];
   readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
+  readonly health: readonly AgentCapabilityHealthSnapshot[];
 }): { readonly agentCapabilityTurnEvidence?: AgentCapabilityTurnEvidenceSnapshot } {
   if (options.capabilityHost === undefined) {
     return {};
@@ -912,6 +999,9 @@ function agentCapabilityTurnEvidenceOption(options: {
 
   const registry = options.capabilityHost.registrySnapshot();
   const enabledCapabilityIds = new Set(options.capabilityHost.enabledCapabilityIds());
+  const healthStatuses = new Map(
+    options.health.map((snapshot) => [snapshot.capabilityId, snapshot.status])
+  );
 
   return {
     agentCapabilityTurnEvidence: createAgentCapabilityTurnEvidenceSnapshot({
@@ -920,6 +1010,7 @@ function agentCapabilityTurnEvidenceOption(options: {
       contractVersion: agentCapabilityContractVersion,
       capabilities: registry.capabilities.map((registration) => {
         const enabled = enabledCapabilityIds.has(registration.manifest.id);
+        const healthStatus = healthStatuses.get(registration.manifest.id);
 
         return {
           capabilityId: registration.manifest.id,
@@ -931,14 +1022,16 @@ function agentCapabilityTurnEvidenceOption(options: {
           enabled,
           availableForTurn: enabled,
           redactionLabels: registration.manifest.runtimePolicy.redactionLabels,
+          ...(healthStatus === undefined ? {} : { healthStatus }),
           ...(registration.manifest.config.fingerprint === undefined
             ? {}
             : { configFingerprint: registration.manifest.config.fingerprint })
         };
       }),
       contextItems: options.contextItems,
+      toolInvocations: options.toolInvocations,
       evidence: options.evidence,
-      health: []
+      health: options.health
     })
   };
 }

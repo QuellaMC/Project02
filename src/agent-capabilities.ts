@@ -294,6 +294,7 @@ export type AgentCapabilityTurnEvidenceSnapshot = RuntimeEventIdentity & {
   readonly contractVersion: typeof agentCapabilityContractVersion;
   readonly capabilities: readonly AgentCapabilityListingSnapshot[];
   readonly contextItems: readonly AgentCapabilityContextItem[];
+  readonly toolInvocations: readonly AgentCapabilityToolInvocationSnapshot[];
   readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
   readonly health: readonly AgentCapabilityHealthSnapshot[];
 };
@@ -362,6 +363,14 @@ export type AgentCapabilityToolCallResult =
       readonly message: string;
       readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
     };
+
+export type AgentCapabilityToolInvocationSnapshot = RuntimeEventIdentity & {
+  readonly kind: 'agent_capability_tool_invocation_snapshot';
+  readonly capabilityId: string;
+  readonly toolName: string;
+  readonly input: AgentCapabilityJsonObject;
+  readonly result: AgentCapabilityToolCallResult;
+};
 
 export type AgentCapabilityHookResult = {
   readonly status: 'completed' | 'failed';
@@ -962,6 +971,126 @@ export function createAgentCapabilityHealthSnapshot(
   } satisfies AgentCapabilityHealthSnapshot);
 }
 
+export function createAgentCapabilityToolInvocationSnapshot(
+  options: unknown
+): AgentCapabilityToolInvocationSnapshot {
+  if (!isRecord(options)) {
+    throw new TypeError('Capability tool invocation snapshot must be an object.');
+  }
+
+  if (options['kind'] !== 'agent_capability_tool_invocation_snapshot') {
+    throw new TypeError(
+      'Capability tool invocation snapshot kind is not supported.'
+    );
+  }
+
+  return Object.freeze({
+    eventId: requirePlainNonEmptyRecordString(options, 'eventId'),
+    traceId: requirePlainNonEmptyRecordString(options, 'traceId'),
+    createdAt: requirePlainNonEmptyRecordString(options, 'createdAt'),
+    kind: 'agent_capability_tool_invocation_snapshot',
+    capabilityId: requirePlainNonEmptyString(
+      requirePlainNonEmptyRecordString(options, 'capabilityId'),
+      'capabilityId'
+    ),
+    toolName: requirePlainNonEmptyString(
+      requirePlainNonEmptyRecordString(options, 'toolName'),
+      'toolName'
+    ),
+    input: createAgentCapabilityJsonObject(options['input'], 'input'),
+    result: createAgentCapabilityToolCallResult(options['result'])
+  } satisfies AgentCapabilityToolInvocationSnapshot);
+}
+
+function createAgentCapabilityToolCallResult(
+  value: unknown
+): AgentCapabilityToolCallResult {
+  if (!isRecord(value)) {
+    throw new TypeError('Capability tool result must be an object.');
+  }
+
+  if (value['status'] === 'accepted') {
+    return Object.freeze({
+      status: 'accepted',
+      output: createAgentCapabilityJsonValue(value['output'], 'output'),
+      evidence: Object.freeze(
+        requiredArrayOrThrow(value['evidence'], 'result.evidence').map(
+          createAgentCapabilityEvidenceSnapshot
+        )
+      )
+    } satisfies AgentCapabilityToolCallResult);
+  }
+
+  if (value['status'] === 'rejected') {
+    return Object.freeze({
+      status: 'rejected',
+      reason: requirePlainNonEmptyRecordString(value, 'reason'),
+      message: redactAgentCapabilityText(
+        requirePlainNonEmptyRecordString(value, 'message')
+      ),
+      evidence: Object.freeze(
+        requiredArrayOrThrow(value['evidence'], 'result.evidence').map(
+          createAgentCapabilityEvidenceSnapshot
+        )
+      )
+    } satisfies AgentCapabilityToolCallResult);
+  }
+
+  throw new TypeError('Capability tool result status is not supported.');
+}
+
+function createAgentCapabilityJsonObject(
+  value: unknown,
+  field: string
+): AgentCapabilityJsonObject {
+  const normalized = createAgentCapabilityJsonValue(value, field);
+
+  if (!isRecord(normalized)) {
+    throw new TypeError(`Capability field "${field}" must be an object.`);
+  }
+
+  return normalized;
+}
+
+function createAgentCapabilityJsonValue(
+  value: unknown,
+  field: string
+): AgentCapabilityJsonValue {
+  if (value === null || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return redactAgentCapabilityText(value);
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new TypeError(`Capability field "${field}" must be finite JSON.`);
+    }
+
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return Object.freeze(
+      value.map((item) => createAgentCapabilityJsonValue(item, field))
+    );
+  }
+
+  if (isRecord(value)) {
+    const snapshot: Record<string, AgentCapabilityJsonValue> = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      snapshot[key] = createAgentCapabilityJsonValue(item, `${field}.${key}`);
+    }
+
+    return Object.freeze(snapshot);
+  }
+
+  throw new TypeError(`Capability field "${field}" must be JSON serializable.`);
+}
+
 export function createAgentCapabilityListingSnapshot(
   options: unknown
 ): AgentCapabilityListingSnapshot {
@@ -1051,6 +1180,10 @@ export function createAgentCapabilityTurnEvidenceSnapshot(
   const contextItems = requiredArrayOrThrow(options['contextItems'], 'contextItems').map(
     createAgentCapabilityContextItem
   );
+  const toolInvocations = requiredArrayOrThrow(
+    options['toolInvocations'] ?? [],
+    'toolInvocations'
+  ).map(createAgentCapabilityToolInvocationSnapshot);
   const evidence = requiredArrayOrThrow(options['evidence'], 'evidence').map(
     createAgentCapabilityEvidenceSnapshot
   );
@@ -1063,6 +1196,10 @@ export function createAgentCapabilityTurnEvidenceSnapshot(
     identity,
     evidence
   });
+  assertAgentCapabilityToolInvocationIdentity({
+    identity,
+    toolInvocations
+  });
 
   return Object.freeze({
     ...identity,
@@ -1070,6 +1207,7 @@ export function createAgentCapabilityTurnEvidenceSnapshot(
     contractVersion: agentCapabilityContractVersion,
     capabilities: Object.freeze(capabilities),
     contextItems: Object.freeze(contextItems),
+    toolInvocations: Object.freeze(toolInvocations),
     evidence: Object.freeze(evidence),
     health: Object.freeze(health)
   } satisfies AgentCapabilityTurnEvidenceSnapshot);
@@ -2053,6 +2191,28 @@ function assertAgentCapabilityEvidenceIdentity(options: {
     throw new TypeError(
       'Capability evidence snapshot identity must match turn evidence identity.'
     );
+  }
+}
+
+function assertAgentCapabilityToolInvocationIdentity(options: {
+  readonly identity: RuntimeEventIdentity;
+  readonly toolInvocations: readonly AgentCapabilityToolInvocationSnapshot[];
+}): void {
+  for (const invocation of options.toolInvocations) {
+    if (
+      invocation.eventId !== options.identity.eventId ||
+      invocation.traceId !== options.identity.traceId ||
+      invocation.createdAt !== options.identity.createdAt
+    ) {
+      throw new TypeError(
+        'Capability tool invocation identity must match turn evidence identity.'
+      );
+    }
+
+    assertAgentCapabilityEvidenceIdentity({
+      identity: options.identity,
+      evidence: invocation.result.evidence
+    });
   }
 }
 

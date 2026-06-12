@@ -19,6 +19,7 @@ import type {
   AgentCapabilityToolCallResult,
   AgentCapabilityPolicyOutcome,
   AgentCapabilityRegistrySnapshot,
+  AgentCapabilitySourceReference,
   RuntimeCapabilityAfterTurnCommittedContext,
   RuntimeCapabilityContext
 } from './agent-capabilities.ts';
@@ -295,6 +296,7 @@ async function runHandleToolCall(options: {
   try {
     return normalizeToolCallResult({
       capability,
+      providedTool,
       value: await withCapabilityHookTimeout({
         capability,
         hookName: 'handleToolCall',
@@ -423,6 +425,7 @@ function isModelFacingCapabilityTool(tool: AgentCapabilityProvidedTool): boolean
 
 function normalizeToolCallResult(options: {
   readonly capability: AgentCapability;
+  readonly providedTool: AgentCapabilityProvidedTool;
   readonly value: unknown;
 }): AgentCapabilityToolCallResult {
   if (!isRecord(options.value)) {
@@ -432,13 +435,21 @@ function normalizeToolCallResult(options: {
   const status = options.value['status'];
 
   if (status === 'accepted') {
+    const evidence = normalizeEvidenceSnapshots({
+      capability: options.capability,
+      value: options.value['evidence']
+    });
+
+    assertAcceptedToolEvidenceSourceReferences({
+      capability: options.capability,
+      providedTool: options.providedTool,
+      evidence
+    });
+
     return Object.freeze({
       status: 'accepted',
       output: normalizeJsonValue(options.value['output']),
-      evidence: normalizeEvidenceSnapshots({
-        capability: options.capability,
-        value: options.value['evidence']
-      })
+      evidence
     } satisfies AgentCapabilityToolCallResult);
   }
 
@@ -866,17 +877,42 @@ function assertContextItemSourceReferences(options: {
   readonly capability: AgentCapability;
   readonly contextItem: AgentCapabilityContextItem;
 }): void {
-  if (!options.capability.manifest.runtimePolicy.sourceReferencesRequired) {
+  assertRequiredSourceReferences({
+    sourceReferencesRequired:
+      options.capability.manifest.runtimePolicy.sourceReferencesRequired,
+    sourceReferences: options.contextItem.sourceReferences,
+    message: `Capability "${options.capability.manifest.id}" context item "${options.contextItem.id}" requires source references.`
+  });
+}
+
+function assertAcceptedToolEvidenceSourceReferences(options: {
+  readonly capability: AgentCapability;
+  readonly providedTool: AgentCapabilityProvidedTool;
+  readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
+}): void {
+  assertRequiredSourceReferences({
+    sourceReferencesRequired: options.providedTool.sourceReferencesRequired,
+    sourceReferences: options.evidence.flatMap(
+      (evidence) => evidence.sourceReferences ?? []
+    ),
+    message: `Capability "${options.capability.manifest.id}" tool "${options.providedTool.name}" accepted result requires source references.`
+  });
+}
+
+function assertRequiredSourceReferences(options: {
+  readonly sourceReferencesRequired: boolean;
+  readonly sourceReferences: readonly AgentCapabilitySourceReference[] | undefined;
+  readonly message: string;
+}): void {
+  if (!options.sourceReferencesRequired) {
     return;
   }
 
-  if (options.contextItem.sourceReferences.length > 0) {
+  if ((options.sourceReferences?.length ?? 0) > 0) {
     return;
   }
 
-  throw new TypeError(
-    `Capability "${options.capability.manifest.id}" context item "${options.contextItem.id}" requires source references.`
-  );
+  throw new TypeError(options.message);
 }
 
 function mergedRedactionLabels(options: {

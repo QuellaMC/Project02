@@ -1788,6 +1788,208 @@ describe('local runtime turn adapter', () => {
     expect(turnEvidence?.evidence).toEqual(result.rawEvent.agentCapabilityEvidence);
   });
 
+  it('records successful capability health snapshots in completed turn evidence', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [
+        createRuntimeTestCapability({
+          id: 'memory.health_completed_runtime',
+          displayName: 'Completed runtime health capability',
+          beforeRoleModelCall(context) {
+            return {
+              contextItems: [],
+              runtimeNotes: [],
+              evidence: [
+                createAgentCapabilityEvidenceSnapshot({
+                  eventId: context.eventId,
+                  traceId: context.traceId,
+                  createdAt: context.timestamp,
+                  kind: 'agent_capability_evidence_snapshot',
+                  capabilityId: 'memory.health_completed_runtime',
+                  evidenceKind: 'before_role_model_call',
+                  status: 'accepted',
+                  summary: 'context hook accepted',
+                  policyOutcome: 'available_for_turn',
+                  redactionLabels: []
+                })
+              ]
+            };
+          },
+          health(context) {
+            return {
+              capabilityId: 'memory.health_completed_runtime',
+              status: 'degraded',
+              checkedAt: context.timestamp,
+              summary: 'memory health degraded',
+              redactionLabels: []
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'health',
+        'evt_health_completed',
+        'trace_health_completed'
+      ),
+      session,
+      logStore,
+      capabilityHost,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'health recorded'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result.status).toBe('completed');
+
+    if (result.status !== 'completed') {
+      throw new Error('Expected completed runtime result.');
+    }
+
+    const turnEvidence = result.rawEvent.agentCapabilityTurnEvidence;
+
+    expect(result.rawEvent.agentCapabilityEvidence).toMatchObject([
+      {
+        capabilityId: 'memory.health_completed_runtime',
+        evidenceKind: 'before_role_model_call',
+        status: 'accepted',
+        summary: 'context hook accepted'
+      }
+    ]);
+    expect(turnEvidence?.evidence).toEqual(result.rawEvent.agentCapabilityEvidence);
+    expect(turnEvidence?.health).toEqual([
+      {
+        capabilityId: 'memory.health_completed_runtime',
+        status: 'degraded',
+        checkedAt: '2026-06-04T10:00:00.000Z',
+        summary: 'memory health degraded',
+        redactionLabels: []
+      }
+    ]);
+    expect(turnEvidence?.capabilities[0]).toMatchObject({
+      capabilityId: 'memory.health_completed_runtime',
+      enabled: true,
+      availableForTurn: true,
+      healthStatus: 'degraded'
+    });
+  });
+
+  it('records failed capability health evidence in rejected turn evidence', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [
+        createRuntimeTestCapability({
+          id: 'memory.health_rejected_runtime',
+          displayName: 'Rejected runtime health capability',
+          beforeRoleModelCall(context) {
+            return {
+              contextItems: [],
+              runtimeNotes: [],
+              evidence: [
+                createAgentCapabilityEvidenceSnapshot({
+                  eventId: context.eventId,
+                  traceId: context.traceId,
+                  createdAt: context.timestamp,
+                  kind: 'agent_capability_evidence_snapshot',
+                  capabilityId: 'memory.health_rejected_runtime',
+                  evidenceKind: 'before_role_model_call',
+                  status: 'accepted',
+                  summary: 'context hook survived rejection',
+                  policyOutcome: 'available_for_turn',
+                  redactionLabels: []
+                })
+              ]
+            };
+          },
+          health() {
+            throw new Error('health fixture unavailable');
+          }
+        })
+      ]
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'health rejection',
+        'evt_health_rejected',
+        'trace_health_rejected'
+      ),
+      session,
+      logStore,
+      capabilityHost,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'line one\nline two'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: roleModelInvalidVisibleReplyRejectionReason
+    });
+
+    const terminalRejected = findRawEvent(
+      result.rawEventLogRecords,
+      'runtime_turn_rejected'
+    );
+    const turnEvidence = terminalRejected.agentCapabilityTurnEvidence;
+
+    expect(terminalRejected.agentCapabilityEvidence).toMatchObject([
+      {
+        capabilityId: 'memory.health_rejected_runtime',
+        evidenceKind: 'before_role_model_call',
+        status: 'accepted',
+        summary: 'context hook survived rejection'
+      },
+      {
+        capabilityId: 'memory.health_rejected_runtime',
+        evidenceKind: 'health',
+        status: 'degraded',
+        summary: 'Capability health hook failed: health fixture unavailable',
+        policyOutcome: 'health_degraded'
+      }
+    ]);
+    expect(turnEvidence?.evidence).toEqual(
+      terminalRejected.agentCapabilityEvidence
+    );
+    expect(turnEvidence?.health).toEqual([
+      {
+        capabilityId: 'memory.health_rejected_runtime',
+        status: 'unavailable',
+        checkedAt: '2026-06-04T10:00:00.000Z',
+        summary: 'health fixture unavailable',
+        redactionLabels: []
+      }
+    ]);
+    expect(turnEvidence?.capabilities[0]).toMatchObject({
+      capabilityId: 'memory.health_rejected_runtime',
+      healthStatus: 'unavailable'
+    });
+  });
+
   it('persists accepted capability tool invocation evidence with the committed turn', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -1821,6 +2023,12 @@ describe('local runtime turn adapter', () => {
                   evidenceKind: 'tool_invocation',
                   status: 'accepted',
                   summary: 'memory search accepted',
+                  sourceReferences: [
+                    {
+                      kind: 'memory',
+                      id: 'mem_tool_runtime'
+                    }
+                  ],
                   redactionLabels: []
                 })
               ]
@@ -1886,6 +2094,29 @@ describe('local runtime turn adapter', () => {
     expect(terminalCompleted.agentCapabilityEvidence).toEqual(
       visibleReplyCommitted.agentCapabilityEvidence
     );
+    expect(terminalCompleted.agentCapabilityTurnEvidence?.toolInvocations).toMatchObject([
+      {
+        capabilityId: 'memory.tool_runtime',
+        toolName: 'memory.search',
+        input: {
+          query: 'preference'
+        },
+        result: {
+          status: 'accepted',
+          output: {
+            matches: ['Mira prefers concise answers.']
+          },
+          evidence: [
+            {
+              capabilityId: 'memory.tool_runtime',
+              evidenceKind: 'tool_invocation',
+              status: 'accepted',
+              summary: 'memory search accepted'
+            }
+          ]
+        }
+      }
+    ]);
   });
 
   it('persists rejected capability tool invocation evidence before visible commit', async () => {
@@ -1987,6 +2218,20 @@ describe('local runtime turn adapter', () => {
     expect(terminalRejected.agentCapabilityEvidence).toEqual(
       commitRejected.agentCapabilityEvidence
     );
+    expect(terminalRejected.agentCapabilityTurnEvidence?.toolInvocations).toMatchObject([
+      {
+        capabilityId: 'memory.tool_rejected_runtime',
+        toolName: 'memory.search',
+        input: {
+          query: 'preference'
+        },
+        result: {
+          status: 'rejected',
+          reason: 'memory_unavailable',
+          message: 'memory fixture unavailable'
+        }
+      }
+    ]);
   });
 
   it('does not run after-commit hooks for rejected turn paths', async () => {
@@ -2115,6 +2360,7 @@ function createRuntimeTestCapability(options: {
   readonly beforeRoleModelCall?: AgentCapabilityLifecycleHooks['beforeRoleModelCall'];
   readonly handleToolCall?: AgentCapabilityLifecycleHooks['handleToolCall'];
   readonly afterTurnCommitted?: AgentCapabilityLifecycleHooks['afterTurnCommitted'];
+  readonly health?: AgentCapabilityLifecycleHooks['health'];
 }): AgentCapability {
   return createAgentCapability({
     manifest: {
@@ -2163,7 +2409,8 @@ function createRuntimeTestCapability(options: {
         : { handleToolCall: options.handleToolCall }),
       ...(options.afterTurnCommitted === undefined
         ? {}
-        : { afterTurnCommitted: options.afterTurnCommitted })
+        : { afterTurnCommitted: options.afterTurnCommitted }),
+      ...(options.health === undefined ? {} : { health: options.health })
     }
   });
 }
@@ -2173,6 +2420,7 @@ function runtimeTestCapabilityDeclarations(options: {
   readonly beforeRoleModelCall?: AgentCapabilityLifecycleHooks['beforeRoleModelCall'];
   readonly handleToolCall?: AgentCapabilityLifecycleHooks['handleToolCall'];
   readonly afterTurnCommitted?: AgentCapabilityLifecycleHooks['afterTurnCommitted'];
+  readonly health?: AgentCapabilityLifecycleHooks['health'];
 }): readonly string[] {
   const declarations: string[] = [];
 
@@ -2186,6 +2434,10 @@ function runtimeTestCapabilityDeclarations(options: {
 
   if (options.afterTurnCommitted !== undefined) {
     declarations.push('after_turn_committed');
+  }
+
+  if (options.health !== undefined) {
+    declarations.push('health');
   }
 
   return Object.freeze(declarations);

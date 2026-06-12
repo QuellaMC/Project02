@@ -326,7 +326,7 @@ export function validateModelToolInputAgainstContract(options: {
       return rejectModelToolInput(
         `${options.toolName} input field "${field.name}" must be ${modelToolInputFieldTypeArticle(
           field.valueType
-        )} ${field.valueType}.`
+        )} ${modelToolInputFieldTypeLabel(field.valueType)}.`
       );
     }
 
@@ -400,6 +400,10 @@ function modelToolInputValueMatchesType(
   value: unknown,
   valueType: ModelToolInputFieldValueType
 ): boolean {
+  if (valueType === 'number') {
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+
   if (valueType === 'array') {
     return Array.isArray(value);
   }
@@ -415,6 +419,12 @@ function modelToolInputFieldTypeArticle(
   valueType: ModelToolInputFieldValueType
 ): 'a' | 'an' {
   return valueType === 'array' || valueType === 'object' ? 'an' : 'a';
+}
+
+function modelToolInputFieldTypeLabel(
+  valueType: ModelToolInputFieldValueType
+): string {
+  return valueType === 'number' ? 'finite number' : valueType;
 }
 
 function freezeJsonRecord(

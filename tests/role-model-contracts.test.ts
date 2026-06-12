@@ -30,6 +30,7 @@ import {
   roleModelUnsupportedEffectRejectionReason,
   roleModelUnknownToolRejectionReason,
   roleModelVisibleReplyActionName,
+  validateModelToolInputAgainstContract,
   type RoleModelCapabilityToolDefinition,
   type RoleModelDecisionRejectionReason,
   type VisibleMessage
@@ -608,6 +609,92 @@ describe('role model decision contracts', () => {
     expect(getRequiredVisibleReplyText(acceptedResult.decision)).toBe(
       'I can search memory.'
     );
+  });
+
+  it('rejects non-finite numeric capability tool inputs before handler routing', () => {
+    const capabilityToolDefinition = createFakeCapabilityToolDefinition({
+      inputContract: {
+        type: 'object',
+        additionalFields: false,
+        fields: [
+          {
+            name: 'limit',
+            description: 'Maximum result count.',
+            required: true,
+            valueType: 'number'
+          }
+        ]
+      }
+    });
+    const capabilityToolDefinitions = [capabilityToolDefinition];
+    const allowedTools = [
+      roleModelVisibleReplyActionName,
+      'memory.search'
+    ] as const;
+
+    const finiteResult = parseRoleModelDecision(
+      JSON.stringify({
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: 'I can search memory.'
+            }
+          },
+          {
+            name: 'memory.search',
+            input: {
+              limit: 3.5
+            }
+          }
+        ]
+      }),
+      allowedTools,
+      capabilityToolDefinitions
+    );
+
+    expect(finiteResult.status).toBe('accepted');
+
+    if (finiteResult.status !== 'accepted') {
+      throw new Error('Expected finite numeric capability decision.');
+    }
+
+    expect(finiteResult.decision.toolCalls[1]).toMatchObject({
+      name: 'memory.search',
+      input: {
+        limit: 3.5
+      }
+    });
+
+    expect(
+      parseRoleModelDecision(
+        `{"version":"${roleModelDecisionContractVersion}","toolCalls":[{"name":"${roleModelVisibleReplyActionName}","input":{"text":"I can search memory."}},{"name":"memory.search","input":{"limit":1e999}}]}`,
+        allowedTools,
+        capabilityToolDefinitions
+      )
+    ).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedToolCallRejectionReason,
+        details: 'memory.search input field "limit" must be a finite number.'
+      }
+    });
+
+    for (const nonFiniteLimit of [Infinity, Number.NaN]) {
+      expect(
+        validateModelToolInputAgainstContract({
+          toolName: 'memory.search',
+          input: {
+            limit: nonFiniteLimit
+          },
+          inputContract: capabilityToolDefinition.inputContract
+        })
+      ).toEqual({
+        status: 'rejected',
+        details: 'memory.search input field "limit" must be a finite number.'
+      });
+    }
   });
 
   it('ignores excluded required capability tools during required-call validation', () => {

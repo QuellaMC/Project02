@@ -129,6 +129,7 @@ type InspectCapabilityEvidence = {
   readonly contractVersion?: string;
   readonly capabilities: readonly InspectCapabilityListing[];
   readonly contextItems: readonly InspectCapabilityContextItem[];
+  readonly toolInvocations: readonly InspectCapabilityToolInvocation[];
   readonly evidence: readonly InspectCapabilityEvidenceSnapshot[];
   readonly policyOutcomes: readonly string[];
   readonly health: readonly InspectCapabilityHealthSnapshot[];
@@ -172,6 +173,26 @@ type InspectCapabilityContextItem = {
   readonly redactionLabels: readonly string[];
   readonly confidence?: number;
 };
+
+type InspectCapabilityToolInvocation = {
+  readonly capabilityId: string;
+  readonly toolName: string;
+  readonly input: unknown;
+  readonly result: InspectCapabilityToolInvocationResult;
+};
+
+type InspectCapabilityToolInvocationResult =
+  | {
+      readonly status: 'accepted';
+      readonly output: unknown;
+      readonly evidence: readonly InspectCapabilityEvidenceSnapshot[];
+    }
+  | {
+      readonly status: 'rejected';
+      readonly reason: string;
+      readonly message: string;
+      readonly evidence: readonly InspectCapabilityEvidenceSnapshot[];
+    };
 
 type InspectCapabilityEvidenceSnapshot = {
   readonly capabilityId: string;
@@ -537,6 +558,7 @@ function capabilityEvidenceForRawEvent(
         : { contractVersion: turnEvidence.contractVersion }),
       capabilities: capabilityListings(turnEvidence),
       contextItems: capabilityContextItems(turnEvidence),
+      toolInvocations: capabilityToolInvocations(turnEvidence),
       evidence: Object.freeze(evidence.map(capabilityEvidenceSnapshot)),
       policyOutcomes: policyOutcomes(evidence),
       health: capabilityHealthSnapshots(turnEvidence)
@@ -613,6 +635,44 @@ function capabilityContextItems(
       } satisfies InspectCapabilityContextItem)
     )
   );
+}
+
+function capabilityToolInvocations(
+  turnEvidence: AgentCapabilityTurnEvidenceSnapshot | undefined
+): readonly InspectCapabilityToolInvocation[] {
+  if (turnEvidence === undefined) {
+    return Object.freeze([]);
+  }
+
+  return Object.freeze(
+    turnEvidence.toolInvocations.map((invocation) =>
+      Object.freeze({
+        capabilityId: invocation.capabilityId,
+        toolName: invocation.toolName,
+        input: invocation.input,
+        result: capabilityToolInvocationResult(invocation.result)
+      } satisfies InspectCapabilityToolInvocation)
+    )
+  );
+}
+
+function capabilityToolInvocationResult(
+  result: AgentCapabilityTurnEvidenceSnapshot['toolInvocations'][number]['result']
+): InspectCapabilityToolInvocationResult {
+  if (result.status === 'accepted') {
+    return Object.freeze({
+      status: 'accepted',
+      output: result.output,
+      evidence: Object.freeze(result.evidence.map(capabilityEvidenceSnapshot))
+    } satisfies InspectCapabilityToolInvocationResult);
+  }
+
+  return Object.freeze({
+    status: 'rejected',
+    reason: result.reason,
+    message: result.message,
+    evidence: Object.freeze(result.evidence.map(capabilityEvidenceSnapshot))
+  } satisfies InspectCapabilityToolInvocationResult);
 }
 
 function capabilityEvidenceSnapshot(

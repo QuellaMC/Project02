@@ -341,6 +341,21 @@ describe('local runtime storage contract', () => {
       'health_degraded',
       'after_commit_failed'
     ]);
+    expect(capabilityEvidence?.toolInvocations).toMatchObject([
+      {
+        capabilityId: 'memory.fixture',
+        toolName: 'memory.search',
+        input: {
+          query: 'token=[redacted]'
+        },
+        result: {
+          status: 'accepted',
+          output: {
+            matches: ['Recovered token=[redacted]']
+          }
+        }
+      }
+    ]);
     expect(JSON.stringify(decoded)).not.toContain('secret-token');
     expect(JSON.stringify(decoded)).not.toContain('plain-secret');
   });
@@ -1114,6 +1129,31 @@ function createCapabilityTurnEvidence(
         ],
         confidence: 0.8,
         redactionLabels: ['memory']
+      }
+    ],
+    toolInvocations: [
+      {
+        ...identity,
+        kind: 'agent_capability_tool_invocation_snapshot',
+        capabilityId: 'memory.fixture',
+        toolName: 'memory.search',
+        input: {
+          query: 'token=secret-token'
+        },
+        result: {
+          status: 'accepted',
+          output: {
+            matches: ['Recovered token=secret-token']
+          },
+          evidence: [
+            createCapabilityEvidence(identity, {
+              evidenceKind: 'tool_invocation',
+              status: 'degraded',
+              policyOutcome: 'optional_degraded',
+              summary: 'Accepted with partial memory results'
+            })
+          ]
+        }
       }
     ],
     evidence: [

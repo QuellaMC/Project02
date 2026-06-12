@@ -766,6 +766,229 @@ describe('runtime capability host', () => {
       ]
     });
   });
+
+  it('accepts grounded tool results when source references are required', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.grounded_tool',
+          displayName: 'Grounded tool fixture',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.grounded_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read',
+              sourceReferencesRequired: true
+            })
+          ],
+          handleToolCall(_call, context) {
+            return {
+              status: 'accepted',
+              output: {
+                answer: 'remembered detail'
+              },
+              evidence: [
+                createAgentCapabilityEvidenceSnapshot({
+                  eventId: context.eventId,
+                  traceId: context.traceId,
+                  createdAt: context.timestamp,
+                  kind: 'agent_capability_evidence_snapshot',
+                  capabilityId: 'memory.grounded_tool',
+                  evidenceKind: 'tool_invocation',
+                  status: 'accepted',
+                  summary: 'memory search returned grounded evidence',
+                  policyOutcome: 'available_for_turn',
+                  sourceReferences: [
+                    {
+                      kind: 'memory',
+                      id: 'mem_1',
+                      title: 'Memory 1'
+                    }
+                  ],
+                  redactionLabels: []
+                })
+              ]
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.grounded_tool',
+        toolName: 'memory.grounded_search',
+        input: {}
+      },
+      createHostTestContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      evidence: [
+        {
+          capabilityId: 'memory.grounded_tool',
+          evidenceKind: 'tool_invocation',
+          status: 'accepted',
+          sourceReferences: [
+            {
+              kind: 'memory',
+              id: 'mem_1'
+            }
+          ]
+        }
+      ]
+    });
+  });
+
+  it('degrades optional accepted tool results missing required source references', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.optional_tool_refs',
+          displayName: 'Optional tool refs fixture',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.optional_ref_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read',
+              sourceReferencesRequired: true
+            })
+          ],
+          handleToolCall() {
+            return {
+              status: 'accepted',
+              output: {
+                answer: 'ungrounded detail'
+              },
+              evidence: []
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.optional_tool_refs',
+        toolName: 'memory.optional_ref_search',
+        input: {}
+      },
+      createHostTestContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      evidence: [
+        {
+          evidenceKind: 'tool_invocation',
+          status: 'degraded',
+          policyOutcome: 'optional_degraded'
+        }
+      ]
+    });
+  });
+
+  it('rejects required and non-degrading accepted tool results missing source references', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.required_tool_refs',
+          displayName: 'Required tool refs fixture',
+          requiredForTurn: true,
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.required_ref_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read',
+              sourceReferencesRequired: true
+            })
+          ],
+          handleToolCall() {
+            return {
+              status: 'accepted',
+              output: {},
+              evidence: []
+            };
+          }
+        }),
+        createHostTestCapability({
+          id: 'memory.rejecting_tool_refs',
+          displayName: 'Rejecting tool refs fixture',
+          handleToolCallFailureBehavior: 'reject_tool_call',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.rejecting_ref_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read',
+              sourceReferencesRequired: true
+            })
+          ],
+          handleToolCall() {
+            return {
+              status: 'accepted',
+              output: {},
+              evidence: []
+            };
+          }
+        })
+      ]
+    });
+    const context = createHostTestContext();
+
+    const requiredResult = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.required_tool_refs',
+        toolName: 'memory.required_ref_search',
+        input: {}
+      },
+      context
+    );
+    const rejectingResult = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.rejecting_tool_refs',
+        toolName: 'memory.rejecting_ref_search',
+        input: {}
+      },
+      context
+    );
+
+    expect(requiredResult).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      evidence: [
+        {
+          evidenceKind: 'tool_invocation',
+          status: 'rejected',
+          policyOutcome: 'handler_rejected'
+        }
+      ]
+    });
+    expect(rejectingResult).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      evidence: [
+        {
+          evidenceKind: 'tool_invocation',
+          status: 'rejected',
+          policyOutcome: 'handler_rejected'
+        }
+      ]
+    });
+  });
 });
 
 function createSearchToolCapability(id: string, displayName: string): AgentCapability {
@@ -942,6 +1165,7 @@ function createHostTestTool(options: {
     | 'external_read'
     | 'local_memory_write';
   readonly requiredForUserTurn?: boolean;
+  readonly sourceReferencesRequired?: boolean;
 }): unknown {
   return Object.freeze({
     name: options.name,
@@ -956,7 +1180,7 @@ function createHostTestTool(options: {
     validationOwner: options.validationOwner,
     sideEffectLevel: options.sideEffectLevel,
     requiresConfirmation: false,
-    sourceReferencesRequired: false
+    sourceReferencesRequired: options.sourceReferencesRequired ?? false
   });
 }
 

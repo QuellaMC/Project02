@@ -95,6 +95,17 @@ type InspectSessionOutput = {
           readonly uri?: string;
         }[];
       }[];
+      readonly toolInvocations: readonly {
+        readonly capabilityId: string;
+        readonly toolName: string;
+        readonly input: unknown;
+        readonly result: {
+          readonly status: string;
+          readonly output?: unknown;
+          readonly reason?: string;
+          readonly message?: string;
+        };
+      }[];
       readonly evidence: readonly {
         readonly capabilityId: string;
         readonly evidenceKind: string;
@@ -576,6 +587,21 @@ describe('node src/inspect-cli.ts', () => {
         }
       ]
     });
+    expect(turn?.capabilityEvidence?.toolInvocations).toMatchObject([
+      {
+        capabilityId: 'memory.fixture',
+        toolName: 'memory.search',
+        input: {
+          query: 'token=[redacted]'
+        },
+        result: {
+          status: 'accepted',
+          output: {
+            matches: ['memory token=[redacted]']
+          }
+        }
+      }
+    ]);
     expect(turn?.capabilityEvidence?.evidence).toHaveLength(7);
     expect(JSON.stringify(turn?.capabilityEvidence)).not.toContain('secret-token');
     await expect(readDurableFiles(storeRoot, 'mira-local')).resolves.toEqual(before);
@@ -973,6 +999,34 @@ function createInspectCapabilityEvidence(
           }
         ],
         redactionLabels: ['secret']
+      }
+    ],
+    toolInvocations: [
+      {
+        ...identity,
+        kind: 'agent_capability_tool_invocation_snapshot',
+        capabilityId: 'memory.fixture',
+        toolName: 'memory.search',
+        input: {
+          query: 'token=secret-token'
+        },
+        result: {
+          status: 'accepted',
+          output: {
+            matches: ['memory token=secret-token']
+          },
+          evidence: [
+            {
+              ...identity,
+              kind: 'agent_capability_evidence_snapshot',
+              capabilityId: 'memory.fixture',
+              evidenceKind: 'tool_invocation',
+              status: 'accepted',
+              summary: 'tool accepted',
+              redactionLabels: ['secret']
+            }
+          ]
+        }
       }
     ],
     evidence: inspectCapabilityEvidenceSnapshots(identity),
