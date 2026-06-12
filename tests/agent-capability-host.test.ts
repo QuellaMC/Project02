@@ -268,6 +268,101 @@ describe('runtime capability host', () => {
     expect(serializedOutput).not.toContain('configFingerprint');
   });
 
+  it('does not advertise enabled capability tools without a handleToolCall hook through capability.list', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.no_handler_discovery',
+          displayName: 'No handler discovery',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.no_handler_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read'
+            })
+          ]
+        }),
+        createSearchToolCapability('memory.handled_discovery', 'Handled discovery')
+      ]
+    });
+    const noHandlerRegistration = host
+      .registrySnapshot()
+      .capabilities.find(
+        (entry) => entry.manifest.id === 'memory.no_handler_discovery'
+      );
+
+    expect(noHandlerRegistration?.providedTools.map((tool) => tool.name)).toEqual([
+      'memory.no_handler_search'
+    ]);
+    expect(noHandlerRegistration?.registeredLifecycleHooks).toEqual([
+      'tool_provider'
+    ]);
+    expect(
+      host
+        .capabilityToolDefinitions()
+        .map((definition) => ({
+          capabilityId: definition.capabilityId,
+          name: definition.name
+        }))
+    ).toEqual([
+      {
+        capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+        name: roleModelCapabilityListToolName
+      },
+      {
+        capabilityId: 'memory.handled_discovery',
+        name: 'memory.search'
+      }
+    ]);
+
+    const context = createHostTestContext();
+    const result = await host.handleToolCall(
+      {
+        eventId: context.eventId,
+        traceId: context.traceId,
+        createdAt: context.timestamp,
+        capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+        toolName: roleModelCapabilityListToolName,
+        input: {}
+      },
+      context
+    );
+
+    expect(result.status).toBe('accepted');
+
+    if (result.status !== 'accepted') {
+      throw new Error('Expected accepted capability discovery result.');
+    }
+
+    expect(result.output).toMatchObject({
+      capabilities: [
+        {
+          id: runtimeCapabilityDiscoveryCapabilityId,
+          providedTools: [
+            {
+              name: roleModelCapabilityListToolName
+            }
+          ]
+        },
+        {
+          id: 'memory.no_handler_discovery',
+          providedTools: [],
+          toolsTruncated: false
+        },
+        {
+          id: 'memory.handled_discovery',
+          providedTools: [
+            {
+              name: 'memory.search'
+            }
+          ],
+          toolsTruncated: false
+        }
+      ]
+    });
+    expect(JSON.stringify(result.output)).not.toContain('memory.no_handler_search');
+  });
+
   it('degrades optional before-model failures with evidence', async () => {
     const host = createRuntimeCapabilityHost({
       capabilities: [
@@ -687,6 +782,71 @@ describe('runtime capability host', () => {
         checkedAt: '2026-06-12T00:00:00.000Z',
         summary: 'healthy',
         redactionLabels: []
+      }
+    ]);
+    expect(healthResult.evidence).toEqual([]);
+  });
+
+  it('emits health evidence for returned degraded and unavailable snapshots', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.returned_degraded_health',
+          displayName: 'Returned degraded health',
+          health(context) {
+            return {
+              capabilityId: 'memory.returned_degraded_health',
+              status: 'degraded',
+              checkedAt: context.timestamp,
+              summary: 'recall lagging',
+              redactionLabels: []
+            };
+          }
+        }),
+        createHostTestCapability({
+          id: 'memory.returned_unavailable_health',
+          displayName: 'Returned unavailable health',
+          health(context) {
+            return {
+              capabilityId: 'memory.returned_unavailable_health',
+              status: 'unavailable',
+              checkedAt: context.timestamp,
+              summary: 'gateway unavailable',
+              redactionLabels: []
+            };
+          }
+        })
+      ]
+    });
+
+    const healthResult = await host.health(createHostTestContext());
+
+    expect(healthResult.snapshots).toMatchObject([
+      {
+        capabilityId: 'memory.returned_degraded_health',
+        status: 'degraded',
+        summary: 'recall lagging'
+      },
+      {
+        capabilityId: 'memory.returned_unavailable_health',
+        status: 'unavailable',
+        summary: 'gateway unavailable'
+      }
+    ]);
+    expect(healthResult.evidence).toMatchObject([
+      {
+        capabilityId: 'memory.returned_degraded_health',
+        evidenceKind: 'health',
+        status: 'degraded',
+        summary: 'Capability health degraded: recall lagging',
+        policyOutcome: 'health_degraded'
+      },
+      {
+        capabilityId: 'memory.returned_unavailable_health',
+        evidenceKind: 'health',
+        status: 'degraded',
+        summary: 'Capability health unavailable: gateway unavailable',
+        policyOutcome: 'health_degraded'
       }
     ]);
   });
@@ -1129,6 +1289,183 @@ describe('runtime capability host', () => {
         }
       ]
     });
+  });
+
+  it('adds rejected tool invocation evidence when a handler rejection only supplies accepted evidence', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.handler_rejected_with_note',
+          displayName: 'Rejected handler with note evidence',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.note_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read'
+            })
+          ],
+          handleToolCall(_call, context) {
+            return {
+              status: 'rejected',
+              reason: 'memory_unavailable',
+              message: 'memory unavailable',
+              evidence: [
+                createAcceptedHostEvidence({
+                  context,
+                  capabilityId: 'memory.handler_rejected_with_note',
+                  evidenceKind: 'tool_invocation'
+                })
+              ]
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.handler_rejected_with_note',
+        toolName: 'memory.note_search',
+        input: {}
+      },
+      createHostTestContext()
+    );
+
+    expect(result.status).toBe('rejected');
+    expect(result.evidence).toHaveLength(2);
+    expect(result.evidence).toMatchObject([
+      {
+        capabilityId: 'memory.handler_rejected_with_note',
+        evidenceKind: 'tool_invocation',
+        status: 'accepted'
+      },
+      {
+        capabilityId: 'memory.handler_rejected_with_note',
+        evidenceKind: 'tool_invocation',
+        status: 'rejected',
+        summary: 'memory unavailable',
+        policyOutcome: 'handler_rejected'
+      }
+    ]);
+  });
+
+  it('does not duplicate rejected tool invocation evidence supplied by a handler rejection', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.handler_supplied_rejected',
+          displayName: 'Rejected handler with rejected evidence',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.rejected_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read'
+            })
+          ],
+          handleToolCall(_call, context) {
+            return {
+              status: 'rejected',
+              reason: 'memory_unavailable',
+              message: 'memory unavailable',
+              evidence: [
+                createAgentCapabilityEvidenceSnapshot({
+                  eventId: context.eventId,
+                  traceId: context.traceId,
+                  createdAt: context.timestamp,
+                  kind: 'agent_capability_evidence_snapshot',
+                  capabilityId: 'memory.handler_supplied_rejected',
+                  evidenceKind: 'tool_invocation',
+                  status: 'rejected',
+                  summary: 'handler supplied rejection',
+                  policyOutcome: 'handler_rejected',
+                  redactionLabels: []
+                })
+              ]
+            };
+          }
+        }),
+        createHostTestCapability({
+          id: 'memory.handler_supplied_failed',
+          displayName: 'Rejected handler with failed evidence',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.failed_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read'
+            })
+          ],
+          handleToolCall(_call, context) {
+            return {
+              status: 'rejected',
+              reason: 'memory_timeout',
+              message: 'memory timed out',
+              evidence: [
+                createAgentCapabilityEvidenceSnapshot({
+                  eventId: context.eventId,
+                  traceId: context.traceId,
+                  createdAt: context.timestamp,
+                  kind: 'agent_capability_evidence_snapshot',
+                  capabilityId: 'memory.handler_supplied_failed',
+                  evidenceKind: 'tool_invocation',
+                  status: 'failed',
+                  summary: 'handler supplied failure',
+                  policyOutcome: 'timeout',
+                  redactionLabels: []
+                })
+              ]
+            };
+          }
+        })
+      ]
+    });
+    const context = createHostTestContext();
+
+    const rejectedResult = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.handler_supplied_rejected',
+        toolName: 'memory.rejected_search',
+        input: {}
+      },
+      context
+    );
+    const failedResult = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.handler_supplied_failed',
+        toolName: 'memory.failed_search',
+        input: {}
+      },
+      context
+    );
+
+    expect(rejectedResult.status).toBe('rejected');
+    expect(rejectedResult.evidence).toHaveLength(1);
+    expect(rejectedResult.evidence).toMatchObject([
+      {
+        capabilityId: 'memory.handler_supplied_rejected',
+        evidenceKind: 'tool_invocation',
+        status: 'rejected',
+        summary: 'handler supplied rejection'
+      }
+    ]);
+    expect(failedResult.status).toBe('rejected');
+    expect(failedResult.evidence).toHaveLength(1);
+    expect(failedResult.evidence).toMatchObject([
+      {
+        capabilityId: 'memory.handler_supplied_failed',
+        evidenceKind: 'tool_invocation',
+        status: 'failed',
+        summary: 'handler supplied failure'
+      }
+    ]);
   });
 
   it('degrades or rejects accepted tool results with stale evidence identity', async () => {

@@ -314,8 +314,8 @@ function createCapabilityDiscoveryOutput(
 function createCapabilityDiscoverySummary(
   capability: AgentCapability
 ): AgentCapabilityJsonObject {
-  const safeTools = capability.providedTools
-    .filter(isModelFacingCapabilityTool)
+  const routableTools = routableModelFacingCapabilityTools(capability);
+  const safeTools = routableTools
     .slice(0, runtimeCapabilityDiscoveryMaxToolsPerCapability)
     .map(createCapabilityDiscoveryToolSummary);
 
@@ -326,8 +326,7 @@ function createCapabilityDiscoverySummary(
     availableForTurn: true,
     providedTools: Object.freeze(safeTools),
     toolsTruncated:
-      capability.providedTools.filter(isModelFacingCapabilityTool).length >
-      runtimeCapabilityDiscoveryMaxToolsPerCapability
+      routableTools.length > runtimeCapabilityDiscoveryMaxToolsPerCapability
   } satisfies AgentCapabilityJsonObject);
 }
 
@@ -587,8 +586,22 @@ function hookEvidenceRecordsFailure(options: {
   readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
   readonly evidenceKind: Extract<AgentCapabilityEvidenceKind, 'after_turn_committed' | 'session_end'>;
 }): boolean {
+  return evidenceRecordsStatus({
+    evidence: options.evidence,
+    evidenceKind: options.evidenceKind,
+    statuses: ['failed']
+  });
+}
+
+function evidenceRecordsStatus(options: {
+  readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
+  readonly evidenceKind: AgentCapabilityEvidenceKind;
+  readonly statuses: readonly AgentCapabilityEvidenceStatus[];
+}): boolean {
   return options.evidence.some(
-    (item) => item.evidenceKind === options.evidenceKind && item.status === 'failed'
+    (item) =>
+      item.evidenceKind === options.evidenceKind &&
+      options.statuses.includes(item.status)
   );
 }
 
@@ -597,20 +610,24 @@ function capabilityToolDefinitionsForEnabledCapabilities(
 ): readonly RoleModelCapabilityToolDefinition[] {
   return Object.freeze(
     capabilities.flatMap((capability) => {
-      if (capability.lifecycleHooks.handleToolCall === undefined) {
-        return [];
-      }
-
-      return capability.providedTools
-        .filter(isModelFacingCapabilityTool)
-        .map((tool) =>
-          Object.freeze({
-            capabilityId: capability.manifest.id,
-            ...tool
-          } satisfies RoleModelCapabilityToolDefinition)
-        );
+      return routableModelFacingCapabilityTools(capability).map((tool) =>
+        Object.freeze({
+          capabilityId: capability.manifest.id,
+          ...tool
+        } satisfies RoleModelCapabilityToolDefinition)
+      );
     })
   );
+}
+
+function routableModelFacingCapabilityTools(
+  capability: AgentCapability
+): readonly AgentCapabilityProvidedTool[] {
+  if (capability.lifecycleHooks.handleToolCall === undefined) {
+    return [];
+  }
+
+  return Object.freeze(capability.providedTools.filter(isModelFacingCapabilityTool));
 }
 
 function isModelFacingCapabilityTool(tool: AgentCapabilityProvidedTool): boolean {
@@ -662,15 +679,34 @@ function normalizeToolCallResult(options: {
       throw new TypeError('Capability rejected tool result must include reason and message.');
     }
 
+    const evidence = normalizeEvidenceSnapshots({
+      capability: options.capability,
+      context: options.context,
+      value: options.value['evidence']
+    });
+    const evidenceWithRejection = evidenceRecordsStatus({
+      evidence,
+      evidenceKind: 'tool_invocation',
+      statuses: ['rejected', 'failed']
+    })
+      ? evidence
+      : Object.freeze([
+          ...evidence,
+          createHookFailureEvidence({
+            capability: options.capability,
+            context: options.context,
+            evidenceKind: 'tool_invocation',
+            status: 'rejected',
+            summary: message,
+            policyOutcome: 'handler_rejected'
+          })
+        ]);
+
     return Object.freeze({
       status: 'rejected',
       reason,
       message,
-      evidence: normalizeEvidenceSnapshots({
-        capability: options.capability,
-        context: options.context,
-        value: options.value['evidence']
-      })
+      evidence: evidenceWithRejection
     } satisfies AgentCapabilityToolCallResult);
   }
 
@@ -769,6 +805,15 @@ async function runHealth(options: {
         field: 'health.capabilityId'
       });
       snapshots.push(snapshot);
+      const healthEvidence = createHealthSnapshotEvidence({
+        capability,
+        context: options.context,
+        snapshot
+      });
+
+      if (healthEvidence !== undefined) {
+        evidence.push(healthEvidence);
+      }
     } catch (error: unknown) {
       const message = errorMessage(error);
       const policyOutcome =
@@ -806,6 +851,39 @@ async function runHealth(options: {
     snapshots: Object.freeze([...snapshots]),
     evidence: Object.freeze([...evidence])
   } satisfies RuntimeCapabilityHealthHostResult);
+}
+
+function createHealthSnapshotEvidence(options: {
+  readonly capability: AgentCapability;
+  readonly context: RuntimeCapabilityContext;
+  readonly snapshot: AgentCapabilityHealthSnapshot;
+}): AgentCapabilityEvidenceSnapshot | undefined {
+  if (options.snapshot.status === 'ok') {
+    return undefined;
+  }
+
+  return createHookFailureEvidence({
+    capability: options.capability,
+    context: options.context,
+    evidenceKind: 'health',
+    status: healthSnapshotEvidenceStatus(options),
+    summary: `Capability health ${options.snapshot.status}: ${options.snapshot.summary}`,
+    policyOutcome: 'health_degraded'
+  });
+}
+
+function healthSnapshotEvidenceStatus(options: {
+  readonly capability: AgentCapability;
+  readonly snapshot: AgentCapabilityHealthSnapshot;
+}): AgentCapabilityEvidenceStatus {
+  if (
+    options.snapshot.status === 'unavailable' &&
+    options.capability.manifest.runtimePolicy.failureBehavior.health === 'reject_turn'
+  ) {
+    return 'failed';
+  }
+
+  return 'degraded';
 }
 
 async function invokeBeforeRoleModelCallHook(options: {

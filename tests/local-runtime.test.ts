@@ -1790,7 +1790,7 @@ describe('local runtime turn adapter', () => {
     expect(turnEvidence?.evidence).toEqual(result.rawEvent.agentCapabilityEvidence);
   });
 
-  it('records successful capability health snapshots in completed turn evidence', async () => {
+  it('records returned degraded capability health evidence in completed turn evidence', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
     const capabilityHost = createRuntimeCapabilityHost({
@@ -1869,6 +1869,13 @@ describe('local runtime turn adapter', () => {
         evidenceKind: 'before_role_model_call',
         status: 'accepted',
         summary: 'context hook accepted'
+      },
+      {
+        capabilityId: 'memory.health_completed_runtime',
+        evidenceKind: 'health',
+        status: 'degraded',
+        summary: 'Capability health degraded: memory health degraded',
+        policyOutcome: 'health_degraded'
       }
     ]);
     expect(turnEvidence?.evidence).toEqual(result.rawEvent.agentCapabilityEvidence);
@@ -2191,11 +2198,27 @@ describe('local runtime turn adapter', () => {
         .some((record) => record.kind === 'visible_reply_committed')
     ).toBe(false);
 
+    const commitRejected = findRawEvent(
+      result.rawEventLogRecords,
+      'commit_validation_rejected'
+    );
     const terminalRejected = findRawEvent(
       result.rawEventLogRecords,
       'runtime_turn_rejected'
     );
 
+    expect(commitRejected.agentCapabilityEvidence).toMatchObject([
+      {
+        capabilityId: 'memory.health_unavailable_runtime',
+        evidenceKind: 'health',
+        status: 'failed',
+        summary: 'Capability health unavailable: gateway unavailable',
+        policyOutcome: 'health_degraded'
+      }
+    ]);
+    expect(terminalRejected.agentCapabilityEvidence).toEqual(
+      commitRejected.agentCapabilityEvidence
+    );
     expect(terminalRejected.agentCapabilityTurnEvidence?.health).toEqual([
       {
         capabilityId: 'memory.health_unavailable_runtime',
