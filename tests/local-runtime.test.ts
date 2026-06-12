@@ -1027,6 +1027,150 @@ describe('local runtime turn adapter', () => {
     );
   });
 
+  it('pairs omitted character state store with a file-backed log store', async () => {
+    const storeRoot = createTempStoreRoot();
+    const sessionId = 'mira-local';
+    await createCatalogedSession(storeRoot, sessionId);
+
+    const session = createConversationSession({
+      id: sessionId
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_default_file_state',
+        'trace_default_file_state'
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'stateful durable reply'
+              }
+            },
+            {
+              name: 'character_state.patch',
+              input: {
+                mood: 'curious'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result.status).toBe('completed');
+    expect(
+      createFileCharacterStateStore({
+        storeRoot,
+        sessionId
+      }).readCurrentState().current.mood
+    ).toBe('curious');
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId
+      }).rawEvents()
+    ).not.toThrow(
+      'Stored character state does not match accepted character state patch evidence.'
+    );
+  });
+
+  it('does not reuse an in-memory default for a later file-backed log store', async () => {
+    const sessionId = 'mira-local';
+    const session = createConversationSession({
+      id: sessionId
+    });
+
+    const warmupResult = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'warmup',
+        'evt_memory_state_warmup',
+        'trace_memory_state_warmup'
+      ),
+      session,
+      logStore: createRuntimeLogStore(),
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'memory reply'
+              }
+            },
+            {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'ecstatic'
+                }
+              }
+            ]
+        })
+      )
+    });
+
+    expect(warmupResult.status).toBe('rejected');
+
+    expect(session.visibleTranscript).toEqual([]);
+
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, sessionId);
+    const fileLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestUserMessageEvent(
+          'file turn',
+          'evt_file_state_after_memory',
+          'trace_file_state_after_memory'
+        ),
+        session,
+        logStore: fileLogStore,
+        roleModelAdapter: createRawOutputAdapter(
+          JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'file reply'
+                }
+              },
+              {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'curious'
+                }
+              }
+            ]
+          })
+        )
+      })
+    ).resolves.toMatchObject({ status: 'completed' });
+
+    expect(
+      createFileCharacterStateStore({
+        storeRoot,
+        sessionId
+      }).readCurrentState().current.mood
+    ).toBe('curious');
+  });
+
   it('keeps the default in-memory character state store scoped to the session', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();

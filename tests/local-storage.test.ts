@@ -36,6 +36,7 @@ import {
   normalizeLocalRuntimeSessionId,
   parseRoleModelDecision,
   planCharacterStatePatch,
+  roleModelAdapterRejectionNotReplayableDetails,
   roleModelDecisionContractVersion,
   roleModelDisallowedToolRejectionReason,
   roleModelInvalidCharacterStatePatchRejectionReason,
@@ -102,6 +103,7 @@ describe('local runtime storage contract', () => {
       sessionsRoot: join('.project02-runtime', 'sessions')
     });
     expect(sessionPaths).toEqual({
+      storeRoot: '.project02-runtime',
       sessionId: 'mira-local',
       sessionRoot: join('.project02-runtime', 'sessions', 'mira-local'),
       tracePath: join('.project02-runtime', 'sessions', 'mira-local', 'trace.jsonl'),
@@ -743,6 +745,42 @@ describe('local runtime storage contract', () => {
           rejection: {
             reason: roleModelProviderErrorRejectionReason,
             details: 'Provider request failed.'
+          }
+        }
+      }
+    });
+  });
+
+  it('accepts sanitized adapter rejection evidence when explicit rejection cannot replay', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    setParsedRoleModelRejection(
+      record,
+      roleModelMalformedOutputRejectionReason,
+      roleModelAdapterRejectionNotReplayableDetails,
+      ''
+    );
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelMalformedOutputRejectionReason,
+      roleModelAdapterRejectionNotReplayableDetails
+    );
+
+    const decoded = decodeRawEventLogRecord(JSON.stringify(record));
+
+    expect(decoded).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelMalformedOutputRejectionReason,
+      roleModelIOSnapshot: {
+        rawOutputText: ''
+      },
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelMalformedOutputRejectionReason,
+            details: roleModelAdapterRejectionNotReplayableDetails
           }
         }
       }

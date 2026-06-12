@@ -11,6 +11,7 @@ import {
   createDecisionContext,
   getRequiredVisibleReplyText,
   createRoleModelInputEnvelope,
+  roleModelAdapterRejectionNotReplayableDetails,
   roleModelDecisionContractVersion,
   roleModelMalformedOutputRejectionReason,
   roleModelProviderErrorRejectionReason,
@@ -233,6 +234,73 @@ describe('role model loop', () => {
     }
   });
 
+  it('rejects explicit adapter rejections when raw output cannot replay to the same rejection', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_role_unreplayable_rejection'
+      ),
+      decisionContext: createDecisionContext({
+        sessionId: 'local-session',
+        characterSnapshot: localCharacterProfile
+      }),
+      adapter: createMalformedRawOutputAdapter({
+        rawOutputText: 'rate limit',
+        rejection: {
+          reason: roleModelProviderErrorRejectionReason,
+          details: 'rate limit'
+        }
+      })
+    });
+
+    expect(result.status).toBe('rejected');
+
+    if (result.status !== 'rejected') {
+      throw new Error('Expected rejected role model result.');
+    }
+
+    expect(result.rejection).toEqual({
+      reason: roleModelMalformedOutputRejectionReason,
+      details: roleModelAdapterRejectionNotReplayableDetails
+    });
+    expect(result.ioSnapshot.rawOutputText).toBe('');
+    expect(result.ioSnapshot.providerMetadata).toBeUndefined();
+    expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
+  });
+
+  it('preserves explicit adapter rejections when raw output replays to the same rejection', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_role_replayable_rejection'
+      ),
+      decisionContext: createDecisionContext({
+        sessionId: 'local-session',
+        characterSnapshot: localCharacterProfile
+      }),
+      adapter: createMalformedRawOutputAdapter({
+        rawOutputText: 'not json',
+        rejection: {
+          reason: roleModelMalformedOutputRejectionReason,
+          details: 'Adapter output must be valid JSON.'
+        }
+      })
+    });
+
+    expect(result.status).toBe('rejected');
+
+    if (result.status !== 'rejected') {
+      throw new Error('Expected rejected role model result.');
+    }
+
+    expect(result.rejection).toEqual({
+      reason: roleModelMalformedOutputRejectionReason,
+      details: 'Adapter output must be valid JSON.'
+    });
+    expect(result.ioSnapshot.rawOutputText).toBe('not json');
+    expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
+  });
+
   it('rejects empty provider-error adapter outputs without matching provider error metadata', async () => {
     const malformedProviderErrorOutputs: readonly unknown[] = [
       {
@@ -292,7 +360,7 @@ describe('role model loop', () => {
 
       expect(result.rejection).toEqual({
         reason: roleModelMalformedOutputRejectionReason,
-        details: 'Adapter raw output must include string rawOutputText.'
+        details: roleModelAdapterRejectionNotReplayableDetails
       });
       expect(result.ioSnapshot.rawOutputText).toBe('');
       expect(result.ioSnapshot.providerMetadata).toBeUndefined();

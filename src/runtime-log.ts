@@ -11,6 +11,7 @@ import {
   type RoleModelIOSnapshot
 } from './role-model-contracts.ts';
 import type { RuntimeEventIdentity, RuntimeEventType } from './runtime-event.ts';
+import type { LocalRuntimeSessionPaths } from './local-storage.ts';
 
 export type RuntimeTurnStatus = 'completed' | 'rejected';
 
@@ -86,6 +87,7 @@ export type ConversationLogRecordInput = VisibleMessage &
   };
 
 export type RuntimeLogStore = {
+  readonly localRuntimeSessionPaths?: LocalRuntimeSessionPaths;
   appendTrace(entry: RuntimeTraceEntryInput): RuntimeTraceEntry;
   appendRawEvent(record: RawEventLogRecordInput): RawEventLogRecord;
   appendConversationMessage(record: ConversationLogRecordInput): ConversationLogRecord;

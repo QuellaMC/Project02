@@ -18,6 +18,7 @@ import {
   type CharacterStatePatchSnapshot,
   type CharacterStateStore
 } from './character-state.ts';
+import { createFileCharacterStateStore } from './file-character-state-store.ts';
 import { buildUserTurnDecisionContext } from './decision-context.ts';
 import {
   createRejectedRoleModelDecisionResult,
@@ -569,6 +570,13 @@ function characterStateStoreForTurn(
 ): CharacterStateStore {
   if (options.characterStateStore !== undefined) {
     return options.characterStateStore;
+  }
+
+  if (options.logStore.localRuntimeSessionPaths !== undefined) {
+    return createFileCharacterStateStore({
+      storeRoot: options.logStore.localRuntimeSessionPaths.storeRoot,
+      sessionId: options.logStore.localRuntimeSessionPaths.sessionId
+    });
   }
 
   const existingStore = defaultCharacterStateStores.get(options.session);

@@ -132,6 +132,8 @@ export const roleModelCommitValidationFailureRejectionReason =
   'commit_validation_failure';
 export const roleModelAdapterRawOutputMissingTextRejectionDetails =
   'Adapter raw output must include string rawOutputText.';
+export const roleModelAdapterRejectionNotReplayableDetails =
+  'Adapter rejection must be replayable from rawOutputText.';
 
 export type RoleModelDecisionRejectionReason =
   | typeof roleModelMalformedOutputRejectionReason
@@ -321,6 +323,34 @@ export function parseRoleModelDecision(
   return parseRoleModelDecisionObject(parsedOutput, allowedTools);
 }
 
+export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
+  readonly rawOutputText: string;
+  readonly providerMetadata: RoleModelProviderMetadata | undefined;
+  readonly decisionResult: RoleModelDecisionResult;
+  readonly allowedTools?: readonly RoleModelAllowedToolName[];
+}): boolean {
+  const parsedRawOutputDecision = parseRoleModelDecision(
+    options.rawOutputText,
+    options.allowedTools
+  );
+
+  return (
+    roleModelDecisionResultsMatch({
+      actual: options.decisionResult,
+      expected: parsedRawOutputDecision
+    }) ||
+    isRoleModelMalformedAdapterRawOutputEvidence({
+      rawOutputText: options.rawOutputText,
+      decisionResult: options.decisionResult
+    }) ||
+    isRoleModelProviderErrorRawOutputEvidence({
+      rawOutputText: options.rawOutputText,
+      providerMetadata: options.providerMetadata,
+      decisionResult: options.decisionResult
+    })
+  );
+}
+
 export function isRoleModelProviderErrorRawOutputEvidence(options: {
   readonly rawOutputText: string;
   readonly providerMetadata: RoleModelProviderMetadata | undefined;
@@ -335,6 +365,45 @@ export function isRoleModelProviderErrorRawOutputEvidence(options: {
     options.decisionResult.rejection.reason ===
       roleModelProviderErrorRejectionReason &&
     options.decisionResult.rejection.details === providerError.message
+  );
+}
+
+function roleModelDecisionResultsMatch(options: {
+  readonly actual: RoleModelDecisionResult;
+  readonly expected: RoleModelDecisionResult;
+}): boolean {
+  if (options.actual.status !== options.expected.status) {
+    return false;
+  }
+
+  if (options.actual.status === 'accepted') {
+    return (
+      options.expected.status === 'accepted' &&
+      JSON.stringify(options.actual.decision) ===
+        JSON.stringify(options.expected.decision)
+    );
+  }
+
+  return (
+    options.expected.status === 'rejected' &&
+    options.actual.rejection.reason === options.expected.rejection.reason &&
+    options.actual.rejection.details === options.expected.rejection.details
+  );
+}
+
+function isRoleModelMalformedAdapterRawOutputEvidence(options: {
+  readonly rawOutputText: string;
+  readonly decisionResult: RoleModelDecisionResult;
+}): boolean {
+  return (
+    options.rawOutputText.length === 0 &&
+    options.decisionResult.status === 'rejected' &&
+    options.decisionResult.rejection.reason ===
+      roleModelMalformedOutputRejectionReason &&
+    (options.decisionResult.rejection.details ===
+      roleModelAdapterRawOutputMissingTextRejectionDetails ||
+      options.decisionResult.rejection.details ===
+        roleModelAdapterRejectionNotReplayableDetails)
   );
 }
 
@@ -511,6 +580,22 @@ function parseModelToolCall(options: {
     return rejectToolCall(
       `Decision toolCalls[${String(options.index)}] must be an object.`
     );
+  }
+
+  const unsupportedToolCallKeys = findUnsupportedKeys(options.rawToolCall, [
+    'name',
+    'input'
+  ]);
+
+  if (unsupportedToolCallKeys.length > 0) {
+    return {
+      status: 'rejected',
+      result: createUnsupportedOutputResult(
+        `Decision toolCalls[${String(
+          options.index
+        )}] includes unsupported fields: ${unsupportedToolCallKeys.join(', ')}.`
+      )
+    };
   }
 
   const name = options.rawToolCall['name'];

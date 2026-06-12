@@ -53,6 +53,7 @@ export {
   getVisibleReplyToolCall,
   roleModelAllowedActionNames,
   roleModelAllowedToolNames,
+  roleModelAdapterRejectionNotReplayableDetails,
   roleModelCharacterStatePatchToolName,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,

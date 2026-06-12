@@ -61,6 +61,7 @@ export function createFileRuntimeLogStore(
   };
 
   return Object.freeze({
+    localRuntimeSessionPaths: paths,
     appendTrace(entry) {
       const encoded = encodeRuntimeTraceEntry(entry);
       const storedEntry = decodeRuntimeTraceEntry(encoded);

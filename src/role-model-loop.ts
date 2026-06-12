@@ -9,16 +9,17 @@ import {
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createVisibleReplyCharacterDecision,
-  isRoleModelProviderErrorRawOutputEvidence,
+  roleModelAdapterRejectionNotReplayableDetails,
+  isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
   roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelDecisionRejectionReasons,
   roleModelMalformedOutputRejectionReason,
-  roleModelProviderErrorRejectionReason,
   type AcceptedRoleModelDecisionResult,
   type CharacterDecision,
   type DecisionContext,
   type ParsedRoleModelDecisionSnapshot,
+  type RoleModelAllowedToolName,
   type RejectedRoleModelDecisionResult,
   type RoleModelDecisionRejection,
   type RoleModelDecisionRejectionReason,
@@ -104,7 +105,10 @@ export async function runRoleModelLoop(
   });
   const adapter = options.adapter ?? createDeterministicLocalRoleModelAdapter();
   const rawOutput: unknown = await adapter.invoke(inputEnvelope);
-  const rawOutputValidation = validateRoleModelAdapterRawOutput(rawOutput);
+  const rawOutputValidation = validateRoleModelAdapterRawOutput(
+    rawOutput,
+    inputEnvelope.allowedTools
+  );
   const identity = createSnapshotIdentity(inputEnvelope.event);
   const sessionId = inputEnvelope.decisionContext.sessionId;
   const ioSnapshot = createRoleModelIOSnapshot({
@@ -170,7 +174,8 @@ type RoleModelAdapterRawOutputValidationResult =
     };
 
 function validateRoleModelAdapterRawOutput(
-  rawOutput: unknown
+  rawOutput: unknown,
+  allowedTools: readonly RoleModelAllowedToolName[]
 ): RoleModelAdapterRawOutputValidationResult {
   if (!isJsonRecord(rawOutput)) {
     return createMalformedAdapterRawOutputResult();
@@ -192,15 +197,16 @@ function validateRoleModelAdapterRawOutput(
     );
 
     if (
-      rejection.reason === roleModelProviderErrorRejectionReason &&
-      rawOutputText.length === 0 &&
-      !isRoleModelProviderErrorRawOutputEvidence({
+      !isRoleModelRawOutputReplayableDecisionEvidence({
         rawOutputText,
         providerMetadata,
-        decisionResult
+        decisionResult,
+        allowedTools
       })
     ) {
-      return createMalformedAdapterRawOutputResult();
+      return createMalformedAdapterRawOutputResult(
+        roleModelAdapterRejectionNotReplayableDetails
+      );
     }
 
     return Object.freeze({
@@ -218,13 +224,15 @@ function validateRoleModelAdapterRawOutput(
   } satisfies RoleModelAdapterRawOutputValidationResult);
 }
 
-function createMalformedAdapterRawOutputResult(): RoleModelAdapterRawOutputValidationResult {
+function createMalformedAdapterRawOutputResult(
+  details = roleModelAdapterRawOutputMissingTextRejectionDetails
+): RoleModelAdapterRawOutputValidationResult {
   return Object.freeze({
     status: 'rejected',
     rawOutputText: '',
     decisionResult: createRejectedRoleModelDecisionResult(
       roleModelMalformedOutputRejectionReason,
-      roleModelAdapterRawOutputMissingTextRejectionDetails
+      details
     )
   } satisfies RoleModelAdapterRawOutputValidationResult);
 }

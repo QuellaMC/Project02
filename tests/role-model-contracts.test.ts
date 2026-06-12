@@ -237,6 +237,51 @@ describe('role model decision contracts', () => {
     );
   });
 
+  it('rejects unsupported fields on new ordered toolCalls items', () => {
+    for (const unsupportedKey of ['arguments', 'function', 'type']) {
+      const result = parseRoleModelDecision(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'visible reply'
+              },
+              [unsupportedKey]: {
+                text: 'ignored alternate shape'
+              }
+            }
+          ]
+        })
+      );
+
+      expect(result).toEqual({
+        status: 'rejected',
+        rejection: {
+          reason: roleModelUnsupportedEffectRejectionReason,
+          details: `Decision toolCalls[0] includes unsupported fields: ${unsupportedKey}.`
+        }
+      });
+    }
+
+    const validResult = parseRoleModelDecision(
+      JSON.stringify({
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: 'visible reply'
+            }
+          }
+        ]
+      })
+    );
+
+    expect(validResult.status).toBe('accepted');
+  });
+
   it('enforces allowed tools for legacy visible_reply action decisions', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({

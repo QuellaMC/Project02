@@ -41,16 +41,14 @@ import {
   getCharacterStatePatchToolCall,
   getRequiredVisibleReplyText,
   isRoleModelAllowedToolName,
-  isRoleModelProviderErrorRawOutputEvidence,
+  isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
-  roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
   roleModelLegacyDecisionContractVersion,
   roleModelDecisionRejectionReasons,
   roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
-  roleModelMalformedOutputRejectionReason,
   type CharacterDecision,
   type DecisionContext,
   type ParsedRoleModelDecisionSnapshot,
@@ -111,6 +109,7 @@ export type LocalRuntimeStorageLayout = {
 };
 
 export type LocalRuntimeSessionPaths = {
+  readonly storeRoot: string;
   readonly sessionId: string;
   readonly sessionRoot: string;
   readonly tracePath: string;
@@ -216,6 +215,7 @@ export function createLocalRuntimeSessionPaths(
   const sessionRoot = join(layout.sessionsRoot, sessionId);
 
   return Object.freeze({
+    storeRoot: layout.storeRoot,
     sessionId,
     sessionRoot,
     tracePath: join(sessionRoot, traceFileName),
@@ -1162,26 +1162,12 @@ function assertParsedRoleModelDecisionMatchesRawOutput(options: {
   readonly roleModelIOSnapshot: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
 }): void {
-  const parsedRawOutputDecision = parseRoleModelDecision(
-    options.roleModelIOSnapshot.rawOutputText,
-    options.roleModelIOSnapshot.inputEnvelope.allowedTools
-  );
-  const parsedSnapshotDecision =
-    options.parsedRoleModelDecisionSnapshot.result;
-
   if (
-    roleModelDecisionResultsMatch({
-      actual: parsedSnapshotDecision,
-      expected: parsedRawOutputDecision
-    }) ||
-    isMalformedAdapterRawOutputEvidence({
-      rawOutputText: options.roleModelIOSnapshot.rawOutputText,
-      parsedSnapshotDecision
-    }) ||
-    isRoleModelProviderErrorRawOutputEvidence({
+    isRoleModelRawOutputReplayableDecisionEvidence({
       rawOutputText: options.roleModelIOSnapshot.rawOutputText,
       providerMetadata: options.roleModelIOSnapshot.providerMetadata,
-      decisionResult: parsedSnapshotDecision
+      decisionResult: options.parsedRoleModelDecisionSnapshot.result,
+      allowedTools: options.roleModelIOSnapshot.inputEnvelope.allowedTools
     })
   ) {
     return;
@@ -1210,43 +1196,6 @@ function assertParsedRoleModelDecisionAllowedByEnvelope(options: {
 
   throwMalformedRecord(
     'roleModelIOSnapshot.inputEnvelope.allowedTools'
-  );
-}
-
-function roleModelDecisionResultsMatch(options: {
-  readonly actual: RoleModelDecisionResult;
-  readonly expected: RoleModelDecisionResult;
-}): boolean {
-  if (options.actual.status !== options.expected.status) {
-    return false;
-  }
-
-  if (options.actual.status === 'accepted') {
-    return (
-      options.expected.status === 'accepted' &&
-      JSON.stringify(options.actual.decision) ===
-        JSON.stringify(options.expected.decision)
-    );
-  }
-
-  return (
-    options.expected.status === 'rejected' &&
-    options.actual.rejection.reason === options.expected.rejection.reason &&
-    options.actual.rejection.details === options.expected.rejection.details
-  );
-}
-
-function isMalformedAdapterRawOutputEvidence(options: {
-  readonly rawOutputText: string;
-  readonly parsedSnapshotDecision: RoleModelDecisionResult;
-}): boolean {
-  return (
-    options.rawOutputText.length === 0 &&
-    options.parsedSnapshotDecision.status === 'rejected' &&
-    options.parsedSnapshotDecision.rejection.reason ===
-      roleModelMalformedOutputRejectionReason &&
-    options.parsedSnapshotDecision.rejection.details ===
-      roleModelAdapterRawOutputMissingTextRejectionDetails
   );
 }
 
