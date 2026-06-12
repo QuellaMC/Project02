@@ -5,7 +5,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createAcceptedRoleModelDecisionResult,
+  createCharacterStatePatchSnapshot,
   createDecisionContext,
+  createDefaultCharacterRuntimeState,
+  createLivingStateBrief,
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
@@ -31,8 +34,15 @@ import {
   LocalRuntimeStorageContractError,
   localRuntimeStorageSchemaVersion,
   normalizeLocalRuntimeSessionId,
+  parseRoleModelDecision,
+  planCharacterStatePatch,
+  roleModelAdapterRejectionNotReplayableDetails,
+  roleModelDecisionContractVersion,
+  roleModelDisallowedToolRejectionReason,
+  roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelMalformedOutputRejectionReason,
+  roleModelProviderErrorRejectionReason,
   roleModelVisibleReplyActionName,
   type ConversationLogRecord,
   type LocalRuntimeStorageContractErrorCode,
@@ -93,6 +103,7 @@ describe('local runtime storage contract', () => {
       sessionsRoot: join('.project02-runtime', 'sessions')
     });
     expect(sessionPaths).toEqual({
+      storeRoot: '.project02-runtime',
       sessionId: 'mira-local',
       sessionRoot: join('.project02-runtime', 'sessions', 'mira-local'),
       tracePath: join('.project02-runtime', 'sessions', 'mira-local', 'trace.jsonl'),
@@ -107,6 +118,12 @@ describe('local runtime storage contract', () => {
         'sessions',
         'mira-local',
         'conversation.jsonl'
+      ),
+      characterStatePath: join(
+        '.project02-runtime',
+        'sessions',
+        'mira-local',
+        'character-state.json'
       )
     });
     expect(createLocalRuntimeStorageLayout({ storeRoot: '/tmp/project02-store' })).toEqual({
@@ -351,7 +368,183 @@ describe('local runtime storage contract', () => {
       'roleModelIOSnapshot.inputEnvelope'
     );
 
-    inputEnvelope['allowedActions'] = [];
+    inputEnvelope['allowedTools'] = [];
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('accepts parser-owned disallowed-tool rejection from stored input envelope tools', () => {
+    const decoded = decodeRawEventLogRecord(
+      JSON.stringify(createRoleModelDisallowedToolRejectedRawEvent())
+    );
+
+    expect(decoded).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelDisallowedToolRejectionReason,
+      roleModelIOSnapshot: {
+        inputEnvelope: {
+          allowedTools: [roleModelVisibleReplyActionName]
+        }
+      },
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelDisallowedToolRejectionReason,
+            details: 'Decision requested disallowed tool "character_state.patch".'
+          }
+        }
+      }
+    });
+  });
+
+  it('rejects stored living-state brief text that does not match its current state', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const snapshot = requiredMutableRecord(
+      record['roleModelIOSnapshot'],
+      'roleModelIOSnapshot'
+    );
+    const inputEnvelope = requiredMutableRecord(
+      snapshot['inputEnvelope'],
+      'roleModelIOSnapshot.inputEnvelope'
+    );
+    const decisionContext = requiredMutableRecord(
+      inputEnvelope['decisionContext'],
+      'roleModelIOSnapshot.inputEnvelope.decisionContext'
+    );
+    const livingStateBrief = requiredMutableRecord(
+      decisionContext['livingStateBrief'],
+      'roleModelIOSnapshot.inputEnvelope.decisionContext.livingStateBrief'
+    );
+
+    livingStateBrief['text'] = 'mood=steady; energy=high; attention=present';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects accepted character-state patch evidence that does not match the parsed tool call', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelCompletedRawEventWithStatePatch()
+    );
+    const snapshot = requiredMutableRecord(
+      record['characterStatePatchSnapshot'],
+      'characterStatePatchSnapshot'
+    );
+    const result = requiredMutableRecord(
+      snapshot['result'],
+      'characterStatePatchSnapshot.result'
+    );
+    const after = requiredMutableRecord(
+      result['after'],
+      'characterStatePatchSnapshot.result.after'
+    );
+    const current = requiredMutableRecord(
+      after['current'],
+      'characterStatePatchSnapshot.result.after.current'
+    );
+
+    current['mood'] = 'playful';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects accepted character-state patch decisions without patch evidence', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelCompletedRawEventWithStatePatch()
+    );
+
+    delete record['characterStatePatchSnapshot'];
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects accepted character-state patch metadata that does not match the parsed tool call', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelCompletedRawEventWithStatePatch()
+    );
+    const snapshot = requiredMutableRecord(
+      record['characterStatePatchSnapshot'],
+      'characterStatePatchSnapshot'
+    );
+    const result = requiredMutableRecord(
+      snapshot['result'],
+      'characterStatePatchSnapshot.result'
+    );
+    const patch = requiredMutableRecord(
+      result['patch'],
+      'characterStatePatchSnapshot.result.patch'
+    );
+
+    patch['mood'] = 'playful';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects character-state patch snapshots with mismatched session identity', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelCompletedRawEventWithStatePatch()
+    );
+    const snapshot = requiredMutableRecord(
+      record['characterStatePatchSnapshot'],
+      'characterStatePatchSnapshot'
+    );
+
+    snapshot['sessionId'] = 'other-session';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects invalid character-state patch commit rejections without patch evidence', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelRejectedRawEventWithStatePatch()
+    );
+
+    delete record['characterStatePatchSnapshot'];
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects rejected character-state patch input that does not match the parsed tool call', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelRejectedRawEventWithStatePatch()
+    );
+    const snapshot = requiredMutableRecord(
+      record['characterStatePatchSnapshot'],
+      'characterStatePatchSnapshot'
+    );
+    const result = requiredMutableRecord(
+      snapshot['result'],
+      'characterStatePatchSnapshot.result'
+    );
+    const patchInput = requiredMutableRecord(
+      result['patchInput'],
+      'characterStatePatchSnapshot.result.patchInput'
+    );
+
+    patchInput['mood'] = 'playful';
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('rejects rejected character-state patch rejection that does not match the parsed tool call', () => {
+    const record = mutableRecordFromRawEvent(
+      createRoleModelRejectedRawEventWithStatePatch()
+    );
+    const snapshot = requiredMutableRecord(
+      record['characterStatePatchSnapshot'],
+      'characterStatePatchSnapshot'
+    );
+    const result = requiredMutableRecord(
+      snapshot['result'],
+      'characterStatePatchSnapshot.result'
+    );
+    const rejection = requiredMutableRecord(
+      result['rejection'],
+      'characterStatePatchSnapshot.result.rejection'
+    );
+
+    rejection['details'] = 'Different rejected patch details.';
 
     expectMalformedRawEvent(record);
   });
@@ -423,10 +616,15 @@ describe('local runtime storage contract', () => {
         result: {
           status: 'accepted',
           decision: {
-            action: {
-              type: roleModelVisibleReplyActionName,
-              text: ''
-            }
+            version: 'mvp-006.tool_calls.v1',
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: ''
+                }
+              }
+            ]
           }
         }
       },
@@ -506,6 +704,103 @@ describe('local runtime storage contract', () => {
       record,
       roleModelMalformedOutputRejectionReason,
       'Different parser details.'
+    );
+
+    expectMalformedRawEvent(record);
+  });
+
+  it('accepts provider-error evidence when rejection details match provider metadata', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    setParsedRoleModelRejection(
+      record,
+      roleModelProviderErrorRejectionReason,
+      'Provider request failed.',
+      ''
+    );
+    setRoleModelProviderErrorMetadata(record, 'Provider request failed.');
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelProviderErrorRejectionReason,
+      'Provider request failed.'
+    );
+
+    const decoded = decodeRawEventLogRecord(JSON.stringify(record));
+
+    expect(decoded).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelProviderErrorRejectionReason,
+      roleModelIOSnapshot: {
+        rawOutputText: '',
+        providerMetadata: {
+          error: {
+            message: 'Provider request failed.'
+          }
+        }
+      },
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelProviderErrorRejectionReason,
+            details: 'Provider request failed.'
+          }
+        }
+      }
+    });
+  });
+
+  it('accepts sanitized adapter rejection evidence when explicit rejection cannot replay', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    setParsedRoleModelRejection(
+      record,
+      roleModelMalformedOutputRejectionReason,
+      roleModelAdapterRejectionNotReplayableDetails,
+      ''
+    );
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelMalformedOutputRejectionReason,
+      roleModelAdapterRejectionNotReplayableDetails
+    );
+
+    const decoded = decodeRawEventLogRecord(JSON.stringify(record));
+
+    expect(decoded).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelMalformedOutputRejectionReason,
+      roleModelIOSnapshot: {
+        rawOutputText: ''
+      },
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelMalformedOutputRejectionReason,
+            details: roleModelAdapterRejectionNotReplayableDetails
+          }
+        }
+      }
+    });
+  });
+
+  it('rejects provider-error evidence when rejection details do not match provider metadata', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+
+    setParsedRoleModelRejection(
+      record,
+      roleModelProviderErrorRejectionReason,
+      'Different provider details.',
+      ''
+    );
+    setRoleModelProviderErrorMetadata(record, 'Provider request failed.');
+    rewriteRawEventAsRoleModelRejection(
+      record,
+      roleModelProviderErrorRejectionReason,
+      'Different provider details.'
     );
 
     expectMalformedRawEvent(record);
@@ -651,7 +946,8 @@ function createRoleModelCompletedRawEvent(): RawEventLogRecord {
     characterSnapshot: {
       id: 'mira',
       displayName: 'Mira'
-    }
+    },
+    livingStateBrief: createLivingStateBrief(createDefaultCharacterRuntimeState())
   });
   const inputEnvelope = createRoleModelInputEnvelope({
     event,
@@ -673,12 +969,7 @@ function createRoleModelCompletedRawEvent(): RawEventLogRecord {
       ...identity,
       sessionId: 'local-session',
       inputEnvelope,
-      rawOutputText: JSON.stringify({
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: 'hello back'
-        }
-      })
+      rawOutputText: JSON.stringify(decision)
     }),
     parsedRoleModelDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
       ...identity,
@@ -691,6 +982,256 @@ function createRoleModelCompletedRawEvent(): RawEventLogRecord {
       result: {
         status: 'accepted',
         acceptedVisibleReplyText: 'hello back'
+      }
+    })
+  } satisfies RawEventLogRecord);
+}
+
+function createRoleModelCompletedRawEventWithStatePatch(): RawEventLogRecord {
+  const identity = createRuntimeEventIdentity({
+    eventId: 'evt_role_model_storage_state_patch',
+    traceId: 'trace_role_model_storage_state_patch',
+    createdAt
+  });
+  const event = createUserMessageRuntimeEvent('hello', identity);
+  const decisionContext = createDecisionContext({
+    sessionId: 'local-session',
+    characterSnapshot: {
+      id: 'mira',
+      displayName: 'Mira'
+    },
+    livingStateBrief: createLivingStateBrief(createDefaultCharacterRuntimeState())
+  });
+  const inputEnvelope = createRoleModelInputEnvelope({
+    event,
+    decisionContext
+  });
+  const rawOutputText = JSON.stringify({
+    version: roleModelDecisionContractVersion,
+    toolCalls: [
+      {
+        name: roleModelVisibleReplyActionName,
+        input: {
+          text: 'hello back'
+        }
+      },
+      {
+        name: 'character_state.patch',
+        input: {
+          mood: 'curious'
+        }
+      }
+    ]
+  });
+  const accepted = parseRoleModelDecision(rawOutputText);
+  const statePatchPlan = planCharacterStatePatch({
+    before: createDefaultCharacterRuntimeState(),
+    patchInput: {
+      mood: 'curious'
+    }
+  });
+
+  if (accepted.status !== 'accepted' || statePatchPlan.status !== 'accepted') {
+    throw new Error('Expected accepted state-patch fixture.');
+  }
+
+  return Object.freeze({
+    ...identity,
+    kind: 'runtime_turn_completed',
+    eventType: 'USER_MESSAGE',
+    status: 'completed',
+    visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
+    payloadSummary: {
+      normalizedCurrentUserMessage: 'hello'
+    },
+    roleModelIOSnapshot: createRoleModelIOSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      inputEnvelope,
+      rawOutputText
+    }),
+    parsedRoleModelDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: accepted
+    }),
+    commitValidation: createRoleModelCommitValidationSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: {
+        status: 'accepted',
+        acceptedVisibleReplyText: 'hello back'
+      }
+    }),
+    characterStatePatchSnapshot: createCharacterStatePatchSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: statePatchPlan
+    })
+  } satisfies RawEventLogRecord);
+}
+
+function createRoleModelRejectedRawEventWithStatePatch(): RawEventLogRecord {
+  const identity = createRuntimeEventIdentity({
+    eventId: 'evt_role_model_storage_state_patch_rejected',
+    traceId: 'trace_role_model_storage_state_patch_rejected',
+    createdAt
+  });
+  const event = createUserMessageRuntimeEvent('hello', identity);
+  const decisionContext = createDecisionContext({
+    sessionId: 'local-session',
+    characterSnapshot: {
+      id: 'mira',
+      displayName: 'Mira'
+    },
+    livingStateBrief: createLivingStateBrief(createDefaultCharacterRuntimeState())
+  });
+  const inputEnvelope = createRoleModelInputEnvelope({
+    event,
+    decisionContext
+  });
+  const rawOutputText = JSON.stringify({
+    version: roleModelDecisionContractVersion,
+    toolCalls: [
+      {
+        name: roleModelVisibleReplyActionName,
+        input: {
+          text: 'hello back'
+        }
+      },
+      {
+        name: 'character_state.patch',
+        input: {
+          mood: 'ecstatic'
+        }
+      }
+    ]
+  });
+  const accepted = parseRoleModelDecision(rawOutputText);
+  const statePatchPlan = planCharacterStatePatch({
+    before: createDefaultCharacterRuntimeState(),
+    patchInput: {
+      mood: 'ecstatic'
+    }
+  });
+
+  if (accepted.status !== 'accepted' || statePatchPlan.status !== 'rejected') {
+    throw new Error('Expected rejected state-patch fixture.');
+  }
+
+  return Object.freeze({
+    ...identity,
+    kind: 'runtime_turn_rejected',
+    eventType: 'USER_MESSAGE',
+    status: 'rejected',
+    reason: roleModelInvalidCharacterStatePatchRejectionReason,
+    payloadSummary: {
+      normalizedCurrentUserMessage: 'hello'
+    },
+    roleModelIOSnapshot: createRoleModelIOSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      inputEnvelope,
+      rawOutputText
+    }),
+    parsedRoleModelDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: accepted
+    }),
+    commitValidation: createRoleModelCommitValidationSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: {
+        status: 'rejected',
+        rejection: createRejectedRoleModelDecisionResult(
+          roleModelInvalidCharacterStatePatchRejectionReason,
+          statePatchPlan.rejection.details
+        ).rejection
+      }
+    }),
+    characterStatePatchSnapshot: createCharacterStatePatchSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: statePatchPlan
+    })
+  } satisfies RawEventLogRecord);
+}
+
+function createRoleModelDisallowedToolRejectedRawEvent(): RawEventLogRecord {
+  const identity = createRuntimeEventIdentity({
+    eventId: 'evt_role_model_storage_disallowed_tool',
+    traceId: 'trace_role_model_storage_disallowed_tool',
+    createdAt
+  });
+  const event = createUserMessageRuntimeEvent('hello', identity);
+  const decisionContext = createDecisionContext({
+    sessionId: 'local-session',
+    characterSnapshot: {
+      id: 'mira',
+      displayName: 'Mira'
+    },
+    livingStateBrief: createLivingStateBrief(createDefaultCharacterRuntimeState())
+  });
+  const inputEnvelope = createRoleModelInputEnvelope({
+    event,
+    decisionContext,
+    allowedTools: [roleModelVisibleReplyActionName]
+  });
+  const rawOutputText = JSON.stringify({
+    version: roleModelDecisionContractVersion,
+    toolCalls: [
+      {
+        name: roleModelVisibleReplyActionName,
+        input: {
+          text: 'hello back'
+        }
+      },
+      {
+        name: 'character_state.patch',
+        input: {
+          mood: 'curious'
+        }
+      }
+    ]
+  });
+  const rejected = parseRoleModelDecision(rawOutputText, [
+    roleModelVisibleReplyActionName
+  ]);
+
+  if (
+    rejected.status !== 'rejected' ||
+    rejected.rejection.reason !== roleModelDisallowedToolRejectionReason
+  ) {
+    throw new Error('Expected disallowed tool fixture.');
+  }
+
+  return Object.freeze({
+    ...identity,
+    kind: 'runtime_turn_rejected',
+    eventType: 'USER_MESSAGE',
+    status: 'rejected',
+    reason: roleModelDisallowedToolRejectionReason,
+    payloadSummary: {
+      normalizedCurrentUserMessage: 'hello'
+    },
+    roleModelIOSnapshot: createRoleModelIOSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      inputEnvelope,
+      rawOutputText
+    }),
+    parsedRoleModelDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: rejected
+    }),
+    commitValidation: createRoleModelCommitValidationSnapshot({
+      ...identity,
+      sessionId: 'local-session',
+      result: {
+        status: 'rejected',
+        rejection: rejected.rejection
       }
     })
   } satisfies RawEventLogRecord);
@@ -736,17 +1277,34 @@ function setParsedVisibleReplyText(
     result['decision'],
     'parsedRoleModelDecisionSnapshot.result.decision'
   );
-  const action = requiredMutableRecord(
-    decision['action'],
-    'parsedRoleModelDecisionSnapshot.result.decision.action'
+  const toolCalls = decision['toolCalls'];
+
+  if (!Array.isArray(toolCalls)) {
+    throw new Error(
+      'Expected mutable array for parsedRoleModelDecisionSnapshot.result.decision.toolCalls.'
+    );
+  }
+
+  const visibleReplyToolCall = requiredMutableRecord(
+    toolCalls[0],
+    'parsedRoleModelDecisionSnapshot.result.decision.toolCalls[0]'
+  );
+  const input = requiredMutableRecord(
+    visibleReplyToolCall['input'],
+    'parsedRoleModelDecisionSnapshot.result.decision.toolCalls[0].input'
   );
 
-  action['text'] = text;
+  input['text'] = text;
   setRoleModelRawOutputText(record, JSON.stringify({
-    action: {
-      type: roleModelVisibleReplyActionName,
-      text
-    }
+    version: 'mvp-006.tool_calls.v1',
+    toolCalls: [
+      {
+        name: roleModelVisibleReplyActionName,
+        input: {
+          text
+        }
+      }
+    ]
   }));
 }
 
@@ -776,6 +1334,29 @@ function setRoleModelRawOutputText(
   );
 
   roleModelIOSnapshot['rawOutputText'] = rawOutputText;
+}
+
+function setRoleModelProviderErrorMetadata(
+  record: Record<string, unknown>,
+  message: string
+): void {
+  const roleModelIOSnapshot = requiredMutableRecord(
+    record['roleModelIOSnapshot'],
+    'roleModelIOSnapshot'
+  );
+
+  roleModelIOSnapshot['providerMetadata'] = {
+    provider: 'nvidia',
+    model: 'nvidia/test-model',
+    request: {
+      endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
+      stream: false
+    },
+    error: {
+      code: 'provider_error',
+      message
+    }
+  };
 }
 
 function mutableRecordFromRawEvent(

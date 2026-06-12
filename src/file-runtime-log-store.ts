@@ -1,6 +1,16 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 import {
+  characterRuntimeStateVersion,
+  characterRuntimeStatesEqual,
+  createDefaultCharacterRuntimeState,
+  createLivingStateBrief,
+  decodeCharacterRuntimeState,
+  type CharacterRuntimeState,
+  type CharacterStatePatchResult,
+  type LivingStateBrief
+} from './character-state.ts';
+import {
   ConversationRehydrationError,
   selectRecentVisibleMessages,
   type VisibleMessage,
@@ -52,6 +62,7 @@ export function createFileRuntimeLogStore(
   };
 
   return Object.freeze({
+    localRuntimeSessionPaths: paths,
     appendTrace(entry) {
       const encoded = encodeRuntimeTraceEntry(entry);
       const storedEntry = decodeRuntimeTraceEntry(encoded);
@@ -234,6 +245,10 @@ function assertDurableRuntimeSessionEvidence(options: {
   if (options.mode === 'public') {
     assertRawEventTurnTerminalCompleteness(rawEvents);
     assertCompleteConversationLog(conversationMessages);
+    assertCharacterStateFileMatchesPatchEvidence({
+      paths: options.paths,
+      rawEvents
+    });
   }
 
   assertRawEventVisibleReferencesMatchConversationMessages({
@@ -268,6 +283,150 @@ function assertDurableRuntimeSessionEvidence(options: {
     ),
     rawEvents
   });
+}
+
+function assertCharacterStateFileMatchesPatchEvidence(options: {
+  readonly paths: LocalRuntimeSessionPaths;
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): void {
+  const expectedState = expectedCharacterStateFromPatchEvidence(
+    options.rawEvents
+  );
+  const storedState = readDurableCharacterState(options.paths);
+
+  if (!characterRuntimeStatesEqual(storedState, expectedState)) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Stored character state does not match accepted character state patch evidence.'
+    );
+  }
+}
+
+function expectedCharacterStateFromPatchEvidence(
+  rawEvents: readonly RawEventLogRecord[]
+): CharacterRuntimeState {
+  let expectedState = createDefaultCharacterRuntimeState();
+
+  for (const rawEvent of rawEvents) {
+    assertRoleModelLivingStateBriefMatchesExpectedState({
+      rawEvent,
+      expectedState
+    });
+
+    const result = rawEvent.characterStatePatchSnapshot?.result;
+
+    if (result !== undefined) {
+      assertCharacterStatePatchBeforeMatchesExpectedState({
+        result,
+        expectedState
+      });
+    }
+
+    if (rawEvent.kind !== 'runtime_turn_completed') {
+      continue;
+    }
+
+    if (result?.status !== 'accepted') {
+      continue;
+    }
+
+    expectedState = result.after;
+  }
+
+  return expectedState;
+}
+
+function assertCharacterStatePatchBeforeMatchesExpectedState(options: {
+  readonly result: CharacterStatePatchResult;
+  readonly expectedState: CharacterRuntimeState;
+}): void {
+  if (characterRuntimeStatesEqual(options.result.before, options.expectedState)) {
+    return;
+  }
+
+  throwCharacterStatePatchBeforeMismatch(options.result.status);
+}
+
+function throwCharacterStatePatchBeforeMismatch(
+  status: CharacterStatePatchResult['status']
+): never {
+  const evidenceKind = status === 'accepted' ? 'Accepted' : 'Rejected';
+
+  throw new LocalRuntimeStorageContractError(
+    'malformed_record',
+    `${evidenceKind} character state patch evidence does not match prior state evidence.`
+  );
+}
+
+function assertRoleModelLivingStateBriefMatchesExpectedState(options: {
+  readonly rawEvent: RawEventLogRecord;
+  readonly expectedState: CharacterRuntimeState;
+}): void {
+  const livingStateBrief =
+    options.rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext
+      .livingStateBrief;
+
+  if (livingStateBrief === undefined) {
+    return;
+  }
+
+  const expectedBrief = createLivingStateBrief(options.expectedState);
+
+  if (livingStateBriefsEqual(livingStateBrief, expectedBrief)) {
+    return;
+  }
+
+  throw new LocalRuntimeStorageContractError(
+    'malformed_record',
+    'Role-model prompted living state must match the durable character state before the turn.'
+  );
+}
+
+function livingStateBriefsEqual(
+  left: LivingStateBrief,
+  right: LivingStateBrief
+): boolean {
+  return left.text === right.text && characterRuntimeStatesEqual(
+    {
+      version: characterRuntimeStateVersion,
+      current: left.current
+    },
+    {
+      version: characterRuntimeStateVersion,
+      current: right.current
+    }
+  );
+}
+
+function readDurableCharacterState(
+  paths: LocalRuntimeSessionPaths
+): CharacterRuntimeState {
+  if (!existsSync(paths.characterStatePath)) {
+    return createDefaultCharacterRuntimeState();
+  }
+
+  try {
+    return decodeCharacterRuntimeState(
+      JSON.parse(readFileSync(paths.characterStatePath, 'utf8')) as unknown,
+      throwMalformedCharacterStateRecord
+    );
+  } catch (error: unknown) {
+    if (error instanceof LocalRuntimeStorageContractError) {
+      throw error;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Stored character state is not valid JSON.'
+    );
+  }
+}
+
+function throwMalformedCharacterStateRecord(field: string): never {
+  throw new LocalRuntimeStorageContractError(
+    'malformed_record',
+    `Stored local runtime field "${field}" is malformed.`
+  );
 }
 
 function nextRuntimeEventIdentity(options: {
@@ -1104,7 +1263,8 @@ function assertRoleModelEvidenceMatchesSessionPath(options: {
       rawEvent.roleModelIOSnapshot?.sessionId,
       rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext.sessionId,
       rawEvent.parsedRoleModelDecisionSnapshot?.sessionId,
-      rawEvent.commitValidation?.sessionId
+      rawEvent.commitValidation?.sessionId,
+      rawEvent.characterStatePatchSnapshot?.sessionId
     ];
 
     for (const sessionId of sessionIds) {
@@ -1114,7 +1274,7 @@ function assertRoleModelEvidenceMatchesSessionPath(options: {
 
       throw new LocalRuntimeStorageContractError(
         'malformed_record',
-        'Role-model evidence session identity must match the durable session path.'
+        'Runtime evidence session identity must match the durable session path.'
       );
     }
   }

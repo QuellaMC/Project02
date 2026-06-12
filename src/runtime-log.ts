@@ -1,5 +1,9 @@
 import type { VisibleMessage } from './conversation.ts';
 import {
+  createCharacterStatePatchSnapshot,
+  type CharacterStatePatchSnapshot
+} from './character-state.ts';
+import {
   createParsedRoleModelDecisionSnapshot,
   createRoleModelIOSnapshot,
   type ParsedRoleModelDecisionSnapshot,
@@ -7,6 +11,7 @@ import {
   type RoleModelIOSnapshot
 } from './role-model-contracts.ts';
 import type { RuntimeEventIdentity, RuntimeEventType } from './runtime-event.ts';
+import type { LocalRuntimeSessionPaths } from './local-storage.ts';
 
 export type RuntimeTurnStatus = 'completed' | 'rejected';
 
@@ -51,6 +56,7 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
+  readonly characterStatePatchSnapshot?: CharacterStatePatchSnapshot;
 };
 
 export type ConversationLogRecord = VisibleMessage &
@@ -72,6 +78,7 @@ export type RawEventLogRecordInput = RuntimeEventIdentity & {
   readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
+  readonly characterStatePatchSnapshot?: CharacterStatePatchSnapshot;
 };
 
 export type ConversationLogRecordInput = VisibleMessage &
@@ -80,6 +87,7 @@ export type ConversationLogRecordInput = VisibleMessage &
   };
 
 export type RuntimeLogStore = {
+  readonly localRuntimeSessionPaths?: LocalRuntimeSessionPaths;
   appendTrace(entry: RuntimeTraceEntryInput): RuntimeTraceEntry;
   appendRawEvent(record: RawEventLogRecordInput): RawEventLogRecord;
   appendConversationMessage(record: ConversationLogRecordInput): ConversationLogRecord;
@@ -203,6 +211,9 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
   const commitValidation = freezeRoleModelCommitValidationSnapshot(
     record.commitValidation
   );
+  const characterStatePatchSnapshot = freezeCharacterStatePatchSnapshot(
+    record.characterStatePatchSnapshot
+  );
 
   return Object.freeze({
     eventId: record.eventId,
@@ -218,7 +229,10 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
     ...(parsedRoleModelDecisionSnapshot === undefined
       ? {}
       : { parsedRoleModelDecisionSnapshot }),
-    ...(commitValidation === undefined ? {} : { commitValidation })
+    ...(commitValidation === undefined ? {} : { commitValidation }),
+    ...(characterStatePatchSnapshot === undefined
+      ? {}
+      : { characterStatePatchSnapshot })
   } satisfies RawEventLogRecord);
 }
 
@@ -286,6 +300,16 @@ function freezeRoleModelCommitValidationSnapshot(
   }
 
   return createRoleModelCommitValidationSnapshot(snapshot);
+}
+
+function freezeCharacterStatePatchSnapshot(
+  snapshot: CharacterStatePatchSnapshot | undefined
+): CharacterStatePatchSnapshot | undefined {
+  if (snapshot === undefined) {
+    return undefined;
+  }
+
+  return createCharacterStatePatchSnapshot(snapshot);
 }
 
 function freezeRoleModelCommitValidationResult(

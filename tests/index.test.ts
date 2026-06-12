@@ -31,10 +31,15 @@ describe('public role-model loop exports', () => {
     ).toEqual({
       status: 'accepted',
       decision: {
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: 'hello'
-        }
+        version: 'mvp-006.tool_calls.v1',
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: 'hello'
+            }
+          }
+        ]
       }
     });
   });

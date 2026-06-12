@@ -13,16 +13,26 @@ import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  createConversationSession,
+  createDefaultCharacterRuntimeState,
+  createFileCharacterStateStore,
   createFileRuntimeLogStore,
+  createLivingStateBrief,
   createLocalRuntimeSessionStore,
   createLocalRuntimeSessionPaths,
+  createUserMessageRuntimeEvent,
+  encodeCharacterRuntimeState,
   LocalRuntimeStorageContractError,
   LocalRuntimeSessionStoreError,
   recordLocalUserMessageInputRejection,
+  roleModelDecisionContractVersion,
+  roleModelVisibleReplyActionName,
+  runLocalUserMessageEvent,
   type ConversationLogRecordInput,
   type LocalRuntimeStorageContractErrorCode,
   type LocalRuntimeSessionStoreErrorCode,
   type RawEventLogRecordInput,
+  type RoleModelAdapter,
   type RuntimeTraceEntryInput
 } from '../src/index.ts';
 
@@ -109,6 +119,416 @@ describe('file-backed runtime log store', () => {
     expect(reopened.traceEntries()).toEqual([receivedTrace, completedTrace]);
     expect(reopened.rawEvents()).toEqual([receivedRawEvent, completedRawEvent]);
     expect(reopened.conversationMessages()).toEqual([userMessage, characterMessage]);
+  });
+
+  it('rejects public reads when current character state disagrees with accepted patch evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const result = await runStatePatchUserTurn({
+      eventIdentity: identity,
+      message: 'hello',
+      replyText: 'stateful reply',
+      patchInput: {
+        mood: 'curious'
+      },
+      session: createConversationSession({
+        id: 'mira-local'
+      }),
+      logStore: createFileRuntimeLogStore({
+        storeRoot,
+        sessionId: 'mira-local'
+      }),
+      characterStateStore: createFileCharacterStateStore({
+        storeRoot,
+        sessionId: 'mira-local'
+      })
+    });
+
+    expect(result.status).toBe('completed');
+
+    writeFileSync(
+      paths.characterStatePath,
+      `${encodeCharacterRuntimeState(createDefaultCharacterRuntimeState())}\n`,
+      'utf8'
+    );
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).rawEvents(),
+      'malformed_record'
+    );
+  });
+
+  it('rejects public reads when patch evidence session disagrees with session path', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const result = await runStatePatchUserTurn({
+      eventIdentity: identity,
+      message: 'hello',
+      replyText: 'stateful reply',
+      patchInput: {
+        mood: 'curious'
+      },
+      session: createConversationSession({
+        id: 'mira-local'
+      }),
+      logStore: createFileRuntimeLogStore({
+        storeRoot,
+        sessionId: 'mira-local'
+      }),
+      characterStateStore: createFileCharacterStateStore({
+        storeRoot,
+        sessionId: 'mira-local'
+      })
+    });
+
+    expect(result.status).toBe('completed');
+
+    const rewrittenRawEvents = readFileSync(paths.rawEventsPath, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => {
+        const record = mutableJsonRecordFromLine(line);
+        const snapshot = record['characterStatePatchSnapshot'];
+
+        if (isMutableRecord(snapshot)) {
+          snapshot['sessionId'] = 'other-session';
+        }
+
+        return JSON.stringify(record);
+      })
+      .join('\n');
+
+    writeFileSync(paths.rawEventsPath, `${rewrittenRawEvents}\n`, 'utf8');
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).rawEvents(),
+      'malformed_record'
+    );
+  });
+
+  it('rejects public reads when prompted living state disagrees with prior patch evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const secondIdentity = {
+      eventId: 'evt_file_log_002',
+      traceId: 'trace_file_log_002',
+      createdAt
+    } as const;
+    let invocationCount = 0;
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke() {
+        invocationCount += 1;
+
+        return {
+          rawOutputText: JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: `stateful reply ${String(invocationCount)}`
+                }
+              },
+              {
+                name: 'character_state.patch',
+                input:
+                  invocationCount === 1
+                    ? { mood: 'curious' }
+                    : { energy: 'high' }
+              }
+            ]
+          })
+        };
+      }
+    };
+    const session = createConversationSession({
+      id: 'mira-local'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const characterStateStore = createFileCharacterStateStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    const firstResult = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('hello', identity),
+      session,
+      logStore,
+      characterStateStore,
+      roleModelAdapter
+    });
+    const secondResult = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('second hello', secondIdentity),
+      session,
+      logStore,
+      characterStateStore,
+      roleModelAdapter
+    });
+
+    expect(firstResult.status).toBe('completed');
+    expect(secondResult.status).toBe('completed');
+
+    const stalePromptedBrief = createLivingStateBrief(
+      createDefaultCharacterRuntimeState()
+    );
+    const rewrittenRawEvents = readFileSync(paths.rawEventsPath, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => {
+        const record = mutableJsonRecordFromLine(line);
+
+        if (
+          record['eventId'] !== secondIdentity.eventId ||
+          record['roleModelIOSnapshot'] === undefined
+        ) {
+          return JSON.stringify(record);
+        }
+
+        const roleModelIOSnapshot = requiredMutableRecord(
+          record['roleModelIOSnapshot'],
+          'roleModelIOSnapshot'
+        );
+        const inputEnvelope = requiredMutableRecord(
+          roleModelIOSnapshot['inputEnvelope'],
+          'roleModelIOSnapshot.inputEnvelope'
+        );
+        const decisionContext = requiredMutableRecord(
+          inputEnvelope['decisionContext'],
+          'roleModelIOSnapshot.inputEnvelope.decisionContext'
+        );
+
+        decisionContext['livingStateBrief'] = stalePromptedBrief;
+
+        return JSON.stringify(record);
+      })
+      .join('\n');
+
+    writeFileSync(paths.rawEventsPath, `${rewrittenRawEvents}\n`, 'utf8');
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).rawEvents(),
+      'malformed_record'
+    );
+  });
+
+  it('rejects public reads when accepted intermediate patch before-state disagrees with prior evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const result = await runStatePatchUserTurn({
+      eventIdentity: identity,
+      message: 'hello',
+      replyText: 'stateful reply',
+      patchInput: {
+        mood: 'curious'
+      },
+      session: createConversationSession({
+        id: 'mira-local'
+      }),
+      logStore: createFileRuntimeLogStore({
+        storeRoot,
+        sessionId: 'mira-local'
+      }),
+      characterStateStore: createFileCharacterStateStore({
+        storeRoot,
+        sessionId: 'mira-local'
+      })
+    });
+
+    expect(result.status).toBe('completed');
+
+    const rewrittenRawEvents = readFileSync(paths.rawEventsPath, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => {
+        const record = mutableJsonRecordFromLine(line);
+
+        if (record['kind'] !== 'visible_reply_committed') {
+          return JSON.stringify(record);
+        }
+
+        const snapshot = requiredMutableRecord(
+          record['characterStatePatchSnapshot'],
+          'characterStatePatchSnapshot'
+        );
+        const snapshotResult = requiredMutableRecord(
+          snapshot['result'],
+          'characterStatePatchSnapshot.result'
+        );
+        const before = requiredMutableRecord(
+          snapshotResult['before'],
+          'characterStatePatchSnapshot.result.before'
+        );
+        const current = requiredMutableRecord(
+          before['current'],
+          'characterStatePatchSnapshot.result.before.current'
+        );
+        const appliedChanges = snapshotResult['appliedChanges'];
+
+        if (!isUnknownArray(appliedChanges)) {
+          throw new Error('Expected accepted patch appliedChanges array.');
+        }
+
+        let moodChange: Record<string, unknown> | undefined;
+
+        for (const appliedChange of appliedChanges) {
+          if (
+            isMutableRecord(appliedChange) &&
+            appliedChange['field'] === 'mood'
+          ) {
+            moodChange = appliedChange;
+            break;
+          }
+        }
+
+        if (!isMutableRecord(moodChange)) {
+          throw new Error('Expected accepted patch mood change.');
+        }
+
+        current['mood'] = 'playful';
+        moodChange['before'] = 'playful';
+
+        return JSON.stringify(record);
+      })
+      .join('\n');
+
+    writeFileSync(paths.rawEventsPath, `${rewrittenRawEvents}\n`, 'utf8');
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).rawEvents(),
+      'malformed_record'
+    );
+  });
+
+  it('rejects public reads when rejected patch before-state disagrees with prior evidence', async () => {
+    const storeRoot = createTempStoreRoot();
+    await createCatalogedSession(storeRoot, 'mira-local');
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const secondIdentity = {
+      eventId: 'evt_file_log_002',
+      traceId: 'trace_file_log_002',
+      createdAt
+    } as const;
+    const session = createConversationSession({
+      id: 'mira-local'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const characterStateStore = createFileCharacterStateStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    const firstResult = await runStatePatchUserTurn({
+      eventIdentity: identity,
+      message: 'hello',
+      replyText: 'stateful reply 1',
+      patchInput: {
+        mood: 'curious'
+      },
+      session,
+      logStore,
+      characterStateStore
+    });
+    const secondResult = await runStatePatchUserTurn({
+      eventIdentity: secondIdentity,
+      message: 'second hello',
+      replyText: 'stateful reply 2',
+      patchInput: {
+        mood: 'ecstatic'
+      },
+      session,
+      logStore,
+      characterStateStore
+    });
+
+    expect(firstResult.status).toBe('completed');
+    expect(secondResult.status).toBe('rejected');
+
+    const rewrittenRawEvents = readFileSync(paths.rawEventsPath, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => {
+        const record = mutableJsonRecordFromLine(line);
+
+        if (record['eventId'] !== secondIdentity.eventId) {
+          return JSON.stringify(record);
+        }
+
+        const snapshot = record['characterStatePatchSnapshot'];
+
+        if (!isMutableRecord(snapshot)) {
+          return JSON.stringify(record);
+        }
+
+        const snapshotResult = requiredMutableRecord(
+          snapshot['result'],
+          'characterStatePatchSnapshot.result'
+        );
+        const before = requiredMutableRecord(
+          snapshotResult['before'],
+          'characterStatePatchSnapshot.result.before'
+        );
+        const current = requiredMutableRecord(
+          before['current'],
+          'characterStatePatchSnapshot.result.before.current'
+        );
+
+        current['mood'] = 'steady';
+
+        return JSON.stringify(record);
+      })
+      .join('\n');
+
+    writeFileSync(paths.rawEventsPath, `${rewrittenRawEvents}\n`, 'utf8');
+
+    expectStorageErrorCode(
+      () =>
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId: 'mira-local'
+        }).rawEvents(),
+      'malformed_record'
+    );
   });
 
   it('keeps two selected sessions separate', async () => {
@@ -2061,6 +2481,35 @@ function createTempStoreRoot(): string {
   return storeRoot;
 }
 
+function mutableJsonRecordFromLine(line: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(line);
+
+  if (isMutableRecord(parsed)) {
+    return parsed;
+  }
+
+  throw new Error('Expected raw event log line to be a JSON object.');
+}
+
+function isMutableRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}
+
+function requiredMutableRecord(
+  value: unknown,
+  field: string
+): Record<string, unknown> {
+  if (isMutableRecord(value)) {
+    return value;
+  }
+
+  throw new Error(`Expected ${field} to be a JSON object.`);
+}
+
 async function createCatalogedFileRuntimeLogStore(
   storeRoot: string,
   sessionId: string
@@ -2087,6 +2536,57 @@ async function createCatalogedSession(
     createdAt,
     updatedAt: createdAt
   });
+}
+
+async function runStatePatchUserTurn(options: {
+  readonly eventIdentity: TestRuntimeIdentity;
+  readonly message: string;
+  readonly replyText: string;
+  readonly patchInput: Readonly<Record<string, unknown>>;
+  readonly session: ReturnType<typeof createConversationSession>;
+  readonly logStore: ReturnType<typeof createFileRuntimeLogStore>;
+  readonly characterStateStore: ReturnType<typeof createFileCharacterStateStore>;
+}): Promise<Awaited<ReturnType<typeof runLocalUserMessageEvent>>> {
+  return await runLocalUserMessageEvent({
+    event: createUserMessageRuntimeEvent(
+      options.message,
+      options.eventIdentity
+    ),
+    session: options.session,
+    logStore: options.logStore,
+    characterStateStore: options.characterStateStore,
+    roleModelAdapter: createStatePatchRoleModelAdapter({
+      replyText: options.replyText,
+      patchInput: options.patchInput
+    })
+  });
+}
+
+function createStatePatchRoleModelAdapter(options: {
+  readonly replyText: string;
+  readonly patchInput: Readonly<Record<string, unknown>>;
+}): RoleModelAdapter {
+  return Object.freeze({
+    invoke() {
+      return {
+        rawOutputText: JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: options.replyText
+              }
+            },
+            {
+              name: 'character_state.patch',
+              input: options.patchInput
+            }
+          ]
+        })
+      };
+    }
+  } satisfies RoleModelAdapter);
 }
 
 function writeVisibleRawEvidence(

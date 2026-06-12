@@ -48,15 +48,28 @@ export {
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createVisibleReplyCharacterDecision,
+  getCharacterStatePatchToolCall,
+  getRequiredVisibleReplyText,
+  getVisibleReplyToolCall,
   roleModelAllowedActionNames,
+  roleModelAllowedToolNames,
+  roleModelAdapterRejectionNotReplayableDetails,
+  roleModelCharacterStatePatchToolName,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
   roleModelDecisionOutputContract,
   roleModelDecisionOutputContractText,
   roleModelDecisionRejectionReasons,
+  roleModelDisallowedToolRejectionReason,
+  roleModelDuplicateToolCallRejectionReason,
+  roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelMalformedOutputRejectionReason,
+  roleModelMalformedToolCallRejectionReason,
+  roleModelMissingRequiredToolCallRejectionReason,
+  roleModelProviderErrorRejectionReason,
   roleModelUnsupportedEffectRejectionReason,
+  roleModelUnknownToolRejectionReason,
   roleModelVisibleReplyActionName,
   type AcceptedRoleModelDecisionResult,
   type CharacterDecision,
@@ -68,14 +81,91 @@ export {
   type ParsedRoleModelDecisionSnapshot,
   type RejectedRoleModelDecisionResult,
   type RoleModelAllowedActionName,
+  type RoleModelAllowedToolName,
   type RoleModelDecisionRejection,
   type RoleModelDecisionRejectionReason,
   type RoleModelDecisionResult,
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot,
   type RoleModelOutputContract,
+  type RoleModelProviderMetadata,
   type RoleModelVisibleReplyAction
 } from './role-model-contracts.ts';
+
+export {
+  builtInModelToolDefinitions,
+  builtInModelToolDefinitionsForUserTurn,
+  characterStatePatchModelToolName,
+  createCharacterStatePatchModelToolCall,
+  createVisibleReplyModelToolCall,
+  findCharacterStatePatchModelToolCall,
+  findVisibleReplyModelToolCall,
+  requiredUserTurnBuiltInModelToolNames,
+  userTurnBuiltInModelToolNames,
+  visibleReplyModelToolName,
+  type BuiltInModelToolCall,
+  type BuiltInModelToolDefinition,
+  type BuiltInModelToolName,
+  type CharacterStatePatchModelToolCall,
+  type CharacterStatePatchModelToolName,
+  type CharacterStatePatchToolInput,
+  type ModelToolInputContract,
+  type ModelToolInputField,
+  type VisibleReplyModelToolCall,
+  type VisibleReplyModelToolName,
+  type VisibleReplyToolInput
+} from './model-tools.ts';
+
+export {
+  createRoleModelPromptPayload,
+  renderRoleModelPromptMessages,
+  roleModelPromptResponseExample,
+  roleModelPromptSystemMessage,
+  type RoleModelPromptMessage,
+  type RoleModelPromptPayload
+} from './role-model-prompt.ts';
+
+export {
+  characterAttentionValues,
+  characterCurrentActivityValues,
+  characterEnergyValues,
+  characterMoodValues,
+  characterRuntimeStateVersion,
+  characterSocialOrientationValues,
+  createCharacterStatePatchSnapshot,
+  createDefaultCharacterRuntimeState,
+  createInMemoryCharacterStateStore,
+  createLivingStateBrief,
+  decodeCharacterRuntimeState,
+  encodeCharacterRuntimeState,
+  freezeCharacterRuntimeState,
+  freezeCharacterStatePatchResult,
+  planCharacterStatePatch,
+  type AcceptedCharacterStatePatchResult,
+  type CharacterAttention,
+  type CharacterCurrentActivity,
+  type CharacterEnergy,
+  type CharacterMood,
+  type CharacterRuntimeState,
+  type CharacterSocialOrientation,
+  type CharacterStateAppliedChange,
+  type CharacterStatePatch,
+  type CharacterStatePatchRejection,
+  type CharacterStatePatchRejectionReason,
+  type CharacterStatePatchResult,
+  type CharacterStatePatchSnapshot,
+  type CharacterStateStore,
+  type CreateCharacterStatePatchSnapshotOptions,
+  type LivingStateBrief,
+  type LivingStateCurrent,
+  type RejectedCharacterStatePatchResult
+} from './character-state.ts';
+
+export { createFileCharacterStateStore } from './file-character-state-store.ts';
+
+export type {
+  CreateFileCharacterStateStoreOptions
+} from './file-character-state-store.ts';
 
 export {
   createDeterministicLocalRoleModelAdapter,
@@ -89,6 +179,28 @@ export {
   type RoleModelLoopResult,
   type RunRoleModelLoopOptions
 } from './role-model-loop.ts';
+
+export {
+  createNvidiaRoleModelProviderAdapter,
+  createNvidiaRoleModelProviderConfigFromEnv,
+  defaultNvidiaChatCompletionsEndpoint,
+  defaultNvidiaRoleModelName,
+  nvidiaApiKeyEnvName,
+  nvidiaRoleModelMaxTokens,
+  nvidiaModelEnvName,
+  nvidiaRoleModelReasoningBudget,
+  nvidiaRoleModelTemperature,
+  nvidiaRoleModelTopP,
+  nvidiaRoleModelProviderName,
+  renderNvidiaMessages,
+  type CreateNvidiaRoleModelProviderAdapterOptions,
+  type NvidiaChatCompletionMessage,
+  type NvidiaFetchClient,
+  type NvidiaFetchRequest,
+  type NvidiaFetchResponse,
+  type NvidiaRoleModelProviderConfig,
+  type NvidiaRoleModelProviderEnvironment
+} from './nvidia-role-model-provider.ts';
 
 export {
   recordLocalUserMessageInputRejection,
