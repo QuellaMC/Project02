@@ -25,6 +25,7 @@ import {
   createAgentCapabilityEvidenceSnapshot,
   createRuntimeCapabilityContext,
   type AgentCapability,
+  type AgentCapabilityLifecycleHooks,
   type AgentCapabilityToolCallResult
 } from '../src/agent-capabilities.ts';
 import { createRuntimeCapabilityHost } from '../src/agent-capability-host.ts';
@@ -725,6 +726,182 @@ describe('role model loop', () => {
       message: 'memory fixture unavailable'
     });
   });
+
+  it('continues when an optional degrading capability tool handler fails after visible_reply', async () => {
+    const event = createTestUserMessageEvent(
+      'search memory',
+      'evt_role_capability_tool_degraded'
+    );
+    const runtimeCapabilityContext = createRuntimeCapabilityContext({
+      eventId: event.eventId,
+      traceId: event.traceId,
+      createdAt: event.createdAt,
+      sessionId: 'local-session',
+      eventType: event.type,
+      currentUserMessage: event.payload.currentUserMessage,
+      character: localCharacterProfile
+    });
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createRoutingCapability({
+          handleToolCall() {
+            throw new Error('memory search unavailable');
+          }
+        })
+      ],
+      enabledCapabilityIds: ['memory.fixture']
+    });
+
+    const result = await runRoleModelLoop({
+      event,
+      decisionContext: createDecisionContext({
+        sessionId: 'local-session',
+        characterSnapshot: localCharacterProfile
+      }),
+      adapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'I can answer without memory.'
+              }
+            },
+            {
+              name: 'memory.search',
+              input: {
+                query: 'preference'
+              }
+            }
+          ]
+        })
+      ),
+      capabilityToolDefinitions: host.capabilityToolDefinitions(),
+      capabilityToolHost: host,
+      runtimeCapabilityContext
+    });
+
+    expect(result.status).toBe('accepted');
+
+    if (result.status !== 'accepted') {
+      throw new Error('Expected degraded capability failure to continue.');
+    }
+
+    expect(getRequiredVisibleReplyText(result.decision)).toBe(
+      'I can answer without memory.'
+    );
+    expect(result.capabilityToolResults).toHaveLength(1);
+    expect(result.capabilityToolResults[0]?.result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      message: 'memory search unavailable',
+      evidence: [
+        {
+          capabilityId: 'memory.fixture',
+          evidenceKind: 'tool_invocation',
+          status: 'degraded',
+          policyOutcome: 'optional_degraded'
+        }
+      ]
+    });
+  });
+
+  it('rejects required and non-degrading capability tool handler failures', async () => {
+    const cases = [
+      {
+        eventId: 'evt_role_capability_tool_non_degrading',
+        capability: createRoutingCapability({
+          handleToolCallFailureBehavior: 'reject_tool_call',
+          handleToolCall() {
+            throw new Error('non-degrading search unavailable');
+          }
+        }),
+        expectedDetails: 'non-degrading search unavailable'
+      },
+      {
+        eventId: 'evt_role_capability_tool_required',
+        capability: createRoutingCapability({
+          requiredForUserTurn: true,
+          handleToolCall() {
+            throw new Error('required search unavailable');
+          }
+        }),
+        expectedDetails: 'required search unavailable'
+      }
+    ] as const;
+
+    for (const testCase of cases) {
+      const event = createTestUserMessageEvent('search memory', testCase.eventId);
+      const runtimeCapabilityContext = createRuntimeCapabilityContext({
+        eventId: event.eventId,
+        traceId: event.traceId,
+        createdAt: event.createdAt,
+        sessionId: 'local-session',
+        eventType: event.type,
+        currentUserMessage: event.payload.currentUserMessage,
+        character: localCharacterProfile
+      });
+      const host = createRuntimeCapabilityHost({
+        capabilities: [testCase.capability],
+        enabledCapabilityIds: ['memory.fixture']
+      });
+
+      const result = await runRoleModelLoop({
+        event,
+        decisionContext: createDecisionContext({
+          sessionId: 'local-session',
+          characterSnapshot: localCharacterProfile
+        }),
+        adapter: createRawOutputAdapter(
+          JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'I will check.'
+                }
+              },
+              {
+                name: 'memory.search',
+                input: {
+                  query: 'preference'
+                }
+              }
+            ]
+          })
+        ),
+        capabilityToolDefinitions: host.capabilityToolDefinitions(),
+        capabilityToolHost: host,
+        runtimeCapabilityContext
+      });
+
+      expect(result.status).toBe('rejected');
+
+      if (result.status !== 'rejected') {
+        throw new Error('Expected capability failure to reject.');
+      }
+
+      expect(result.rejection).toEqual({
+        reason: roleModelCapabilityToolRejectedRejectionReason,
+        details: testCase.expectedDetails
+      });
+      expect(result.capabilityToolResults[0]?.result).toMatchObject({
+        status: 'rejected',
+        reason: 'handler_failed',
+        message: testCase.expectedDetails,
+        evidence: [
+          {
+            capabilityId: 'memory.fixture',
+            evidenceKind: 'tool_invocation',
+            status: 'rejected',
+            policyOutcome: 'handler_rejected'
+          }
+        ]
+      });
+    }
+  });
 });
 
 function createTestUserMessageEvent(message: string, eventId: string) {
@@ -759,8 +936,22 @@ function createMalformedRawOutputAdapter(rawOutput: unknown): RoleModelAdapter {
 }
 
 function createRoutingCapability(options: {
-  readonly result: AgentCapabilityToolCallResult;
+  readonly result?: AgentCapabilityToolCallResult;
+  readonly requiredForTurn?: boolean;
+  readonly requiredForUserTurn?: boolean;
+  readonly handleToolCallFailureBehavior?: 'degrade' | 'reject_tool_call';
+  readonly handleToolCall?: AgentCapabilityLifecycleHooks['handleToolCall'];
 }): AgentCapability {
+  const handleToolCall: AgentCapabilityLifecycleHooks['handleToolCall'] =
+    options.handleToolCall ??
+    (() => {
+      if (options.result === undefined) {
+        throw new Error('Routing capability test result is missing.');
+      }
+
+      return options.result;
+    });
+
   return createAgentCapability({
     manifest: {
       id: 'memory.fixture',
@@ -779,7 +970,7 @@ function createRoutingCapability(options: {
       },
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
-        requiredForTurn: false,
+        requiredForTurn: options.requiredForTurn ?? false,
         sideEffectLevel: 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
@@ -787,7 +978,7 @@ function createRoutingCapability(options: {
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
-          handleToolCall: 'degrade',
+          handleToolCall: options.handleToolCallFailureBehavior ?? 'degrade',
           afterTurnCommitted: 'log_failure',
           health: 'degrade'
         }
@@ -801,7 +992,7 @@ function createRoutingCapability(options: {
       {
         name: 'memory.search',
         description: 'Search fake memory.',
-        requiredForUserTurn: false,
+        requiredForUserTurn: options.requiredForUserTurn ?? false,
         maxCallsPerUserTurn: 1,
         inputContract: {
           type: 'object',
@@ -821,9 +1012,7 @@ function createRoutingCapability(options: {
       }
     ],
     lifecycleHooks: {
-      handleToolCall() {
-        return options.result;
-      }
+      handleToolCall
     }
   });
 }

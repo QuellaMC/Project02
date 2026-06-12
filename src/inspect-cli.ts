@@ -525,7 +525,7 @@ function capabilityEvidenceForRawEvent(
     return {};
   }
 
-  const evidence = Object.freeze([
+  const evidence = uniqueCapabilityEvidenceSnapshots([
     ...simpleEvidence,
     ...(turnEvidence?.evidence ?? [])
   ]);
@@ -634,6 +634,45 @@ function capabilityEvidenceSnapshot(
       ? {}
       : { configFingerprint: snapshot.configFingerprint })
   } satisfies InspectCapabilityEvidenceSnapshot);
+}
+
+function uniqueCapabilityEvidenceSnapshots(
+  snapshots: readonly AgentCapabilityEvidenceSnapshot[]
+): readonly AgentCapabilityEvidenceSnapshot[] {
+  const seen = new Set<string>();
+  const uniqueSnapshots: AgentCapabilityEvidenceSnapshot[] = [];
+
+  for (const snapshot of snapshots) {
+    const key = capabilityEvidenceSnapshotKey(snapshot);
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    uniqueSnapshots.push(snapshot);
+  }
+
+  return Object.freeze(uniqueSnapshots);
+}
+
+function capabilityEvidenceSnapshotKey(
+  snapshot: AgentCapabilityEvidenceSnapshot
+): string {
+  return JSON.stringify({
+    eventId: snapshot.eventId,
+    traceId: snapshot.traceId,
+    createdAt: snapshot.createdAt,
+    kind: snapshot.kind,
+    capabilityId: snapshot.capabilityId,
+    evidenceKind: snapshot.evidenceKind,
+    status: snapshot.status,
+    summary: snapshot.summary,
+    policyOutcome: snapshot.policyOutcome,
+    sourceReferences: snapshot.sourceReferences,
+    redactionLabels: snapshot.redactionLabels,
+    configFingerprint: snapshot.configFingerprint
+  });
 }
 
 function capabilityHealthSnapshots(

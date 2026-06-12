@@ -499,6 +499,10 @@ function parseRoleModelDecisionObject(
     allowedTools,
     modelToolDefinitions
   );
+  const allowedModelToolDefinitions = toolDefinitionsForAllowedTools({
+    allowedTools: frozenAllowedTools,
+    toolDefinitions: modelToolDefinitions
+  });
 
   if (!isJsonRecord(parsedOutput)) {
     return createMalformedOutputResult(
@@ -560,7 +564,7 @@ function parseRoleModelDecisionObject(
 
   const cardinalityResult = validateUserTurnToolCallCardinality(
     toolCalls,
-    modelToolDefinitions
+    allowedModelToolDefinitions
   );
 
   if (cardinalityResult !== undefined) {

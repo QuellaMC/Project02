@@ -610,6 +610,47 @@ describe('role model decision contracts', () => {
     );
   });
 
+  it('ignores excluded required capability tools during required-call validation', () => {
+    const capabilityToolDefinitions = [
+      createFakeCapabilityToolDefinition({
+        requiredForUserTurn: true
+      })
+    ];
+    const visibleReplyOnlyDecision = JSON.stringify({
+      version: roleModelDecisionContractVersion,
+      toolCalls: [
+        {
+          name: roleModelVisibleReplyActionName,
+          input: {
+            text: 'I can answer without searching.'
+          }
+        }
+      ]
+    });
+
+    const excludedResult = parseRoleModelDecision(
+      visibleReplyOnlyDecision,
+      [roleModelVisibleReplyActionName],
+      capabilityToolDefinitions
+    );
+
+    expect(excludedResult.status).toBe('accepted');
+
+    const includedResult = parseRoleModelDecision(
+      visibleReplyOnlyDecision,
+      [roleModelVisibleReplyActionName, 'memory.search'],
+      capabilityToolDefinitions
+    );
+
+    expect(includedResult).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMissingRequiredToolCallRejectionReason,
+        details: 'Decision must include required memory.search tool call.'
+      }
+    });
+  });
+
   it('enforces allowed tools for legacy visible_reply action decisions', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({

@@ -276,13 +276,19 @@ async function runHandleToolCall(options: {
   }
 
   const hook = capability.lifecycleHooks.handleToolCall;
+  const failureDegrades = handleToolCallFailureDegrades({
+    capability,
+    providedTool
+  });
 
   if (hook === undefined) {
     return createRejectedToolCallResult({
       call: options.call,
       context: options.context,
       reason: 'handler_missing',
-      message: `Capability "${capability.manifest.id}" has no handleToolCall hook.`
+      message: `Capability "${capability.manifest.id}" has no handleToolCall hook.`,
+      evidenceStatus: failureDegrades ? 'degraded' : 'rejected',
+      policyOutcome: failureDegrades ? 'optional_degraded' : 'handler_rejected'
     });
   }
 
@@ -302,7 +308,7 @@ async function runHandleToolCall(options: {
         context: options.context,
         reason: 'handler_timeout',
         message: error.message,
-        evidenceStatus: 'failed',
+        evidenceStatus: failureDegrades ? 'degraded' : 'failed',
         policyOutcome: 'timeout'
       });
     }
@@ -311,7 +317,9 @@ async function runHandleToolCall(options: {
       call: options.call,
       context: options.context,
       reason: 'handler_failed',
-      message: errorMessage(error)
+      message: errorMessage(error),
+      evidenceStatus: failureDegrades ? 'degraded' : 'rejected',
+      policyOutcome: failureDegrades ? 'optional_degraded' : 'handler_rejected'
     });
   }
 }
@@ -825,6 +833,18 @@ function beforeRoleModelFailureRejectsTurn(capability: AgentCapability): boolean
     capability.manifest.runtimePolicy.requiredForTurn ||
     capability.manifest.runtimePolicy.failureBehavior.beforeRoleModelCall ===
       'reject_turn'
+  );
+}
+
+function handleToolCallFailureDegrades(options: {
+  readonly capability: AgentCapability;
+  readonly providedTool: AgentCapabilityProvidedTool;
+}): boolean {
+  return (
+    !options.capability.manifest.runtimePolicy.requiredForTurn &&
+    !options.providedTool.requiredForUserTurn &&
+    options.capability.manifest.runtimePolicy.failureBehavior.handleToolCall ===
+      'degrade'
   );
 }
 

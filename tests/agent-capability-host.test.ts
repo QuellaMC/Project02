@@ -564,7 +564,7 @@ describe('runtime capability host', () => {
         evidence: [
           {
             evidenceKind: 'tool_invocation',
-            status: 'failed',
+            status: 'degraded',
             policyOutcome: 'timeout'
           }
         ]
@@ -682,6 +682,90 @@ describe('runtime capability host', () => {
       }
     ]);
   });
+
+  it('preserves rejecting evidence for required and non-degrading tool handler failures', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.rejecting_tool',
+          displayName: 'Rejecting tool fixture',
+          handleToolCallFailureBehavior: 'reject_tool_call',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.rejecting_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read'
+            })
+          ],
+          handleToolCall() {
+            throw new Error('search unavailable');
+          }
+        }),
+        createHostTestCapability({
+          id: 'memory.required_tool',
+          displayName: 'Required tool fixture',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.required_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read',
+              requiredForUserTurn: true
+            })
+          ],
+          handleToolCall() {
+            throw new Error('required search unavailable');
+          }
+        })
+      ]
+    });
+    const context = createHostTestContext();
+
+    const rejectingResult = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.rejecting_tool',
+        toolName: 'memory.rejecting_search',
+        input: {}
+      },
+      context
+    );
+    const requiredResult = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.required_tool',
+        toolName: 'memory.required_search',
+        input: {}
+      },
+      context
+    );
+
+    expect(rejectingResult).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      evidence: [
+        {
+          evidenceKind: 'tool_invocation',
+          status: 'rejected',
+          policyOutcome: 'handler_rejected'
+        }
+      ]
+    });
+    expect(requiredResult).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      evidence: [
+        {
+          evidenceKind: 'tool_invocation',
+          status: 'rejected',
+          policyOutcome: 'handler_rejected'
+        }
+      ]
+    });
+  });
 });
 
 function createSearchToolCapability(id: string, displayName: string): AgentCapability {
@@ -752,6 +836,7 @@ function createHostTestCapability(options: {
   readonly requiredForTurn?: boolean;
   readonly sourceReferencesRequired?: boolean;
   readonly timeoutMs?: number;
+  readonly handleToolCallFailureBehavior?: 'degrade' | 'reject_tool_call';
   readonly providedTools?: readonly unknown[];
   readonly beforeRoleModelCall?: AgentCapabilityLifecycleHooks['beforeRoleModelCall'];
   readonly handleToolCall?: AgentCapabilityLifecycleHooks['handleToolCall'];
@@ -786,7 +871,7 @@ function createHostTestCapability(options: {
         failureBehavior: {
           beforeRoleModelCall:
             options.requiredForTurn === true ? 'reject_turn' : 'degrade',
-          handleToolCall: 'degrade',
+          handleToolCall: options.handleToolCallFailureBehavior ?? 'degrade',
           afterTurnCommitted: 'log_failure',
           health: 'degrade'
         }
@@ -856,11 +941,12 @@ function createHostTestTool(options: {
     | 'runtime_read'
     | 'external_read'
     | 'local_memory_write';
+  readonly requiredForUserTurn?: boolean;
 }): unknown {
   return Object.freeze({
     name: options.name,
     description: 'Host test tool.',
-    requiredForUserTurn: false,
+    requiredForUserTurn: options.requiredForUserTurn ?? false,
     maxCallsPerUserTurn: 1,
     inputContract: {
       type: 'object',

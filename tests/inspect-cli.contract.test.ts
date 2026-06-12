@@ -22,6 +22,7 @@ import {
   runLocalUserMessageEvent
 } from '../src/index.ts';
 import type {
+  AgentCapabilityEvidenceSnapshot,
   AgentCapabilityTurnEvidenceSnapshot,
   RuntimeEventIdentity
 } from '../src/index.ts';
@@ -820,7 +821,7 @@ async function seedCapabilityEvidenceSession(
     status: 'rejected',
     reason: 'required capability failed',
     payloadSummary,
-    agentCapabilityTurnEvidence: createInspectCapabilityEvidence(identity)
+    ...createInspectCapabilityDualStorageEvidence(identity)
   });
   logStore.appendRawEvent({
     ...identity,
@@ -829,7 +830,7 @@ async function seedCapabilityEvidenceSession(
     status: 'rejected',
     reason: 'required capability failed',
     payloadSummary,
-    agentCapabilityTurnEvidence: createInspectCapabilityEvidence(identity)
+    ...createInspectCapabilityDualStorageEvidence(identity)
   });
   logStore.appendTrace({
     ...identity,
@@ -838,6 +839,20 @@ async function seedCapabilityEvidenceSession(
   logStore.appendTrace({
     ...identity,
     step: 'runtime_turn_rejected'
+  });
+}
+
+function createInspectCapabilityDualStorageEvidence(
+  identity: RuntimeEventIdentity
+): {
+  readonly agentCapabilityEvidence: readonly AgentCapabilityEvidenceSnapshot[];
+  readonly agentCapabilityTurnEvidence: AgentCapabilityTurnEvidenceSnapshot;
+} {
+  const turnEvidence = createInspectCapabilityEvidence(identity);
+
+  return Object.freeze({
+    agentCapabilityEvidence: turnEvidence.evidence,
+    agentCapabilityTurnEvidence: turnEvidence
   });
 }
 

@@ -284,7 +284,13 @@ async function routeCapabilityToolCalls(options: {
 
     results.push(routingEvidence);
 
-    if (routingEvidence.result.status === 'rejected') {
+    if (
+      routingEvidence.result.status === 'rejected' &&
+      !isOptionalDegradedCapabilityToolFailure({
+        definition: capabilityToolDefinition,
+        result: routingEvidence.result
+      })
+    ) {
       return createRejectedCapabilityToolRoutingResult({
         results,
         reason: roleModelCapabilityToolRejectedRejectionReason,
@@ -325,6 +331,32 @@ function findCapabilityToolDefinition(
   toolName: string
 ): RoleModelCapabilityToolDefinition | undefined {
   return definitions.find((definition) => definition.name === toolName);
+}
+
+function isOptionalDegradedCapabilityToolFailure(options: {
+  readonly definition: RoleModelCapabilityToolDefinition;
+  readonly result: AgentCapabilityToolCallResult;
+}): boolean {
+  return (
+    !options.definition.requiredForUserTurn &&
+    options.result.status === 'rejected' &&
+    isDegradedCapabilityHandlerFailureReason(options.result.reason) &&
+    options.result.evidence.some(
+      (evidence) =>
+        evidence.evidenceKind === 'tool_invocation' &&
+        evidence.status === 'degraded' &&
+        (evidence.policyOutcome === 'optional_degraded' ||
+          evidence.policyOutcome === 'timeout')
+    )
+  );
+}
+
+function isDegradedCapabilityHandlerFailureReason(reason: string): boolean {
+  return (
+    reason === 'handler_failed' ||
+    reason === 'handler_timeout' ||
+    reason === 'handler_missing'
+  );
 }
 
 function createAgentCapabilityToolCall(options: {
