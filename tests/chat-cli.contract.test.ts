@@ -8,12 +8,20 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { runChatCli as runChatCliInProcess } from '../src/chat-cli.ts';
 import {
+  createConversationSession,
+  createFileCharacterStateStore,
+  createFileRuntimeLogStore,
+  createLocalRuntimeSessionStore,
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
+  defaultNvidiaRoleModelName,
   encodeStorageSchemaMarker,
   LocalRuntimeStorageContractError,
+  roleModelDecisionContractVersion,
+  roleModelVisibleReplyActionName,
   type CharacterAgent,
+  type RoleModelAdapter,
   type RuntimeLogStore
 } from '../src/index.ts';
 
@@ -28,6 +36,19 @@ type TraceSummary = {
   readonly traceId: string;
   readonly status: 'completed' | 'rejected';
   readonly steps: readonly string[];
+  readonly provider?: {
+    readonly name: string;
+    readonly model?: string;
+    readonly responseStatus?: number;
+    readonly errorCode?: string;
+    readonly errorMessage?: string;
+  };
+  readonly toolCalls?: readonly string[];
+  readonly characterStatePatch?: {
+    readonly status: string;
+    readonly appliedChangeCount?: number;
+    readonly rejectionReason?: string;
+  };
   readonly error?: string;
 };
 
@@ -82,6 +103,113 @@ describe('node src/chat-cli.ts', () => {
     });
   });
 
+  it('fails clearly when the NVIDIA provider is selected without an API key', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const result = await runCommand(
+      'node',
+      [
+        'src/chat-cli.ts',
+        '--store',
+        storeRoot,
+        '--new-session',
+        createTempSessionId(),
+        '--provider',
+        'nvidia'
+      ],
+      'hello\n',
+      {
+        NVIDIA_API_KEY: '',
+        PROJECT02_ROLE_MODEL_PROVIDER: ''
+      }
+    );
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: 'Mira is ready.\nYou: ',
+      stderr: 'Error: NVIDIA provider requires NVIDIA_API_KEY.\n'
+    });
+  });
+
+  it('emits provider error status in trace mode when NVIDIA configuration is missing', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const result = await runCommand(
+      'node',
+      [
+        'src/chat-cli.ts',
+        '--store',
+        storeRoot,
+        '--new-session',
+        createTempSessionId(),
+        '--trace',
+        '--provider',
+        'nvidia'
+      ],
+      'hello\n',
+      {
+        NVIDIA_API_KEY: '',
+        PROJECT02_ROLE_MODEL_PROVIDER: ''
+      }
+    );
+    const traceSummaries = parseTraceSummaries(result.stderr);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('Mira is ready.\nYou: ');
+    expect(traceSummaries).toEqual([
+      expect.objectContaining({
+        status: 'rejected',
+        provider: {
+          name: 'nvidia',
+          model: defaultNvidiaRoleModelName,
+          errorCode: 'missing_api_key',
+          errorMessage: 'NVIDIA provider requires NVIDIA_API_KEY.'
+        },
+        characterStatePatch: {
+          status: 'not_requested'
+        },
+        error: 'NVIDIA provider requires NVIDIA_API_KEY.'
+      })
+    ]);
+  });
+
+  it('uses the provider environment default but lets the CLI flag choose local', async () => {
+    const envSelected = await runCommand(
+      'node',
+      ['src/chat-cli.ts', '--store', await createTempStoreRoot()],
+      'hello\n',
+      {
+        NVIDIA_API_KEY: '',
+        PROJECT02_ROLE_MODEL_PROVIDER: 'nvidia'
+      }
+    );
+    const cliSelected = await runCommand(
+      'node',
+      [
+        'src/chat-cli.ts',
+        '--store',
+        await createTempStoreRoot(),
+        '--provider',
+        'local'
+      ],
+      'hello\n/exit\n',
+      {
+        NVIDIA_API_KEY: '',
+        PROJECT02_ROLE_MODEL_PROVIDER: 'nvidia'
+      }
+    );
+
+    expect(envSelected.stderr).toBe(
+      'Error: NVIDIA provider requires NVIDIA_API_KEY.\n'
+    );
+    expect(cliSelected).toEqual({
+      exitCode: 0,
+      stdout:
+        'Mira is ready.\n' +
+        "You: Mira: I'm here. Tell me what you need.\n" +
+        'You: ',
+      stderr: ''
+    });
+  });
+
   it('exits cleanly when /exit is the first input', async () => {
     const result = await runFreshChatCli('/exit\n');
 
@@ -122,11 +250,19 @@ describe('node src/chat-cli.ts', () => {
     expect(traceSummaries).toEqual([
       expect.objectContaining({
         status: 'completed',
-        steps: successfulTraceSteps
+        steps: successfulTraceSteps,
+        toolCalls: ['visible_reply'],
+        characterStatePatch: {
+          status: 'not_requested'
+        }
       }),
       expect.objectContaining({
         status: 'completed',
-        steps: successfulTraceSteps
+        steps: successfulTraceSteps,
+        toolCalls: ['visible_reply'],
+        characterStatePatch: {
+          status: 'not_requested'
+        }
       })
     ]);
     expect(traceSummaries[0]?.eventId).toMatch(/^evt_/u);
@@ -156,7 +292,11 @@ describe('node src/chat-cli.ts', () => {
       }),
       expect.objectContaining({
         status: 'completed',
-        steps: successfulTraceSteps
+        steps: successfulTraceSteps,
+        toolCalls: ['visible_reply'],
+        characterStatePatch: {
+          status: 'not_requested'
+        }
       })
     ]);
   });
@@ -205,6 +345,66 @@ describe('node src/chat-cli.ts', () => {
     expect(stdout.contents()).toBe('Mira is ready.\nYou: ');
     expect(stderr.contents()).toBe(
       'Error: Local runtime store could not be written.\n'
+    );
+  });
+
+  it('uses file-backed state when runChatCli receives a file-backed log store', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const sessionId = createTempSessionId();
+    const sessionStore = createLocalRuntimeSessionStore({ storeRoot });
+    await sessionStore.createSession({ sessionId });
+    const session = createConversationSession({ id: sessionId });
+    const stdout = new CapturingWritable();
+    const stderr = new CapturingWritable();
+
+    const exitCode = await runChatCliInProcess({
+      stdin: Readable.from(['hello\n/exit\n']),
+      stdout,
+      stderr,
+      session,
+      logStore: createFileRuntimeLogStore({
+        storeRoot,
+        sessionId
+      }),
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'durable state reply'
+              }
+            },
+            {
+              name: 'character_state.patch',
+              input: {
+                mood: 'curious'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout.contents()).toBe(
+      'Mira is ready.\nYou: Mira: durable state reply\nYou: '
+    );
+    expect(stderr.contents()).toBe('');
+    expect(
+      createFileCharacterStateStore({
+        storeRoot,
+        sessionId
+      }).readCurrentState().current.mood
+    ).toBe('curious');
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId
+      }).rawEvents()
+    ).not.toThrow(
+      'Stored character state does not match accepted character state patch evidence.'
     );
   });
 
@@ -558,13 +758,28 @@ function createTempSessionId(): string {
   return `test-session-${String(tempSessionCounter)}`;
 }
 
+function createRawOutputAdapter(rawOutputText: string): RoleModelAdapter {
+  return {
+    invoke() {
+      return Object.freeze({
+        rawOutputText
+      });
+    }
+  };
+}
+
 async function runCommand(
   command: string,
   args: readonly string[],
-  stdin: string
+  stdin: string,
+  env: NodeJS.ProcessEnv = {}
 ): Promise<CommandResult> {
   const child = spawn(command, args, {
     cwd: projectRoot,
+    env: {
+      ...process.env,
+      ...env
+    },
     stdio: ['pipe', 'pipe', 'pipe']
   });
 

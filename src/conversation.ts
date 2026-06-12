@@ -151,6 +151,24 @@ export async function runCharacterTurn(
   });
 }
 
+export function rollbackLastCharacterTurn(
+  session: ConversationSession,
+  turn: CharacterTurnResult
+): void {
+  const transcript = getMutableTranscript(session);
+  const userMessageIndex = transcript.length - 2;
+
+  if (
+    userMessageIndex < 0 ||
+    transcript[userMessageIndex] !== turn.userMessage ||
+    transcript[userMessageIndex + 1] !== turn.characterMessage
+  ) {
+    throw new Error('Cannot roll back a character turn that is no longer latest.');
+  }
+
+  transcript.splice(userMessageIndex, 2);
+}
+
 async function runSerializedCharacterTurn(
   session: ConversationSession,
   message: string | undefined,

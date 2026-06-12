@@ -57,6 +57,7 @@ type InspectTurnEvidence = {
   readonly steps: readonly string[];
   readonly visibleMessages: readonly InspectVisibleMessage[];
   readonly roleModelEvidence?: InspectRoleModelEvidence;
+  readonly characterStatePatchEvidence?: InspectCharacterStatePatchEvidence;
   readonly reason?: string;
 };
 
@@ -69,15 +70,16 @@ type InspectVisibleMessage = {
 
 type InspectRoleModelEvidence = {
   readonly input?: {
-    readonly sessionId: string;
-    readonly allowedActions: readonly string[];
-    readonly outputContractVersion: string;
-    readonly currentUserMessage: string;
+      readonly sessionId: string;
+      readonly allowedTools: readonly string[];
+      readonly outputContractVersion: string;
+      readonly currentUserMessage: string;
     readonly recentVisibleMessages: readonly InspectVisibleMessage[];
     readonly runtimeNotes: readonly string[];
   };
   readonly output?: {
     readonly rawOutputText: string;
+    readonly providerMetadata?: unknown;
   };
   readonly parsedDecision?: InspectParsedRoleModelDecision;
   readonly commitValidation?: InspectRoleModelCommitValidation;
@@ -86,16 +88,18 @@ type InspectRoleModelEvidence = {
 type InspectParsedRoleModelDecision =
   | {
       readonly status: 'accepted';
-      readonly action: {
-        readonly type: 'visible_reply';
-        readonly text: string;
-      };
+      readonly toolCalls: readonly InspectModelToolCall[];
     }
   | {
       readonly status: 'rejected';
       readonly rejectionReason: string;
       readonly rejectionDetails?: string;
     };
+
+type InspectModelToolCall = {
+  readonly name: string;
+  readonly input: Readonly<Record<string, unknown>>;
+};
 
 type InspectRoleModelCommitValidation =
   | {
@@ -107,6 +111,16 @@ type InspectRoleModelCommitValidation =
       readonly rejectionReason: string;
       readonly rejectionDetails?: string;
     };
+
+type InspectCharacterStatePatchEvidence = {
+  readonly status: 'accepted' | 'rejected';
+  readonly patch?: unknown;
+  readonly patchInput?: unknown;
+  readonly before: unknown;
+  readonly after?: unknown;
+  readonly appliedChanges?: unknown;
+  readonly rejection?: unknown;
+};
 
 class InspectCliUsageError extends Error {
   constructor(message: string) {
@@ -319,6 +333,7 @@ function createTurnEvidenceEntry(options: {
       )
     ),
     ...roleModelEvidenceForRawEvent(options.rawEvent),
+    ...characterStatePatchEvidenceForRawEvent(options.rawEvent),
     ...(options.rawEvent.reason === undefined
       ? {}
       : { reason: options.rawEvent.reason })
@@ -347,7 +362,7 @@ function roleModelEvidenceForRawEvent(
         : {
             input: Object.freeze({
               sessionId: inputEnvelope.decisionContext.sessionId,
-              allowedActions: Object.freeze([...inputEnvelope.allowedActions]),
+              allowedTools: Object.freeze([...inputEnvelope.allowedTools]),
               outputContractVersion: inputEnvelope.outputContract.version,
               currentUserMessage:
                 inputEnvelope.event.payload.currentUserMessage,
@@ -365,7 +380,13 @@ function roleModelEvidenceForRawEvent(
         ? {}
         : {
             output: Object.freeze({
-              rawOutputText: rawEvent.roleModelIOSnapshot.rawOutputText
+              rawOutputText: rawEvent.roleModelIOSnapshot.rawOutputText,
+              ...(rawEvent.roleModelIOSnapshot.providerMetadata === undefined
+                ? {}
+                : {
+                    providerMetadata:
+                      rawEvent.roleModelIOSnapshot.providerMetadata
+                  })
             })
           }),
       ...(parsedDecision === undefined
@@ -381,16 +402,55 @@ function roleModelEvidenceForRawEvent(
   };
 }
 
+function characterStatePatchEvidenceForRawEvent(
+  rawEvent: RawEventLogRecord
+): {
+  readonly characterStatePatchEvidence?: InspectCharacterStatePatchEvidence;
+} {
+  const snapshot = rawEvent.characterStatePatchSnapshot;
+
+  if (snapshot === undefined) {
+    return {};
+  }
+
+  const result = snapshot.result;
+
+  if (result.status === 'accepted') {
+    return {
+      characterStatePatchEvidence: Object.freeze({
+        status: 'accepted',
+        patch: result.patch,
+        before: result.before,
+        after: result.after,
+        appliedChanges: result.appliedChanges
+      } satisfies InspectCharacterStatePatchEvidence)
+    };
+  }
+
+  return {
+    characterStatePatchEvidence: Object.freeze({
+      status: 'rejected',
+      patchInput: result.patchInput,
+      before: result.before,
+      rejection: result.rejection
+    } satisfies InspectCharacterStatePatchEvidence)
+  };
+}
+
 function parsedRoleModelDecision(
   result: RoleModelDecisionResult
 ): InspectParsedRoleModelDecision {
   if (result.status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
-      action: Object.freeze({
-        type: result.decision.action.type,
-        text: result.decision.action.text
-      })
+      toolCalls: Object.freeze(
+        result.decision.toolCalls.map((toolCall) =>
+          Object.freeze({
+            name: toolCall.name,
+            input: Object.freeze({ ...toolCall.input })
+          } satisfies InspectModelToolCall)
+        )
+      )
     } satisfies InspectParsedRoleModelDecision);
   }
 
