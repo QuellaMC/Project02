@@ -6,20 +6,28 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   CharacterReplyValidationError,
+  agentCapabilityContractVersion,
+  createAgentCapability,
+  createAgentCapabilityEvidenceSnapshot,
   createConversationSession,
   createDefaultCharacterRuntimeState,
   createFileCharacterStateStore,
   createFileRuntimeLogStore,
   createInMemoryCharacterStateStore,
   createLocalRuntimeSessionStore,
+  createRuntimeCapabilityHost,
   createRuntimeLogStore,
   createUserMessageRuntimeEvent,
   recordLocalUserMessageInputRejection,
+  runtimeCapabilityBeforeRoleModelCallRejectionReason,
   roleModelDecisionContractVersion,
+  roleModelCapabilityToolRejectedRejectionReason,
   roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelVisibleReplyActionName,
   runLocalUserMessageEvent,
+  type AgentCapability,
+  type AgentCapabilityLifecycleHooks,
   type CharacterAgent,
   type CharacterAgentReply,
   type CharacterStateStore,
@@ -812,6 +820,76 @@ describe('local runtime turn adapter', () => {
     });
   });
 
+  it('writes accepted character state only after visible conversation logging succeeds', async () => {
+    const session = createConversationSession();
+    const baseLogStore = createRuntimeLogStore();
+    const characterStateStore = createInMemoryCharacterStateStore();
+    const observedOrder: string[] = [];
+    const logStore = Object.freeze({
+      appendTrace(entry) {
+        return baseLogStore.appendTrace(entry);
+      },
+      appendRawEvent(record) {
+        return baseLogStore.appendRawEvent(record);
+      },
+      appendConversationMessage(record) {
+        observedOrder.push('conversation');
+        return baseLogStore.appendConversationMessage(record);
+      },
+      traceEntries() {
+        return baseLogStore.traceEntries();
+      },
+      rawEvents() {
+        return baseLogStore.rawEvents();
+      },
+      conversationMessages() {
+        return baseLogStore.conversationMessages();
+      }
+    } satisfies RuntimeLogStore);
+    const orderedStateStore = Object.freeze({
+      readCurrentState() {
+        return characterStateStore.readCurrentState();
+      },
+      writeCurrentState(state) {
+        observedOrder.push('state');
+        return characterStateStore.writeCurrentState(state);
+      }
+    } satisfies CharacterStateStore);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_state_order',
+        'trace_state_order'
+      ),
+      session,
+      logStore,
+      characterStateStore: orderedStateStore,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'stateful reply'
+              }
+            },
+            {
+              name: 'character_state.patch',
+              input: {
+                mood: 'curious'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result.status).toBe('completed');
+    expect(observedOrder).toEqual(['conversation', 'conversation', 'state']);
+  });
+
   it('accepts no-op character state patches and logs empty applied changes', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -1238,7 +1316,7 @@ describe('local runtime turn adapter', () => {
     expect(observedMoods).toEqual(['steady', 'curious']);
   });
 
-  it('does not commit visible durable evidence when accepted state writes fail', async () => {
+  it('does not append accepted raw-event evidence when accepted state writes fail', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
     const characterStateStore = createWriteFailingCharacterStateStore();
@@ -1275,7 +1353,10 @@ describe('local runtime turn adapter', () => {
       })
     ).rejects.toThrow('state write failed');
 
-    expect(logStore.conversationMessages()).toEqual([]);
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'hello',
+      'stateful reply'
+    ]);
     expect(session.visibleTranscript).toEqual([]);
     expect(
       logStore
@@ -1295,7 +1376,656 @@ describe('local runtime turn adapter', () => {
       }
     });
   });
+
+  it('runs optional before-model hooks before the role-model adapter and degrades with evidence', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const order: string[] = [];
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [
+        createRuntimeTestCapability({
+          id: 'memory.optional_before_runtime',
+          displayName: 'Optional runtime before hook',
+          beforeRoleModelCall() {
+            order.push('before');
+            throw new Error('recall unavailable');
+          }
+        })
+      ]
+    });
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke(inputEnvelope) {
+        order.push('adapter');
+        expect(inputEnvelope.event.payload.currentUserMessage).toBe('hello');
+
+        return {
+          rawOutputText: JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'reply after optional degradation'
+                }
+              }
+            ]
+          })
+        };
+      }
+    };
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_optional_before',
+        'trace_optional_before'
+      ),
+      session,
+      logStore,
+      roleModelAdapter,
+      capabilityHost
+    });
+
+    expect(result.status).toBe('completed');
+
+    if (result.status !== 'completed') {
+      throw new Error('Expected completed runtime result.');
+    }
+
+    const visibleReplyCommitted = findRawEvent(
+      result.rawEventLogRecords,
+      'visible_reply_committed'
+    );
+    const terminalCompleted = findRawEvent(
+      result.rawEventLogRecords,
+      'runtime_turn_completed'
+    );
+
+    expect(order).toEqual(['before', 'adapter']);
+    expect(result.turn.reply.text).toBe('reply after optional degradation');
+    expect(visibleReplyCommitted.agentCapabilityEvidence).toMatchObject([
+      {
+        capabilityId: 'memory.optional_before_runtime',
+        evidenceKind: 'before_role_model_call',
+        status: 'degraded',
+        policyOutcome: 'optional_degraded'
+      }
+    ]);
+    expect(terminalCompleted.agentCapabilityEvidence).toEqual(
+      visibleReplyCommitted.agentCapabilityEvidence
+    );
+  });
+
+  it('rejects required before-model hook failures before visible commit', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    let adapterCalls = 0;
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [
+        createRuntimeTestCapability({
+          id: 'memory.required_before_runtime',
+          displayName: 'Required runtime before hook',
+          requiredForTurn: true,
+          beforeRoleModelCall() {
+            throw new Error('required recall unavailable');
+          }
+        })
+      ]
+    });
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke() {
+        adapterCalls += 1;
+
+        return {
+          rawOutputText: JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'should not commit'
+                }
+              }
+            ]
+          })
+        };
+      }
+    };
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_required_before',
+        'trace_required_before'
+      ),
+      session,
+      logStore,
+      roleModelAdapter,
+      capabilityHost
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: runtimeCapabilityBeforeRoleModelCallRejectionReason,
+      message: 'required recall unavailable'
+    });
+    expect(adapterCalls).toBe(0);
+    expect(session.visibleTranscript).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
+
+    const capabilityRejected = findRawEvent(
+      result.rawEventLogRecords,
+      'capability_before_role_model_call_rejected'
+    );
+    const terminalRejected = findRawEvent(
+      result.rawEventLogRecords,
+      'runtime_turn_rejected'
+    );
+
+    expect(capabilityRejected.agentCapabilityEvidence).toMatchObject([
+      {
+        capabilityId: 'memory.required_before_runtime',
+        evidenceKind: 'before_role_model_call',
+        status: 'rejected',
+        policyOutcome: 'required_rejected'
+      }
+    ]);
+    expect(terminalRejected.agentCapabilityEvidence).toEqual(
+      capabilityRejected.agentCapabilityEvidence
+    );
+    expect(stepNames(result.traceEntries)).toEqual([
+      'runtime_event_received',
+      'runtime_event_normalized',
+      'runtime_turn_started',
+      'capability_before_role_model_call_rejected',
+      'raw_event_log_appended',
+      'runtime_turn_rejected'
+    ]);
+  });
+
+  it('runs after-commit hooks after visible commit evidence and keeps accepted turns on failure', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    let observedRawKindsDuringAfter: readonly RawEventLogRecordKind[] = [];
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [
+        createRuntimeTestCapability({
+          id: 'memory.after_runtime',
+          displayName: 'After runtime hook',
+          afterTurnCommitted() {
+            observedRawKindsDuringAfter = logStore
+              .rawEvents()
+              .map((record) => record.kind);
+            throw new Error('capture unavailable');
+          }
+        })
+      ]
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'hello',
+        'evt_after_failure',
+        'trace_after_failure'
+      ),
+      session,
+      logStore,
+      capabilityHost,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'committed before capture'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result.status).toBe('completed');
+
+    if (result.status !== 'completed') {
+      throw new Error('Expected completed runtime result.');
+    }
+
+    expect(observedRawKindsDuringAfter).toEqual([
+      'runtime_event_received',
+      'runtime_event_normalized',
+      'visible_reply_committed'
+    ]);
+    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+      'hello',
+      'committed before capture'
+    ]);
+    expect(result.rawEvent.agentCapabilityEvidence).toMatchObject([
+      {
+        capabilityId: 'memory.after_runtime',
+        evidenceKind: 'after_turn_committed',
+        status: 'failed',
+        policyOutcome: 'after_commit_failed'
+      }
+    ]);
+  });
+
+  it('persists accepted capability tool invocation evidence with the committed turn', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [
+        createRuntimeTestCapability({
+          id: 'memory.tool_runtime',
+          displayName: 'Runtime tool capability',
+          providedTools: [createRuntimeTestTool('memory.search')],
+          handleToolCall(call, context) {
+            expect(call).toMatchObject({
+              capabilityId: 'memory.tool_runtime',
+              toolName: 'memory.search',
+              input: {
+                query: 'preference'
+              }
+            });
+
+            return {
+              status: 'accepted',
+              output: {
+                matches: ['Mira prefers concise answers.']
+              },
+              evidence: [
+                createAgentCapabilityEvidenceSnapshot({
+                  eventId: context.eventId,
+                  traceId: context.traceId,
+                  createdAt: context.timestamp,
+                  kind: 'agent_capability_evidence_snapshot',
+                  capabilityId: 'memory.tool_runtime',
+                  evidenceKind: 'tool_invocation',
+                  status: 'accepted',
+                  summary: 'memory search accepted',
+                  redactionLabels: []
+                })
+              ]
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'search memory',
+        'evt_capability_tool_accepted',
+        'trace_capability_tool_accepted'
+      ),
+      session,
+      logStore,
+      capabilityHost,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'I found one memory.'
+              }
+            },
+            {
+              name: 'memory.search',
+              input: {
+                query: 'preference'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result.status).toBe('completed');
+
+    if (result.status !== 'completed') {
+      throw new Error('Expected completed runtime result.');
+    }
+
+    const visibleReplyCommitted = findRawEvent(
+      result.rawEventLogRecords,
+      'visible_reply_committed'
+    );
+    const terminalCompleted = findRawEvent(
+      result.rawEventLogRecords,
+      'runtime_turn_completed'
+    );
+
+    expect(visibleReplyCommitted.agentCapabilityEvidence).toMatchObject([
+      {
+        capabilityId: 'memory.tool_runtime',
+        evidenceKind: 'tool_invocation',
+        status: 'accepted',
+        summary: 'memory search accepted'
+      }
+    ]);
+    expect(terminalCompleted.agentCapabilityEvidence).toEqual(
+      visibleReplyCommitted.agentCapabilityEvidence
+    );
+  });
+
+  it('persists rejected capability tool invocation evidence before visible commit', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [
+        createRuntimeTestCapability({
+          id: 'memory.tool_rejected_runtime',
+          displayName: 'Rejected runtime tool capability',
+          providedTools: [createRuntimeTestTool('memory.search')],
+          handleToolCall(_call, context) {
+            return {
+              status: 'rejected',
+              reason: 'memory_unavailable',
+              message: 'memory fixture unavailable',
+              evidence: [
+                createAgentCapabilityEvidenceSnapshot({
+                  eventId: context.eventId,
+                  traceId: context.traceId,
+                  createdAt: context.timestamp,
+                  kind: 'agent_capability_evidence_snapshot',
+                  capabilityId: 'memory.tool_rejected_runtime',
+                  evidenceKind: 'tool_invocation',
+                  status: 'rejected',
+                  summary: 'memory fixture unavailable',
+                  redactionLabels: []
+                })
+              ]
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'search memory',
+        'evt_capability_tool_rejected',
+        'trace_capability_tool_rejected'
+      ),
+      session,
+      logStore,
+      capabilityHost,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'I will check.'
+              }
+            },
+            {
+              name: 'memory.search',
+              input: {
+                query: 'preference'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: roleModelCapabilityToolRejectedRejectionReason
+    });
+    expect(session.visibleTranscript).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
+
+    const commitRejected = findRawEvent(
+      result.rawEventLogRecords,
+      'commit_validation_rejected'
+    );
+    const terminalRejected = findRawEvent(
+      result.rawEventLogRecords,
+      'runtime_turn_rejected'
+    );
+
+    expect(commitRejected.agentCapabilityEvidence).toMatchObject([
+      {
+        capabilityId: 'memory.tool_rejected_runtime',
+        evidenceKind: 'tool_invocation',
+        status: 'rejected',
+        summary: 'memory fixture unavailable'
+      }
+    ]);
+    expect(terminalRejected.agentCapabilityEvidence).toEqual(
+      commitRejected.agentCapabilityEvidence
+    );
+  });
+
+  it('does not run after-commit hooks for rejected turn paths', async () => {
+    const rejectedCases = [
+      {
+        message: '',
+        eventId: 'evt_after_not_input',
+        traceId: 'trace_after_not_input'
+      },
+      {
+        message: 'hello',
+        eventId: 'evt_after_not_malformed_model',
+        traceId: 'trace_after_not_malformed_model',
+        roleModelAdapter: createRawOutputAdapter('not json')
+      },
+      {
+        message: 'hello',
+        eventId: 'evt_after_not_invalid_reply',
+        traceId: 'trace_after_not_invalid_reply',
+        roleModelAdapter: createRawOutputAdapter(
+          JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'line one\nline two'
+                }
+              }
+            ]
+          })
+        )
+      },
+      {
+        message: 'hello',
+        eventId: 'evt_after_not_invalid_state',
+        traceId: 'trace_after_not_invalid_state',
+        roleModelAdapter: createRawOutputAdapter(
+          JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'invalid state reply'
+                }
+              },
+              {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'ecstatic'
+                }
+              }
+            ]
+          })
+        )
+      }
+    ];
+
+    for (const rejectedCase of rejectedCases) {
+      const session = createConversationSession();
+      const logStore = createRuntimeLogStore();
+      let afterCalls = 0;
+      const capabilityHost = createRuntimeCapabilityHost({
+        capabilities: [
+          createRuntimeTestCapability({
+            id: `memory.after_not_${rejectedCase.eventId}`,
+            displayName: 'After hook not called',
+            afterTurnCommitted() {
+              afterCalls += 1;
+
+              return {
+                status: 'completed',
+                evidence: []
+              };
+            }
+          })
+        ]
+      });
+
+      const result = await runLocalUserMessageEvent({
+        event:
+          rejectedCase.message.length === 0
+            ? Object.freeze({
+                eventId: rejectedCase.eventId,
+                traceId: rejectedCase.traceId,
+                createdAt: '2026-06-04T10:00:00.000Z',
+                type: 'USER_MESSAGE',
+                payload: Object.freeze({
+                  currentUserMessage: rejectedCase.message
+                })
+              } satisfies UserMessageRuntimeEvent)
+            : createTestUserMessageEvent(
+                rejectedCase.message,
+                rejectedCase.eventId,
+                rejectedCase.traceId
+              ),
+        session,
+        logStore,
+        capabilityHost,
+        ...(rejectedCase.roleModelAdapter === undefined
+          ? {}
+          : { roleModelAdapter: rejectedCase.roleModelAdapter })
+      });
+
+      expect(result.status).toBe('rejected');
+      expect(afterCalls).toBe(0);
+      expect(session.visibleTranscript).toEqual([]);
+      expect(logStore.conversationMessages()).toEqual([]);
+      expect(
+        logStore
+          .rawEvents()
+          .some((record) => record.kind === 'visible_reply_committed')
+      ).toBe(false);
+    }
+  });
 });
+
+function createRuntimeTestCapability(options: {
+  readonly id: string;
+  readonly displayName: string;
+  readonly requiredForTurn?: boolean;
+  readonly providedTools?: readonly unknown[];
+  readonly beforeRoleModelCall?: AgentCapabilityLifecycleHooks['beforeRoleModelCall'];
+  readonly handleToolCall?: AgentCapabilityLifecycleHooks['handleToolCall'];
+  readonly afterTurnCommitted?: AgentCapabilityLifecycleHooks['afterTurnCommitted'];
+}): AgentCapability {
+  return createAgentCapability({
+    manifest: {
+      id: options.id,
+      displayName: options.displayName,
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'Local runtime lifecycle test capability.',
+      contractVersion: agentCapabilityContractVersion,
+      compatibility: {
+        hostContractVersions: [agentCapabilityContractVersion],
+        sourceSystem: 'project02'
+      },
+      declaredCapabilities: runtimeTestCapabilityDeclarations(options),
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: options.requiredForTurn ?? false,
+        sideEffectLevel: 'local_memory_write',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall:
+            options.requiredForTurn === true ? 'reject_turn' : 'degrade',
+          handleToolCall: 'degrade',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['local_runtime_test']
+      }
+    },
+    providedTools: options.providedTools ?? [],
+    lifecycleHooks: {
+      ...(options.beforeRoleModelCall === undefined
+        ? {}
+        : { beforeRoleModelCall: options.beforeRoleModelCall }),
+      ...(options.handleToolCall === undefined
+        ? {}
+        : { handleToolCall: options.handleToolCall }),
+      ...(options.afterTurnCommitted === undefined
+        ? {}
+        : { afterTurnCommitted: options.afterTurnCommitted })
+    }
+  });
+}
+
+function runtimeTestCapabilityDeclarations(options: {
+  readonly providedTools?: readonly unknown[];
+  readonly beforeRoleModelCall?: AgentCapabilityLifecycleHooks['beforeRoleModelCall'];
+  readonly handleToolCall?: AgentCapabilityLifecycleHooks['handleToolCall'];
+  readonly afterTurnCommitted?: AgentCapabilityLifecycleHooks['afterTurnCommitted'];
+}): readonly string[] {
+  const declarations: string[] = [];
+
+  if ((options.providedTools ?? []).length > 0) {
+    declarations.push('tool_provider', 'handle_tool_call');
+  }
+
+  if (options.beforeRoleModelCall !== undefined) {
+    declarations.push('context_provider', 'before_role_model_call');
+  }
+
+  if (options.afterTurnCommitted !== undefined) {
+    declarations.push('after_turn_committed');
+  }
+
+  return Object.freeze(declarations);
+}
+
+function createRuntimeTestTool(name: string): unknown {
+  return Object.freeze({
+    name,
+    description: 'Runtime capability test tool.',
+    requiredForUserTurn: false,
+    maxCallsPerUserTurn: 1,
+    inputContract: {
+      type: 'object',
+      additionalFields: false,
+      fields: [
+        {
+          name: 'query',
+          description: 'Search query.',
+          required: true
+        }
+      ]
+    },
+    validationOwner: 'capability_host',
+    sideEffectLevel: 'runtime_read',
+    requiresConfirmation: false,
+    sourceReferencesRequired: true
+  });
+}
 
 function createTestUserMessageEvent(
   message: string,

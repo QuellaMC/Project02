@@ -13,8 +13,10 @@ import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  agentCapabilityContractVersion,
   createConversationSession,
   createDefaultCharacterRuntimeState,
+  createAgentCapabilityTurnEvidenceSnapshot,
   createFileCharacterStateStore,
   createFileRuntimeLogStore,
   createLivingStateBrief,
@@ -29,10 +31,12 @@ import {
   roleModelVisibleReplyActionName,
   runLocalUserMessageEvent,
   type ConversationLogRecordInput,
+  type AgentCapabilityTurnEvidenceSnapshot,
   type LocalRuntimeStorageContractErrorCode,
   type LocalRuntimeSessionStoreErrorCode,
   type RawEventLogRecordInput,
   type RoleModelAdapter,
+  type RuntimeEventIdentity,
   type RuntimeTraceEntryInput
 } from '../src/index.ts';
 
@@ -87,7 +91,8 @@ describe('file-backed runtime log store', () => {
       payloadSummary: {
         rawInput: ' hello ',
         normalizedCurrentUserMessage: 'hello'
-      }
+      },
+      agentCapabilityTurnEvidence: createFileStoreCapabilityEvidence(identity)
     };
     const userMessage = createConversationRecord({
       id: 'mira-local:message-1',
@@ -2804,6 +2809,31 @@ function createConversationRecord(options: {
     text: options.text,
     committedAt
   };
+}
+
+function createFileStoreCapabilityEvidence(
+  eventIdentity: RuntimeEventIdentity
+): AgentCapabilityTurnEvidenceSnapshot {
+  return createAgentCapabilityTurnEvidenceSnapshot({
+    ...eventIdentity,
+    kind: 'agent_capability_turn_evidence_snapshot',
+    contractVersion: agentCapabilityContractVersion,
+    capabilities: [],
+    contextItems: [],
+    evidence: [
+      {
+        ...eventIdentity,
+        kind: 'agent_capability_evidence_snapshot',
+        capabilityId: 'memory.fixture',
+        evidenceKind: 'after_turn_committed',
+        status: 'failed',
+        summary: 'capture api_key=secret-token failed',
+        policyOutcome: 'after_commit_failed',
+        redactionLabels: ['secret']
+      }
+    ],
+    health: []
+  });
 }
 
 function expectStorageErrorCode(

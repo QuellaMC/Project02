@@ -8,6 +8,8 @@ import {
   LocalRuntimeStorageContractError,
   normalizeLocalRuntimeSessionId,
   type ConversationLogRecord,
+  type AgentCapabilityEvidenceSnapshot,
+  type AgentCapabilityTurnEvidenceSnapshot,
   type LocalRuntimeSessionMetadata,
   type RawEventLogRecord,
   type RoleModelCommitValidationResult,
@@ -58,6 +60,7 @@ type InspectTurnEvidence = {
   readonly visibleMessages: readonly InspectVisibleMessage[];
   readonly roleModelEvidence?: InspectRoleModelEvidence;
   readonly characterStatePatchEvidence?: InspectCharacterStatePatchEvidence;
+  readonly capabilityEvidence?: InspectCapabilityEvidence;
   readonly reason?: string;
 };
 
@@ -120,6 +123,80 @@ type InspectCharacterStatePatchEvidence = {
   readonly after?: unknown;
   readonly appliedChanges?: unknown;
   readonly rejection?: unknown;
+};
+
+type InspectCapabilityEvidence = {
+  readonly contractVersion?: string;
+  readonly capabilities: readonly InspectCapabilityListing[];
+  readonly contextItems: readonly InspectCapabilityContextItem[];
+  readonly evidence: readonly InspectCapabilityEvidenceSnapshot[];
+  readonly policyOutcomes: readonly string[];
+  readonly health: readonly InspectCapabilityHealthSnapshot[];
+};
+
+type InspectCapabilityListing = {
+  readonly capabilityId: string;
+  readonly displayName: string;
+  readonly version: string;
+  readonly kind: string;
+  readonly localTrustLevel: string;
+  readonly installed: boolean;
+  readonly registered: boolean;
+  readonly enabled: boolean;
+  readonly availableForTurn: boolean;
+  readonly providedTools: readonly InspectCapabilityToolListing[];
+  readonly registeredLifecycleHooks: readonly string[];
+  readonly redactionLabels: readonly string[];
+  readonly configFingerprint?: string;
+  readonly healthStatus?: string;
+};
+
+type InspectCapabilityToolListing = {
+  readonly name: string;
+  readonly validationOwner: string;
+  readonly sideEffectLevel: string;
+  readonly requiresConfirmation: boolean;
+  readonly sourceReferencesRequired: boolean;
+};
+
+type InspectCapabilityContextItem = {
+  readonly capabilityId: string;
+  readonly id: string;
+  readonly kind: string;
+  readonly text: string;
+  readonly budget: {
+    readonly estimatedTokens: number;
+    readonly priority: number;
+  };
+  readonly sourceReferences: readonly InspectCapabilitySourceReference[];
+  readonly redactionLabels: readonly string[];
+  readonly confidence?: number;
+};
+
+type InspectCapabilityEvidenceSnapshot = {
+  readonly capabilityId: string;
+  readonly evidenceKind: string;
+  readonly status: string;
+  readonly summary: string;
+  readonly redactionLabels: readonly string[];
+  readonly policyOutcome?: string;
+  readonly sourceReferences?: readonly InspectCapabilitySourceReference[];
+  readonly configFingerprint?: string;
+};
+
+type InspectCapabilityHealthSnapshot = {
+  readonly capabilityId: string;
+  readonly status: string;
+  readonly checkedAt: string;
+  readonly summary: string;
+  readonly redactionLabels: readonly string[];
+};
+
+type InspectCapabilitySourceReference = {
+  readonly kind: string;
+  readonly id: string;
+  readonly title?: string;
+  readonly uri?: string;
 };
 
 class InspectCliUsageError extends Error {
@@ -334,6 +411,7 @@ function createTurnEvidenceEntry(options: {
     ),
     ...roleModelEvidenceForRawEvent(options.rawEvent),
     ...characterStatePatchEvidenceForRawEvent(options.rawEvent),
+    ...capabilityEvidenceForRawEvent(options.rawEvent),
     ...(options.rawEvent.reason === undefined
       ? {}
       : { reason: options.rawEvent.reason })
@@ -435,6 +513,179 @@ function characterStatePatchEvidenceForRawEvent(
       rejection: result.rejection
     } satisfies InspectCharacterStatePatchEvidence)
   };
+}
+
+function capabilityEvidenceForRawEvent(
+  rawEvent: RawEventLogRecord
+): { readonly capabilityEvidence?: InspectCapabilityEvidence } {
+  const turnEvidence = rawEvent.agentCapabilityTurnEvidence;
+  const simpleEvidence = rawEvent.agentCapabilityEvidence ?? [];
+
+  if (turnEvidence === undefined && simpleEvidence.length === 0) {
+    return {};
+  }
+
+  const evidence = Object.freeze([
+    ...simpleEvidence,
+    ...(turnEvidence?.evidence ?? [])
+  ]);
+
+  return {
+    capabilityEvidence: Object.freeze({
+      ...(turnEvidence === undefined
+        ? {}
+        : { contractVersion: turnEvidence.contractVersion }),
+      capabilities: capabilityListings(turnEvidence),
+      contextItems: capabilityContextItems(turnEvidence),
+      evidence: Object.freeze(evidence.map(capabilityEvidenceSnapshot)),
+      policyOutcomes: policyOutcomes(evidence),
+      health: capabilityHealthSnapshots(turnEvidence)
+    } satisfies InspectCapabilityEvidence)
+  };
+}
+
+function capabilityListings(
+  turnEvidence: AgentCapabilityTurnEvidenceSnapshot | undefined
+): readonly InspectCapabilityListing[] {
+  if (turnEvidence === undefined) {
+    return Object.freeze([]);
+  }
+
+  return Object.freeze(
+    turnEvidence.capabilities.map((capability) =>
+      Object.freeze({
+        capabilityId: capability.capabilityId,
+        displayName: capability.manifest.displayName,
+        version: capability.manifest.version,
+        kind: capability.manifest.kind,
+        localTrustLevel: capability.manifest.localTrustLevel,
+        installed: capability.installed,
+        registered: capability.registered,
+        enabled: capability.enabled,
+        availableForTurn: capability.availableForTurn,
+        providedTools: Object.freeze(
+          capability.providedTools.map((tool) =>
+            Object.freeze({
+              name: tool.name,
+              validationOwner: tool.validationOwner,
+              sideEffectLevel: tool.sideEffectLevel,
+              requiresConfirmation: tool.requiresConfirmation,
+              sourceReferencesRequired: tool.sourceReferencesRequired
+            } satisfies InspectCapabilityToolListing)
+          )
+        ),
+        registeredLifecycleHooks: Object.freeze([
+          ...capability.registeredLifecycleHooks
+        ]),
+        redactionLabels: Object.freeze([...capability.redactionLabels]),
+        ...(capability.configFingerprint === undefined
+          ? {}
+          : { configFingerprint: capability.configFingerprint }),
+        ...(capability.healthStatus === undefined
+          ? {}
+          : { healthStatus: capability.healthStatus })
+      } satisfies InspectCapabilityListing)
+    )
+  );
+}
+
+function capabilityContextItems(
+  turnEvidence: AgentCapabilityTurnEvidenceSnapshot | undefined
+): readonly InspectCapabilityContextItem[] {
+  if (turnEvidence === undefined) {
+    return Object.freeze([]);
+  }
+
+  return Object.freeze(
+    turnEvidence.contextItems.map((item) =>
+      Object.freeze({
+        capabilityId: item.capabilityId,
+        id: item.id,
+        kind: item.kind,
+        text: item.text,
+        budget: Object.freeze({
+          estimatedTokens: item.budget.estimatedTokens,
+          priority: item.budget.priority
+        }),
+        sourceReferences: sourceReferences(item.sourceReferences),
+        redactionLabels: Object.freeze([...item.redactionLabels]),
+        ...(item.confidence === undefined ? {} : { confidence: item.confidence })
+      } satisfies InspectCapabilityContextItem)
+    )
+  );
+}
+
+function capabilityEvidenceSnapshot(
+  snapshot: AgentCapabilityEvidenceSnapshot
+): InspectCapabilityEvidenceSnapshot {
+  return Object.freeze({
+    capabilityId: snapshot.capabilityId,
+    evidenceKind: snapshot.evidenceKind,
+    status: snapshot.status,
+    summary: snapshot.summary,
+    redactionLabels: Object.freeze([...snapshot.redactionLabels]),
+    ...(snapshot.policyOutcome === undefined
+      ? {}
+      : { policyOutcome: snapshot.policyOutcome }),
+    ...(snapshot.sourceReferences === undefined
+      ? {}
+      : { sourceReferences: sourceReferences(snapshot.sourceReferences) }),
+    ...(snapshot.configFingerprint === undefined
+      ? {}
+      : { configFingerprint: snapshot.configFingerprint })
+  } satisfies InspectCapabilityEvidenceSnapshot);
+}
+
+function capabilityHealthSnapshots(
+  turnEvidence: AgentCapabilityTurnEvidenceSnapshot | undefined
+): readonly InspectCapabilityHealthSnapshot[] {
+  if (turnEvidence === undefined) {
+    return Object.freeze([]);
+  }
+
+  return Object.freeze(
+    turnEvidence.health.map((snapshot) =>
+      Object.freeze({
+        capabilityId: snapshot.capabilityId,
+        status: snapshot.status,
+        checkedAt: snapshot.checkedAt,
+        summary: snapshot.summary,
+        redactionLabels: Object.freeze([...snapshot.redactionLabels])
+      } satisfies InspectCapabilityHealthSnapshot)
+    )
+  );
+}
+
+function policyOutcomes(
+  evidence: readonly AgentCapabilityEvidenceSnapshot[]
+): readonly string[] {
+  const outcomes: string[] = [];
+
+  for (const snapshot of evidence) {
+    if (
+      snapshot.policyOutcome !== undefined &&
+      !outcomes.includes(snapshot.policyOutcome)
+    ) {
+      outcomes.push(snapshot.policyOutcome);
+    }
+  }
+
+  return Object.freeze(outcomes);
+}
+
+function sourceReferences(
+  references: readonly InspectCapabilitySourceReference[]
+): readonly InspectCapabilitySourceReference[] {
+  return Object.freeze(
+    references.map((reference) =>
+      Object.freeze({
+        kind: reference.kind,
+        id: reference.id,
+        ...(reference.title === undefined ? {} : { title: reference.title }),
+        ...(reference.uri === undefined ? {} : { uri: reference.uri })
+      } satisfies InspectCapabilitySourceReference)
+    )
+  );
 }
 
 function parsedRoleModelDecision(

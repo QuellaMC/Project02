@@ -4,19 +4,31 @@ import {
   type LivingStateBrief
 } from './character-state.ts';
 import {
+  createAgentCapabilityContextItem,
+  createAgentCapabilityProvidedTool,
+  type AgentCapabilityContextItem,
+  type AgentCapabilityProvidedTool
+} from './agent-capabilities.ts';
+import {
+  builtInModelToolDefinitionsForUserTurn,
   characterStatePatchModelToolName,
   createCharacterStatePatchModelToolCall,
   createVisibleReplyModelToolCall,
   findCharacterStatePatchModelToolCall,
   findVisibleReplyModelToolCall,
   freezeBuiltInModelToolCall,
-  freezeBuiltInModelToolCalls,
+  freezeModelToolCall,
+  freezeModelToolCalls,
+  freezeModelToolDefinition,
+  validateModelToolInputAgainstContract,
   isBuiltInModelToolName,
   userTurnBuiltInModelToolNames,
   visibleReplyModelToolName,
   type BuiltInModelToolCall,
   type BuiltInModelToolName,
   type CharacterStatePatchModelToolCall,
+  type ModelToolCall,
+  type ModelToolDefinition,
   type VisibleReplyModelToolCall
 } from './model-tools.ts';
 import type {
@@ -29,9 +41,15 @@ export const roleModelLegacyDecisionContractVersion = 'mvp-005.visible_reply.v1'
 export const roleModelVisibleReplyActionName = visibleReplyModelToolName;
 export const roleModelCharacterStatePatchToolName =
   characterStatePatchModelToolName;
+export const roleModelCapabilityListToolName = 'capability.list';
 
-export type RoleModelAllowedToolName = BuiltInModelToolName;
+export type RoleModelAllowedToolName = string;
 export type RoleModelAllowedActionName = RoleModelAllowedToolName;
+export type RoleModelToolDefinition = ModelToolDefinition;
+
+export type RoleModelCapabilityToolDefinition = AgentCapabilityProvidedTool & {
+  readonly capabilityId: string;
+};
 
 export const roleModelAllowedToolNames = userTurnBuiltInModelToolNames;
 export const roleModelAllowedActionNames = roleModelAllowedToolNames;
@@ -39,13 +57,13 @@ export const roleModelAllowedActionNames = roleModelAllowedToolNames;
 export function isRoleModelAllowedToolName(
   value: unknown
 ): value is RoleModelAllowedToolName {
-  return isBuiltInModelToolName(value);
+  return typeof value === 'string' && isRoleModelToolNameSyntax(value);
 }
 
 export const isRoleModelAllowedActionName = isRoleModelAllowedToolName;
 
 export const roleModelDecisionOutputContractText =
-  'Return exactly one complete valid JSON CharacterDecision object with version "mvp-006.tool_calls.v1" and ordered toolCalls. Required call shape: {"name":"visible_reply","input":{"text":"one visible reply line"}}. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". For a user turn, include one visible_reply call with input.text. Include character_state.patch only when it is listed in allowedTools and toolDefinitions.';
+  'Return exactly one complete valid JSON CharacterDecision object with version "mvp-006.tool_calls.v1" and ordered toolCalls. Required call shape: {"name":"visible_reply","input":{"text":"one visible reply line"}}. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". For a user turn, include one visible_reply call with input.text. Include character_state.patch only when it is listed in allowedTools and toolDefinitions. Include capability tools only when their names are listed in both allowedTools and toolDefinitions.';
 
 export type RoleModelOutputContract = {
   readonly version: string;
@@ -79,6 +97,7 @@ export type DecisionContext = {
   readonly characterSnapshot: CharacterProfile;
   readonly recentVisibleMessages: readonly VisibleMessage[];
   readonly runtimeNotes: readonly string[];
+  readonly capabilityContextItems: readonly AgentCapabilityContextItem[];
   readonly livingStateBrief?: LivingStateBrief;
 };
 
@@ -87,6 +106,7 @@ export type CreateDecisionContextOptions = {
   readonly characterSnapshot: CharacterProfile;
   readonly recentVisibleMessages?: readonly VisibleMessage[];
   readonly runtimeNotes?: readonly string[];
+  readonly capabilityContextItems?: readonly AgentCapabilityContextItem[];
   readonly livingStateBrief?: LivingStateBrief;
 };
 
@@ -94,6 +114,8 @@ export type RoleModelInputEnvelope = {
   readonly event: UserMessageRuntimeEvent;
   readonly decisionContext: DecisionContext;
   readonly allowedTools: readonly RoleModelAllowedToolName[];
+  readonly toolDefinitions: readonly RoleModelToolDefinition[];
+  readonly capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[];
   readonly outputContract: RoleModelOutputContract;
 };
 
@@ -102,6 +124,7 @@ export type CreateRoleModelInputEnvelopeOptions = {
   readonly decisionContext: DecisionContext;
   readonly allowedTools?: readonly RoleModelAllowedToolName[];
   readonly allowedActions?: readonly RoleModelAllowedActionName[];
+  readonly capabilityToolDefinitions?: readonly RoleModelCapabilityToolDefinition[];
   readonly outputContract?: RoleModelOutputContract;
 };
 
@@ -112,7 +135,7 @@ export type RoleModelVisibleReplyAction = {
 
 export type CharacterDecision = {
   readonly version: typeof roleModelDecisionContractVersion;
-  readonly toolCalls: readonly BuiltInModelToolCall[];
+  readonly toolCalls: readonly ModelToolCall[];
 };
 
 export const roleModelMalformedOutputRejectionReason = 'malformed_output';
@@ -130,6 +153,8 @@ export const roleModelInvalidCharacterStatePatchRejectionReason =
 export const roleModelProviderErrorRejectionReason = 'provider_error';
 export const roleModelCommitValidationFailureRejectionReason =
   'commit_validation_failure';
+export const roleModelCapabilityToolRejectedRejectionReason =
+  'capability_tool_rejected';
 export const roleModelAdapterRawOutputMissingTextRejectionDetails =
   'Adapter raw output must include string rawOutputText.';
 export const roleModelAdapterRejectionNotReplayableDetails =
@@ -146,7 +171,8 @@ export type RoleModelDecisionRejectionReason =
   | typeof roleModelInvalidVisibleReplyRejectionReason
   | typeof roleModelInvalidCharacterStatePatchRejectionReason
   | typeof roleModelProviderErrorRejectionReason
-  | typeof roleModelCommitValidationFailureRejectionReason;
+  | typeof roleModelCommitValidationFailureRejectionReason
+  | typeof roleModelCapabilityToolRejectedRejectionReason;
 
 export const roleModelDecisionRejectionReasons = Object.freeze([
   roleModelMalformedOutputRejectionReason,
@@ -159,7 +185,8 @@ export const roleModelDecisionRejectionReasons = Object.freeze([
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelProviderErrorRejectionReason,
-  roleModelCommitValidationFailureRejectionReason
+  roleModelCommitValidationFailureRejectionReason,
+  roleModelCapabilityToolRejectedRejectionReason
 ] satisfies readonly RoleModelDecisionRejectionReason[]);
 
 export type RoleModelDecisionRejection = {
@@ -218,6 +245,9 @@ export function createDecisionContext(
       options.recentVisibleMessages ?? []
     ),
     runtimeNotes: Object.freeze([...(options.runtimeNotes ?? [])]),
+    capabilityContextItems: freezeCapabilityContextItems(
+      options.capabilityContextItems ?? []
+    ),
     ...(options.livingStateBrief === undefined
       ? {}
       : { livingStateBrief: createLivingStateBriefFromBrief(options.livingStateBrief) })
@@ -227,12 +257,28 @@ export function createDecisionContext(
 export function createRoleModelInputEnvelope(
   options: CreateRoleModelInputEnvelopeOptions
 ): RoleModelInputEnvelope {
+  const capabilityToolDefinitions = freezeCapabilityToolDefinitions(
+    options.capabilityToolDefinitions ?? []
+  );
+  const modelToolDefinitions = modelToolDefinitionsForCapabilityToolDefinitions(
+    capabilityToolDefinitions
+  );
+  const allowedTools = freezeAllowedTools(
+    options.allowedTools ??
+      options.allowedActions ??
+      defaultAllowedToolsForCapabilityDefinitions(capabilityToolDefinitions),
+    modelToolDefinitions
+  );
+
   return Object.freeze({
     event: freezeUserMessageRuntimeEventSnapshot(options.event),
     decisionContext: createDecisionContext(options.decisionContext),
-    allowedTools: freezeAllowedTools(
-      options.allowedTools ?? options.allowedActions ?? roleModelAllowedToolNames
-    ),
+    allowedTools,
+    toolDefinitions: toolDefinitionsForAllowedTools({
+      allowedTools,
+      toolDefinitions: modelToolDefinitions
+    }),
+    capabilityToolDefinitions,
     outputContract: freezeRoleModelOutputContract(
       options.outputContract ?? roleModelDecisionOutputContract
     )
@@ -240,9 +286,9 @@ export function createRoleModelInputEnvelope(
 }
 
 export function createCharacterDecision(
-  toolCalls: readonly BuiltInModelToolCall[]
+  toolCalls: readonly ModelToolCall[]
 ): CharacterDecision {
-  assertUserTurnToolCallCardinality(toolCalls);
+  assertUserTurnToolCallCardinality(toolCalls, builtInModelToolDefinitionsForUserTurn());
 
   return freezeCharacterDecision({
     version: roleModelDecisionContractVersion,
@@ -310,7 +356,8 @@ export function createParsedRoleModelDecisionSnapshot(
 
 export function parseRoleModelDecision(
   rawOutputText: string,
-  allowedTools: readonly RoleModelAllowedToolName[] = roleModelAllowedToolNames
+  allowedTools: readonly RoleModelAllowedToolName[] = roleModelAllowedToolNames,
+  capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[] = []
 ): RoleModelDecisionResult {
   let parsedOutput: unknown;
 
@@ -320,7 +367,11 @@ export function parseRoleModelDecision(
     return createMalformedOutputResult('Adapter output must be valid JSON.');
   }
 
-  return parseRoleModelDecisionObject(parsedOutput, allowedTools);
+  return parseRoleModelDecisionObject(
+    parsedOutput,
+    allowedTools,
+    capabilityToolDefinitions
+  );
 }
 
 export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
@@ -328,10 +379,12 @@ export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
   readonly providerMetadata: RoleModelProviderMetadata | undefined;
   readonly decisionResult: RoleModelDecisionResult;
   readonly allowedTools?: readonly RoleModelAllowedToolName[];
+  readonly capabilityToolDefinitions?: readonly RoleModelCapabilityToolDefinition[];
 }): boolean {
   const parsedRawOutputDecision = parseRoleModelDecision(
     options.rawOutputText,
-    options.allowedTools
+    options.allowedTools,
+    options.capabilityToolDefinitions
   );
 
   return (
@@ -433,9 +486,19 @@ export function getCharacterStatePatchToolCall(
 
 function parseRoleModelDecisionObject(
   parsedOutput: unknown,
-  allowedTools: readonly RoleModelAllowedToolName[]
+  allowedTools: readonly RoleModelAllowedToolName[],
+  capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[]
 ): RoleModelDecisionResult {
-  const frozenAllowedTools = freezeAllowedTools(allowedTools);
+  const frozenCapabilityToolDefinitions = freezeCapabilityToolDefinitions(
+    capabilityToolDefinitions
+  );
+  const modelToolDefinitions = modelToolDefinitionsForCapabilityToolDefinitions(
+    frozenCapabilityToolDefinitions
+  );
+  const frozenAllowedTools = freezeAllowedTools(
+    allowedTools,
+    modelToolDefinitions
+  );
 
   if (!isJsonRecord(parsedOutput)) {
     return createMalformedOutputResult(
@@ -478,11 +541,12 @@ function parseRoleModelDecisionObject(
     return createMalformedOutputResult('Decision toolCalls must be an array.');
   }
 
-  const toolCalls: BuiltInModelToolCall[] = [];
+  const toolCalls: ModelToolCall[] = [];
 
   for (const [index, rawToolCall] of rawToolCalls.entries()) {
     const parsedToolCall = parseModelToolCall({
       allowedTools: frozenAllowedTools,
+      modelToolDefinitions,
       index,
       rawToolCall
     });
@@ -494,7 +558,10 @@ function parseRoleModelDecisionObject(
     toolCalls.push(parsedToolCall.toolCall);
   }
 
-  const cardinalityResult = validateUserTurnToolCallCardinality(toolCalls);
+  const cardinalityResult = validateUserTurnToolCallCardinality(
+    toolCalls,
+    modelToolDefinitions
+  );
 
   if (cardinalityResult !== undefined) {
     return cardinalityResult;
@@ -564,7 +631,7 @@ function parseLegacyVisibleReplyDecision(
 type ParsedToolCallResult =
   | {
       readonly status: 'accepted';
-      readonly toolCall: BuiltInModelToolCall;
+      readonly toolCall: ModelToolCall;
     }
   | {
       readonly status: 'rejected';
@@ -573,6 +640,7 @@ type ParsedToolCallResult =
 
 function parseModelToolCall(options: {
   readonly allowedTools: readonly RoleModelAllowedToolName[];
+  readonly modelToolDefinitions: readonly RoleModelToolDefinition[];
   readonly index: number;
   readonly rawToolCall: unknown;
 }): ParsedToolCallResult {
@@ -606,7 +674,12 @@ function parseModelToolCall(options: {
     );
   }
 
-  if (!isBuiltInModelToolName(name)) {
+  const modelToolDefinition = findModelToolDefinition(
+    options.modelToolDefinitions,
+    name
+  );
+
+  if (modelToolDefinition === undefined) {
     return {
       status: 'rejected',
       result: createRejectedRoleModelDecisionResult(
@@ -638,9 +711,29 @@ function parseModelToolCall(options: {
     return parseVisibleReplyToolCallInput(input, options.index);
   }
 
+  if (name === characterStatePatchModelToolName) {
+    return {
+      status: 'accepted',
+      toolCall: createCharacterStatePatchModelToolCall(input)
+    };
+  }
+
+  const inputValidation = validateModelToolInputAgainstContract({
+    toolName: name,
+    input,
+    inputContract: modelToolDefinition.inputContract
+  });
+
+  if (inputValidation.status === 'rejected') {
+    return rejectToolCall(inputValidation.details);
+  }
+
   return {
     status: 'accepted',
-    toolCall: createCharacterStatePatchModelToolCall(input)
+    toolCall: freezeModelToolCall({
+      name,
+      input: inputValidation.input
+    })
   };
 }
 
@@ -687,9 +780,13 @@ function rejectToolCall(details: string): ParsedToolCallResult {
 }
 
 function assertUserTurnToolCallCardinality(
-  toolCalls: readonly BuiltInModelToolCall[]
+  toolCalls: readonly ModelToolCall[],
+  modelToolDefinitions: readonly RoleModelToolDefinition[]
 ): void {
-  const result = validateUserTurnToolCallCardinality(toolCalls);
+  const result = validateUserTurnToolCallCardinality(
+    toolCalls,
+    modelToolDefinitions
+  );
 
   if (result !== undefined) {
     throw new TypeError(result.rejection.details ?? result.rejection.reason);
@@ -697,7 +794,8 @@ function assertUserTurnToolCallCardinality(
 }
 
 function validateUserTurnToolCallCardinality(
-  toolCalls: readonly BuiltInModelToolCall[]
+  toolCalls: readonly ModelToolCall[],
+  modelToolDefinitions: readonly RoleModelToolDefinition[]
 ): RejectedRoleModelDecisionResult | undefined {
   const visibleReplyCount = toolCalls.filter(
     (call) => call.name === visibleReplyModelToolName
@@ -725,6 +823,32 @@ function validateUserTurnToolCallCardinality(
       roleModelDuplicateToolCallRejectionReason,
       'Decision must not include duplicate character_state.patch tool calls.'
     );
+  }
+
+  for (const definition of modelToolDefinitions) {
+    if (isBuiltInModelToolName(definition.name)) {
+      continue;
+    }
+
+    const count = toolCalls.filter((call) => call.name === definition.name).length;
+
+    if (definition.requiredForUserTurn && count === 0) {
+      return createRejectedRoleModelDecisionResult(
+        roleModelMissingRequiredToolCallRejectionReason,
+        `Decision must include required ${definition.name} tool call.`
+      );
+    }
+
+    if (count > definition.maxCallsPerUserTurn) {
+      return createRejectedRoleModelDecisionResult(
+        roleModelDuplicateToolCallRejectionReason,
+        `Decision requested ${definition.name} ${String(
+          count
+        )} times; maxCallsPerUserTurn is ${String(
+          definition.maxCallsPerUserTurn
+        )}.`
+      );
+    }
   }
 
   return undefined;
@@ -806,13 +930,137 @@ function createLivingStateBriefFromBrief(
   });
 }
 
+function freezeCapabilityContextItems(
+  contextItems: readonly AgentCapabilityContextItem[]
+): readonly AgentCapabilityContextItem[] {
+  return Object.freeze(contextItems.map(createAgentCapabilityContextItem));
+}
+
+function freezeCapabilityToolDefinitions(
+  definitions: readonly RoleModelCapabilityToolDefinition[]
+): readonly RoleModelCapabilityToolDefinition[] {
+  const frozenDefinitions: RoleModelCapabilityToolDefinition[] = [];
+  const seenNames = new Set<string>();
+
+  for (const definition of definitions) {
+    const capabilityId = requiredRoleModelIdentifier(
+      definition.capabilityId,
+      'capabilityId'
+    );
+    const providedTool = createAgentCapabilityProvidedTool(definition);
+
+    if (isBuiltInModelToolName(providedTool.name)) {
+      throw new TypeError(
+        `Capability tool "${providedTool.name}" must not duplicate a built-in model tool.`
+      );
+    }
+
+    if (seenNames.has(providedTool.name)) {
+      throw new TypeError(
+        `Capability tool "${providedTool.name}" is declared more than once.`
+      );
+    }
+
+    if (providedTool.validationOwner !== 'capability_host') {
+      throw new TypeError(
+        `Capability tool "${providedTool.name}" must be validated by capability_host.`
+      );
+    }
+
+    if (providedTool.requiresConfirmation) {
+      throw new TypeError(
+        `Capability tool "${providedTool.name}" requires confirmation and cannot be model-facing in CT-03.`
+      );
+    }
+
+    if (
+      providedTool.sideEffectLevel !== 'none' &&
+      providedTool.sideEffectLevel !== 'runtime_read'
+    ) {
+      throw new TypeError(
+        `Capability tool "${providedTool.name}" must be read-only for CT-03.`
+      );
+    }
+
+    seenNames.add(providedTool.name);
+    frozenDefinitions.push(
+      Object.freeze({
+        capabilityId,
+        ...providedTool
+      } satisfies RoleModelCapabilityToolDefinition)
+    );
+  }
+
+  return Object.freeze(frozenDefinitions);
+}
+
+function modelToolDefinitionsForCapabilityToolDefinitions(
+  capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[]
+): readonly RoleModelToolDefinition[] {
+  return Object.freeze([
+    ...builtInModelToolDefinitionsForUserTurn(),
+    ...capabilityToolDefinitions.map((definition) =>
+      freezeModelToolDefinition(definition)
+    )
+  ]);
+}
+
+function defaultAllowedToolsForCapabilityDefinitions(
+  capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[]
+): readonly RoleModelAllowedToolName[] {
+  return Object.freeze([
+    ...roleModelAllowedToolNames,
+    ...capabilityToolDefinitions.map((definition) => definition.name)
+  ]);
+}
+
+function toolDefinitionsForAllowedTools(options: {
+  readonly allowedTools: readonly RoleModelAllowedToolName[];
+  readonly toolDefinitions: readonly RoleModelToolDefinition[];
+}): readonly RoleModelToolDefinition[] {
+  return Object.freeze(
+    options.toolDefinitions
+      .filter((definition) => options.allowedTools.includes(definition.name))
+      .map(freezeModelToolDefinition)
+  );
+}
+
+function findModelToolDefinition(
+  definitions: readonly RoleModelToolDefinition[],
+  name: string
+): RoleModelToolDefinition | undefined {
+  return definitions.find((definition) => definition.name === name);
+}
+
+function requiredRoleModelIdentifier(value: string, field: string): string {
+  if (!isRoleModelToolNameSyntax(value)) {
+    throw new TypeError(
+      `Role-model ${field} must start with a letter and use only letters, numbers, dots, underscores, or hyphens.`
+    );
+  }
+
+  return value;
+}
+
+function isRoleModelToolNameSyntax(value: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u.test(value);
+}
+
 function freezeAllowedTools(
-  allowedTools: readonly unknown[]
+  allowedTools: readonly unknown[],
+  modelToolDefinitions: readonly RoleModelToolDefinition[]
 ): readonly RoleModelAllowedToolName[] {
   const validatedTools: RoleModelAllowedToolName[] = [];
+  const supportedToolNames = new Set(
+    modelToolDefinitions.map((definition) => definition.name)
+  );
 
   for (const tool of allowedTools) {
-    if (!isRoleModelAllowedToolName(tool)) {
+    if (
+      typeof tool !== 'string' ||
+      !isRoleModelToolNameSyntax(tool) ||
+      !supportedToolNames.has(tool)
+    ) {
       throw new TypeError(
         'Role-model allowedTools must contain only supported tools.'
       );
@@ -875,7 +1123,7 @@ function freezeProviderMetadata(
 function freezeCharacterDecision(decision: CharacterDecision): CharacterDecision {
   return Object.freeze({
     version: roleModelDecisionContractVersion,
-    toolCalls: freezeBuiltInModelToolCalls(decision.toolCalls)
+    toolCalls: freezeModelToolCalls(decision.toolCalls)
   } satisfies CharacterDecision);
 }
 

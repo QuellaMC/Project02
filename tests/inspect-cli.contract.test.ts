@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  agentCapabilityContractVersion,
   createConversationSession,
+  createAgentCapabilityTurnEvidenceSnapshot,
   createFileCharacterStateStore,
   createFileRuntimeLogStore,
   createLocalRuntimeSessionPaths,
@@ -18,6 +20,10 @@ import {
   roleModelMalformedOutputRejectionReason,
   roleModelVisibleReplyActionName,
   runLocalUserMessageEvent
+} from '../src/index.ts';
+import type {
+  AgentCapabilityTurnEvidenceSnapshot,
+  RuntimeEventIdentity
 } from '../src/index.ts';
 import type { RoleModelAdapter } from '../src/role-model-loop.ts';
 
@@ -65,6 +71,42 @@ type InspectSessionOutput = {
       readonly after?: unknown;
       readonly appliedChanges?: unknown;
       readonly rejection?: unknown;
+    };
+    readonly capabilityEvidence?: {
+      readonly contractVersion?: string;
+      readonly capabilities: readonly {
+        readonly capabilityId: string;
+        readonly displayName: string;
+        readonly enabled: boolean;
+        readonly availableForTurn: boolean;
+        readonly configFingerprint?: string;
+        readonly healthStatus?: string;
+        readonly providedTools: readonly {
+          readonly name: string;
+        }[];
+      }[];
+      readonly contextItems: readonly {
+        readonly capabilityId: string;
+        readonly text: string;
+        readonly sourceReferences: readonly {
+          readonly kind: string;
+          readonly id: string;
+          readonly uri?: string;
+        }[];
+      }[];
+      readonly evidence: readonly {
+        readonly capabilityId: string;
+        readonly evidenceKind: string;
+        readonly status: string;
+        readonly summary: string;
+        readonly policyOutcome?: string;
+      }[];
+      readonly policyOutcomes: readonly string[];
+      readonly health: readonly {
+        readonly capabilityId: string;
+        readonly status: string;
+        readonly summary: string;
+      }[];
     };
     readonly reason?: string;
   }[];
@@ -462,6 +504,82 @@ describe('node src/inspect-cli.ts', () => {
     });
   });
 
+  it('prints stored capability evidence and listing state without running hooks', async () => {
+    const storeRoot = await createTempStoreRoot();
+
+    await seedCapabilityEvidenceSession(storeRoot, 'mira-local');
+
+    const before = await readDurableFiles(storeRoot, 'mira-local');
+    const result = await runInspectCli([
+      '--store',
+      storeRoot,
+      '--session',
+      'mira-local'
+    ]);
+    const output = parseJson(result.stdout) as InspectSessionOutput;
+    const turn = output.turns[0];
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      stderr: ''
+    });
+    expect(output.counts).toEqual({
+      traceEntries: 4,
+      rawEvents: 3,
+      conversationMessages: 0
+    });
+    expect(turn?.capabilityEvidence).toMatchObject({
+      contractVersion: agentCapabilityContractVersion,
+      capabilities: [
+        {
+          capabilityId: 'memory.fixture',
+          displayName: 'Fixture memory',
+          enabled: true,
+          availableForTurn: false,
+          configFingerprint: 'gateway_api_key=[redacted]',
+          healthStatus: 'degraded',
+          providedTools: [
+            {
+              name: 'memory.search'
+            }
+          ]
+        }
+      ],
+      contextItems: [
+        {
+          capabilityId: 'memory.fixture',
+          text: 'memory api_key=[redacted]',
+          sourceReferences: [
+            {
+              kind: 'memory',
+              id: 'mem_1',
+              uri: 'https://[redacted]@memory.local/item?token=[redacted]'
+            }
+          ]
+        }
+      ],
+      policyOutcomes: [
+        'required_rejected',
+        'optional_degraded',
+        'disallowed_tool_call',
+        'handler_rejected',
+        'timeout',
+        'health_degraded',
+        'after_commit_failed'
+      ],
+      health: [
+        {
+          capabilityId: 'memory.fixture',
+          status: 'degraded',
+          summary: 'health token=[redacted]'
+        }
+      ]
+    });
+    expect(turn?.capabilityEvidence?.evidence).toHaveLength(7);
+    expect(JSON.stringify(turn?.capabilityEvidence)).not.toContain('secret-token');
+    await expect(readDurableFiles(storeRoot, 'mira-local')).resolves.toEqual(before);
+  });
+
   it('does not mutate session metadata or runtime logs while inspecting', async () => {
     const storeRoot = await createTempStoreRoot();
 
@@ -654,6 +772,284 @@ async function seedRejectedRoleModelSession(
   expect(result.status).toBe('rejected');
 }
 
+async function seedCapabilityEvidenceSession(
+  storeRoot: string,
+  sessionId: string
+): Promise<void> {
+  const sessionStore = createLocalRuntimeSessionStore({
+    storeRoot,
+    now: () => '2026-06-12T00:00:00.000Z'
+  });
+  await sessionStore.createSession({
+    sessionId,
+    createdAt: '2026-06-12T00:00:00.000Z'
+  });
+
+  const logStore = createFileRuntimeLogStore({
+    storeRoot,
+    sessionId
+  });
+  const identity = createRuntimeEventIdentity({
+    eventId: 'evt_capability_required_rejected',
+    traceId: 'trace_capability_required_rejected',
+    createdAt: '2026-06-12T00:00:00.000Z'
+  });
+  const payloadSummary = {
+    rawInput: 'remember this',
+    normalizedCurrentUserMessage: 'remember this'
+  };
+
+  logStore.appendTrace({
+    ...identity,
+    step: 'runtime_event_received'
+  });
+  logStore.appendRawEvent({
+    ...identity,
+    kind: 'runtime_event_received',
+    eventType: 'USER_MESSAGE',
+    payloadSummary
+  });
+  logStore.appendTrace({
+    ...identity,
+    step: 'capability_before_role_model_call_rejected'
+  });
+  logStore.appendRawEvent({
+    ...identity,
+    kind: 'capability_before_role_model_call_rejected',
+    eventType: 'USER_MESSAGE',
+    status: 'rejected',
+    reason: 'required capability failed',
+    payloadSummary,
+    agentCapabilityTurnEvidence: createInspectCapabilityEvidence(identity)
+  });
+  logStore.appendRawEvent({
+    ...identity,
+    kind: 'runtime_turn_rejected',
+    eventType: 'USER_MESSAGE',
+    status: 'rejected',
+    reason: 'required capability failed',
+    payloadSummary,
+    agentCapabilityTurnEvidence: createInspectCapabilityEvidence(identity)
+  });
+  logStore.appendTrace({
+    ...identity,
+    step: 'raw_event_log_appended'
+  });
+  logStore.appendTrace({
+    ...identity,
+    step: 'runtime_turn_rejected'
+  });
+}
+
+function createInspectCapabilityEvidence(
+  identity: RuntimeEventIdentity
+): AgentCapabilityTurnEvidenceSnapshot {
+  return createAgentCapabilityTurnEvidenceSnapshot({
+    ...identity,
+    kind: 'agent_capability_turn_evidence_snapshot',
+    contractVersion: agentCapabilityContractVersion,
+    capabilities: [
+      {
+        capabilityId: 'memory.fixture',
+        manifest: {
+          id: 'memory.fixture',
+          displayName: 'Fixture memory',
+          version: '1.0.0',
+          kind: 'memory_provider',
+          description: 'Fixture memory provider.',
+          contractVersion: agentCapabilityContractVersion,
+          compatibility: {
+            hostContractVersions: [agentCapabilityContractVersion],
+            sourceSystem: 'project02'
+          },
+          declaredCapabilities: [
+            'context_provider',
+            'before_role_model_call',
+            'tool_provider',
+            'handle_tool_call',
+            'after_turn_committed',
+            'health'
+          ],
+          config: {
+            fields: [
+              {
+                name: 'gateway_api_key',
+                description: 'Gateway API key.',
+                required: true,
+                secret: true,
+                redactionLabels: ['secret']
+              }
+            ],
+            fingerprint: 'gateway_api_key=secret-token'
+          },
+          localTrustLevel: 'test_fixture',
+          runtimePolicy: {
+            requiredForTurn: true,
+            sideEffectLevel: 'local_memory_write',
+            confirmation: 'not_required',
+            timeoutMs: 1000,
+            sourceReferencesRequired: true,
+            redactionLabels: ['secret'],
+            failureBehavior: {
+              beforeRoleModelCall: 'reject_turn',
+              handleToolCall: 'degrade',
+              afterTurnCommitted: 'log_failure',
+              health: 'degrade'
+            }
+          },
+          activation: {
+            defaultEnabled: true,
+            reasons: ['inspect_test']
+          }
+        },
+        providedTools: [
+          {
+            name: 'memory.search',
+            description: 'Search memory.',
+            requiredForUserTurn: false,
+            maxCallsPerUserTurn: 1,
+            inputContract: {
+              type: 'object',
+              additionalFields: false,
+              fields: [
+                {
+                  name: 'query',
+                  description: 'Search query.',
+                  required: true
+                }
+              ]
+            },
+            validationOwner: 'capability_host',
+            sideEffectLevel: 'runtime_read',
+            requiresConfirmation: false,
+            sourceReferencesRequired: true
+          }
+        ],
+        registeredLifecycleHooks: [
+          'before_role_model_call',
+          'handle_tool_call',
+          'after_turn_committed',
+          'health'
+        ],
+        installed: true,
+        registered: true,
+        enabled: true,
+        availableForTurn: false,
+        redactionLabels: ['secret'],
+        configFingerprint: 'gateway_api_key=secret-token',
+        healthStatus: 'degraded'
+      }
+    ],
+    contextItems: [
+      {
+        capabilityId: 'memory.fixture',
+        id: 'memory.item_1',
+        kind: 'memory',
+        text: 'memory api_key=secret-token',
+        budget: {
+          estimatedTokens: 6,
+          priority: 1
+        },
+        sourceReferences: [
+          {
+            kind: 'memory',
+            id: 'mem_1',
+            uri: 'https://user:secret-token@memory.local/item?token=secret-token'
+          }
+        ],
+        redactionLabels: ['secret']
+      }
+    ],
+    evidence: inspectCapabilityEvidenceSnapshots(identity),
+    health: [
+      {
+        capabilityId: 'memory.fixture',
+        status: 'degraded',
+        checkedAt: identity.createdAt,
+        summary: 'health token=secret-token',
+        redactionLabels: ['secret']
+      }
+    ]
+  });
+}
+
+function inspectCapabilityEvidenceSnapshots(
+  identity: RuntimeEventIdentity
+): AgentCapabilityTurnEvidenceSnapshot['evidence'] {
+  return [
+    {
+      ...identity,
+      kind: 'agent_capability_evidence_snapshot',
+      capabilityId: 'memory.fixture',
+      evidenceKind: 'before_role_model_call',
+      status: 'rejected',
+      summary: 'required failed',
+      policyOutcome: 'required_rejected',
+      redactionLabels: ['secret']
+    },
+    {
+      ...identity,
+      kind: 'agent_capability_evidence_snapshot',
+      capabilityId: 'memory.fixture',
+      evidenceKind: 'before_role_model_call',
+      status: 'degraded',
+      summary: 'optional degraded',
+      policyOutcome: 'optional_degraded',
+      redactionLabels: ['secret']
+    },
+    {
+      ...identity,
+      kind: 'agent_capability_evidence_snapshot',
+      capabilityId: 'memory.fixture',
+      evidenceKind: 'tool_invocation',
+      status: 'rejected',
+      summary: 'tool disallowed',
+      policyOutcome: 'disallowed_tool_call',
+      redactionLabels: []
+    },
+    {
+      ...identity,
+      kind: 'agent_capability_evidence_snapshot',
+      capabilityId: 'memory.fixture',
+      evidenceKind: 'tool_invocation',
+      status: 'rejected',
+      summary: 'handler rejected',
+      policyOutcome: 'handler_rejected',
+      redactionLabels: []
+    },
+    {
+      ...identity,
+      kind: 'agent_capability_evidence_snapshot',
+      capabilityId: 'memory.fixture',
+      evidenceKind: 'tool_invocation',
+      status: 'failed',
+      summary: 'timed out',
+      policyOutcome: 'timeout',
+      redactionLabels: []
+    },
+    {
+      ...identity,
+      kind: 'agent_capability_evidence_snapshot',
+      capabilityId: 'memory.fixture',
+      evidenceKind: 'health',
+      status: 'degraded',
+      summary: 'health degraded',
+      policyOutcome: 'health_degraded',
+      redactionLabels: []
+    },
+    {
+      ...identity,
+      kind: 'agent_capability_evidence_snapshot',
+      capabilityId: 'memory.fixture',
+      evidenceKind: 'after_turn_committed',
+      status: 'failed',
+      summary: 'capture failed',
+      policyOutcome: 'after_commit_failed',
+      redactionLabels: []
+    }
+  ];
+}
+
 function createRawOutputAdapter(rawOutputText: string): RoleModelAdapter {
   return Object.freeze({
     invoke() {
@@ -689,8 +1085,27 @@ async function readDurableFiles(
       paths.tracePath,
       paths.rawEventsPath,
       paths.conversationPath
-    ].map(async (filePath) => await readFile(filePath, 'utf8'))
+    ].map(readFileIfPresent)
   );
+}
+
+async function readFileIfPresent(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, 'utf8');
+  } catch (error: unknown) {
+    if (
+      isNodeErrorWithCode(error) &&
+      error.code === 'ENOENT'
+    ) {
+      return '';
+    }
+
+    throw error;
+  }
+}
+
+function isNodeErrorWithCode(error: unknown): error is { readonly code: string } {
+  return typeof error === 'object' && error !== null && 'code' in error;
 }
 
 async function runCommand(

@@ -1,0 +1,156 @@
+{
+  "provider": "memory_tencentdb",
+  "displayName": "memory-tencentdb",
+  "version": "1.0.0-fixture",
+  "aliases": ["tdai", "memory-tencentdb"],
+  "hooks": ["on_memory_write", "on_session_end"],
+  "config": {
+    "gateway_cmd": {
+      "description": "Command used by Hermes to start the gateway.",
+      "required": false,
+      "secret": false
+    },
+    "gateway_host": {
+      "description": "Gateway host.",
+      "required": true,
+      "secret": false
+    },
+    "gateway_port": {
+      "description": "Gateway port.",
+      "required": true,
+      "secret": false
+    },
+    "gateway_api_key": {
+      "description": "Gateway API key.",
+      "required": false,
+      "secret": true
+    },
+    "llm_api_key": {
+      "description": "LLM API key used by the memory gateway.",
+      "required": false,
+      "secret": true
+    },
+    "llm_base_url": {
+      "description": "LLM base URL used by the memory gateway.",
+      "required": false,
+      "secret": false
+    },
+    "llm_model": {
+      "description": "LLM model used by the memory gateway.",
+      "required": false,
+      "secret": false
+    }
+  },
+  "behavior": {
+    "prefetch": {
+      "context": "Hermes prefetch recalls that Mira should keep capability evidence compact.",
+      "estimatedTokens": 12,
+      "confidence": 0.78
+    },
+    "sync": {
+      "queued": true,
+      "mode": "non_blocking",
+      "captureEndpoint": "/capture"
+    },
+    "sessionEnd": {
+      "flushed": true,
+      "endpoint": "/session/end"
+    },
+    "health": {
+      "status": "degraded",
+      "summary": "Fixture circuit breaker is closed but provider is optional."
+    },
+    "searchTools": [
+      {
+        "name": "memory_tencentdb_memory_search",
+        "description": "Search TencentDB memories through Hermes.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["query"],
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query."
+            },
+            "limit": {
+              "type": "number",
+              "description": "Maximum result count."
+            },
+            "type": {
+              "type": "string",
+              "description": "Memory type.",
+              "enum": ["persona", "episodic", "instruction"]
+            }
+          }
+        },
+        "fixtureResponse": {
+          "results": [
+            {
+              "id": "hermes_memory_1",
+              "text": "Project02 adapters must keep external fields explicit."
+            }
+          ],
+          "total": 1
+        }
+      },
+      {
+        "name": "memory_tencentdb_conversation_search",
+        "description": "Search TencentDB conversations through Hermes.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["query"],
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query."
+            },
+            "limit": {
+              "type": "number",
+              "description": "Maximum result count."
+            }
+          }
+        },
+        "fixtureResponse": {
+          "results": [
+            {
+              "id": "hermes_conversation_1",
+              "text": "Prior conversation covered memory-provider degradation."
+            }
+          ],
+          "total": 1
+        }
+      }
+    ]
+  },
+  "degradation": {
+    "circuitBreaker": {
+      "failureThreshold": 5,
+      "pauseMs": 60000
+    },
+    "backPressure": {
+      "maxInFlight": 4,
+      "oldestWaitMs": 5000
+    },
+    "startupHealthWaitMs": 30000,
+    "watchdogProbeMs": 10000
+  },
+  "unsupportedFields": [
+    {
+      "fieldPath": "hooks.on_memory_write",
+      "disposition": "future_extension",
+      "evidence": "Research marks on_memory_write as reserved/TODO; CT-05 records it but does not execute it."
+    },
+    {
+      "fieldPath": "gateway_cmd",
+      "disposition": "ignored_with_evidence",
+      "evidence": "Sidecar process supervision is outside MVP-007 automated tests."
+    },
+    {
+      "fieldPath": "degradation.watchdogProbeMs",
+      "disposition": "future_extension",
+      "evidence": "Provider resurrection watchdog behavior belongs to a production adapter slice."
+    }
+  ]
+}

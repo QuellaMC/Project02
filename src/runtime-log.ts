@@ -10,6 +10,12 @@ import {
   type RoleModelDecisionRejection,
   type RoleModelIOSnapshot
 } from './role-model-contracts.ts';
+import {
+  createAgentCapabilityEvidenceSnapshot,
+  createAgentCapabilityTurnEvidenceSnapshot,
+  type AgentCapabilityEvidenceSnapshot,
+  type AgentCapabilityTurnEvidenceSnapshot
+} from './agent-capabilities.ts';
 import type { RuntimeEventIdentity, RuntimeEventType } from './runtime-event.ts';
 import type { LocalRuntimeSessionPaths } from './local-storage.ts';
 
@@ -19,6 +25,7 @@ export type RuntimeTraceStepName =
   | 'runtime_event_received'
   | 'runtime_event_normalized'
   | 'runtime_turn_started'
+  | 'capability_before_role_model_call_rejected'
   | 'visible_reply_committed'
   | 'input_validation_rejected'
   | 'character_reply_rejected'
@@ -34,6 +41,7 @@ export type RuntimeTraceEntry = RuntimeEventIdentity & {
 export type RawEventLogRecordKind =
   | 'runtime_event_received'
   | 'runtime_event_normalized'
+  | 'capability_before_role_model_call_rejected'
   | 'visible_reply_committed'
   | 'input_validation_rejected'
   | 'character_reply_rejected'
@@ -57,6 +65,8 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
   readonly characterStatePatchSnapshot?: CharacterStatePatchSnapshot;
+  readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[];
+  readonly agentCapabilityTurnEvidence?: AgentCapabilityTurnEvidenceSnapshot;
 };
 
 export type ConversationLogRecord = VisibleMessage &
@@ -79,6 +89,8 @@ export type RawEventLogRecordInput = RuntimeEventIdentity & {
   readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
   readonly characterStatePatchSnapshot?: CharacterStatePatchSnapshot;
+  readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[];
+  readonly agentCapabilityTurnEvidence?: AgentCapabilityTurnEvidenceSnapshot;
 };
 
 export type ConversationLogRecordInput = VisibleMessage &
@@ -214,6 +226,12 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
   const characterStatePatchSnapshot = freezeCharacterStatePatchSnapshot(
     record.characterStatePatchSnapshot
   );
+  const agentCapabilityEvidence = freezeAgentCapabilityEvidenceSnapshots(
+    record.agentCapabilityEvidence
+  );
+  const agentCapabilityTurnEvidence = freezeAgentCapabilityTurnEvidenceSnapshot(
+    record.agentCapabilityTurnEvidence
+  );
 
   return Object.freeze({
     eventId: record.eventId,
@@ -232,7 +250,13 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
     ...(commitValidation === undefined ? {} : { commitValidation }),
     ...(characterStatePatchSnapshot === undefined
       ? {}
-      : { characterStatePatchSnapshot })
+      : { characterStatePatchSnapshot }),
+    ...(agentCapabilityEvidence === undefined
+      ? {}
+      : { agentCapabilityEvidence }),
+    ...(agentCapabilityTurnEvidence === undefined
+      ? {}
+      : { agentCapabilityTurnEvidence })
   } satisfies RawEventLogRecord);
 }
 
@@ -310,6 +334,30 @@ function freezeCharacterStatePatchSnapshot(
   }
 
   return createCharacterStatePatchSnapshot(snapshot);
+}
+
+function freezeAgentCapabilityEvidenceSnapshots(
+  snapshots: readonly AgentCapabilityEvidenceSnapshot[] | undefined
+): readonly AgentCapabilityEvidenceSnapshot[] | undefined {
+  if (snapshots === undefined) {
+    return undefined;
+  }
+
+  return Object.freeze(
+    snapshots.map((snapshot) =>
+      createAgentCapabilityEvidenceSnapshot(snapshot)
+    )
+  );
+}
+
+function freezeAgentCapabilityTurnEvidenceSnapshot(
+  snapshot: AgentCapabilityTurnEvidenceSnapshot | undefined
+): AgentCapabilityTurnEvidenceSnapshot | undefined {
+  if (snapshot === undefined) {
+    return undefined;
+  }
+
+  return createAgentCapabilityTurnEvidenceSnapshot(snapshot);
 }
 
 function freezeRoleModelCommitValidationResult(

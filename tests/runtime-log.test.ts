@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  agentCapabilityContractVersion,
+  createAgentCapabilityTurnEvidenceSnapshot,
   createRuntimeLogStore,
   type ConversationLogRecordInput,
+  type AgentCapabilityTurnEvidenceSnapshot,
   type RawEventLogRecordInput,
+  type RuntimeEventIdentity,
   type RuntimeTraceEntryInput
 } from '../src/index.ts';
 
@@ -62,7 +66,8 @@ describe('runtime log store', () => {
       eventType: 'USER_MESSAGE',
       status: 'completed',
       visibleMessageIds,
-      payloadSummary
+      payloadSummary,
+      agentCapabilityTurnEvidence: createMinimalCapabilityTurnEvidence(identity)
     };
 
     const receivedRecord = store.appendRawEvent(received);
@@ -77,6 +82,21 @@ describe('runtime log store', () => {
       visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
       payloadSummary: {
         normalizedCurrentUserMessage: 'hello'
+      },
+      agentCapabilityTurnEvidence: {
+        ...createMinimalCapabilityTurnEvidence(identity),
+        evidence: [
+          {
+            ...identity,
+            kind: 'agent_capability_evidence_snapshot',
+            capabilityId: 'memory.fixture',
+            evidenceKind: 'policy',
+            status: 'failed',
+            summary: 'handler token=[redacted]',
+            policyOutcome: 'handler_rejected',
+            redactionLabels: ['secret']
+          }
+        ]
       }
     });
     expect(Object.isFrozen(appended)).toBe(true);
@@ -130,3 +150,28 @@ describe('runtime log store', () => {
     expect(store.conversationMessages()).toEqual([]);
   });
 });
+
+function createMinimalCapabilityTurnEvidence(
+  eventIdentity: RuntimeEventIdentity
+): AgentCapabilityTurnEvidenceSnapshot {
+  return createAgentCapabilityTurnEvidenceSnapshot({
+    ...eventIdentity,
+    kind: 'agent_capability_turn_evidence_snapshot',
+    contractVersion: agentCapabilityContractVersion,
+    capabilities: [],
+    contextItems: [],
+    evidence: [
+      {
+        ...eventIdentity,
+        kind: 'agent_capability_evidence_snapshot',
+        capabilityId: 'memory.fixture',
+        evidenceKind: 'policy',
+        status: 'failed',
+        summary: 'handler token=secret-token',
+        policyOutcome: 'handler_rejected',
+        redactionLabels: ['secret']
+      }
+    ],
+    health: []
+  });
+}

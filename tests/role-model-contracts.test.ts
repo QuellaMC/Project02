@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   characterStatePatchModelToolName,
+  createAgentCapabilityContextItem,
   createAcceptedRoleModelDecisionResult,
   createCharacterStatePatchModelToolCall,
   createDecisionContext,
@@ -16,6 +17,7 @@ import {
   getRequiredVisibleReplyText,
   parseRoleModelDecision,
   roleModelAllowedToolNames,
+  roleModelCapabilityListToolName,
   roleModelDecisionContractVersion,
   roleModelDecisionOutputContract,
   roleModelDecisionRejectionReasons,
@@ -28,6 +30,7 @@ import {
   roleModelUnsupportedEffectRejectionReason,
   roleModelUnknownToolRejectionReason,
   roleModelVisibleReplyActionName,
+  type RoleModelCapabilityToolDefinition,
   type RoleModelDecisionRejectionReason,
   type VisibleMessage
 } from '../src/index.ts';
@@ -194,6 +197,170 @@ describe('role model decision contracts', () => {
     expect(envelope.allowedTools).toEqual([roleModelVisibleReplyActionName]);
   });
 
+  it('adds immutable capability context and host-approved tool definitions to the model envelope', () => {
+    const identity = createRuntimeEventIdentity({
+      eventId: 'evt_capability_context_items',
+      traceId: 'trace_capability_context_items',
+      createdAt: '2026-06-12T00:00:00.000Z'
+    });
+    const event = createUserMessageRuntimeEvent('what do you remember?', identity);
+    const contextItem = createAgentCapabilityContextItem({
+      capabilityId: 'memory.fixture',
+      id: 'memory.fixture.recall_1',
+      kind: 'memory',
+      text: 'Mira prefers concise answers.',
+      budget: {
+        estimatedTokens: 8,
+        priority: 1
+      },
+      sourceReferences: [
+        {
+          kind: 'memory',
+          id: 'mem_1',
+          title: 'preference'
+        }
+      ],
+      confidence: 0.9,
+      redactionLabels: ['memory']
+    });
+    const decisionContext = createDecisionContext({
+      sessionId: 'session-role-model',
+      characterSnapshot: {
+        id: 'mira',
+        displayName: 'Mira'
+      },
+      runtimeNotes: ['base runtime note'],
+      capabilityContextItems: [contextItem]
+    });
+    const envelope = createRoleModelInputEnvelope({
+      event,
+      decisionContext,
+      capabilityToolDefinitions: [
+        createFakeCapabilityToolDefinition(),
+        createFakeCapabilityToolDefinition({
+          name: roleModelCapabilityListToolName,
+          capabilityId: 'runtime.capability_discovery',
+          description: 'List safe current-turn capability summaries.',
+          sourceReferencesRequired: false
+        })
+      ]
+    });
+
+    expect(envelope.decisionContext.runtimeNotes).toEqual([
+      'base runtime note'
+    ]);
+    expect(envelope.decisionContext.capabilityContextItems).toEqual([
+      contextItem
+    ]);
+    expect(envelope.decisionContext.capabilityContextItems[0]?.budget).toEqual({
+      estimatedTokens: 8,
+      priority: 1
+    });
+    expect(
+      envelope.decisionContext.capabilityContextItems[0]?.sourceReferences
+    ).toEqual([
+      {
+        kind: 'memory',
+        id: 'mem_1',
+        title: 'preference'
+      }
+    ]);
+    expect(envelope.allowedTools).toEqual([
+      roleModelVisibleReplyActionName,
+      characterStatePatchModelToolName,
+      'memory.search',
+      roleModelCapabilityListToolName
+    ]);
+    expect(envelope.toolDefinitions.map((definition) => definition.name)).toEqual([
+      roleModelVisibleReplyActionName,
+      characterStatePatchModelToolName,
+      'memory.search',
+      roleModelCapabilityListToolName
+    ]);
+    expect(Object.isFrozen(envelope.decisionContext.capabilityContextItems)).toBe(
+      true
+    );
+    expect(Object.isFrozen(envelope.capabilityToolDefinitions)).toBe(true);
+  });
+
+  it('shows capability tools only when allowed and rejects unsafe model-facing definitions', () => {
+    const identity = createRuntimeEventIdentity({
+      eventId: 'evt_capability_tool_visibility',
+      traceId: 'trace_capability_tool_visibility',
+      createdAt: '2026-06-12T00:00:00.000Z'
+    });
+    const event = createUserMessageRuntimeEvent('search memory', identity);
+    const decisionContext = createDecisionContext({
+      sessionId: 'session-role-model',
+      characterSnapshot: {
+        id: 'mira',
+        displayName: 'Mira'
+      }
+    });
+    const envelope = createRoleModelInputEnvelope({
+      event,
+      decisionContext,
+      allowedTools: [roleModelVisibleReplyActionName],
+      capabilityToolDefinitions: [createFakeCapabilityToolDefinition()]
+    });
+
+    expect(envelope.allowedTools).toEqual([roleModelVisibleReplyActionName]);
+    expect(envelope.toolDefinitions.map((definition) => definition.name)).toEqual([
+      roleModelVisibleReplyActionName
+    ]);
+    expect(
+      parseRoleModelDecision(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'I can look.'
+              }
+            },
+            {
+              name: 'memory.search',
+              input: {
+                query: 'preference'
+              }
+            }
+          ]
+        }),
+        envelope.allowedTools,
+        envelope.capabilityToolDefinitions
+      )
+    ).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelDisallowedToolRejectionReason,
+        details: 'Decision requested disallowed tool "memory.search".'
+      }
+    });
+    expect(() =>
+      createRoleModelInputEnvelope({
+        event,
+        decisionContext,
+        capabilityToolDefinitions: [
+          createFakeCapabilityToolDefinition({
+            name: roleModelVisibleReplyActionName
+          })
+        ]
+      })
+    ).toThrow('must not duplicate a built-in model tool');
+    expect(() =>
+      createRoleModelInputEnvelope({
+        event,
+        decisionContext,
+        capabilityToolDefinitions: [
+          createFakeCapabilityToolDefinition({
+            requiresConfirmation: true
+          })
+        ]
+      })
+    ).toThrow('requires confirmation');
+  });
+
   it('parses the new ordered toolCalls decision and the MVP-005 visible_reply action shape', () => {
     const patchCall = createCharacterStatePatchModelToolCall({
       mood: 'curious'
@@ -282,6 +449,129 @@ describe('role model decision contracts', () => {
     expect(validResult.status).toBe('accepted');
   });
 
+  it('validates capability tool calls before commit while preserving built-in tool validation', () => {
+    const capabilityToolDefinitions = [createFakeCapabilityToolDefinition()];
+    const allowedTools = [
+      roleModelVisibleReplyActionName,
+      'memory.search'
+    ] as const;
+    const visibleReplyCall = {
+      name: roleModelVisibleReplyActionName,
+      input: {
+        text: 'I can search memory.'
+      }
+    };
+
+    expect(
+      parseRoleModelDecision(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            visibleReplyCall,
+            {
+              name: 'unknown.search',
+              input: {
+                query: 'preference'
+              }
+            }
+          ]
+        }),
+        allowedTools,
+        capabilityToolDefinitions
+      )
+    ).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelUnknownToolRejectionReason,
+        details: 'Decision requested unknown tool "unknown.search".'
+      }
+    });
+    expect(
+      parseRoleModelDecision(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            visibleReplyCall,
+            {
+              name: 'memory.search',
+              input: {}
+            }
+          ]
+        }),
+        allowedTools,
+        capabilityToolDefinitions
+      )
+    ).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedToolCallRejectionReason,
+        details: 'memory.search input missing required field "query".'
+      }
+    });
+    expect(
+      parseRoleModelDecision(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            visibleReplyCall,
+            {
+              name: 'memory.search',
+              input: {
+                query: 'preference'
+              }
+            },
+            {
+              name: 'memory.search',
+              input: {
+                query: 'preference again'
+              }
+            }
+          ]
+        }),
+        allowedTools,
+        capabilityToolDefinitions
+      )
+    ).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelDuplicateToolCallRejectionReason,
+        details:
+          'Decision requested memory.search 2 times; maxCallsPerUserTurn is 1.'
+      }
+    });
+
+    const acceptedResult = parseRoleModelDecision(
+      JSON.stringify({
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          visibleReplyCall,
+          {
+            name: 'memory.search',
+            input: {
+              query: 'preference'
+            }
+          }
+        ]
+      }),
+      allowedTools,
+      capabilityToolDefinitions
+    );
+
+    expect(acceptedResult.status).toBe('accepted');
+
+    if (acceptedResult.status !== 'accepted') {
+      throw new Error('Expected accepted capability decision.');
+    }
+
+    expect(acceptedResult.decision.toolCalls.map((call) => call.name)).toEqual([
+      roleModelVisibleReplyActionName,
+      'memory.search'
+    ]);
+    expect(getRequiredVisibleReplyText(acceptedResult.decision)).toBe(
+      'I can search memory.'
+    );
+  });
+
   it('enforces allowed tools for legacy visible_reply action decisions', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
@@ -324,3 +614,30 @@ describe('role model decision contracts', () => {
     );
   });
 });
+
+function createFakeCapabilityToolDefinition(
+  overrides: Partial<RoleModelCapabilityToolDefinition> = {}
+): RoleModelCapabilityToolDefinition {
+  return {
+    capabilityId: overrides.capabilityId ?? 'memory.fixture',
+    name: overrides.name ?? 'memory.search',
+    description: overrides.description ?? 'Search fake memory.',
+    requiredForUserTurn: overrides.requiredForUserTurn ?? false,
+    maxCallsPerUserTurn: overrides.maxCallsPerUserTurn ?? 1,
+    inputContract: overrides.inputContract ?? {
+      type: 'object',
+      additionalFields: false,
+      fields: [
+        {
+          name: 'query',
+          description: 'Search query.',
+          required: true
+        }
+      ]
+    },
+    validationOwner: overrides.validationOwner ?? 'capability_host',
+    sideEffectLevel: overrides.sideEffectLevel ?? 'runtime_read',
+    requiresConfirmation: overrides.requiresConfirmation ?? false,
+    sourceReferencesRequired: overrides.sourceReferencesRequired ?? true
+  };
+}

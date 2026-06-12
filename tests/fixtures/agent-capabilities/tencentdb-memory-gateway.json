@@ -1,0 +1,215 @@
+{
+  "name": "TencentDB-Agent-Memory gateway",
+  "version": "main-fixture",
+  "config": {
+    "gateway_host": {
+      "description": "Gateway host.",
+      "required": true,
+      "secret": false
+    },
+    "gateway_port": {
+      "description": "Gateway port.",
+      "required": true,
+      "secret": false
+    },
+    "gateway_api_key": {
+      "description": "Optional bearer token.",
+      "required": false,
+      "secret": true
+    }
+  },
+  "endpoints": {
+    "health": {
+      "method": "GET",
+      "path": "/health",
+      "response": {
+        "status": "ok",
+        "version": "0.1.0-fixture",
+        "uptime": 120,
+        "stores": {
+          "vectorStore": "ready",
+          "embeddingService": "ready"
+        }
+      }
+    },
+    "recall": {
+      "method": "POST",
+      "path": "/recall",
+      "requestSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query", "session_key"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Current user message or recall query."
+          },
+          "session_key": {
+            "type": "string",
+            "description": "Conversation-scoped key."
+          },
+          "user_id": {
+            "type": "string",
+            "description": "Optional user id."
+          }
+        }
+      },
+      "response": {
+        "context": "Mira remembers that the user prefers short implementation notes.",
+        "strategy": "hybrid",
+        "memory_count": 2,
+        "estimatedTokens": 11,
+        "confidence": 0.82
+      }
+    },
+    "capture": {
+      "method": "POST",
+      "path": "/capture",
+      "requestSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["user_content", "assistant_content", "session_key"],
+        "properties": {
+          "user_content": {
+            "type": "string",
+            "description": "Committed user-visible input."
+          },
+          "assistant_content": {
+            "type": "string",
+            "description": "Committed assistant-visible reply."
+          },
+          "session_key": {
+            "type": "string",
+            "description": "Conversation-scoped key."
+          }
+        }
+      },
+      "response": {
+        "l0_recorded": true,
+        "scheduler_notified": true
+      }
+    },
+    "searchMemories": {
+      "method": "POST",
+      "path": "/search/memories",
+      "requestSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Memory search query."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Result limit clamped by gateway."
+          },
+          "type": {
+            "type": "string",
+            "description": "Memory type.",
+            "enum": ["persona", "episodic", "instruction"]
+          },
+          "scene": {
+            "type": "string",
+            "description": "Optional scene."
+          }
+        }
+      },
+      "response": {
+        "results": [
+          {
+            "id": "mem_fixture_1",
+            "text": "User prefers concise implementation handoffs.",
+            "type": "instruction"
+          }
+        ],
+        "total": 1,
+        "strategy": "hybrid"
+      }
+    },
+    "searchConversations": {
+      "method": "POST",
+      "path": "/search/conversations",
+      "requestSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Conversation search query."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Result limit."
+          },
+          "session_key": {
+            "type": "string",
+            "description": "Optional session key."
+          }
+        }
+      },
+      "response": {
+        "results": [
+          {
+            "id": "conversation_fixture_1",
+            "text": "Prior session discussed adapter evidence notes."
+          }
+        ],
+        "total": 1
+      }
+    },
+    "sessionEnd": {
+      "method": "POST",
+      "path": "/session/end",
+      "requestSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["session_key"],
+        "properties": {
+          "session_key": {
+            "type": "string",
+            "description": "Conversation-scoped key."
+          },
+          "user_id": {
+            "type": "string",
+            "description": "Optional user id."
+          }
+        }
+      },
+      "response": {
+        "flushed": true
+      }
+    },
+    "seed": {
+      "method": "POST",
+      "path": "/seed",
+      "response": {
+        "accepted": true
+      }
+    }
+  },
+  "gatewayInternals": {
+    "storageBackend": "sqlite-vec",
+    "embeddingPipeline": "external",
+    "cors": "gateway-managed"
+  },
+  "unsupportedFields": [
+    {
+      "fieldPath": "endpoints.seed",
+      "disposition": "future_extension",
+      "evidence": "Seed import is outside MVP-007 fixture mapping."
+    },
+    {
+      "fieldPath": "gatewayInternals.storageBackend",
+      "disposition": "ignored_with_evidence",
+      "evidence": "Gateway storage internals remain gateway-owned; project02 maps only the host boundary."
+    },
+    {
+      "fieldPath": "gatewayInternals.embeddingPipeline",
+      "disposition": "future_extension",
+      "evidence": "Embedding setup belongs to a production adapter slice."
+    }
+  ]
+}

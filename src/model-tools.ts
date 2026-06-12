@@ -29,12 +29,17 @@ export type ModelToolInputContract = {
   readonly additionalFields: boolean;
 };
 
-export type BuiltInModelToolDefinition = {
-  readonly name: BuiltInModelToolName;
+export type ModelToolDefinition = {
+  readonly name: string;
   readonly description: string;
   readonly requiredForUserTurn: boolean;
-  readonly maxCallsPerUserTurn: 1;
+  readonly maxCallsPerUserTurn: number;
   readonly inputContract: ModelToolInputContract;
+};
+
+export type BuiltInModelToolDefinition = ModelToolDefinition & {
+  readonly name: BuiltInModelToolName;
+  readonly maxCallsPerUserTurn: 1;
 };
 
 export type VisibleReplyToolInput = {
@@ -56,6 +61,13 @@ export type CharacterStatePatchModelToolCall = {
 export type BuiltInModelToolCall =
   | VisibleReplyModelToolCall
   | CharacterStatePatchModelToolCall;
+
+export type CapabilityModelToolCall = {
+  readonly name: string;
+  readonly input: Readonly<Record<string, unknown>>;
+};
+
+export type ModelToolCall = BuiltInModelToolCall | CapabilityModelToolCall;
 
 export const userTurnBuiltInModelToolNames = Object.freeze([
   visibleReplyModelToolName,
@@ -177,15 +189,140 @@ export function freezeBuiltInModelToolCalls(
 }
 
 export function findVisibleReplyModelToolCall(
-  calls: readonly BuiltInModelToolCall[]
+  calls: readonly ModelToolCall[]
 ): VisibleReplyModelToolCall | undefined {
-  return calls.find((call) => call.name === visibleReplyModelToolName);
+  const call = calls.find((candidate) => candidate.name === visibleReplyModelToolName);
+
+  if (call === undefined) {
+    return undefined;
+  }
+
+  const text = call.input['text'];
+
+  if (typeof text !== 'string') {
+    return undefined;
+  }
+
+  return createVisibleReplyModelToolCall(text);
 }
 
 export function findCharacterStatePatchModelToolCall(
-  calls: readonly BuiltInModelToolCall[]
+  calls: readonly ModelToolCall[]
 ): CharacterStatePatchModelToolCall | undefined {
-  return calls.find((call) => call.name === characterStatePatchModelToolName);
+  const call = calls.find(
+    (candidate) => candidate.name === characterStatePatchModelToolName
+  );
+
+  if (call === undefined) {
+    return undefined;
+  }
+
+  return createCharacterStatePatchModelToolCall(call.input);
+}
+
+export function freezeModelToolDefinition(
+  definition: ModelToolDefinition
+): ModelToolDefinition {
+  return Object.freeze({
+    name: definition.name,
+    description: definition.description,
+    requiredForUserTurn: definition.requiredForUserTurn,
+    maxCallsPerUserTurn: definition.maxCallsPerUserTurn,
+    inputContract: freezeModelToolInputContract(definition.inputContract)
+  } satisfies ModelToolDefinition);
+}
+
+export function freezeModelToolDefinitions(
+  definitions: readonly ModelToolDefinition[]
+): readonly ModelToolDefinition[] {
+  return Object.freeze(definitions.map(freezeModelToolDefinition));
+}
+
+export function freezeModelToolCall(call: ModelToolCall): ModelToolCall {
+  if (call.name === visibleReplyModelToolName) {
+    const text = call.input['text'];
+
+    return createVisibleReplyModelToolCall(typeof text === 'string' ? text : '');
+  }
+
+  if (call.name === characterStatePatchModelToolName) {
+    return createCharacterStatePatchModelToolCall(call.input);
+  }
+
+  return Object.freeze({
+    name: call.name,
+    input: freezeJsonRecord(call.input)
+  } satisfies CapabilityModelToolCall);
+}
+
+export function freezeModelToolCalls(
+  calls: readonly ModelToolCall[]
+): readonly ModelToolCall[] {
+  return Object.freeze(calls.map(freezeModelToolCall));
+}
+
+export type ModelToolInputValidationResult =
+  | {
+      readonly status: 'accepted';
+      readonly input: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly details: string;
+    };
+
+export function validateModelToolInputAgainstContract(options: {
+  readonly toolName: string;
+  readonly input: Readonly<Record<string, unknown>>;
+  readonly inputContract: ModelToolInputContract;
+}): ModelToolInputValidationResult {
+  const supportedFieldNames = options.inputContract.fields.map(
+    (field) => field.name
+  );
+
+  if (!options.inputContract.additionalFields) {
+    const unsupportedInputKeys = Object.keys(options.input).filter(
+      (key) => !supportedFieldNames.includes(key)
+    );
+
+    if (unsupportedInputKeys.length > 0) {
+      return rejectModelToolInput(
+        `${options.toolName} input includes unsupported fields: ${unsupportedInputKeys.join(
+          ', '
+        )}.`
+      );
+    }
+  }
+
+  for (const field of options.inputContract.fields) {
+    const fieldValue = options.input[field.name];
+
+    if (field.required && fieldValue === undefined) {
+      return rejectModelToolInput(
+        `${options.toolName} input missing required field "${field.name}".`
+      );
+    }
+
+    if (fieldValue === undefined || field.allowedValues === undefined) {
+      continue;
+    }
+
+    if (
+      typeof fieldValue !== 'string' ||
+      !field.allowedValues.includes(fieldValue)
+    ) {
+      return rejectModelToolInput(
+        `${options.toolName} input field "${field.name}" must be one of: ${field.allowedValues.join(
+          ', '
+        )}.`
+      );
+    }
+  }
+
+  return Object.freeze({
+    status: 'accepted',
+    input: freezeJsonRecord(options.input)
+  } satisfies ModelToolInputValidationResult);
 }
 
 function createBuiltInModelToolDefinition(options: {
@@ -199,23 +336,36 @@ function createBuiltInModelToolDefinition(options: {
     description: options.description,
     requiredForUserTurn: options.requiredForUserTurn,
     maxCallsPerUserTurn: 1,
-    inputContract: Object.freeze({
-      type: options.inputContract.type,
-      fields: Object.freeze(
-        options.inputContract.fields.map((field) =>
-          Object.freeze({
-            name: field.name,
-            description: field.description,
-            required: field.required,
-            ...(field.allowedValues === undefined
-              ? {}
-              : { allowedValues: Object.freeze([...field.allowedValues]) })
-          } satisfies ModelToolInputField)
-        )
-      ),
-      additionalFields: options.inputContract.additionalFields
-    } satisfies ModelToolInputContract)
+    inputContract: freezeModelToolInputContract(options.inputContract)
   } satisfies BuiltInModelToolDefinition);
+}
+
+function freezeModelToolInputContract(
+  inputContract: ModelToolInputContract
+): ModelToolInputContract {
+  return Object.freeze({
+    type: inputContract.type,
+    fields: Object.freeze(
+      inputContract.fields.map((field) =>
+        Object.freeze({
+          name: field.name,
+          description: field.description,
+          required: field.required,
+          ...(field.allowedValues === undefined
+            ? {}
+            : { allowedValues: Object.freeze([...field.allowedValues]) })
+        } satisfies ModelToolInputField)
+      )
+    ),
+    additionalFields: inputContract.additionalFields
+  } satisfies ModelToolInputContract);
+}
+
+function rejectModelToolInput(details: string): ModelToolInputValidationResult {
+  return Object.freeze({
+    status: 'rejected',
+    details
+  } satisfies ModelToolInputValidationResult);
 }
 
 function freezeJsonRecord(

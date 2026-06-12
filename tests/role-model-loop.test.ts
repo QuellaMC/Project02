@@ -11,6 +11,7 @@ import {
   createDecisionContext,
   getRequiredVisibleReplyText,
   createRoleModelInputEnvelope,
+  roleModelCapabilityToolRejectedRejectionReason,
   roleModelAdapterRejectionNotReplayableDetails,
   roleModelDecisionContractVersion,
   roleModelMalformedOutputRejectionReason,
@@ -18,6 +19,15 @@ import {
   roleModelUnsupportedEffectRejectionReason,
   roleModelVisibleReplyActionName
 } from '../src/role-model-contracts.ts';
+import {
+  agentCapabilityContractVersion,
+  createAgentCapability,
+  createAgentCapabilityEvidenceSnapshot,
+  createRuntimeCapabilityContext,
+  type AgentCapability,
+  type AgentCapabilityToolCallResult
+} from '../src/agent-capabilities.ts';
+import { createRuntimeCapabilityHost } from '../src/agent-capability-host.ts';
 import {
   createDeterministicLocalRoleModelAdapter,
   createRoleModelAdapterFromCharacterAgent,
@@ -511,6 +521,205 @@ describe('role model loop', () => {
       }
     });
   });
+
+  it('routes accepted capability tool calls through the runtime capability host', async () => {
+    const event = createTestUserMessageEvent(
+      'search memory',
+      'evt_role_capability_tool'
+    );
+    const runtimeCapabilityContext = createRuntimeCapabilityContext({
+      eventId: event.eventId,
+      traceId: event.traceId,
+      createdAt: event.createdAt,
+      sessionId: 'local-session',
+      eventType: event.type,
+      currentUserMessage: event.payload.currentUserMessage,
+      character: localCharacterProfile
+    });
+    const capability = createRoutingCapability({
+      result: {
+        status: 'accepted',
+        output: {
+          results: ['Mira prefers concise answers.']
+        },
+        evidence: [
+          createAgentCapabilityEvidenceSnapshot({
+            eventId: event.eventId,
+            traceId: event.traceId,
+            createdAt: event.createdAt,
+            kind: 'agent_capability_evidence_snapshot',
+            capabilityId: 'memory.fixture',
+            evidenceKind: 'tool_invocation',
+            status: 'accepted',
+            summary: 'memory search accepted',
+            sourceReferences: [
+              {
+                kind: 'memory',
+                id: 'mem_1',
+                title: 'preference'
+              }
+            ],
+            redactionLabels: []
+          })
+        ]
+      }
+    });
+    const host = createRuntimeCapabilityHost({
+      capabilities: [capability],
+      enabledCapabilityIds: ['memory.fixture']
+    });
+    const result = await runRoleModelLoop({
+      event,
+      decisionContext: createDecisionContext({
+        sessionId: 'local-session',
+        characterSnapshot: localCharacterProfile
+      }),
+      adapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'I found one memory.'
+              }
+            },
+            {
+              name: 'memory.search',
+              input: {
+                query: 'preference'
+              }
+            }
+          ]
+        })
+      ),
+      capabilityToolDefinitions: host.capabilityToolDefinitions(),
+      capabilityToolHost: host,
+      runtimeCapabilityContext
+    });
+
+    expect(result.status).toBe('accepted');
+
+    if (result.status !== 'accepted') {
+      throw new Error('Expected accepted role model result.');
+    }
+
+    expect(getRequiredVisibleReplyText(result.decision)).toBe(
+      'I found one memory.'
+    );
+    expect(result.capabilityToolResults).toHaveLength(1);
+    expect(result.capabilityToolResults[0]?.call).toMatchObject({
+      eventId: event.eventId,
+      traceId: event.traceId,
+      createdAt: event.createdAt,
+      capabilityId: 'memory.fixture',
+      toolName: 'memory.search',
+      input: {
+        query: 'preference'
+      }
+    });
+    expect(result.capabilityToolResults[0]?.result).toMatchObject({
+      status: 'accepted',
+      output: {
+        results: ['Mira prefers concise answers.']
+      },
+      evidence: [
+        {
+          capabilityId: 'memory.fixture',
+          evidenceKind: 'tool_invocation',
+          status: 'accepted',
+          summary: 'memory search accepted'
+        }
+      ]
+    });
+  });
+
+  it('rejects host-rejected capability tool calls before returning an accepted loop result', async () => {
+    const event = createTestUserMessageEvent(
+      'search memory',
+      'evt_role_capability_tool_rejected'
+    );
+    const runtimeCapabilityContext = createRuntimeCapabilityContext({
+      eventId: event.eventId,
+      traceId: event.traceId,
+      createdAt: event.createdAt,
+      sessionId: 'local-session',
+      eventType: event.type,
+      currentUserMessage: event.payload.currentUserMessage,
+      character: localCharacterProfile
+    });
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createRoutingCapability({
+          result: {
+            status: 'rejected',
+            reason: 'memory_unavailable',
+            message: 'memory fixture unavailable',
+            evidence: [
+              createAgentCapabilityEvidenceSnapshot({
+                eventId: event.eventId,
+                traceId: event.traceId,
+                createdAt: event.createdAt,
+                kind: 'agent_capability_evidence_snapshot',
+                capabilityId: 'memory.fixture',
+                evidenceKind: 'tool_invocation',
+                status: 'rejected',
+                summary: 'memory fixture unavailable',
+                redactionLabels: []
+              })
+            ]
+          }
+        })
+      ],
+      enabledCapabilityIds: ['memory.fixture']
+    });
+    const result = await runRoleModelLoop({
+      event,
+      decisionContext: createDecisionContext({
+        sessionId: 'local-session',
+        characterSnapshot: localCharacterProfile
+      }),
+      adapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'I will check.'
+              }
+            },
+            {
+              name: 'memory.search',
+              input: {
+                query: 'preference'
+              }
+            }
+          ]
+        })
+      ),
+      capabilityToolDefinitions: host.capabilityToolDefinitions(),
+      capabilityToolHost: host,
+      runtimeCapabilityContext
+    });
+
+    expect(result.status).toBe('rejected');
+
+    if (result.status !== 'rejected') {
+      throw new Error('Expected rejected role model result.');
+    }
+
+    expect(result.rejection).toEqual({
+      reason: roleModelCapabilityToolRejectedRejectionReason,
+      details: 'memory fixture unavailable'
+    });
+    expect(result.capabilityToolResults).toHaveLength(1);
+    expect(result.capabilityToolResults[0]?.result).toMatchObject({
+      status: 'rejected',
+      reason: 'memory_unavailable',
+      message: 'memory fixture unavailable'
+    });
+  });
 });
 
 function createTestUserMessageEvent(message: string, eventId: string) {
@@ -542,4 +751,74 @@ function createMalformedRawOutputAdapter(rawOutput: unknown): RoleModelAdapter {
       return rawOutput as RoleModelAdapterRawOutput;
     }
   };
+}
+
+function createRoutingCapability(options: {
+  readonly result: AgentCapabilityToolCallResult;
+}): AgentCapability {
+  return createAgentCapability({
+    manifest: {
+      id: 'memory.fixture',
+      displayName: 'Memory fixture',
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'In-process memory fixture for role-model loop tests.',
+      contractVersion: agentCapabilityContractVersion,
+      compatibility: {
+        hostContractVersions: [agentCapabilityContractVersion],
+        sourceSystem: 'project02'
+      },
+      declaredCapabilities: ['tool_provider', 'handle_tool_call'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'degrade',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['role_model_loop_test']
+      }
+    },
+    providedTools: [
+      {
+        name: 'memory.search',
+        description: 'Search fake memory.',
+        requiredForUserTurn: false,
+        maxCallsPerUserTurn: 1,
+        inputContract: {
+          type: 'object',
+          additionalFields: false,
+          fields: [
+            {
+              name: 'query',
+              description: 'Search query.',
+              required: true
+            }
+          ]
+        },
+        validationOwner: 'capability_host',
+        sideEffectLevel: 'runtime_read',
+        requiresConfirmation: false,
+        sourceReferencesRequired: true
+      }
+    ],
+    lifecycleHooks: {
+      handleToolCall() {
+        return options.result;
+      }
+    }
+  });
 }

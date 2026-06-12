@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  agentCapabilityContractVersion,
   createAcceptedRoleModelDecisionResult,
+  createAgentCapabilityTurnEvidenceSnapshot,
   createCharacterStatePatchSnapshot,
   createDecisionContext,
   createDefaultCharacterRuntimeState,
@@ -46,8 +48,10 @@ import {
   roleModelVisibleReplyActionName,
   type ConversationLogRecord,
   type LocalRuntimeStorageContractErrorCode,
+  type AgentCapabilityTurnEvidenceSnapshot,
   type RawEventLogRecord,
   type RoleModelDecisionRejectionReason,
+  type RuntimeEventIdentity,
   type RuntimeTraceEntry
 } from '../src/index.ts';
 
@@ -289,6 +293,81 @@ describe('local runtime storage contract', () => {
     };
 
     expect(decodeRawEventLogRecord(encodeRawEventLogRecord(rawEvent))).toEqual(rawEvent);
+  });
+
+  it('decodes redacted capability turn evidence with source refs and policy outcomes', () => {
+    const rawEvent: RawEventLogRecord = {
+      eventId: 'evt_capability_storage',
+      traceId: 'trace_capability_storage',
+      createdAt,
+      kind: 'runtime_turn_rejected',
+      eventType: 'USER_MESSAGE',
+      status: 'rejected',
+      reason: 'required capability failed',
+      agentCapabilityTurnEvidence: createCapabilityTurnEvidence({
+        eventId: 'evt_capability_storage',
+        traceId: 'trace_capability_storage',
+        createdAt
+      })
+    };
+
+    const decoded = decodeRawEventLogRecord(encodeRawEventLogRecord(rawEvent));
+    const capabilityEvidence = decoded.agentCapabilityTurnEvidence;
+
+    expect(capabilityEvidence?.capabilities[0]).toMatchObject({
+      capabilityId: 'memory.fixture',
+      enabled: true,
+      availableForTurn: false,
+      configFingerprint: 'gateway_api_key=[redacted]'
+    });
+    expect(capabilityEvidence?.contextItems[0]).toMatchObject({
+      capabilityId: 'memory.fixture',
+      text: 'Recovered endpoint token=[redacted]',
+      sourceReferences: [
+        {
+          kind: 'memory',
+          id: 'mem_1',
+          uri: 'https://[redacted]@memory.local/item?api_key=[redacted]'
+        }
+      ]
+    });
+    expect(capabilityEvidence?.evidence.map((snapshot) => snapshot.policyOutcome)).toEqual([
+      'required_rejected',
+      'optional_degraded',
+      'disallowed_tool_call',
+      'handler_rejected',
+      'timeout',
+      'health_degraded',
+      'after_commit_failed'
+    ]);
+    expect(JSON.stringify(decoded)).not.toContain('secret-token');
+    expect(JSON.stringify(decoded)).not.toContain('plain-secret');
+  });
+
+  it('rejects capability evidence whose nested identity does not match the raw event identity', () => {
+    const rawEvent: RawEventLogRecord = {
+      eventId: 'evt_capability_storage',
+      traceId: 'trace_capability_storage',
+      createdAt,
+      kind: 'runtime_turn_rejected',
+      eventType: 'USER_MESSAGE',
+      status: 'rejected',
+      reason: 'required capability failed',
+      agentCapabilityTurnEvidence: createCapabilityTurnEvidence({
+        eventId: 'evt_capability_storage',
+        traceId: 'trace_capability_storage',
+        createdAt
+      })
+    };
+    const record = mutableRecordFromRawEvent(rawEvent);
+    const turnEvidence = requiredMutableRecord(
+      record['agentCapabilityTurnEvidence'],
+      'agentCapabilityTurnEvidence'
+    );
+
+    turnEvidence['eventId'] = 'evt_other';
+
+    expectMalformedRawEvent(record);
   });
 
   it('rejects role-model evidence whose nested identity does not match the raw event identity', () => {
@@ -933,6 +1012,219 @@ describe('local runtime storage contract', () => {
     ).toThrow(LocalRuntimeStorageContractError);
   });
 });
+
+function createCapabilityTurnEvidence(
+  identity: RuntimeEventIdentity
+): AgentCapabilityTurnEvidenceSnapshot {
+  return createAgentCapabilityTurnEvidenceSnapshot({
+    ...identity,
+    kind: 'agent_capability_turn_evidence_snapshot',
+    contractVersion: agentCapabilityContractVersion,
+    capabilities: [
+      {
+        capabilityId: 'memory.fixture',
+        manifest: createCapabilityManifestFixture(),
+        providedTools: [
+          {
+            name: 'memory.search',
+            description: 'Search memory.',
+            requiredForUserTurn: false,
+            maxCallsPerUserTurn: 1,
+            inputContract: {
+              type: 'object',
+              additionalFields: false,
+              fields: [
+                {
+                  name: 'query',
+                  description: 'Search query.',
+                  required: true
+                }
+              ]
+            },
+            validationOwner: 'capability_host',
+            sideEffectLevel: 'runtime_read',
+            requiresConfirmation: false,
+            sourceReferencesRequired: true
+          }
+        ],
+        registeredLifecycleHooks: [
+          'before_role_model_call',
+          'handle_tool_call',
+          'after_turn_committed',
+          'health'
+        ],
+        installed: true,
+        registered: true,
+        enabled: true,
+        availableForTurn: false,
+        redactionLabels: ['secret'],
+        configFingerprint: 'gateway_api_key=plain-secret',
+        healthStatus: 'degraded'
+      }
+    ],
+    contextItems: [
+      {
+        capabilityId: 'memory.fixture',
+        id: 'memory.item_1',
+        kind: 'memory',
+        text: 'Recovered endpoint token=secret-token',
+        budget: {
+          estimatedTokens: 12,
+          priority: 1
+        },
+        sourceReferences: [
+          {
+            kind: 'memory',
+            id: 'mem_1',
+            title: 'token=secret-token',
+            uri: 'https://user:plain-secret@memory.local/item?api_key=secret-token'
+          }
+        ],
+        confidence: 0.8,
+        redactionLabels: ['memory']
+      }
+    ],
+    evidence: [
+      createCapabilityEvidence(identity, {
+        evidenceKind: 'before_role_model_call',
+        status: 'rejected',
+        policyOutcome: 'required_rejected',
+        summary: 'Required recall rejected with Bearer secret-token'
+      }),
+      createCapabilityEvidence(identity, {
+        evidenceKind: 'before_role_model_call',
+        status: 'degraded',
+        policyOutcome: 'optional_degraded',
+        summary: 'Optional recall degraded'
+      }),
+      createCapabilityEvidence(identity, {
+        evidenceKind: 'tool_invocation',
+        status: 'rejected',
+        policyOutcome: 'disallowed_tool_call',
+        summary: 'Tool was not allowed'
+      }),
+      createCapabilityEvidence(identity, {
+        evidenceKind: 'tool_invocation',
+        status: 'rejected',
+        policyOutcome: 'handler_rejected',
+        summary: 'Handler rejected query'
+      }),
+      createCapabilityEvidence(identity, {
+        evidenceKind: 'tool_invocation',
+        status: 'failed',
+        policyOutcome: 'timeout',
+        summary: 'Timed out after 1000ms'
+      }),
+      createCapabilityEvidence(identity, {
+        evidenceKind: 'health',
+        status: 'degraded',
+        policyOutcome: 'health_degraded',
+        summary: 'Health degraded'
+      }),
+      createCapabilityEvidence(identity, {
+        evidenceKind: 'after_turn_committed',
+        status: 'failed',
+        policyOutcome: 'after_commit_failed',
+        summary: 'Capture failed'
+      })
+    ],
+    health: [
+      {
+        capabilityId: 'memory.fixture',
+        status: 'degraded',
+        checkedAt: createdAt,
+        summary: 'gateway token=secret-token degraded',
+        redactionLabels: ['secret']
+      }
+    ]
+  });
+}
+
+function createCapabilityEvidence(
+  identity: RuntimeEventIdentity,
+  options: {
+    readonly evidenceKind:
+      | 'before_role_model_call'
+      | 'tool_invocation'
+      | 'after_turn_committed'
+      | 'health';
+    readonly status: 'rejected' | 'degraded' | 'failed';
+    readonly policyOutcome:
+      | 'required_rejected'
+      | 'optional_degraded'
+      | 'disallowed_tool_call'
+      | 'handler_rejected'
+      | 'timeout'
+      | 'health_degraded'
+      | 'after_commit_failed';
+    readonly summary: string;
+  }
+): AgentCapabilityTurnEvidenceSnapshot['evidence'][number] {
+  return {
+    ...identity,
+    kind: 'agent_capability_evidence_snapshot',
+    capabilityId: 'memory.fixture',
+    evidenceKind: options.evidenceKind,
+    status: options.status,
+    summary: options.summary,
+    policyOutcome: options.policyOutcome,
+    redactionLabels: ['secret']
+  };
+}
+
+function createCapabilityManifestFixture(): AgentCapabilityTurnEvidenceSnapshot['capabilities'][number]['manifest'] {
+  return {
+    id: 'memory.fixture',
+    displayName: 'Fixture memory',
+    version: '1.0.0',
+    kind: 'memory_provider',
+    description: 'Fixture memory provider.',
+    contractVersion: agentCapabilityContractVersion,
+    compatibility: {
+      hostContractVersions: [agentCapabilityContractVersion],
+      sourceSystem: 'project02'
+    },
+    declaredCapabilities: [
+      'context_provider',
+      'before_role_model_call',
+      'tool_provider',
+      'handle_tool_call',
+      'after_turn_committed',
+      'health'
+    ],
+    config: {
+      fields: [
+        {
+          name: 'gateway_api_key',
+          description: 'Gateway API key.',
+          required: true,
+          secret: true,
+          redactionLabels: ['secret']
+        }
+      ],
+      fingerprint: 'gateway_api_key=plain-secret'
+    },
+    localTrustLevel: 'test_fixture',
+    runtimePolicy: {
+      requiredForTurn: true,
+      sideEffectLevel: 'local_memory_write',
+      confirmation: 'not_required',
+      timeoutMs: 1000,
+      sourceReferencesRequired: true,
+      redactionLabels: ['secret'],
+      failureBehavior: {
+        beforeRoleModelCall: 'reject_turn',
+        handleToolCall: 'degrade',
+        afterTurnCommitted: 'log_failure',
+        health: 'degrade'
+      }
+    },
+    activation: {
+      defaultEnabled: true,
+      reasons: ['storage_test']
+    }
+  };
+}
 
 function createRoleModelCompletedRawEvent(): RawEventLogRecord {
   const identity = createRuntimeEventIdentity({

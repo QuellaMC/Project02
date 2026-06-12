@@ -21,6 +21,17 @@ import {
 import { createFileCharacterStateStore } from './file-character-state-store.ts';
 import { buildUserTurnDecisionContext } from './decision-context.ts';
 import {
+  createRuntimeCapabilityContext,
+  type AgentCapabilityEvidenceSnapshot
+} from './agent-capabilities.ts';
+import {
+  runtimeCapabilityBeforeRoleModelCallRejectionReason,
+  type RuntimeCapabilityBeforeRoleModelCallCompletedResult,
+  type RuntimeCapabilityHookHostResult,
+  type RuntimeCapabilityHost
+} from './agent-capability-host.ts';
+import {
+  createDecisionContext,
   createRejectedRoleModelDecisionResult,
   getCharacterStatePatchToolCall,
   getRequiredVisibleReplyText,
@@ -34,7 +45,8 @@ import {
 import {
   createRoleModelAdapterFromCharacterAgent,
   runRoleModelLoop,
-  type RoleModelAdapter
+  type RoleModelAdapter,
+  type RoleModelCapabilityToolRoutingEvidence
 } from './role-model-loop.ts';
 import {
   createUserMessageRuntimeEvent,
@@ -57,6 +69,7 @@ import type {
 export type LocalRuntimeUserMessageRejectionReason =
   | 'input_validation_rejected'
   | 'character_reply_rejected'
+  | typeof runtimeCapabilityBeforeRoleModelCallRejectionReason
   | RoleModelDecisionRejectionReason;
 
 export type RunLocalUserMessageEventOptions = {
@@ -67,6 +80,7 @@ export type RunLocalUserMessageEventOptions = {
   readonly agent?: CharacterAgent;
   readonly characterStateStore?: CharacterStateStore;
   readonly roleModelAdapter?: RoleModelAdapter;
+  readonly capabilityHost?: RuntimeCapabilityHost;
   readonly characterTurnOptions?: CharacterTurnOptions;
   readonly committedAt?: string;
 };
@@ -230,6 +244,7 @@ async function runSerializedLocalUserMessageEvent(
   }
 
   function appendRejectedResult(optionsForRejection: {
+    readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[];
     readonly evidence?: RoleModelRawEvidence;
     readonly message: string;
     readonly rawKind: RawEventLogRecordInput['kind'];
@@ -247,7 +262,10 @@ async function runSerializedLocalUserMessageEvent(
       status: 'rejected',
       reason: optionsForRejection.rawReason,
       payloadSummary,
-      ...evidence
+      ...evidence,
+      ...agentCapabilityEvidenceOption(
+        optionsForRejection.agentCapabilityEvidence
+      )
     });
 
     const rawEvent = appendRawEvent({
@@ -257,7 +275,10 @@ async function runSerializedLocalUserMessageEvent(
       status: 'rejected',
       reason: optionsForRejection.rawReason,
       payloadSummary,
-      ...evidence
+      ...evidence,
+      ...agentCapabilityEvidenceOption(
+        optionsForRejection.agentCapabilityEvidence
+      )
     });
 
     appendTrace('raw_event_log_appended');
@@ -276,10 +297,12 @@ async function runSerializedLocalUserMessageEvent(
 
   function appendRoleModelRejectedResult(
     rejection: RoleModelDecisionRejection,
-    evidence: RoleModelRawEvidence
+    evidence: RoleModelRawEvidence,
+    agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[]
   ): LocalRuntimeUserMessageRejectedResult {
     return appendRejectedResult({
       evidence,
+      ...(agentCapabilityEvidence === undefined ? {} : { agentCapabilityEvidence }),
       message: rejection.details ?? rejection.reason,
       rawKind: 'commit_validation_rejected',
       rawReason: rejection.reason,
@@ -341,15 +364,65 @@ async function runSerializedLocalUserMessageEvent(
             recentMessageLimit: options.characterTurnOptions.recentMessageLimit
           })
     });
+    const runtimeCapabilityContext = createRuntimeCapabilityContext({
+      ...identity,
+      sessionId: decisionContext.sessionId,
+      eventType: event.type,
+      currentUserMessage: event.payload.currentUserMessage,
+      character: decisionContext.characterSnapshot
+    });
+    const beforeRoleModelCallResult =
+      options.capabilityHost === undefined
+        ? createEmptyBeforeRoleModelCallResult()
+        : await options.capabilityHost.beforeRoleModelCall(
+            runtimeCapabilityContext
+          );
+
+    if (beforeRoleModelCallResult.status === 'rejected') {
+      return appendRejectedResult({
+        agentCapabilityEvidence: beforeRoleModelCallResult.evidence,
+        message: beforeRoleModelCallResult.message,
+        rawKind: runtimeCapabilityBeforeRoleModelCallRejectionReason,
+        rawReason: beforeRoleModelCallResult.message,
+        reason: beforeRoleModelCallResult.reason,
+        traceStep: runtimeCapabilityBeforeRoleModelCallRejectionReason
+      });
+    }
+
+    const roleModelDecisionContext = createDecisionContext({
+      sessionId: decisionContext.sessionId,
+      characterSnapshot: decisionContext.characterSnapshot,
+      recentVisibleMessages: decisionContext.recentVisibleMessages,
+      runtimeNotes: Object.freeze([
+        ...decisionContext.runtimeNotes,
+        ...beforeRoleModelCallResult.runtimeNotes
+      ]),
+      capabilityContextItems: beforeRoleModelCallResult.contextItems,
+      ...(decisionContext.livingStateBrief === undefined
+        ? {}
+        : { livingStateBrief: decisionContext.livingStateBrief })
+    });
     const roleModelResult = await runRoleModelLoop({
       event,
-      decisionContext,
+      decisionContext: roleModelDecisionContext,
+      capabilityToolDefinitions:
+        options.capabilityHost?.capabilityToolDefinitions() ?? [],
+      ...(options.capabilityHost === undefined
+        ? {}
+        : {
+            capabilityToolHost: options.capabilityHost,
+            runtimeCapabilityContext
+          }),
       ...roleModelLoopAdapterOption(options)
     });
     const roleModelEvidence = {
       roleModelIOSnapshot: roleModelResult.ioSnapshot,
       parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot
     } satisfies RoleModelRawEvidence;
+    const roleModelCapabilityEvidence = combineAgentCapabilityEvidence(
+      beforeRoleModelCallResult.evidence,
+      capabilityToolEvidenceFromRouting(roleModelResult.capabilityToolResults)
+    );
 
     if (roleModelResult.status === 'rejected') {
       const commitValidation = createRejectedCommitValidationSnapshot({
@@ -358,10 +431,14 @@ async function runSerializedLocalUserMessageEvent(
         sessionId: decisionContext.sessionId
       });
 
-      return appendRoleModelRejectedResult(roleModelResult.rejection, {
-        ...roleModelEvidence,
-        commitValidation
-      });
+      return appendRoleModelRejectedResult(
+        roleModelResult.rejection,
+        {
+          ...roleModelEvidence,
+          commitValidation
+        },
+        roleModelCapabilityEvidence
+      );
     }
 
     const statePatchToolCall = getCharacterStatePatchToolCall(
@@ -394,13 +471,17 @@ async function runSerializedLocalUserMessageEvent(
         sessionId: decisionContext.sessionId
       });
 
-      return appendRoleModelRejectedResult(rejection, {
-        ...roleModelEvidence,
-        commitValidation,
-        ...(statePatchSnapshot === undefined
-          ? {}
-          : { characterStatePatchSnapshot: statePatchSnapshot })
-      });
+      return appendRoleModelRejectedResult(
+        rejection,
+        {
+          ...roleModelEvidence,
+          commitValidation,
+          ...(statePatchSnapshot === undefined
+            ? {}
+            : { characterStatePatchSnapshot: statePatchSnapshot })
+        },
+        roleModelCapabilityEvidence
+      );
     }
 
     let turn: CharacterTurnResult;
@@ -416,6 +497,7 @@ async function runSerializedLocalUserMessageEvent(
     } catch (error: unknown) {
       if (error instanceof CharacterInputError) {
         return appendRejectedResult({
+          agentCapabilityEvidence: roleModelCapabilityEvidence,
           evidence: roleModelEvidence,
           message: error.message,
           rawKind: 'input_validation_rejected',
@@ -433,10 +515,14 @@ async function runSerializedLocalUserMessageEvent(
           sessionId: decisionContext.sessionId
         });
 
-        return appendRoleModelRejectedResult(rejection, {
-          ...roleModelEvidence,
-          commitValidation
-        });
+        return appendRoleModelRejectedResult(
+          rejection,
+          {
+            ...roleModelEvidence,
+            commitValidation
+          },
+          roleModelCapabilityEvidence
+        );
       }
 
       throw error;
@@ -465,15 +551,6 @@ async function runSerializedLocalUserMessageEvent(
         : { characterStatePatchSnapshot: statePatchSnapshot })
     } satisfies RoleModelRawEvidence;
 
-    if (statePatchPlan?.status === 'accepted') {
-      characterStateStore.writeCurrentState(statePatchPlan.after);
-      writtenCharacterStateRollback = {
-        store: characterStateStore,
-        state: currentCharacterState,
-        rollbackAllowed: true
-      };
-    }
-
     const conversationMessages = Object.freeze([
       options.logStore.appendConversationMessage({
         ...turn.userMessage,
@@ -487,6 +564,15 @@ async function runSerializedLocalUserMessageEvent(
       })
     ]);
 
+    if (statePatchPlan?.status === 'accepted') {
+      characterStateStore.writeCurrentState(statePatchPlan.after);
+      writtenCharacterStateRollback = {
+        store: characterStateStore,
+        state: currentCharacterState,
+        rollbackAllowed: true
+      };
+    }
+
     appendTrace('visible_reply_committed');
     appendRawEvent({
       ...identity,
@@ -494,10 +580,22 @@ async function runSerializedLocalUserMessageEvent(
       eventType: event.type,
       visibleMessageIds: conversationMessages.map((message) => message.id),
       payloadSummary,
-      ...acceptedEvidence
+      ...acceptedEvidence,
+      ...agentCapabilityEvidenceOption(roleModelCapabilityEvidence)
     });
 
     sessionTurnRollback.rollbackAllowed = false;
+
+    const afterTurnCommittedResult =
+      options.capabilityHost === undefined
+        ? createEmptyHookResult()
+        : await options.capabilityHost.afterTurnCommitted(
+            runtimeCapabilityContext
+          );
+    const completedCapabilityEvidence = combineAgentCapabilityEvidence(
+      roleModelCapabilityEvidence,
+      afterTurnCommittedResult.evidence
+    );
 
     const rawEvent = appendRawEvent({
       ...identity,
@@ -506,7 +604,8 @@ async function runSerializedLocalUserMessageEvent(
       status: 'completed',
       visibleMessageIds: conversationMessages.map((message) => message.id),
       payloadSummary,
-      ...acceptedEvidence
+      ...acceptedEvidence,
+      ...agentCapabilityEvidenceOption(completedCapabilityEvidence)
     });
 
     appendTrace('raw_event_log_appended');
@@ -717,6 +816,46 @@ function roleModelLoopAdapterOption(
   }
 
   return {};
+}
+
+function createEmptyBeforeRoleModelCallResult(): RuntimeCapabilityBeforeRoleModelCallCompletedResult {
+  return Object.freeze({
+    status: 'completed',
+    contextItems: Object.freeze([]),
+    runtimeNotes: Object.freeze([]),
+    evidence: Object.freeze([])
+  } satisfies RuntimeCapabilityBeforeRoleModelCallCompletedResult);
+}
+
+function createEmptyHookResult(): RuntimeCapabilityHookHostResult {
+  return Object.freeze({
+    status: 'completed',
+    evidence: Object.freeze([])
+  } satisfies RuntimeCapabilityHookHostResult);
+}
+
+function capabilityToolEvidenceFromRouting(
+  results: readonly RoleModelCapabilityToolRoutingEvidence[]
+): readonly AgentCapabilityEvidenceSnapshot[] {
+  return Object.freeze(results.flatMap((routing) => routing.result.evidence));
+}
+
+function combineAgentCapabilityEvidence(
+  ...evidenceGroups: readonly (readonly AgentCapabilityEvidenceSnapshot[])[]
+): readonly AgentCapabilityEvidenceSnapshot[] {
+  return Object.freeze(evidenceGroups.flatMap((evidence) => evidence));
+}
+
+function agentCapabilityEvidenceOption(
+  evidence: readonly AgentCapabilityEvidenceSnapshot[] | undefined
+): { readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[] } {
+  if (evidence === undefined || evidence.length === 0) {
+    return {};
+  }
+
+  return {
+    agentCapabilityEvidence: Object.freeze([...evidence])
+  };
 }
 
 function createFixedReplyAgent(replyText: string): CharacterAgent {

@@ -1,9 +1,8 @@
 import {
-  builtInModelToolDefinitionsForUserTurn,
   characterStatePatchModelToolName,
   visibleReplyModelToolName,
   type BuiltInModelToolCall,
-  type BuiltInModelToolDefinition
+  type ModelToolDefinition
 } from './model-tools.ts';
 import {
   roleModelDecisionContractVersion,
@@ -22,7 +21,7 @@ export type RoleModelPromptMessage = {
 export type RoleModelPromptPayload = {
   readonly outputContract: RoleModelOutputContract;
   readonly allowedTools: readonly RoleModelAllowedToolName[];
-  readonly toolDefinitions: readonly BuiltInModelToolDefinition[];
+  readonly toolDefinitions: readonly ModelToolDefinition[];
   readonly responseExample: RoleModelPromptResponseExample;
   readonly event: UserMessageRuntimeEvent;
   readonly decisionContext: DecisionContext;
@@ -79,7 +78,7 @@ export function createRoleModelPromptPayload(
   return Object.freeze({
     outputContract: inputEnvelope.outputContract,
     allowedTools: Object.freeze([...inputEnvelope.allowedTools]),
-    toolDefinitions: toolDefinitionsForAllowedTools(inputEnvelope.allowedTools),
+    toolDefinitions: Object.freeze([...inputEnvelope.toolDefinitions]),
     responseExample: createRoleModelPromptResponseExample(
       inputEnvelope.allowedTools
     ),
@@ -105,14 +104,4 @@ function createRoleModelPromptResponseExample(
       )
     )
   } satisfies RoleModelPromptResponseExample);
-}
-
-function toolDefinitionsForAllowedTools(
-  allowedTools: readonly RoleModelAllowedToolName[]
-): readonly BuiltInModelToolDefinition[] {
-  return Object.freeze(
-    builtInModelToolDefinitionsForUserTurn().filter((definition) =>
-      allowedTools.includes(definition.name)
-    )
-  );
 }
