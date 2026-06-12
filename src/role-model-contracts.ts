@@ -517,7 +517,11 @@ function parseRoleModelDecisionObject(
   }
 
   if (parsedOutput['action'] !== undefined) {
-    return parseLegacyVisibleReplyDecision(parsedOutput, frozenAllowedTools);
+    return parseLegacyVisibleReplyDecision(
+      parsedOutput,
+      frozenAllowedTools,
+      allowedModelToolDefinitions
+    );
   }
 
   const version = parsedOutput['version'];
@@ -576,7 +580,8 @@ function parseRoleModelDecisionObject(
 
 function parseLegacyVisibleReplyDecision(
   parsedOutput: Readonly<Record<string, unknown>>,
-  allowedTools: readonly RoleModelAllowedToolName[]
+  allowedTools: readonly RoleModelAllowedToolName[],
+  allowedModelToolDefinitions: readonly RoleModelToolDefinition[]
 ): RoleModelDecisionResult {
   const action = parsedOutput['action'];
 
@@ -627,8 +632,18 @@ function parseLegacyVisibleReplyDecision(
     );
   }
 
+  const toolCalls = [createVisibleReplyModelToolCall(replyText)];
+  const cardinalityResult = validateUserTurnToolCallCardinality(
+    toolCalls,
+    allowedModelToolDefinitions
+  );
+
+  if (cardinalityResult !== undefined) {
+    return cardinalityResult;
+  }
+
   return createAcceptedRoleModelDecisionResult(
-    createVisibleReplyCharacterDecision(replyText)
+    createCharacterDecision(toolCalls)
   );
 }
 

@@ -738,6 +738,42 @@ describe('role model decision contracts', () => {
     });
   });
 
+  it('enforces included required capability tools for legacy visible_reply action decisions', () => {
+    const capabilityToolDefinitions = [
+      createFakeCapabilityToolDefinition({
+        requiredForUserTurn: true
+      })
+    ];
+    const legacyVisibleReplyDecision = JSON.stringify({
+      action: {
+        type: roleModelVisibleReplyActionName,
+        text: 'legacy reply'
+      }
+    });
+
+    const excludedResult = parseRoleModelDecision(
+      legacyVisibleReplyDecision,
+      [roleModelVisibleReplyActionName],
+      capabilityToolDefinitions
+    );
+
+    expect(excludedResult.status).toBe('accepted');
+
+    const includedResult = parseRoleModelDecision(
+      legacyVisibleReplyDecision,
+      [roleModelVisibleReplyActionName, 'memory.search'],
+      capabilityToolDefinitions
+    );
+
+    expect(includedResult).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMissingRequiredToolCallRejectionReason,
+        details: 'Decision must include required memory.search tool call.'
+      }
+    });
+  });
+
   it('enforces allowed tools for legacy visible_reply action decisions', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({

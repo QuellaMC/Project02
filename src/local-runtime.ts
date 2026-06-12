@@ -76,9 +76,12 @@ import type {
   RuntimeTraceStepName
 } from './runtime-log.ts';
 
+const runtimeCapabilityHealthRejectionReason = 'capability_health_rejected';
+
 export type LocalRuntimeUserMessageRejectionReason =
   | 'input_validation_rejected'
   | 'character_reply_rejected'
+  | typeof runtimeCapabilityHealthRejectionReason
   | typeof runtimeCapabilityBeforeRoleModelCallRejectionReason
   | RoleModelDecisionRejectionReason;
 
@@ -259,6 +262,7 @@ async function runSerializedLocalUserMessageEvent(
     readonly agentCapabilityContextItems?: readonly AgentCapabilityContextItem[];
     readonly agentCapabilityToolInvocations?: readonly AgentCapabilityToolInvocationSnapshot[];
     readonly evidence?: RoleModelRawEvidence;
+    readonly healthResult?: RuntimeCapabilityHealthHostResult;
     readonly message: string;
     readonly rawKind: RawEventLogRecordInput['kind'];
     readonly rawReason: string;
@@ -267,10 +271,12 @@ async function runSerializedLocalUserMessageEvent(
     readonly traceStep: RuntimeTraceStepName;
   }): Promise<LocalRuntimeUserMessageRejectedResult> {
     const evidence = optionsForRejection.evidence ?? {};
-    const healthResult = await capabilityHealthForTurn({
-      capabilityHost: options.capabilityHost,
-      runtimeCapabilityContext: optionsForRejection.runtimeCapabilityContext
-    });
+    const healthResult =
+      optionsForRejection.healthResult ??
+      (await capabilityHealthForTurn({
+        capabilityHost: options.capabilityHost,
+        runtimeCapabilityContext: optionsForRejection.runtimeCapabilityContext
+      }));
     const agentCapabilityEvidence = combineAgentCapabilityEvidence(
       optionsForRejection.agentCapabilityEvidence ?? [],
       healthResult.evidence
@@ -597,6 +603,43 @@ async function runSerializedLocalUserMessageEvent(
       rollbackAllowed: true
     };
 
+    const preCommitHealthResult = await capabilityHealthForTurn({
+      capabilityHost: options.capabilityHost,
+      runtimeCapabilityContext
+    });
+
+    if (
+      healthResultRejectsTurn({
+        capabilityHost: options.capabilityHost,
+        healthResult: preCommitHealthResult
+      })
+    ) {
+      rollbackSessionTurnIfSafe(sessionTurnRollback);
+      sessionTurnRollback = undefined;
+
+      return await appendRejectedResult({
+        agentCapabilityEvidence: roleModelCapabilityEvidence,
+        agentCapabilityContextItems: beforeRoleModelCallResult.contextItems,
+        agentCapabilityToolInvocations: roleModelCapabilityToolInvocations,
+        evidence: {
+          ...roleModelEvidence,
+          ...(statePatchSnapshot === undefined
+            ? {}
+            : { characterStatePatchSnapshot: statePatchSnapshot })
+        },
+        healthResult: preCommitHealthResult,
+        message: healthResultRejectionMessage({
+          capabilityHost: options.capabilityHost,
+          healthResult: preCommitHealthResult
+        }),
+        rawKind: 'commit_validation_rejected',
+        rawReason: runtimeCapabilityHealthRejectionReason,
+        reason: runtimeCapabilityHealthRejectionReason,
+        runtimeCapabilityContext,
+        traceStep: 'commit_validation_rejected'
+      });
+    }
+
     const committedAt = options.committedAt ?? options.event.createdAt;
     const acceptedCommitValidation = createRoleModelCommitValidationSnapshot({
       ...identity,
@@ -665,14 +708,10 @@ async function runSerializedLocalUserMessageEvent(
         : await options.capabilityHost.afterTurnCommitted(
             afterCommitCapabilityContext
           );
-    const healthResult = await capabilityHealthForTurn({
-      capabilityHost: options.capabilityHost,
-      runtimeCapabilityContext
-    });
     const completedCapabilityEvidence = combineAgentCapabilityEvidence(
       roleModelCapabilityEvidence,
       afterTurnCommittedResult.evidence,
-      healthResult.evidence
+      preCommitHealthResult.evidence
     );
 
     const rawEvent = appendRawEvent({
@@ -690,7 +729,7 @@ async function runSerializedLocalUserMessageEvent(
         contextItems: beforeRoleModelCallResult.contextItems,
         toolInvocations: roleModelCapabilityToolInvocations,
         evidence: completedCapabilityEvidence,
-        health: healthResult.snapshots
+        health: preCommitHealthResult.snapshots
       })
     });
 
@@ -945,6 +984,85 @@ async function capabilityHealthForTurn(options: {
   }
 
   return await options.capabilityHost.health(options.runtimeCapabilityContext);
+}
+
+function healthResultRejectsTurn(options: {
+  readonly capabilityHost: RuntimeCapabilityHost | undefined;
+  readonly healthResult: RuntimeCapabilityHealthHostResult;
+}): boolean {
+  if (
+    options.healthResult.evidence.some((evidence) =>
+      healthEvidenceRejectsTurn(evidence)
+    )
+  ) {
+    return true;
+  }
+
+  const rejectingCapabilityIds = healthRejectingCapabilityIds(
+    options.capabilityHost
+  );
+
+  return options.healthResult.snapshots.some(
+    (snapshot) =>
+      snapshot.status === 'unavailable' &&
+      rejectingCapabilityIds.has(snapshot.capabilityId)
+  );
+}
+
+function healthEvidenceRejectsTurn(
+  evidence: AgentCapabilityEvidenceSnapshot
+): boolean {
+  return evidence.evidenceKind === 'health' && evidence.status === 'failed';
+}
+
+function healthResultRejectionMessage(options: {
+  readonly capabilityHost: RuntimeCapabilityHost | undefined;
+  readonly healthResult: RuntimeCapabilityHealthHostResult;
+}): string {
+  const failedEvidenceSummary = options.healthResult.evidence.find((evidence) =>
+    healthEvidenceRejectsTurn(evidence)
+  )?.summary;
+
+  if (failedEvidenceSummary !== undefined) {
+    return failedEvidenceSummary;
+  }
+
+  const rejectingCapabilityIds = healthRejectingCapabilityIds(
+    options.capabilityHost
+  );
+  const unavailableSnapshot = options.healthResult.snapshots.find(
+    (snapshot) =>
+      snapshot.status === 'unavailable' &&
+      rejectingCapabilityIds.has(snapshot.capabilityId)
+  );
+
+  if (unavailableSnapshot !== undefined) {
+    return `Capability health unavailable: ${unavailableSnapshot.summary}`;
+  }
+
+  return 'Capability health policy rejected the turn.';
+}
+
+function healthRejectingCapabilityIds(
+  capabilityHost: RuntimeCapabilityHost | undefined
+): ReadonlySet<string> {
+  if (capabilityHost === undefined) {
+    return new Set<string>();
+  }
+
+  const enabledCapabilityIds = new Set(capabilityHost.enabledCapabilityIds());
+
+  return new Set(
+    capabilityHost
+      .registrySnapshot()
+      .capabilities.filter(
+        (registration) =>
+          enabledCapabilityIds.has(registration.manifest.id) &&
+          registration.manifest.runtimePolicy.failureBehavior.health ===
+            'reject_turn'
+      )
+      .map((registration) => registration.manifest.id)
+  );
 }
 
 function capabilityToolEvidenceFromRouting(

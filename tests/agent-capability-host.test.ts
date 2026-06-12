@@ -683,6 +683,94 @@ describe('runtime capability host', () => {
     ]);
   });
 
+  it('degrades optional hook evidence when runtime identity is stale', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.stale_event_evidence',
+          displayName: 'Stale event evidence fixture',
+          beforeRoleModelCall(context) {
+            return {
+              contextItems: [],
+              runtimeNotes: ['stale event note'],
+              evidence: [
+                createAcceptedHostEvidence({
+                  context,
+                  capabilityId: 'memory.stale_event_evidence',
+                  evidenceKind: 'before_role_model_call',
+                  eventId: 'evt_previous'
+                })
+              ]
+            };
+          }
+        }),
+        createHostTestCapability({
+          id: 'memory.stale_trace_evidence',
+          displayName: 'Stale trace evidence fixture',
+          beforeRoleModelCall(context) {
+            return {
+              contextItems: [],
+              runtimeNotes: ['stale trace note'],
+              evidence: [
+                createAcceptedHostEvidence({
+                  context,
+                  capabilityId: 'memory.stale_trace_evidence',
+                  evidenceKind: 'before_role_model_call',
+                  traceId: 'trace_previous'
+                })
+              ]
+            };
+          }
+        }),
+        createHostTestCapability({
+          id: 'memory.stale_created_at_evidence',
+          displayName: 'Stale createdAt evidence fixture',
+          beforeRoleModelCall(context) {
+            return {
+              contextItems: [],
+              runtimeNotes: ['stale createdAt note'],
+              evidence: [
+                createAcceptedHostEvidence({
+                  context,
+                  capabilityId: 'memory.stale_created_at_evidence',
+                  evidenceKind: 'before_role_model_call',
+                  createdAt: '2026-06-11T00:00:00.000Z'
+                })
+              ]
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await host.beforeRoleModelCall(createHostTestContext());
+
+    expect(result.status).toBe('completed');
+
+    if (result.status !== 'completed') {
+      throw new Error('Expected stale optional evidence identity to degrade.');
+    }
+
+    expect(result.runtimeNotes).toEqual([]);
+    expect(result.evidence).toMatchObject([
+      {
+        capabilityId: 'memory.stale_event_evidence',
+        status: 'degraded',
+        policyOutcome: 'optional_degraded'
+      },
+      {
+        capabilityId: 'memory.stale_trace_evidence',
+        status: 'degraded',
+        policyOutcome: 'optional_degraded'
+      },
+      {
+        capabilityId: 'memory.stale_created_at_evidence',
+        status: 'degraded',
+        policyOutcome: 'optional_degraded'
+      }
+    ]);
+  });
+
   it('preserves rejecting evidence for required and non-degrading tool handler failures', async () => {
     const host = createRuntimeCapabilityHost({
       capabilities: [
@@ -759,6 +847,113 @@ describe('runtime capability host', () => {
       reason: 'handler_failed',
       evidence: [
         {
+          evidenceKind: 'tool_invocation',
+          status: 'rejected',
+          policyOutcome: 'handler_rejected'
+        }
+      ]
+    });
+  });
+
+  it('degrades or rejects accepted tool results with stale evidence identity', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.optional_stale_tool_evidence',
+          displayName: 'Optional stale tool evidence fixture',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.optional_stale_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read'
+            })
+          ],
+          handleToolCall(_call, context) {
+            return {
+              status: 'accepted',
+              output: {},
+              evidence: [
+                createAcceptedHostEvidence({
+                  context,
+                  capabilityId: 'memory.optional_stale_tool_evidence',
+                  evidenceKind: 'tool_invocation',
+                  createdAt: '2026-06-11T00:00:00.000Z'
+                })
+              ]
+            };
+          }
+        }),
+        createHostTestCapability({
+          id: 'memory.required_stale_tool_evidence',
+          displayName: 'Required stale tool evidence fixture',
+          requiredForTurn: true,
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.required_stale_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read'
+            })
+          ],
+          handleToolCall(_call, context) {
+            return {
+              status: 'accepted',
+              output: {},
+              evidence: [
+                createAcceptedHostEvidence({
+                  context,
+                  capabilityId: 'memory.required_stale_tool_evidence',
+                  evidenceKind: 'tool_invocation',
+                  traceId: 'trace_previous'
+                })
+              ]
+            };
+          }
+        })
+      ]
+    });
+    const context = createHostTestContext();
+
+    const optionalResult = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.optional_stale_tool_evidence',
+        toolName: 'memory.optional_stale_search',
+        input: {}
+      },
+      context
+    );
+    const requiredResult = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.required_stale_tool_evidence',
+        toolName: 'memory.required_stale_search',
+        input: {}
+      },
+      context
+    );
+
+    expect(optionalResult).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      evidence: [
+        {
+          capabilityId: 'memory.optional_stale_tool_evidence',
+          evidenceKind: 'tool_invocation',
+          status: 'degraded',
+          policyOutcome: 'optional_degraded'
+        }
+      ]
+    });
+    expect(requiredResult).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      evidence: [
+        {
+          capabilityId: 'memory.required_stale_tool_evidence',
           evidenceKind: 'tool_invocation',
           status: 'rejected',
           policyOutcome: 'handler_rejected'
@@ -891,6 +1086,156 @@ describe('runtime capability host', () => {
           evidenceKind: 'tool_invocation',
           status: 'degraded',
           policyOutcome: 'optional_degraded'
+        }
+      ]
+    });
+  });
+
+  it('degrades optional accepted tool results containing non-finite output', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.optional_non_finite_tool',
+          displayName: 'Optional non-finite tool fixture',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.optional_non_finite_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read'
+            })
+          ],
+          handleToolCall() {
+            return {
+              status: 'accepted',
+              output: {
+                answerScore: Infinity
+              },
+              evidence: []
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.optional_non_finite_tool',
+        toolName: 'memory.optional_non_finite_search',
+        input: {}
+      },
+      createHostTestContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      message: 'Capability tool output must be finite JSON.',
+      evidence: [
+        {
+          evidenceKind: 'tool_invocation',
+          status: 'degraded',
+          policyOutcome: 'optional_degraded'
+        }
+      ]
+    });
+  });
+
+  it('rejects required and non-degrading accepted tool results containing non-finite output', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.required_non_finite_tool',
+          displayName: 'Required non-finite tool fixture',
+          requiredForTurn: true,
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.required_non_finite_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read'
+            })
+          ],
+          handleToolCall() {
+            return {
+              status: 'accepted',
+              output: {
+                scores: [Number.NaN]
+              },
+              evidence: []
+            };
+          }
+        }),
+        createHostTestCapability({
+          id: 'memory.rejecting_non_finite_tool',
+          displayName: 'Rejecting non-finite tool fixture',
+          handleToolCallFailureBehavior: 'reject_tool_call',
+          providedTools: [
+            createHostTestTool({
+              name: 'memory.rejecting_non_finite_search',
+              validationOwner: 'capability_host',
+              sideEffectLevel: 'runtime_read'
+            })
+          ],
+          handleToolCall() {
+            return {
+              status: 'accepted',
+              output: {
+                confidence: Number.NaN
+              },
+              evidence: []
+            };
+          }
+        })
+      ]
+    });
+    const context = createHostTestContext();
+
+    const requiredResult = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.required_non_finite_tool',
+        toolName: 'memory.required_non_finite_search',
+        input: {}
+      },
+      context
+    );
+    const rejectingResult = await host.handleToolCall(
+      {
+        eventId: 'evt_host',
+        traceId: 'trace_host',
+        createdAt: '2026-06-12T00:00:00.000Z',
+        capabilityId: 'memory.rejecting_non_finite_tool',
+        toolName: 'memory.rejecting_non_finite_search',
+        input: {}
+      },
+      context
+    );
+
+    expect(requiredResult).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      message: 'Capability tool output must be finite JSON.',
+      evidence: [
+        {
+          evidenceKind: 'tool_invocation',
+          status: 'rejected',
+          policyOutcome: 'handler_rejected'
+        }
+      ]
+    });
+    expect(rejectingResult).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      message: 'Capability tool output must be finite JSON.',
+      evidence: [
+        {
+          evidenceKind: 'tool_invocation',
+          status: 'rejected',
+          policyOutcome: 'handler_rejected'
         }
       ]
     });
@@ -1205,4 +1550,26 @@ function createHostTestContextItem(options: {
     ],
     redactionLabels: []
   };
+}
+
+function createAcceptedHostEvidence(options: {
+  readonly context: RuntimeCapabilityContext;
+  readonly capabilityId: string;
+  readonly evidenceKind: 'before_role_model_call' | 'tool_invocation';
+  readonly eventId?: string;
+  readonly traceId?: string;
+  readonly createdAt?: string;
+}): ReturnType<typeof createAgentCapabilityEvidenceSnapshot> {
+  return createAgentCapabilityEvidenceSnapshot({
+    eventId: options.eventId ?? options.context.eventId,
+    traceId: options.traceId ?? options.context.traceId,
+    createdAt: options.createdAt ?? options.context.timestamp,
+    kind: 'agent_capability_evidence_snapshot',
+    capabilityId: options.capabilityId,
+    evidenceKind: options.evidenceKind,
+    status: 'accepted',
+    summary: 'accepted host evidence',
+    policyOutcome: 'available_for_turn',
+    redactionLabels: []
+  });
 }

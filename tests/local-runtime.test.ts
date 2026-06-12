@@ -1990,6 +1990,211 @@ describe('local runtime turn adapter', () => {
     });
   });
 
+  it('rejects required health failures before visible output is committed', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    let healthCalls = 0;
+    let afterCalls = 0;
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [
+        createRuntimeTestCapability({
+          id: 'memory.health_required_runtime',
+          displayName: 'Required runtime health capability',
+          healthFailureBehavior: 'reject_turn',
+          afterTurnCommitted() {
+            afterCalls += 1;
+
+            return {
+              status: 'completed',
+              evidence: []
+            };
+          },
+          health() {
+            healthCalls += 1;
+            throw new Error('required health unavailable');
+          }
+        })
+      ]
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'health gate',
+        'evt_health_required',
+        'trace_health_required'
+      ),
+      session,
+      logStore,
+      capabilityHost,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'should not commit'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'capability_health_rejected',
+      message: 'Capability health hook failed: required health unavailable'
+    });
+    expect(healthCalls).toBe(1);
+    expect(afterCalls).toBe(0);
+    expect(session.visibleTranscript).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
+    expect(
+      logStore
+        .rawEvents()
+        .some((record) => record.kind === 'visible_reply_committed')
+    ).toBe(false);
+
+    const commitRejected = findRawEvent(
+      result.rawEventLogRecords,
+      'commit_validation_rejected'
+    );
+    const terminalRejected = findRawEvent(
+      result.rawEventLogRecords,
+      'runtime_turn_rejected'
+    );
+
+    expect(commitRejected.agentCapabilityEvidence).toMatchObject([
+      {
+        capabilityId: 'memory.health_required_runtime',
+        evidenceKind: 'health',
+        status: 'failed',
+        summary: 'Capability health hook failed: required health unavailable',
+        policyOutcome: 'health_degraded'
+      }
+    ]);
+    expect(terminalRejected.agentCapabilityEvidence).toEqual(
+      commitRejected.agentCapabilityEvidence
+    );
+    expect(terminalRejected.agentCapabilityTurnEvidence?.health).toEqual([
+      {
+        capabilityId: 'memory.health_required_runtime',
+        status: 'unavailable',
+        checkedAt: '2026-06-04T10:00:00.000Z',
+        summary: 'required health unavailable',
+        redactionLabels: []
+      }
+    ]);
+    expect(terminalRejected.agentCapabilityTurnEvidence?.capabilities[0])
+      .toMatchObject({
+        capabilityId: 'memory.health_required_runtime',
+        healthStatus: 'unavailable'
+      });
+    expect(stepNames(result.traceEntries)).toEqual([
+      'runtime_event_received',
+      'runtime_event_normalized',
+      'runtime_turn_started',
+      'commit_validation_rejected',
+      'raw_event_log_appended',
+      'runtime_turn_rejected'
+    ]);
+  });
+
+  it('rejects unavailable required health snapshots before visible output is committed', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    let healthCalls = 0;
+    let afterCalls = 0;
+    const capabilityHost = createRuntimeCapabilityHost({
+      capabilities: [
+        createRuntimeTestCapability({
+          id: 'memory.health_unavailable_runtime',
+          displayName: 'Unavailable runtime health capability',
+          healthFailureBehavior: 'reject_turn',
+          afterTurnCommitted() {
+            afterCalls += 1;
+
+            return {
+              status: 'completed',
+              evidence: []
+            };
+          },
+          health(context) {
+            healthCalls += 1;
+
+            return {
+              capabilityId: 'memory.health_unavailable_runtime',
+              status: 'unavailable',
+              checkedAt: context.timestamp,
+              summary: 'gateway unavailable',
+              redactionLabels: []
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestUserMessageEvent(
+        'health unavailable',
+        'evt_health_unavailable',
+        'trace_health_unavailable'
+      ),
+      session,
+      logStore,
+      capabilityHost,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'should not commit'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'capability_health_rejected',
+      message: 'Capability health unavailable: gateway unavailable'
+    });
+    expect(healthCalls).toBe(1);
+    expect(afterCalls).toBe(0);
+    expect(session.visibleTranscript).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
+    expect(
+      logStore
+        .rawEvents()
+        .some((record) => record.kind === 'visible_reply_committed')
+    ).toBe(false);
+
+    const terminalRejected = findRawEvent(
+      result.rawEventLogRecords,
+      'runtime_turn_rejected'
+    );
+
+    expect(terminalRejected.agentCapabilityTurnEvidence?.health).toEqual([
+      {
+        capabilityId: 'memory.health_unavailable_runtime',
+        status: 'unavailable',
+        checkedAt: '2026-06-04T10:00:00.000Z',
+        summary: 'gateway unavailable',
+        redactionLabels: []
+      }
+    ]);
+    expect(terminalRejected.agentCapabilityTurnEvidence?.capabilities[0])
+      .toMatchObject({
+        capabilityId: 'memory.health_unavailable_runtime',
+        healthStatus: 'unavailable'
+      });
+  });
+
   it('persists accepted capability tool invocation evidence with the committed turn', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -2361,6 +2566,7 @@ function createRuntimeTestCapability(options: {
   readonly handleToolCall?: AgentCapabilityLifecycleHooks['handleToolCall'];
   readonly afterTurnCommitted?: AgentCapabilityLifecycleHooks['afterTurnCommitted'];
   readonly health?: AgentCapabilityLifecycleHooks['health'];
+  readonly healthFailureBehavior?: 'degrade' | 'reject_turn';
 }): AgentCapability {
   return createAgentCapability({
     manifest: {
@@ -2391,7 +2597,7 @@ function createRuntimeTestCapability(options: {
             options.requiredForTurn === true ? 'reject_turn' : 'degrade',
           handleToolCall: 'degrade',
           afterTurnCommitted: 'log_failure',
-          health: 'degrade'
+          health: options.healthFailureBehavior ?? 'degrade'
         }
       },
       activation: {

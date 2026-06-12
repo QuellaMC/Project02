@@ -297,6 +297,7 @@ async function runHandleToolCall(options: {
     return normalizeToolCallResult({
       capability,
       providedTool,
+      context: options.context,
       value: await withCapabilityHookTimeout({
         capability,
         hookName: 'handleToolCall',
@@ -426,6 +427,7 @@ function isModelFacingCapabilityTool(tool: AgentCapabilityProvidedTool): boolean
 function normalizeToolCallResult(options: {
   readonly capability: AgentCapability;
   readonly providedTool: AgentCapabilityProvidedTool;
+  readonly context: RuntimeCapabilityContext;
   readonly value: unknown;
 }): AgentCapabilityToolCallResult {
   if (!isRecord(options.value)) {
@@ -437,6 +439,7 @@ function normalizeToolCallResult(options: {
   if (status === 'accepted') {
     const evidence = normalizeEvidenceSnapshots({
       capability: options.capability,
+      context: options.context,
       value: options.value['evidence']
     });
 
@@ -467,6 +470,7 @@ function normalizeToolCallResult(options: {
       message,
       evidence: normalizeEvidenceSnapshots({
         capability: options.capability,
+        context: options.context,
         value: options.value['evidence']
       })
     } satisfies AgentCapabilityToolCallResult);
@@ -508,9 +512,16 @@ function normalizeJsonValue(value: unknown): AgentCapabilityJsonValue {
   if (
     value === null ||
     typeof value === 'string' ||
-    typeof value === 'number' ||
     typeof value === 'boolean'
   ) {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new TypeError('Capability tool output must be finite JSON.');
+    }
+
     return value;
   }
 
@@ -609,6 +620,7 @@ async function invokeBeforeRoleModelCallHook(options: {
       status: 'accepted',
       value: normalizeBeforeRoleModelCallResult({
         capability: options.capability,
+        context: options.context,
         value: await withCapabilityHookTimeout({
           capability: options.capability,
           hookName: 'beforeRoleModelCall',
@@ -637,6 +649,7 @@ async function invokeHook<TContext extends RuntimeCapabilityContext>(options: {
       status: 'accepted',
       value: normalizeHookResult({
         capability: options.capability,
+        context: options.context,
         value: await withCapabilityHookTimeout({
           capability: options.capability,
           hookName: options.hookName,
@@ -656,6 +669,7 @@ async function invokeHook<TContext extends RuntimeCapabilityContext>(options: {
 
 function normalizeBeforeRoleModelCallResult(options: {
   readonly capability: AgentCapability;
+  readonly context: RuntimeCapabilityContext;
   readonly value: unknown;
 }): AgentCapabilityBeforeRoleModelCallResult {
   if (!isRecord(options.value)) {
@@ -670,6 +684,7 @@ function normalizeBeforeRoleModelCallResult(options: {
     runtimeNotes: normalizeRuntimeNotes(options.value['runtimeNotes']),
     evidence: normalizeEvidenceSnapshots({
       capability: options.capability,
+      context: options.context,
       value: options.value['evidence']
     })
   } satisfies AgentCapabilityBeforeRoleModelCallResult);
@@ -677,6 +692,7 @@ function normalizeBeforeRoleModelCallResult(options: {
 
 function normalizeHookResult(options: {
   readonly capability: AgentCapability;
+  readonly context: RuntimeCapabilityContext;
   readonly value: unknown;
 }): AgentCapabilityHookResult {
   if (!isRecord(options.value)) {
@@ -693,6 +709,7 @@ function normalizeHookResult(options: {
     status,
     evidence: normalizeEvidenceSnapshots({
       capability: options.capability,
+      context: options.context,
       value: options.value['evidence']
     })
   } satisfies AgentCapabilityHookResult);
@@ -737,6 +754,7 @@ function normalizeRuntimeNotes(value: unknown): readonly string[] {
 
 function normalizeEvidenceSnapshots(options: {
   readonly capability: AgentCapability;
+  readonly context: RuntimeCapabilityContext;
   readonly value: unknown;
 }): readonly AgentCapabilityEvidenceSnapshot[] {
   return Object.freeze(
@@ -749,6 +767,11 @@ function normalizeEvidenceSnapshots(options: {
         capability: options.capability,
         actualCapabilityId: evidence.capabilityId,
         field: 'evidence.capabilityId'
+      });
+      assertSnapshotRuntimeIdentity({
+        context: options.context,
+        snapshot: evidence,
+        field: 'evidence'
       });
 
       return evidence;
@@ -870,6 +893,24 @@ function assertSnapshotCapabilityId(options: {
 
   throw new TypeError(
     `${options.field} must match capability "${options.capability.manifest.id}".`
+  );
+}
+
+function assertSnapshotRuntimeIdentity(options: {
+  readonly context: RuntimeCapabilityContext;
+  readonly snapshot: Pick<AgentCapabilityEvidenceSnapshot, 'eventId' | 'traceId' | 'createdAt'>;
+  readonly field: string;
+}): void {
+  if (
+    options.snapshot.eventId === options.context.eventId &&
+    options.snapshot.traceId === options.context.traceId &&
+    options.snapshot.createdAt === options.context.timestamp
+  ) {
+    return;
+  }
+
+  throw new TypeError(
+    `${options.field} identity must match current runtime event identity.`
   );
 }
 
