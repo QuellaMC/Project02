@@ -605,6 +605,69 @@ describe('runtime capability host', () => {
     );
   });
 
+  it('rejects required before-model context dropped by the token budget', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.optional_budget_context',
+          displayName: 'Optional budget context',
+          beforeRoleModelCall() {
+            return {
+              contextItems: [
+                createHostTestContextItem({
+                  capabilityId: 'memory.optional_budget_context',
+                  id: 'memory.optional_budget_context.compact',
+                  estimatedTokens: 60,
+                  priority: 1
+                })
+              ],
+              runtimeNotes: [],
+              evidence: []
+            };
+          }
+        }),
+        createHostTestCapability({
+          id: 'memory.required_budget_context',
+          displayName: 'Required budget context',
+          requiredForTurn: true,
+          beforeRoleModelCall() {
+            return {
+              contextItems: [
+                createHostTestContextItem({
+                  capabilityId: 'memory.required_budget_context',
+                  id: 'memory.required_budget_context.large',
+                  estimatedTokens: 220,
+                  priority: 2
+                })
+              ],
+              runtimeNotes: [],
+              evidence: []
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await host.beforeRoleModelCall(createHostTestContext());
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: runtimeCapabilityBeforeRoleModelCallRejectionReason,
+      capabilityId: 'memory.required_budget_context'
+    });
+    expect(result.evidence).toMatchObject([
+      {
+        capabilityId: 'memory.required_budget_context',
+        evidenceKind: 'before_role_model_call',
+        status: 'rejected',
+        policyOutcome: 'required_rejected'
+      }
+    ]);
+    expect(result.evidence[0]?.summary).toContain(
+      'memory.required_budget_context.large'
+    );
+  });
+
   it('applies timeout policy to before-model hooks', async () => {
     vi.useFakeTimers();
 
@@ -1117,6 +1180,49 @@ describe('runtime capability host', () => {
         policyOutcome: 'optional_degraded'
       }
     ]);
+  });
+
+  it('redacts before-model runtime notes returned by capability hooks', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [
+        createHostTestCapability({
+          id: 'memory.runtime_note_redaction',
+          displayName: 'Runtime note redaction fixture',
+          beforeRoleModelCall() {
+            return {
+              contextItems: [],
+              runtimeNotes: [
+                'memory prefetch Authorization Bearer runtime-token',
+                'gateway api_key="plain-secret" and credential: raw-password',
+                'source https://user:plain-secret@example.test/path?token=secret-token'
+              ],
+              evidence: []
+            };
+          }
+        })
+      ]
+    });
+
+    const result = await host.beforeRoleModelCall(createHostTestContext());
+
+    expect(result.status).toBe('completed');
+
+    if (result.status !== 'completed') {
+      throw new Error('Expected runtime note redaction to complete.');
+    }
+
+    expect(result.runtimeNotes).toEqual([
+      'memory prefetch Authorization Bearer [redacted]',
+      'gateway api_key="[redacted]" and credential: [redacted]',
+      'source https://[redacted]@example.test/path?token=[redacted]'
+    ]);
+
+    const serializedNotes = JSON.stringify(result.runtimeNotes);
+
+    expect(serializedNotes).not.toContain('runtime-token');
+    expect(serializedNotes).not.toContain('plain-secret');
+    expect(serializedNotes).not.toContain('raw-password');
+    expect(serializedNotes).not.toContain('secret-token');
   });
 
   it('degrades optional hook evidence when runtime identity is stale', async () => {

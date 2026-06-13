@@ -821,7 +821,7 @@ describe('local runtime turn adapter', () => {
     });
   });
 
-  it('writes accepted character state only after visible conversation logging succeeds', async () => {
+  it('writes accepted character state before durable visible conversation logging', async () => {
     const session = createConversationSession();
     const baseLogStore = createRuntimeLogStore();
     const characterStateStore = createInMemoryCharacterStateStore();
@@ -888,7 +888,7 @@ describe('local runtime turn adapter', () => {
     });
 
     expect(result.status).toBe('completed');
-    expect(observedOrder).toEqual(['conversation', 'conversation', 'state']);
+    expect(observedOrder).toEqual(['state', 'conversation', 'conversation']);
   });
 
   it('accepts no-op character state patches and logs empty applied changes', async () => {
@@ -1317,9 +1317,18 @@ describe('local runtime turn adapter', () => {
     expect(observedMoods).toEqual(['steady', 'curious']);
   });
 
-  it('does not append accepted raw-event evidence when accepted state writes fail', async () => {
-    const session = createConversationSession();
-    const logStore = createRuntimeLogStore();
+  it('does not append durable visible conversation messages when accepted state writes fail', async () => {
+    const storeRoot = createTempStoreRoot();
+    const sessionId = 'mira-local';
+    await createCatalogedSession(storeRoot, sessionId);
+
+    const session = createConversationSession({
+      id: sessionId
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
     const characterStateStore = createWriteFailingCharacterStateStore();
 
     await expect(
@@ -1354,17 +1363,22 @@ describe('local runtime turn adapter', () => {
       })
     ).rejects.toThrow('state write failed');
 
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
-      'hello',
-      'stateful reply'
-    ]);
-    expect(session.visibleTranscript).toEqual([]);
     expect(
-      logStore
-        .rawEvents()
-        .some((record) => record.kind === 'visible_reply_committed')
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId
+      }).conversationMessages()
+    ).toEqual([]);
+    expect(session.visibleTranscript).toEqual([]);
+    const rawEvents = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    }).rawEvents();
+
+    expect(
+      rawEvents.some((record) => record.kind === 'visible_reply_committed')
     ).toBe(false);
-    expect(logStore.rawEvents()).toContainEqual({
+    expect(rawEvents).toContainEqual({
       eventId: 'evt_state_write_failure',
       traceId: 'trace_state_write_failure',
       createdAt: '2026-06-04T10:00:00.000Z',
@@ -1710,7 +1724,7 @@ describe('local runtime turn adapter', () => {
                   capabilityId: 'memory.context_runtime'
                 })
               ],
-              runtimeNotes: ['memory context injected'],
+              runtimeNotes: ['memory context injected token=secret-token'],
               evidence: [
                 createAgentCapabilityEvidenceSnapshot({
                   eventId: context.eventId,
@@ -1788,6 +1802,13 @@ describe('local runtime turn adapter', () => {
       }
     ]);
     expect(turnEvidence?.evidence).toEqual(result.rawEvent.agentCapabilityEvidence);
+    expect(
+      result.rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext
+        .runtimeNotes
+    ).toEqual(['memory context injected token=[redacted]']);
+    expect(
+      JSON.stringify(result.rawEvent.roleModelIOSnapshot?.inputEnvelope)
+    ).not.toContain('secret-token');
   });
 
   it('records returned degraded capability health evidence in completed turn evidence', async () => {

@@ -657,6 +657,15 @@ async function runSerializedLocalUserMessageEvent(
         : { characterStatePatchSnapshot: statePatchSnapshot })
     } satisfies RoleModelRawEvidence;
 
+    if (statePatchPlan?.status === 'accepted') {
+      characterStateStore.writeCurrentState(statePatchPlan.after);
+      writtenCharacterStateRollback = {
+        store: characterStateStore,
+        state: currentCharacterState,
+        rollbackAllowed: true
+      };
+    }
+
     const conversationMessages = Object.freeze([
       options.logStore.appendConversationMessage({
         ...turn.userMessage,
@@ -669,15 +678,6 @@ async function runSerializedLocalUserMessageEvent(
         committedAt
       })
     ]);
-
-    if (statePatchPlan?.status === 'accepted') {
-      characterStateStore.writeCurrentState(statePatchPlan.after);
-      writtenCharacterStateRollback = {
-        store: characterStateStore,
-        state: currentCharacterState,
-        rollbackAllowed: true
-      };
-    }
 
     appendTrace('visible_reply_committed');
     appendRawEvent({

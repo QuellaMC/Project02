@@ -4,7 +4,8 @@ import {
   createAgentCapabilityContextItem,
   createAgentCapabilityEvidenceSnapshot,
   createAgentCapabilityHealthSnapshot,
-  createAgentCapabilityRegistrySnapshot
+  createAgentCapabilityRegistrySnapshot,
+  redactAgentCapabilityText
 } from './agent-capabilities.ts';
 import type {
   AgentCapability,
@@ -128,6 +129,19 @@ type CollectedCapabilityContextItem = {
   readonly item: AgentCapabilityContextItem;
   readonly originalIndex: number;
 };
+
+type BoundedCapabilityContextItemsResult =
+  | {
+      readonly status: 'completed';
+      readonly contextItems: readonly AgentCapabilityContextItem[];
+      readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
+    }
+  | {
+      readonly status: 'rejected';
+      readonly capabilityId: string;
+      readonly message: string;
+      readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
+    };
 
 export function createRuntimeCapabilityHost(
   options: CreateRuntimeCapabilityHostOptions = {}
@@ -419,6 +433,16 @@ async function runBeforeRoleModelCall(options: {
     contextItems
   });
   evidence.push(...boundedContext.evidence);
+
+  if (boundedContext.status === 'rejected') {
+    return Object.freeze({
+      status: 'rejected',
+      reason: runtimeCapabilityBeforeRoleModelCallRejectionReason,
+      capabilityId: boundedContext.capabilityId,
+      message: boundedContext.message,
+      evidence: Object.freeze([...evidence])
+    } satisfies RuntimeCapabilityBeforeRoleModelCallHostResult);
+  }
 
   return Object.freeze({
     status: 'completed',
@@ -1019,10 +1043,7 @@ function normalizeContextItems(options: {
 function boundCapabilityContextItems(options: {
   readonly context: RuntimeCapabilityContext;
   readonly contextItems: readonly CollectedCapabilityContextItem[];
-}): {
-  readonly contextItems: readonly AgentCapabilityContextItem[];
-  readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
-} {
+}): BoundedCapabilityContextItemsResult {
   const totalEstimatedTokens = options.contextItems.reduce(
     (total, contextItem) => total + contextItem.item.budget.estimatedTokens,
     0
@@ -1030,6 +1051,7 @@ function boundCapabilityContextItems(options: {
 
   if (totalEstimatedTokens <= runtimeCapabilityContextEstimatedTokenBudget) {
     return Object.freeze({
+      status: 'completed',
       contextItems: Object.freeze(
         options.contextItems.map((contextItem) => contextItem.item)
       ),
@@ -1060,17 +1082,28 @@ function boundCapabilityContextItems(options: {
   const droppedContextItems = options.contextItems.filter(
     (contextItem) => !retainedIndexes.has(contextItem.originalIndex)
   );
+  const evidence = contextBudgetEvidence({
+    context: options.context,
+    droppedContextItems,
+    retainedEstimatedTokens,
+    totalEstimatedTokens
+  });
+  const rejectedContextItem =
+    firstDroppedContextItemThatRejectsTurn(droppedContextItems);
+
+  if (rejectedContextItem !== undefined) {
+    return Object.freeze({
+      status: 'rejected',
+      capabilityId: rejectedContextItem.capability.manifest.id,
+      message: requiredContextBudgetRejectionMessage(rejectedContextItem),
+      evidence
+    });
+  }
 
   return Object.freeze({
+    status: 'completed',
     contextItems: Object.freeze(retainedContextItems),
-    evidence: Object.freeze(
-      contextBudgetEvidence({
-        context: options.context,
-        droppedContextItems,
-        retainedEstimatedTokens,
-        totalEstimatedTokens
-      })
-    )
+    evidence
   });
 }
 
@@ -1114,21 +1147,39 @@ function contextBudgetEvidence(options: {
   }
 
   return Object.freeze(
-    [...droppedByCapability.values()].map((entry) =>
-      createHookFailureEvidence({
+    [...droppedByCapability.values()].map((entry) => {
+      const rejectsTurn = beforeRoleModelFailureRejectsTurn(entry.capability);
+
+      return createHookFailureEvidence({
         capability: entry.capability,
         context: options.context,
         evidenceKind: 'before_role_model_call',
-        status: 'degraded',
+        status: rejectsTurn ? 'rejected' : 'degraded',
         summary: contextBudgetEvidenceSummary({
           droppedContextItems: entry.dropped,
           retainedEstimatedTokens: options.retainedEstimatedTokens,
           totalEstimatedTokens: options.totalEstimatedTokens
         }),
-        policyOutcome: 'optional_degraded'
-      })
-    )
+        policyOutcome: rejectsTurn ? 'required_rejected' : 'optional_degraded'
+      });
+    })
   );
+}
+
+function firstDroppedContextItemThatRejectsTurn(
+  droppedContextItems: readonly CollectedCapabilityContextItem[]
+): CollectedCapabilityContextItem | undefined {
+  return droppedContextItems.find((contextItem) =>
+    beforeRoleModelFailureRejectsTurn(contextItem.capability)
+  );
+}
+
+function requiredContextBudgetRejectionMessage(
+  contextItem: CollectedCapabilityContextItem
+): string {
+  return `Required before-role-model capability context exceeded the ${String(
+    runtimeCapabilityContextEstimatedTokenBudget
+  )}-token budget; dropped context item "${contextItem.item.id}".`;
 }
 
 function contextBudgetEvidenceSummary(options: {
@@ -1156,7 +1207,7 @@ function normalizeRuntimeNotes(value: unknown): readonly string[] {
         throw new TypeError('runtimeNotes must contain non-empty strings.');
       }
 
-      return item;
+      return redactAgentCapabilityText(item);
     })
   );
 }

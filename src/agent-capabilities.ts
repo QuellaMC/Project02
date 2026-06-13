@@ -2225,7 +2225,7 @@ function assertAgentCapabilityToolInvocationIdentity(options: {
   }
 }
 
-function redactAgentCapabilityText(value: string): string {
+export function redactAgentCapabilityText(value: string): string {
   return redactUriCredentials(
     redactUriSecretQueryValues(
       redactSecretKeyValues(redactBearerTokens(value))
