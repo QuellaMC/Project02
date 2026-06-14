@@ -87,14 +87,13 @@ export const userTurnBuiltInModelToolNames = Object.freeze([
 ] satisfies readonly BuiltInModelToolName[]);
 
 export const requiredUserTurnBuiltInModelToolNames = Object.freeze([
-  visibleReplyModelToolName
 ] satisfies readonly BuiltInModelToolName[]);
 
 export const builtInModelToolDefinitions = Object.freeze([
   createBuiltInModelToolDefinition({
     name: visibleReplyModelToolName,
     description: 'Return exactly one visible reply line for the user.',
-    requiredForUserTurn: true,
+    requiredForUserTurn: false,
     inputContract: {
       type: 'object',
       fields: [

@@ -1,8 +1,10 @@
 import { createInterface } from 'node:readline';
+import { loadEnvFile } from 'node:process';
 import { pathToFileURL } from 'node:url';
 
 import {
   createConversationSession,
+  createDefaultProject02CapabilityHost,
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
   createRuntimeEventIdentity,
@@ -18,7 +20,6 @@ import {
   runLocalUserMessageEvent,
   RuntimeEventInputError,
   type CharacterAgent,
-  type CharacterStateStore,
   type ConversationSession,
   type LocalRuntimeUserMessageInputRejectedResult,
   type LocalRuntimeUserMessageResult,
@@ -27,6 +28,8 @@ import {
   type RuntimeLogStore,
   type RuntimeTraceEntry,
   type RuntimeTraceStepName,
+  type LocalRuntimeTurnProgressEvent,
+  type RuntimeCapabilityHost,
   type RuntimeTurnStatus
 } from './index.ts';
 import {
@@ -41,8 +44,9 @@ type ChatCliOptions = {
   readonly stderr: NodeJS.WritableStream;
   readonly traceMode?: boolean;
   readonly agent?: CharacterAgent;
-  readonly characterStateStore?: CharacterStateStore;
+  readonly characterStateStore?: unknown;
   readonly roleModelAdapter?: RoleModelAdapter;
+  readonly capabilityHost?: RuntimeCapabilityHost;
   readonly session?: ConversationSession;
   readonly logStore?: RuntimeLogStore;
 };
@@ -91,7 +95,8 @@ type ChatTraceCharacterStatePatchSummary =
 
 type CompletedChatRuntimeTurn = {
   readonly status: 'completed';
-  readonly characterReplyText: string;
+  readonly characterReplyText?: string;
+  readonly nonCommittedTopLevelText?: string;
   readonly traceSummary: ChatTraceSummary;
 };
 
@@ -111,10 +116,14 @@ type TraceIdentity = {
 
 type DurableChatRuntime = {
   readonly session: ConversationSession;
+  readonly characterStateStore?: unknown;
   readonly logStore: RuntimeLogStore;
 };
 
 const exitCommand = '/exit';
+const modelTextToggleCommand = '/model-text';
+const showModelTextCommand = '/show-model-text';
+const hideModelTextCommand = '/hide-model-text';
 const promptText = 'You: ';
 const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
 const roleModelProviderEnvName = 'PROJECT02_ROLE_MODEL_PROVIDER';
@@ -131,15 +140,19 @@ export async function runChatCliFromArgs(
   options: ChatCliOptions
 ): Promise<number> {
   try {
+    loadDefaultDotEnvFile();
     const parsedArgs = parseChatCliArgs(args);
 
     validateDurableSessionArgs(parsedArgs);
     const durableRuntime = await createDurableChatRuntime(parsedArgs);
     const roleModelAdapter = createSelectedRoleModelAdapter(parsedArgs);
+    const capabilityHost =
+      options.capabilityHost ?? createDefaultProject02CapabilityHost();
 
     return await runChatCli({
       ...options,
       ...durableRuntime,
+      capabilityHost,
       ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
       traceMode: options.traceMode === true || parsedArgs.traceMode
     });
@@ -164,15 +177,32 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
     crlfDelay: Infinity,
     terminal: false
   });
+  let showNonCommittedTopLevelText = false;
 
   options.stdout.write(`${session.character.displayName} is ready.\n`);
   options.stdout.write(promptText);
 
   try {
     for await (const line of lines) {
-      if (line.trim() === exitCommand) {
+      const trimmedLine = line.trim();
+
+      if (trimmedLine === exitCommand) {
         lines.close();
         return 0;
+      }
+
+      const nextModelTextVisibility = modelTextVisibilityCommand(
+        trimmedLine,
+        showNonCommittedTopLevelText
+      );
+
+      if (nextModelTextVisibility !== undefined) {
+        showNonCommittedTopLevelText = nextModelTextVisibility;
+        options.stdout.write(
+          `Model top-level text display: ${showNonCommittedTopLevelText ? 'shown' : 'hidden'}.\n`
+        );
+        options.stdout.write(promptText);
+        continue;
       }
 
       try {
@@ -181,16 +211,30 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
           logStore,
           line,
           ...(options.agent === undefined ? {} : { agent: options.agent }),
-          ...(options.characterStateStore === undefined
-            ? {}
-            : { characterStateStore: options.characterStateStore }),
           ...(options.roleModelAdapter === undefined
             ? {}
-            : { roleModelAdapter: options.roleModelAdapter })
+            : { roleModelAdapter: options.roleModelAdapter }),
+          ...(options.capabilityHost === undefined
+            ? {}
+            : { capabilityHost: options.capabilityHost }),
+          onProgress(progressEvent) {
+            writeRuntimeProgress(options.stdout, session, progressEvent);
+          }
         });
 
         if (result.status === 'completed') {
-          options.stdout.write(`${session.character.displayName}: ${result.characterReplyText}\n`);
+          if (result.characterReplyText !== undefined) {
+            options.stdout.write(`${session.character.displayName}: ${result.characterReplyText}\n`);
+          }
+          if (
+            showNonCommittedTopLevelText &&
+            result.nonCommittedTopLevelText !== undefined
+          ) {
+            writeNonCommittedTopLevelText(
+              options.stdout,
+              result.nonCommittedTopLevelText
+            );
+          }
         } else if (options.traceMode === true) {
           writeTraceSummary(options.stderr, result.traceSummary);
         } else {
@@ -227,11 +271,14 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
 
 type HandleUserMessageThroughRuntimeOptions = {
   readonly session: ConversationSession;
-  readonly characterStateStore?: CharacterStateStore;
   readonly logStore: RuntimeLogStore;
   readonly line: string;
   readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
+  readonly capabilityHost?: RuntimeCapabilityHost;
+  readonly onProgress?: (
+    event: LocalRuntimeTurnProgressEvent
+  ) => Promise<void> | void;
 };
 
 async function handleUserMessageThroughRuntime(
@@ -249,12 +296,15 @@ async function handleUserMessageThroughRuntime(
         logStore: options.logStore,
         rawInput: options.line,
         ...(options.agent === undefined ? {} : { agent: options.agent }),
-        ...(options.characterStateStore === undefined
-          ? {}
-          : { characterStateStore: options.characterStateStore }),
         ...(options.roleModelAdapter === undefined
           ? {}
-          : { roleModelAdapter: options.roleModelAdapter })
+          : { roleModelAdapter: options.roleModelAdapter }),
+        ...(options.capabilityHost === undefined
+          ? {}
+          : { capabilityHost: options.capabilityHost }),
+        ...(options.onProgress === undefined
+          ? {}
+          : { onProgress: options.onProgress })
       });
 
       return mapRuntimeResult(result);
@@ -286,9 +336,14 @@ async function handleUserMessageThroughRuntime(
 
 function mapRuntimeResult(result: LocalRuntimeUserMessageResult): ChatRuntimeTurn {
   if (result.status === 'completed') {
+    const turn = result.turn as typeof result.turn | undefined;
+
     return {
       status: 'completed',
-      characterReplyText: result.turn.characterMessage.text,
+      ...(turn === undefined
+        ? {}
+        : { characterReplyText: turn.characterMessage.text }),
+      ...nonCommittedTopLevelTextOption(result.rawEvent),
       traceSummary: createTraceSummary(
         result.event,
         'completed',
@@ -311,6 +366,78 @@ function mapRuntimeResult(result: LocalRuntimeUserMessageResult): ChatRuntimeTur
       result.rawEvent
     )
   };
+}
+
+function writeRuntimeProgress(
+  stdout: NodeJS.WritableStream,
+  session: ConversationSession,
+  progressEvent: LocalRuntimeTurnProgressEvent
+): void {
+  if (progressEvent.kind === 'visible_reply') {
+    if (!progressEvent.final) {
+      stdout.write(`${session.character.displayName}: ${progressEvent.text}\n`);
+    }
+
+    return;
+  }
+
+  if (progressEvent.kind === 'tool_calls_requested') {
+    stdout.write(
+      `[tools] Model requested ${String(progressEvent.toolNames.length)} ${progressEvent.toolNames.length === 1 ? 'tool call' : 'tool calls'}: ${progressEvent.toolNames.join(', ')}\n`
+    );
+    return;
+  }
+
+  stdout.write(
+    `[tools] ${progressEvent.toolName} ${progressEvent.status === 'accepted' ? 'completed' : 'rejected'}\n`
+  );
+}
+
+function nonCommittedTopLevelTextOption(
+  rawEvent: RawEventLogRecord
+): { readonly nonCommittedTopLevelText?: string } {
+  const result = rawEvent.parsedRoleModelDecisionSnapshot?.result;
+
+  if (result?.status !== 'accepted' || result.nonCommittedText === undefined) {
+    return {};
+  }
+
+  return {
+    nonCommittedTopLevelText: result.nonCommittedText
+  };
+}
+
+function modelTextVisibilityCommand(
+  trimmedLine: string,
+  currentlyVisible: boolean
+): boolean | undefined {
+  if (trimmedLine === modelTextToggleCommand) {
+    return !currentlyVisible;
+  }
+
+  if (trimmedLine === showModelTextCommand) {
+    return true;
+  }
+
+  if (trimmedLine === hideModelTextCommand) {
+    return false;
+  }
+
+  return undefined;
+}
+
+function writeNonCommittedTopLevelText(
+  stdout: NodeJS.WritableStream,
+  text: string
+): void {
+  stdout.write('[model top-level text | not committed]\n');
+  stdout.write(text);
+
+  if (!text.endsWith('\n')) {
+    stdout.write('\n');
+  }
+
+  stdout.write('[/model top-level text]\n');
 }
 
 function mapInputRejectionResult(
@@ -425,31 +552,8 @@ function traceToolCallsOption(
 function traceCharacterStatePatchSummaryOption(
   rawEvent: RawEventLogRecord | undefined
 ): { readonly characterStatePatch?: ChatTraceCharacterStatePatchSummary } {
-  const result = rawEvent?.characterStatePatchSnapshot?.result;
-
-  if (result === undefined) {
-    return {
-      characterStatePatch: Object.freeze({
-        status: 'not_requested'
-      } satisfies ChatTraceCharacterStatePatchSummary)
-    };
-  }
-
-  if (result.status === 'accepted') {
-    return {
-      characterStatePatch: Object.freeze({
-        status: 'accepted',
-        appliedChangeCount: result.appliedChanges.length
-      } satisfies ChatTraceCharacterStatePatchSummary)
-    };
-  }
-
-  return {
-    characterStatePatch: Object.freeze({
-      status: 'rejected',
-      rejectionReason: result.rejection.reason
-    } satisfies ChatTraceCharacterStatePatchSummary)
-  };
+  void rawEvent;
+  return {};
 }
 
 function writeTraceSummary(
@@ -700,6 +804,29 @@ function isFormattedTerminalError(
   return (
     error instanceof ChatCliUsageError ||
     isLocalRuntimeTerminalError(error)
+  );
+}
+
+function loadDefaultDotEnvFile(): void {
+  try {
+    loadEnvFile();
+  } catch (error: unknown) {
+    if (isMissingDotEnvFile(error)) {
+      return;
+    }
+
+    throw new ChatCliUsageError(
+      `Could not load .env file: ${error instanceof Error ? error.message : 'unknown error'}.`
+    );
+  }
+}
+
+function isMissingDotEnvFile(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ENOENT'
   );
 }
 

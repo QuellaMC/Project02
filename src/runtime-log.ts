@@ -1,8 +1,5 @@
 import type { VisibleMessage } from './conversation.ts';
-import {
-  createCharacterStatePatchSnapshot,
-  type CharacterStatePatchSnapshot
-} from './character-state.ts';
+import type { CharacterStatePatchSnapshot } from './character-state.ts';
 import {
   createParsedRoleModelDecisionSnapshot,
   createRoleModelIOSnapshot,
@@ -13,6 +10,8 @@ import {
 import {
   createAgentCapabilityEvidenceSnapshot,
   createAgentCapabilityTurnEvidenceSnapshot,
+  type AgentCapabilityJsonObject,
+  type AgentCapabilityToolCallResult,
   type AgentCapabilityEvidenceSnapshot,
   type AgentCapabilityTurnEvidenceSnapshot
 } from './agent-capabilities.ts';
@@ -26,6 +25,8 @@ export type RuntimeTraceStepName =
   | 'runtime_event_normalized'
   | 'runtime_turn_started'
   | 'capability_before_role_model_call_rejected'
+  | 'tool_call_started'
+  | 'tool_call_finished'
   | 'visible_reply_committed'
   | 'input_validation_rejected'
   | 'character_reply_rejected'
@@ -42,6 +43,8 @@ export type RawEventLogRecordKind =
   | 'runtime_event_received'
   | 'runtime_event_normalized'
   | 'capability_before_role_model_call_rejected'
+  | 'tool_call_started'
+  | 'tool_call_finished'
   | 'visible_reply_committed'
   | 'input_validation_rejected'
   | 'character_reply_rejected'
@@ -60,6 +63,14 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly status?: RuntimeTurnStatus;
   readonly reason?: string;
   readonly visibleMessageIds?: readonly string[];
+  readonly toolCallIds?: readonly string[];
+  readonly toolCallId?: string;
+  readonly toolRound?: number;
+  readonly toolName?: string;
+  readonly toolPluginId?: string;
+  readonly toolInput?: AgentCapabilityJsonObject;
+  readonly toolResult?: AgentCapabilityToolCallResult;
+  readonly pluginStoreRevision?: number;
   readonly payloadSummary?: RawEventLogPayloadSummary;
   readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
@@ -84,6 +95,14 @@ export type RawEventLogRecordInput = RuntimeEventIdentity & {
   readonly status?: RuntimeTurnStatus;
   readonly reason?: string;
   readonly visibleMessageIds?: readonly string[];
+  readonly toolCallIds?: readonly string[];
+  readonly toolCallId?: string;
+  readonly toolRound?: number;
+  readonly toolName?: string;
+  readonly toolPluginId?: string;
+  readonly toolInput?: AgentCapabilityJsonObject;
+  readonly toolResult?: AgentCapabilityToolCallResult;
+  readonly pluginStoreRevision?: number;
   readonly payloadSummary?: RawEventLogPayloadSummary;
   readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
@@ -110,7 +129,7 @@ export type RuntimeLogStore = {
 
 export type AcceptedRoleModelCommitValidationResult = {
   readonly status: 'accepted';
-  readonly acceptedVisibleReplyText: string;
+  readonly acceptedVisibleReplyText?: string;
 };
 
 export type RejectedRoleModelCommitValidationResult = {
@@ -212,6 +231,10 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
     record.visibleMessageIds === undefined
       ? undefined
       : Object.freeze([...record.visibleMessageIds]);
+  const toolCallIds =
+    record.toolCallIds === undefined
+      ? undefined
+      : Object.freeze([...record.toolCallIds]);
   const payloadSummary = freezeRawEventPayloadSummary(record.payloadSummary);
   const roleModelIOSnapshot = freezeRoleModelIOSnapshot(
     record.roleModelIOSnapshot
@@ -222,9 +245,6 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
     );
   const commitValidation = freezeRoleModelCommitValidationSnapshot(
     record.commitValidation
-  );
-  const characterStatePatchSnapshot = freezeCharacterStatePatchSnapshot(
-    record.characterStatePatchSnapshot
   );
   const agentCapabilityEvidence = freezeAgentCapabilityEvidenceSnapshots(
     record.agentCapabilityEvidence
@@ -242,15 +262,24 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
     ...(record.status === undefined ? {} : { status: record.status }),
     ...(record.reason === undefined ? {} : { reason: record.reason }),
     ...(visibleMessageIds === undefined ? {} : { visibleMessageIds }),
+    ...(toolCallIds === undefined ? {} : { toolCallIds }),
+    ...(record.toolCallId === undefined ? {} : { toolCallId: record.toolCallId }),
+    ...(record.toolRound === undefined ? {} : { toolRound: record.toolRound }),
+    ...(record.toolName === undefined ? {} : { toolName: record.toolName }),
+    ...(record.toolPluginId === undefined
+      ? {}
+      : { toolPluginId: record.toolPluginId }),
+    ...(record.toolInput === undefined ? {} : { toolInput: record.toolInput }),
+    ...(record.toolResult === undefined ? {} : { toolResult: record.toolResult }),
+    ...(record.pluginStoreRevision === undefined
+      ? {}
+      : { pluginStoreRevision: record.pluginStoreRevision }),
     ...(payloadSummary === undefined ? {} : { payloadSummary }),
     ...(roleModelIOSnapshot === undefined ? {} : { roleModelIOSnapshot }),
     ...(parsedRoleModelDecisionSnapshot === undefined
       ? {}
       : { parsedRoleModelDecisionSnapshot }),
     ...(commitValidation === undefined ? {} : { commitValidation }),
-    ...(characterStatePatchSnapshot === undefined
-      ? {}
-      : { characterStatePatchSnapshot }),
     ...(agentCapabilityEvidence === undefined
       ? {}
       : { agentCapabilityEvidence }),
@@ -326,16 +355,6 @@ function freezeRoleModelCommitValidationSnapshot(
   return createRoleModelCommitValidationSnapshot(snapshot);
 }
 
-function freezeCharacterStatePatchSnapshot(
-  snapshot: CharacterStatePatchSnapshot | undefined
-): CharacterStatePatchSnapshot | undefined {
-  if (snapshot === undefined) {
-    return undefined;
-  }
-
-  return createCharacterStatePatchSnapshot(snapshot);
-}
-
 function freezeAgentCapabilityEvidenceSnapshots(
   snapshots: readonly AgentCapabilityEvidenceSnapshot[] | undefined
 ): readonly AgentCapabilityEvidenceSnapshot[] | undefined {
@@ -366,7 +385,9 @@ function freezeRoleModelCommitValidationResult(
   if (result.status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
-      acceptedVisibleReplyText: result.acceptedVisibleReplyText
+      ...(result.acceptedVisibleReplyText === undefined
+        ? {}
+        : { acceptedVisibleReplyText: result.acceptedVisibleReplyText })
     } satisfies AcceptedRoleModelCommitValidationResult);
   }
 

@@ -11,8 +11,10 @@ import {
   firstPartyModelToolsCapabilityId,
   localCharacterProfile,
   roleModelCapabilityListToolName,
+  roleModelCharacterStatePatchToolName,
   runtimeCapabilityBeforeRoleModelCallRejectionReason,
   runtimeCapabilityDiscoveryCapabilityId,
+  roleModelVisibleReplyActionName,
   type AgentCapability,
   type AgentCapabilityContextItem,
   type AgentCapabilityLifecycleHooks,
@@ -266,6 +268,62 @@ describe('runtime capability host', () => {
     expect(serializedOutput).not.toContain('secret-token');
     expect(serializedOutput).not.toContain('/Users/mike');
     expect(serializedOutput).not.toContain('configFingerprint');
+  });
+
+  it('lists first-party built-in tools in discovery without routing them through the capability host', async () => {
+    const host = createRuntimeCapabilityHost({
+      capabilities: [createFirstPartyModelToolsCapability()]
+    });
+    const context = createHostTestContext();
+    const result = await host.handleToolCall(
+      {
+        eventId: context.eventId,
+        traceId: context.traceId,
+        createdAt: context.timestamp,
+        capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+        toolName: roleModelCapabilityListToolName,
+        input: {}
+      },
+      context
+    );
+
+    expect(host.capabilityToolDefinitions().map((definition) => definition.name))
+      .toEqual([roleModelCapabilityListToolName]);
+    expect(result.status).toBe('accepted');
+
+    if (result.status !== 'accepted') {
+      throw new Error('Expected accepted capability discovery result.');
+    }
+
+    expect(result.output).toMatchObject({
+      capabilities: [
+        {
+          id: runtimeCapabilityDiscoveryCapabilityId,
+          providedTools: [
+            {
+              name: roleModelCapabilityListToolName
+            }
+          ]
+        },
+        {
+          id: firstPartyModelToolsCapabilityId,
+          providedTools: [
+            {
+              name: roleModelVisibleReplyActionName,
+              sideEffectLevel: 'none',
+              requiredForUserTurn: true
+            },
+            {
+              name: roleModelCharacterStatePatchToolName,
+              sideEffectLevel: 'none',
+              requiredForUserTurn: false
+            }
+          ],
+          toolsTruncated: false
+        }
+      ],
+      truncated: false
+    });
   });
 
   it('does not advertise enabled capability tools without a handleToolCall hook through capability.list', async () => {

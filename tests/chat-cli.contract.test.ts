@@ -17,10 +17,15 @@ import {
   createLocalRuntimeStorageSchemaMarker,
   defaultNvidiaRoleModelName,
   encodeStorageSchemaMarker,
+  firstPartyModelToolsCapabilityId,
   LocalRuntimeStorageContractError,
+  roleModelCapabilityListToolName,
   roleModelDecisionContractVersion,
   roleModelVisibleReplyActionName,
+  runtimeCapabilityDiscoveryCapabilityId,
   type CharacterAgent,
+  type RawEventLogRecord,
+  type RawEventLogRecordKind,
   type RoleModelAdapter,
   type RuntimeLogStore
 } from '../src/index.ts';
@@ -29,6 +34,13 @@ type CommandResult = {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
+};
+
+type ProviderEnvironmentMode = 'blank' | 'omit' | 'inherit';
+
+type RunCommandOptions = {
+  readonly cwd?: string;
+  readonly providerEnvironmentMode?: ProviderEnvironmentMode;
 };
 
 type TraceSummary = {
@@ -208,6 +220,54 @@ describe('node src/chat-cli.ts', () => {
         'You: ',
       stderr: ''
     });
+  });
+
+  it('loads provider selection and model from a local .env file before parsing chat args', async () => {
+    const dotenvRoot = await createTempStoreRoot();
+    const storeRoot = await createTempStoreRoot();
+
+    await writeFile(
+      join(dotenvRoot, '.env'),
+      [
+        'PROJECT02_ROLE_MODEL_PROVIDER=nvidia',
+        'NVIDIA_MODEL=nvidia/dotenv-test-model'
+      ].join('\n'),
+      'utf8'
+    );
+
+    const result = await runCommand(
+      'node',
+      [
+        join(projectRoot, 'src/chat-cli.ts'),
+        '--store',
+        storeRoot,
+        '--new-session',
+        createTempSessionId(),
+        '--trace'
+      ],
+      'hello\n',
+      {},
+      {
+        cwd: dotenvRoot,
+        providerEnvironmentMode: 'omit'
+      }
+    );
+    const traceSummaries = parseTraceSummaries(result.stderr);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('Mira is ready.\nYou: ');
+    expect(traceSummaries).toEqual([
+      expect.objectContaining({
+        status: 'rejected',
+        provider: {
+          name: 'nvidia',
+          model: 'nvidia/dotenv-test-model',
+          errorCode: 'missing_api_key',
+          errorMessage: 'NVIDIA provider requires NVIDIA_API_KEY.'
+        },
+        error: 'NVIDIA provider requires NVIDIA_API_KEY.'
+      })
+    ]);
   });
 
   it('exits cleanly when /exit is the first input', async () => {
@@ -406,6 +466,82 @@ describe('node src/chat-cli.ts', () => {
     ).not.toThrow(
       'Stored character state does not match accepted character state patch evidence.'
     );
+  });
+
+  it('hides non-committed top-level model text by default in chat output', async () => {
+    const stdout = new CapturingWritable();
+    const stderr = new CapturingWritable();
+
+    const exitCode = await runChatCliInProcess({
+      stdin: Readable.from(['hello\n/exit\n']),
+      stdout,
+      stderr,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          text: 'non-committed top-level model text',
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'committed visible reply'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout.contents()).toBe(
+      'Mira is ready.\nYou: Mira: committed visible reply\nYou: '
+    );
+    expect(stderr.contents()).toBe('');
+  });
+
+  it('toggles non-committed top-level model text in a visually separate chat block', async () => {
+    const stdout = new CapturingWritable();
+    const stderr = new CapturingWritable();
+
+    const exitCode = await runChatCliInProcess({
+      stdin: Readable.from([
+        '/model-text\n',
+        'hello\n',
+        '/model-text\n',
+        'still there?\n',
+        '/exit\n'
+      ]),
+      stdout,
+      stderr,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          text: 'non-committed top-level model text',
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'committed visible reply'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout.contents()).toBe(
+      'Mira is ready.\n' +
+        'You: Model top-level text display: shown.\n' +
+        'You: Mira: committed visible reply\n' +
+        '[model top-level text | not committed]\n' +
+        'non-committed top-level model text\n' +
+        '[/model top-level text]\n' +
+        'You: Model top-level text display: hidden.\n' +
+        'You: Mira: committed visible reply\n' +
+        'You: '
+    );
+    expect(stderr.contents()).toBe('');
   });
 
   it('does not emit a trace summary for /exit', async () => {
@@ -709,6 +845,64 @@ describe('pnpm --silent chat', () => {
       })
     ]);
   });
+
+  it('attaches the default static Project02 capability host to chat turns', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const sessionId = 'package-host';
+    const result = await runCommand(
+      'pnpm',
+      [
+        '--silent',
+        'chat',
+        '--',
+        '--store',
+        storeRoot,
+        '--new-session',
+        sessionId
+      ],
+      'hello\n/exit\n'
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe('');
+
+    const terminalCompleted = findRawEvent(
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId
+      }).rawEvents(),
+      'runtime_turn_completed'
+    );
+
+    expect(
+      terminalCompleted.agentCapabilityTurnEvidence?.capabilities.map(
+        (capability) => ({
+          capabilityId: capability.capabilityId,
+          enabled: capability.enabled,
+          availableForTurn: capability.availableForTurn
+        })
+      )
+    ).toEqual([
+      {
+        capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+        enabled: true,
+        availableForTurn: true
+      },
+      {
+        capabilityId: firstPartyModelToolsCapabilityId,
+        enabled: true,
+        availableForTurn: true
+      }
+    ]);
+    expect(
+      terminalCompleted.roleModelIOSnapshot?.inputEnvelope.capabilityToolDefinitions
+    ).toEqual([
+      expect.objectContaining({
+        capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+        name: roleModelCapabilityListToolName
+      })
+    ]);
+  });
 });
 
 describe('MVP-001 relay compatibility', () => {
@@ -772,14 +966,15 @@ async function runCommand(
   command: string,
   args: readonly string[],
   stdin: string,
-  env: NodeJS.ProcessEnv = {}
+  env: NodeJS.ProcessEnv = {},
+  options: RunCommandOptions = {}
 ): Promise<CommandResult> {
   const child = spawn(command, args, {
-    cwd: projectRoot,
-    env: {
-      ...process.env,
-      ...env
-    },
+    cwd: options.cwd ?? projectRoot,
+    env: createCommandEnvironment(
+      env,
+      options.providerEnvironmentMode ?? 'blank'
+    ),
     stdio: ['pipe', 'pipe', 'pipe']
   });
 
@@ -795,6 +990,30 @@ async function runCommand(
     exitCode,
     stdout,
     stderr
+  };
+}
+
+function createCommandEnvironment(
+  env: NodeJS.ProcessEnv,
+  providerEnvironmentMode: ProviderEnvironmentMode
+): NodeJS.ProcessEnv {
+  const commandEnv = {
+    ...process.env
+  };
+
+  if (providerEnvironmentMode === 'blank') {
+    commandEnv['NVIDIA_API_KEY'] = '';
+    commandEnv['NVIDIA_MODEL'] = '';
+    commandEnv['PROJECT02_ROLE_MODEL_PROVIDER'] = '';
+  } else if (providerEnvironmentMode === 'omit') {
+    delete commandEnv['NVIDIA_API_KEY'];
+    delete commandEnv['NVIDIA_MODEL'];
+    delete commandEnv['PROJECT02_ROLE_MODEL_PROVIDER'];
+  }
+
+  return {
+    ...commandEnv,
+    ...env
   };
 }
 
@@ -869,6 +1088,19 @@ function isStringArray(value: unknown): value is readonly string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function findRawEvent(
+  rawEvents: readonly RawEventLogRecord[],
+  kind: RawEventLogRecordKind
+): RawEventLogRecord {
+  const rawEvent = rawEvents.find((record) => record.kind === kind);
+
+  if (rawEvent === undefined) {
+    throw new Error(`Expected raw event kind ${kind}.`);
+  }
+
+  return rawEvent;
 }
 
 function createWriteFailingLogStore(): RuntimeLogStore {

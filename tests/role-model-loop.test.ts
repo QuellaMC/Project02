@@ -573,31 +573,75 @@ describe('role model loop', () => {
       capabilities: [capability],
       enabledCapabilityIds: ['memory.fixture']
     });
+    let adapterCalls = 0;
+    const adapter: RoleModelAdapter = {
+      invoke(inputEnvelope) {
+        adapterCalls += 1;
+
+        if (adapterCalls === 1) {
+          expect(inputEnvelope.toolObservations).toEqual([]);
+
+          return Object.freeze({
+            rawOutputText: JSON.stringify({
+              version: roleModelDecisionContractVersion,
+              toolCalls: [
+                {
+                  name: roleModelVisibleReplyActionName,
+                  input: {
+                    text: 'I will check memory.'
+                  }
+                },
+                {
+                  name: 'memory.search',
+                  input: {
+                    query: 'preference'
+                  }
+                }
+              ]
+            })
+          });
+        }
+
+        expect(inputEnvelope.toolObservations).toMatchObject([
+          {
+            round: 1,
+            capabilityId: 'memory.fixture',
+            toolName: 'memory.search',
+            input: {
+              query: 'preference'
+            },
+            result: {
+              status: 'accepted',
+              output: {
+                results: ['Mira prefers concise answers.']
+              }
+            }
+          }
+        ]);
+
+        return Object.freeze({
+          rawOutputText: JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'I found one memory.'
+                }
+              }
+            ]
+          })
+        });
+      }
+    };
+
     const result = await runRoleModelLoop({
       event,
       decisionContext: createDecisionContext({
         sessionId: 'local-session',
         characterSnapshot: localCharacterProfile
       }),
-      adapter: createRawOutputAdapter(
-        JSON.stringify({
-          version: roleModelDecisionContractVersion,
-          toolCalls: [
-            {
-              name: roleModelVisibleReplyActionName,
-              input: {
-                text: 'I found one memory.'
-              }
-            },
-            {
-              name: 'memory.search',
-              input: {
-                query: 'preference'
-              }
-            }
-          ]
-        })
-      ),
+      adapter,
       capabilityToolDefinitions: host.capabilityToolDefinitions(),
       capabilityToolHost: host,
       runtimeCapabilityContext
@@ -612,6 +656,8 @@ describe('role model loop', () => {
     expect(getRequiredVisibleReplyText(result.decision)).toBe(
       'I found one memory.'
     );
+    expect(adapterCalls).toBe(2);
+    expect(result.rounds).toHaveLength(2);
     expect(result.capabilityToolResults).toHaveLength(1);
     expect(result.capabilityToolResults[0]?.call).toMatchObject({
       eventId: event.eventId,
@@ -668,29 +714,71 @@ describe('role model loop', () => {
       ],
       enabledCapabilityIds: ['memory.fixture']
     });
+    let adapterCalls = 0;
+    const adapter: RoleModelAdapter = {
+      invoke(inputEnvelope) {
+        adapterCalls += 1;
+
+        if (adapterCalls === 1) {
+          expect(inputEnvelope.toolObservations).toEqual([]);
+
+          return Object.freeze({
+            rawOutputText: JSON.stringify({
+              version: roleModelDecisionContractVersion,
+              toolCalls: [
+                {
+                  name: roleModelVisibleReplyActionName,
+                  input: {
+                    text: 'Here is what I can use.'
+                  }
+                },
+                {
+                  name: roleModelCapabilityListToolName,
+                  input: {}
+                }
+              ]
+            })
+          });
+        }
+
+        expect(inputEnvelope.toolObservations).toMatchObject([
+          {
+            round: 1,
+            capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+            toolName: roleModelCapabilityListToolName,
+            input: {},
+            result: {
+              status: 'accepted',
+              output: {
+                truncated: false
+              }
+            }
+          }
+        ]);
+
+        return Object.freeze({
+          rawOutputText: JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'I can use the memory search tool.'
+                }
+              }
+            ]
+          })
+        });
+      }
+    };
+
     const result = await runRoleModelLoop({
       event,
       decisionContext: createDecisionContext({
         sessionId: 'local-session',
         characterSnapshot: localCharacterProfile
       }),
-      adapter: createRawOutputAdapter(
-        JSON.stringify({
-          version: roleModelDecisionContractVersion,
-          toolCalls: [
-            {
-              name: roleModelVisibleReplyActionName,
-              input: {
-                text: 'Here is what I can use.'
-              }
-            },
-            {
-              name: roleModelCapabilityListToolName,
-              input: {}
-            }
-          ]
-        })
-      ),
+      adapter,
       capabilityToolDefinitions: host.capabilityToolDefinitions(),
       capabilityToolHost: host,
       runtimeCapabilityContext
@@ -701,6 +789,11 @@ describe('role model loop', () => {
     if (result.status !== 'accepted') {
       throw new Error('Expected accepted capability list result.');
     }
+
+    expect(adapterCalls).toBe(2);
+    expect(getRequiredVisibleReplyText(result.decision)).toBe(
+      'I can use the memory search tool.'
+    );
 
     const routedList = result.capabilityToolResults.find(
       (routing) => routing.call.toolName === roleModelCapabilityListToolName
@@ -868,31 +961,74 @@ describe('role model loop', () => {
       enabledCapabilityIds: ['memory.fixture']
     });
 
+    let adapterCalls = 0;
+    const adapter: RoleModelAdapter = {
+      invoke(inputEnvelope) {
+        adapterCalls += 1;
+
+        if (adapterCalls === 1) {
+          expect(inputEnvelope.toolObservations).toEqual([]);
+
+          return Object.freeze({
+            rawOutputText: JSON.stringify({
+              version: roleModelDecisionContractVersion,
+              toolCalls: [
+                {
+                  name: roleModelVisibleReplyActionName,
+                  input: {
+                    text: 'I will check memory.'
+                  }
+                },
+                {
+                  name: 'memory.search',
+                  input: {
+                    query: 'preference'
+                  }
+                }
+              ]
+            })
+          });
+        }
+
+        expect(inputEnvelope.toolObservations).toMatchObject([
+          {
+            round: 1,
+            capabilityId: 'memory.fixture',
+            toolName: 'memory.search',
+            input: {
+              query: 'preference'
+            },
+            result: {
+              status: 'rejected',
+              reason: 'handler_failed',
+              message: 'memory search unavailable'
+            }
+          }
+        ]);
+
+        return Object.freeze({
+          rawOutputText: JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'I can answer without memory.'
+                }
+              }
+            ]
+          })
+        });
+      }
+    };
+
     const result = await runRoleModelLoop({
       event,
       decisionContext: createDecisionContext({
         sessionId: 'local-session',
         characterSnapshot: localCharacterProfile
       }),
-      adapter: createRawOutputAdapter(
-        JSON.stringify({
-          version: roleModelDecisionContractVersion,
-          toolCalls: [
-            {
-              name: roleModelVisibleReplyActionName,
-              input: {
-                text: 'I can answer without memory.'
-              }
-            },
-            {
-              name: 'memory.search',
-              input: {
-                query: 'preference'
-              }
-            }
-          ]
-        })
-      ),
+      adapter,
       capabilityToolDefinitions: host.capabilityToolDefinitions(),
       capabilityToolHost: host,
       runtimeCapabilityContext
@@ -907,6 +1043,8 @@ describe('role model loop', () => {
     expect(getRequiredVisibleReplyText(result.decision)).toBe(
       'I can answer without memory.'
     );
+    expect(adapterCalls).toBe(2);
+    expect(result.rounds).toHaveLength(2);
     expect(result.capabilityToolResults).toHaveLength(1);
     expect(result.capabilityToolResults[0]?.result).toMatchObject({
       status: 'rejected',

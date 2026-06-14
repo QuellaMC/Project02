@@ -2,16 +2,19 @@ export {
   CharacterInputError,
   CharacterReplyValidationError,
   ConversationRehydrationError,
+  appendCharacterVisibleMessage,
   createConversationSession,
   createDeterministicCharacterAgent,
   localCharacterProfile,
   defaultRecentVisibleMessageLimit,
+  normalizeCharacterAgentReply,
   runCharacterTurn,
   selectRecentVisibleMessages,
   validateCharacterAgentReply,
   validateRestoredVisibleTranscript,
   type CharacterAgent,
   type CharacterAgentInput,
+  type CharacterMessageAppendResult,
   type CharacterAgentReply,
   type CharacterProfile,
   type CharacterTurnOptions,
@@ -48,6 +51,7 @@ export {
   createRoleModelCapabilityToolDefinitions,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
+  createRoleModelToolObservation,
   createVisibleReplyCharacterDecision,
   getCharacterStatePatchToolCall,
   getRequiredVisibleReplyText,
@@ -94,6 +98,8 @@ export {
   type RoleModelOutputContract,
   type RoleModelProviderMetadata,
   type RoleModelToolDefinition,
+  type RoleModelToolObservation,
+  type RoleModelToolObservationResult,
   type RoleModelVisibleReplyAction
 } from './role-model-contracts.ts';
 
@@ -196,6 +202,7 @@ export {
 } from './agent-capabilities.ts';
 
 export {
+  createDefaultProject02CapabilityHost,
   createRuntimeCapabilityHost,
   runtimeCapabilityBeforeRoleModelCallRejectionReason,
   runtimeCapabilityDiscoveryCapabilityId,
@@ -274,14 +281,19 @@ export type {
 export {
   createDeterministicLocalRoleModelAdapter,
   createRoleModelAdapterFromCharacterAgent,
+  defaultRoleModelMaxCapabilityToolRounds,
   parseRoleModelDecision,
   runRoleModelLoop,
   type AcceptedRoleModelLoopResult,
   type RejectedRoleModelLoopResult,
   type RoleModelAdapter,
   type RoleModelAdapterRawOutput,
+  type RoleModelCapabilityToolCallCompletedEvent,
   type RoleModelCapabilityToolHost,
+  type RoleModelCapabilityToolCallsRequestedEvent,
   type RoleModelCapabilityToolRoutingEvidence,
+  type RoleModelInterimVisibleReplyEvent,
+  type RoleModelLoopRound,
   type RoleModelLoopResult,
   type RunRoleModelLoopOptions
 } from './role-model-loop.ts';
@@ -316,6 +328,7 @@ export {
   type LocalRuntimeUserMessageRejectedResult,
   type LocalRuntimeUserMessageRejectionReason,
   type LocalRuntimeUserMessageResult,
+  type LocalRuntimeTurnProgressEvent,
   type RunLocalUserMessageEventOptions,
   type RecordLocalUserMessageInputRejectionOptions
 } from './local-runtime.ts';
@@ -325,6 +338,26 @@ export { createFileRuntimeLogStore } from './file-runtime-log-store.ts';
 export type {
   CreateFileRuntimeLogStoreOptions
 } from './file-runtime-log-store.ts';
+
+export {
+  characterStatePluginId,
+  createCharacterStatePlugin,
+  createDefaultProject02PluginHost,
+  createRuntimePluginFileStore,
+  createRuntimePluginHost
+} from './plugins/index.ts';
+
+export type {
+  CreateRuntimePluginFileStoreOptions,
+  CreateRuntimePluginHostOptions,
+  RuntimePlugin,
+  RuntimePluginApiGrant,
+  RuntimePluginBeforeRoleModelCallResult,
+  RuntimePluginFileStore,
+  RuntimePluginHost,
+  RuntimePluginManifest,
+  RuntimePluginToolContext
+} from './plugins/index.ts';
 
 export {
   createRoleModelCommitValidationSnapshot,

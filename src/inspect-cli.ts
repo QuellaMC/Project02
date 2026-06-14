@@ -58,6 +58,8 @@ type InspectTurnEvidence = {
   readonly status: RuntimeTurnStatus;
   readonly steps: readonly string[];
   readonly visibleMessages: readonly InspectVisibleMessage[];
+  readonly modelRounds: readonly InspectRoleModelRoundEvidence[];
+  readonly toolEvents: readonly InspectToolCallEvent[];
   readonly roleModelEvidence?: InspectRoleModelEvidence;
   readonly characterStatePatchEvidence?: InspectCharacterStatePatchEvidence;
   readonly capabilityEvidence?: InspectCapabilityEvidence;
@@ -71,12 +73,22 @@ type InspectVisibleMessage = {
   readonly text: string;
 };
 
+type InspectToolCallEvent = {
+  readonly callId: string;
+  readonly round: number;
+  readonly toolName: string;
+  readonly pluginId: string;
+  readonly input?: unknown;
+  readonly result?: InspectCapabilityToolInvocationResult;
+  readonly pluginStoreRevision?: number;
+};
+
 type InspectRoleModelEvidence = {
   readonly input?: {
-      readonly sessionId: string;
-      readonly allowedTools: readonly string[];
-      readonly outputContractVersion: string;
-      readonly currentUserMessage: string;
+    readonly sessionId: string;
+    readonly allowedTools: readonly string[];
+    readonly outputContractVersion: string;
+    readonly currentUserMessage: string;
     readonly recentVisibleMessages: readonly InspectVisibleMessage[];
     readonly runtimeNotes: readonly string[];
   };
@@ -88,10 +100,16 @@ type InspectRoleModelEvidence = {
   readonly commitValidation?: InspectRoleModelCommitValidation;
 };
 
+type InspectRoleModelRoundEvidence = {
+  readonly rawEventKind: string;
+  readonly roleModelEvidence: InspectRoleModelEvidence;
+};
+
 type InspectParsedRoleModelDecision =
   | {
       readonly status: 'accepted';
       readonly toolCalls: readonly InspectModelToolCall[];
+      readonly nonCommittedTopLevelText?: InspectNonCommittedTopLevelText;
     }
   | {
       readonly status: 'rejected';
@@ -104,10 +122,16 @@ type InspectModelToolCall = {
   readonly input: Readonly<Record<string, unknown>>;
 };
 
+type InspectNonCommittedTopLevelText = {
+  readonly source: 'model_top_level_text';
+  readonly committed: false;
+  readonly text: string;
+};
+
 type InspectRoleModelCommitValidation =
   | {
       readonly status: 'accepted';
-      readonly acceptedVisibleReplyText: string;
+      readonly acceptedVisibleReplyText?: string;
     }
   | {
       readonly status: 'rejected';
@@ -398,6 +422,7 @@ function createTurnEvidence(options: {
       .map((rawEvent) =>
         createTurnEvidenceEntry({
           conversationMessages: options.conversationMessages,
+          rawEvents: options.rawEvents,
           rawEvent,
           traceEntries: options.traceEntries
         })
@@ -407,6 +432,7 @@ function createTurnEvidence(options: {
 
 function createTurnEvidenceEntry(options: {
   readonly conversationMessages: readonly ConversationLogRecord[];
+  readonly rawEvents: readonly RawEventLogRecord[];
   readonly rawEvent: RawEventLogRecord;
   readonly traceEntries: readonly RuntimeTraceEntry[];
 }): InspectTurnEvidence {
@@ -430,6 +456,14 @@ function createTurnEvidenceEntry(options: {
         visibleMessagesForId(options.conversationMessages, messageId)
       )
     ),
+    modelRounds: modelRoundsForTurn({
+      rawEvents: options.rawEvents,
+      terminalRawEvent: options.rawEvent
+    }),
+    toolEvents: toolEventsForTurn({
+      rawEvents: options.rawEvents,
+      terminalRawEvent: options.rawEvent
+    }),
     ...roleModelEvidenceForRawEvent(options.rawEvent),
     ...characterStatePatchEvidenceForRawEvent(options.rawEvent),
     ...capabilityEvidenceForRawEvent(options.rawEvent),
@@ -534,6 +568,73 @@ function characterStatePatchEvidenceForRawEvent(
       rejection: result.rejection
     } satisfies InspectCharacterStatePatchEvidence)
   };
+}
+
+function modelRoundsForTurn(options: {
+  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly terminalRawEvent: RawEventLogRecord;
+}): readonly InspectRoleModelRoundEvidence[] {
+  return Object.freeze(
+    options.rawEvents
+      .filter(
+        (rawEvent) =>
+          rawEvent.eventId === options.terminalRawEvent.eventId &&
+          rawEvent.traceId === options.terminalRawEvent.traceId
+      )
+      .flatMap((rawEvent) => {
+        const evidence = roleModelEvidenceForRawEvent(rawEvent).roleModelEvidence;
+
+        if (evidence === undefined) {
+          return [];
+        }
+
+        return [
+          Object.freeze({
+            rawEventKind: rawEvent.kind,
+            roleModelEvidence: evidence
+          } satisfies InspectRoleModelRoundEvidence)
+        ];
+      })
+  );
+}
+
+function toolEventsForTurn(options: {
+  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly terminalRawEvent: RawEventLogRecord;
+}): readonly InspectToolCallEvent[] {
+  const referencedCallIds = new Set(options.terminalRawEvent.toolCallIds ?? []);
+
+  if (referencedCallIds.size === 0) {
+    return Object.freeze([]);
+  }
+
+  return Object.freeze(
+    options.rawEvents
+      .filter(
+        (rawEvent) =>
+          rawEvent.eventId === options.terminalRawEvent.eventId &&
+          rawEvent.traceId === options.terminalRawEvent.traceId &&
+          rawEvent.toolCallId !== undefined &&
+          referencedCallIds.has(rawEvent.toolCallId) &&
+          (rawEvent.kind === 'tool_call_started' ||
+            rawEvent.kind === 'tool_call_finished')
+      )
+      .map((rawEvent) =>
+        Object.freeze({
+          callId: rawEvent.toolCallId ?? '',
+          round: rawEvent.toolRound ?? 0,
+          toolName: rawEvent.toolName ?? '',
+          pluginId: rawEvent.toolPluginId ?? '',
+          ...(rawEvent.toolInput === undefined ? {} : { input: rawEvent.toolInput }),
+          ...(rawEvent.toolResult === undefined
+            ? {}
+            : { result: capabilityToolInvocationResult(rawEvent.toolResult) }),
+          ...(rawEvent.pluginStoreRevision === undefined
+            ? {}
+            : { pluginStoreRevision: rawEvent.pluginStoreRevision })
+        } satisfies InspectToolCallEvent)
+      )
+  );
 }
 
 function capabilityEvidenceForRawEvent(
@@ -800,7 +901,16 @@ function parsedRoleModelDecision(
             input: Object.freeze({ ...toolCall.input })
           } satisfies InspectModelToolCall)
         )
-      )
+      ),
+      ...(result.nonCommittedText !== undefined
+        ? {
+            nonCommittedTopLevelText: Object.freeze({
+              source: 'model_top_level_text',
+              committed: false,
+              text: result.nonCommittedText
+            } satisfies InspectNonCommittedTopLevelText)
+          }
+        : {})
     } satisfies InspectParsedRoleModelDecision);
   }
 
@@ -819,7 +929,9 @@ function roleModelCommitValidation(
   if (result.status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
-      acceptedVisibleReplyText: result.acceptedVisibleReplyText
+      ...(result.acceptedVisibleReplyText === undefined
+        ? {}
+        : { acceptedVisibleReplyText: result.acceptedVisibleReplyText })
     } satisfies InspectRoleModelCommitValidation);
   }
 

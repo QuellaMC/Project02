@@ -16,9 +16,12 @@ import {
   createLocalRuntimeStorageLayout,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
+  firstPartyModelToolsCapabilityId,
+  roleModelCapabilityListToolName,
   roleModelDecisionContractVersion,
   roleModelMalformedOutputRejectionReason,
   roleModelVisibleReplyActionName,
+  runtimeCapabilityDiscoveryCapabilityId,
   runLocalUserMessageEvent
 } from '../src/index.ts';
 import type {
@@ -148,6 +151,11 @@ type InspectRoleModelEvidence = {
           readonly name: string;
           readonly input: Readonly<Record<string, unknown>>;
         }[];
+        readonly nonCommittedTopLevelText?: {
+          readonly source: 'model_top_level_text';
+          readonly committed: false;
+          readonly text: string;
+        };
       }
     | {
         readonly status: 'rejected';
@@ -277,7 +285,8 @@ describe('node src/inspect-cli.ts', () => {
             sessionId: 'mira-local',
             allowedTools: [
               roleModelVisibleReplyActionName,
-              'character_state.patch'
+              'character_state.patch',
+              roleModelCapabilityListToolName
             ],
             outputContractVersion: 'mvp-006.tool_calls.v1',
             currentUserMessage: 'hello',
@@ -312,6 +321,67 @@ describe('node src/inspect-cli.ts', () => {
             status: 'accepted',
             acceptedVisibleReplyText: "I'm here. Tell me what you need."
           }
+        },
+        capabilityEvidence: {
+          contractVersion: agentCapabilityContractVersion,
+          capabilities: [
+            {
+              capabilityId: runtimeCapabilityDiscoveryCapabilityId,
+              displayName: 'Runtime capability discovery',
+              version: '1.0.0',
+              kind: 'first_party',
+              localTrustLevel: 'first_party',
+              installed: true,
+              registered: true,
+              enabled: true,
+              availableForTurn: true,
+              providedTools: [
+                {
+                  name: roleModelCapabilityListToolName,
+                  validationOwner: 'capability_host',
+                  sideEffectLevel: 'runtime_read',
+                  requiresConfirmation: false,
+                  sourceReferencesRequired: false
+                }
+              ],
+              registeredLifecycleHooks: ['tool_provider', 'handle_tool_call'],
+              redactionLabels: []
+            },
+            {
+              capabilityId: firstPartyModelToolsCapabilityId,
+              displayName: 'First-party model tools',
+              version: '1.0.0',
+              kind: 'first_party',
+              localTrustLevel: 'first_party',
+              installed: true,
+              registered: true,
+              enabled: true,
+              availableForTurn: true,
+              providedTools: [
+                {
+                  name: roleModelVisibleReplyActionName,
+                  validationOwner: 'built_in_model_tools',
+                  sideEffectLevel: 'none',
+                  requiresConfirmation: false,
+                  sourceReferencesRequired: false
+                },
+                {
+                  name: 'character_state.patch',
+                  validationOwner: 'built_in_model_tools',
+                  sideEffectLevel: 'none',
+                  requiresConfirmation: false,
+                  sourceReferencesRequired: false
+                }
+              ],
+              registeredLifecycleHooks: ['tool_provider'],
+              redactionLabels: []
+            }
+          ],
+          contextItems: [],
+          toolInvocations: [],
+          evidence: [],
+          policyOutcomes: [],
+          health: []
         }
       }
     );
@@ -395,6 +465,91 @@ describe('node src/inspect-cli.ts', () => {
           after: 'curious'
         }
       ]
+    });
+  });
+
+  it('shows accepted top-level model text separately from visible reply evidence', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const sessionStore = createLocalRuntimeSessionStore({ storeRoot });
+
+    await sessionStore.createSession({ sessionId: 'mira-local' });
+
+    const session = createConversationSession({ id: 'mira-local' });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const characterStateStore = createFileCharacterStateStore({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+
+    await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('hello', {
+        eventId: 'evt_inspect_model_text',
+        traceId: 'trace_inspect_model_text',
+        createdAt: '2026-06-14T00:00:00.000Z'
+      }),
+      session,
+      logStore,
+      characterStateStore,
+      roleModelAdapter: createRawOutputAdapter(
+        JSON.stringify({
+          version: roleModelDecisionContractVersion,
+          text: 'non-committed top-level model text',
+          toolCalls: [
+            {
+              name: roleModelVisibleReplyActionName,
+              input: {
+                text: 'committed visible reply'
+              }
+            }
+          ]
+        })
+      )
+    });
+
+    const inspectResult = await runInspectCli([
+      '--store',
+      storeRoot,
+      '--session',
+      'mira-local'
+    ]);
+    const output = parseJson(
+      inspectResult.stdout
+    ) as InspectSessionOutput;
+    const turn = output.turns[0];
+
+    expect(inspectResult).toMatchObject({
+      exitCode: 0,
+      stderr: ''
+    });
+    expect(turn?.visibleMessages[1]?.text).toBe(
+      'committed visible reply'
+    );
+    expect(turn?.roleModelEvidence?.parsedDecision).toMatchObject({
+      status: 'accepted',
+      toolCalls: [
+        {
+          name: roleModelVisibleReplyActionName,
+          input: {
+            text: 'committed visible reply'
+          }
+        }
+      ]
+    });
+    expect(
+      turn?.roleModelEvidence?.parsedDecision?.status === 'accepted'
+        ? turn.roleModelEvidence.parsedDecision.nonCommittedTopLevelText
+        : undefined
+    ).toEqual({
+      source: 'model_top_level_text',
+      committed: false,
+      text: 'non-committed top-level model text'
+    });
+    expect(turn?.roleModelEvidence?.commitValidation).toEqual({
+      status: 'accepted',
+      acceptedVisibleReplyText: 'committed visible reply'
     });
   });
 
@@ -1184,6 +1339,12 @@ async function runCommand(
 ): Promise<CommandResult> {
   const child = spawn(command, args, {
     cwd: projectRoot,
+    env: {
+      ...process.env,
+      NVIDIA_API_KEY: '',
+      NVIDIA_MODEL: '',
+      PROJECT02_ROLE_MODEL_PROVIDER: ''
+    },
     stdio: ['pipe', 'pipe', 'pipe']
   });
 

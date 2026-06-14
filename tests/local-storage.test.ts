@@ -430,6 +430,48 @@ describe('local runtime storage contract', () => {
     expectMalformedRawEvent(record);
   });
 
+  it('decodes legacy visible_reply decisions in stored parsed evidence', () => {
+    const record = mutableRecordFromRawEvent(createRoleModelCompletedRawEvent());
+    const ioSnapshot = requiredMutableRecord(
+      record['roleModelIOSnapshot'],
+      'roleModelIOSnapshot'
+    );
+    const parsedSnapshot = requiredMutableRecord(
+      record['parsedRoleModelDecisionSnapshot'],
+      'parsedRoleModelDecisionSnapshot'
+    );
+    const parsedResult = requiredMutableRecord(
+      parsedSnapshot['result'],
+      'parsedRoleModelDecisionSnapshot.result'
+    );
+    const legacyDecision = {
+      action: {
+        type: roleModelVisibleReplyActionName,
+        text: 'hello back'
+      }
+    };
+
+    ioSnapshot['rawOutputText'] = JSON.stringify(legacyDecision);
+    parsedResult['decision'] = legacyDecision;
+
+    const decoded = decodeRawEventLogRecord(JSON.stringify(record));
+
+    expect(decoded.parsedRoleModelDecisionSnapshot?.result).toMatchObject({
+      status: 'accepted',
+      decision: {
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: 'hello back'
+            }
+          }
+        ]
+      }
+    });
+  });
+
   it('rejects role-model evidence whose raw output parses to a different decision', () => {
     for (const rawOutputText of [
       JSON.stringify({
@@ -983,15 +1025,6 @@ describe('local runtime storage contract', () => {
         status: 'completed'
       },
       {
-        eventId: 'evt_rejected_with_messages',
-        traceId: 'trace_rejected_with_messages',
-        createdAt,
-        kind: 'runtime_turn_rejected',
-        eventType: 'USER_MESSAGE',
-        status: 'rejected',
-        visibleMessageIds: ['local-session:message-1']
-      },
-      {
         eventId: 'evt_rejected_with_empty_messages',
         traceId: 'trace_rejected_with_empty_messages',
         createdAt,
@@ -1005,6 +1038,20 @@ describe('local runtime storage contract', () => {
         LocalRuntimeStorageContractError
       );
     }
+
+    expect(() =>
+      decodeRawEventLogRecord(
+        JSON.stringify({
+          eventId: 'evt_rejected_with_messages',
+          traceId: 'trace_rejected_with_messages',
+          createdAt,
+          kind: 'runtime_turn_rejected',
+          eventType: 'USER_MESSAGE',
+          status: 'rejected',
+          visibleMessageIds: ['local-session:message-1']
+        })
+      )
+    ).not.toThrow();
   });
 
   it('rejects stored visible message text that is not already normalized', () => {

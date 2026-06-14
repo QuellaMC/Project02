@@ -6,10 +6,12 @@ import {
 import {
   roleModelCapabilityToolRejectedRejectionReason,
   createParsedRoleModelDecisionSnapshot,
+  createRoleModelToolObservation,
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createVisibleReplyCharacterDecision,
+  getVisibleReplyToolCall,
   roleModelAdapterRejectionNotReplayableDetails,
   isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
@@ -27,10 +29,12 @@ import {
   type RoleModelDecisionRejectionReason,
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot,
-  type RoleModelProviderMetadata
+  type RoleModelProviderMetadata,
+  type RoleModelToolObservation
 } from './role-model-contracts.ts';
 import {
-  isBuiltInModelToolName,
+  characterStatePatchModelToolName,
+  visibleReplyModelToolName,
   type ModelToolCall
 } from './model-tools.ts';
 import type {
@@ -62,6 +66,21 @@ export type RunRoleModelLoopOptions = {
   readonly adapter?: RoleModelAdapter;
   readonly capabilityToolDefinitions?: readonly RoleModelCapabilityToolDefinition[];
   readonly capabilityToolHost?: RoleModelCapabilityToolHost;
+  readonly resolveToolCapabilityId?: (toolName: string) => string | undefined;
+  readonly maxCapabilityToolRounds?: number;
+  readonly maxToolRounds?: number;
+  readonly onCapabilityToolCallStarted?: (
+    event: RoleModelCapabilityToolCallStartedEvent
+  ) => Promise<void> | void;
+  readonly onCapabilityToolCallCompleted?: (
+    event: RoleModelCapabilityToolCallCompletedEvent
+  ) => Promise<void> | void;
+  readonly onCapabilityToolCallsRequested?: (
+    event: RoleModelCapabilityToolCallsRequestedEvent
+  ) => Promise<void> | void;
+  readonly onInterimVisibleReply?: (
+    event: RoleModelInterimVisibleReplyEvent
+  ) => Promise<void> | void;
   readonly runtimeCapabilityContext?: RuntimeCapabilityContext;
 };
 
@@ -73,8 +92,45 @@ export type RoleModelCapabilityToolHost = {
 };
 
 export type RoleModelCapabilityToolRoutingEvidence = {
+  readonly callId: string;
   readonly call: AgentCapabilityToolCall;
   readonly result: AgentCapabilityToolCallResult;
+};
+
+export type RoleModelInterimVisibleReplyEvent = {
+  readonly round: number;
+  readonly text: string;
+  readonly inputEnvelope: RoleModelInputEnvelope;
+  readonly ioSnapshot: RoleModelIOSnapshot;
+  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+};
+
+export type RoleModelCapabilityToolCallsRequestedEvent = {
+  readonly round: number;
+  readonly toolNames: readonly string[];
+};
+
+export type RoleModelCapabilityToolCallStartedEvent = {
+  readonly callId: string;
+  readonly round: number;
+  readonly call: AgentCapabilityToolCall;
+};
+
+export type RoleModelCapabilityToolCallCompletedEvent = {
+  readonly callId: string;
+  readonly capabilityId: string;
+  readonly round: number;
+  readonly status: AgentCapabilityToolCallResult['status'];
+  readonly toolName: string;
+  readonly result: AgentCapabilityToolCallResult;
+};
+
+export type RoleModelLoopRound = {
+  readonly round: number;
+  readonly inputEnvelope: RoleModelInputEnvelope;
+  readonly ioSnapshot: RoleModelIOSnapshot;
+  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+  readonly capabilityToolResults: readonly RoleModelCapabilityToolRoutingEvidence[];
 };
 
 export type AcceptedRoleModelLoopResult = {
@@ -85,6 +141,7 @@ export type AcceptedRoleModelLoopResult = {
   readonly decisionResult: AcceptedRoleModelDecisionResult;
   readonly decision: CharacterDecision;
   readonly capabilityToolResults: readonly RoleModelCapabilityToolRoutingEvidence[];
+  readonly rounds: readonly RoleModelLoopRound[];
 };
 
 export type RejectedRoleModelLoopResult = {
@@ -95,11 +152,16 @@ export type RejectedRoleModelLoopResult = {
   readonly decisionResult: RejectedRoleModelDecisionResult;
   readonly rejection: RoleModelDecisionRejection;
   readonly capabilityToolResults: readonly RoleModelCapabilityToolRoutingEvidence[];
+  readonly rounds: readonly RoleModelLoopRound[];
 };
 
 export type RoleModelLoopResult =
   | AcceptedRoleModelLoopResult
   | RejectedRoleModelLoopResult;
+
+export const defaultRoleModelMaxToolRounds = 99;
+export const defaultRoleModelMaxCapabilityToolRounds =
+  defaultRoleModelMaxToolRounds;
 
 export function createDeterministicLocalRoleModelAdapter(): RoleModelAdapter {
   return createRoleModelAdapterFromCharacterAgent(
@@ -129,80 +191,220 @@ export function createRoleModelAdapterFromCharacterAgent(
 export async function runRoleModelLoop(
   options: RunRoleModelLoopOptions
 ): Promise<RoleModelLoopResult> {
-  const inputEnvelope = createRoleModelInputEnvelope({
-    event: options.event,
-    decisionContext: options.decisionContext,
-    capabilityToolDefinitions: options.capabilityToolDefinitions ?? []
-  });
   const adapter = options.adapter ?? createDeterministicLocalRoleModelAdapter();
-  const rawOutput: unknown = await adapter.invoke(inputEnvelope);
-  const rawOutputValidation = validateRoleModelAdapterRawOutput(
-    rawOutput,
-    inputEnvelope.allowedTools,
-    inputEnvelope.capabilityToolDefinitions
-  );
-  const identity = createSnapshotIdentity(inputEnvelope.event);
-  const sessionId = inputEnvelope.decisionContext.sessionId;
-  const ioSnapshot = createRoleModelIOSnapshot({
-    ...identity,
-    sessionId,
-    inputEnvelope,
-    rawOutputText: rawOutputValidation.rawOutputText,
-    ...providerMetadataOption(rawOutputValidation.providerMetadata)
-  });
-  const decisionResult =
-    rawOutputValidation.status === 'accepted'
-      ? parseRoleModelDecision(
-          rawOutputValidation.rawOutputText,
-          inputEnvelope.allowedTools,
-          inputEnvelope.capabilityToolDefinitions
-        )
-      : rawOutputValidation.decisionResult;
-  const capabilityToolRouting =
-    decisionResult.status === 'accepted'
-      ? await routeCapabilityToolCalls({
-          decision: decisionResult.decision,
-          identity,
-          inputEnvelope,
-          ...(options.capabilityToolHost === undefined
-            ? {}
-            : { capabilityToolHost: options.capabilityToolHost }),
-          ...(options.runtimeCapabilityContext === undefined
-            ? {}
-            : { runtimeCapabilityContext: options.runtimeCapabilityContext })
-        })
-      : createAcceptedCapabilityToolRoutingResult([]);
-  const finalDecisionResult =
-    capabilityToolRouting.status === 'accepted'
-      ? decisionResult
-      : capabilityToolRouting.decisionResult;
-  const parsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
-    ...identity,
-    sessionId,
-    result: decisionResult
-  });
+  const maxToolRounds =
+    options.maxToolRounds ??
+    options.maxCapabilityToolRounds ??
+    defaultRoleModelMaxToolRounds;
+  const identity = createSnapshotIdentity(options.event);
+  const sessionId = options.decisionContext.sessionId;
+  const rounds: RoleModelLoopRound[] = [];
+  const allCapabilityToolResults: RoleModelCapabilityToolRoutingEvidence[] = [];
+  let toolRounds = 0;
+  let toolObservations: readonly RoleModelToolObservation[] = Object.freeze([]);
 
-  if (finalDecisionResult.status === 'accepted') {
-    return Object.freeze({
-      status: 'accepted',
+  for (let round = 1; ; round += 1) {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: options.event,
+      decisionContext: options.decisionContext,
+      capabilityToolDefinitions: options.capabilityToolDefinitions ?? [],
+      toolObservations
+    });
+    const rawOutput: unknown = await adapter.invoke(inputEnvelope);
+    const rawOutputValidation = validateRoleModelAdapterRawOutput(
+      rawOutput,
+      inputEnvelope.allowedTools,
+      inputEnvelope.capabilityToolDefinitions
+    );
+    const ioSnapshot = createRoleModelIOSnapshot({
+      ...identity,
+      sessionId,
+      inputEnvelope,
+      rawOutputText: rawOutputValidation.rawOutputText,
+      ...providerMetadataOption(rawOutputValidation.providerMetadata)
+    });
+    const decisionResult =
+      rawOutputValidation.status === 'accepted'
+        ? parseRoleModelDecision(
+            rawOutputValidation.rawOutputText,
+            inputEnvelope.allowedTools,
+            inputEnvelope.capabilityToolDefinitions
+          )
+        : rawOutputValidation.decisionResult;
+    const parsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
+      ...identity,
+      sessionId,
+      result: decisionResult
+    });
+
+    if (decisionResult.status === 'rejected') {
+      const loopRound = createRoleModelLoopRound({
+        capabilityToolResults: [],
+        inputEnvelope,
+        ioSnapshot,
+        parsedDecisionSnapshot,
+        round
+      });
+
+      rounds.push(loopRound);
+
+      return createRejectedRoleModelLoopResult({
+        capabilityToolResults: allCapabilityToolResults,
+        decisionResult,
+        inputEnvelope,
+        ioSnapshot,
+        parsedDecisionSnapshot,
+        rounds
+      });
+    }
+
+    const executableToolCalls = executableModelToolCalls(
+      decisionResult.decision.toolCalls
+    );
+
+    if (executableToolCalls.length === 0) {
+      if (
+        getVisibleReplyToolCall(decisionResult.decision) === undefined &&
+        decisionResult.nonCommittedText === undefined
+      ) {
+        const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
+          roleModelMalformedOutputRejectionReason,
+          'Terminal model output must include visible_reply or top-level text.'
+        );
+        const loopRound = createRoleModelLoopRound({
+          capabilityToolResults: [],
+          inputEnvelope,
+          ioSnapshot,
+          parsedDecisionSnapshot,
+          round
+        });
+
+        rounds.push(loopRound);
+
+        return createRejectedRoleModelLoopResult({
+          capabilityToolResults: allCapabilityToolResults,
+          decisionResult: rejectedDecisionResult,
+          inputEnvelope,
+          ioSnapshot,
+          parsedDecisionSnapshot,
+          rounds
+        });
+      }
+
+      const loopRound = createRoleModelLoopRound({
+        capabilityToolResults: [],
+        inputEnvelope,
+        ioSnapshot,
+        parsedDecisionSnapshot,
+        round
+      });
+
+      rounds.push(loopRound);
+
+      return Object.freeze({
+        status: 'accepted',
+        inputEnvelope,
+        ioSnapshot,
+        parsedDecisionSnapshot,
+        decisionResult,
+        decision: decisionResult.decision,
+        capabilityToolResults: Object.freeze([...allCapabilityToolResults]),
+        rounds: Object.freeze([...rounds])
+      } satisfies AcceptedRoleModelLoopResult);
+    }
+
+    if (toolRounds >= maxToolRounds) {
+      const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
+        roleModelCapabilityToolRejectedRejectionReason,
+        `Role model exceeded maximum executable tool rounds (${String(maxToolRounds)}).`
+      );
+      const loopRound = createRoleModelLoopRound({
+        capabilityToolResults: [],
+        inputEnvelope,
+        ioSnapshot,
+        parsedDecisionSnapshot,
+        round
+      });
+
+      rounds.push(loopRound);
+
+      return createRejectedRoleModelLoopResult({
+        capabilityToolResults: allCapabilityToolResults,
+        decisionResult: rejectedDecisionResult,
+        inputEnvelope,
+        ioSnapshot,
+        parsedDecisionSnapshot,
+        rounds
+      });
+    }
+
+    const visibleReply = getVisibleReplyToolCall(decisionResult.decision);
+
+    if (visibleReply !== undefined) {
+      await options.onInterimVisibleReply?.({
+        round,
+        text: visibleReply.input.text,
+        inputEnvelope,
+        ioSnapshot,
+        parsedDecisionSnapshot
+      });
+    }
+
+    await options.onCapabilityToolCallsRequested?.({
+      round,
+      toolNames: executableToolCalls.map((call) => call.name)
+    });
+
+    const capabilityToolRouting = await routeExecutableToolCalls({
+      toolCalls: executableToolCalls,
+      identity,
+      inputEnvelope,
+      round,
+      ...(options.resolveToolCapabilityId === undefined
+        ? {}
+        : { resolveToolCapabilityId: options.resolveToolCapabilityId }),
+      ...(options.onCapabilityToolCallStarted === undefined
+        ? {}
+        : { onCapabilityToolCallStarted: options.onCapabilityToolCallStarted }),
+      ...(options.capabilityToolHost === undefined
+        ? {}
+        : { capabilityToolHost: options.capabilityToolHost }),
+      ...(options.runtimeCapabilityContext === undefined
+        ? {}
+        : { runtimeCapabilityContext: options.runtimeCapabilityContext })
+    });
+
+    for (const result of capabilityToolRouting.results) {
+      await options.onCapabilityToolCallCompleted?.({
+        round,
+        callId: result.callId,
+        capabilityId: result.call.capabilityId,
+        toolName: result.call.toolName,
+        status: result.result.status,
+        result: result.result
+      });
+    }
+
+    allCapabilityToolResults.push(...capabilityToolRouting.results);
+
+    const loopRound = createRoleModelLoopRound({
+      capabilityToolResults: capabilityToolRouting.results,
       inputEnvelope,
       ioSnapshot,
       parsedDecisionSnapshot,
-      decisionResult: finalDecisionResult,
-      decision: finalDecisionResult.decision,
-      capabilityToolResults: capabilityToolRouting.results
-    } satisfies AcceptedRoleModelLoopResult);
-  }
+      round
+    });
 
-  return Object.freeze({
-    status: 'rejected',
-    inputEnvelope,
-    ioSnapshot,
-    parsedDecisionSnapshot,
-    decisionResult: finalDecisionResult,
-    rejection: finalDecisionResult.rejection,
-    capabilityToolResults: capabilityToolRouting.results
-  } satisfies RejectedRoleModelLoopResult);
+    rounds.push(loopRound);
+
+    toolRounds += 1;
+    toolObservations = Object.freeze([
+      ...toolObservations,
+      ...capabilityToolRouting.results.map((routing) =>
+        createToolObservationFromRouting({ round, routing })
+      )
+    ]);
+  }
 }
 
 type CapabilityToolRoutingResult =
@@ -216,49 +418,136 @@ type CapabilityToolRoutingResult =
       readonly decisionResult: RejectedRoleModelDecisionResult;
     };
 
-async function routeCapabilityToolCalls(options: {
-  readonly decision: CharacterDecision;
+function createRoleModelLoopRound(options: {
+  readonly capabilityToolResults: readonly RoleModelCapabilityToolRoutingEvidence[];
+  readonly inputEnvelope: RoleModelInputEnvelope;
+  readonly ioSnapshot: RoleModelIOSnapshot;
+  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+  readonly round: number;
+}): RoleModelLoopRound {
+  return Object.freeze({
+    round: options.round,
+    inputEnvelope: options.inputEnvelope,
+    ioSnapshot: options.ioSnapshot,
+    parsedDecisionSnapshot: options.parsedDecisionSnapshot,
+    capabilityToolResults: Object.freeze([...options.capabilityToolResults])
+  } satisfies RoleModelLoopRound);
+}
+
+function createRejectedRoleModelLoopResult(options: {
+  readonly capabilityToolResults: readonly RoleModelCapabilityToolRoutingEvidence[];
+  readonly decisionResult: RejectedRoleModelDecisionResult;
+  readonly inputEnvelope: RoleModelInputEnvelope;
+  readonly ioSnapshot: RoleModelIOSnapshot;
+  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+  readonly rounds: readonly RoleModelLoopRound[];
+}): RejectedRoleModelLoopResult {
+  return Object.freeze({
+    status: 'rejected',
+    inputEnvelope: options.inputEnvelope,
+    ioSnapshot: options.ioSnapshot,
+    parsedDecisionSnapshot: options.parsedDecisionSnapshot,
+    decisionResult: options.decisionResult,
+    rejection: options.decisionResult.rejection,
+    capabilityToolResults: Object.freeze([...options.capabilityToolResults]),
+    rounds: Object.freeze([...options.rounds])
+  } satisfies RejectedRoleModelLoopResult);
+}
+
+function executableModelToolCalls(
+  toolCalls: readonly ModelToolCall[]
+): readonly ModelToolCall[] {
+  return Object.freeze(
+    toolCalls.filter((toolCall) => toolCall.name !== visibleReplyModelToolName)
+  );
+}
+
+function createToolObservationFromRouting(options: {
+  readonly round: number;
+  readonly routing: RoleModelCapabilityToolRoutingEvidence;
+}): RoleModelToolObservation {
+  const result =
+    options.routing.result.status === 'accepted'
+      ? {
+          status: 'accepted',
+          output: options.routing.result.output
+        } as const
+      : {
+          status: 'rejected',
+          reason: options.routing.result.reason,
+          message: options.routing.result.message
+        } as const;
+
+  return createRoleModelToolObservation({
+    round: options.round,
+    capabilityId: options.routing.call.capabilityId,
+    toolName: options.routing.call.toolName,
+    input: options.routing.call.input,
+    result
+  });
+}
+
+async function routeExecutableToolCalls(options: {
+  readonly toolCalls: readonly ModelToolCall[];
   readonly identity: RuntimeEventIdentity;
   readonly inputEnvelope: RoleModelInputEnvelope;
+  readonly round: number;
   readonly capabilityToolHost?: RoleModelCapabilityToolHost;
+  readonly onCapabilityToolCallStarted?: (
+    event: RoleModelCapabilityToolCallStartedEvent
+  ) => Promise<void> | void;
+  readonly resolveToolCapabilityId?: (toolName: string) => string | undefined;
   readonly runtimeCapabilityContext?: RuntimeCapabilityContext;
 }): Promise<CapabilityToolRoutingResult> {
   const results: RoleModelCapabilityToolRoutingEvidence[] = [];
 
-  for (const toolCall of options.decision.toolCalls) {
-    if (isBuiltInModelToolName(toolCall.name)) {
-      continue;
-    }
-
-    const capabilityToolDefinition = findCapabilityToolDefinition(
+  for (const [index, toolCall] of options.toolCalls.entries()) {
+    const capabilityId =
+      options.resolveToolCapabilityId?.(toolCall.name) ??
+      findCapabilityToolDefinition(
       options.inputEnvelope.capabilityToolDefinitions,
       toolCall.name
-    );
-
-    if (capabilityToolDefinition === undefined) {
-      return createRejectedCapabilityToolRoutingResult({
-        results,
-        reason: roleModelCapabilityToolRejectedRejectionReason,
-        details: `Capability tool "${toolCall.name}" is not declared for this turn.`
-      });
-    }
-
-    if (
-      options.capabilityToolHost === undefined ||
-      options.runtimeCapabilityContext === undefined
-    ) {
-      return createRejectedCapabilityToolRoutingResult({
-        results,
-        reason: roleModelCapabilityToolRejectedRejectionReason,
-        details: `Capability tool "${toolCall.name}" has no host handler for this turn.`
-      });
-    }
+      )?.capabilityId;
 
     const routedCall = createAgentCapabilityToolCall({
       identity: options.identity,
-      capabilityId: capabilityToolDefinition.capabilityId,
+      capabilityId: capabilityId ?? undeclaredToolCapabilityId(toolCall.name),
       toolCall
     });
+    const callId = createToolCallId({
+      index,
+      round: options.round,
+      toolName: toolCall.name
+    });
+
+    await options.onCapabilityToolCallStarted?.({
+      callId,
+      round: options.round,
+      call: routedCall
+    });
+
+    if (
+      capabilityId === undefined ||
+      options.capabilityToolHost === undefined ||
+      options.runtimeCapabilityContext === undefined
+    ) {
+      results.push(
+        createRejectedToolRoutingEvidence({
+          callId,
+          call: routedCall,
+          reason:
+            capabilityId === undefined
+              ? 'tool_not_declared'
+              : 'tool_host_missing',
+          message:
+            capabilityId === undefined
+              ? `Tool "${toolCall.name}" is not declared for this turn.`
+              : `Tool "${toolCall.name}" has no host handler for this turn.`
+        })
+      );
+      continue;
+    }
+
     let hostResult: AgentCapabilityToolCallResult;
 
     try {
@@ -267,36 +556,27 @@ async function routeCapabilityToolCalls(options: {
         options.runtimeCapabilityContext
       );
     } catch (error: unknown) {
-      return createRejectedCapabilityToolRoutingResult({
-        results,
-        reason: roleModelCapabilityToolRejectedRejectionReason,
-        details:
+      results.push(
+        createRejectedToolRoutingEvidence({
+          callId,
+          call: routedCall,
+          reason: 'handler_failed',
+          message:
           error instanceof Error
             ? error.message
-            : `Capability tool "${toolCall.name}" handler failed.`
-      });
+            : `Tool "${toolCall.name}" handler failed.`
+        })
+      );
+      continue;
     }
 
     const routingEvidence = Object.freeze({
+      callId,
       call: routedCall,
       result: freezeAgentCapabilityToolCallResult(hostResult)
     } satisfies RoleModelCapabilityToolRoutingEvidence);
 
     results.push(routingEvidence);
-
-    if (
-      routingEvidence.result.status === 'rejected' &&
-      !isOptionalDegradedCapabilityToolFailure({
-        definition: capabilityToolDefinition,
-        result: routingEvidence.result
-      })
-    ) {
-      return createRejectedCapabilityToolRoutingResult({
-        results,
-        reason: roleModelCapabilityToolRejectedRejectionReason,
-        details: routingEvidence.result.message
-      });
-    }
   }
 
   return createAcceptedCapabilityToolRoutingResult(results);
@@ -311,19 +591,22 @@ function createAcceptedCapabilityToolRoutingResult(
   } satisfies CapabilityToolRoutingResult);
 }
 
-function createRejectedCapabilityToolRoutingResult(options: {
-  readonly results: readonly RoleModelCapabilityToolRoutingEvidence[];
-  readonly reason: RoleModelDecisionRejectionReason;
-  readonly details: string;
-}): CapabilityToolRoutingResult {
+function createRejectedToolRoutingEvidence(options: {
+  readonly callId: string;
+  readonly call: AgentCapabilityToolCall;
+  readonly reason: string;
+  readonly message: string;
+}): RoleModelCapabilityToolRoutingEvidence {
   return Object.freeze({
-    status: 'rejected',
-    results: Object.freeze([...options.results]),
-    decisionResult: createRejectedRoleModelDecisionResult(
-      options.reason,
-      options.details
-    )
-  } satisfies CapabilityToolRoutingResult);
+    callId: options.callId,
+    call: options.call,
+    result: Object.freeze({
+      status: 'rejected',
+      reason: options.reason,
+      message: options.message,
+      evidence: Object.freeze([])
+    } satisfies AgentCapabilityToolCallResult)
+  } satisfies RoleModelCapabilityToolRoutingEvidence);
 }
 
 function findCapabilityToolDefinition(
@@ -331,32 +614,6 @@ function findCapabilityToolDefinition(
   toolName: string
 ): RoleModelCapabilityToolDefinition | undefined {
   return definitions.find((definition) => definition.name === toolName);
-}
-
-function isOptionalDegradedCapabilityToolFailure(options: {
-  readonly definition: RoleModelCapabilityToolDefinition;
-  readonly result: AgentCapabilityToolCallResult;
-}): boolean {
-  return (
-    !options.definition.requiredForUserTurn &&
-    options.result.status === 'rejected' &&
-    isDegradedCapabilityHandlerFailureReason(options.result.reason) &&
-    options.result.evidence.some(
-      (evidence) =>
-        evidence.evidenceKind === 'tool_invocation' &&
-        evidence.status === 'degraded' &&
-        (evidence.policyOutcome === 'optional_degraded' ||
-          evidence.policyOutcome === 'timeout')
-    )
-  );
-}
-
-function isDegradedCapabilityHandlerFailureReason(reason: string): boolean {
-  return (
-    reason === 'handler_failed' ||
-    reason === 'handler_timeout' ||
-    reason === 'handler_missing'
-  );
 }
 
 function createAgentCapabilityToolCall(options: {
@@ -372,6 +629,22 @@ function createAgentCapabilityToolCall(options: {
     toolName: options.toolCall.name,
     input: freezeAgentCapabilityJsonObject(options.toolCall.input)
   } satisfies AgentCapabilityToolCall);
+}
+
+function undeclaredToolCapabilityId(toolName: string): string {
+  if (toolName === characterStatePatchModelToolName) {
+    return 'character-state';
+  }
+
+  return `undeclared.${toolName}`;
+}
+
+function createToolCallId(options: {
+  readonly index: number;
+  readonly round: number;
+  readonly toolName: string;
+}): string {
+  return `round-${String(options.round)}.${String(options.index + 1)}.${options.toolName}`;
 }
 
 function freezeAgentCapabilityToolCallResult(

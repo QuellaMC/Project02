@@ -44,6 +44,11 @@ export type CharacterTurnResult = {
   readonly reply: CharacterAgentReply;
 };
 
+export type CharacterMessageAppendResult = {
+  readonly characterMessage: VisibleMessage;
+  readonly reply: CharacterAgentReply;
+};
+
 export type ConversationSessionOptions = {
   readonly id?: string;
   readonly character?: CharacterProfile;
@@ -169,6 +174,28 @@ export function rollbackLastCharacterTurn(
   transcript.splice(userMessageIndex, 2);
 }
 
+export function appendCharacterVisibleMessage(
+  session: ConversationSession,
+  reply: CharacterAgentReply
+): CharacterMessageAppendResult {
+  const transcript = getMutableTranscript(session);
+  const normalizedReplyText = normalizeCharacterReply(reply);
+  const characterMessage = createCharacterVisibleMessage({
+    messageNumber: transcript.length + 1,
+    replyText: normalizedReplyText,
+    session
+  });
+
+  transcript.push(characterMessage);
+
+  return Object.freeze({
+    characterMessage,
+    reply: {
+      text: normalizedReplyText
+    }
+  } satisfies CharacterMessageAppendResult);
+}
+
 async function runSerializedCharacterTurn(
   session: ConversationSession,
   message: string | undefined,
@@ -195,13 +222,11 @@ async function runSerializedCharacterTurn(
     speakerName: localUserSpeaker.displayName,
     text: normalizedMessage
   } satisfies VisibleMessage);
-  const characterMessage = Object.freeze({
-    id: createMessageId(session, nextMessageNumber + 1),
-    role: 'character',
-    speakerId: session.character.id,
-    speakerName: session.character.displayName,
-    text: normalizedReplyText
-  } satisfies VisibleMessage);
+  const characterMessage = createCharacterVisibleMessage({
+    messageNumber: nextMessageNumber + 1,
+    replyText: normalizedReplyText,
+    session
+  });
 
   transcript.push(userMessage, characterMessage);
 
@@ -270,6 +295,14 @@ export function validateCharacterAgentReply(reply: unknown): CharacterAgentReply
   return reply;
 }
 
+export function normalizeCharacterAgentReply(
+  reply: unknown
+): CharacterAgentReply {
+  return Object.freeze({
+    text: normalizeCharacterReply(reply)
+  } satisfies CharacterAgentReply);
+}
+
 function normalizeCharacterReply(reply: unknown): string {
   const characterReply = validateCharacterAgentReply(reply);
 
@@ -327,6 +360,20 @@ function getMutableTranscript(session: ConversationSession): VisibleMessage[] {
 
 function createMessageId(session: ConversationSession, messageNumber: number): string {
   return createMessageIdForSessionId(session.id, messageNumber);
+}
+
+function createCharacterVisibleMessage(options: {
+  readonly messageNumber: number;
+  readonly replyText: string;
+  readonly session: ConversationSession;
+}): VisibleMessage {
+  return Object.freeze({
+    id: createMessageId(options.session, options.messageNumber),
+    role: 'character',
+    speakerId: options.session.character.id,
+    speakerName: options.session.character.displayName,
+    text: options.replyText
+  } satisfies VisibleMessage);
 }
 
 function findPreviousUserMessage(

@@ -1,7 +1,8 @@
 import {
+  appendCharacterVisibleMessage,
   CharacterInputError,
   CharacterReplyValidationError,
-  rollbackLastCharacterTurn,
+  normalizeCharacterAgentReply,
   runCharacterTurn,
   type CharacterAgent,
   type CharacterAgentReply,
@@ -9,16 +10,6 @@ import {
   type CharacterTurnResult,
   type ConversationSession
 } from './conversation.ts';
-import {
-  createCharacterStatePatchSnapshot,
-  createInMemoryCharacterStateStore,
-  createLivingStateBrief,
-  planCharacterStatePatch,
-  type CharacterRuntimeState,
-  type CharacterStatePatchSnapshot,
-  type CharacterStateStore
-} from './character-state.ts';
-import { createFileCharacterStateStore } from './file-character-state-store.ts';
 import { buildUserTurnDecisionContext } from './decision-context.ts';
 import {
   agentCapabilityContractVersion,
@@ -29,23 +20,21 @@ import {
   type AgentCapabilityContextItem,
   type AgentCapabilityEvidenceSnapshot,
   type AgentCapabilityHealthSnapshot,
+  type AgentCapabilityToolCall,
+  type AgentCapabilityToolCallResult,
   type AgentCapabilityToolInvocationSnapshot,
   type AgentCapabilityTurnEvidenceSnapshot,
   type RuntimeCapabilityContext
 } from './agent-capabilities.ts';
 import {
   runtimeCapabilityBeforeRoleModelCallRejectionReason,
-  type RuntimeCapabilityBeforeRoleModelCallCompletedResult,
   type RuntimeCapabilityHealthHostResult,
-  type RuntimeCapabilityHookHostResult,
   type RuntimeCapabilityHost
 } from './agent-capability-host.ts';
 import {
   createDecisionContext,
   createRejectedRoleModelDecisionResult,
-  getCharacterStatePatchToolCall,
-  getRequiredVisibleReplyText,
-  roleModelInvalidCharacterStatePatchRejectionReason,
+  getVisibleReplyToolCall,
   roleModelInvalidVisibleReplyRejectionReason,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelDecisionRejection,
@@ -58,6 +47,8 @@ import {
   type RoleModelAdapter,
   type RoleModelCapabilityToolRoutingEvidence
 } from './role-model-loop.ts';
+import { createDefaultProject02PluginHost } from './plugins/index.ts';
+import type { RuntimePluginHost } from './plugins/index.ts';
 import {
   createUserMessageRuntimeEvent,
   RuntimeEventInputError,
@@ -91,12 +82,33 @@ export type RunLocalUserMessageEventOptions = {
   readonly logStore: RuntimeLogStore;
   readonly rawInput?: string;
   readonly agent?: CharacterAgent;
-  readonly characterStateStore?: CharacterStateStore;
+  readonly characterStateStore?: unknown;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly capabilityHost?: RuntimeCapabilityHost;
   readonly characterTurnOptions?: CharacterTurnOptions;
   readonly committedAt?: string;
+  readonly onProgress?: (
+    event: LocalRuntimeTurnProgressEvent
+  ) => Promise<void> | void;
 };
+
+export type LocalRuntimeTurnProgressEvent =
+  | {
+      readonly kind: 'visible_reply';
+      readonly final: boolean;
+      readonly text: string;
+    }
+  | {
+      readonly kind: 'tool_calls_requested';
+      readonly round: number;
+      readonly toolNames: readonly string[];
+    }
+  | {
+      readonly kind: 'tool_call_completed';
+      readonly round: number;
+      readonly status: 'accepted' | 'rejected';
+      readonly toolName: string;
+    };
 
 export type LocalRuntimeUserMessageCompletedResult = {
   readonly status: 'completed';
@@ -142,16 +154,11 @@ export type RecordLocalUserMessageInputRejectionOptions = {
 const unexpectedRuntimeTurnFailureMessage =
   'Runtime turn failed before producing a reply.';
 const localRuntimeTurnQueues = new WeakMap<ConversationSession, Promise<void>>();
-const defaultCharacterStateStores = new WeakMap<
-  ConversationSession,
-  CharacterStateStore
->();
 
 type RoleModelRawEvidence = {
   readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
-  readonly characterStatePatchSnapshot?: CharacterStatePatchSnapshot;
 };
 
 export function recordLocalUserMessageInputRejection(
@@ -269,6 +276,8 @@ async function runSerializedLocalUserMessageEvent(
     readonly reason: LocalRuntimeUserMessageRejectionReason;
     readonly runtimeCapabilityContext?: RuntimeCapabilityContext;
     readonly traceStep: RuntimeTraceStepName;
+    readonly toolCallIds?: readonly string[];
+    readonly visibleMessageIds?: readonly string[];
   }): Promise<LocalRuntimeUserMessageRejectedResult> {
     const evidence = optionsForRejection.evidence ?? {};
     const healthResult =
@@ -289,6 +298,12 @@ async function runSerializedLocalUserMessageEvent(
       eventType: event.type,
       status: 'rejected',
       reason: optionsForRejection.rawReason,
+      ...(optionsForRejection.toolCallIds === undefined
+        ? {}
+        : { toolCallIds: optionsForRejection.toolCallIds }),
+      ...(optionsForRejection.visibleMessageIds === undefined
+        ? {}
+        : { visibleMessageIds: optionsForRejection.visibleMessageIds }),
       payloadSummary,
       ...evidence,
       ...agentCapabilityEvidenceOption(agentCapabilityEvidence),
@@ -309,6 +324,12 @@ async function runSerializedLocalUserMessageEvent(
       eventType: event.type,
       status: 'rejected',
       reason: optionsForRejection.rawReason,
+      ...(optionsForRejection.toolCallIds === undefined
+        ? {}
+        : { toolCallIds: optionsForRejection.toolCallIds }),
+      ...(optionsForRejection.visibleMessageIds === undefined
+        ? {}
+        : { visibleMessageIds: optionsForRejection.visibleMessageIds }),
       payloadSummary,
       ...evidence,
       ...agentCapabilityEvidenceOption(agentCapabilityEvidence),
@@ -361,7 +382,9 @@ async function runSerializedLocalUserMessageEvent(
       ...(runtimeCapabilityContext === undefined
         ? {}
         : { runtimeCapabilityContext }),
-      traceStep: 'commit_validation_rejected'
+      traceStep: 'commit_validation_rejected',
+      toolCallIds: Object.freeze([...finishedToolCallIds]),
+      ...visibleMessageIdsForTurnOption(committedVisibleMessages)
     });
   }
 
@@ -381,20 +404,176 @@ async function runSerializedLocalUserMessageEvent(
   });
   appendTrace('runtime_turn_started');
 
-  let writtenCharacterStateRollback:
-    | {
-        readonly state: CharacterRuntimeState;
-        readonly store: CharacterStateStore;
-        rollbackAllowed: boolean;
+  const committedVisibleMessages: ConversationLogRecord[] = [];
+  const finishedToolCallIds: string[] = [];
+  let userConversationMessage: ConversationLogRecord | undefined;
+
+  async function emitProgress(
+    progressEvent: LocalRuntimeTurnProgressEvent
+  ): Promise<void> {
+    await options.onProgress?.(progressEvent);
+  }
+
+  async function appendVisibleReplyForDecision(optionsForReply: {
+    readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[];
+    readonly final: boolean;
+    readonly roleModelIOSnapshot: RoleModelIOSnapshot;
+    readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+    readonly text: string;
+  }): Promise<CharacterTurnResult | undefined> {
+    const normalizedReply = normalizeCharacterAgentReply({
+      text: optionsForReply.text
+    });
+    const commitValidation = createRoleModelCommitValidationSnapshot({
+      ...identity,
+      sessionId: decisionContextSessionIdFromEvidence(
+        optionsForReply.roleModelIOSnapshot
+      ),
+      result: {
+        status: 'accepted',
+        acceptedVisibleReplyText: normalizedReply.text
       }
-    | undefined;
-  let sessionTurnRollback:
-    | {
-        readonly session: ConversationSession;
-        readonly turn: CharacterTurnResult;
-        rollbackAllowed: boolean;
-      }
-    | undefined;
+    });
+
+    if (!optionsForReply.final) {
+      appendTrace('visible_reply_committed');
+      appendRawEvent({
+        ...identity,
+        kind: 'visible_reply_committed',
+        eventType: event.type,
+        payloadSummary,
+        roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
+        parsedRoleModelDecisionSnapshot:
+          optionsForReply.parsedRoleModelDecisionSnapshot,
+        commitValidation,
+        ...agentCapabilityEvidenceOption(
+          optionsForReply.agentCapabilityEvidence
+        )
+      });
+
+      await emitProgress({
+        kind: 'visible_reply',
+        final: false,
+        text: normalizedReply.text
+      });
+
+      return undefined;
+    }
+
+    let turn: CharacterTurnResult;
+    let visibleMessagesForThisReply: readonly ConversationLogRecord[];
+    const committedAt = options.committedAt ?? options.event.createdAt;
+
+    if (userConversationMessage === undefined) {
+      turn = await runCharacterTurn(
+        options.session,
+        event.payload.currentUserMessage,
+        createFixedReplyAgent(normalizedReply.text),
+        options.characterTurnOptions
+      );
+
+      const userRecord = options.logStore.appendConversationMessage({
+        ...turn.userMessage,
+        ...identity,
+        committedAt
+      });
+      const characterRecord = options.logStore.appendConversationMessage({
+        ...turn.characterMessage,
+        ...identity,
+        committedAt
+      });
+
+      userConversationMessage = userRecord;
+      visibleMessagesForThisReply = Object.freeze([userRecord, characterRecord]);
+    } else {
+      const characterAppend = appendCharacterVisibleMessage(
+        options.session,
+        normalizedReply
+      );
+      const characterRecord = options.logStore.appendConversationMessage({
+        ...characterAppend.characterMessage,
+        ...identity,
+        committedAt
+      });
+
+      turn = Object.freeze({
+        userMessage: userConversationMessage,
+        characterMessage: characterAppend.characterMessage,
+        reply: characterAppend.reply
+      } satisfies CharacterTurnResult);
+      visibleMessagesForThisReply = Object.freeze([characterRecord]);
+    }
+
+    committedVisibleMessages.push(...visibleMessagesForThisReply);
+
+    appendTrace('visible_reply_committed');
+    appendRawEvent({
+      ...identity,
+      kind: 'visible_reply_committed',
+      eventType: event.type,
+      visibleMessageIds: visibleMessagesForThisReply.map(
+        (message) => message.id
+      ),
+      payloadSummary,
+      roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
+      parsedRoleModelDecisionSnapshot:
+        optionsForReply.parsedRoleModelDecisionSnapshot,
+      commitValidation,
+      ...agentCapabilityEvidenceOption(
+        optionsForReply.agentCapabilityEvidence
+      )
+    });
+
+    await emitProgress({
+      kind: 'visible_reply',
+      final: optionsForReply.final,
+      text: turn.reply.text
+    });
+
+    return turn;
+  }
+
+  function appendToolCallStarted(optionsForTool: {
+    readonly callId: string;
+    readonly round: number;
+    readonly call: AgentCapabilityToolCall;
+  }): void {
+    appendTrace('tool_call_started');
+    appendRawEvent({
+      ...identity,
+      kind: 'tool_call_started',
+      eventType: event.type,
+      toolCallId: optionsForTool.callId,
+      toolRound: optionsForTool.round,
+      toolName: optionsForTool.call.toolName,
+      toolPluginId: optionsForTool.call.capabilityId,
+      toolInput: optionsForTool.call.input,
+      payloadSummary
+    });
+  }
+
+  function appendToolCallFinished(optionsForTool: {
+    readonly callId: string;
+    readonly round: number;
+    readonly capabilityId: string;
+    readonly toolName: string;
+    readonly result: AgentCapabilityToolCallResult;
+  }): void {
+    appendTrace('tool_call_finished');
+    appendRawEvent({
+      ...identity,
+      kind: 'tool_call_finished',
+      eventType: event.type,
+      toolCallId: optionsForTool.callId,
+      toolRound: optionsForTool.round,
+      toolName: optionsForTool.toolName,
+      toolPluginId: optionsForTool.capabilityId,
+      toolResult: optionsForTool.result,
+      ...pluginStoreRevisionOption(optionsForTool.result),
+      payloadSummary
+    });
+    finishedToolCallIds.push(optionsForTool.callId);
+  }
 
   try {
     if (normalizedEventResult.status === 'rejected') {
@@ -407,11 +586,8 @@ async function runSerializedLocalUserMessageEvent(
       });
     }
 
-    const characterStateStore = characterStateStoreForTurn(options);
-    const currentCharacterState = characterStateStore.readCurrentState();
     const decisionContext = buildUserTurnDecisionContext({
       session: options.session,
-      livingStateBrief: createLivingStateBrief(currentCharacterState),
       ...(options.characterTurnOptions?.recentMessageLimit === undefined
         ? {}
         : {
@@ -426,12 +602,14 @@ async function runSerializedLocalUserMessageEvent(
       character: decisionContext.characterSnapshot
     });
     runtimeCapabilityContextForTurn = runtimeCapabilityContext;
-    const beforeRoleModelCallResult =
-      options.capabilityHost === undefined
-        ? createEmptyBeforeRoleModelCallResult()
-        : await options.capabilityHost.beforeRoleModelCall(
-            runtimeCapabilityContext
-          );
+    const pluginHost = createPluginHostForTurn({
+      capabilityHost: options.capabilityHost,
+      decisionContextSessionId: decisionContext.sessionId,
+      logStore: options.logStore
+    });
+    const beforeRoleModelCallResult = await pluginHost.beforeRoleModelCall(
+      runtimeCapabilityContext
+    );
 
     if (beforeRoleModelCallResult.status === 'rejected') {
       return await appendRejectedResult({
@@ -453,22 +631,56 @@ async function runSerializedLocalUserMessageEvent(
         ...decisionContext.runtimeNotes,
         ...beforeRoleModelCallResult.runtimeNotes
       ]),
-      capabilityContextItems: beforeRoleModelCallResult.contextItems,
-      ...(decisionContext.livingStateBrief === undefined
-        ? {}
-        : { livingStateBrief: decisionContext.livingStateBrief })
+      capabilityContextItems: beforeRoleModelCallResult.contextItems
     });
     const roleModelResult = await runRoleModelLoop({
       event,
       decisionContext: roleModelDecisionContext,
-      capabilityToolDefinitions:
-        options.capabilityHost?.capabilityToolDefinitions() ?? [],
-      ...(options.capabilityHost === undefined
-        ? {}
-        : {
-            capabilityToolHost: options.capabilityHost,
-            runtimeCapabilityContext
-          }),
+      capabilityToolDefinitions: pluginHost.capabilityToolDefinitions(),
+      capabilityToolHost: pluginHost,
+      runtimeCapabilityContext,
+      resolveToolCapabilityId(toolName) {
+        return pluginHost.resolveToolCapabilityId(toolName);
+      },
+      onCapabilityToolCallStarted(progressEvent) {
+        appendToolCallStarted({
+          callId: progressEvent.callId,
+          round: progressEvent.round,
+          call: progressEvent.call
+        });
+      },
+      async onCapabilityToolCallCompleted(progressEvent) {
+        appendToolCallFinished({
+          callId: progressEvent.callId,
+          round: progressEvent.round,
+          capabilityId: progressEvent.capabilityId,
+          toolName: progressEvent.toolName,
+          result: progressEvent.result
+        });
+        await emitProgress({
+          kind: 'tool_call_completed',
+          round: progressEvent.round,
+          status: progressEvent.status,
+          toolName: progressEvent.toolName
+        });
+      },
+      async onCapabilityToolCallsRequested(progressEvent) {
+        await emitProgress({
+          kind: 'tool_calls_requested',
+          round: progressEvent.round,
+          toolNames: progressEvent.toolNames
+        });
+      },
+      async onInterimVisibleReply(progressEvent) {
+        await appendVisibleReplyForDecision({
+          agentCapabilityEvidence: beforeRoleModelCallResult.evidence,
+          final: false,
+          roleModelIOSnapshot: progressEvent.ioSnapshot,
+          parsedRoleModelDecisionSnapshot:
+            progressEvent.parsedDecisionSnapshot,
+          text: progressEvent.text
+        });
+      },
       ...roleModelLoopAdapterOption(options)
     });
     const roleModelEvidence = {
@@ -502,111 +714,41 @@ async function runSerializedLocalUserMessageEvent(
       );
     }
 
-    const statePatchToolCall = getCharacterStatePatchToolCall(
-      roleModelResult.decision
-    );
-    const statePatchPlan =
-      statePatchToolCall === undefined
-        ? undefined
-        : planCharacterStatePatch({
-            before: currentCharacterState,
-            patchInput: statePatchToolCall.input
-          });
-    const statePatchSnapshot =
-      statePatchPlan === undefined
-        ? undefined
-        : createCharacterStatePatchSnapshot({
-            ...identity,
-            sessionId: decisionContext.sessionId,
-            result: statePatchPlan
+    const visibleReply = getVisibleReplyToolCall(roleModelResult.decision);
+    const visibleReplyText = visibleReply?.input.text;
+
+    if (visibleReplyText !== undefined) {
+      try {
+        normalizeCharacterAgentReply({
+          text: visibleReplyText
+        });
+      } catch (error: unknown) {
+        if (error instanceof CharacterReplyValidationError) {
+          const rejection = createInvalidVisibleReplyRejection(error);
+          const commitValidation = createRejectedCommitValidationSnapshot({
+            identity,
+            rejection,
+            sessionId: decisionContext.sessionId
           });
 
-    if (statePatchPlan?.status === 'rejected') {
-      const rejection = createRejectedRoleModelDecisionResult(
-        roleModelInvalidCharacterStatePatchRejectionReason,
-        statePatchPlan.rejection.details
-      ).rejection;
-      const commitValidation = createRejectedCommitValidationSnapshot({
-        identity,
-        rejection,
-        sessionId: decisionContext.sessionId
-      });
+          return await appendRoleModelRejectedResult(
+            rejection,
+            {
+              ...roleModelEvidence,
+              commitValidation
+            },
+            roleModelCapabilityEvidence,
+            beforeRoleModelCallResult.contextItems,
+            roleModelCapabilityToolInvocations,
+            runtimeCapabilityContext
+          );
+        }
 
-      return await appendRoleModelRejectedResult(
-        rejection,
-        {
-          ...roleModelEvidence,
-          commitValidation,
-          ...(statePatchSnapshot === undefined
-            ? {}
-            : { characterStatePatchSnapshot: statePatchSnapshot })
-        },
-        roleModelCapabilityEvidence,
-        beforeRoleModelCallResult.contextItems,
-        roleModelCapabilityToolInvocations,
-        runtimeCapabilityContext
-      );
+        throw error;
+      }
     }
 
-    let turn: CharacterTurnResult;
-    const visibleReplyText = getRequiredVisibleReplyText(roleModelResult.decision);
-
-    try {
-      turn = await runCharacterTurn(
-        options.session,
-        event.payload.currentUserMessage,
-        createFixedReplyAgent(visibleReplyText),
-        options.characterTurnOptions
-      );
-    } catch (error: unknown) {
-      if (error instanceof CharacterInputError) {
-        return await appendRejectedResult({
-          agentCapabilityEvidence: roleModelCapabilityEvidence,
-          agentCapabilityContextItems: beforeRoleModelCallResult.contextItems,
-          evidence: roleModelEvidence,
-          message: error.message,
-          rawKind: 'input_validation_rejected',
-          rawReason: error.message,
-          reason: 'input_validation_rejected',
-          runtimeCapabilityContext,
-          traceStep: 'input_validation_rejected'
-        });
-      }
-
-      if (error instanceof CharacterReplyValidationError) {
-        const rejection = createInvalidVisibleReplyRejection(error);
-        const commitValidation = createRejectedCommitValidationSnapshot({
-          identity,
-          rejection,
-          sessionId: decisionContext.sessionId
-        });
-
-        return await appendRoleModelRejectedResult(
-          rejection,
-          {
-            ...roleModelEvidence,
-            commitValidation
-          },
-          roleModelCapabilityEvidence,
-          beforeRoleModelCallResult.contextItems,
-          roleModelCapabilityToolInvocations,
-          runtimeCapabilityContext
-        );
-      }
-
-      throw error;
-    }
-
-    sessionTurnRollback = {
-      session: options.session,
-      turn,
-      rollbackAllowed: true
-    };
-
-    const preCommitHealthResult = await capabilityHealthForTurn({
-      capabilityHost: options.capabilityHost,
-      runtimeCapabilityContext
-    });
+    const preCommitHealthResult = await pluginHost.health(runtimeCapabilityContext);
 
     if (
       healthResultRejectsTurn({
@@ -614,18 +756,12 @@ async function runSerializedLocalUserMessageEvent(
         healthResult: preCommitHealthResult
       })
     ) {
-      rollbackSessionTurnIfSafe(sessionTurnRollback);
-      sessionTurnRollback = undefined;
-
       return await appendRejectedResult({
         agentCapabilityEvidence: roleModelCapabilityEvidence,
         agentCapabilityContextItems: beforeRoleModelCallResult.contextItems,
         agentCapabilityToolInvocations: roleModelCapabilityToolInvocations,
         evidence: {
-          ...roleModelEvidence,
-          ...(statePatchSnapshot === undefined
-            ? {}
-            : { characterStatePatchSnapshot: statePatchSnapshot })
+          ...roleModelEvidence
         },
         healthResult: preCommitHealthResult,
         message: healthResultRejectionMessage({
@@ -636,61 +772,21 @@ async function runSerializedLocalUserMessageEvent(
         rawReason: runtimeCapabilityHealthRejectionReason,
         reason: runtimeCapabilityHealthRejectionReason,
         runtimeCapabilityContext,
-        traceStep: 'commit_validation_rejected'
+        traceStep: 'commit_validation_rejected',
+        ...visibleMessageIdsForTurnOption(committedVisibleMessages)
       });
     }
 
-    const committedAt = options.committedAt ?? options.event.createdAt;
-    const acceptedCommitValidation = createRoleModelCommitValidationSnapshot({
-      ...identity,
-      sessionId: decisionContext.sessionId,
-      result: {
-        status: 'accepted',
-        acceptedVisibleReplyText: turn.reply.text
-      }
-    });
-    const acceptedEvidence = {
-      ...roleModelEvidence,
-      commitValidation: acceptedCommitValidation,
-      ...(statePatchSnapshot === undefined
-        ? {}
-        : { characterStatePatchSnapshot: statePatchSnapshot })
-    } satisfies RoleModelRawEvidence;
-
-    if (statePatchPlan?.status === 'accepted') {
-      characterStateStore.writeCurrentState(statePatchPlan.after);
-      writtenCharacterStateRollback = {
-        store: characterStateStore,
-        state: currentCharacterState,
-        rollbackAllowed: true
-      };
-    }
-
-    const conversationMessages = Object.freeze([
-      options.logStore.appendConversationMessage({
-        ...turn.userMessage,
-        ...identity,
-        committedAt
-      }),
-      options.logStore.appendConversationMessage({
-        ...turn.characterMessage,
-        ...identity,
-        committedAt
-      })
-    ]);
-
-    appendTrace('visible_reply_committed');
-    appendRawEvent({
-      ...identity,
-      kind: 'visible_reply_committed',
-      eventType: event.type,
-      visibleMessageIds: conversationMessages.map((message) => message.id),
-      payloadSummary,
-      ...acceptedEvidence,
-      ...agentCapabilityEvidenceOption(roleModelCapabilityEvidence)
-    });
-
-    sessionTurnRollback.rollbackAllowed = false;
+    const turn =
+      visibleReplyText === undefined
+        ? undefined
+        : await appendVisibleReplyForDecision({
+            agentCapabilityEvidence: roleModelCapabilityEvidence,
+            final: true,
+            roleModelIOSnapshot: roleModelResult.ioSnapshot,
+            parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot,
+            text: visibleReplyText
+          });
     const afterCommitCapabilityContext =
       createRuntimeCapabilityAfterTurnCommittedContext({
         ...identity,
@@ -698,16 +794,12 @@ async function runSerializedLocalUserMessageEvent(
         eventType: event.type,
         currentUserMessage: event.payload.currentUserMessage,
         character: decisionContext.characterSnapshot,
-        committedAt,
-        visibleMessages: conversationMessages
+        committedAt: options.committedAt ?? options.event.createdAt,
+        visibleMessages: committedVisibleMessages
       });
 
     const afterTurnCommittedResult =
-      options.capabilityHost === undefined
-        ? createEmptyHookResult()
-        : await options.capabilityHost.afterTurnCommitted(
-            afterCommitCapabilityContext
-          );
+      await pluginHost.afterTurnCommitted(afterCommitCapabilityContext);
     const completedCapabilityEvidence = combineAgentCapabilityEvidence(
       roleModelCapabilityEvidence,
       afterTurnCommittedResult.evidence,
@@ -719,9 +811,19 @@ async function runSerializedLocalUserMessageEvent(
       kind: 'runtime_turn_completed',
       eventType: event.type,
       status: 'completed',
-      visibleMessageIds: conversationMessages.map((message) => message.id),
+      ...visibleMessageIdsForTurnOption(committedVisibleMessages),
+      toolCallIds: Object.freeze([...finishedToolCallIds]),
       payloadSummary,
-      ...acceptedEvidence,
+      roleModelIOSnapshot: roleModelResult.ioSnapshot,
+      parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot,
+      commitValidation: createRoleModelCommitValidationSnapshot({
+        ...identity,
+        sessionId: decisionContext.sessionId,
+        result: {
+          status: 'accepted',
+          ...(turn === undefined ? {} : { acceptedVisibleReplyText: turn.reply.text })
+        }
+      }),
       ...agentCapabilityEvidenceOption(completedCapabilityEvidence),
       ...agentCapabilityTurnEvidenceOption({
         identity,
@@ -736,15 +838,11 @@ async function runSerializedLocalUserMessageEvent(
     appendTrace('raw_event_log_appended');
     appendTrace('runtime_turn_completed');
 
-    if (writtenCharacterStateRollback !== undefined) {
-      writtenCharacterStateRollback.rollbackAllowed = false;
-    }
-
     return Object.freeze({
       status: 'completed',
       event,
-      turn,
-      conversationMessages,
+      turn: turn as CharacterTurnResult,
+      conversationMessages: Object.freeze([...committedVisibleMessages]),
       rawEvent,
       rawEventLogRecords: Object.freeze([...rawEventLogRecords]),
       traceEntries: Object.freeze([...traceEntries])
@@ -774,18 +872,19 @@ async function runSerializedLocalUserMessageEvent(
         ...(runtimeCapabilityContextForTurn === undefined
           ? {}
           : { runtimeCapabilityContext: runtimeCapabilityContextForTurn }),
-        traceStep: 'character_reply_rejected'
+        traceStep: 'character_reply_rejected',
+        ...visibleMessageIdsForTurnOption(committedVisibleMessages)
       });
     }
 
-    rollbackWrittenCharacterStateIfSafe(writtenCharacterStateRollback);
-    rollbackSessionTurnIfSafe(sessionTurnRollback);
     appendRawEvent({
       ...identity,
       kind: 'runtime_turn_rejected',
       eventType: event.type,
       status: 'rejected',
       reason: unexpectedRuntimeTurnFailureMessage,
+      toolCallIds: Object.freeze([...finishedToolCallIds]),
+      ...visibleMessageIdsForTurnOption(committedVisibleMessages),
       payloadSummary
     });
     appendTrace('raw_event_log_appended');
@@ -795,62 +894,48 @@ async function runSerializedLocalUserMessageEvent(
   }
 }
 
-function characterStateStoreForTurn(
-  options: RunLocalUserMessageEventOptions
-): CharacterStateStore {
-  if (options.characterStateStore !== undefined) {
-    return options.characterStateStore;
+function visibleMessageIdsForTurnOption(
+  messages: readonly ConversationLogRecord[]
+): { readonly visibleMessageIds?: readonly string[] } {
+  if (messages.length === 0) {
+    return {};
   }
 
-  if (options.logStore.localRuntimeSessionPaths !== undefined) {
-    return createFileCharacterStateStore({
-      storeRoot: options.logStore.localRuntimeSessionPaths.storeRoot,
-      sessionId: options.logStore.localRuntimeSessionPaths.sessionId
-    });
-  }
-
-  const existingStore = defaultCharacterStateStores.get(options.session);
-
-  if (existingStore !== undefined) {
-    return existingStore;
-  }
-
-  const store = createInMemoryCharacterStateStore();
-
-  defaultCharacterStateStores.set(options.session, store);
-  return store;
+  return {
+    visibleMessageIds: Object.freeze(messages.map((message) => message.id))
+  };
 }
 
-function rollbackSessionTurnIfSafe(
-  rollback:
-    | {
-        readonly session: ConversationSession;
-        readonly turn: CharacterTurnResult;
-        readonly rollbackAllowed: boolean;
-      }
-    | undefined
-): void {
-  if (rollback?.rollbackAllowed !== true) {
-    return;
+function pluginStoreRevisionOption(
+  result: AgentCapabilityToolCallResult
+): { readonly pluginStoreRevision?: number } {
+  if (result.status !== 'accepted') {
+    return {};
   }
 
-  rollbackLastCharacterTurn(rollback.session, rollback.turn);
+  const output = result.output;
+
+  if (typeof output !== 'object' || output === null || Array.isArray(output)) {
+    return {};
+  }
+
+  const revision = (output as Readonly<Record<string, unknown>>)[
+    'pluginStoreRevision'
+  ];
+
+  if (typeof revision !== 'number') {
+    return {};
+  }
+
+  return {
+    pluginStoreRevision: revision
+  };
 }
 
-function rollbackWrittenCharacterStateIfSafe(
-  rollback:
-    | {
-        readonly state: CharacterRuntimeState;
-        readonly store: CharacterStateStore;
-        readonly rollbackAllowed: boolean;
-      }
-    | undefined
-): void {
-  if (rollback?.rollbackAllowed !== true) {
-    return;
-  }
-
-  rollback.store.writeCurrentState(rollback.state);
+function decisionContextSessionIdFromEvidence(
+  snapshot: RoleModelIOSnapshot
+): string {
+  return snapshot.inputEnvelope.decisionContext.sessionId;
 }
 
 async function enqueueLocalRuntimeTurn<T>(
@@ -949,20 +1034,20 @@ function roleModelLoopAdapterOption(
   return {};
 }
 
-function createEmptyBeforeRoleModelCallResult(): RuntimeCapabilityBeforeRoleModelCallCompletedResult {
-  return Object.freeze({
-    status: 'completed',
-    contextItems: Object.freeze([]),
-    runtimeNotes: Object.freeze([]),
-    evidence: Object.freeze([])
-  } satisfies RuntimeCapabilityBeforeRoleModelCallCompletedResult);
-}
+function createPluginHostForTurn(options: {
+  readonly capabilityHost: RuntimeCapabilityHost | undefined;
+  readonly decisionContextSessionId: string;
+  readonly logStore: RuntimeLogStore;
+}): RuntimePluginHost {
+  const sessionPaths = options.logStore.localRuntimeSessionPaths;
 
-function createEmptyHookResult(): RuntimeCapabilityHookHostResult {
-  return Object.freeze({
-    status: 'completed',
-    evidence: Object.freeze([])
-  } satisfies RuntimeCapabilityHookHostResult);
+  return createDefaultProject02PluginHost({
+    ...(options.capabilityHost === undefined
+      ? {}
+      : { capabilityHost: options.capabilityHost }),
+    ...(sessionPaths === undefined ? {} : { storeRoot: sessionPaths.storeRoot }),
+    sessionId: sessionPaths?.sessionId ?? options.decisionContextSessionId
+  });
 }
 
 function createEmptyHealthResult(): RuntimeCapabilityHealthHostResult {

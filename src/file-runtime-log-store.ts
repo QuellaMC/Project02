@@ -241,6 +241,10 @@ function assertDurableRuntimeSessionEvidence(options: {
     rawEvents,
     allowedTerminalRawWithoutTrace: allowedTerminalRawWithoutTrace(options)
   });
+  assertToolCallRawEventsAreComplete({
+    mode: options.mode,
+    rawEvents
+  });
 
   if (options.mode === 'public') {
     assertRawEventTurnTerminalCompleteness(rawEvents);
@@ -283,6 +287,87 @@ function assertDurableRuntimeSessionEvidence(options: {
     ),
     rawEvents
   });
+}
+
+function assertToolCallRawEventsAreComplete(options: {
+  readonly mode: RuntimeLogValidationMode;
+  readonly rawEvents: readonly RawEventLogRecord[];
+}): void {
+  const started = new Map<string, RawEventLogRecord>();
+  const finished = new Map<string, RawEventLogRecord>();
+
+  for (const rawEvent of options.rawEvents) {
+    if (rawEvent.kind === 'tool_call_started') {
+      const callId = requiredToolCallId(rawEvent);
+
+      if (started.has(callId)) {
+        throw new LocalRuntimeStorageContractError(
+          'malformed_record',
+          `Tool call started more than once: ${callId}.`
+        );
+      }
+
+      started.set(callId, rawEvent);
+      continue;
+    }
+
+    if (rawEvent.kind === 'tool_call_finished') {
+      const callId = requiredToolCallId(rawEvent);
+
+      if (!started.has(callId)) {
+        throw new LocalRuntimeStorageContractError(
+          'malformed_record',
+          `Tool call finished before start: ${callId}.`
+        );
+      }
+
+      if (finished.has(callId)) {
+        throw new LocalRuntimeStorageContractError(
+          'malformed_record',
+          `Tool call finished more than once: ${callId}.`
+        );
+      }
+
+      finished.set(callId, rawEvent);
+    }
+  }
+
+  if (options.mode === 'public') {
+    for (const callId of started.keys()) {
+      if (finished.has(callId)) {
+        continue;
+      }
+
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        `Tool call started without finish: ${callId}.`
+      );
+    }
+  }
+
+  for (const rawEvent of options.rawEvents.filter(isTerminalRawEventLogRecord)) {
+    for (const callId of rawEvent.toolCallIds ?? []) {
+      if (finished.has(callId)) {
+        continue;
+      }
+
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        `Terminal raw event references unfinished tool call: ${callId}.`
+      );
+    }
+  }
+}
+
+function requiredToolCallId(rawEvent: RawEventLogRecord): string {
+  if (rawEvent.toolCallId === undefined) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Tool call raw event is missing toolCallId.'
+    );
+  }
+
+  return rawEvent.toolCallId;
 }
 
 function assertCharacterStateFileMatchesPatchEvidence(options: {
@@ -1318,7 +1403,7 @@ function assertConversationMessagesHaveTerminalRawEvidence(options: {
 
   const completedTurnEvidence = new Set(
     options.rawEvents
-      .filter(isCompletedTerminalRawEventLogRecord)
+      .filter(isVisibleMessageTerminalRawEventLogRecord)
       .flatMap((record) =>
         (record.visibleMessageIds ?? []).map((messageId) =>
           visibleMessageEvidenceKey(record, messageId)
@@ -1338,6 +1423,15 @@ function assertConversationMessagesHaveTerminalRawEvidence(options: {
 
 function isCompletedTerminalRawEventLogRecord(record: RawEventLogRecord): boolean {
   return record.kind === 'runtime_turn_completed';
+}
+
+function isVisibleMessageTerminalRawEventLogRecord(
+  record: RawEventLogRecord
+): boolean {
+  return (
+    record.kind === 'runtime_turn_completed' ||
+    record.kind === 'runtime_turn_rejected'
+  );
 }
 
 function terminalTraceStepForRawEvent(

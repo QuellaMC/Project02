@@ -419,6 +419,61 @@ describe('role model decision contracts', () => {
     );
   });
 
+  it('accepts redundant top-level text as non-committed model text', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        version: roleModelDecisionContractVersion,
+        text: 'non-committed model summary',
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: 'committed visible reply'
+            }
+          }
+        ]
+      })
+    );
+
+    expect(result.status).toBe('accepted');
+
+    if (result.status !== 'accepted') {
+      throw new Error('Expected accepted role-model decision.');
+    }
+
+    expect(getRequiredVisibleReplyText(result.decision)).toBe(
+      'committed visible reply'
+    );
+    expect(result.nonCommittedText).toBe('non-committed model summary');
+  });
+
+  it('rejects non-string top-level text on new ordered toolCalls decisions', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        version: roleModelDecisionContractVersion,
+        text: {
+          value: 'not accepted'
+        },
+        toolCalls: [
+          {
+            name: roleModelVisibleReplyActionName,
+            input: {
+              text: 'visible reply'
+            }
+          }
+        ]
+      })
+    );
+
+    expect(result).toEqual({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'Decision text must be a string.'
+      }
+    });
+  });
+
   it('rejects unsupported fields on new ordered toolCalls items', () => {
     for (const unsupportedKey of ['arguments', 'function', 'type']) {
       const result = parseRoleModelDecision(

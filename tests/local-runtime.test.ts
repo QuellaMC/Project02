@@ -1090,7 +1090,7 @@ describe('local runtime turn adapter', () => {
           })
         )
       })
-    ).rejects.toThrow('Conversation message lacks terminal raw-event evidence');
+    ).rejects.toThrow('completed raw-event append failed');
 
     expect(characterStateStore.readCurrentState()).toEqual(
       createDefaultCharacterRuntimeState()
@@ -2309,6 +2309,69 @@ describe('local runtime turn adapter', () => {
       ]
     });
 
+    let adapterCalls = 0;
+    const progressEvents: unknown[] = [];
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke(inputEnvelope) {
+        adapterCalls += 1;
+
+        if (adapterCalls === 1) {
+          expect(inputEnvelope.toolObservations).toEqual([]);
+
+          return Object.freeze({
+            rawOutputText: JSON.stringify({
+              version: roleModelDecisionContractVersion,
+              toolCalls: [
+                {
+                  name: roleModelVisibleReplyActionName,
+                  input: {
+                    text: 'I will check memory.'
+                  }
+                },
+                {
+                  name: 'memory.search',
+                  input: {
+                    query: 'preference'
+                  }
+                }
+              ]
+            })
+          });
+        }
+
+        expect(inputEnvelope.toolObservations).toMatchObject([
+          {
+            round: 1,
+            capabilityId: 'memory.tool_runtime',
+            toolName: 'memory.search',
+            input: {
+              query: 'preference'
+            },
+            result: {
+              status: 'accepted',
+              output: {
+                matches: ['Mira prefers concise answers.']
+              }
+            }
+          }
+        ]);
+
+        return Object.freeze({
+          rawOutputText: JSON.stringify({
+            version: roleModelDecisionContractVersion,
+            toolCalls: [
+              {
+                name: roleModelVisibleReplyActionName,
+                input: {
+                  text: 'I found one memory.'
+                }
+              }
+            ]
+          })
+        });
+      }
+    };
+
     const result = await runLocalUserMessageEvent({
       event: createTestUserMessageEvent(
         'search memory',
@@ -2318,25 +2381,10 @@ describe('local runtime turn adapter', () => {
       session,
       logStore,
       capabilityHost,
-      roleModelAdapter: createRawOutputAdapter(
-        JSON.stringify({
-          version: roleModelDecisionContractVersion,
-          toolCalls: [
-            {
-              name: roleModelVisibleReplyActionName,
-              input: {
-                text: 'I found one memory.'
-              }
-            },
-            {
-              name: 'memory.search',
-              input: {
-                query: 'preference'
-              }
-            }
-          ]
-        })
-      )
+      roleModelAdapter,
+      onProgress(progressEvent) {
+        progressEvents.push(progressEvent);
+      }
     });
 
     expect(result.status).toBe('completed');
@@ -2345,16 +2393,56 @@ describe('local runtime turn adapter', () => {
       throw new Error('Expected completed runtime result.');
     }
 
-    const visibleReplyCommitted = findRawEvent(
-      result.rawEventLogRecords,
-      'visible_reply_committed'
+    const visibleReplyCommittedRecords = result.rawEventLogRecords.filter(
+      (record) => record.kind === 'visible_reply_committed'
     );
+    expect(visibleReplyCommittedRecords).toHaveLength(2);
+    const finalVisibleReplyCommitted = visibleReplyCommittedRecords[1];
+
+    if (finalVisibleReplyCommitted === undefined) {
+      throw new Error('Expected final visible reply commit.');
+    }
+
     const terminalCompleted = findRawEvent(
       result.rawEventLogRecords,
       'runtime_turn_completed'
     );
 
-    expect(visibleReplyCommitted.agentCapabilityEvidence).toMatchObject([
+    expect(adapterCalls).toBe(2);
+    expect(result.conversationMessages.map((message) => message.text)).toEqual([
+      'search memory',
+      'I will check memory.',
+      'I found one memory.'
+    ]);
+    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+      'search memory',
+      'I will check memory.',
+      'I found one memory.'
+    ]);
+    expect(progressEvents).toMatchObject([
+      {
+        kind: 'visible_reply',
+        final: false,
+        text: 'I will check memory.'
+      },
+      {
+        kind: 'capability_tool_calls_requested',
+        round: 1,
+        toolNames: ['memory.search']
+      },
+      {
+        kind: 'capability_tool_call_completed',
+        round: 1,
+        status: 'accepted',
+        toolName: 'memory.search'
+      },
+      {
+        kind: 'visible_reply',
+        final: true,
+        text: 'I found one memory.'
+      }
+    ]);
+    expect(finalVisibleReplyCommitted.agentCapabilityEvidence).toMatchObject([
       {
         capabilityId: 'memory.tool_runtime',
         evidenceKind: 'tool_invocation',
@@ -2363,7 +2451,7 @@ describe('local runtime turn adapter', () => {
       }
     ]);
     expect(terminalCompleted.agentCapabilityEvidence).toEqual(
-      visibleReplyCommitted.agentCapabilityEvidence
+      finalVisibleReplyCommitted.agentCapabilityEvidence
     );
     expect(terminalCompleted.agentCapabilityTurnEvidence?.toolInvocations).toMatchObject([
       {
@@ -2390,7 +2478,7 @@ describe('local runtime turn adapter', () => {
     ]);
   });
 
-  it('persists rejected capability tool invocation evidence before visible commit', async () => {
+  it('keeps interim visible reply evidence when a capability tool is rejected', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
     const capabilityHost = createRuntimeCapabilityHost({
@@ -2457,9 +2545,19 @@ describe('local runtime turn adapter', () => {
       status: 'rejected',
       reason: roleModelCapabilityToolRejectedRejectionReason
     });
-    expect(session.visibleTranscript).toEqual([]);
-    expect(logStore.conversationMessages()).toEqual([]);
+    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+      'search memory',
+      'I will check.'
+    ]);
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'search memory',
+      'I will check.'
+    ]);
 
+    const visibleReplyCommitted = findRawEvent(
+      result.rawEventLogRecords,
+      'visible_reply_committed'
+    );
     const commitRejected = findRawEvent(
       result.rawEventLogRecords,
       'commit_validation_rejected'
@@ -2469,6 +2567,16 @@ describe('local runtime turn adapter', () => {
       'runtime_turn_rejected'
     );
 
+    expect(visibleReplyCommitted.visibleMessageIds).toEqual([
+      'local-session:message-1',
+      'local-session:message-2'
+    ]);
+    expect(commitRejected.visibleMessageIds).toEqual(
+      visibleReplyCommitted.visibleMessageIds
+    );
+    expect(terminalRejected.visibleMessageIds).toEqual(
+      visibleReplyCommitted.visibleMessageIds
+    );
     expect(commitRejected.agentCapabilityEvidence).toMatchObject([
       {
         capabilityId: 'memory.tool_rejected_runtime',

@@ -3,6 +3,7 @@ import {
   createAgentCapability,
   createAgentCapabilityContextItem,
   createAgentCapabilityEvidenceSnapshot,
+  createFirstPartyModelToolsCapability,
   createAgentCapabilityHealthSnapshot,
   createAgentCapabilityRegistrySnapshot,
   redactAgentCapabilityText
@@ -215,6 +216,12 @@ export function createRuntimeCapabilityHost(
   } satisfies RuntimeCapabilityHost);
 }
 
+export function createDefaultProject02CapabilityHost(): RuntimeCapabilityHost {
+  return createRuntimeCapabilityHost({
+    capabilities: [createFirstPartyModelToolsCapability()]
+  });
+}
+
 function createRuntimeCapabilityDiscoveryCapability(
   enabledCapabilitiesForTurn: () => readonly AgentCapability[]
 ): AgentCapability {
@@ -328,8 +335,8 @@ function createCapabilityDiscoveryOutput(
 function createCapabilityDiscoverySummary(
   capability: AgentCapability
 ): AgentCapabilityJsonObject {
-  const routableTools = routableModelFacingCapabilityTools(capability);
-  const safeTools = routableTools
+  const discoverableTools = discoverableCurrentTurnCapabilityTools(capability);
+  const safeTools = discoverableTools
     .slice(0, runtimeCapabilityDiscoveryMaxToolsPerCapability)
     .map(createCapabilityDiscoveryToolSummary);
 
@@ -340,7 +347,7 @@ function createCapabilityDiscoverySummary(
     availableForTurn: true,
     providedTools: Object.freeze(safeTools),
     toolsTruncated:
-      routableTools.length > runtimeCapabilityDiscoveryMaxToolsPerCapability
+      discoverableTools.length > runtimeCapabilityDiscoveryMaxToolsPerCapability
   } satisfies AgentCapabilityJsonObject);
 }
 
@@ -652,6 +659,40 @@ function routableModelFacingCapabilityTools(
   }
 
   return Object.freeze(capability.providedTools.filter(isModelFacingCapabilityTool));
+}
+
+function discoverableCurrentTurnCapabilityTools(
+  capability: AgentCapability
+): readonly AgentCapabilityProvidedTool[] {
+  return Object.freeze(
+    capability.providedTools.filter((tool) =>
+      isDiscoverableCurrentTurnTool({ capability, tool })
+    )
+  );
+}
+
+function isDiscoverableCurrentTurnTool(options: {
+  readonly capability: AgentCapability;
+  readonly tool: AgentCapabilityProvidedTool;
+}): boolean {
+  if (isModelFacingCapabilityTool(options.tool)) {
+    return options.capability.lifecycleHooks.handleToolCall !== undefined;
+  }
+
+  return isFirstPartyBuiltInModelTool(options);
+}
+
+function isFirstPartyBuiltInModelTool(options: {
+  readonly capability: AgentCapability;
+  readonly tool: AgentCapabilityProvidedTool;
+}): boolean {
+  return (
+    options.capability.manifest.localTrustLevel === 'first_party' &&
+    options.tool.validationOwner === 'built_in_model_tools' &&
+    isBuiltInModelToolName(options.tool.name) &&
+    !options.tool.requiresConfirmation &&
+    options.tool.sideEffectLevel === 'none'
+  );
 }
 
 function isModelFacingCapabilityTool(tool: AgentCapabilityProvidedTool): boolean {
