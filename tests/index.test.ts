@@ -4,7 +4,8 @@ import {
   createDeterministicLocalRoleModelAdapter,
   parseRoleModelDecision,
   projectHealth,
-  roleModelVisibleReplyActionName
+  roleModelDecisionContractVersion,
+  visibleReplyModelToolName
 } from '../src/index.ts';
 
 describe('projectHealth', () => {
@@ -22,10 +23,15 @@ describe('public role-model loop exports', () => {
     expect(
       parseRoleModelDecision(
         JSON.stringify({
-          action: {
-            type: roleModelVisibleReplyActionName,
-            text: 'hello'
-          }
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: visibleReplyModelToolName,
+              input: {
+                text: 'hello'
+              }
+            }
+          ]
         })
       )
     ).toEqual({
@@ -34,7 +40,7 @@ describe('public role-model loop exports', () => {
         version: 'mvp-006.tool_calls.v1',
         toolCalls: [
           {
-            name: roleModelVisibleReplyActionName,
+            name: visibleReplyModelToolName,
             input: {
               text: 'hello'
             }

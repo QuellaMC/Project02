@@ -6,23 +6,6 @@ import type {
   VisibleMessageRole
 } from './conversation.ts';
 import {
-  characterRuntimeStatesEqual,
-  createLivingStateBrief,
-  createCharacterStatePatchSnapshot,
-  decodeCharacterRuntimeState,
-  planCharacterStatePatch,
-  type AcceptedCharacterStatePatchResult,
-  type CharacterRuntimeState,
-  type CharacterStateAppliedChange,
-  type CharacterStatePatch,
-  type CharacterStatePatchRejection,
-  type CharacterStatePatchRejectionReason,
-  type CharacterStatePatchResult,
-  type CharacterStatePatchSnapshot,
-  type LivingStateBrief,
-  type RejectedCharacterStatePatchResult
-} from './character-state.ts';
-import {
   normalizeOneLineMessage,
   OneLineMessageValidationError
 } from './message-validation.ts';
@@ -39,22 +22,19 @@ import {
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createRoleModelToolObservation,
-  getCharacterStatePatchToolCall,
   getRequiredVisibleReplyText,
   getVisibleReplyToolCall,
   isRoleModelAllowedToolName,
   isRoleModelRawOutputReplayableDecisionEvidence,
-  roleModelCapabilityToolRejectedRejectionReason,
+  roleModelPluginToolRejectedRejectionReason,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
-  roleModelLegacyDecisionContractVersion,
   roleModelDecisionRejectionReasons,
-  roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   type CharacterDecision,
   type DecisionContext,
   type ParsedRoleModelDecisionSnapshot,
-  type RoleModelCapabilityToolDefinition,
+  type RoleModelPluginToolDefinition,
   type RoleModelAllowedToolName,
   type RoleModelDecisionRejection,
   type RoleModelDecisionRejectionReason,
@@ -70,26 +50,26 @@ import {
   createCharacterStatePatchModelToolCall,
   createVisibleReplyModelToolCall,
   visibleReplyModelToolName,
-  type CapabilityModelToolCall,
+  type PluginModelToolCall,
   type ModelToolCall
 } from './model-tools.ts';
 import {
-  createAgentCapabilityContextItem,
-  createAgentCapabilityEvidenceSnapshot,
-  createAgentCapabilityProvidedTool,
-  createAgentCapabilityTurnEvidenceSnapshot,
-  type AgentCapabilityContextItem,
-  type AgentCapabilityEvidenceKind,
-  type AgentCapabilityEvidenceSnapshot,
-  type AgentCapabilityEvidenceStatus,
-  type AgentCapabilityPolicyOutcome,
-  type AgentCapabilityJsonObject,
-  type AgentCapabilityJsonValue,
-  type AgentCapabilitySourceKind,
-  type AgentCapabilitySourceReference,
-  type AgentCapabilityToolCallResult,
-  type AgentCapabilityTurnEvidenceSnapshot
-} from './agent-capabilities.ts';
+  createRuntimePluginContextItem,
+  createRuntimePluginEvidenceSnapshot,
+  createRuntimePluginProvidedTool,
+  createRuntimePluginTurnEvidenceSnapshot,
+  type RuntimePluginContextItem,
+  type RuntimePluginEvidenceKind,
+  type RuntimePluginEvidenceSnapshot,
+  type RuntimePluginEvidenceStatus,
+  type RuntimePluginPolicyOutcome,
+  type RuntimePluginJsonObject,
+  type RuntimePluginJsonValue,
+  type RuntimePluginSourceKind,
+  type RuntimePluginSourceReference,
+  type RuntimePluginToolCallResult,
+  type RuntimePluginTurnEvidenceSnapshot
+} from './plugins/types.ts';
 import {
   createRoleModelCommitValidationSnapshot,
   isTerminalRawEventLogRecordKind,
@@ -108,7 +88,7 @@ import {
 
 export const defaultLocalRuntimeStoreRoot = '.project02-runtime';
 export const defaultLocalRuntimeSessionId = 'local-session';
-export const localRuntimeStorageSchemaVersion = 2;
+export const localRuntimeStorageSchemaVersion = 3;
 
 export type LocalRuntimeStorageContractErrorCode =
   | 'invalid_session_id'
@@ -144,7 +124,6 @@ export type LocalRuntimeSessionPaths = {
   readonly tracePath: string;
   readonly rawEventsPath: string;
   readonly conversationPath: string;
-  readonly characterStatePath: string;
 };
 
 export type LocalRuntimeStorageLayoutOptions = {
@@ -182,13 +161,12 @@ const sessionsDirectoryName = 'sessions';
 const traceFileName = 'trace.jsonl';
 const rawEventsFileName = 'raw-events.jsonl';
 const conversationFileName = 'conversation.jsonl';
-const characterStateFileName = 'character-state.json';
 
 const runtimeTraceSteps = [
   'runtime_event_received',
   'runtime_event_normalized',
   'runtime_turn_started',
-  'capability_before_role_model_call_rejected',
+  'plugin_before_role_model_call_rejected',
   'tool_call_started',
   'tool_call_finished',
   'visible_reply_committed',
@@ -203,7 +181,7 @@ const runtimeTraceSteps = [
 const rawEventKinds = [
   'runtime_event_received',
   'runtime_event_normalized',
-  'capability_before_role_model_call_rejected',
+  'plugin_before_role_model_call_rejected',
   'tool_call_started',
   'tool_call_finished',
   'visible_reply_committed',
@@ -218,7 +196,7 @@ const runtimeTurnStatuses = [
   'completed',
   'rejected'
 ] as const satisfies readonly RuntimeTurnStatus[];
-const agentCapabilityEvidenceKinds = [
+const runtimePluginEvidenceKinds = [
   'registration',
   'before_role_model_call',
   'tool_invocation',
@@ -226,14 +204,14 @@ const agentCapabilityEvidenceKinds = [
   'session_end',
   'health',
   'policy'
-] as const satisfies readonly AgentCapabilityEvidenceKind[];
-const agentCapabilityEvidenceStatuses = [
+] as const satisfies readonly RuntimePluginEvidenceKind[];
+const runtimePluginEvidenceStatuses = [
   'accepted',
   'rejected',
   'degraded',
   'failed'
-] as const satisfies readonly AgentCapabilityEvidenceStatus[];
-const agentCapabilityPolicyOutcomes = [
+] as const satisfies readonly RuntimePluginEvidenceStatus[];
+const runtimePluginPolicyOutcomes = [
   'registration_accepted',
   'available_for_turn',
   'optional_degraded',
@@ -243,22 +221,21 @@ const agentCapabilityPolicyOutcomes = [
   'timeout',
   'health_degraded',
   'after_commit_failed'
-] as const satisfies readonly AgentCapabilityPolicyOutcome[];
-const agentCapabilitySourceKinds = [
+] as const satisfies readonly RuntimePluginPolicyOutcome[];
+const runtimePluginSourceKinds = [
   'memory',
   'conversation',
   'resource',
   'external_contract',
   'runtime'
-] as const satisfies readonly AgentCapabilitySourceKind[];
+] as const satisfies readonly RuntimePluginSourceKind[];
 
 const visibleMessageRoles = ['user', 'character'] as const satisfies readonly VisibleMessageRole[];
 const runtimeEventTypes = ['USER_MESSAGE'] as const satisfies readonly RuntimeEventType[];
 const sessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const commitOwnedRoleModelRejectionReasons = [
   roleModelInvalidVisibleReplyRejectionReason,
-  roleModelInvalidCharacterStatePatchRejectionReason,
-  roleModelCapabilityToolRejectedRejectionReason,
+  roleModelPluginToolRejectedRejectionReason,
   roleModelCommitValidationFailureRejectionReason
 ] as const satisfies readonly RoleModelDecisionRejectionReason[];
 
@@ -289,8 +266,7 @@ export function createLocalRuntimeSessionPaths(
     sessionRoot,
     tracePath: join(sessionRoot, traceFileName),
     rawEventsPath: join(sessionRoot, rawEventsFileName),
-    conversationPath: join(sessionRoot, conversationFileName),
-    characterStatePath: join(sessionRoot, characterStateFileName)
+    conversationPath: join(sessionRoot, conversationFileName)
   } satisfies LocalRuntimeSessionPaths);
 }
 
@@ -400,8 +376,8 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const toolRound = optionalRecordNumber(record, 'toolRound');
   const toolName = optionalRecordString(record, 'toolName', 'malformed_record');
   const toolPluginId = optionalRecordString(record, 'toolPluginId', 'malformed_record');
-  const toolInput = optionalAgentCapabilityJsonObject(record['toolInput']);
-  const toolResult = optionalAgentCapabilityToolCallResult(record['toolResult']);
+  const toolInput = optionalRuntimePluginJsonObject(record['toolInput']);
+  const toolResult = optionalRuntimePluginToolCallResult(record['toolResult']);
   const pluginStoreRevision = optionalRecordNumber(
     record,
     'pluginStoreRevision'
@@ -417,14 +393,11 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const commitValidation = optionalRoleModelCommitValidationSnapshot(
     record['commitValidation']
   );
-  const characterStatePatchSnapshot = optionalCharacterStatePatchSnapshot(
-    record['characterStatePatchSnapshot']
+  const runtimePluginEvidence = optionalRuntimePluginEvidenceSnapshots(
+    record['runtimePluginEvidence']
   );
-  const agentCapabilityEvidence = optionalAgentCapabilityEvidenceSnapshots(
-    record['agentCapabilityEvidence']
-  );
-  const agentCapabilityTurnEvidence = optionalAgentCapabilityTurnEvidenceSnapshot(
-    record['agentCapabilityTurnEvidence']
+  const runtimePluginTurnEvidence = optionalRuntimePluginTurnEvidenceSnapshot(
+    record['runtimePluginTurnEvidence']
   );
 
   assertTerminalRawEventSemantics({
@@ -455,28 +428,14 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     parsedRoleModelDecisionSnapshot,
     commitValidation
   });
-  assertCharacterStatePatchEvidenceSemantics({
+  assertRuntimePluginEvidenceSemantics({
     identity: {
       eventId,
       traceId,
       createdAt
     },
-    kind,
-    reason,
-    status,
-    commitValidation,
-    roleModelIOSnapshot,
-    parsedRoleModelDecisionSnapshot,
-    characterStatePatchSnapshot
-  });
-  assertAgentCapabilityEvidenceSemantics({
-    identity: {
-      eventId,
-      traceId,
-      createdAt
-    },
-    agentCapabilityEvidence,
-    agentCapabilityTurnEvidence
+    runtimePluginEvidence,
+    runtimePluginTurnEvidence
   });
 
   return Object.freeze({
@@ -502,15 +461,12 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
       ? {}
       : { parsedRoleModelDecisionSnapshot }),
     ...(commitValidation === undefined ? {} : { commitValidation }),
-    ...(characterStatePatchSnapshot === undefined
+    ...(runtimePluginEvidence === undefined
       ? {}
-      : { characterStatePatchSnapshot }),
-    ...(agentCapabilityEvidence === undefined
+      : { runtimePluginEvidence }),
+    ...(runtimePluginTurnEvidence === undefined
       ? {}
-      : { agentCapabilityEvidence }),
-    ...(agentCapabilityTurnEvidence === undefined
-      ? {}
-      : { agentCapabilityTurnEvidence })
+      : { runtimePluginTurnEvidence })
   } satisfies RawEventLogRecord);
 }
 
@@ -732,48 +688,48 @@ function optionalRuntimeTurnStatus(value: unknown): RuntimeTurnStatus | undefine
   throwMalformedRecord('status');
 }
 
-function requiredAgentCapabilityEvidenceKind(
+function requiredRuntimePluginEvidenceKind(
   value: unknown
-): AgentCapabilityEvidenceKind {
-  if (isOneOf(value, agentCapabilityEvidenceKinds)) {
+): RuntimePluginEvidenceKind {
+  if (isOneOf(value, runtimePluginEvidenceKinds)) {
     return value;
   }
 
-  throwMalformedRecord('agentCapabilityEvidence.evidenceKind');
+  throwMalformedRecord('runtimePluginEvidence.evidenceKind');
 }
 
-function requiredAgentCapabilityEvidenceStatus(
+function requiredRuntimePluginEvidenceStatus(
   value: unknown
-): AgentCapabilityEvidenceStatus {
-  if (isOneOf(value, agentCapabilityEvidenceStatuses)) {
+): RuntimePluginEvidenceStatus {
+  if (isOneOf(value, runtimePluginEvidenceStatuses)) {
     return value;
   }
 
-  throwMalformedRecord('agentCapabilityEvidence.status');
+  throwMalformedRecord('runtimePluginEvidence.status');
 }
 
-function optionalAgentCapabilityPolicyOutcome(
+function optionalRuntimePluginPolicyOutcome(
   value: unknown
-): AgentCapabilityPolicyOutcome | undefined {
+): RuntimePluginPolicyOutcome | undefined {
   if (value === undefined) {
     return undefined;
   }
 
-  if (isOneOf(value, agentCapabilityPolicyOutcomes)) {
+  if (isOneOf(value, runtimePluginPolicyOutcomes)) {
     return value;
   }
 
-  throwMalformedRecord('agentCapabilityEvidence.policyOutcome');
+  throwMalformedRecord('runtimePluginEvidence.policyOutcome');
 }
 
-function requiredAgentCapabilitySourceKind(
+function requiredRuntimePluginSourceKind(
   value: unknown
-): AgentCapabilitySourceKind {
-  if (isOneOf(value, agentCapabilitySourceKinds)) {
+): RuntimePluginSourceKind {
+  if (isOneOf(value, runtimePluginSourceKinds)) {
     return value;
   }
 
-  throwMalformedRecord('agentCapabilityEvidence.sourceReferences.kind');
+  throwMalformedRecord('runtimePluginEvidence.sourceReferences.kind');
 }
 
 function assertTerminalRawEventSemantics(options: {
@@ -808,8 +764,8 @@ function assertToolRawEventSemantics(options: {
   readonly toolRound: number | undefined;
   readonly toolName: string | undefined;
   readonly toolPluginId: string | undefined;
-  readonly toolInput: AgentCapabilityJsonObject | undefined;
-  readonly toolResult: AgentCapabilityToolCallResult | undefined;
+  readonly toolInput: RuntimePluginJsonObject | undefined;
+  readonly toolResult: RuntimePluginToolCallResult | undefined;
 }): void {
   if (options.kind !== 'tool_call_started' && options.kind !== 'tool_call_finished') {
     if (
@@ -983,49 +939,22 @@ function optionalRoleModelCommitValidationSnapshot(
   });
 }
 
-function optionalCharacterStatePatchSnapshot(
+function optionalRuntimePluginEvidenceSnapshots(
   value: unknown
-): CharacterStatePatchSnapshot | undefined {
+): readonly RuntimePluginEvidenceSnapshot[] | undefined {
   if (value === undefined) {
     return undefined;
   }
 
-  if (!isRecord(value)) {
-    throwMalformedRecord('characterStatePatchSnapshot');
-  }
-
-  requiredLiteralString(
-    value,
-    'kind',
-    'character_state_patch_snapshot',
-    'characterStatePatchSnapshot.kind'
-  );
-
-  return createCharacterStatePatchSnapshot({
-    eventId: requiredRecordString(value, 'eventId', 'malformed_record'),
-    traceId: requiredRecordString(value, 'traceId', 'malformed_record'),
-    createdAt: requiredRecordString(value, 'createdAt', 'malformed_record'),
-    sessionId: requiredRecordString(value, 'sessionId', 'malformed_record'),
-    result: requiredCharacterStatePatchResult(value['result'])
-  });
-}
-
-function optionalAgentCapabilityEvidenceSnapshots(
-  value: unknown
-): readonly AgentCapabilityEvidenceSnapshot[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const snapshots: AgentCapabilityEvidenceSnapshot[] = [];
+  const snapshots: RuntimePluginEvidenceSnapshot[] = [];
 
   try {
-    for (const item of requiredArray(value, 'agentCapabilityEvidence')) {
-      snapshots.push(requiredAgentCapabilityEvidenceSnapshot(item));
+    for (const item of requiredArray(value, 'runtimePluginEvidence')) {
+      snapshots.push(requiredRuntimePluginEvidenceSnapshot(item));
     }
   } catch (error: unknown) {
     if (error instanceof TypeError) {
-      throwMalformedRecord('agentCapabilityEvidence');
+      throwMalformedRecord('runtimePluginEvidence');
     }
 
     throw error;
@@ -1034,9 +963,9 @@ function optionalAgentCapabilityEvidenceSnapshots(
   return Object.freeze(snapshots);
 }
 
-function optionalAgentCapabilityJsonObject(
+function optionalRuntimePluginJsonObject(
   value: unknown
-): AgentCapabilityJsonObject | undefined {
+): RuntimePluginJsonObject | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -1048,9 +977,9 @@ function optionalAgentCapabilityJsonObject(
   return freezeJsonRecord(value);
 }
 
-function optionalAgentCapabilityToolCallResult(
+function optionalRuntimePluginToolCallResult(
   value: unknown
-): AgentCapabilityToolCallResult | undefined {
+): RuntimePluginToolCallResult | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -1065,10 +994,10 @@ function optionalAgentCapabilityToolCallResult(
       output: freezeJsonValue(value['output']),
       evidence: Object.freeze(
         requiredArray(value['evidence'], 'toolResult.evidence').map(
-          requiredAgentCapabilityEvidenceSnapshot
+          requiredRuntimePluginEvidenceSnapshot
         )
       )
-    } satisfies AgentCapabilityToolCallResult);
+    } satisfies RuntimePluginToolCallResult);
   }
 
   if (value['status'] === 'rejected') {
@@ -1078,51 +1007,51 @@ function optionalAgentCapabilityToolCallResult(
       message: requiredRecordString(value, 'message', 'malformed_record'),
       evidence: Object.freeze(
         requiredArray(value['evidence'], 'toolResult.evidence').map(
-          requiredAgentCapabilityEvidenceSnapshot
+          requiredRuntimePluginEvidenceSnapshot
         )
       )
-    } satisfies AgentCapabilityToolCallResult);
+    } satisfies RuntimePluginToolCallResult);
   }
 
   throwMalformedRecord('toolResult.status');
 }
 
-function optionalAgentCapabilityTurnEvidenceSnapshot(
+function optionalRuntimePluginTurnEvidenceSnapshot(
   value: unknown
-): AgentCapabilityTurnEvidenceSnapshot | undefined {
+): RuntimePluginTurnEvidenceSnapshot | undefined {
   if (value === undefined) {
     return undefined;
   }
 
   try {
-    return createAgentCapabilityTurnEvidenceSnapshot(value);
+    return createRuntimePluginTurnEvidenceSnapshot(value);
   } catch (error: unknown) {
     if (error instanceof TypeError) {
-      throwMalformedRecord('agentCapabilityTurnEvidence');
+      throwMalformedRecord('runtimePluginTurnEvidence');
     }
 
     throw error;
   }
 }
 
-function requiredAgentCapabilityEvidenceSnapshot(
+function requiredRuntimePluginEvidenceSnapshot(
   value: unknown
-): AgentCapabilityEvidenceSnapshot {
+): RuntimePluginEvidenceSnapshot {
   if (!isRecord(value)) {
-    throwMalformedRecord('agentCapabilityEvidence');
+    throwMalformedRecord('runtimePluginEvidence');
   }
 
   requiredLiteralString(
     value,
     'kind',
-    'agent_capability_evidence_snapshot',
-    'agentCapabilityEvidence.kind'
+    'runtime_plugin_evidence_snapshot',
+    'runtimePluginEvidence.kind'
   );
 
-  const sourceReferences = optionalAgentCapabilitySourceReferences(
+  const sourceReferences = optionalRuntimePluginSourceReferences(
     value['sourceReferences']
   );
-  const policyOutcome = optionalAgentCapabilityPolicyOutcome(
+  const policyOutcome = optionalRuntimePluginPolicyOutcome(
     value['policyOutcome']
   );
   const configFingerprint = optionalRecordString(
@@ -1131,48 +1060,48 @@ function requiredAgentCapabilityEvidenceSnapshot(
     'malformed_record'
   );
 
-  return createAgentCapabilityEvidenceSnapshot({
+  return createRuntimePluginEvidenceSnapshot({
     eventId: requiredRecordString(value, 'eventId', 'malformed_record'),
     traceId: requiredRecordString(value, 'traceId', 'malformed_record'),
     createdAt: requiredRecordString(value, 'createdAt', 'malformed_record'),
-    kind: 'agent_capability_evidence_snapshot',
-    capabilityId: requiredRecordString(
+    kind: 'runtime_plugin_evidence_snapshot',
+    pluginId: requiredRecordString(
       value,
-      'capabilityId',
+      'pluginId',
       'malformed_record'
     ),
-    evidenceKind: requiredAgentCapabilityEvidenceKind(value['evidenceKind']),
-    status: requiredAgentCapabilityEvidenceStatus(value['status']),
+    evidenceKind: requiredRuntimePluginEvidenceKind(value['evidenceKind']),
+    status: requiredRuntimePluginEvidenceStatus(value['status']),
     summary: requiredRecordString(value, 'summary', 'malformed_record'),
     ...(policyOutcome === undefined ? {} : { policyOutcome }),
     ...(sourceReferences === undefined ? {} : { sourceReferences }),
     redactionLabels: requiredStringArray(
       value['redactionLabels'],
-      'agentCapabilityEvidence.redactionLabels'
+      'runtimePluginEvidence.redactionLabels'
     ),
     ...(configFingerprint === undefined ? {} : { configFingerprint })
   });
 }
 
-function optionalAgentCapabilitySourceReferences(
+function optionalRuntimePluginSourceReferences(
   value: unknown
-): readonly AgentCapabilitySourceReference[] | undefined {
+): readonly RuntimePluginSourceReference[] | undefined {
   if (value === undefined) {
     return undefined;
   }
 
-  const sourceReferences: AgentCapabilitySourceReference[] = [];
+  const sourceReferences: RuntimePluginSourceReference[] = [];
 
   for (const item of requiredArray(value, 'sourceReferences')) {
-    sourceReferences.push(requiredAgentCapabilitySourceReference(item));
+    sourceReferences.push(requiredRuntimePluginSourceReference(item));
   }
 
   return Object.freeze(sourceReferences);
 }
 
-function requiredAgentCapabilitySourceReference(
+function requiredRuntimePluginSourceReference(
   value: unknown
-): AgentCapabilitySourceReference {
+): RuntimePluginSourceReference {
   if (!isRecord(value)) {
     throwMalformedRecord('sourceReferences');
   }
@@ -1181,38 +1110,38 @@ function requiredAgentCapabilitySourceReference(
   const uri = optionalRecordString(value, 'uri', 'malformed_record');
 
   return Object.freeze({
-    kind: requiredAgentCapabilitySourceKind(value['kind']),
+    kind: requiredRuntimePluginSourceKind(value['kind']),
     id: requiredRecordString(value, 'id', 'malformed_record'),
     ...(title === undefined ? {} : { title }),
     ...(uri === undefined ? {} : { uri })
-  } satisfies AgentCapabilitySourceReference);
+  } satisfies RuntimePluginSourceReference);
 }
 
-function assertAgentCapabilityEvidenceSemantics(options: {
+function assertRuntimePluginEvidenceSemantics(options: {
   readonly identity: RuntimeEventIdentity;
-  readonly agentCapabilityEvidence:
-    | readonly AgentCapabilityEvidenceSnapshot[]
+  readonly runtimePluginEvidence:
+    | readonly RuntimePluginEvidenceSnapshot[]
     | undefined;
-  readonly agentCapabilityTurnEvidence:
-    | AgentCapabilityTurnEvidenceSnapshot
+  readonly runtimePluginTurnEvidence:
+    | RuntimePluginTurnEvidenceSnapshot
     | undefined;
 }): void {
-  for (const snapshot of options.agentCapabilityEvidence ?? []) {
+  for (const snapshot of options.runtimePluginEvidence ?? []) {
     assertMatchingRoleModelIdentity({
       actual: snapshot,
       expected: options.identity,
-      field: 'agentCapabilityEvidence'
+      field: 'runtimePluginEvidence'
     });
   }
 
-  if (options.agentCapabilityTurnEvidence === undefined) {
+  if (options.runtimePluginTurnEvidence === undefined) {
     return;
   }
 
   assertMatchingRoleModelIdentity({
-    actual: options.agentCapabilityTurnEvidence,
+    actual: options.runtimePluginTurnEvidence,
     expected: options.identity,
-    field: 'agentCapabilityTurnEvidence'
+    field: 'runtimePluginTurnEvidence'
   });
 }
 
@@ -1308,240 +1237,6 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
   });
 }
 
-function assertCharacterStatePatchEvidenceSemantics(options: {
-  readonly identity: RuntimeEventIdentity;
-  readonly kind: RawEventLogRecordKind;
-  readonly status: RuntimeTurnStatus | undefined;
-  readonly reason: string | undefined;
-  readonly commitValidation: RoleModelCommitValidationSnapshot | undefined;
-  readonly roleModelIOSnapshot: RoleModelIOSnapshot | undefined;
-  readonly parsedRoleModelDecisionSnapshot:
-    | ParsedRoleModelDecisionSnapshot
-    | undefined;
-  readonly characterStatePatchSnapshot: CharacterStatePatchSnapshot | undefined;
-}): void {
-  if (options.characterStatePatchSnapshot === undefined) {
-    return;
-  }
-
-  const snapshot = options.characterStatePatchSnapshot;
-
-  assertMatchingRoleModelIdentity({
-    actual: snapshot,
-    expected: options.identity,
-    field: 'characterStatePatchSnapshot'
-  });
-
-  assertMatchingRoleModelSession({
-    actual: snapshot.sessionId,
-    expected: requiredPatchEvidenceRoleModelSessionId(
-      options.roleModelIOSnapshot
-    ),
-    field: 'characterStatePatchSnapshot.sessionId'
-  });
-
-  const result = snapshot.result;
-
-  if (result.status === 'accepted') {
-    if (
-      options.kind !== 'visible_reply_committed' &&
-      options.kind !== 'runtime_turn_completed'
-    ) {
-      throwMalformedRecord('characterStatePatchSnapshot');
-    }
-
-    if (
-      options.kind === 'runtime_turn_completed' &&
-      options.status !== 'completed'
-    ) {
-      throwMalformedRecord('characterStatePatchSnapshot.result.status');
-    }
-
-    if (options.commitValidation?.result.status !== 'accepted') {
-      throwMalformedRecord('commitValidation.result.status');
-    }
-
-    assertAcceptedCharacterStatePatchMatchesParsedToolCall({
-      parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
-      snapshot
-    });
-
-    return;
-  }
-
-  if (
-    options.kind !== 'commit_validation_rejected' &&
-    options.kind !== 'runtime_turn_rejected'
-  ) {
-    throwMalformedRecord('characterStatePatchSnapshot');
-  }
-
-  if (
-    options.kind === 'runtime_turn_rejected' &&
-    options.status !== 'rejected'
-  ) {
-    throwMalformedRecord('characterStatePatchSnapshot.result.status');
-  }
-
-  if (options.reason !== roleModelInvalidCharacterStatePatchRejectionReason) {
-    throwMalformedRecord('reason');
-  }
-
-  if (
-    options.commitValidation?.result.status !== 'rejected' ||
-    options.commitValidation.result.rejection.reason !==
-      roleModelInvalidCharacterStatePatchRejectionReason
-  ) {
-    throwMalformedRecord('commitValidation.result.rejection.reason');
-  }
-
-  assertRejectedCharacterStatePatchMatchesParsedToolCall({
-    parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
-    snapshot
-  });
-}
-
-function requiredPatchEvidenceRoleModelSessionId(
-  roleModelIOSnapshot: RoleModelIOSnapshot | undefined
-): string {
-  if (roleModelIOSnapshot !== undefined) {
-    return roleModelIOSnapshot.sessionId;
-  }
-
-  throwMalformedRecord('characterStatePatchSnapshot.sessionId');
-}
-
-function assertAcceptedCharacterStatePatchMatchesParsedToolCall(options: {
-  readonly parsedRoleModelDecisionSnapshot:
-    | ParsedRoleModelDecisionSnapshot
-    | undefined;
-  readonly snapshot: CharacterStatePatchSnapshot;
-}): void {
-  const actualResult = options.snapshot.result;
-
-  if (actualResult.status !== 'accepted') {
-    throwMalformedRecord('characterStatePatchSnapshot.result.status');
-  }
-
-  const expectedResult = expectedCharacterStatePatchResultFromParsedToolCall({
-    parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
-    before: actualResult.before
-  });
-
-  if (
-    expectedResult.status !== 'accepted' ||
-    !acceptedCharacterStatePatchResultsEqual(actualResult, expectedResult)
-  ) {
-    throwMalformedRecord('characterStatePatchSnapshot.result');
-  }
-}
-
-function acceptedCharacterStatePatchResultsEqual(
-  left: AcceptedCharacterStatePatchResult,
-  right: AcceptedCharacterStatePatchResult
-): boolean {
-  return (
-    characterStatePatchesEqual(left.patch, right.patch) &&
-    characterRuntimeStatesEqual(left.before, right.before) &&
-    characterRuntimeStatesEqual(left.after, right.after) &&
-    characterStateAppliedChangesEqual(left.appliedChanges, right.appliedChanges)
-  );
-}
-
-function expectedCharacterStatePatchResultFromParsedToolCall(options: {
-  readonly parsedRoleModelDecisionSnapshot:
-    | ParsedRoleModelDecisionSnapshot
-    | undefined;
-  readonly before: CharacterRuntimeState;
-}): CharacterStatePatchResult {
-  const parsedResult = options.parsedRoleModelDecisionSnapshot?.result;
-
-  if (parsedResult?.status !== 'accepted') {
-    throwMalformedRecord('characterStatePatchSnapshot');
-  }
-
-  const toolCall = getCharacterStatePatchToolCall(parsedResult.decision);
-
-  if (toolCall === undefined) {
-    throwMalformedRecord('characterStatePatchSnapshot');
-  }
-
-  return planCharacterStatePatch({
-    before: options.before,
-    patchInput: toolCall.input
-  });
-}
-
-function assertRejectedCharacterStatePatchMatchesParsedToolCall(options: {
-  readonly parsedRoleModelDecisionSnapshot:
-    | ParsedRoleModelDecisionSnapshot
-    | undefined;
-  readonly snapshot: CharacterStatePatchSnapshot;
-}): void {
-  const actualResult = options.snapshot.result;
-
-  if (actualResult.status !== 'rejected') {
-    throwMalformedRecord('characterStatePatchSnapshot.result.status');
-  }
-
-  const expectedResult = expectedCharacterStatePatchResultFromParsedToolCall({
-    parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
-    before: actualResult.before
-  });
-
-  if (
-    expectedResult.status !== 'rejected' ||
-    !rejectedCharacterStatePatchResultsEqual(actualResult, expectedResult)
-  ) {
-    throwMalformedRecord('characterStatePatchSnapshot.result');
-  }
-}
-
-function rejectedCharacterStatePatchResultsEqual(
-  left: RejectedCharacterStatePatchResult,
-  right: RejectedCharacterStatePatchResult
-): boolean {
-  return (
-    JSON.stringify(left.patchInput) === JSON.stringify(right.patchInput) &&
-    characterRuntimeStatesEqual(left.before, right.before) &&
-    left.rejection.reason === right.rejection.reason &&
-    left.rejection.details === right.rejection.details
-  );
-}
-
-function characterStatePatchesEqual(
-  left: CharacterStatePatch,
-  right: CharacterStatePatch
-): boolean {
-  return (
-    left.mood === right.mood &&
-    left.energy === right.energy &&
-    left.attention === right.attention &&
-    left.currentActivity === right.currentActivity &&
-    left.socialOrientation === right.socialOrientation
-  );
-}
-
-function characterStateAppliedChangesEqual(
-  left: readonly CharacterStateAppliedChange[],
-  right: readonly CharacterStateAppliedChange[]
-): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return left.every((leftChange, index) => {
-    const rightChange = right[index];
-
-    return (
-      rightChange !== undefined &&
-      leftChange.field === rightChange.field &&
-      leftChange.before === rightChange.before &&
-      leftChange.after === rightChange.after
-    );
-  });
-}
-
 function assertRoleModelInputTextMatchesPayloadSummary(options: {
   readonly payloadSummary: RawEventLogPayloadSummary | undefined;
   readonly inputText: string;
@@ -1572,8 +1267,8 @@ function assertParsedRoleModelDecisionMatchesRawOutput(options: {
       providerMetadata: options.roleModelIOSnapshot.providerMetadata,
       decisionResult: options.parsedRoleModelDecisionSnapshot.result,
       allowedTools: options.roleModelIOSnapshot.inputEnvelope.allowedTools,
-      capabilityToolDefinitions:
-        options.roleModelIOSnapshot.inputEnvelope.capabilityToolDefinitions
+      pluginToolDefinitions:
+        options.roleModelIOSnapshot.inputEnvelope.pluginToolDefinitions
     })
   ) {
     return;
@@ -1592,17 +1287,15 @@ function assertParsedRoleModelDecisionAllowedByEnvelope(options: {
     return;
   }
 
-  const allToolCallsAreAllowed = parsedResult.decision.toolCalls.every((call) =>
-    options.roleModelIOSnapshot.inputEnvelope.allowedTools.includes(call.name)
-  );
+  const visibleReplyIsAllowed = parsedResult.decision.toolCalls
+    .filter((call) => call.name === visibleReplyModelToolName)
+    .every((call) =>
+      options.roleModelIOSnapshot.inputEnvelope.allowedTools.includes(call.name)
+    );
 
-  if (allToolCallsAreAllowed) {
-    return;
+  if (!visibleReplyIsAllowed) {
+    throwMalformedRecord('roleModelIOSnapshot.inputEnvelope.allowedTools');
   }
-
-  throwMalformedRecord(
-    'roleModelIOSnapshot.inputEnvelope.allowedTools'
-  );
 }
 
 function assertRoleModelCommitStatusMatchesRawEvent(options: {
@@ -1806,11 +1499,9 @@ function requiredRoleModelInputEnvelope(
   return createRoleModelInputEnvelope({
     event: requiredUserMessageRuntimeEvent(value['event']),
     decisionContext: requiredDecisionContext(value['decisionContext']),
-    allowedTools: requiredRoleModelAllowedTools(
-      value['allowedTools'] ?? value['allowedActions']
-    ),
-    capabilityToolDefinitions: optionalRoleModelCapabilityToolDefinitions(
-      value['capabilityToolDefinitions']
+    allowedTools: requiredRoleModelAllowedTools(value['allowedTools']),
+    pluginToolDefinitions: optionalRoleModelPluginToolDefinitions(
+      value['pluginToolDefinitions']
     ),
     toolObservations: optionalRoleModelToolObservations(
       value['toolObservations']
@@ -1860,10 +1551,9 @@ function requiredDecisionContext(value: unknown): DecisionContext {
       'recentVisibleMessages'
     ),
     runtimeNotes: requiredStringArray(value['runtimeNotes'], 'runtimeNotes'),
-    capabilityContextItems: optionalAgentCapabilityContextItems(
-      value['capabilityContextItems']
-    ),
-    ...optionalLivingStateBriefOption(value['livingStateBrief'])
+    pluginContextItems: optionalRuntimePluginContextItems(
+      value['pluginContextItems']
+    )
   });
 }
 
@@ -1876,41 +1566,6 @@ function requiredCharacterProfile(value: unknown): CharacterProfile {
     id: requiredRecordString(value, 'id', 'malformed_record'),
     displayName: requiredRecordString(value, 'displayName', 'malformed_record')
   } satisfies CharacterProfile);
-}
-
-function optionalLivingStateBriefOption(value: unknown): {
-  readonly livingStateBrief?: LivingStateBrief;
-} {
-  if (value === undefined) {
-    return {};
-  }
-
-  if (!isRecord(value)) {
-    throwMalformedRecord('livingStateBrief');
-  }
-
-  const current = value['current'];
-
-  if (!isRecord(current)) {
-    throwMalformedRecord('livingStateBrief.current');
-  }
-
-  const text = requiredRecordString(value, 'text', 'malformed_record');
-  const livingStateBrief = createLivingStateBrief({
-    version: 'mvp-006.character_state.v1',
-    current: requiredCharacterRuntimeState({
-      version: 'mvp-006.character_state.v1',
-      current
-    }).current
-  });
-
-  if (text !== livingStateBrief.text) {
-    throwMalformedRecord('livingStateBrief.text');
-  }
-
-  return {
-    livingStateBrief
-  };
 }
 
 function requiredVisibleMessages(
@@ -1954,21 +1609,21 @@ function requiredStringArray(value: unknown, key: string): readonly string[] {
   return Object.freeze(strings);
 }
 
-function optionalAgentCapabilityContextItems(
+function optionalRuntimePluginContextItems(
   value: unknown
-): readonly AgentCapabilityContextItem[] {
+): readonly RuntimePluginContextItem[] {
   if (value === undefined) {
     return Object.freeze([]);
   }
 
-  const contextItems: AgentCapabilityContextItem[] = [];
+  const contextItems: RuntimePluginContextItem[] = [];
 
-  for (const item of requiredArray(value, 'capabilityContextItems')) {
+  for (const item of requiredArray(value, 'pluginContextItems')) {
     try {
-      contextItems.push(createAgentCapabilityContextItem(item));
+      contextItems.push(createRuntimePluginContextItem(item));
     } catch (error: unknown) {
       if (error instanceof TypeError) {
-        throwMalformedRecord('capabilityContextItems');
+        throwMalformedRecord('pluginContextItems');
       }
 
       throw error;
@@ -1978,36 +1633,36 @@ function optionalAgentCapabilityContextItems(
   return Object.freeze(contextItems);
 }
 
-function optionalRoleModelCapabilityToolDefinitions(
+function optionalRoleModelPluginToolDefinitions(
   value: unknown
-): readonly RoleModelCapabilityToolDefinition[] {
+): readonly RoleModelPluginToolDefinition[] {
   if (value === undefined) {
     return Object.freeze([]);
   }
 
-  const definitions: RoleModelCapabilityToolDefinition[] = [];
+  const definitions: RoleModelPluginToolDefinition[] = [];
 
-  for (const item of requiredArray(value, 'capabilityToolDefinitions')) {
+  for (const item of requiredArray(value, 'pluginToolDefinitions')) {
     if (!isRecord(item)) {
-      throwMalformedRecord('capabilityToolDefinitions');
+      throwMalformedRecord('pluginToolDefinitions');
     }
 
-    const capabilityId = requiredRecordString(
+    const pluginId = requiredRecordString(
       item,
-      'capabilityId',
+      'pluginId',
       'malformed_record'
     );
 
     try {
       definitions.push(
         Object.freeze({
-          capabilityId,
-          ...createAgentCapabilityProvidedTool(item)
-        } satisfies RoleModelCapabilityToolDefinition)
+          pluginId,
+          ...createRuntimePluginProvidedTool(item)
+        } satisfies RoleModelPluginToolDefinition)
       );
     } catch (error: unknown) {
       if (error instanceof TypeError) {
-        throwMalformedRecord('capabilityToolDefinitions');
+        throwMalformedRecord('pluginToolDefinitions');
       }
 
       throw error;
@@ -2041,9 +1696,9 @@ function optionalRoleModelToolObservations(
       observations.push(
         createRoleModelToolObservation({
           round: requiredRecordNumber(item, 'round', 'malformed_record'),
-          capabilityId: requiredRecordString(
+          pluginId: requiredRecordString(
             item,
-            'capabilityId',
+            'pluginId',
             'malformed_record'
           ),
           toolName: requiredRecordString(item, 'toolName', 'malformed_record'),
@@ -2115,10 +1770,7 @@ function requiredRoleModelOutputContract(
 
   const version = requiredRecordString(value, 'version', 'malformed_record');
 
-  if (
-    version !== roleModelDecisionContractVersion &&
-    version !== roleModelLegacyDecisionContractVersion
-  ) {
+  if (version !== roleModelDecisionContractVersion) {
     throwMalformedRecord('outputContract.version');
   }
 
@@ -2279,47 +1931,7 @@ function requiredCharacterDecision(value: unknown): CharacterDecision {
     } satisfies CharacterDecision);
   }
 
-  if (value['version'] === undefined && value['action'] !== undefined) {
-    return requiredLegacyVisibleReplyCharacterDecision(value);
-  }
-
   throwMalformedRecord('decision.version');
-}
-
-function requiredLegacyVisibleReplyCharacterDecision(
-  value: Readonly<Record<string, unknown>>
-): CharacterDecision {
-  if (Object.keys(value).some((key) => key !== 'action')) {
-    throwMalformedRecord('decision');
-  }
-
-  const action = value['action'];
-
-  if (!isRecord(action)) {
-    throwMalformedRecord('decision.action');
-  }
-
-  if (Object.keys(action).some((key) => key !== 'type' && key !== 'text')) {
-    throwMalformedRecord('decision.action');
-  }
-
-  if (
-    requiredRecordString(action, 'type', 'malformed_record') !==
-    visibleReplyModelToolName
-  ) {
-    throwMalformedRecord('decision.action.type');
-  }
-
-  const text = requiredRecordStringAllowingEmpty(
-    action,
-    'text',
-    'malformed_record'
-  );
-
-  return Object.freeze({
-    version: roleModelDecisionContractVersion,
-    toolCalls: Object.freeze([createVisibleReplyModelToolCall(text)])
-  } satisfies CharacterDecision);
 }
 
 function requiredModelToolCall(value: unknown): ModelToolCall {
@@ -2351,13 +1963,13 @@ function requiredModelToolCall(value: unknown): ModelToolCall {
   return Object.freeze({
     name,
     input: freezeJsonRecord(input)
-  } satisfies CapabilityModelToolCall);
+  } satisfies PluginModelToolCall);
 }
 
 function freezeJsonRecord(
   record: Readonly<Record<string, unknown>>
-): Readonly<Record<string, AgentCapabilityJsonValue>> {
-  const snapshot: Record<string, AgentCapabilityJsonValue> = {};
+): Readonly<Record<string, RuntimePluginJsonValue>> {
+  const snapshot: Record<string, RuntimePluginJsonValue> = {};
 
   for (const [key, value] of Object.entries(record)) {
     snapshot[key] = freezeJsonValue(value);
@@ -2366,7 +1978,7 @@ function freezeJsonRecord(
   return Object.freeze(snapshot);
 }
 
-function freezeJsonValue(value: unknown): AgentCapabilityJsonValue {
+function freezeJsonValue(value: unknown): RuntimePluginJsonValue {
   if (
     value === null ||
     typeof value === 'string' ||
@@ -2421,161 +2033,6 @@ function requiredRoleModelCommitValidationResult(
   }
 
   throwMalformedRecord('status');
-}
-
-function requiredCharacterStatePatchResult(
-  value: unknown
-): CharacterStatePatchResult {
-  if (!isRecord(value)) {
-    throwMalformedRecord('characterStatePatchSnapshot.result');
-  }
-
-  const status = requiredRecordString(value, 'status', 'malformed_record');
-
-  if (status === 'accepted') {
-    return Object.freeze({
-      status: 'accepted',
-      patch: requiredCharacterStatePatch(value['patch']),
-      before: requiredCharacterRuntimeState(value['before']),
-      after: requiredCharacterRuntimeState(value['after']),
-      appliedChanges: requiredCharacterStateAppliedChanges(
-        value['appliedChanges']
-      )
-    } satisfies AcceptedCharacterStatePatchResult);
-  }
-
-  if (status === 'rejected') {
-    return Object.freeze({
-      status: 'rejected',
-      patchInput: requiredUnknownRecord(value['patchInput'], 'patchInput'),
-      before: requiredCharacterRuntimeState(value['before']),
-      rejection: requiredCharacterStatePatchRejection(value['rejection'])
-    } satisfies RejectedCharacterStatePatchResult);
-  }
-
-  throwMalformedRecord('characterStatePatchSnapshot.result.status');
-}
-
-function requiredCharacterRuntimeState(value: unknown): CharacterRuntimeState {
-  return decodeCharacterRuntimeState(value, throwMalformedRecord);
-}
-
-function requiredCharacterStatePatch(value: unknown): CharacterStatePatch {
-  if (!isRecord(value)) {
-    throwMalformedRecord('characterStatePatchSnapshot.result.patch');
-  }
-
-  for (const key of Object.keys(value)) {
-    requiredCharacterStatePatchField(key);
-  }
-
-  const state = decodeCharacterRuntimeState(
-    {
-      version: 'mvp-006.character_state.v1',
-      current: {
-        mood: value['mood'] ?? 'steady',
-        energy: value['energy'] ?? 'medium',
-        attention: value['attention'] ?? 'present',
-        currentActivity: value['currentActivity'] ?? 'idle',
-        socialOrientation: value['socialOrientation'] ?? 'open'
-      }
-    },
-    throwMalformedRecord
-  );
-
-  return Object.freeze({
-    ...(value['mood'] === undefined ? {} : { mood: state.current.mood }),
-    ...(value['energy'] === undefined ? {} : { energy: state.current.energy }),
-    ...(value['attention'] === undefined
-      ? {}
-      : { attention: state.current.attention }),
-    ...(value['currentActivity'] === undefined
-      ? {}
-      : { currentActivity: state.current.currentActivity }),
-    ...(value['socialOrientation'] === undefined
-      ? {}
-      : { socialOrientation: state.current.socialOrientation })
-  } satisfies CharacterStatePatch);
-}
-
-function requiredCharacterStateAppliedChanges(
-  value: unknown
-): readonly CharacterStateAppliedChange[] {
-  const changes: CharacterStateAppliedChange[] = [];
-
-  for (const item of requiredArray(value, 'appliedChanges')) {
-    if (!isRecord(item)) {
-      throwMalformedRecord('appliedChanges');
-    }
-
-    changes.push(
-      Object.freeze({
-        field: requiredCharacterStatePatchField(item['field']),
-        before: requiredRecordString(item, 'before', 'malformed_record'),
-        after: requiredRecordString(item, 'after', 'malformed_record')
-      } satisfies CharacterStateAppliedChange)
-    );
-  }
-
-  return Object.freeze(changes);
-}
-
-function requiredCharacterStatePatchField(
-  value: unknown
-): CharacterStateAppliedChange['field'] {
-  if (
-    value === 'mood' ||
-    value === 'energy' ||
-    value === 'attention' ||
-    value === 'currentActivity' ||
-    value === 'socialOrientation'
-  ) {
-    return value;
-  }
-
-  throwMalformedRecord('appliedChanges.field');
-}
-
-function requiredCharacterStatePatchRejection(
-  value: unknown
-): CharacterStatePatchRejection {
-  if (!isRecord(value)) {
-    throwMalformedRecord('characterStatePatchSnapshot.result.rejection');
-  }
-
-  return Object.freeze({
-    reason: requiredCharacterStatePatchRejectionReason(value['reason']),
-    details: requiredRecordStringAllowingEmpty(
-      value,
-      'details',
-      'malformed_record'
-    )
-  } satisfies CharacterStatePatchRejection);
-}
-
-function requiredCharacterStatePatchRejectionReason(
-  value: unknown
-): CharacterStatePatchRejectionReason {
-  if (
-    value === 'malformed_state_patch' ||
-    value === 'unsupported_state_field' ||
-    value === 'invalid_state_value'
-  ) {
-    return value;
-  }
-
-  throwMalformedRecord('characterStatePatchSnapshot.result.rejection.reason');
-}
-
-function requiredUnknownRecord(
-  value: unknown,
-  key: string
-): Readonly<Record<string, unknown>> {
-  if (!isRecord(value)) {
-    throwMalformedRecord(key);
-  }
-
-  return Object.freeze({ ...value });
 }
 
 function requiredRoleModelDecisionRejection(

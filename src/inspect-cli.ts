@@ -8,8 +8,8 @@ import {
   LocalRuntimeStorageContractError,
   normalizeLocalRuntimeSessionId,
   type ConversationLogRecord,
-  type AgentCapabilityEvidenceSnapshot,
-  type AgentCapabilityTurnEvidenceSnapshot,
+  type RuntimePluginEvidenceSnapshot,
+  type RuntimePluginTurnEvidenceSnapshot,
   type LocalRuntimeSessionMetadata,
   type RawEventLogRecord,
   type RoleModelCommitValidationResult,
@@ -61,8 +61,7 @@ type InspectTurnEvidence = {
   readonly modelRounds: readonly InspectRoleModelRoundEvidence[];
   readonly toolEvents: readonly InspectToolCallEvent[];
   readonly roleModelEvidence?: InspectRoleModelEvidence;
-  readonly characterStatePatchEvidence?: InspectCharacterStatePatchEvidence;
-  readonly capabilityEvidence?: InspectCapabilityEvidence;
+  readonly pluginEvidence?: InspectPluginEvidence;
   readonly reason?: string;
 };
 
@@ -79,7 +78,7 @@ type InspectToolCallEvent = {
   readonly toolName: string;
   readonly pluginId: string;
   readonly input?: unknown;
-  readonly result?: InspectCapabilityToolInvocationResult;
+  readonly result?: InspectPluginToolInvocationResult;
   readonly pluginStoreRevision?: number;
 };
 
@@ -139,28 +138,18 @@ type InspectRoleModelCommitValidation =
       readonly rejectionDetails?: string;
     };
 
-type InspectCharacterStatePatchEvidence = {
-  readonly status: 'accepted' | 'rejected';
-  readonly patch?: unknown;
-  readonly patchInput?: unknown;
-  readonly before: unknown;
-  readonly after?: unknown;
-  readonly appliedChanges?: unknown;
-  readonly rejection?: unknown;
-};
-
-type InspectCapabilityEvidence = {
+type InspectPluginEvidence = {
   readonly contractVersion?: string;
-  readonly capabilities: readonly InspectCapabilityListing[];
-  readonly contextItems: readonly InspectCapabilityContextItem[];
-  readonly toolInvocations: readonly InspectCapabilityToolInvocation[];
-  readonly evidence: readonly InspectCapabilityEvidenceSnapshot[];
+  readonly plugins: readonly InspectPluginListing[];
+  readonly contextItems: readonly InspectPluginContextItem[];
+  readonly toolInvocations: readonly InspectPluginToolInvocation[];
+  readonly evidence: readonly InspectPluginEvidenceSnapshot[];
   readonly policyOutcomes: readonly string[];
-  readonly health: readonly InspectCapabilityHealthSnapshot[];
+  readonly health: readonly InspectPluginHealthSnapshot[];
 };
 
-type InspectCapabilityListing = {
-  readonly capabilityId: string;
+type InspectPluginListing = {
+  readonly pluginId: string;
   readonly displayName: string;
   readonly version: string;
   readonly kind: string;
@@ -169,14 +158,14 @@ type InspectCapabilityListing = {
   readonly registered: boolean;
   readonly enabled: boolean;
   readonly availableForTurn: boolean;
-  readonly providedTools: readonly InspectCapabilityToolListing[];
+  readonly providedTools: readonly InspectPluginToolListing[];
   readonly registeredLifecycleHooks: readonly string[];
   readonly redactionLabels: readonly string[];
   readonly configFingerprint?: string;
   readonly healthStatus?: string;
 };
 
-type InspectCapabilityToolListing = {
+type InspectPluginToolListing = {
   readonly name: string;
   readonly validationOwner: string;
   readonly sideEffectLevel: string;
@@ -184,8 +173,8 @@ type InspectCapabilityToolListing = {
   readonly sourceReferencesRequired: boolean;
 };
 
-type InspectCapabilityContextItem = {
-  readonly capabilityId: string;
+type InspectPluginContextItem = {
+  readonly pluginId: string;
   readonly id: string;
   readonly kind: string;
   readonly text: string;
@@ -193,51 +182,51 @@ type InspectCapabilityContextItem = {
     readonly estimatedTokens: number;
     readonly priority: number;
   };
-  readonly sourceReferences: readonly InspectCapabilitySourceReference[];
+  readonly sourceReferences: readonly InspectPluginSourceReference[];
   readonly redactionLabels: readonly string[];
   readonly confidence?: number;
 };
 
-type InspectCapabilityToolInvocation = {
-  readonly capabilityId: string;
+type InspectPluginToolInvocation = {
+  readonly pluginId: string;
   readonly toolName: string;
   readonly input: unknown;
-  readonly result: InspectCapabilityToolInvocationResult;
+  readonly result: InspectPluginToolInvocationResult;
 };
 
-type InspectCapabilityToolInvocationResult =
+type InspectPluginToolInvocationResult =
   | {
       readonly status: 'accepted';
       readonly output: unknown;
-      readonly evidence: readonly InspectCapabilityEvidenceSnapshot[];
+      readonly evidence: readonly InspectPluginEvidenceSnapshot[];
     }
   | {
       readonly status: 'rejected';
       readonly reason: string;
       readonly message: string;
-      readonly evidence: readonly InspectCapabilityEvidenceSnapshot[];
+      readonly evidence: readonly InspectPluginEvidenceSnapshot[];
     };
 
-type InspectCapabilityEvidenceSnapshot = {
-  readonly capabilityId: string;
+type InspectPluginEvidenceSnapshot = {
+  readonly pluginId: string;
   readonly evidenceKind: string;
   readonly status: string;
   readonly summary: string;
   readonly redactionLabels: readonly string[];
   readonly policyOutcome?: string;
-  readonly sourceReferences?: readonly InspectCapabilitySourceReference[];
+  readonly sourceReferences?: readonly InspectPluginSourceReference[];
   readonly configFingerprint?: string;
 };
 
-type InspectCapabilityHealthSnapshot = {
-  readonly capabilityId: string;
+type InspectPluginHealthSnapshot = {
+  readonly pluginId: string;
   readonly status: string;
   readonly checkedAt: string;
   readonly summary: string;
   readonly redactionLabels: readonly string[];
 };
 
-type InspectCapabilitySourceReference = {
+type InspectPluginSourceReference = {
   readonly kind: string;
   readonly id: string;
   readonly title?: string;
@@ -465,8 +454,7 @@ function createTurnEvidenceEntry(options: {
       terminalRawEvent: options.rawEvent
     }),
     ...roleModelEvidenceForRawEvent(options.rawEvent),
-    ...characterStatePatchEvidenceForRawEvent(options.rawEvent),
-    ...capabilityEvidenceForRawEvent(options.rawEvent),
+    ...pluginEvidenceForRawEvent(options.rawEvent),
     ...(options.rawEvent.reason === undefined
       ? {}
       : { reason: options.rawEvent.reason })
@@ -535,41 +523,6 @@ function roleModelEvidenceForRawEvent(
   };
 }
 
-function characterStatePatchEvidenceForRawEvent(
-  rawEvent: RawEventLogRecord
-): {
-  readonly characterStatePatchEvidence?: InspectCharacterStatePatchEvidence;
-} {
-  const snapshot = rawEvent.characterStatePatchSnapshot;
-
-  if (snapshot === undefined) {
-    return {};
-  }
-
-  const result = snapshot.result;
-
-  if (result.status === 'accepted') {
-    return {
-      characterStatePatchEvidence: Object.freeze({
-        status: 'accepted',
-        patch: result.patch,
-        before: result.before,
-        after: result.after,
-        appliedChanges: result.appliedChanges
-      } satisfies InspectCharacterStatePatchEvidence)
-    };
-  }
-
-  return {
-    characterStatePatchEvidence: Object.freeze({
-      status: 'rejected',
-      patchInput: result.patchInput,
-      before: result.before,
-      rejection: result.rejection
-    } satisfies InspectCharacterStatePatchEvidence)
-  };
-}
-
 function modelRoundsForTurn(options: {
   readonly rawEvents: readonly RawEventLogRecord[];
   readonly terminalRawEvent: RawEventLogRecord;
@@ -628,7 +581,7 @@ function toolEventsForTurn(options: {
           ...(rawEvent.toolInput === undefined ? {} : { input: rawEvent.toolInput }),
           ...(rawEvent.toolResult === undefined
             ? {}
-            : { result: capabilityToolInvocationResult(rawEvent.toolResult) }),
+            : { result: pluginToolInvocationResult(rawEvent.toolResult) }),
           ...(rawEvent.pluginStoreRevision === undefined
             ? {}
             : { pluginStoreRevision: rawEvent.pluginStoreRevision })
@@ -637,84 +590,84 @@ function toolEventsForTurn(options: {
   );
 }
 
-function capabilityEvidenceForRawEvent(
+function pluginEvidenceForRawEvent(
   rawEvent: RawEventLogRecord
-): { readonly capabilityEvidence?: InspectCapabilityEvidence } {
-  const turnEvidence = rawEvent.agentCapabilityTurnEvidence;
-  const simpleEvidence = rawEvent.agentCapabilityEvidence ?? [];
+): { readonly pluginEvidence?: InspectPluginEvidence } {
+  const turnEvidence = rawEvent.runtimePluginTurnEvidence;
+  const simpleEvidence = rawEvent.runtimePluginEvidence ?? [];
 
   if (turnEvidence === undefined && simpleEvidence.length === 0) {
     return {};
   }
 
-  const evidence = uniqueCapabilityEvidenceSnapshots([
+  const evidence = uniquePluginEvidenceSnapshots([
     ...simpleEvidence,
     ...(turnEvidence?.evidence ?? [])
   ]);
 
   return {
-    capabilityEvidence: Object.freeze({
+    pluginEvidence: Object.freeze({
       ...(turnEvidence === undefined
         ? {}
         : { contractVersion: turnEvidence.contractVersion }),
-      capabilities: capabilityListings(turnEvidence),
-      contextItems: capabilityContextItems(turnEvidence),
-      toolInvocations: capabilityToolInvocations(turnEvidence),
-      evidence: Object.freeze(evidence.map(capabilityEvidenceSnapshot)),
+      plugins: pluginListings(turnEvidence),
+      contextItems: pluginContextItems(turnEvidence),
+      toolInvocations: pluginToolInvocations(turnEvidence),
+      evidence: Object.freeze(evidence.map(pluginEvidenceSnapshot)),
       policyOutcomes: policyOutcomes(evidence),
-      health: capabilityHealthSnapshots(turnEvidence)
-    } satisfies InspectCapabilityEvidence)
+      health: pluginHealthSnapshots(turnEvidence)
+    } satisfies InspectPluginEvidence)
   };
 }
 
-function capabilityListings(
-  turnEvidence: AgentCapabilityTurnEvidenceSnapshot | undefined
-): readonly InspectCapabilityListing[] {
+function pluginListings(
+  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined
+): readonly InspectPluginListing[] {
   if (turnEvidence === undefined) {
     return Object.freeze([]);
   }
 
   return Object.freeze(
-    turnEvidence.capabilities.map((capability) =>
+    turnEvidence.plugins.map((plugin) =>
       Object.freeze({
-        capabilityId: capability.capabilityId,
-        displayName: capability.manifest.displayName,
-        version: capability.manifest.version,
-        kind: capability.manifest.kind,
-        localTrustLevel: capability.manifest.localTrustLevel,
-        installed: capability.installed,
-        registered: capability.registered,
-        enabled: capability.enabled,
-        availableForTurn: capability.availableForTurn,
+        pluginId: plugin.pluginId,
+        displayName: plugin.manifest.displayName,
+        version: plugin.manifest.version,
+        kind: plugin.manifest.kind,
+        localTrustLevel: plugin.manifest.localTrustLevel,
+        installed: plugin.installed,
+        registered: plugin.registered,
+        enabled: plugin.enabled,
+        availableForTurn: plugin.availableForTurn,
         providedTools: Object.freeze(
-          capability.providedTools.map((tool) =>
+          plugin.providedTools.map((tool) =>
             Object.freeze({
               name: tool.name,
               validationOwner: tool.validationOwner,
               sideEffectLevel: tool.sideEffectLevel,
               requiresConfirmation: tool.requiresConfirmation,
               sourceReferencesRequired: tool.sourceReferencesRequired
-            } satisfies InspectCapabilityToolListing)
+            } satisfies InspectPluginToolListing)
           )
         ),
         registeredLifecycleHooks: Object.freeze([
-          ...capability.registeredLifecycleHooks
+          ...plugin.registeredLifecycleHooks
         ]),
-        redactionLabels: Object.freeze([...capability.redactionLabels]),
-        ...(capability.configFingerprint === undefined
+        redactionLabels: Object.freeze([...plugin.redactionLabels]),
+        ...(plugin.configFingerprint === undefined
           ? {}
-          : { configFingerprint: capability.configFingerprint }),
-        ...(capability.healthStatus === undefined
+          : { configFingerprint: plugin.configFingerprint }),
+        ...(plugin.healthStatus === undefined
           ? {}
-          : { healthStatus: capability.healthStatus })
-      } satisfies InspectCapabilityListing)
+          : { healthStatus: plugin.healthStatus })
+      } satisfies InspectPluginListing)
     )
   );
 }
 
-function capabilityContextItems(
-  turnEvidence: AgentCapabilityTurnEvidenceSnapshot | undefined
-): readonly InspectCapabilityContextItem[] {
+function pluginContextItems(
+  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined
+): readonly InspectPluginContextItem[] {
   if (turnEvidence === undefined) {
     return Object.freeze([]);
   }
@@ -722,7 +675,7 @@ function capabilityContextItems(
   return Object.freeze(
     turnEvidence.contextItems.map((item) =>
       Object.freeze({
-        capabilityId: item.capabilityId,
+        pluginId: item.pluginId,
         id: item.id,
         kind: item.kind,
         text: item.text,
@@ -733,14 +686,14 @@ function capabilityContextItems(
         sourceReferences: sourceReferences(item.sourceReferences),
         redactionLabels: Object.freeze([...item.redactionLabels]),
         ...(item.confidence === undefined ? {} : { confidence: item.confidence })
-      } satisfies InspectCapabilityContextItem)
+      } satisfies InspectPluginContextItem)
     )
   );
 }
 
-function capabilityToolInvocations(
-  turnEvidence: AgentCapabilityTurnEvidenceSnapshot | undefined
-): readonly InspectCapabilityToolInvocation[] {
+function pluginToolInvocations(
+  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined
+): readonly InspectPluginToolInvocation[] {
   if (turnEvidence === undefined) {
     return Object.freeze([]);
   }
@@ -748,39 +701,39 @@ function capabilityToolInvocations(
   return Object.freeze(
     turnEvidence.toolInvocations.map((invocation) =>
       Object.freeze({
-        capabilityId: invocation.capabilityId,
+        pluginId: invocation.pluginId,
         toolName: invocation.toolName,
         input: invocation.input,
-        result: capabilityToolInvocationResult(invocation.result)
-      } satisfies InspectCapabilityToolInvocation)
+        result: pluginToolInvocationResult(invocation.result)
+      } satisfies InspectPluginToolInvocation)
     )
   );
 }
 
-function capabilityToolInvocationResult(
-  result: AgentCapabilityTurnEvidenceSnapshot['toolInvocations'][number]['result']
-): InspectCapabilityToolInvocationResult {
+function pluginToolInvocationResult(
+  result: RuntimePluginTurnEvidenceSnapshot['toolInvocations'][number]['result']
+): InspectPluginToolInvocationResult {
   if (result.status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
       output: result.output,
-      evidence: Object.freeze(result.evidence.map(capabilityEvidenceSnapshot))
-    } satisfies InspectCapabilityToolInvocationResult);
+      evidence: Object.freeze(result.evidence.map(pluginEvidenceSnapshot))
+    } satisfies InspectPluginToolInvocationResult);
   }
 
   return Object.freeze({
     status: 'rejected',
     reason: result.reason,
     message: result.message,
-    evidence: Object.freeze(result.evidence.map(capabilityEvidenceSnapshot))
-  } satisfies InspectCapabilityToolInvocationResult);
+    evidence: Object.freeze(result.evidence.map(pluginEvidenceSnapshot))
+  } satisfies InspectPluginToolInvocationResult);
 }
 
-function capabilityEvidenceSnapshot(
-  snapshot: AgentCapabilityEvidenceSnapshot
-): InspectCapabilityEvidenceSnapshot {
+function pluginEvidenceSnapshot(
+  snapshot: RuntimePluginEvidenceSnapshot
+): InspectPluginEvidenceSnapshot {
   return Object.freeze({
-    capabilityId: snapshot.capabilityId,
+    pluginId: snapshot.pluginId,
     evidenceKind: snapshot.evidenceKind,
     status: snapshot.status,
     summary: snapshot.summary,
@@ -794,17 +747,17 @@ function capabilityEvidenceSnapshot(
     ...(snapshot.configFingerprint === undefined
       ? {}
       : { configFingerprint: snapshot.configFingerprint })
-  } satisfies InspectCapabilityEvidenceSnapshot);
+  } satisfies InspectPluginEvidenceSnapshot);
 }
 
-function uniqueCapabilityEvidenceSnapshots(
-  snapshots: readonly AgentCapabilityEvidenceSnapshot[]
-): readonly AgentCapabilityEvidenceSnapshot[] {
+function uniquePluginEvidenceSnapshots(
+  snapshots: readonly RuntimePluginEvidenceSnapshot[]
+): readonly RuntimePluginEvidenceSnapshot[] {
   const seen = new Set<string>();
-  const uniqueSnapshots: AgentCapabilityEvidenceSnapshot[] = [];
+  const uniqueSnapshots: RuntimePluginEvidenceSnapshot[] = [];
 
   for (const snapshot of snapshots) {
-    const key = capabilityEvidenceSnapshotKey(snapshot);
+    const key = pluginEvidenceSnapshotKey(snapshot);
 
     if (seen.has(key)) {
       continue;
@@ -817,15 +770,15 @@ function uniqueCapabilityEvidenceSnapshots(
   return Object.freeze(uniqueSnapshots);
 }
 
-function capabilityEvidenceSnapshotKey(
-  snapshot: AgentCapabilityEvidenceSnapshot
+function pluginEvidenceSnapshotKey(
+  snapshot: RuntimePluginEvidenceSnapshot
 ): string {
   return JSON.stringify({
     eventId: snapshot.eventId,
     traceId: snapshot.traceId,
     createdAt: snapshot.createdAt,
     kind: snapshot.kind,
-    capabilityId: snapshot.capabilityId,
+    pluginId: snapshot.pluginId,
     evidenceKind: snapshot.evidenceKind,
     status: snapshot.status,
     summary: snapshot.summary,
@@ -836,9 +789,9 @@ function capabilityEvidenceSnapshotKey(
   });
 }
 
-function capabilityHealthSnapshots(
-  turnEvidence: AgentCapabilityTurnEvidenceSnapshot | undefined
-): readonly InspectCapabilityHealthSnapshot[] {
+function pluginHealthSnapshots(
+  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined
+): readonly InspectPluginHealthSnapshot[] {
   if (turnEvidence === undefined) {
     return Object.freeze([]);
   }
@@ -846,18 +799,18 @@ function capabilityHealthSnapshots(
   return Object.freeze(
     turnEvidence.health.map((snapshot) =>
       Object.freeze({
-        capabilityId: snapshot.capabilityId,
+        pluginId: snapshot.pluginId,
         status: snapshot.status,
         checkedAt: snapshot.checkedAt,
         summary: snapshot.summary,
         redactionLabels: Object.freeze([...snapshot.redactionLabels])
-      } satisfies InspectCapabilityHealthSnapshot)
+      } satisfies InspectPluginHealthSnapshot)
     )
   );
 }
 
 function policyOutcomes(
-  evidence: readonly AgentCapabilityEvidenceSnapshot[]
+  evidence: readonly RuntimePluginEvidenceSnapshot[]
 ): readonly string[] {
   const outcomes: string[] = [];
 
@@ -874,8 +827,8 @@ function policyOutcomes(
 }
 
 function sourceReferences(
-  references: readonly InspectCapabilitySourceReference[]
-): readonly InspectCapabilitySourceReference[] {
+  references: readonly InspectPluginSourceReference[]
+): readonly InspectPluginSourceReference[] {
   return Object.freeze(
     references.map((reference) =>
       Object.freeze({
@@ -883,7 +836,7 @@ function sourceReferences(
         id: reference.id,
         ...(reference.title === undefined ? {} : { title: reference.title }),
         ...(reference.uri === undefined ? {} : { uri: reference.uri })
-      } satisfies InspectCapabilitySourceReference)
+      } satisfies InspectPluginSourceReference)
     )
   );
 }

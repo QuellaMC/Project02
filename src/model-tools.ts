@@ -4,7 +4,7 @@ import {
   characterEnergyValues,
   characterMoodValues,
   characterSocialOrientationValues
-} from './character-state.ts';
+} from './plugins/builtin/character-state/schema.ts';
 
 export const visibleReplyModelToolName = 'visible_reply';
 export const characterStatePatchModelToolName = 'character_state.patch';
@@ -74,12 +74,12 @@ export type BuiltInModelToolCall =
   | VisibleReplyModelToolCall
   | CharacterStatePatchModelToolCall;
 
-export type CapabilityModelToolCall = {
+export type PluginModelToolCall = {
   readonly name: string;
   readonly input: Readonly<Record<string, unknown>>;
 };
 
-export type ModelToolCall = BuiltInModelToolCall | CapabilityModelToolCall;
+export type ModelToolCall = BuiltInModelToolCall | PluginModelToolCall;
 
 export const userTurnBuiltInModelToolNames = Object.freeze([
   visibleReplyModelToolName,
@@ -263,7 +263,7 @@ export function freezeModelToolCall(call: ModelToolCall): ModelToolCall {
   return Object.freeze({
     name: call.name,
     input: freezeJsonRecord(call.input)
-  } satisfies CapabilityModelToolCall);
+  } satisfies PluginModelToolCall);
 }
 
 export function freezeModelToolCalls(

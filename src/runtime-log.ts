@@ -1,5 +1,4 @@
 import type { VisibleMessage } from './conversation.ts';
-import type { CharacterStatePatchSnapshot } from './character-state.ts';
 import {
   createParsedRoleModelDecisionSnapshot,
   createRoleModelIOSnapshot,
@@ -8,13 +7,13 @@ import {
   type RoleModelIOSnapshot
 } from './role-model-contracts.ts';
 import {
-  createAgentCapabilityEvidenceSnapshot,
-  createAgentCapabilityTurnEvidenceSnapshot,
-  type AgentCapabilityJsonObject,
-  type AgentCapabilityToolCallResult,
-  type AgentCapabilityEvidenceSnapshot,
-  type AgentCapabilityTurnEvidenceSnapshot
-} from './agent-capabilities.ts';
+  createRuntimePluginEvidenceSnapshot,
+  createRuntimePluginTurnEvidenceSnapshot,
+  type RuntimePluginJsonObject,
+  type RuntimePluginToolCallResult,
+  type RuntimePluginEvidenceSnapshot,
+  type RuntimePluginTurnEvidenceSnapshot
+} from './plugins/types.ts';
 import type { RuntimeEventIdentity, RuntimeEventType } from './runtime-event.ts';
 import type { LocalRuntimeSessionPaths } from './local-storage.ts';
 
@@ -24,7 +23,7 @@ export type RuntimeTraceStepName =
   | 'runtime_event_received'
   | 'runtime_event_normalized'
   | 'runtime_turn_started'
-  | 'capability_before_role_model_call_rejected'
+  | 'plugin_before_role_model_call_rejected'
   | 'tool_call_started'
   | 'tool_call_finished'
   | 'visible_reply_committed'
@@ -42,7 +41,7 @@ export type RuntimeTraceEntry = RuntimeEventIdentity & {
 export type RawEventLogRecordKind =
   | 'runtime_event_received'
   | 'runtime_event_normalized'
-  | 'capability_before_role_model_call_rejected'
+  | 'plugin_before_role_model_call_rejected'
   | 'tool_call_started'
   | 'tool_call_finished'
   | 'visible_reply_committed'
@@ -68,16 +67,15 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly toolRound?: number;
   readonly toolName?: string;
   readonly toolPluginId?: string;
-  readonly toolInput?: AgentCapabilityJsonObject;
-  readonly toolResult?: AgentCapabilityToolCallResult;
+  readonly toolInput?: RuntimePluginJsonObject;
+  readonly toolResult?: RuntimePluginToolCallResult;
   readonly pluginStoreRevision?: number;
   readonly payloadSummary?: RawEventLogPayloadSummary;
   readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
-  readonly characterStatePatchSnapshot?: CharacterStatePatchSnapshot;
-  readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[];
-  readonly agentCapabilityTurnEvidence?: AgentCapabilityTurnEvidenceSnapshot;
+  readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
+  readonly runtimePluginTurnEvidence?: RuntimePluginTurnEvidenceSnapshot;
 };
 
 export type ConversationLogRecord = VisibleMessage &
@@ -100,16 +98,15 @@ export type RawEventLogRecordInput = RuntimeEventIdentity & {
   readonly toolRound?: number;
   readonly toolName?: string;
   readonly toolPluginId?: string;
-  readonly toolInput?: AgentCapabilityJsonObject;
-  readonly toolResult?: AgentCapabilityToolCallResult;
+  readonly toolInput?: RuntimePluginJsonObject;
+  readonly toolResult?: RuntimePluginToolCallResult;
   readonly pluginStoreRevision?: number;
   readonly payloadSummary?: RawEventLogPayloadSummary;
   readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
-  readonly characterStatePatchSnapshot?: CharacterStatePatchSnapshot;
-  readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[];
-  readonly agentCapabilityTurnEvidence?: AgentCapabilityTurnEvidenceSnapshot;
+  readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
+  readonly runtimePluginTurnEvidence?: RuntimePluginTurnEvidenceSnapshot;
 };
 
 export type ConversationLogRecordInput = VisibleMessage &
@@ -246,11 +243,11 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
   const commitValidation = freezeRoleModelCommitValidationSnapshot(
     record.commitValidation
   );
-  const agentCapabilityEvidence = freezeAgentCapabilityEvidenceSnapshots(
-    record.agentCapabilityEvidence
+  const runtimePluginEvidence = freezeRuntimePluginEvidenceSnapshots(
+    record.runtimePluginEvidence
   );
-  const agentCapabilityTurnEvidence = freezeAgentCapabilityTurnEvidenceSnapshot(
-    record.agentCapabilityTurnEvidence
+  const runtimePluginTurnEvidence = freezeRuntimePluginTurnEvidenceSnapshot(
+    record.runtimePluginTurnEvidence
   );
 
   return Object.freeze({
@@ -280,12 +277,12 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
       ? {}
       : { parsedRoleModelDecisionSnapshot }),
     ...(commitValidation === undefined ? {} : { commitValidation }),
-    ...(agentCapabilityEvidence === undefined
+    ...(runtimePluginEvidence === undefined
       ? {}
-      : { agentCapabilityEvidence }),
-    ...(agentCapabilityTurnEvidence === undefined
+      : { runtimePluginEvidence }),
+    ...(runtimePluginTurnEvidence === undefined
       ? {}
-      : { agentCapabilityTurnEvidence })
+      : { runtimePluginTurnEvidence })
   } satisfies RawEventLogRecord);
 }
 
@@ -355,28 +352,28 @@ function freezeRoleModelCommitValidationSnapshot(
   return createRoleModelCommitValidationSnapshot(snapshot);
 }
 
-function freezeAgentCapabilityEvidenceSnapshots(
-  snapshots: readonly AgentCapabilityEvidenceSnapshot[] | undefined
-): readonly AgentCapabilityEvidenceSnapshot[] | undefined {
+function freezeRuntimePluginEvidenceSnapshots(
+  snapshots: readonly RuntimePluginEvidenceSnapshot[] | undefined
+): readonly RuntimePluginEvidenceSnapshot[] | undefined {
   if (snapshots === undefined) {
     return undefined;
   }
 
   return Object.freeze(
     snapshots.map((snapshot) =>
-      createAgentCapabilityEvidenceSnapshot(snapshot)
+      createRuntimePluginEvidenceSnapshot(snapshot)
     )
   );
 }
 
-function freezeAgentCapabilityTurnEvidenceSnapshot(
-  snapshot: AgentCapabilityTurnEvidenceSnapshot | undefined
-): AgentCapabilityTurnEvidenceSnapshot | undefined {
+function freezeRuntimePluginTurnEvidenceSnapshot(
+  snapshot: RuntimePluginTurnEvidenceSnapshot | undefined
+): RuntimePluginTurnEvidenceSnapshot | undefined {
   if (snapshot === undefined) {
     return undefined;
   }
 
-  return createAgentCapabilityTurnEvidenceSnapshot(snapshot);
+  return createRuntimePluginTurnEvidenceSnapshot(snapshot);
 }
 
 function freezeRoleModelCommitValidationResult(

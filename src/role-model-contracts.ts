@@ -1,12 +1,11 @@
 import type { CharacterProfile, VisibleMessage } from './conversation.ts';
-import type { LivingStateBrief } from './character-state.ts';
 import {
-  createAgentCapabilityContextItem,
-  createAgentCapabilityProvidedTool,
-  type AgentCapabilityContextItem,
-  type AgentCapabilityJsonValue,
-  type AgentCapabilityProvidedTool
-} from './agent-capabilities.ts';
+  createRuntimePluginContextItem,
+  createRuntimePluginProvidedTool,
+  type RuntimePluginContextItem,
+  type RuntimePluginJsonValue,
+  type RuntimePluginProvidedTool
+} from './plugins/types.ts';
 import {
   builtInModelToolDefinitionsForUserTurn,
   characterStatePatchModelToolName,
@@ -35,30 +34,24 @@ import type {
 } from './runtime-event.ts';
 
 export const roleModelDecisionContractVersion = 'mvp-006.tool_calls.v1';
-export const roleModelLegacyDecisionContractVersion = 'mvp-005.visible_reply.v1';
-export const roleModelVisibleReplyActionName = visibleReplyModelToolName;
 export const roleModelCharacterStatePatchToolName =
   characterStatePatchModelToolName;
-export const roleModelCapabilityListToolName = 'capability.list';
+export const roleModelPluginListToolName = 'plugin.list';
 
 export type RoleModelAllowedToolName = string;
-export type RoleModelAllowedActionName = RoleModelAllowedToolName;
 export type RoleModelToolDefinition = ModelToolDefinition;
 
-export type RoleModelCapabilityToolDefinition = AgentCapabilityProvidedTool & {
-  readonly capabilityId: string;
+export type RoleModelPluginToolDefinition = RuntimePluginProvidedTool & {
+  readonly pluginId: string;
 };
 
 export const roleModelAllowedToolNames = userTurnBuiltInModelToolNames;
-export const roleModelAllowedActionNames = roleModelAllowedToolNames;
 
 export function isRoleModelAllowedToolName(
   value: unknown
 ): value is RoleModelAllowedToolName {
   return typeof value === 'string' && isRoleModelToolNameSyntax(value);
 }
-
-export const isRoleModelAllowedActionName = isRoleModelAllowedToolName;
 
 export const roleModelDecisionOutputContractText =
   'Return exactly one complete valid JSON CharacterDecision object with version "mvp-006.tool_calls.v1" and ordered toolCalls. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is the only non-executed output tool. Any other tool call is executed and fed back as a tool observation. If visible_reply appears with executable tools, it is interim visible output. A terminal response may use exactly one visible_reply, or may use top-level text only as folded model text with no visible final reply.';
@@ -95,8 +88,7 @@ export type DecisionContext = {
   readonly characterSnapshot: CharacterProfile;
   readonly recentVisibleMessages: readonly VisibleMessage[];
   readonly runtimeNotes: readonly string[];
-  readonly capabilityContextItems: readonly AgentCapabilityContextItem[];
-  readonly livingStateBrief?: LivingStateBrief;
+  readonly pluginContextItems: readonly RuntimePluginContextItem[];
 };
 
 export type CreateDecisionContextOptions = {
@@ -104,8 +96,7 @@ export type CreateDecisionContextOptions = {
   readonly characterSnapshot: CharacterProfile;
   readonly recentVisibleMessages?: readonly VisibleMessage[];
   readonly runtimeNotes?: readonly string[];
-  readonly capabilityContextItems?: readonly AgentCapabilityContextItem[];
-  readonly livingStateBrief?: LivingStateBrief;
+  readonly pluginContextItems?: readonly RuntimePluginContextItem[];
 };
 
 export type RoleModelInputEnvelope = {
@@ -113,7 +104,7 @@ export type RoleModelInputEnvelope = {
   readonly decisionContext: DecisionContext;
   readonly allowedTools: readonly RoleModelAllowedToolName[];
   readonly toolDefinitions: readonly RoleModelToolDefinition[];
-  readonly capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[];
+  readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
   readonly toolObservations: readonly RoleModelToolObservation[];
   readonly outputContract: RoleModelOutputContract;
 };
@@ -122,35 +113,29 @@ export type CreateRoleModelInputEnvelopeOptions = {
   readonly event: UserMessageRuntimeEvent;
   readonly decisionContext: DecisionContext;
   readonly allowedTools?: readonly RoleModelAllowedToolName[];
-  readonly allowedActions?: readonly RoleModelAllowedActionName[];
-  readonly capabilityToolDefinitions?: readonly RoleModelCapabilityToolDefinition[];
+  readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
   readonly toolObservations?: readonly RoleModelToolObservation[];
   readonly outputContract?: RoleModelOutputContract;
 };
 
 export type RoleModelToolObservation = {
   readonly round: number;
-  readonly capabilityId: string;
+  readonly pluginId: string;
   readonly toolName: string;
-  readonly input: Readonly<Record<string, AgentCapabilityJsonValue>>;
+  readonly input: Readonly<Record<string, RuntimePluginJsonValue>>;
   readonly result: RoleModelToolObservationResult;
 };
 
 export type RoleModelToolObservationResult =
   | {
       readonly status: 'accepted';
-      readonly output: AgentCapabilityJsonValue;
+      readonly output: RuntimePluginJsonValue;
     }
   | {
       readonly status: 'rejected';
       readonly reason: string;
       readonly message: string;
     };
-
-export type RoleModelVisibleReplyAction = {
-  readonly type: typeof roleModelVisibleReplyActionName;
-  readonly text: string;
-};
 
 export type CharacterDecision = {
   readonly version: typeof roleModelDecisionContractVersion;
@@ -167,13 +152,11 @@ export const roleModelMissingRequiredToolCallRejectionReason =
   'missing_required_tool_call';
 export const roleModelUnsupportedEffectRejectionReason = 'unsupported_effect';
 export const roleModelInvalidVisibleReplyRejectionReason = 'invalid_visible_reply';
-export const roleModelInvalidCharacterStatePatchRejectionReason =
-  'invalid_character_state_patch';
 export const roleModelProviderErrorRejectionReason = 'provider_error';
 export const roleModelCommitValidationFailureRejectionReason =
   'commit_validation_failure';
-export const roleModelCapabilityToolRejectedRejectionReason =
-  'capability_tool_rejected';
+export const roleModelPluginToolRejectedRejectionReason =
+  'plugin_tool_rejected';
 export const roleModelAdapterRawOutputMissingTextRejectionDetails =
   'Adapter raw output must include string rawOutputText.';
 export const roleModelAdapterRejectionNotReplayableDetails =
@@ -188,10 +171,9 @@ export type RoleModelDecisionRejectionReason =
   | typeof roleModelMissingRequiredToolCallRejectionReason
   | typeof roleModelUnsupportedEffectRejectionReason
   | typeof roleModelInvalidVisibleReplyRejectionReason
-  | typeof roleModelInvalidCharacterStatePatchRejectionReason
   | typeof roleModelProviderErrorRejectionReason
   | typeof roleModelCommitValidationFailureRejectionReason
-  | typeof roleModelCapabilityToolRejectedRejectionReason;
+  | typeof roleModelPluginToolRejectedRejectionReason;
 
 export const roleModelDecisionRejectionReasons = Object.freeze([
   roleModelMalformedOutputRejectionReason,
@@ -202,10 +184,9 @@ export const roleModelDecisionRejectionReasons = Object.freeze([
   roleModelMissingRequiredToolCallRejectionReason,
   roleModelUnsupportedEffectRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
-  roleModelInvalidCharacterStatePatchRejectionReason,
   roleModelProviderErrorRejectionReason,
   roleModelCommitValidationFailureRejectionReason,
-  roleModelCapabilityToolRejectedRejectionReason
+  roleModelPluginToolRejectedRejectionReason
 ] satisfies readonly RoleModelDecisionRejectionReason[]);
 
 export type RoleModelDecisionRejection = {
@@ -265,8 +246,8 @@ export function createDecisionContext(
       options.recentVisibleMessages ?? []
     ),
     runtimeNotes: Object.freeze([...(options.runtimeNotes ?? [])]),
-    capabilityContextItems: freezeCapabilityContextItems(
-      options.capabilityContextItems ?? []
+    pluginContextItems: freezePluginContextItems(
+      options.pluginContextItems ?? []
     )
   } satisfies DecisionContext);
 }
@@ -274,16 +255,15 @@ export function createDecisionContext(
 export function createRoleModelInputEnvelope(
   options: CreateRoleModelInputEnvelopeOptions
 ): RoleModelInputEnvelope {
-  const capabilityToolDefinitions = createRoleModelCapabilityToolDefinitions(
-    options.capabilityToolDefinitions ?? []
+  const pluginToolDefinitions = createRoleModelPluginToolDefinitions(
+    options.pluginToolDefinitions ?? []
   );
-  const modelToolDefinitions = modelToolDefinitionsForCapabilityToolDefinitions(
-    capabilityToolDefinitions
+  const modelToolDefinitions = modelToolDefinitionsForPluginToolDefinitions(
+    pluginToolDefinitions
   );
   const allowedTools = freezeAllowedTools(
     options.allowedTools ??
-      options.allowedActions ??
-      defaultAllowedToolsForCapabilityDefinitions(capabilityToolDefinitions),
+      defaultAllowedToolsForPluginDefinitions(pluginToolDefinitions),
     modelToolDefinitions
   );
 
@@ -295,7 +275,7 @@ export function createRoleModelInputEnvelope(
       allowedTools,
       toolDefinitions: modelToolDefinitions
     }),
-    capabilityToolDefinitions,
+    pluginToolDefinitions,
     toolObservations: freezeRoleModelToolObservations(
       options.toolObservations ?? []
     ),
@@ -389,7 +369,7 @@ export function createParsedRoleModelDecisionSnapshot(
 export function parseRoleModelDecision(
   rawOutputText: string,
   allowedTools: readonly RoleModelAllowedToolName[] = roleModelAllowedToolNames,
-  capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[] = []
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[] = []
 ): RoleModelDecisionResult {
   let parsedOutput: unknown;
 
@@ -402,7 +382,7 @@ export function parseRoleModelDecision(
   return parseRoleModelDecisionObject(
     parsedOutput,
     allowedTools,
-    capabilityToolDefinitions
+    pluginToolDefinitions
   );
 }
 
@@ -411,12 +391,12 @@ export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
   readonly providerMetadata: RoleModelProviderMetadata | undefined;
   readonly decisionResult: RoleModelDecisionResult;
   readonly allowedTools?: readonly RoleModelAllowedToolName[];
-  readonly capabilityToolDefinitions?: readonly RoleModelCapabilityToolDefinition[];
+  readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
 }): boolean {
   const parsedRawOutputDecision = parseRoleModelDecision(
     options.rawOutputText,
     options.allowedTools,
-    options.capabilityToolDefinitions
+    options.pluginToolDefinitions
   );
 
   return (
@@ -520,13 +500,13 @@ export function getCharacterStatePatchToolCall(
 function parseRoleModelDecisionObject(
   parsedOutput: unknown,
   allowedTools: readonly RoleModelAllowedToolName[],
-  capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[]
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[]
 ): RoleModelDecisionResult {
-  const frozenCapabilityToolDefinitions = createRoleModelCapabilityToolDefinitions(
-    capabilityToolDefinitions
+  const frozenPluginToolDefinitions = createRoleModelPluginToolDefinitions(
+    pluginToolDefinitions
   );
-  const modelToolDefinitions = modelToolDefinitionsForCapabilityToolDefinitions(
-    frozenCapabilityToolDefinitions
+  const modelToolDefinitions = modelToolDefinitionsForPluginToolDefinitions(
+    frozenPluginToolDefinitions
   );
   const frozenAllowedTools = freezeAllowedTools(
     allowedTools,
@@ -579,8 +559,6 @@ function parseRoleModelDecisionObject(
 
   for (const [index, rawToolCall] of rawToolCalls.entries()) {
     const parsedToolCall = parseModelToolCall({
-      allowedTools: frozenAllowedTools,
-      modelToolDefinitions,
       index,
       rawToolCall
     });
@@ -623,8 +601,6 @@ type ParsedToolCallResult =
     };
 
 function parseModelToolCall(options: {
-  readonly allowedTools: readonly RoleModelAllowedToolName[];
-  readonly modelToolDefinitions: readonly RoleModelToolDefinition[];
   readonly index: number;
   readonly rawToolCall: unknown;
 }): ParsedToolCallResult {
@@ -658,29 +634,12 @@ function parseModelToolCall(options: {
     );
   }
 
-  const modelToolDefinition = findModelToolDefinition(
-    options.modelToolDefinitions,
-    name
-  );
-
-  if (modelToolDefinition === undefined) {
-    return {
-      status: 'rejected',
-      result: createRejectedRoleModelDecisionResult(
-        roleModelUnknownToolRejectionReason,
-        `Decision requested unknown tool "${name}".`
-      )
-    };
-  }
-
-  if (!options.allowedTools.includes(name)) {
-    return {
-      status: 'rejected',
-      result: createRejectedRoleModelDecisionResult(
-        roleModelDisallowedToolRejectionReason,
-        `Decision requested disallowed tool "${name}".`
-      )
-    };
+  if (!isRoleModelToolNameSyntax(name)) {
+    return rejectToolCall(
+      `Decision toolCalls[${String(
+        options.index
+      )}].name must start with a letter and use only letters, numbers, dots, underscores, or hyphens.`
+    );
   }
 
   const input = options.rawToolCall['input'];
@@ -695,28 +654,32 @@ function parseModelToolCall(options: {
     return parseVisibleReplyToolCallInput(input, options.index);
   }
 
+  const jsonInputValidation = validateModelToolInputAgainstContract({
+    toolName: name,
+    input,
+    inputContract: {
+      type: 'object',
+      fields: [],
+      additionalFields: true
+    }
+  });
+
+  if (jsonInputValidation.status === 'rejected') {
+    return rejectToolCall(jsonInputValidation.details);
+  }
+
   if (name === characterStatePatchModelToolName) {
     return {
       status: 'accepted',
-      toolCall: createCharacterStatePatchModelToolCall(input)
+      toolCall: createCharacterStatePatchModelToolCall(jsonInputValidation.input)
     };
-  }
-
-  const inputValidation = validateModelToolInputAgainstContract({
-    toolName: name,
-    input,
-    inputContract: modelToolDefinition.inputContract
-  });
-
-  if (inputValidation.status === 'rejected') {
-    return rejectToolCall(inputValidation.details);
   }
 
   return {
     status: 'accepted',
     toolCall: freezeModelToolCall({
       name,
-      input: inputValidation.input
+      input: jsonInputValidation.input
     })
   };
 }
@@ -898,46 +861,46 @@ function freezeVisibleMessageSnapshot(message: VisibleMessage): VisibleMessage {
   } satisfies VisibleMessage);
 }
 
-function freezeCapabilityContextItems(
-  contextItems: readonly AgentCapabilityContextItem[]
-): readonly AgentCapabilityContextItem[] {
-  return Object.freeze(contextItems.map(createAgentCapabilityContextItem));
+function freezePluginContextItems(
+  contextItems: readonly RuntimePluginContextItem[]
+): readonly RuntimePluginContextItem[] {
+  return Object.freeze(contextItems.map(createRuntimePluginContextItem));
 }
 
-export function createRoleModelCapabilityToolDefinitions(
-  definitions: readonly RoleModelCapabilityToolDefinition[]
-): readonly RoleModelCapabilityToolDefinition[] {
-  const frozenDefinitions: RoleModelCapabilityToolDefinition[] = [];
+export function createRoleModelPluginToolDefinitions(
+  definitions: readonly RoleModelPluginToolDefinition[]
+): readonly RoleModelPluginToolDefinition[] {
+  const frozenDefinitions: RoleModelPluginToolDefinition[] = [];
   const seenNames = new Set<string>();
 
   for (const definition of definitions) {
-    const capabilityId = requiredRoleModelIdentifier(
-      definition.capabilityId,
-      'capabilityId'
+    const pluginId = requiredRoleModelIdentifier(
+      definition.pluginId,
+      'pluginId'
     );
-    const providedTool = createAgentCapabilityProvidedTool(definition);
+    const providedTool = createRuntimePluginProvidedTool(definition);
 
     if (isBuiltInModelToolName(providedTool.name)) {
       throw new TypeError(
-        `Capability tool "${providedTool.name}" must not duplicate a built-in model tool.`
+        `Plugin tool "${providedTool.name}" must not duplicate a built-in model tool.`
       );
     }
 
     if (seenNames.has(providedTool.name)) {
       throw new TypeError(
-        `Capability tool "${providedTool.name}" is declared more than once.`
+        `Plugin tool "${providedTool.name}" is declared more than once.`
       );
     }
 
-    if (providedTool.validationOwner !== 'capability_host') {
+    if (providedTool.validationOwner !== 'plugin_host') {
       throw new TypeError(
-        `Capability tool "${providedTool.name}" must be validated by capability_host.`
+        `Plugin tool "${providedTool.name}" must be validated by plugin_host.`
       );
     }
 
     if (providedTool.requiresConfirmation) {
       throw new TypeError(
-        `Capability tool "${providedTool.name}" requires confirmation and cannot be model-facing in CT-03.`
+        `Plugin tool "${providedTool.name}" requires confirmation and cannot be model-facing in CT-03.`
       );
     }
 
@@ -946,39 +909,39 @@ export function createRoleModelCapabilityToolDefinitions(
       providedTool.sideEffectLevel !== 'runtime_read'
     ) {
       throw new TypeError(
-        `Capability tool "${providedTool.name}" must be read-only for CT-03.`
+        `Plugin tool "${providedTool.name}" must be read-only for CT-03.`
       );
     }
 
     seenNames.add(providedTool.name);
     frozenDefinitions.push(
       Object.freeze({
-        capabilityId,
+        pluginId,
         ...providedTool
-      } satisfies RoleModelCapabilityToolDefinition)
+      } satisfies RoleModelPluginToolDefinition)
     );
   }
 
   return Object.freeze(frozenDefinitions);
 }
 
-function modelToolDefinitionsForCapabilityToolDefinitions(
-  capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[]
+function modelToolDefinitionsForPluginToolDefinitions(
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[]
 ): readonly RoleModelToolDefinition[] {
   return Object.freeze([
     ...builtInModelToolDefinitionsForUserTurn(),
-    ...capabilityToolDefinitions.map((definition) =>
+    ...pluginToolDefinitions.map((definition) =>
       freezeModelToolDefinition(definition)
     )
   ]);
 }
 
-function defaultAllowedToolsForCapabilityDefinitions(
-  capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[]
+function defaultAllowedToolsForPluginDefinitions(
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[]
 ): readonly RoleModelAllowedToolName[] {
   return Object.freeze([
     ...roleModelAllowedToolNames,
-    ...capabilityToolDefinitions.map((definition) => definition.name)
+    ...pluginToolDefinitions.map((definition) => definition.name)
   ]);
 }
 
@@ -991,13 +954,6 @@ function toolDefinitionsForAllowedTools(options: {
       .filter((definition) => options.allowedTools.includes(definition.name))
       .map(freezeModelToolDefinition)
   );
-}
-
-function findModelToolDefinition(
-  definitions: readonly RoleModelToolDefinition[],
-  name: string
-): RoleModelToolDefinition | undefined {
-  return definitions.find((definition) => definition.name === name);
 }
 
 function requiredRoleModelIdentifier(value: string, field: string): string {
@@ -1064,15 +1020,15 @@ function freezeRoleModelToolObservation(
 
   return Object.freeze({
     round: observation.round,
-    capabilityId: requiredRoleModelIdentifier(
-      observation.capabilityId,
-      'tool observation capabilityId'
+    pluginId: requiredRoleModelIdentifier(
+      observation.pluginId,
+      'tool observation pluginId'
     ),
     toolName: requiredRoleModelIdentifier(
       observation.toolName,
       'tool observation toolName'
     ),
-    input: freezeAgentCapabilityJsonObject(observation.input),
+    input: freezeRuntimePluginJsonObject(observation.input),
     result: freezeRoleModelToolObservationResult(observation.result)
   } satisfies RoleModelToolObservation);
 }
@@ -1083,7 +1039,7 @@ function freezeRoleModelToolObservationResult(
   if (result.status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
-      output: freezeAgentCapabilityJsonValue(result.output)
+      output: freezeRuntimePluginJsonValue(result.output)
     } satisfies RoleModelToolObservationResult);
   }
 
@@ -1094,21 +1050,21 @@ function freezeRoleModelToolObservationResult(
   } satisfies RoleModelToolObservationResult);
 }
 
-function freezeAgentCapabilityJsonObject(
+function freezeRuntimePluginJsonObject(
   value: Readonly<Record<string, unknown>>
-): Readonly<Record<string, AgentCapabilityJsonValue>> {
-  const snapshot: Record<string, AgentCapabilityJsonValue> = {};
+): Readonly<Record<string, RuntimePluginJsonValue>> {
+  const snapshot: Record<string, RuntimePluginJsonValue> = {};
 
   for (const [key, item] of Object.entries(value)) {
-    snapshot[key] = freezeAgentCapabilityJsonValue(item);
+    snapshot[key] = freezeRuntimePluginJsonValue(item);
   }
 
   return Object.freeze(snapshot);
 }
 
-function freezeAgentCapabilityJsonValue(
+function freezeRuntimePluginJsonValue(
   value: unknown
-): AgentCapabilityJsonValue {
+): RuntimePluginJsonValue {
   if (
     value === null ||
     typeof value === 'string' ||
@@ -1119,11 +1075,11 @@ function freezeAgentCapabilityJsonValue(
   }
 
   if (Array.isArray(value)) {
-    return Object.freeze(value.map(freezeAgentCapabilityJsonValue));
+    return Object.freeze(value.map(freezeRuntimePluginJsonValue));
   }
 
   if (isJsonRecord(value)) {
-    return freezeAgentCapabilityJsonObject(value);
+    return freezeRuntimePluginJsonObject(value);
   }
 
   throw new TypeError('Role-model tool observation values must be JSON-compatible.');

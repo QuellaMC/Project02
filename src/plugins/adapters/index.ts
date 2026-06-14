@@ -1,62 +1,62 @@
 import {
-  agentCapabilityContractVersion,
-  createAgentCapability,
-  createAgentCapabilityContextItem,
-  createAgentCapabilityEvidenceSnapshot,
-  createAgentCapabilityHealthSnapshot,
-  createFirstPartyModelToolsCapability,
-  type AgentCapability,
-  type AgentCapabilityConfigField,
-  type AgentCapabilityContextItem,
-  type AgentCapabilityDeclaration,
-  type AgentCapabilityEvidenceKind,
-  type AgentCapabilityEvidenceSnapshot,
-  type AgentCapabilityEvidenceStatus,
-  type AgentCapabilityHealthSnapshot,
-  type AgentCapabilityHookResult,
-  type AgentCapabilityJsonObject,
-  type AgentCapabilityJsonValue,
-  type AgentCapabilityManifest,
-  type AgentCapabilityProvidedTool,
-  type AgentCapabilityRuntimePolicy,
-  type AgentCapabilitySideEffectLevel,
-  type AgentCapabilitySourceReference,
-  type AgentCapabilityToolCall,
-  type AgentCapabilityToolCallResult,
-  type AgentCapabilityToolValidationOwner,
-  type RuntimeCapabilityContext
-} from '../agent-capabilities.ts';
+  runtimePluginContractVersion,
+  createRuntimePlugin,
+  createRuntimePluginContextItem,
+  createRuntimePluginEvidenceSnapshot,
+  createRuntimePluginHealthSnapshot,
+  createFirstPartyModelToolsPlugin,
+  type RuntimePlugin,
+  type RuntimePluginConfigField,
+  type RuntimePluginContextItem,
+  type RuntimePluginDeclaration,
+  type RuntimePluginEvidenceKind,
+  type RuntimePluginEvidenceSnapshot,
+  type RuntimePluginEvidenceStatus,
+  type RuntimePluginHealthSnapshot,
+  type RuntimePluginHookResult,
+  type RuntimePluginJsonObject,
+  type RuntimePluginJsonValue,
+  type RuntimePluginManifest,
+  type RuntimePluginProvidedTool,
+  type RuntimePluginRuntimePolicy,
+  type RuntimePluginSideEffectLevel,
+  type RuntimePluginSourceReference,
+  type RuntimePluginToolCall,
+  type RuntimePluginToolCallResult,
+  type RuntimePluginToolValidationOwner,
+  type RuntimePluginContext
+} from '../types.ts';
 import {
   modelToolInputFieldValueTypes
-} from '../model-tools.ts';
+} from '../../model-tools.ts';
 import type {
   ModelToolInputFieldValueType,
   ModelToolInputContract,
   ModelToolInputField
-} from '../model-tools.ts';
+} from '../../model-tools.ts';
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 
-export type AgentCapabilityAdapterCompatibilityDisposition =
+export type RuntimePluginAdapterCompatibilityDisposition =
   | 'mapped'
   | 'ignored_with_evidence'
   | 'future_extension';
 
-export type AgentCapabilityAdapterCompatibilityNote = {
+export type RuntimePluginAdapterCompatibilityNote = {
   readonly sourceSystem: string;
   readonly fieldPath: string;
-  readonly disposition: AgentCapabilityAdapterCompatibilityDisposition;
+  readonly disposition: RuntimePluginAdapterCompatibilityDisposition;
   readonly evidence: string;
 };
 
-export type AgentCapabilityAdapterMapping = {
-  readonly capability: AgentCapability;
-  readonly compatibilityNotes: readonly AgentCapabilityAdapterCompatibilityNote[];
+export type RuntimePluginAdapterMapping = {
+  readonly plugin: RuntimePlugin;
+  readonly compatibilityNotes: readonly RuntimePluginAdapterCompatibilityNote[];
 };
 
 export function mapOpenClawMemoryPluginFixture(
   value: unknown
-): AgentCapabilityAdapterMapping {
+): RuntimePluginAdapterMapping {
   const fixture = requiredRecord(value, 'OpenClaw fixture');
   const contracts = requiredRecord(fixture['contracts'], 'contracts');
   const toolNames = requiredStringArray(contracts['tools'], 'contracts.tools');
@@ -115,13 +115,13 @@ export function mapOpenClawMemoryPluginFixture(
       'fixture',
     compatibilityNotes: notes
   });
-  const capability = createAgentCapability({
+  const plugin = createRuntimePlugin({
     manifest,
     providedTools,
     lifecycleHooks: {
       handleToolCall(call, context) {
         return createAcceptedToolCallResult({
-          capabilityId: manifestId,
+          pluginId: manifestId,
           call,
           context,
           output: {
@@ -132,7 +132,7 @@ export function mapOpenClawMemoryPluginFixture(
           summary: `Mapped OpenClaw tool ${call.toolName} through fixture adapter.`,
           sourceReferences: [
             createToolContractSourceReference({
-              capabilityId: manifestId,
+              pluginId: manifestId,
               toolName: call.toolName,
               title: `OpenClaw contracts.tools entry ${call.toolName}`,
               uri: `fixture://openclaw/tools/${sourceReferenceIdSegment(
@@ -143,8 +143,8 @@ export function mapOpenClawMemoryPluginFixture(
         });
       },
       health(context) {
-        return createAgentCapabilityHealthSnapshot({
-          capabilityId: manifestId,
+        return createRuntimePluginHealthSnapshot({
+          pluginId: manifestId,
           status: 'ok',
           checkedAt: context.timestamp,
           summary:
@@ -155,12 +155,12 @@ export function mapOpenClawMemoryPluginFixture(
     }
   });
 
-  return freezeMapping({ capability, compatibilityNotes: notes });
+  return freezeMapping({ plugin, compatibilityNotes: notes });
 }
 
 export function mapTencentDbMemoryGatewayFixture(
   value: unknown
-): AgentCapabilityAdapterMapping {
+): RuntimePluginAdapterMapping {
   const fixture = requiredRecord(value, 'TencentDB gateway fixture');
   const endpoints = requiredRecord(fixture['endpoints'], 'endpoints');
   const recall = requiredEndpoint(endpoints, 'recall');
@@ -225,7 +225,7 @@ export function mapTencentDbMemoryGatewayFixture(
     configFingerprint: 'fixture-redacted-tdai-gateway',
     compatibilityNotes: notes
   });
-  const capability = createAgentCapability({
+  const plugin = createRuntimePlugin({
     manifest,
     providedTools,
     lifecycleHooks: {
@@ -235,7 +235,7 @@ export function mapTencentDbMemoryGatewayFixture(
           'endpoints.recall.response.confidence'
         );
         const contextItem = createMemoryContextItem({
-          capabilityId: manifestId,
+          pluginId: manifestId,
           id: 'tdai.recall.fixture',
           text: requiredString(
             recall.response['context'],
@@ -263,7 +263,7 @@ export function mapTencentDbMemoryGatewayFixture(
           ]),
           evidence: Object.freeze([
             createEvidence({
-              capabilityId: manifestId,
+              pluginId: manifestId,
               context,
               evidenceKind: 'before_role_model_call',
               status: 'accepted',
@@ -279,14 +279,14 @@ export function mapTencentDbMemoryGatewayFixture(
       handleToolCall(call, context) {
         if (call.toolName === 'memory_tencentdb.memory_search') {
           return createAcceptedToolCallResult({
-            capabilityId: manifestId,
+            pluginId: manifestId,
             call,
             context,
             output: endpointToolOutput(searchMemories),
             summary: 'Mapped TencentDB /search/memories fixture response.',
             sourceReferences: [
               createEndpointSourceReference({
-                capabilityId: manifestId,
+                pluginId: manifestId,
                 endpointName: 'searchMemories',
                 endpoint: searchMemories,
                 titlePrefix: 'TencentDB gateway fixture',
@@ -298,7 +298,7 @@ export function mapTencentDbMemoryGatewayFixture(
 
         if (call.toolName === 'memory_tencentdb.conversation_search') {
           return createAcceptedToolCallResult({
-            capabilityId: manifestId,
+            pluginId: manifestId,
             call,
             context,
             output: endpointToolOutput(searchConversations),
@@ -306,7 +306,7 @@ export function mapTencentDbMemoryGatewayFixture(
               'Mapped TencentDB /search/conversations fixture response.',
             sourceReferences: [
               createEndpointSourceReference({
-                capabilityId: manifestId,
+                pluginId: manifestId,
                 endpointName: 'searchConversations',
                 endpoint: searchConversations,
                 titlePrefix: 'TencentDB gateway fixture',
@@ -317,7 +317,7 @@ export function mapTencentDbMemoryGatewayFixture(
         }
 
         return createRejectedToolCallResult({
-          capabilityId: manifestId,
+          pluginId: manifestId,
           call,
           context,
           reason: 'unsupported_fixture_tool',
@@ -326,7 +326,7 @@ export function mapTencentDbMemoryGatewayFixture(
       },
       afterTurnCommitted(context) {
         return createCompletedHookResult({
-          capabilityId: manifestId,
+          pluginId: manifestId,
           context,
           evidenceKind: 'after_turn_committed',
           summary: `Mapped TencentDB /capture response: ${JSON.stringify(
@@ -336,7 +336,7 @@ export function mapTencentDbMemoryGatewayFixture(
       },
       onSessionEnd(context) {
         return createCompletedHookResult({
-          capabilityId: manifestId,
+          pluginId: manifestId,
           context,
           evidenceKind: 'session_end',
           summary: `Mapped TencentDB /session/end response: ${JSON.stringify(
@@ -346,7 +346,7 @@ export function mapTencentDbMemoryGatewayFixture(
       },
       health(context) {
         return healthSnapshotFromEndpoint({
-          capabilityId: manifestId,
+          pluginId: manifestId,
           context,
           endpoint: health
         });
@@ -354,12 +354,12 @@ export function mapTencentDbMemoryGatewayFixture(
     }
   });
 
-  return freezeMapping({ capability, compatibilityNotes: notes });
+  return freezeMapping({ plugin, compatibilityNotes: notes });
 }
 
 export function mapHermesMemoryProviderFixture(
   value: unknown
-): AgentCapabilityAdapterMapping {
+): RuntimePluginAdapterMapping {
   const fixture = requiredRecord(value, 'Hermes provider fixture');
   const behavior = requiredRecord(fixture['behavior'], 'behavior');
   const prefetch = requiredRecord(behavior['prefetch'], 'behavior.prefetch');
@@ -424,7 +424,7 @@ export function mapHermesMemoryProviderFixture(
       maxCallsPerUserTurn: 2
     })
   );
-  const capability = createAgentCapability({
+  const plugin = createRuntimePlugin({
     manifest,
     providedTools,
     lifecycleHooks: {
@@ -434,7 +434,7 @@ export function mapHermesMemoryProviderFixture(
           'prefetch.confidence'
         );
         const contextItem = createMemoryContextItem({
-          capabilityId: manifestId,
+          pluginId: manifestId,
           id: 'hermes.prefetch.fixture',
           text: requiredString(prefetch['context'], 'behavior.prefetch.context'),
           sourceId: 'hermes.prefetch.fixture',
@@ -455,7 +455,7 @@ export function mapHermesMemoryProviderFixture(
           ]),
           evidence: Object.freeze([
             createEvidence({
-              capabilityId: manifestId,
+              pluginId: manifestId,
               context,
               evidenceKind: 'before_role_model_call',
               status: 'accepted',
@@ -477,7 +477,7 @@ export function mapHermesMemoryProviderFixture(
 
         if (tool === undefined) {
           return createRejectedToolCallResult({
-            capabilityId: manifestId,
+            pluginId: manifestId,
             call,
             context,
             reason: 'unsupported_fixture_tool',
@@ -486,7 +486,7 @@ export function mapHermesMemoryProviderFixture(
         }
 
         return createAcceptedToolCallResult({
-          capabilityId: manifestId,
+          pluginId: manifestId,
           call,
           context,
           output: jsonObjectFromRecord(
@@ -495,7 +495,7 @@ export function mapHermesMemoryProviderFixture(
           summary: `Mapped Hermes search tool ${call.toolName}.`,
           sourceReferences: [
             createToolContractSourceReference({
-              capabilityId: manifestId,
+              pluginId: manifestId,
               toolName: call.toolName,
               title: `Hermes search tool ${call.toolName}`,
               uri: `fixture://hermes/searchTools/${sourceReferenceIdSegment(
@@ -507,7 +507,7 @@ export function mapHermesMemoryProviderFixture(
       },
       afterTurnCommitted(context) {
         return createCompletedHookResult({
-          capabilityId: manifestId,
+          pluginId: manifestId,
           context,
           evidenceKind: 'after_turn_committed',
           summary: `Mapped Hermes sync response: ${JSON.stringify(
@@ -517,7 +517,7 @@ export function mapHermesMemoryProviderFixture(
       },
       onSessionEnd(context) {
         return createCompletedHookResult({
-          capabilityId: manifestId,
+          pluginId: manifestId,
           context,
           evidenceKind: 'session_end',
           summary: `Mapped Hermes session-end response: ${JSON.stringify(
@@ -526,8 +526,8 @@ export function mapHermesMemoryProviderFixture(
         });
       },
       health(context) {
-        return createAgentCapabilityHealthSnapshot({
-          capabilityId: manifestId,
+        return createRuntimePluginHealthSnapshot({
+          pluginId: manifestId,
           status: healthStatusFromString(
             optionalString(health['status'], 'behavior.health.status') ??
               'degraded'
@@ -540,12 +540,12 @@ export function mapHermesMemoryProviderFixture(
     }
   });
 
-  return freezeMapping({ capability, compatibilityNotes: notes });
+  return freezeMapping({ plugin, compatibilityNotes: notes });
 }
 
 export function mapMcpToolsResourcesFixture(
   value: unknown
-): AgentCapabilityAdapterMapping {
+): RuntimePluginAdapterMapping {
   const fixture = requiredRecord(value, 'MCP fixture');
   const server = requiredRecord(fixture['server'], 'server');
   const protocolVersion = requiredString(
@@ -571,18 +571,18 @@ export function mapMcpToolsResourcesFixture(
     }),
     ...unsupportedNotesFromFixture(fixture, 'model-context-protocol')
   ];
-  const manifest = createAgentCapabilityManifestForAdapter({
+  const manifest = createRuntimePluginManifestForAdapter({
     id: manifestId,
     displayName:
       optionalString(server['name'], 'server.name') ?? 'MCP fixture server',
     version: `${protocolVersion}-fixture`,
     kind: 'bridge_adapter',
     description:
-      'Fixture adapter for MCP 2025-06-18 tools and resources mapped into the local capability contract.',
+      'Fixture adapter for MCP 2025-06-18 tools and resources mapped into the local plugin contract.',
     sourceSystem: 'model-context-protocol',
     sourceVersion: protocolVersion,
     externalContract: 'mcp-tools-resources',
-    declaredCapabilities: [
+    declaredPlugins: [
       'tool_provider',
       'handle_tool_call',
       'context_provider',
@@ -618,14 +618,14 @@ export function mapMcpToolsResourcesFixture(
       maxCallsPerUserTurn: 2
     })
   );
-  const capability = createAgentCapability({
+  const plugin = createRuntimePlugin({
     manifest,
     providedTools,
     lifecycleHooks: {
       beforeRoleModelCall(context) {
         const contextItems = resources.map((resource, index) =>
-          createAgentCapabilityContextItem({
-            capabilityId: manifestId,
+          createRuntimePluginContextItem({
+            pluginId: manifestId,
             id: `mcp.resource.${String(index + 1)}`,
             kind: 'resource',
             text: requiredString(resource['fixtureText'], 'resources.fixtureText'),
@@ -656,7 +656,7 @@ export function mapMcpToolsResourcesFixture(
           ]),
           evidence: Object.freeze([
             createEvidence({
-              capabilityId: manifestId,
+              pluginId: manifestId,
               context,
               evidenceKind: 'before_role_model_call',
               status: 'accepted',
@@ -676,7 +676,7 @@ export function mapMcpToolsResourcesFixture(
 
         if (tool === undefined) {
           return createRejectedToolCallResult({
-            capabilityId: manifestId,
+            pluginId: manifestId,
             call,
             context,
             reason: 'unsupported_fixture_tool',
@@ -685,7 +685,7 @@ export function mapMcpToolsResourcesFixture(
         }
 
         return createAcceptedToolCallResult({
-          capabilityId: manifestId,
+          pluginId: manifestId,
           call,
           context,
           output: jsonObjectFromRecord(
@@ -694,7 +694,7 @@ export function mapMcpToolsResourcesFixture(
           summary: `Mapped MCP tool ${call.toolName}.`,
           sourceReferences: [
             createToolContractSourceReference({
-              capabilityId: manifestId,
+              pluginId: manifestId,
               toolName: call.toolName,
               title: `MCP tool ${call.toolName}`,
               uri: `fixture://mcp/tools/${sourceReferenceIdSegment(
@@ -705,8 +705,8 @@ export function mapMcpToolsResourcesFixture(
         });
       },
       health(context) {
-        return createAgentCapabilityHealthSnapshot({
-          capabilityId: manifestId,
+        return createRuntimePluginHealthSnapshot({
+          pluginId: manifestId,
           status: 'ok',
           checkedAt: context.timestamp,
           summary: `MCP fixture server ${requiredString(
@@ -719,33 +719,33 @@ export function mapMcpToolsResourcesFixture(
     }
   });
 
-  return freezeMapping({ capability, compatibilityNotes: notes });
+  return freezeMapping({ plugin, compatibilityNotes: notes });
 }
 
-export function mapFirstPartyModelToolsCapability(): AgentCapabilityAdapterMapping {
-  const capability = createFirstPartyModelToolsCapability();
+export function mapFirstPartyModelToolsPlugin(): RuntimePluginAdapterMapping {
+  const plugin = createFirstPartyModelToolsPlugin();
   const notes = [
     createCompatibilityNote({
       sourceSystem: 'project02',
       fieldPath: 'builtInModelToolDefinitionsForUserTurn',
       disposition: 'mapped',
       evidence:
-        'First-party built-in tools are represented through AgentCapability without changing validationOwner or input contracts.'
+        'First-party built-in tools are represented through RuntimePlugin without changing validationOwner or input contracts.'
     })
   ];
 
-  return freezeMapping({ capability, compatibilityNotes: notes });
+  return freezeMapping({ plugin, compatibilityNotes: notes });
 }
 
 function createOpenClawManifest(options: {
   readonly fixture: JsonRecord;
   readonly manifestId: string;
-  readonly configFields: readonly AgentCapabilityConfigField[];
+  readonly configFields: readonly RuntimePluginConfigField[];
   readonly activationReasons: readonly string[];
   readonly sourceVersion: string;
-  readonly compatibilityNotes: readonly AgentCapabilityAdapterCompatibilityNote[];
-}): AgentCapabilityManifest {
-  return createAgentCapabilityManifestForAdapter({
+  readonly compatibilityNotes: readonly RuntimePluginAdapterCompatibilityNote[];
+}): RuntimePluginManifest {
+  return createRuntimePluginManifestForAdapter({
     id: options.manifestId,
     displayName:
       optionalString(options.fixture['name'], 'name') ??
@@ -756,11 +756,11 @@ function createOpenClawManifest(options: {
     kind: 'bridge_adapter',
     description:
       optionalString(options.fixture['description'], 'description') ??
-      'OpenClaw memory plugin fixture mapped into the local capability contract.',
+      'OpenClaw memory plugin fixture mapped into the local plugin contract.',
     sourceSystem: 'openclaw',
     sourceVersion: options.sourceVersion,
     externalContract: 'openclaw.plugin.json',
-    declaredCapabilities: ['tool_provider', 'handle_tool_call', 'health'],
+    declaredPlugins: ['tool_provider', 'handle_tool_call', 'health'],
     configFields: options.configFields,
     runtimePolicy: createAdapterPolicy({
       sideEffectLevel: 'runtime_read',
@@ -779,11 +779,11 @@ function createMemoryGatewayManifest(options: {
   readonly sourceVersion: string;
   readonly externalContract: string;
   readonly description: string;
-  readonly configFields: readonly AgentCapabilityConfigField[];
+  readonly configFields: readonly RuntimePluginConfigField[];
   readonly configFingerprint: string;
-  readonly compatibilityNotes: readonly AgentCapabilityAdapterCompatibilityNote[];
-}): AgentCapabilityManifest {
-  return createAgentCapabilityManifestForAdapter({
+  readonly compatibilityNotes: readonly RuntimePluginAdapterCompatibilityNote[];
+}): RuntimePluginManifest {
+  return createRuntimePluginManifestForAdapter({
     id: options.id,
     displayName: options.displayName,
     version: options.sourceVersion,
@@ -792,7 +792,7 @@ function createMemoryGatewayManifest(options: {
     sourceSystem: options.sourceSystem,
     sourceVersion: options.sourceVersion,
     externalContract: options.externalContract,
-    declaredCapabilities: [
+    declaredPlugins: [
       'context_provider',
       'before_role_model_call',
       'tool_provider',
@@ -814,31 +814,31 @@ function createMemoryGatewayManifest(options: {
   });
 }
 
-function createAgentCapabilityManifestForAdapter(options: {
+function createRuntimePluginManifestForAdapter(options: {
   readonly id: string;
   readonly displayName: string;
   readonly version: string;
-  readonly kind: AgentCapabilityManifest['kind'];
+  readonly kind: RuntimePluginManifest['kind'];
   readonly description: string;
   readonly sourceSystem: string;
   readonly sourceVersion: string;
   readonly externalContract: string;
-  readonly declaredCapabilities: readonly AgentCapabilityDeclaration[];
-  readonly configFields: readonly AgentCapabilityConfigField[];
+  readonly declaredPlugins: readonly RuntimePluginDeclaration[];
+  readonly configFields: readonly RuntimePluginConfigField[];
   readonly configFingerprint?: string;
-  readonly runtimePolicy: AgentCapabilityRuntimePolicy;
+  readonly runtimePolicy: RuntimePluginRuntimePolicy;
   readonly activationReasons: readonly string[];
-  readonly compatibilityNotes: readonly AgentCapabilityAdapterCompatibilityNote[];
-}): AgentCapabilityManifest {
+  readonly compatibilityNotes: readonly RuntimePluginAdapterCompatibilityNote[];
+}): RuntimePluginManifest {
   return {
     id: options.id,
     displayName: options.displayName,
     version: options.version,
     kind: options.kind,
     description: options.description,
-    contractVersion: agentCapabilityContractVersion,
+    contractVersion: runtimePluginContractVersion,
     compatibility: {
-      hostContractVersions: [agentCapabilityContractVersion],
+      hostContractVersions: [runtimePluginContractVersion],
       sourceSystem: options.sourceSystem,
       sourceVersion: options.sourceVersion,
       externalContract: options.externalContract,
@@ -846,7 +846,7 @@ function createAgentCapabilityManifestForAdapter(options: {
         (note) => `${note.disposition}:${note.fieldPath}:${note.evidence}`
       )
     },
-    declaredCapabilities: options.declaredCapabilities,
+    declaredPlugins: options.declaredPlugins,
     config: {
       fields: options.configFields,
       ...(options.configFingerprint === undefined
@@ -858,16 +858,17 @@ function createAgentCapabilityManifestForAdapter(options: {
     activation: {
       defaultEnabled: false,
       reasons: options.activationReasons
-    }
+    },
+    requestedApis: []
   };
 }
 
 function createAdapterPolicy(options: {
-  readonly sideEffectLevel: AgentCapabilitySideEffectLevel;
+  readonly sideEffectLevel: RuntimePluginSideEffectLevel;
   readonly timeoutMs: number;
   readonly sourceReferencesRequired: boolean;
   readonly redactionLabels?: readonly string[];
-}): AgentCapabilityRuntimePolicy {
+}): RuntimePluginRuntimePolicy {
   return {
     requiredForTurn: false,
     sideEffectLevel: options.sideEffectLevel,
@@ -888,11 +889,11 @@ function createProvidedToolFromSchema(options: {
   readonly name: string;
   readonly description: string;
   readonly inputContract: ModelToolInputContract;
-  readonly validationOwner: AgentCapabilityToolValidationOwner;
-  readonly sideEffectLevel: AgentCapabilitySideEffectLevel;
+  readonly validationOwner: RuntimePluginToolValidationOwner;
+  readonly sideEffectLevel: RuntimePluginSideEffectLevel;
   readonly sourceReferencesRequired: boolean;
   readonly maxCallsPerUserTurn?: number;
-}): AgentCapabilityProvidedTool {
+}): RuntimePluginProvidedTool {
   return {
     name: options.name,
     description: options.description,
@@ -908,7 +909,7 @@ function createProvidedToolFromSchema(options: {
 
 function configFieldsFromSchema(
   schema: JsonRecord
-): readonly AgentCapabilityConfigField[] {
+): readonly RuntimePluginConfigField[] {
   const properties = optionalRecord(schema['properties'], 'schema.properties');
   const required = new Set(
     optionalStringArray(schema['required'], 'schema.required')
@@ -939,7 +940,7 @@ function configFieldsFromSchema(
 
 function configFieldsFromConfigRecord(
   config: JsonRecord
-): readonly AgentCapabilityConfigField[] {
+): readonly RuntimePluginConfigField[] {
   return Object.freeze(
     Object.entries(config).map(([name, value]) => {
       const configField = requiredRecord(value, `config.${name}`);
@@ -966,7 +967,7 @@ function createConfigField(options: {
   readonly description: string;
   readonly required: boolean;
   readonly secret: boolean;
-}): AgentCapabilityConfigField {
+}): RuntimePluginConfigField {
   return {
     name: options.name,
     description: options.description,
@@ -1038,7 +1039,7 @@ function modelToolInputFieldValueTypeFromSchema(
 }
 
 function createMemoryContextItem(options: {
-  readonly capabilityId: string;
+  readonly pluginId: string;
   readonly id: string;
   readonly text: string;
   readonly sourceId: string;
@@ -1046,9 +1047,9 @@ function createMemoryContextItem(options: {
   readonly sourceUri: string;
   readonly estimatedTokens: number;
   readonly confidence?: number;
-}): AgentCapabilityContextItem {
-  return createAgentCapabilityContextItem({
-    capabilityId: options.capabilityId,
+}): RuntimePluginContextItem {
+  return createRuntimePluginContextItem({
+    pluginId: options.pluginId,
     id: options.id,
     kind: 'memory',
     text: options.text,
@@ -1070,22 +1071,22 @@ function createMemoryContextItem(options: {
 }
 
 function createEvidence(options: {
-  readonly capabilityId: string;
-  readonly context: RuntimeCapabilityContext;
-  readonly evidenceKind: AgentCapabilityEvidenceKind;
-  readonly status: AgentCapabilityEvidenceStatus;
+  readonly pluginId: string;
+  readonly context: RuntimePluginContext;
+  readonly evidenceKind: RuntimePluginEvidenceKind;
+  readonly status: RuntimePluginEvidenceStatus;
   readonly summary: string;
   readonly policyOutcome?: string;
-  readonly sourceReferences?: readonly AgentCapabilitySourceReference[];
+  readonly sourceReferences?: readonly RuntimePluginSourceReference[];
   readonly configFingerprint?: string;
   readonly redactionLabels?: readonly string[];
-}): AgentCapabilityEvidenceSnapshot {
-  return createAgentCapabilityEvidenceSnapshot({
+}): RuntimePluginEvidenceSnapshot {
+  return createRuntimePluginEvidenceSnapshot({
     eventId: options.context.eventId,
     traceId: options.context.traceId,
     createdAt: options.context.timestamp,
-    kind: 'agent_capability_evidence_snapshot',
-    capabilityId: options.capabilityId,
+    kind: 'runtime_plugin_evidence_snapshot',
+    pluginId: options.pluginId,
     evidenceKind: options.evidenceKind,
     status: options.status,
     summary: options.summary,
@@ -1103,19 +1104,19 @@ function createEvidence(options: {
 }
 
 function createAcceptedToolCallResult(options: {
-  readonly capabilityId: string;
-  readonly call: AgentCapabilityToolCall;
-  readonly context: RuntimeCapabilityContext;
-  readonly output: AgentCapabilityJsonValue;
+  readonly pluginId: string;
+  readonly call: RuntimePluginToolCall;
+  readonly context: RuntimePluginContext;
+  readonly output: RuntimePluginJsonValue;
   readonly summary: string;
-  readonly sourceReferences?: readonly AgentCapabilitySourceReference[];
-}): AgentCapabilityToolCallResult {
+  readonly sourceReferences?: readonly RuntimePluginSourceReference[];
+}): RuntimePluginToolCallResult {
   return Object.freeze({
     status: 'accepted',
     output: options.output,
     evidence: Object.freeze([
       createEvidence({
-        capabilityId: options.capabilityId,
+        pluginId: options.pluginId,
         context: options.context,
         evidenceKind: 'tool_invocation',
         status: 'accepted',
@@ -1129,13 +1130,13 @@ function createAcceptedToolCallResult(options: {
 }
 
 function createToolContractSourceReference(options: {
-  readonly capabilityId: string;
+  readonly pluginId: string;
   readonly toolName: string;
   readonly title: string;
   readonly uri: string;
-}): AgentCapabilitySourceReference {
+}): RuntimePluginSourceReference {
   return createAdapterExternalContractSourceReference({
-    capabilityId: options.capabilityId,
+    pluginId: options.pluginId,
     idSuffix: `tool.${sourceReferenceIdSegment(options.toolName)}`,
     title: options.title,
     uri: options.uri
@@ -1143,14 +1144,14 @@ function createToolContractSourceReference(options: {
 }
 
 function createEndpointSourceReference(options: {
-  readonly capabilityId: string;
+  readonly pluginId: string;
   readonly endpointName: string;
   readonly endpoint: EndpointFixture;
   readonly titlePrefix: string;
   readonly uriBase: string;
-}): AgentCapabilitySourceReference {
+}): RuntimePluginSourceReference {
   return createAdapterExternalContractSourceReference({
-    capabilityId: options.capabilityId,
+    pluginId: options.pluginId,
     idSuffix: `endpoint.${sourceReferenceIdSegment(options.endpointName)}`,
     title: `${options.titlePrefix} ${options.endpoint.method} ${options.endpoint.path}`,
     uri: `${options.uriBase}${options.endpoint.path}`
@@ -1158,14 +1159,14 @@ function createEndpointSourceReference(options: {
 }
 
 function createAdapterExternalContractSourceReference(options: {
-  readonly capabilityId: string;
+  readonly pluginId: string;
   readonly idSuffix: string;
   readonly title: string;
   readonly uri: string;
-}): AgentCapabilitySourceReference {
+}): RuntimePluginSourceReference {
   return Object.freeze({
     kind: 'external_contract',
-    id: `${options.capabilityId}.${options.idSuffix}`,
+    id: `${options.pluginId}.${options.idSuffix}`,
     title: options.title,
     uri: options.uri
   });
@@ -1179,19 +1180,19 @@ function sourceReferenceIdSegment(value: string): string {
 }
 
 function createRejectedToolCallResult(options: {
-  readonly capabilityId: string;
-  readonly call: AgentCapabilityToolCall;
-  readonly context: RuntimeCapabilityContext;
+  readonly pluginId: string;
+  readonly call: RuntimePluginToolCall;
+  readonly context: RuntimePluginContext;
   readonly reason: string;
   readonly message: string;
-}): AgentCapabilityToolCallResult {
+}): RuntimePluginToolCallResult {
   return Object.freeze({
     status: 'rejected',
     reason: options.reason,
     message: options.message,
     evidence: Object.freeze([
       createEvidence({
-        capabilityId: options.capabilityId,
+        pluginId: options.pluginId,
         context: options.context,
         evidenceKind: 'tool_invocation',
         status: 'rejected',
@@ -1203,16 +1204,16 @@ function createRejectedToolCallResult(options: {
 }
 
 function createCompletedHookResult(options: {
-  readonly capabilityId: string;
-  readonly context: RuntimeCapabilityContext;
-  readonly evidenceKind: AgentCapabilityEvidenceKind;
+  readonly pluginId: string;
+  readonly context: RuntimePluginContext;
+  readonly evidenceKind: RuntimePluginEvidenceKind;
   readonly summary: string;
-}): AgentCapabilityHookResult {
+}): RuntimePluginHookResult {
   return Object.freeze({
     status: 'completed',
     evidence: Object.freeze([
       createEvidence({
-        capabilityId: options.capabilityId,
+        pluginId: options.pluginId,
         context: options.context,
         evidenceKind: options.evidenceKind,
         status: 'accepted',
@@ -1223,15 +1224,15 @@ function createCompletedHookResult(options: {
 }
 
 function healthSnapshotFromEndpoint(options: {
-  readonly capabilityId: string;
-  readonly context: RuntimeCapabilityContext;
+  readonly pluginId: string;
+  readonly context: RuntimePluginContext;
   readonly endpoint: EndpointFixture;
-}): AgentCapabilityHealthSnapshot {
+}): RuntimePluginHealthSnapshot {
   const statusText =
     optionalString(options.endpoint.response['status'], 'health.status') ?? 'ok';
 
-  return createAgentCapabilityHealthSnapshot({
-    capabilityId: options.capabilityId,
+  return createRuntimePluginHealthSnapshot({
+    pluginId: options.pluginId,
     status: healthStatusFromString(statusText),
     checkedAt: options.context.timestamp,
     summary: `Gateway health fixture status ${statusText}.`,
@@ -1241,7 +1242,7 @@ function healthSnapshotFromEndpoint(options: {
 
 function healthStatusFromString(
   value: string
-): AgentCapabilityHealthSnapshot['status'] {
+): RuntimePluginHealthSnapshot['status'] {
   if (value === 'ok' || value === 'degraded' || value === 'unavailable') {
     return value;
   }
@@ -1274,7 +1275,7 @@ function requiredEndpoint(
   });
 }
 
-function endpointToolOutput(endpoint: EndpointFixture): AgentCapabilityJsonObject {
+function endpointToolOutput(endpoint: EndpointFixture): RuntimePluginJsonObject {
   return Object.freeze({
     method: endpoint.method,
     path: endpoint.path,
@@ -1364,8 +1365,8 @@ function degradationSummary(degradation: JsonRecord): string {
 }
 
 function createCompatibilityNote(
-  options: AgentCapabilityAdapterCompatibilityNote
-): AgentCapabilityAdapterCompatibilityNote {
+  options: RuntimePluginAdapterCompatibilityNote
+): RuntimePluginAdapterCompatibilityNote {
   return Object.freeze({
     sourceSystem: options.sourceSystem,
     fieldPath: options.fieldPath,
@@ -1377,7 +1378,7 @@ function createCompatibilityNote(
 function unsupportedNotesFromFixture(
   fixture: JsonRecord,
   sourceSystem: string
-): readonly AgentCapabilityAdapterCompatibilityNote[] {
+): readonly RuntimePluginAdapterCompatibilityNote[] {
   const unsupportedFields = recordsArray(
     fixture['unsupportedFields'],
     'unsupportedFields'
@@ -1402,7 +1403,7 @@ function unsupportedNotesFromFixture(
 
 function compatibilityDispositionFromString(
   value: string
-): AgentCapabilityAdapterCompatibilityDisposition {
+): RuntimePluginAdapterCompatibilityDisposition {
   if (
     value === 'mapped' ||
     value === 'ignored_with_evidence' ||
@@ -1415,15 +1416,15 @@ function compatibilityDispositionFromString(
 }
 
 function freezeMapping(
-  mapping: AgentCapabilityAdapterMapping
-): AgentCapabilityAdapterMapping {
+  mapping: RuntimePluginAdapterMapping
+): RuntimePluginAdapterMapping {
   return Object.freeze({
-    capability: mapping.capability,
+    plugin: mapping.plugin,
     compatibilityNotes: Object.freeze([...mapping.compatibilityNotes])
   });
 }
 
-function jsonObjectFromRecord(record: JsonRecord): AgentCapabilityJsonObject {
+function jsonObjectFromRecord(record: JsonRecord): RuntimePluginJsonObject {
   return Object.freeze(
     Object.fromEntries(
       Object.entries(record).map(([key, value]) => [
@@ -1434,7 +1435,7 @@ function jsonObjectFromRecord(record: JsonRecord): AgentCapabilityJsonObject {
   );
 }
 
-function jsonValueFromUnknown(value: unknown): AgentCapabilityJsonValue {
+function jsonValueFromUnknown(value: unknown): RuntimePluginJsonValue {
   if (
     value === null ||
     typeof value === 'string' ||

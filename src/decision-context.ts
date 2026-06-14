@@ -6,14 +6,12 @@ import {
   createDecisionContext,
   type DecisionContext
 } from './role-model-contracts.ts';
-import type { AgentCapabilityContextItem } from './agent-capabilities.ts';
-import type { LivingStateBrief } from './character-state.ts';
+import type { RuntimePluginContextItem } from './plugins/types.ts';
 
 export type BuildUserTurnDecisionContextOptions = {
   readonly session: ConversationSession;
-  readonly livingStateBrief?: LivingStateBrief;
   readonly runtimeNotes?: readonly string[];
-  readonly capabilityContextItems?: readonly AgentCapabilityContextItem[];
+  readonly pluginContextItems?: readonly RuntimePluginContextItem[];
   readonly recentMessageLimit?: number;
 };
 
@@ -28,9 +26,6 @@ export function buildUserTurnDecisionContext(
       options.recentMessageLimit
     ),
     runtimeNotes: options.runtimeNotes ?? [],
-    capabilityContextItems: options.capabilityContextItems ?? [],
-    ...(options.livingStateBrief === undefined
-      ? {}
-      : { livingStateBrief: options.livingStateBrief })
+    pluginContextItems: options.pluginContextItems ?? []
   });
 }

@@ -1,5 +1,3 @@
-import type { RuntimeEventIdentity } from './runtime-event.ts';
-
 export const characterRuntimeStateVersion = 'mvp-006.character_state.v1';
 
 export const characterMoodValues = Object.freeze([
@@ -93,22 +91,6 @@ export type CharacterStatePatchResult =
   | AcceptedCharacterStatePatchResult
   | RejectedCharacterStatePatchResult;
 
-export type CharacterStatePatchSnapshot = RuntimeEventIdentity & {
-  readonly kind: 'character_state_patch_snapshot';
-  readonly sessionId: string;
-  readonly result: CharacterStatePatchResult;
-};
-
-export type CreateCharacterStatePatchSnapshotOptions = RuntimeEventIdentity & {
-  readonly sessionId: string;
-  readonly result: CharacterStatePatchResult;
-};
-
-export type CharacterStateStore = {
-  readCurrentState(): CharacterRuntimeState;
-  writeCurrentState(state: CharacterRuntimeState): CharacterRuntimeState;
-};
-
 export function createDefaultCharacterRuntimeState(): CharacterRuntimeState {
   return freezeCharacterRuntimeState({
     version: characterRuntimeStateVersion,
@@ -165,35 +147,6 @@ export function planCharacterStatePatch(options: {
     after,
     appliedChanges
   } satisfies AcceptedCharacterStatePatchResult);
-}
-
-export function createCharacterStatePatchSnapshot(
-  options: CreateCharacterStatePatchSnapshotOptions
-): CharacterStatePatchSnapshot {
-  return Object.freeze({
-    eventId: options.eventId,
-    traceId: options.traceId,
-    createdAt: options.createdAt,
-    kind: 'character_state_patch_snapshot',
-    sessionId: options.sessionId,
-    result: freezeCharacterStatePatchResult(options.result)
-  } satisfies CharacterStatePatchSnapshot);
-}
-
-export function createInMemoryCharacterStateStore(
-  initialState: CharacterRuntimeState = createDefaultCharacterRuntimeState()
-): CharacterStateStore {
-  let currentState = freezeCharacterRuntimeState(initialState);
-
-  return Object.freeze({
-    readCurrentState() {
-      return freezeCharacterRuntimeState(currentState);
-    },
-    writeCurrentState(state) {
-      currentState = freezeCharacterRuntimeState(state);
-      return currentState;
-    }
-  } satisfies CharacterStateStore);
 }
 
 export function encodeCharacterRuntimeState(

@@ -4,7 +4,7 @@ import {
   type CharacterAgent
 } from './conversation.ts';
 import {
-  roleModelCapabilityToolRejectedRejectionReason,
+  roleModelPluginToolRejectedRejectionReason,
   createParsedRoleModelDecisionSnapshot,
   createRoleModelToolObservation,
   createRejectedRoleModelDecisionResult,
@@ -23,7 +23,7 @@ import {
   type DecisionContext,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelAllowedToolName,
-  type RoleModelCapabilityToolDefinition,
+  type RoleModelPluginToolDefinition,
   type RejectedRoleModelDecisionResult,
   type RoleModelDecisionRejection,
   type RoleModelDecisionRejectionReason,
@@ -38,12 +38,12 @@ import {
   type ModelToolCall
 } from './model-tools.ts';
 import type {
-  AgentCapabilityJsonObject,
-  AgentCapabilityJsonValue,
-  AgentCapabilityToolCall,
-  AgentCapabilityToolCallResult,
-  RuntimeCapabilityContext
-} from './agent-capabilities.ts';
+  RuntimePluginJsonObject,
+  RuntimePluginJsonValue,
+  RuntimePluginToolCall,
+  RuntimePluginToolCallResult,
+  RuntimePluginContext
+} from './plugins/types.ts';
 import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from './runtime-event.ts';
 
 export { parseRoleModelDecision } from './role-model-contracts.ts';
@@ -64,37 +64,37 @@ export type RunRoleModelLoopOptions = {
   readonly event: UserMessageRuntimeEvent;
   readonly decisionContext: DecisionContext;
   readonly adapter?: RoleModelAdapter;
-  readonly capabilityToolDefinitions?: readonly RoleModelCapabilityToolDefinition[];
-  readonly capabilityToolHost?: RoleModelCapabilityToolHost;
-  readonly resolveToolCapabilityId?: (toolName: string) => string | undefined;
-  readonly maxCapabilityToolRounds?: number;
+  readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
+  readonly pluginToolHost?: RoleModelPluginToolHost;
+  readonly resolveToolPluginId?: (toolName: string) => string | undefined;
+  readonly maxPluginToolRounds?: number;
   readonly maxToolRounds?: number;
-  readonly onCapabilityToolCallStarted?: (
-    event: RoleModelCapabilityToolCallStartedEvent
+  readonly onPluginToolCallStarted?: (
+    event: RoleModelPluginToolCallStartedEvent
   ) => Promise<void> | void;
-  readonly onCapabilityToolCallCompleted?: (
-    event: RoleModelCapabilityToolCallCompletedEvent
+  readonly onPluginToolCallCompleted?: (
+    event: RoleModelPluginToolCallCompletedEvent
   ) => Promise<void> | void;
-  readonly onCapabilityToolCallsRequested?: (
-    event: RoleModelCapabilityToolCallsRequestedEvent
+  readonly onPluginToolCallsRequested?: (
+    event: RoleModelPluginToolCallsRequestedEvent
   ) => Promise<void> | void;
   readonly onInterimVisibleReply?: (
     event: RoleModelInterimVisibleReplyEvent
   ) => Promise<void> | void;
-  readonly runtimeCapabilityContext?: RuntimeCapabilityContext;
+  readonly runtimePluginContext?: RuntimePluginContext;
 };
 
-export type RoleModelCapabilityToolHost = {
+export type RoleModelPluginToolHost = {
   readonly handleToolCall: (
-    call: AgentCapabilityToolCall,
-    context: RuntimeCapabilityContext
-  ) => AgentCapabilityToolCallResult | Promise<AgentCapabilityToolCallResult>;
+    call: RuntimePluginToolCall,
+    context: RuntimePluginContext
+  ) => RuntimePluginToolCallResult | Promise<RuntimePluginToolCallResult>;
 };
 
-export type RoleModelCapabilityToolRoutingEvidence = {
+export type RoleModelPluginToolRoutingEvidence = {
   readonly callId: string;
-  readonly call: AgentCapabilityToolCall;
-  readonly result: AgentCapabilityToolCallResult;
+  readonly call: RuntimePluginToolCall;
+  readonly result: RuntimePluginToolCallResult;
 };
 
 export type RoleModelInterimVisibleReplyEvent = {
@@ -105,24 +105,24 @@ export type RoleModelInterimVisibleReplyEvent = {
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
 };
 
-export type RoleModelCapabilityToolCallsRequestedEvent = {
+export type RoleModelPluginToolCallsRequestedEvent = {
   readonly round: number;
   readonly toolNames: readonly string[];
 };
 
-export type RoleModelCapabilityToolCallStartedEvent = {
+export type RoleModelPluginToolCallStartedEvent = {
   readonly callId: string;
   readonly round: number;
-  readonly call: AgentCapabilityToolCall;
+  readonly call: RuntimePluginToolCall;
 };
 
-export type RoleModelCapabilityToolCallCompletedEvent = {
+export type RoleModelPluginToolCallCompletedEvent = {
   readonly callId: string;
-  readonly capabilityId: string;
+  readonly pluginId: string;
   readonly round: number;
-  readonly status: AgentCapabilityToolCallResult['status'];
+  readonly status: RuntimePluginToolCallResult['status'];
   readonly toolName: string;
-  readonly result: AgentCapabilityToolCallResult;
+  readonly result: RuntimePluginToolCallResult;
 };
 
 export type RoleModelLoopRound = {
@@ -130,7 +130,7 @@ export type RoleModelLoopRound = {
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly ioSnapshot: RoleModelIOSnapshot;
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
-  readonly capabilityToolResults: readonly RoleModelCapabilityToolRoutingEvidence[];
+  readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
 };
 
 export type AcceptedRoleModelLoopResult = {
@@ -140,7 +140,7 @@ export type AcceptedRoleModelLoopResult = {
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
   readonly decisionResult: AcceptedRoleModelDecisionResult;
   readonly decision: CharacterDecision;
-  readonly capabilityToolResults: readonly RoleModelCapabilityToolRoutingEvidence[];
+  readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
   readonly rounds: readonly RoleModelLoopRound[];
 };
 
@@ -151,7 +151,7 @@ export type RejectedRoleModelLoopResult = {
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
   readonly decisionResult: RejectedRoleModelDecisionResult;
   readonly rejection: RoleModelDecisionRejection;
-  readonly capabilityToolResults: readonly RoleModelCapabilityToolRoutingEvidence[];
+  readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
   readonly rounds: readonly RoleModelLoopRound[];
 };
 
@@ -160,7 +160,7 @@ export type RoleModelLoopResult =
   | RejectedRoleModelLoopResult;
 
 export const defaultRoleModelMaxToolRounds = 99;
-export const defaultRoleModelMaxCapabilityToolRounds =
+export const defaultRoleModelMaxPluginToolRounds =
   defaultRoleModelMaxToolRounds;
 
 export function createDeterministicLocalRoleModelAdapter(): RoleModelAdapter {
@@ -194,12 +194,12 @@ export async function runRoleModelLoop(
   const adapter = options.adapter ?? createDeterministicLocalRoleModelAdapter();
   const maxToolRounds =
     options.maxToolRounds ??
-    options.maxCapabilityToolRounds ??
+    options.maxPluginToolRounds ??
     defaultRoleModelMaxToolRounds;
   const identity = createSnapshotIdentity(options.event);
   const sessionId = options.decisionContext.sessionId;
   const rounds: RoleModelLoopRound[] = [];
-  const allCapabilityToolResults: RoleModelCapabilityToolRoutingEvidence[] = [];
+  const allPluginToolResults: RoleModelPluginToolRoutingEvidence[] = [];
   let toolRounds = 0;
   let toolObservations: readonly RoleModelToolObservation[] = Object.freeze([]);
 
@@ -207,14 +207,14 @@ export async function runRoleModelLoop(
     const inputEnvelope = createRoleModelInputEnvelope({
       event: options.event,
       decisionContext: options.decisionContext,
-      capabilityToolDefinitions: options.capabilityToolDefinitions ?? [],
+      pluginToolDefinitions: options.pluginToolDefinitions ?? [],
       toolObservations
     });
     const rawOutput: unknown = await adapter.invoke(inputEnvelope);
     const rawOutputValidation = validateRoleModelAdapterRawOutput(
       rawOutput,
       inputEnvelope.allowedTools,
-      inputEnvelope.capabilityToolDefinitions
+      inputEnvelope.pluginToolDefinitions
     );
     const ioSnapshot = createRoleModelIOSnapshot({
       ...identity,
@@ -228,7 +228,7 @@ export async function runRoleModelLoop(
         ? parseRoleModelDecision(
             rawOutputValidation.rawOutputText,
             inputEnvelope.allowedTools,
-            inputEnvelope.capabilityToolDefinitions
+            inputEnvelope.pluginToolDefinitions
           )
         : rawOutputValidation.decisionResult;
     const parsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
@@ -239,7 +239,7 @@ export async function runRoleModelLoop(
 
     if (decisionResult.status === 'rejected') {
       const loopRound = createRoleModelLoopRound({
-        capabilityToolResults: [],
+        pluginToolResults: [],
         inputEnvelope,
         ioSnapshot,
         parsedDecisionSnapshot,
@@ -249,7 +249,7 @@ export async function runRoleModelLoop(
       rounds.push(loopRound);
 
       return createRejectedRoleModelLoopResult({
-        capabilityToolResults: allCapabilityToolResults,
+        pluginToolResults: allPluginToolResults,
         decisionResult,
         inputEnvelope,
         ioSnapshot,
@@ -272,7 +272,7 @@ export async function runRoleModelLoop(
           'Terminal model output must include visible_reply or top-level text.'
         );
         const loopRound = createRoleModelLoopRound({
-          capabilityToolResults: [],
+          pluginToolResults: [],
           inputEnvelope,
           ioSnapshot,
           parsedDecisionSnapshot,
@@ -282,7 +282,7 @@ export async function runRoleModelLoop(
         rounds.push(loopRound);
 
         return createRejectedRoleModelLoopResult({
-          capabilityToolResults: allCapabilityToolResults,
+          pluginToolResults: allPluginToolResults,
           decisionResult: rejectedDecisionResult,
           inputEnvelope,
           ioSnapshot,
@@ -292,7 +292,7 @@ export async function runRoleModelLoop(
       }
 
       const loopRound = createRoleModelLoopRound({
-        capabilityToolResults: [],
+        pluginToolResults: [],
         inputEnvelope,
         ioSnapshot,
         parsedDecisionSnapshot,
@@ -308,18 +308,18 @@ export async function runRoleModelLoop(
         parsedDecisionSnapshot,
         decisionResult,
         decision: decisionResult.decision,
-        capabilityToolResults: Object.freeze([...allCapabilityToolResults]),
+        pluginToolResults: Object.freeze([...allPluginToolResults]),
         rounds: Object.freeze([...rounds])
       } satisfies AcceptedRoleModelLoopResult);
     }
 
     if (toolRounds >= maxToolRounds) {
       const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
-        roleModelCapabilityToolRejectedRejectionReason,
+        roleModelPluginToolRejectedRejectionReason,
         `Role model exceeded maximum executable tool rounds (${String(maxToolRounds)}).`
       );
       const loopRound = createRoleModelLoopRound({
-        capabilityToolResults: [],
+        pluginToolResults: [],
         inputEnvelope,
         ioSnapshot,
         parsedDecisionSnapshot,
@@ -329,7 +329,7 @@ export async function runRoleModelLoop(
       rounds.push(loopRound);
 
       return createRejectedRoleModelLoopResult({
-        capabilityToolResults: allCapabilityToolResults,
+        pluginToolResults: allPluginToolResults,
         decisionResult: rejectedDecisionResult,
         inputEnvelope,
         ioSnapshot,
@@ -350,45 +350,45 @@ export async function runRoleModelLoop(
       });
     }
 
-    await options.onCapabilityToolCallsRequested?.({
+    await options.onPluginToolCallsRequested?.({
       round,
       toolNames: executableToolCalls.map((call) => call.name)
     });
 
-    const capabilityToolRouting = await routeExecutableToolCalls({
+    const pluginToolRouting = await routeExecutableToolCalls({
       toolCalls: executableToolCalls,
       identity,
       inputEnvelope,
       round,
-      ...(options.resolveToolCapabilityId === undefined
+      ...(options.resolveToolPluginId === undefined
         ? {}
-        : { resolveToolCapabilityId: options.resolveToolCapabilityId }),
-      ...(options.onCapabilityToolCallStarted === undefined
+        : { resolveToolPluginId: options.resolveToolPluginId }),
+      ...(options.onPluginToolCallStarted === undefined
         ? {}
-        : { onCapabilityToolCallStarted: options.onCapabilityToolCallStarted }),
-      ...(options.capabilityToolHost === undefined
+        : { onPluginToolCallStarted: options.onPluginToolCallStarted }),
+      ...(options.pluginToolHost === undefined
         ? {}
-        : { capabilityToolHost: options.capabilityToolHost }),
-      ...(options.runtimeCapabilityContext === undefined
+        : { pluginToolHost: options.pluginToolHost }),
+      ...(options.runtimePluginContext === undefined
         ? {}
-        : { runtimeCapabilityContext: options.runtimeCapabilityContext })
+        : { runtimePluginContext: options.runtimePluginContext })
     });
 
-    for (const result of capabilityToolRouting.results) {
-      await options.onCapabilityToolCallCompleted?.({
+    for (const result of pluginToolRouting.results) {
+      await options.onPluginToolCallCompleted?.({
         round,
         callId: result.callId,
-        capabilityId: result.call.capabilityId,
+        pluginId: result.call.pluginId,
         toolName: result.call.toolName,
         status: result.result.status,
         result: result.result
       });
     }
 
-    allCapabilityToolResults.push(...capabilityToolRouting.results);
+    allPluginToolResults.push(...pluginToolRouting.results);
 
     const loopRound = createRoleModelLoopRound({
-      capabilityToolResults: capabilityToolRouting.results,
+      pluginToolResults: pluginToolRouting.results,
       inputEnvelope,
       ioSnapshot,
       parsedDecisionSnapshot,
@@ -400,26 +400,26 @@ export async function runRoleModelLoop(
     toolRounds += 1;
     toolObservations = Object.freeze([
       ...toolObservations,
-      ...capabilityToolRouting.results.map((routing) =>
+      ...pluginToolRouting.results.map((routing) =>
         createToolObservationFromRouting({ round, routing })
       )
     ]);
   }
 }
 
-type CapabilityToolRoutingResult =
+type PluginToolRoutingResult =
   | {
       readonly status: 'accepted';
-      readonly results: readonly RoleModelCapabilityToolRoutingEvidence[];
+      readonly results: readonly RoleModelPluginToolRoutingEvidence[];
     }
   | {
       readonly status: 'rejected';
-      readonly results: readonly RoleModelCapabilityToolRoutingEvidence[];
+      readonly results: readonly RoleModelPluginToolRoutingEvidence[];
       readonly decisionResult: RejectedRoleModelDecisionResult;
     };
 
 function createRoleModelLoopRound(options: {
-  readonly capabilityToolResults: readonly RoleModelCapabilityToolRoutingEvidence[];
+  readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly ioSnapshot: RoleModelIOSnapshot;
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
@@ -430,12 +430,12 @@ function createRoleModelLoopRound(options: {
     inputEnvelope: options.inputEnvelope,
     ioSnapshot: options.ioSnapshot,
     parsedDecisionSnapshot: options.parsedDecisionSnapshot,
-    capabilityToolResults: Object.freeze([...options.capabilityToolResults])
+    pluginToolResults: Object.freeze([...options.pluginToolResults])
   } satisfies RoleModelLoopRound);
 }
 
 function createRejectedRoleModelLoopResult(options: {
-  readonly capabilityToolResults: readonly RoleModelCapabilityToolRoutingEvidence[];
+  readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
   readonly decisionResult: RejectedRoleModelDecisionResult;
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly ioSnapshot: RoleModelIOSnapshot;
@@ -449,7 +449,7 @@ function createRejectedRoleModelLoopResult(options: {
     parsedDecisionSnapshot: options.parsedDecisionSnapshot,
     decisionResult: options.decisionResult,
     rejection: options.decisionResult.rejection,
-    capabilityToolResults: Object.freeze([...options.capabilityToolResults]),
+    pluginToolResults: Object.freeze([...options.pluginToolResults]),
     rounds: Object.freeze([...options.rounds])
   } satisfies RejectedRoleModelLoopResult);
 }
@@ -464,7 +464,7 @@ function executableModelToolCalls(
 
 function createToolObservationFromRouting(options: {
   readonly round: number;
-  readonly routing: RoleModelCapabilityToolRoutingEvidence;
+  readonly routing: RoleModelPluginToolRoutingEvidence;
 }): RoleModelToolObservation {
   const result =
     options.routing.result.status === 'accepted'
@@ -480,7 +480,7 @@ function createToolObservationFromRouting(options: {
 
   return createRoleModelToolObservation({
     round: options.round,
-    capabilityId: options.routing.call.capabilityId,
+    pluginId: options.routing.call.pluginId,
     toolName: options.routing.call.toolName,
     input: options.routing.call.input,
     result
@@ -492,26 +492,26 @@ async function routeExecutableToolCalls(options: {
   readonly identity: RuntimeEventIdentity;
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly round: number;
-  readonly capabilityToolHost?: RoleModelCapabilityToolHost;
-  readonly onCapabilityToolCallStarted?: (
-    event: RoleModelCapabilityToolCallStartedEvent
+  readonly pluginToolHost?: RoleModelPluginToolHost;
+  readonly onPluginToolCallStarted?: (
+    event: RoleModelPluginToolCallStartedEvent
   ) => Promise<void> | void;
-  readonly resolveToolCapabilityId?: (toolName: string) => string | undefined;
-  readonly runtimeCapabilityContext?: RuntimeCapabilityContext;
-}): Promise<CapabilityToolRoutingResult> {
-  const results: RoleModelCapabilityToolRoutingEvidence[] = [];
+  readonly resolveToolPluginId?: (toolName: string) => string | undefined;
+  readonly runtimePluginContext?: RuntimePluginContext;
+}): Promise<PluginToolRoutingResult> {
+  const results: RoleModelPluginToolRoutingEvidence[] = [];
 
   for (const [index, toolCall] of options.toolCalls.entries()) {
-    const capabilityId =
-      options.resolveToolCapabilityId?.(toolCall.name) ??
-      findCapabilityToolDefinition(
-      options.inputEnvelope.capabilityToolDefinitions,
+    const pluginId =
+      options.resolveToolPluginId?.(toolCall.name) ??
+      findPluginToolDefinition(
+      options.inputEnvelope.pluginToolDefinitions,
       toolCall.name
-      )?.capabilityId;
+      )?.pluginId;
 
-    const routedCall = createAgentCapabilityToolCall({
+    const routedCall = createRuntimePluginToolCall({
       identity: options.identity,
-      capabilityId: capabilityId ?? undeclaredToolCapabilityId(toolCall.name),
+      pluginId: pluginId ?? undeclaredToolPluginId(toolCall.name),
       toolCall
     });
     const callId = createToolCallId({
@@ -520,27 +520,27 @@ async function routeExecutableToolCalls(options: {
       toolName: toolCall.name
     });
 
-    await options.onCapabilityToolCallStarted?.({
+    await options.onPluginToolCallStarted?.({
       callId,
       round: options.round,
       call: routedCall
     });
 
     if (
-      capabilityId === undefined ||
-      options.capabilityToolHost === undefined ||
-      options.runtimeCapabilityContext === undefined
+      pluginId === undefined ||
+      options.pluginToolHost === undefined ||
+      options.runtimePluginContext === undefined
     ) {
       results.push(
         createRejectedToolRoutingEvidence({
           callId,
           call: routedCall,
           reason:
-            capabilityId === undefined
+            pluginId === undefined
               ? 'tool_not_declared'
               : 'tool_host_missing',
           message:
-            capabilityId === undefined
+            pluginId === undefined
               ? `Tool "${toolCall.name}" is not declared for this turn.`
               : `Tool "${toolCall.name}" has no host handler for this turn.`
         })
@@ -548,12 +548,12 @@ async function routeExecutableToolCalls(options: {
       continue;
     }
 
-    let hostResult: AgentCapabilityToolCallResult;
+    let hostResult: RuntimePluginToolCallResult;
 
     try {
-      hostResult = await options.capabilityToolHost.handleToolCall(
+      hostResult = await options.pluginToolHost.handleToolCall(
         routedCall,
-        options.runtimeCapabilityContext
+        options.runtimePluginContext
       );
     } catch (error: unknown) {
       results.push(
@@ -573,30 +573,30 @@ async function routeExecutableToolCalls(options: {
     const routingEvidence = Object.freeze({
       callId,
       call: routedCall,
-      result: freezeAgentCapabilityToolCallResult(hostResult)
-    } satisfies RoleModelCapabilityToolRoutingEvidence);
+      result: freezeRuntimePluginToolCallResult(hostResult)
+    } satisfies RoleModelPluginToolRoutingEvidence);
 
     results.push(routingEvidence);
   }
 
-  return createAcceptedCapabilityToolRoutingResult(results);
+  return createAcceptedPluginToolRoutingResult(results);
 }
 
-function createAcceptedCapabilityToolRoutingResult(
-  results: readonly RoleModelCapabilityToolRoutingEvidence[]
-): CapabilityToolRoutingResult {
+function createAcceptedPluginToolRoutingResult(
+  results: readonly RoleModelPluginToolRoutingEvidence[]
+): PluginToolRoutingResult {
   return Object.freeze({
     status: 'accepted',
     results: Object.freeze([...results])
-  } satisfies CapabilityToolRoutingResult);
+  } satisfies PluginToolRoutingResult);
 }
 
 function createRejectedToolRoutingEvidence(options: {
   readonly callId: string;
-  readonly call: AgentCapabilityToolCall;
+  readonly call: RuntimePluginToolCall;
   readonly reason: string;
   readonly message: string;
-}): RoleModelCapabilityToolRoutingEvidence {
+}): RoleModelPluginToolRoutingEvidence {
   return Object.freeze({
     callId: options.callId,
     call: options.call,
@@ -605,33 +605,33 @@ function createRejectedToolRoutingEvidence(options: {
       reason: options.reason,
       message: options.message,
       evidence: Object.freeze([])
-    } satisfies AgentCapabilityToolCallResult)
-  } satisfies RoleModelCapabilityToolRoutingEvidence);
+    } satisfies RuntimePluginToolCallResult)
+  } satisfies RoleModelPluginToolRoutingEvidence);
 }
 
-function findCapabilityToolDefinition(
-  definitions: readonly RoleModelCapabilityToolDefinition[],
+function findPluginToolDefinition(
+  definitions: readonly RoleModelPluginToolDefinition[],
   toolName: string
-): RoleModelCapabilityToolDefinition | undefined {
+): RoleModelPluginToolDefinition | undefined {
   return definitions.find((definition) => definition.name === toolName);
 }
 
-function createAgentCapabilityToolCall(options: {
+function createRuntimePluginToolCall(options: {
   readonly identity: RuntimeEventIdentity;
-  readonly capabilityId: string;
+  readonly pluginId: string;
   readonly toolCall: ModelToolCall;
-}): AgentCapabilityToolCall {
+}): RuntimePluginToolCall {
   return Object.freeze({
     eventId: options.identity.eventId,
     traceId: options.identity.traceId,
     createdAt: options.identity.createdAt,
-    capabilityId: options.capabilityId,
+    pluginId: options.pluginId,
     toolName: options.toolCall.name,
-    input: freezeAgentCapabilityJsonObject(options.toolCall.input)
-  } satisfies AgentCapabilityToolCall);
+    input: freezeRuntimePluginJsonObject(options.toolCall.input)
+  } satisfies RuntimePluginToolCall);
 }
 
-function undeclaredToolCapabilityId(toolName: string): string {
+function undeclaredToolPluginId(toolName: string): string {
   if (toolName === characterStatePatchModelToolName) {
     return 'character-state';
   }
@@ -647,15 +647,15 @@ function createToolCallId(options: {
   return `round-${String(options.round)}.${String(options.index + 1)}.${options.toolName}`;
 }
 
-function freezeAgentCapabilityToolCallResult(
-  result: AgentCapabilityToolCallResult
-): AgentCapabilityToolCallResult {
+function freezeRuntimePluginToolCallResult(
+  result: RuntimePluginToolCallResult
+): RuntimePluginToolCallResult {
   if (result.status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
-      output: freezeAgentCapabilityJsonValue(result.output),
+      output: freezeRuntimePluginJsonValue(result.output),
       evidence: Object.freeze([...result.evidence])
-    } satisfies AgentCapabilityToolCallResult);
+    } satisfies RuntimePluginToolCallResult);
   }
 
   return Object.freeze({
@@ -663,24 +663,24 @@ function freezeAgentCapabilityToolCallResult(
     reason: result.reason,
     message: result.message,
     evidence: Object.freeze([...result.evidence])
-  } satisfies AgentCapabilityToolCallResult);
+  } satisfies RuntimePluginToolCallResult);
 }
 
-function freezeAgentCapabilityJsonObject(
+function freezeRuntimePluginJsonObject(
   value: Readonly<Record<string, unknown>>
-): AgentCapabilityJsonObject {
-  const snapshot: Record<string, AgentCapabilityJsonValue> = {};
+): RuntimePluginJsonObject {
+  const snapshot: Record<string, RuntimePluginJsonValue> = {};
 
   for (const [key, item] of Object.entries(value)) {
-    snapshot[key] = freezeAgentCapabilityJsonValue(item);
+    snapshot[key] = freezeRuntimePluginJsonValue(item);
   }
 
   return Object.freeze(snapshot);
 }
 
-function freezeAgentCapabilityJsonValue(
+function freezeRuntimePluginJsonValue(
   value: unknown
-): AgentCapabilityJsonValue {
+): RuntimePluginJsonValue {
   if (
     value === null ||
     typeof value === 'string' ||
@@ -691,14 +691,14 @@ function freezeAgentCapabilityJsonValue(
   }
 
   if (Array.isArray(value)) {
-    return Object.freeze(value.map(freezeAgentCapabilityJsonValue));
+    return Object.freeze(value.map(freezeRuntimePluginJsonValue));
   }
 
   if (isJsonRecord(value)) {
-    return freezeAgentCapabilityJsonObject(value);
+    return freezeRuntimePluginJsonObject(value);
   }
 
-  throw new TypeError('Capability tool input must be JSON serializable.');
+  throw new TypeError('Plugin tool input must be JSON serializable.');
 }
 
 function createRoleModelAdapterRawOutput(
@@ -725,7 +725,7 @@ type RoleModelAdapterRawOutputValidationResult =
 function validateRoleModelAdapterRawOutput(
   rawOutput: unknown,
   allowedTools: readonly RoleModelAllowedToolName[],
-  capabilityToolDefinitions: readonly RoleModelCapabilityToolDefinition[]
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[]
 ): RoleModelAdapterRawOutputValidationResult {
   if (!isJsonRecord(rawOutput)) {
     return createMalformedAdapterRawOutputResult();
@@ -752,7 +752,7 @@ function validateRoleModelAdapterRawOutput(
         providerMetadata,
         decisionResult,
         allowedTools,
-        capabilityToolDefinitions
+        pluginToolDefinitions
       })
     ) {
       return createMalformedAdapterRawOutputResult(

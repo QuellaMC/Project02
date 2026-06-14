@@ -12,25 +12,24 @@ import {
 } from './conversation.ts';
 import { buildUserTurnDecisionContext } from './decision-context.ts';
 import {
-  agentCapabilityContractVersion,
-  createAgentCapabilityToolInvocationSnapshot,
-  createAgentCapabilityTurnEvidenceSnapshot,
-  createRuntimeCapabilityAfterTurnCommittedContext,
-  createRuntimeCapabilityContext,
-  type AgentCapabilityContextItem,
-  type AgentCapabilityEvidenceSnapshot,
-  type AgentCapabilityHealthSnapshot,
-  type AgentCapabilityToolCall,
-  type AgentCapabilityToolCallResult,
-  type AgentCapabilityToolInvocationSnapshot,
-  type AgentCapabilityTurnEvidenceSnapshot,
-  type RuntimeCapabilityContext
-} from './agent-capabilities.ts';
+  runtimePluginContractVersion,
+  createRuntimePluginToolInvocationSnapshot,
+  createRuntimePluginTurnEvidenceSnapshot,
+  createRuntimePluginAfterTurnCommittedContext,
+  createRuntimePluginContext,
+  type RuntimePluginContextItem,
+  type RuntimePluginEvidenceSnapshot,
+  type RuntimePluginHealthSnapshot,
+  type RuntimePluginToolCall,
+  type RuntimePluginToolCallResult,
+  type RuntimePluginToolInvocationSnapshot,
+  type RuntimePluginTurnEvidenceSnapshot,
+  type RuntimePluginContext
+} from './plugins/types.ts';
 import {
-  runtimeCapabilityBeforeRoleModelCallRejectionReason,
-  type RuntimeCapabilityHealthHostResult,
-  type RuntimeCapabilityHost
-} from './agent-capability-host.ts';
+  runtimePluginBeforeRoleModelCallRejectionReason,
+  type RuntimePluginHealthHostResult
+} from './plugins/index.ts';
 import {
   createDecisionContext,
   createRejectedRoleModelDecisionResult,
@@ -45,10 +44,12 @@ import {
   createRoleModelAdapterFromCharacterAgent,
   runRoleModelLoop,
   type RoleModelAdapter,
-  type RoleModelCapabilityToolRoutingEvidence
+  type RoleModelPluginToolRoutingEvidence
 } from './role-model-loop.ts';
-import { createDefaultProject02PluginHost } from './plugins/index.ts';
-import type { RuntimePluginHost } from './plugins/index.ts';
+import {
+  createDefaultProject02PluginHost,
+  type RuntimePluginHost
+} from './plugins/index.ts';
 import {
   createUserMessageRuntimeEvent,
   RuntimeEventInputError,
@@ -67,13 +68,13 @@ import type {
   RuntimeTraceStepName
 } from './runtime-log.ts';
 
-const runtimeCapabilityHealthRejectionReason = 'capability_health_rejected';
+const runtimePluginHealthRejectionReason = 'plugin_health_rejected';
 
 export type LocalRuntimeUserMessageRejectionReason =
   | 'input_validation_rejected'
   | 'character_reply_rejected'
-  | typeof runtimeCapabilityHealthRejectionReason
-  | typeof runtimeCapabilityBeforeRoleModelCallRejectionReason
+  | typeof runtimePluginHealthRejectionReason
+  | typeof runtimePluginBeforeRoleModelCallRejectionReason
   | RoleModelDecisionRejectionReason;
 
 export type RunLocalUserMessageEventOptions = {
@@ -82,9 +83,8 @@ export type RunLocalUserMessageEventOptions = {
   readonly logStore: RuntimeLogStore;
   readonly rawInput?: string;
   readonly agent?: CharacterAgent;
-  readonly characterStateStore?: unknown;
   readonly roleModelAdapter?: RoleModelAdapter;
-  readonly capabilityHost?: RuntimeCapabilityHost;
+  readonly pluginHost?: RuntimePluginHost;
   readonly characterTurnOptions?: CharacterTurnOptions;
   readonly committedAt?: string;
   readonly onProgress?: (
@@ -245,7 +245,8 @@ async function runSerializedLocalUserMessageEvent(
     normalizedCurrentUserMessage: event.payload.currentUserMessage,
     ...(options.rawInput === undefined ? {} : { rawInput: options.rawInput })
   });
-  let runtimeCapabilityContextForTurn: RuntimeCapabilityContext | undefined;
+  let runtimePluginContextForTurn: RuntimePluginContext | undefined;
+  let runtimePluginHostForTurn: RuntimePluginHost | undefined;
 
   function appendTrace(step: RuntimeTraceStepName): RuntimeTraceEntry {
     const traceEntry = options.logStore.appendTrace({
@@ -265,29 +266,31 @@ async function runSerializedLocalUserMessageEvent(
   }
 
   async function appendRejectedResult(optionsForRejection: {
-    readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[];
-    readonly agentCapabilityContextItems?: readonly AgentCapabilityContextItem[];
-    readonly agentCapabilityToolInvocations?: readonly AgentCapabilityToolInvocationSnapshot[];
+    readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
+    readonly runtimePluginContextItems?: readonly RuntimePluginContextItem[];
+    readonly runtimePluginToolInvocations?: readonly RuntimePluginToolInvocationSnapshot[];
     readonly evidence?: RoleModelRawEvidence;
-    readonly healthResult?: RuntimeCapabilityHealthHostResult;
+    readonly healthResult?: RuntimePluginHealthHostResult;
     readonly message: string;
     readonly rawKind: RawEventLogRecordInput['kind'];
     readonly rawReason: string;
     readonly reason: LocalRuntimeUserMessageRejectionReason;
-    readonly runtimeCapabilityContext?: RuntimeCapabilityContext;
+    readonly runtimePluginContext?: RuntimePluginContext;
     readonly traceStep: RuntimeTraceStepName;
     readonly toolCallIds?: readonly string[];
     readonly visibleMessageIds?: readonly string[];
   }): Promise<LocalRuntimeUserMessageRejectedResult> {
     const evidence = optionsForRejection.evidence ?? {};
+    const pluginHostForEvidence =
+      runtimePluginHostForTurn ?? options.pluginHost;
     const healthResult =
       optionsForRejection.healthResult ??
-      (await capabilityHealthForTurn({
-        capabilityHost: options.capabilityHost,
-        runtimeCapabilityContext: optionsForRejection.runtimeCapabilityContext
+      (await pluginHealthForTurn({
+        pluginHost: pluginHostForEvidence,
+        runtimePluginContext: optionsForRejection.runtimePluginContext
       }));
-    const agentCapabilityEvidence = combineAgentCapabilityEvidence(
-      optionsForRejection.agentCapabilityEvidence ?? [],
+    const runtimePluginEvidence = combineRuntimePluginEvidence(
+      optionsForRejection.runtimePluginEvidence ?? [],
       healthResult.evidence
     );
 
@@ -306,14 +309,14 @@ async function runSerializedLocalUserMessageEvent(
         : { visibleMessageIds: optionsForRejection.visibleMessageIds }),
       payloadSummary,
       ...evidence,
-      ...agentCapabilityEvidenceOption(agentCapabilityEvidence),
-      ...agentCapabilityTurnEvidenceOption({
+      ...runtimePluginEvidenceOption(runtimePluginEvidence),
+      ...runtimePluginTurnEvidenceOption({
         identity,
-        capabilityHost: options.capabilityHost,
-        contextItems: optionsForRejection.agentCapabilityContextItems ?? [],
+        pluginHost: pluginHostForEvidence,
+        contextItems: optionsForRejection.runtimePluginContextItems ?? [],
         toolInvocations:
-          optionsForRejection.agentCapabilityToolInvocations ?? [],
-        evidence: agentCapabilityEvidence,
+          optionsForRejection.runtimePluginToolInvocations ?? [],
+        evidence: runtimePluginEvidence,
         health: healthResult.snapshots
       })
     });
@@ -332,14 +335,14 @@ async function runSerializedLocalUserMessageEvent(
         : { visibleMessageIds: optionsForRejection.visibleMessageIds }),
       payloadSummary,
       ...evidence,
-      ...agentCapabilityEvidenceOption(agentCapabilityEvidence),
-      ...agentCapabilityTurnEvidenceOption({
+      ...runtimePluginEvidenceOption(runtimePluginEvidence),
+      ...runtimePluginTurnEvidenceOption({
         identity,
-        capabilityHost: options.capabilityHost,
-        contextItems: optionsForRejection.agentCapabilityContextItems ?? [],
+        pluginHost: pluginHostForEvidence,
+        contextItems: optionsForRejection.runtimePluginContextItems ?? [],
         toolInvocations:
-          optionsForRejection.agentCapabilityToolInvocations ?? [],
-        evidence: agentCapabilityEvidence,
+          optionsForRejection.runtimePluginToolInvocations ?? [],
+        evidence: runtimePluginEvidence,
         health: healthResult.snapshots
       })
     });
@@ -361,27 +364,27 @@ async function runSerializedLocalUserMessageEvent(
   function appendRoleModelRejectedResult(
     rejection: RoleModelDecisionRejection,
     evidence: RoleModelRawEvidence,
-    agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[],
-    agentCapabilityContextItems?: readonly AgentCapabilityContextItem[],
-    agentCapabilityToolInvocations?: readonly AgentCapabilityToolInvocationSnapshot[],
-    runtimeCapabilityContext?: RuntimeCapabilityContext
+    runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[],
+    runtimePluginContextItems?: readonly RuntimePluginContextItem[],
+    runtimePluginToolInvocations?: readonly RuntimePluginToolInvocationSnapshot[],
+    runtimePluginContext?: RuntimePluginContext
   ): Promise<LocalRuntimeUserMessageRejectedResult> {
     return appendRejectedResult({
       evidence,
-      ...(agentCapabilityEvidence === undefined ? {} : { agentCapabilityEvidence }),
-      ...(agentCapabilityContextItems === undefined
+      ...(runtimePluginEvidence === undefined ? {} : { runtimePluginEvidence }),
+      ...(runtimePluginContextItems === undefined
         ? {}
-        : { agentCapabilityContextItems }),
-      ...(agentCapabilityToolInvocations === undefined
+        : { runtimePluginContextItems }),
+      ...(runtimePluginToolInvocations === undefined
         ? {}
-        : { agentCapabilityToolInvocations }),
+        : { runtimePluginToolInvocations }),
       message: rejection.details ?? rejection.reason,
       rawKind: 'commit_validation_rejected',
       rawReason: rejection.reason,
       reason: rejection.reason,
-      ...(runtimeCapabilityContext === undefined
+      ...(runtimePluginContext === undefined
         ? {}
-        : { runtimeCapabilityContext }),
+        : { runtimePluginContext }),
       traceStep: 'commit_validation_rejected',
       toolCallIds: Object.freeze([...finishedToolCallIds]),
       ...visibleMessageIdsForTurnOption(committedVisibleMessages)
@@ -415,7 +418,7 @@ async function runSerializedLocalUserMessageEvent(
   }
 
   async function appendVisibleReplyForDecision(optionsForReply: {
-    readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[];
+    readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
     readonly final: boolean;
     readonly roleModelIOSnapshot: RoleModelIOSnapshot;
     readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
@@ -446,8 +449,8 @@ async function runSerializedLocalUserMessageEvent(
         parsedRoleModelDecisionSnapshot:
           optionsForReply.parsedRoleModelDecisionSnapshot,
         commitValidation,
-        ...agentCapabilityEvidenceOption(
-          optionsForReply.agentCapabilityEvidence
+        ...runtimePluginEvidenceOption(
+          optionsForReply.runtimePluginEvidence
         )
       });
 
@@ -519,8 +522,8 @@ async function runSerializedLocalUserMessageEvent(
       parsedRoleModelDecisionSnapshot:
         optionsForReply.parsedRoleModelDecisionSnapshot,
       commitValidation,
-      ...agentCapabilityEvidenceOption(
-        optionsForReply.agentCapabilityEvidence
+      ...runtimePluginEvidenceOption(
+        optionsForReply.runtimePluginEvidence
       )
     });
 
@@ -536,7 +539,7 @@ async function runSerializedLocalUserMessageEvent(
   function appendToolCallStarted(optionsForTool: {
     readonly callId: string;
     readonly round: number;
-    readonly call: AgentCapabilityToolCall;
+    readonly call: RuntimePluginToolCall;
   }): void {
     appendTrace('tool_call_started');
     appendRawEvent({
@@ -546,7 +549,7 @@ async function runSerializedLocalUserMessageEvent(
       toolCallId: optionsForTool.callId,
       toolRound: optionsForTool.round,
       toolName: optionsForTool.call.toolName,
-      toolPluginId: optionsForTool.call.capabilityId,
+      toolPluginId: optionsForTool.call.pluginId,
       toolInput: optionsForTool.call.input,
       payloadSummary
     });
@@ -555,9 +558,9 @@ async function runSerializedLocalUserMessageEvent(
   function appendToolCallFinished(optionsForTool: {
     readonly callId: string;
     readonly round: number;
-    readonly capabilityId: string;
+    readonly pluginId: string;
     readonly toolName: string;
-    readonly result: AgentCapabilityToolCallResult;
+    readonly result: RuntimePluginToolCallResult;
   }): void {
     appendTrace('tool_call_finished');
     appendRawEvent({
@@ -567,7 +570,7 @@ async function runSerializedLocalUserMessageEvent(
       toolCallId: optionsForTool.callId,
       toolRound: optionsForTool.round,
       toolName: optionsForTool.toolName,
-      toolPluginId: optionsForTool.capabilityId,
+      toolPluginId: optionsForTool.pluginId,
       toolResult: optionsForTool.result,
       ...pluginStoreRevisionOption(optionsForTool.result),
       payloadSummary
@@ -594,32 +597,33 @@ async function runSerializedLocalUserMessageEvent(
             recentMessageLimit: options.characterTurnOptions.recentMessageLimit
           })
     });
-    const runtimeCapabilityContext = createRuntimeCapabilityContext({
+    const runtimePluginContext = createRuntimePluginContext({
       ...identity,
       sessionId: decisionContext.sessionId,
       eventType: event.type,
       currentUserMessage: event.payload.currentUserMessage,
       character: decisionContext.characterSnapshot
     });
-    runtimeCapabilityContextForTurn = runtimeCapabilityContext;
+    runtimePluginContextForTurn = runtimePluginContext;
     const pluginHost = createPluginHostForTurn({
-      capabilityHost: options.capabilityHost,
+      pluginHost: options.pluginHost,
       decisionContextSessionId: decisionContext.sessionId,
       logStore: options.logStore
     });
+    runtimePluginHostForTurn = pluginHost;
     const beforeRoleModelCallResult = await pluginHost.beforeRoleModelCall(
-      runtimeCapabilityContext
+      runtimePluginContext
     );
 
     if (beforeRoleModelCallResult.status === 'rejected') {
       return await appendRejectedResult({
-        agentCapabilityEvidence: beforeRoleModelCallResult.evidence,
+        runtimePluginEvidence: beforeRoleModelCallResult.evidence,
         message: beforeRoleModelCallResult.message,
-        rawKind: runtimeCapabilityBeforeRoleModelCallRejectionReason,
+        rawKind: runtimePluginBeforeRoleModelCallRejectionReason,
         rawReason: beforeRoleModelCallResult.message,
         reason: beforeRoleModelCallResult.reason,
-        runtimeCapabilityContext,
-        traceStep: runtimeCapabilityBeforeRoleModelCallRejectionReason
+        runtimePluginContext,
+        traceStep: runtimePluginBeforeRoleModelCallRejectionReason
       });
     }
 
@@ -631,29 +635,29 @@ async function runSerializedLocalUserMessageEvent(
         ...decisionContext.runtimeNotes,
         ...beforeRoleModelCallResult.runtimeNotes
       ]),
-      capabilityContextItems: beforeRoleModelCallResult.contextItems
+      pluginContextItems: beforeRoleModelCallResult.contextItems
     });
     const roleModelResult = await runRoleModelLoop({
       event,
       decisionContext: roleModelDecisionContext,
-      capabilityToolDefinitions: pluginHost.capabilityToolDefinitions(),
-      capabilityToolHost: pluginHost,
-      runtimeCapabilityContext,
-      resolveToolCapabilityId(toolName) {
-        return pluginHost.resolveToolCapabilityId(toolName);
+      pluginToolDefinitions: pluginHost.pluginToolDefinitions(),
+      pluginToolHost: pluginHost,
+      runtimePluginContext,
+      resolveToolPluginId(toolName) {
+        return pluginHost.resolveToolPluginId(toolName);
       },
-      onCapabilityToolCallStarted(progressEvent) {
+      onPluginToolCallStarted(progressEvent) {
         appendToolCallStarted({
           callId: progressEvent.callId,
           round: progressEvent.round,
           call: progressEvent.call
         });
       },
-      async onCapabilityToolCallCompleted(progressEvent) {
+      async onPluginToolCallCompleted(progressEvent) {
         appendToolCallFinished({
           callId: progressEvent.callId,
           round: progressEvent.round,
-          capabilityId: progressEvent.capabilityId,
+          pluginId: progressEvent.pluginId,
           toolName: progressEvent.toolName,
           result: progressEvent.result
         });
@@ -664,7 +668,7 @@ async function runSerializedLocalUserMessageEvent(
           toolName: progressEvent.toolName
         });
       },
-      async onCapabilityToolCallsRequested(progressEvent) {
+      async onPluginToolCallsRequested(progressEvent) {
         await emitProgress({
           kind: 'tool_calls_requested',
           round: progressEvent.round,
@@ -673,7 +677,7 @@ async function runSerializedLocalUserMessageEvent(
       },
       async onInterimVisibleReply(progressEvent) {
         await appendVisibleReplyForDecision({
-          agentCapabilityEvidence: beforeRoleModelCallResult.evidence,
+          runtimePluginEvidence: beforeRoleModelCallResult.evidence,
           final: false,
           roleModelIOSnapshot: progressEvent.ioSnapshot,
           parsedRoleModelDecisionSnapshot:
@@ -687,12 +691,12 @@ async function runSerializedLocalUserMessageEvent(
       roleModelIOSnapshot: roleModelResult.ioSnapshot,
       parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot
     } satisfies RoleModelRawEvidence;
-    const roleModelCapabilityEvidence = combineAgentCapabilityEvidence(
+    const roleModelPluginEvidence = combineRuntimePluginEvidence(
       beforeRoleModelCallResult.evidence,
-      capabilityToolEvidenceFromRouting(roleModelResult.capabilityToolResults)
+      pluginToolEvidenceFromRouting(roleModelResult.pluginToolResults)
     );
-    const roleModelCapabilityToolInvocations =
-      capabilityToolInvocationsFromRouting(roleModelResult.capabilityToolResults);
+    const roleModelPluginToolInvocations =
+      pluginToolInvocationsFromRouting(roleModelResult.pluginToolResults);
 
     if (roleModelResult.status === 'rejected') {
       const commitValidation = createRejectedCommitValidationSnapshot({
@@ -707,10 +711,10 @@ async function runSerializedLocalUserMessageEvent(
           ...roleModelEvidence,
           commitValidation
         },
-        roleModelCapabilityEvidence,
+        roleModelPluginEvidence,
         beforeRoleModelCallResult.contextItems,
-        roleModelCapabilityToolInvocations,
-        runtimeCapabilityContext
+        roleModelPluginToolInvocations,
+        runtimePluginContext
       );
     }
 
@@ -737,10 +741,10 @@ async function runSerializedLocalUserMessageEvent(
               ...roleModelEvidence,
               commitValidation
             },
-            roleModelCapabilityEvidence,
+            roleModelPluginEvidence,
             beforeRoleModelCallResult.contextItems,
-            roleModelCapabilityToolInvocations,
-            runtimeCapabilityContext
+            roleModelPluginToolInvocations,
+            runtimePluginContext
           );
         }
 
@@ -748,30 +752,30 @@ async function runSerializedLocalUserMessageEvent(
       }
     }
 
-    const preCommitHealthResult = await pluginHost.health(runtimeCapabilityContext);
+    const preCommitHealthResult = await pluginHost.health(runtimePluginContext);
 
     if (
       healthResultRejectsTurn({
-        capabilityHost: options.capabilityHost,
+        pluginHost,
         healthResult: preCommitHealthResult
       })
     ) {
       return await appendRejectedResult({
-        agentCapabilityEvidence: roleModelCapabilityEvidence,
-        agentCapabilityContextItems: beforeRoleModelCallResult.contextItems,
-        agentCapabilityToolInvocations: roleModelCapabilityToolInvocations,
+        runtimePluginEvidence: roleModelPluginEvidence,
+        runtimePluginContextItems: beforeRoleModelCallResult.contextItems,
+        runtimePluginToolInvocations: roleModelPluginToolInvocations,
         evidence: {
           ...roleModelEvidence
         },
         healthResult: preCommitHealthResult,
         message: healthResultRejectionMessage({
-          capabilityHost: options.capabilityHost,
+          pluginHost,
           healthResult: preCommitHealthResult
         }),
         rawKind: 'commit_validation_rejected',
-        rawReason: runtimeCapabilityHealthRejectionReason,
-        reason: runtimeCapabilityHealthRejectionReason,
-        runtimeCapabilityContext,
+        rawReason: runtimePluginHealthRejectionReason,
+        reason: runtimePluginHealthRejectionReason,
+        runtimePluginContext,
         traceStep: 'commit_validation_rejected',
         ...visibleMessageIdsForTurnOption(committedVisibleMessages)
       });
@@ -781,14 +785,14 @@ async function runSerializedLocalUserMessageEvent(
       visibleReplyText === undefined
         ? undefined
         : await appendVisibleReplyForDecision({
-            agentCapabilityEvidence: roleModelCapabilityEvidence,
+            runtimePluginEvidence: roleModelPluginEvidence,
             final: true,
             roleModelIOSnapshot: roleModelResult.ioSnapshot,
             parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot,
             text: visibleReplyText
           });
-    const afterCommitCapabilityContext =
-      createRuntimeCapabilityAfterTurnCommittedContext({
+    const afterCommitPluginContext =
+      createRuntimePluginAfterTurnCommittedContext({
         ...identity,
         sessionId: decisionContext.sessionId,
         eventType: event.type,
@@ -799,9 +803,9 @@ async function runSerializedLocalUserMessageEvent(
       });
 
     const afterTurnCommittedResult =
-      await pluginHost.afterTurnCommitted(afterCommitCapabilityContext);
-    const completedCapabilityEvidence = combineAgentCapabilityEvidence(
-      roleModelCapabilityEvidence,
+      await pluginHost.afterTurnCommitted(afterCommitPluginContext);
+    const completedPluginEvidence = combineRuntimePluginEvidence(
+      roleModelPluginEvidence,
       afterTurnCommittedResult.evidence,
       preCommitHealthResult.evidence
     );
@@ -824,13 +828,13 @@ async function runSerializedLocalUserMessageEvent(
           ...(turn === undefined ? {} : { acceptedVisibleReplyText: turn.reply.text })
         }
       }),
-      ...agentCapabilityEvidenceOption(completedCapabilityEvidence),
-      ...agentCapabilityTurnEvidenceOption({
+      ...runtimePluginEvidenceOption(completedPluginEvidence),
+      ...runtimePluginTurnEvidenceOption({
         identity,
-        capabilityHost: options.capabilityHost,
+        pluginHost,
         contextItems: beforeRoleModelCallResult.contextItems,
-        toolInvocations: roleModelCapabilityToolInvocations,
-        evidence: completedCapabilityEvidence,
+        toolInvocations: roleModelPluginToolInvocations,
+        evidence: completedPluginEvidence,
         health: preCommitHealthResult.snapshots
       })
     });
@@ -854,9 +858,9 @@ async function runSerializedLocalUserMessageEvent(
         rawKind: 'input_validation_rejected',
         rawReason: error.message,
         reason: 'input_validation_rejected',
-        ...(runtimeCapabilityContextForTurn === undefined
+        ...(runtimePluginContextForTurn === undefined
           ? {}
-          : { runtimeCapabilityContext: runtimeCapabilityContextForTurn }),
+          : { runtimePluginContext: runtimePluginContextForTurn }),
         traceStep: 'input_validation_rejected'
       });
     }
@@ -869,9 +873,9 @@ async function runSerializedLocalUserMessageEvent(
         rawKind: 'character_reply_rejected',
         rawReason: rejection.reason,
         reason: rejection.reason,
-        ...(runtimeCapabilityContextForTurn === undefined
+        ...(runtimePluginContextForTurn === undefined
           ? {}
-          : { runtimeCapabilityContext: runtimeCapabilityContextForTurn }),
+          : { runtimePluginContext: runtimePluginContextForTurn }),
         traceStep: 'character_reply_rejected',
         ...visibleMessageIdsForTurnOption(committedVisibleMessages)
       });
@@ -907,7 +911,7 @@ function visibleMessageIdsForTurnOption(
 }
 
 function pluginStoreRevisionOption(
-  result: AgentCapabilityToolCallResult
+  result: RuntimePluginToolCallResult
 ): { readonly pluginStoreRevision?: number } {
   if (result.status !== 'accepted') {
     return {};
@@ -1035,45 +1039,46 @@ function roleModelLoopAdapterOption(
 }
 
 function createPluginHostForTurn(options: {
-  readonly capabilityHost: RuntimeCapabilityHost | undefined;
+  readonly pluginHost: RuntimePluginHost | undefined;
   readonly decisionContextSessionId: string;
   readonly logStore: RuntimeLogStore;
 }): RuntimePluginHost {
+  if (options.pluginHost !== undefined) {
+    return options.pluginHost;
+  }
+
   const sessionPaths = options.logStore.localRuntimeSessionPaths;
 
   return createDefaultProject02PluginHost({
-    ...(options.capabilityHost === undefined
-      ? {}
-      : { capabilityHost: options.capabilityHost }),
     ...(sessionPaths === undefined ? {} : { storeRoot: sessionPaths.storeRoot }),
     sessionId: sessionPaths?.sessionId ?? options.decisionContextSessionId
   });
 }
 
-function createEmptyHealthResult(): RuntimeCapabilityHealthHostResult {
+function createEmptyHealthResult(): RuntimePluginHealthHostResult {
   return Object.freeze({
     snapshots: Object.freeze([]),
     evidence: Object.freeze([])
-  } satisfies RuntimeCapabilityHealthHostResult);
+  } satisfies RuntimePluginHealthHostResult);
 }
 
-async function capabilityHealthForTurn(options: {
-  readonly capabilityHost: RuntimeCapabilityHost | undefined;
-  readonly runtimeCapabilityContext: RuntimeCapabilityContext | undefined;
-}): Promise<RuntimeCapabilityHealthHostResult> {
+async function pluginHealthForTurn(options: {
+  readonly pluginHost: RuntimePluginHost | undefined;
+  readonly runtimePluginContext: RuntimePluginContext | undefined;
+}): Promise<RuntimePluginHealthHostResult> {
   if (
-    options.capabilityHost === undefined ||
-    options.runtimeCapabilityContext === undefined
+    options.pluginHost === undefined ||
+    options.runtimePluginContext === undefined
   ) {
     return createEmptyHealthResult();
   }
 
-  return await options.capabilityHost.health(options.runtimeCapabilityContext);
+  return await options.pluginHost.health(options.runtimePluginContext);
 }
 
 function healthResultRejectsTurn(options: {
-  readonly capabilityHost: RuntimeCapabilityHost | undefined;
-  readonly healthResult: RuntimeCapabilityHealthHostResult;
+  readonly pluginHost: RuntimePluginHost | undefined;
+  readonly healthResult: RuntimePluginHealthHostResult;
 }): boolean {
   if (
     options.healthResult.evidence.some((evidence) =>
@@ -1083,26 +1088,26 @@ function healthResultRejectsTurn(options: {
     return true;
   }
 
-  const rejectingCapabilityIds = healthRejectingCapabilityIds(
-    options.capabilityHost
+  const rejectingPluginIds = healthRejectingPluginIds(
+    options.pluginHost
   );
 
   return options.healthResult.snapshots.some(
     (snapshot) =>
       snapshot.status === 'unavailable' &&
-      rejectingCapabilityIds.has(snapshot.capabilityId)
+      rejectingPluginIds.has(snapshot.pluginId)
   );
 }
 
 function healthEvidenceRejectsTurn(
-  evidence: AgentCapabilityEvidenceSnapshot
+  evidence: RuntimePluginEvidenceSnapshot
 ): boolean {
   return evidence.evidenceKind === 'health' && evidence.status === 'failed';
 }
 
 function healthResultRejectionMessage(options: {
-  readonly capabilityHost: RuntimeCapabilityHost | undefined;
-  readonly healthResult: RuntimeCapabilityHealthHostResult;
+  readonly pluginHost: RuntimePluginHost | undefined;
+  readonly healthResult: RuntimePluginHealthHostResult;
 }): string {
   const failedEvidenceSummary = options.healthResult.evidence.find((evidence) =>
     healthEvidenceRejectsTurn(evidence)
@@ -1112,37 +1117,37 @@ function healthResultRejectionMessage(options: {
     return failedEvidenceSummary;
   }
 
-  const rejectingCapabilityIds = healthRejectingCapabilityIds(
-    options.capabilityHost
+  const rejectingPluginIds = healthRejectingPluginIds(
+    options.pluginHost
   );
   const unavailableSnapshot = options.healthResult.snapshots.find(
     (snapshot) =>
       snapshot.status === 'unavailable' &&
-      rejectingCapabilityIds.has(snapshot.capabilityId)
+      rejectingPluginIds.has(snapshot.pluginId)
   );
 
   if (unavailableSnapshot !== undefined) {
-    return `Capability health unavailable: ${unavailableSnapshot.summary}`;
+    return `Plugin health unavailable: ${unavailableSnapshot.summary}`;
   }
 
-  return 'Capability health policy rejected the turn.';
+  return 'Plugin health policy rejected the turn.';
 }
 
-function healthRejectingCapabilityIds(
-  capabilityHost: RuntimeCapabilityHost | undefined
+function healthRejectingPluginIds(
+  pluginHost: RuntimePluginHost | undefined
 ): ReadonlySet<string> {
-  if (capabilityHost === undefined) {
+  if (pluginHost === undefined) {
     return new Set<string>();
   }
 
-  const enabledCapabilityIds = new Set(capabilityHost.enabledCapabilityIds());
+  const enabledPluginIds = new Set(pluginHost.enabledPluginIds());
 
   return new Set(
-    capabilityHost
+    pluginHost
       .registrySnapshot()
-      .capabilities.filter(
+      .plugins.filter(
         (registration) =>
-          enabledCapabilityIds.has(registration.manifest.id) &&
+          enabledPluginIds.has(registration.manifest.id) &&
           registration.manifest.runtimePolicy.failureBehavior.health ===
             'reject_turn'
       )
@@ -1150,73 +1155,73 @@ function healthRejectingCapabilityIds(
   );
 }
 
-function capabilityToolEvidenceFromRouting(
-  results: readonly RoleModelCapabilityToolRoutingEvidence[]
-): readonly AgentCapabilityEvidenceSnapshot[] {
+function pluginToolEvidenceFromRouting(
+  results: readonly RoleModelPluginToolRoutingEvidence[]
+): readonly RuntimePluginEvidenceSnapshot[] {
   return Object.freeze(results.flatMap((routing) => routing.result.evidence));
 }
 
-function capabilityToolInvocationsFromRouting(
-  results: readonly RoleModelCapabilityToolRoutingEvidence[]
-): readonly AgentCapabilityToolInvocationSnapshot[] {
+function pluginToolInvocationsFromRouting(
+  results: readonly RoleModelPluginToolRoutingEvidence[]
+): readonly RuntimePluginToolInvocationSnapshot[] {
   return Object.freeze(
     results.map((routing) =>
-      createAgentCapabilityToolInvocationSnapshot({
+      createRuntimePluginToolInvocationSnapshot({
         ...routing.call,
-        kind: 'agent_capability_tool_invocation_snapshot',
+        kind: 'runtime_plugin_tool_invocation_snapshot',
         result: routing.result
       })
     )
   );
 }
 
-function combineAgentCapabilityEvidence(
-  ...evidenceGroups: readonly (readonly AgentCapabilityEvidenceSnapshot[])[]
-): readonly AgentCapabilityEvidenceSnapshot[] {
+function combineRuntimePluginEvidence(
+  ...evidenceGroups: readonly (readonly RuntimePluginEvidenceSnapshot[])[]
+): readonly RuntimePluginEvidenceSnapshot[] {
   return Object.freeze(evidenceGroups.flatMap((evidence) => evidence));
 }
 
-function agentCapabilityEvidenceOption(
-  evidence: readonly AgentCapabilityEvidenceSnapshot[] | undefined
-): { readonly agentCapabilityEvidence?: readonly AgentCapabilityEvidenceSnapshot[] } {
+function runtimePluginEvidenceOption(
+  evidence: readonly RuntimePluginEvidenceSnapshot[] | undefined
+): { readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[] } {
   if (evidence === undefined || evidence.length === 0) {
     return {};
   }
 
   return {
-    agentCapabilityEvidence: Object.freeze([...evidence])
+    runtimePluginEvidence: Object.freeze([...evidence])
   };
 }
 
-function agentCapabilityTurnEvidenceOption(options: {
+function runtimePluginTurnEvidenceOption(options: {
   readonly identity: RuntimeEventIdentity;
-  readonly capabilityHost: RuntimeCapabilityHost | undefined;
-  readonly contextItems: readonly AgentCapabilityContextItem[];
-  readonly toolInvocations: readonly AgentCapabilityToolInvocationSnapshot[];
-  readonly evidence: readonly AgentCapabilityEvidenceSnapshot[];
-  readonly health: readonly AgentCapabilityHealthSnapshot[];
-}): { readonly agentCapabilityTurnEvidence?: AgentCapabilityTurnEvidenceSnapshot } {
-  if (options.capabilityHost === undefined) {
+  readonly pluginHost: RuntimePluginHost | undefined;
+  readonly contextItems: readonly RuntimePluginContextItem[];
+  readonly toolInvocations: readonly RuntimePluginToolInvocationSnapshot[];
+  readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
+  readonly health: readonly RuntimePluginHealthSnapshot[];
+}): { readonly runtimePluginTurnEvidence?: RuntimePluginTurnEvidenceSnapshot } {
+  if (options.pluginHost === undefined) {
     return {};
   }
 
-  const registry = options.capabilityHost.registrySnapshot();
-  const enabledCapabilityIds = new Set(options.capabilityHost.enabledCapabilityIds());
+  const registry = options.pluginHost.registrySnapshot();
+  const enabledPluginIds = new Set(options.pluginHost.enabledPluginIds());
   const healthStatuses = new Map(
-    options.health.map((snapshot) => [snapshot.capabilityId, snapshot.status])
+    options.health.map((snapshot) => [snapshot.pluginId, snapshot.status])
   );
 
   return {
-    agentCapabilityTurnEvidence: createAgentCapabilityTurnEvidenceSnapshot({
+    runtimePluginTurnEvidence: createRuntimePluginTurnEvidenceSnapshot({
       ...options.identity,
-      kind: 'agent_capability_turn_evidence_snapshot',
-      contractVersion: agentCapabilityContractVersion,
-      capabilities: registry.capabilities.map((registration) => {
-        const enabled = enabledCapabilityIds.has(registration.manifest.id);
+      kind: 'runtime_plugin_turn_evidence_snapshot',
+      contractVersion: runtimePluginContractVersion,
+      plugins: registry.plugins.map((registration) => {
+        const enabled = enabledPluginIds.has(registration.manifest.id);
         const healthStatus = healthStatuses.get(registration.manifest.id);
 
         return {
-          capabilityId: registration.manifest.id,
+          pluginId: registration.manifest.id,
           manifest: registration.manifest,
           providedTools: registration.providedTools,
           registeredLifecycleHooks: registration.registeredLifecycleHooks,

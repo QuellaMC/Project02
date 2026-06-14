@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  agentCapabilityContractVersion,
-  createAgentCapabilityTurnEvidenceSnapshot,
+  runtimePluginContractVersion,
+  createRuntimePluginTurnEvidenceSnapshot,
   createRuntimeLogStore,
   type ConversationLogRecordInput,
-  type AgentCapabilityTurnEvidenceSnapshot,
+  type RuntimePluginTurnEvidenceSnapshot,
   type RawEventLogRecordInput,
   type RuntimeEventIdentity,
   type RuntimeTraceEntryInput
@@ -67,7 +67,7 @@ describe('runtime log store', () => {
       status: 'completed',
       visibleMessageIds,
       payloadSummary,
-      agentCapabilityTurnEvidence: createMinimalCapabilityTurnEvidence(identity)
+      runtimePluginTurnEvidence: createMinimalPluginTurnEvidence(identity)
     };
 
     const receivedRecord = store.appendRawEvent(received);
@@ -83,13 +83,13 @@ describe('runtime log store', () => {
       payloadSummary: {
         normalizedCurrentUserMessage: 'hello'
       },
-      agentCapabilityTurnEvidence: {
-        ...createMinimalCapabilityTurnEvidence(identity),
+      runtimePluginTurnEvidence: {
+        ...createMinimalPluginTurnEvidence(identity),
         evidence: [
           {
             ...identity,
-            kind: 'agent_capability_evidence_snapshot',
-            capabilityId: 'memory.fixture',
+            kind: 'runtime_plugin_evidence_snapshot',
+            pluginId: 'memory.fixture',
             evidenceKind: 'policy',
             status: 'failed',
             summary: 'handler token=[redacted]',
@@ -151,20 +151,20 @@ describe('runtime log store', () => {
   });
 });
 
-function createMinimalCapabilityTurnEvidence(
+function createMinimalPluginTurnEvidence(
   eventIdentity: RuntimeEventIdentity
-): AgentCapabilityTurnEvidenceSnapshot {
-  return createAgentCapabilityTurnEvidenceSnapshot({
+): RuntimePluginTurnEvidenceSnapshot {
+  return createRuntimePluginTurnEvidenceSnapshot({
     ...eventIdentity,
-    kind: 'agent_capability_turn_evidence_snapshot',
-    contractVersion: agentCapabilityContractVersion,
-    capabilities: [],
+    kind: 'runtime_plugin_turn_evidence_snapshot',
+    contractVersion: runtimePluginContractVersion,
+    plugins: [],
     contextItems: [],
     evidence: [
       {
         ...eventIdentity,
-        kind: 'agent_capability_evidence_snapshot',
-        capabilityId: 'memory.fixture',
+        kind: 'runtime_plugin_evidence_snapshot',
+        pluginId: 'memory.fixture',
         evidenceKind: 'policy',
         status: 'failed',
         summary: 'handler token=secret-token',

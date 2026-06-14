@@ -7,7 +7,7 @@ import {
 } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 
-import type { AgentCapabilityJsonValue } from '../agent-capabilities.ts';
+import type { RuntimePluginJsonValue } from './types.ts';
 import type { RuntimePluginFileStore } from './types.ts';
 
 export type CreateRuntimePluginFileStoreOptions = {
@@ -19,7 +19,7 @@ export type CreateRuntimePluginFileStoreOptions = {
 const inMemoryPluginStores = new Map<string, InMemoryPluginStoreState>();
 
 type InMemoryPluginStoreState = {
-  readonly files: Map<string, AgentCapabilityJsonValue>;
+  readonly files: Map<string, RuntimePluginJsonValue>;
   revision: number;
 };
 
@@ -48,6 +48,24 @@ export function createRuntimePluginFileStore(
       } catch (error: unknown) {
         if (isMissingFileError(error)) {
           return undefined;
+        }
+
+        throw error;
+      }
+    },
+    readJsonl(path) {
+      const filePath = join(root, safeRelativePath(path));
+
+      try {
+        return Object.freeze(
+          readFileSync(filePath, 'utf8')
+            .split('\n')
+            .filter((line) => line.trim().length > 0)
+            .map((line) => freezeJsonValue(JSON.parse(line) as unknown))
+        );
+      } catch (error: unknown) {
+        if (isMissingFileError(error)) {
+          return Object.freeze([]);
         }
 
         throw error;
@@ -83,7 +101,7 @@ function createInMemoryRuntimePluginFileStore(
 
   if (state === undefined) {
     state = {
-      files: new Map<string, AgentCapabilityJsonValue>(),
+      files: new Map<string, RuntimePluginJsonValue>(),
       revision: 0
     };
     inMemoryPluginStores.set(key, state);
@@ -94,6 +112,19 @@ function createInMemoryRuntimePluginFileStore(
       const value = state.files.get(safeRelativePath(path));
 
       return value === undefined ? undefined : freezeJsonValue(value);
+    },
+    readJsonl(path) {
+      const value = state.files.get(safeRelativePath(path));
+
+      if (value === undefined) {
+        return Object.freeze([]);
+      }
+
+      if (!isJsonArray(value)) {
+        throw new TypeError('Plugin JSONL path already stores non-array JSON.');
+      }
+
+      return Object.freeze(value.map(freezeJsonValue));
     },
     writeJsonAtomic(path, value) {
       state.files.set(safeRelativePath(path), freezeJsonValue(value));
@@ -145,7 +176,7 @@ function isMissingFileError(error: unknown): boolean {
   );
 }
 
-function freezeJsonValue(value: unknown): AgentCapabilityJsonValue {
+function freezeJsonValue(value: unknown): RuntimePluginJsonValue {
   if (
     value === null ||
     typeof value === 'string' ||
@@ -160,7 +191,7 @@ function freezeJsonValue(value: unknown): AgentCapabilityJsonValue {
   }
 
   if (typeof value === 'object') {
-    const frozen: Record<string, AgentCapabilityJsonValue> = {};
+    const frozen: Record<string, RuntimePluginJsonValue> = {};
 
     for (const [key, item] of Object.entries(value)) {
       frozen[key] = freezeJsonValue(item);
@@ -173,7 +204,7 @@ function freezeJsonValue(value: unknown): AgentCapabilityJsonValue {
 }
 
 function isJsonArray(
-  value: AgentCapabilityJsonValue
-): value is readonly AgentCapabilityJsonValue[] {
+  value: RuntimePluginJsonValue
+): value is readonly RuntimePluginJsonValue[] {
   return Array.isArray(value);
 }

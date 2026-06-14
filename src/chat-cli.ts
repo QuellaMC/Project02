@@ -4,7 +4,6 @@ import { pathToFileURL } from 'node:url';
 
 import {
   createConversationSession,
-  createDefaultProject02CapabilityHost,
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
   createRuntimeEventIdentity,
@@ -29,7 +28,7 @@ import {
   type RuntimeTraceEntry,
   type RuntimeTraceStepName,
   type LocalRuntimeTurnProgressEvent,
-  type RuntimeCapabilityHost,
+  type RuntimePluginHost,
   type RuntimeTurnStatus
 } from './index.ts';
 import {
@@ -44,9 +43,8 @@ type ChatCliOptions = {
   readonly stderr: NodeJS.WritableStream;
   readonly traceMode?: boolean;
   readonly agent?: CharacterAgent;
-  readonly characterStateStore?: unknown;
   readonly roleModelAdapter?: RoleModelAdapter;
-  readonly capabilityHost?: RuntimeCapabilityHost;
+  readonly pluginHost?: RuntimePluginHost;
   readonly session?: ConversationSession;
   readonly logStore?: RuntimeLogStore;
 };
@@ -68,7 +66,6 @@ type ChatTraceSummary = {
   readonly steps: readonly RuntimeTraceStepName[];
   readonly provider?: ChatTraceProviderSummary;
   readonly toolCalls?: readonly string[];
-  readonly characterStatePatch?: ChatTraceCharacterStatePatchSummary;
   readonly error?: string;
 };
 
@@ -79,19 +76,6 @@ type ChatTraceProviderSummary = {
   readonly errorCode?: string;
   readonly errorMessage?: string;
 };
-
-type ChatTraceCharacterStatePatchSummary =
-  | {
-      readonly status: 'accepted';
-      readonly appliedChangeCount: number;
-    }
-  | {
-      readonly status: 'rejected';
-      readonly rejectionReason: string;
-    }
-  | {
-      readonly status: 'not_requested';
-    };
 
 type CompletedChatRuntimeTurn = {
   readonly status: 'completed';
@@ -116,7 +100,6 @@ type TraceIdentity = {
 
 type DurableChatRuntime = {
   readonly session: ConversationSession;
-  readonly characterStateStore?: unknown;
   readonly logStore: RuntimeLogStore;
 };
 
@@ -146,13 +129,9 @@ export async function runChatCliFromArgs(
     validateDurableSessionArgs(parsedArgs);
     const durableRuntime = await createDurableChatRuntime(parsedArgs);
     const roleModelAdapter = createSelectedRoleModelAdapter(parsedArgs);
-    const capabilityHost =
-      options.capabilityHost ?? createDefaultProject02CapabilityHost();
-
     return await runChatCli({
       ...options,
       ...durableRuntime,
-      capabilityHost,
       ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
       traceMode: options.traceMode === true || parsedArgs.traceMode
     });
@@ -214,9 +193,9 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
           ...(options.roleModelAdapter === undefined
             ? {}
             : { roleModelAdapter: options.roleModelAdapter }),
-          ...(options.capabilityHost === undefined
+          ...(options.pluginHost === undefined
             ? {}
-            : { capabilityHost: options.capabilityHost }),
+            : { pluginHost: options.pluginHost }),
           onProgress(progressEvent) {
             writeRuntimeProgress(options.stdout, session, progressEvent);
           }
@@ -275,7 +254,7 @@ type HandleUserMessageThroughRuntimeOptions = {
   readonly line: string;
   readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
-  readonly capabilityHost?: RuntimeCapabilityHost;
+  readonly pluginHost?: RuntimePluginHost;
   readonly onProgress?: (
     event: LocalRuntimeTurnProgressEvent
   ) => Promise<void> | void;
@@ -299,9 +278,9 @@ async function handleUserMessageThroughRuntime(
         ...(options.roleModelAdapter === undefined
           ? {}
           : { roleModelAdapter: options.roleModelAdapter }),
-        ...(options.capabilityHost === undefined
+        ...(options.pluginHost === undefined
           ? {}
-          : { capabilityHost: options.capabilityHost }),
+          : { pluginHost: options.pluginHost }),
         ...(options.onProgress === undefined
           ? {}
           : { onProgress: options.onProgress })
@@ -502,7 +481,6 @@ function createTraceSummary(
     steps: Object.freeze(entries.map((entry) => entry.step)),
     ...traceProviderSummaryOption(rawEvent),
     ...traceToolCallsOption(rawEvent),
-    ...traceCharacterStatePatchSummaryOption(rawEvent),
     ...(error === undefined ? {} : { error })
   } satisfies ChatTraceSummary);
 }
@@ -547,13 +525,6 @@ function traceToolCallsOption(
   return {
     toolCalls: Object.freeze(result.decision.toolCalls.map((call) => call.name))
   };
-}
-
-function traceCharacterStatePatchSummaryOption(
-  rawEvent: RawEventLogRecord | undefined
-): { readonly characterStatePatch?: ChatTraceCharacterStatePatchSummary } {
-  void rawEvent;
-  return {};
 }
 
 function writeTraceSummary(

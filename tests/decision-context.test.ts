@@ -37,13 +37,13 @@ describe('user-turn decision context builder', () => {
       characterSnapshot: localCharacterProfile,
       recentVisibleMessages: [],
       runtimeNotes: ['local USER_MESSAGE turn', 'recent visible only'],
-      capabilityContextItems: []
+      pluginContextItems: []
     });
     expect(Object.isFrozen(context)).toBe(true);
     expect(Object.isFrozen(context.characterSnapshot)).toBe(true);
     expect(Object.isFrozen(context.recentVisibleMessages)).toBe(true);
     expect(Object.isFrozen(context.runtimeNotes)).toBe(true);
-    expect(Object.isFrozen(context.capabilityContextItems)).toBe(true);
+    expect(Object.isFrozen(context.pluginContextItems)).toBe(true);
     expect(() => {
       Reflect.apply(Array.prototype.push, context.runtimeNotes, ['tampered']);
     }).toThrow(TypeError);

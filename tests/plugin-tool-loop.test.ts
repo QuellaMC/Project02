@@ -76,7 +76,7 @@ describe('plugin-driven tool loop', () => {
       toolResult: {
         status: 'accepted'
       },
-      pluginStoreRevision: 2
+      pluginStoreRevision: 3
     });
     expect(rawEvents.at(-1)).toMatchObject({
       kind: 'runtime_turn_completed',
@@ -87,7 +87,7 @@ describe('plugin-driven tool loop', () => {
 
     expect(observations).toHaveLength(1);
     expect(observations[0]?.round).toBe(1);
-    expect(observations[0]?.capabilityId).toBe('character-state');
+    expect(observations[0]?.pluginId).toBe('character-state');
     expect(observations[0]?.toolName).toBe('character_state.patch');
     expect(observations[0]?.result.status).toBe('accepted');
   });
@@ -208,6 +208,61 @@ describe('plugin-driven tool loop', () => {
         .filter((event) => event.kind === 'visible_reply_committed')
         .map((event) => event.visibleMessageIds)
     ).toEqual([undefined, ['local-session:message-1', 'local-session:message-2']]);
+  });
+
+  it('turns unknown executable tools into observations and continues', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const adapter = createSequencedAdapter([
+      {
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: 'memory.unknown',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('try unknown', 'evt_unknown_tool'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    expect(result.status).toBe('completed');
+    const finishedTool = logStore
+      .rawEvents()
+      .find((event) => event.kind === 'tool_call_finished');
+
+    expect(finishedTool).toMatchObject({
+      toolCallId: 'round-1.1.memory.unknown',
+      toolName: 'memory.unknown',
+      toolPluginId: 'undeclared.memory.unknown',
+      toolResult: {
+        status: 'rejected',
+        reason: 'tool_not_declared'
+      }
+    });
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_completed',
+      toolCallIds: ['round-1.1.memory.unknown']
+    });
   });
 });
 
