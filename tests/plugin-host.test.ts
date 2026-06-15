@@ -6,6 +6,7 @@ import {
 import {
   createFirstPartyModelToolsPlugin,
   createRuntimePlugin,
+  createRuntimePluginAfterTurnCommittedContext,
   createRuntimePluginContext,
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
@@ -221,6 +222,79 @@ describe('runtime plugin host', () => {
     expect(fileStore.revision()).toBe(0);
   });
 
+  it('withholds fileStore writes from read-only handleToolCall tools', async () => {
+    const sessionIdentity = {};
+    const plugin = createReadOnlyFileStoreProbePlugin();
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      sessionIdentity
+    });
+    const fileStore = createPluginHostTestFileStore({
+      pluginId: plugin.manifest.id,
+      sessionIdentity
+    });
+
+    fileStore.writeJsonAtomic('seed.json', {
+      value: 'existing'
+    });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected read-only fileStore probe to be accepted.');
+    }
+
+    expect(result.output).toEqual({
+      seed: {
+        value: 'existing'
+      },
+      writeBlocked: true
+    });
+    expect(fileStore.readJson('read-only-write.json')).toBeUndefined();
+    expect(fileStore.revision()).toBe(1);
+  });
+
+  it('withholds fileStore writes from read-only hook contexts', async () => {
+    const sessionIdentity = {};
+    const plugin = createReadOnlyBeforeRoleModelFileStoreProbePlugin();
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      sessionIdentity
+    });
+    const fileStore = createPluginHostTestFileStore({
+      pluginId: plugin.manifest.id,
+      sessionIdentity
+    });
+
+    fileStore.writeJsonAtomic('seed.json', {
+      value: 'existing'
+    });
+
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected read-only hook probe to complete.');
+    }
+
+    expect(result.runtimeNotes).toEqual([
+      '{"seed":{"value":"existing"},"writeBlocked":true}'
+    ]);
+    expect(fileStore.readJson('read-only-hook-write.json')).toBeUndefined();
+    expect(fileStore.revision()).toBe(1);
+  });
+
   it('blocks retained fileStore writes after beforeRoleModelCall completes', async () => {
     let retainedFileStore: RuntimePluginFileStore | undefined;
     const sessionIdentity = {};
@@ -278,8 +352,16 @@ describe('runtime plugin host', () => {
       sessionIdentity
     });
 
-    expect(fileStore.readJson('during-handle.json')).toEqual({ value: 'during' });
+    expect(fileStore.readJson('during-handle.json')).toBeUndefined();
     expect(fileStore.readJson('after-handle.json')).toBeUndefined();
+    expect(fileStore.revision()).toBe(0);
+
+    const afterCommitResult = await host.afterTurnCommitted(
+      testPluginAfterTurnCommittedContext()
+    );
+
+    expect(afterCommitResult.status).toBe('completed');
+    expect(fileStore.readJson('during-handle.json')).toEqual({ value: 'during' });
     expect(fileStore.revision()).toBe(1);
   });
 
@@ -997,10 +1079,15 @@ function createRetainedBeforeRoleModelFileStorePlugin(
   retainFileStore: (fileStore: RuntimePluginFileStore) => void
 ): RuntimePlugin {
   const pluginId = 'memory.retained-before.fixture';
+  const manifest = memorySearchPluginManifest(pluginId);
 
   return createRuntimePlugin({
     manifest: {
-      ...memorySearchPluginManifest(pluginId),
+      ...manifest,
+      runtimePolicy: {
+        ...manifest.runtimePolicy,
+        sideEffectLevel: 'local_memory_write'
+      },
       declaredPlugins: ['before_role_model_call'],
       requestedApis: ['file_store']
     },
@@ -1023,6 +1110,105 @@ function createRetainedBeforeRoleModelFileStorePlugin(
   });
 }
 
+function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
+  const pluginId = 'memory.read-only-file-store.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      requestedApis: ['file_store']
+    },
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall(_call, context) {
+        if (context.fileStore === undefined) {
+          throw new Error('Expected read-only tool context to include fileStore.');
+        }
+
+        const seed = context.fileStore.readJson('seed.json');
+        if (seed === undefined) {
+          throw new Error('Expected seeded fileStore value.');
+        }
+        let writeBlocked = false;
+
+        try {
+          context.fileStore.writeJsonAtomic('read-only-write.json', {
+            value: 'blocked'
+          });
+        } catch {
+          writeBlocked = true;
+        }
+
+        return {
+          status: 'accepted',
+          output: {
+            seed,
+            writeBlocked
+          },
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId,
+              evidenceKind: 'tool_invocation',
+              status: 'accepted',
+              summary: 'Read-only fileStore probe completed.',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
+function createReadOnlyBeforeRoleModelFileStoreProbePlugin(): RuntimePlugin {
+  const pluginId = 'memory.read-only-before-file-store.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      declaredPlugins: ['before_role_model_call'],
+      requestedApis: ['file_store']
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall(context) {
+        if (context.fileStore === undefined) {
+          throw new Error('Expected read-only hook context to include fileStore.');
+        }
+
+        const seed = context.fileStore.readJson('seed.json');
+        if (seed === undefined) {
+          throw new Error('Expected seeded fileStore value.');
+        }
+        let writeBlocked = false;
+
+        try {
+          context.fileStore.writeJsonAtomic('read-only-hook-write.json', {
+            value: 'blocked'
+          });
+        } catch {
+          writeBlocked = true;
+        }
+
+        return {
+          contextItems: [],
+          runtimeNotes: [
+            JSON.stringify({
+              seed,
+              writeBlocked
+            })
+          ],
+          evidence: []
+        };
+      }
+    }
+  });
+}
+
 function createRetainedHandleToolCallFileStorePlugin(
   retainFileStore: (fileStore: RuntimePluginFileStore) => void
 ): RuntimePlugin {
@@ -1033,7 +1219,7 @@ function createRetainedHandleToolCallFileStorePlugin(
       ...memorySearchPluginManifest(pluginId),
       requestedApis: ['file_store']
     },
-    providedTools: memorySearchProvidedTools(),
+    providedTools: localMemoryWriteSearchProvidedTools(),
     lifecycleHooks: {
       handleToolCall(call, context) {
         writeDuringHookAndRetainFileStore({
@@ -1061,10 +1247,15 @@ function createRetainedHealthFileStorePlugin(
   retainFileStore: (fileStore: RuntimePluginFileStore) => void
 ): RuntimePlugin {
   const pluginId = 'memory.retained-health.fixture';
+  const manifest = memorySearchPluginManifest(pluginId);
 
   return createRuntimePlugin({
     manifest: {
-      ...memorySearchPluginManifest(pluginId),
+      ...manifest,
+      runtimePolicy: {
+        ...manifest.runtimePolicy,
+        sideEffectLevel: 'local_memory_write'
+      },
       declaredPlugins: ['health'],
       requestedApis: ['file_store']
     },
@@ -1259,6 +1450,15 @@ function memorySearchProvidedTools() {
   ];
 }
 
+function localMemoryWriteSearchProvidedTools() {
+  return memorySearchProvidedTools().map((tool) =>
+    Object.freeze({
+      ...tool,
+      sideEffectLevel: 'local_memory_write' as const
+    })
+  );
+}
+
 function testPluginContext() {
   return createRuntimePluginContext({
     ...testIdentity(),
@@ -1269,6 +1469,21 @@ function testPluginContext() {
       id: 'mira',
       displayName: 'Mira'
     }
+  });
+}
+
+function testPluginAfterTurnCommittedContext() {
+  return createRuntimePluginAfterTurnCommittedContext({
+    ...testIdentity(),
+    sessionId: 'session-plugin-host',
+    eventType: 'USER_MESSAGE',
+    currentUserMessage: 'hello',
+    character: {
+      id: 'mira',
+      displayName: 'Mira'
+    },
+    committedAt: '2026-06-15T00:00:00.000Z',
+    visibleMessages: []
   });
 }
 

@@ -626,9 +626,86 @@ describe('plugin-driven tool loop', () => {
       })
     ).rejects.toThrow('terminal raw event append failed');
     expect(afterTurnCommittedCalls).toBe(0);
+    expect(session.visibleTranscript).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
     expect(logStore.rawEvents().some((event) => event.kind === 'runtime_turn_completed')).toBe(
       false
     );
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected'
+    });
+    expect(logStore.rawEvents().at(-1)?.visibleMessageIds).toBeUndefined();
+  });
+
+  it('does not commit handleToolCall fileStore writes when finish logging fails', async () => {
+    const sessionId = 'session-tool-finish-log-failure';
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
+
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+
+    const session = createConversationSession({ id: sessionId });
+    const logStore = createToolCallFinishedAppendFailingLogStore(
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId
+      })
+    );
+    const pluginHost = createRuntimePluginHost({
+      storeRoot,
+      sessionId,
+      plugins: [createHandleFileStoreWritePlugin()]
+    });
+    const pluginStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId: handleFileStoreWritePluginId
+    });
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: handleFileStoreWriteToolName,
+            input: {
+              value: 'side effect'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'finish logging should fail first'
+            }
+          }
+        ]
+      }
+    ]);
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestEvent('write memory', 'evt_tool_finish_append_fails'),
+        session,
+        logStore,
+        roleModelAdapter: adapter,
+        pluginHost
+      })
+    ).rejects.toThrow('tool_call_finished raw event append failed');
+
+    expect(pluginStore.readJson('state.json')).toBeUndefined();
+    expect(pluginStore.revision()).toBe(0);
+    expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_finished')).toBe(
+      false
+    );
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected'
+    });
   });
 
   it('does not expose plugin inventory through hidden runtime context', async () => {
@@ -1632,6 +1709,137 @@ function createAfterTurnCommittedAppendFailingLogStore(): RuntimeLogStore {
       return logStore.conversationMessages();
     }
   } satisfies RuntimeLogStore);
+}
+
+function createToolCallFinishedAppendFailingLogStore(
+  logStore: RuntimeLogStore
+): RuntimeLogStore {
+  return Object.freeze({
+    appendTrace(entry) {
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      if (record.kind === 'tool_call_finished') {
+        throw new Error('tool_call_finished raw event append failed');
+      }
+
+      return logStore.appendRawEvent(record);
+    },
+    appendConversationMessage(record) {
+      return logStore.appendConversationMessage(record);
+    },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
+const handleFileStoreWritePluginId = 'handle-write.fixture';
+const handleFileStoreWriteToolName = 'handle.write';
+
+function createHandleFileStoreWritePlugin() {
+  return createRuntimePlugin({
+    manifest: {
+      id: handleFileStoreWritePluginId,
+      displayName: 'Handle Write Fixture',
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'Test plugin for handleToolCall fileStore writes.',
+      contractVersion: runtimePluginContractVersion,
+      compatibility: {
+        hostContractVersions: [runtimePluginContractVersion],
+        sourceSystem: 'test'
+      },
+      declaredPlugins: ['tool_provider', 'handle_tool_call'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'local_memory_write',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'reject_tool_call',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test']
+      },
+      requestedApis: ['file_store']
+    },
+    providedTools: [
+      Object.freeze({
+        name: handleFileStoreWriteToolName,
+        description: 'Write a test value through the plugin file store.',
+        requiredForUserTurn: false,
+        maxCallsPerUserTurn: 1,
+        inputContract: {
+          type: 'object',
+          fields: [
+            {
+              name: 'value',
+              description: 'Value to write.',
+              required: true
+            }
+          ],
+          additionalFields: false
+        },
+        validationOwner: 'plugin_host',
+        sideEffectLevel: 'local_memory_write',
+        requiresConfirmation: false,
+        sourceReferencesRequired: false
+      })
+    ],
+    lifecycleHooks: {
+      handleToolCall(call, context) {
+        if (context.fileStore === undefined) {
+          throw new Error('Expected handle write fixture to receive fileStore.');
+        }
+
+        context.fileStore.writeJsonAtomic('state.json', {
+          value: call.input['value'] ?? 'missing'
+        });
+
+        return {
+          status: 'accepted',
+          output: {
+            ok: true,
+            pluginStoreRevision: context.fileStore.revision()
+          },
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId: handleFileStoreWritePluginId,
+              evidenceKind: 'tool_invocation',
+              status: 'accepted',
+              summary: 'Staged handleToolCall fileStore write.',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
 }
 
 function createAfterTurnCommittedProbeHost(

@@ -19,6 +19,7 @@ import type {
   RuntimePluginJsonObject,
   RuntimePluginJsonValue,
   RuntimePluginProvidedTool,
+  RuntimePluginSideEffectLevel,
   RuntimePluginToolCall,
   RuntimePluginToolCallResult,
   RuntimePluginPolicyOutcome,
@@ -38,7 +39,11 @@ import {
   type RoleModelPluginToolDefinition
 } from '../role-model/contracts.ts';
 import { createCharacterStatePlugin } from './builtin/character-state/index.ts';
-import { createRuntimePluginFileStore } from './file-store.ts';
+import {
+  createRuntimePluginFileStore,
+  freezeRuntimePluginFileStoreJsonValue,
+  normalizeRuntimePluginFileStorePath
+} from './file-store.ts';
 
 export const runtimePluginBeforeRoleModelCallRejectionReason =
   'plugin_before_role_model_call_rejected';
@@ -181,17 +186,48 @@ type BoundedPluginPromptContextResult =
 type PluginHookContextScope<TContext extends RuntimePluginContext> = {
   readonly context: TContext;
   readonly revokeFileStoreWrites: () => void;
+  readonly commitFileStoreWrites: () => void;
+  readonly discardFileStoreWrites: () => void;
 };
 
 type RevocableRuntimePluginFileStore = {
   readonly fileStore: RuntimePluginFileStore;
   revokeWrites(): void;
+  commitWrites(): void;
+  discardWrites(): void;
+};
+
+type StagedRuntimePluginFileStoreOperation =
+  | {
+      readonly kind: 'writeJsonAtomic';
+      readonly path: string;
+      readonly value: RuntimePluginJsonValue;
+    }
+  | {
+      readonly kind: 'appendJsonl';
+      readonly path: string;
+      readonly value: RuntimePluginJsonValue;
+    };
+
+type StagedRuntimePluginFileStoreState = {
+  readonly fileStore: RuntimePluginFileStore;
+  readonly files: Map<string, RuntimePluginJsonValue>;
+  readonly operations: StagedRuntimePluginFileStoreOperation[];
+};
+
+type PendingRuntimePluginFileStoreWrites = {
+  readonly files: Map<string, RuntimePluginJsonValue>;
+  readonly operations: StagedRuntimePluginFileStoreOperation[];
 };
 
 export function createRuntimePluginHost(
   options: CreateRuntimePluginHostOptions = {}
 ): RuntimePluginHost {
   const configuredPlugins = Object.freeze([...(options.plugins ?? [])]);
+  const stagedFileStoreWrites = new Map<
+    string,
+    StagedRuntimePluginFileStoreState
+  >();
   let enabledPlugins: readonly RuntimePlugin[] = [];
   const plugins = Object.freeze([
     createRuntimePluginDiscoveryPlugin(() => enabledPlugins),
@@ -242,11 +278,17 @@ export function createRuntimePluginHost(
         context,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
-        sessionIdentity: options.sessionIdentity
+        sessionIdentity: options.sessionIdentity,
+        stagedFileStoreWrites
       });
     },
     async afterTurnCommitted(context) {
-      return await runHookPhase({
+      const stagedCommitResult = commitStagedFileStoreWritesForTurn({
+        plugins: enabledPlugins,
+        context,
+        stagedFileStoreWrites
+      });
+      const hookResult = await runHookPhase({
         plugins: enabledPlugins,
         context,
         storeRoot: options.storeRoot,
@@ -257,6 +299,18 @@ export function createRuntimePluginHost(
         hookForPlugin: (plugin) =>
           plugin.lifecycleHooks.afterTurnCommitted
       });
+
+      return Object.freeze({
+        status:
+          stagedCommitResult.status === 'completed_with_failures' ||
+          hookResult.status === 'completed_with_failures'
+            ? 'completed_with_failures'
+            : 'completed',
+        evidence: Object.freeze([
+          ...stagedCommitResult.evidence,
+          ...hookResult.evidence
+        ])
+      } satisfies RuntimePluginHookHostResult);
     },
     async onSessionEnd(context) {
       return await runHookPhase({
@@ -297,21 +351,39 @@ function createPluginHookContext<TContext extends RuntimePluginContext>(options:
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
+  readonly allowFileStoreWrites?: boolean;
+  readonly stagedFileStoreWrites?: Map<string, StagedRuntimePluginFileStoreState>;
 }): PluginHookContextScope<TContext> {
   const grantsFileStore = options.plugin.manifest.requestedApis.includes('file_store');
   const sessionId = options.sessionId ?? options.context.sessionId;
-  const fileStore = grantsFileStore
-    ? createRevocableRuntimePluginFileStore(
-        createRuntimePluginFileStore({
-          ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-          sessionId,
-          ...(options.sessionIdentity === undefined
-            ? {}
-            : { sessionIdentity: options.sessionIdentity }),
-          pluginId: options.plugin.manifest.id
-        })
-      )
+  const allowWrites =
+    options.allowFileStoreWrites ??
+    sideEffectLevelAllowsFileStoreWrites(
+      options.plugin.manifest.runtimePolicy.sideEffectLevel
+    );
+  const baseFileStore = grantsFileStore
+    ? createRuntimePluginFileStore({
+        ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+        sessionId,
+        ...(options.sessionIdentity === undefined
+          ? {}
+          : { sessionIdentity: options.sessionIdentity }),
+        pluginId: options.plugin.manifest.id
+      })
     : undefined;
+  const fileStore =
+    baseFileStore === undefined
+      ? undefined
+      : options.stagedFileStoreWrites === undefined
+        ? createRevocableRuntimePluginFileStore(baseFileStore, { allowWrites })
+        : createStagedRevocableRuntimePluginFileStore(baseFileStore, {
+            allowWrites,
+            stageKey: stagedFileStoreKey({
+              context: options.context,
+              plugin: options.plugin
+            }),
+            stagedFileStoreWrites: options.stagedFileStoreWrites
+          });
   const context = Object.freeze({
     ...options.context,
     pluginId: options.plugin.manifest.id,
@@ -322,12 +394,19 @@ function createPluginHookContext<TContext extends RuntimePluginContext>(options:
     context,
     revokeFileStoreWrites: () => {
       fileStore?.revokeWrites();
+    },
+    commitFileStoreWrites: () => {
+      fileStore?.commitWrites();
+    },
+    discardFileStoreWrites: () => {
+      fileStore?.discardWrites();
     }
   });
 }
 
 function createRevocableRuntimePluginFileStore(
-  fileStore: RuntimePluginFileStore
+  fileStore: RuntimePluginFileStore,
+  options: { readonly allowWrites: boolean }
 ): RevocableRuntimePluginFileStore {
   let writesRevoked = false;
 
@@ -340,11 +419,17 @@ function createRevocableRuntimePluginFileStore(
         return fileStore.readJsonl(path);
       },
       writeJsonAtomic(path, value) {
-        assertPluginFileStoreWritesActive(writesRevoked);
+        assertPluginFileStoreWritesAllowed({
+          allowWrites: options.allowWrites,
+          writesRevoked
+        });
         fileStore.writeJsonAtomic(path, value);
       },
       appendJsonl(path, value) {
-        assertPluginFileStoreWritesActive(writesRevoked);
+        assertPluginFileStoreWritesAllowed({
+          allowWrites: options.allowWrites,
+          writesRevoked
+        });
         fileStore.appendJsonl(path, value);
       },
       revision() {
@@ -353,12 +438,257 @@ function createRevocableRuntimePluginFileStore(
     } satisfies RuntimePluginFileStore),
     revokeWrites() {
       writesRevoked = true;
+    },
+    commitWrites() {
+      return undefined;
+    },
+    discardWrites() {
+      return undefined;
     }
   } satisfies RevocableRuntimePluginFileStore);
 }
 
-function assertPluginFileStoreWritesActive(writesRevoked: boolean): void {
-  if (writesRevoked) {
+function createStagedRevocableRuntimePluginFileStore(
+  fileStore: RuntimePluginFileStore,
+  options: {
+    readonly allowWrites: boolean;
+    readonly stageKey: string;
+    readonly stagedFileStoreWrites: Map<string, StagedRuntimePluginFileStoreState>;
+  }
+): RevocableRuntimePluginFileStore {
+  let writesRevoked = false;
+  let pendingWrites: PendingRuntimePluginFileStoreWrites | undefined;
+
+  function stagedState():
+    | StagedRuntimePluginFileStoreState
+    | undefined {
+    return options.stagedFileStoreWrites.get(options.stageKey);
+  }
+
+  function ensurePendingWrites(): PendingRuntimePluginFileStoreWrites {
+    if (pendingWrites === undefined) {
+      pendingWrites = {
+        files: new Map<string, RuntimePluginJsonValue>(),
+        operations: []
+      };
+    }
+
+    return pendingWrites;
+  }
+
+  function readStagedPath(path: string): RuntimePluginJsonValue | undefined {
+    if (pendingWrites?.files.has(path) === true) {
+      return pendingWrites.files.get(path);
+    }
+
+    const turnState = stagedState();
+
+    if (turnState?.files.has(path) === true) {
+      return turnState.files.get(path);
+    }
+
+    return undefined;
+  }
+
+  function stagedRevisionOffset(): number {
+    return (
+      (stagedState()?.operations.length ?? 0) +
+      (pendingWrites?.operations.length ?? 0)
+    );
+  }
+
+  return Object.freeze({
+    fileStore: Object.freeze({
+      readJson(path) {
+        const safePath = normalizeRuntimePluginFileStorePath(path);
+        const stagedValue = readStagedPath(safePath);
+
+        return stagedValue === undefined
+          ? fileStore.readJson(safePath)
+          : stagedValue;
+      },
+      readJsonl(path) {
+        const safePath = normalizeRuntimePluginFileStorePath(path);
+        const stagedValue = readStagedPath(safePath);
+
+        if (stagedValue === undefined) {
+          return fileStore.readJsonl(safePath);
+        }
+
+        if (!isRuntimePluginJsonArray(stagedValue)) {
+          throw new TypeError('Plugin JSONL path already stores non-array JSON.');
+        }
+
+        return Object.freeze([...stagedValue]);
+      },
+      writeJsonAtomic(path, value) {
+        assertPluginFileStoreWritesAllowed({
+          allowWrites: options.allowWrites,
+          writesRevoked
+        });
+
+        const safePath = normalizeRuntimePluginFileStorePath(path);
+        const frozenValue = freezeRuntimePluginFileStoreJsonValue(value);
+        const pending = ensurePendingWrites();
+
+        pending.files.set(safePath, frozenValue);
+        pending.operations.push({
+          kind: 'writeJsonAtomic',
+          path: safePath,
+          value: frozenValue
+        });
+      },
+      appendJsonl(path, value) {
+        assertPluginFileStoreWritesAllowed({
+          allowWrites: options.allowWrites,
+          writesRevoked
+        });
+
+        const safePath = normalizeRuntimePluginFileStorePath(path);
+        const frozenValue = freezeRuntimePluginFileStoreJsonValue(value);
+        const current = readStagedPath(safePath) ?? fileStore.readJsonl(safePath);
+
+        if (!isRuntimePluginJsonArray(current)) {
+          throw new TypeError('Plugin JSONL path already stores non-array JSON.');
+        }
+
+        const pending = ensurePendingWrites();
+        const nextValue = Object.freeze([...current, frozenValue]);
+
+        pending.files.set(safePath, nextValue);
+        pending.operations.push({
+          kind: 'appendJsonl',
+          path: safePath,
+          value: frozenValue
+        });
+      },
+      revision() {
+        return fileStore.revision() + stagedRevisionOffset();
+      }
+    } satisfies RuntimePluginFileStore),
+    revokeWrites() {
+      writesRevoked = true;
+    },
+    commitWrites() {
+      if (pendingWrites === undefined || pendingWrites.operations.length === 0) {
+        pendingWrites = undefined;
+        return;
+      }
+
+      let turnState = options.stagedFileStoreWrites.get(options.stageKey);
+
+      if (turnState === undefined) {
+        turnState = {
+          fileStore,
+          files: new Map<string, RuntimePluginJsonValue>(),
+          operations: []
+        };
+        options.stagedFileStoreWrites.set(options.stageKey, turnState);
+      }
+
+      for (const [path, value] of pendingWrites.files) {
+        turnState.files.set(path, value);
+      }
+      turnState.operations.push(...pendingWrites.operations);
+      pendingWrites = undefined;
+    },
+    discardWrites() {
+      pendingWrites = undefined;
+    }
+  } satisfies RevocableRuntimePluginFileStore);
+}
+
+function commitStagedFileStoreWritesForTurn(options: {
+  readonly plugins: readonly RuntimePlugin[];
+  readonly context: RuntimePluginAfterTurnCommittedContext;
+  readonly stagedFileStoreWrites: Map<string, StagedRuntimePluginFileStoreState>;
+}): RuntimePluginHookHostResult {
+  const evidence: RuntimePluginEvidenceSnapshot[] = [];
+  let failed = false;
+
+  for (const plugin of options.plugins) {
+    const stageKey = stagedFileStoreKey({
+      context: options.context,
+      plugin
+    });
+    const stagedWrites = options.stagedFileStoreWrites.get(stageKey);
+
+    if (stagedWrites === undefined || stagedWrites.operations.length === 0) {
+      continue;
+    }
+
+    options.stagedFileStoreWrites.delete(stageKey);
+
+    try {
+      for (const operation of stagedWrites.operations) {
+        if (operation.kind === 'writeJsonAtomic') {
+          stagedWrites.fileStore.writeJsonAtomic(operation.path, operation.value);
+          continue;
+        }
+
+        stagedWrites.fileStore.appendJsonl(operation.path, operation.value);
+      }
+
+      evidence.push(
+        createRuntimePluginEvidenceSnapshot({
+          eventId: options.context.eventId,
+          traceId: options.context.traceId,
+          createdAt: options.context.timestamp,
+          kind: 'runtime_plugin_evidence_snapshot',
+          pluginId: plugin.manifest.id,
+          evidenceKind: 'after_turn_committed',
+          status: 'accepted',
+          summary: `Committed ${String(
+            stagedWrites.operations.length
+          )} staged handleToolCall fileStore write(s).`,
+          redactionLabels: options.context.privacy.redactionLabels
+        })
+      );
+    } catch (error: unknown) {
+      failed = true;
+      evidence.push(
+        createHookFailureEvidence({
+          plugin,
+          context: options.context,
+          evidenceKind: 'after_turn_committed',
+          status: 'failed',
+          summary: `Staged handleToolCall fileStore write commit failed: ${errorMessage(error)}`,
+          policyOutcome: 'after_commit_failed'
+        })
+      );
+    }
+  }
+
+  return Object.freeze({
+    status: failed ? 'completed_with_failures' : 'completed',
+    evidence: Object.freeze(evidence)
+  } satisfies RuntimePluginHookHostResult);
+}
+
+function stagedFileStoreKey(options: {
+  readonly context: RuntimePluginContext;
+  readonly plugin: RuntimePlugin;
+}): string {
+  return `${options.context.sessionId}\u0000${options.context.turnId}\u0000${options.plugin.manifest.id}`;
+}
+
+function isRuntimePluginJsonArray(
+  value: RuntimePluginJsonValue
+): value is readonly RuntimePluginJsonValue[] {
+  return Array.isArray(value);
+}
+
+function assertPluginFileStoreWritesAllowed(options: {
+  readonly allowWrites: boolean;
+  readonly writesRevoked: boolean;
+}): void {
+  if (!options.allowWrites) {
+    throw new Error(
+      'Plugin fileStore writes are not allowed for read-only tool invocations.'
+    );
+  }
+
+  if (options.writesRevoked) {
     throw new Error(
       'Plugin fileStore writes are no longer allowed after hook completion.'
     );
@@ -626,6 +956,7 @@ async function runHandleToolCall(options: {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
+  readonly stagedFileStoreWrites: Map<string, StagedRuntimePluginFileStoreState>;
 }): Promise<RuntimePluginToolCallResult> {
   const plugin = options.plugins.find(
     (candidate) => candidate.manifest.id === options.call.pluginId
@@ -663,7 +994,9 @@ async function runHandleToolCall(options: {
     plugin,
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
-    sessionIdentity: options.sessionIdentity
+    sessionIdentity: options.sessionIdentity,
+    allowFileStoreWrites: toolAllowsFileStoreWrites(providedTool),
+    stagedFileStoreWrites: options.stagedFileStoreWrites
   });
   const inputValidation =
     providedTool.validationOwner === 'plugin_host'
@@ -675,6 +1008,7 @@ async function runHandleToolCall(options: {
       : undefined;
 
   if (inputValidation?.status === 'rejected') {
+    hookContext.discardFileStoreWrites();
     return createRejectedToolCallResult({
       call: options.call,
       context: hookContext.context,
@@ -686,6 +1020,7 @@ async function runHandleToolCall(options: {
   }
 
   if (hook === undefined) {
+    hookContext.discardFileStoreWrites();
     return createRejectedToolCallResult({
       call: options.call,
       context: options.context,
@@ -697,7 +1032,7 @@ async function runHandleToolCall(options: {
   }
 
   try {
-    return normalizeToolCallResult({
+    const result = normalizeToolCallResult({
       plugin,
       providedTool,
       context: hookContext.context,
@@ -708,7 +1043,17 @@ async function runHandleToolCall(options: {
         operation: async () => await hook(options.call, hookContext.context)
       })
     });
+
+    if (result.status === 'accepted') {
+      hookContext.commitFileStoreWrites();
+    } else {
+      hookContext.discardFileStoreWrites();
+    }
+
+    return result;
   } catch (error: unknown) {
+    hookContext.discardFileStoreWrites();
+
     if (error instanceof PluginHookTimeoutError) {
       return createRejectedToolCallResult({
         call: options.call,
@@ -915,6 +1260,16 @@ function isModelFacingPluginTool(options: {
       options.tool.sideEffectLevel === 'runtime_read' ||
       options.tool.sideEffectLevel === 'local_memory_write')
   );
+}
+
+function toolAllowsFileStoreWrites(tool: RuntimePluginProvidedTool): boolean {
+  return sideEffectLevelAllowsFileStoreWrites(tool.sideEffectLevel);
+}
+
+function sideEffectLevelAllowsFileStoreWrites(
+  sideEffectLevel: RuntimePluginSideEffectLevel
+): boolean {
+  return sideEffectLevel === 'local_memory_write';
 }
 
 function toolRequiresConfirmation(options: {

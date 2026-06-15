@@ -173,6 +173,49 @@ describe('file runtime log store plugin tool event validation', () => {
     expect(() => logStore.rawEvents()).toThrow(LocalRuntimeStorageContractError);
   });
 
+  it('allows a rejected terminal turn to close an unfinished tool call start', async () => {
+    const storeRoot = createStoreRoot();
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'session-tools-rejected',
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'session-tools-rejected'
+    });
+    const eventId = 'evt_tool_finish_log_failed';
+
+    appendTurnPrefix(logStore, eventId);
+    logStore.appendRawEvent({
+      ...identity(eventId),
+      kind: 'tool_call_started',
+      eventType: 'USER_MESSAGE',
+      toolCallId: 'round-1.1.memory.write',
+      toolRound: 1,
+      toolName: 'memory.write',
+      toolPluginId: 'memory.fixture',
+      toolInput: {
+        value: 'planned'
+      }
+    });
+    logStore.appendRawEvent({
+      ...identity(eventId),
+      kind: 'runtime_turn_rejected',
+      eventType: 'USER_MESSAGE',
+      status: 'rejected',
+      reason: 'Runtime turn failed before producing a reply.'
+    });
+    logStore.appendTrace({
+      ...identity(eventId),
+      step: 'runtime_turn_rejected'
+    });
+
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected'
+    });
+  });
+
   it('rejects terminal events that reference unfinished tool calls', async () => {
     const storeRoot = createStoreRoot();
     await createLocalRuntimeSessionStore({ storeRoot }).createSession({

@@ -88,6 +88,28 @@ describe('runtime plugin file store', () => {
     expect(firstAgain.revision()).toBe(1);
   });
 
+  it('preserves own __proto__ keys in plugin file values', () => {
+    const memory = createRuntimePluginFileStore({
+      sessionId: 'session-proto-key',
+      pluginId: 'plugin.proto'
+    });
+    const durable = createRuntimePluginFileStore({
+      storeRoot: createTempRoot(),
+      sessionId: 'session-proto-key',
+      pluginId: 'plugin.proto'
+    });
+
+    memory.writeJsonAtomic('state.json', createProtoKeyValue());
+    memory.appendJsonl('events.jsonl', createProtoKeyValue());
+    durable.writeJsonAtomic('state.json', createProtoKeyValue());
+    durable.appendJsonl('events.jsonl', createProtoKeyValue());
+
+    expectProtoKeyValue(memory.readJson('state.json'));
+    expectProtoKeyValue(memory.readJsonl('events.jsonl')[0]);
+    expectProtoKeyValue(durable.readJson('state.json'));
+    expectProtoKeyValue(durable.readJsonl('events.jsonl')[0]);
+  });
+
   it('rejects non-finite plugin file values before writing', () => {
     const memory = createRuntimePluginFileStore({
       sessionId: 'session-finite-json',
@@ -133,4 +155,49 @@ function pluginRoot(
   pluginId: string
 ): string {
   return join(storeRoot, 'sessions', sessionId, 'plugins', pluginId);
+}
+
+function createProtoKeyValue(): RuntimePluginJsonObject {
+  const nested: Record<string, RuntimePluginJsonObject[string]> = {};
+  Object.defineProperty(nested, '__proto__', {
+    value: 'nested-value',
+    enumerable: true
+  });
+
+  const value: Record<string, RuntimePluginJsonObject[string]> = {
+    nested
+  };
+  Object.defineProperty(value, '__proto__', {
+    value: {
+      preserved: true
+    },
+    enumerable: true
+  });
+
+  return value;
+}
+
+function expectProtoKeyValue(value: unknown): void {
+  if (!isRecord(value)) {
+    throw new Error('Expected plugin file value to be a JSON object.');
+  }
+
+  expect(Object.hasOwn(value, '__proto__')).toBe(true);
+  expect(value['__proto__']).toEqual({
+    preserved: true
+  });
+  expect(JSON.stringify(value)).toContain('"__proto__":{"preserved":true}');
+
+  const nested = value['nested'];
+  if (!isRecord(nested)) {
+    throw new Error('Expected nested plugin file value to be a JSON object.');
+  }
+
+  expect(Object.hasOwn(nested, '__proto__')).toBe(true);
+  expect(nested['__proto__']).toBe('nested-value');
+  expect(JSON.stringify(nested)).toContain('"__proto__":"nested-value"');
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

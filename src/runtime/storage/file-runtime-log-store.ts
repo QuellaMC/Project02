@@ -305,6 +305,9 @@ function assertToolCallRawEventsAreComplete(options: {
 }): void {
   const started = new Map<string, RawEventLogRecord>();
   const finished = new Map<string, RawEventLogRecord>();
+  const rejectedTerminalIdentityKeys = terminalRejectedRawEventIdentityKeys(
+    options.rawEvents
+  );
 
   for (const rawEvent of options.rawEvents) {
     if (rawEvent.kind === 'tool_call_started') {
@@ -343,8 +346,14 @@ function assertToolCallRawEventsAreComplete(options: {
   }
 
   if (options.mode === 'public') {
-    for (const callId of started.keys()) {
+    for (const [callId, rawEvent] of started) {
       if (finished.has(callId)) {
+        continue;
+      }
+
+      if (
+        rejectedTerminalIdentityKeys.has(runtimeEventIdentityKey(rawEvent))
+      ) {
         continue;
       }
 
@@ -367,6 +376,22 @@ function assertToolCallRawEventsAreComplete(options: {
       );
     }
   }
+}
+
+function terminalRejectedRawEventIdentityKeys(
+  rawEvents: readonly RawEventLogRecord[]
+): ReadonlySet<string> {
+  const identityKeys = new Set<string>();
+
+  for (const rawEvent of rawEvents) {
+    if (rawEvent.kind !== 'runtime_turn_rejected') {
+      continue;
+    }
+
+    identityKeys.add(runtimeEventIdentityKey(rawEvent));
+  }
+
+  return identityKeys;
 }
 
 function requiredToolCallId(rawEvent: RawEventLogRecord): string {

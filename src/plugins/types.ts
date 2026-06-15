@@ -550,7 +550,7 @@ export function validateRuntimePluginManifest(
       displayName: displayName.value,
       version: version.value,
       kind,
-      description: description.value,
+      description: redactRuntimePluginText(description.value),
       contractVersion: runtimePluginContractVersion,
       compatibility: compatibility.value,
       declaredPlugins: declaredPlugins.value,

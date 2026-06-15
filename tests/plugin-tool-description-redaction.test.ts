@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/runtime/event.ts';
 import {
   createRuntimePlugin,
+  createRuntimePluginRegistrySnapshot,
   createRuntimePluginTurnEvidenceSnapshot,
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
@@ -17,6 +18,48 @@ const credentialBearingDescription =
   'Search memory with api_key=super-secret Bearer secret-token and https://user:pass@example.test/?token=tool-secret.';
 
 describe('plugin tool description redaction', () => {
+  it('redacts manifest descriptions before registry and evidence exposure', () => {
+    const plugin = createCredentialDescriptionPlugin();
+    const registry = createRuntimePluginRegistrySnapshot([plugin]);
+
+    expectCredentialBearingTextRedacted(
+      registry.plugins[0]?.manifest.description
+    );
+    expectCredentialBearingTextRedacted(
+      registry.plugins[0]?.manifest.config.fields[0]?.description
+    );
+
+    const snapshot = createRuntimePluginTurnEvidenceSnapshot({
+      ...testIdentity(),
+      kind: 'runtime_plugin_turn_evidence_snapshot',
+      contractVersion: runtimePluginContractVersion,
+      plugins: [
+        {
+          pluginId: 'memory.secret_description.fixture',
+          manifest: credentialDescriptionManifest(),
+          providedTools: [credentialDescriptionTool()],
+          registeredLifecycleHooks: ['tool_provider'],
+          installed: true,
+          registered: true,
+          enabled: true,
+          availableForTurn: true,
+          redactionLabels: ['credential']
+        }
+      ],
+      contextItems: [],
+      toolInvocations: [],
+      evidence: [],
+      health: []
+    });
+
+    expectCredentialBearingTextRedacted(
+      snapshot.plugins[0]?.manifest.description
+    );
+    expectCredentialBearingTextRedacted(
+      snapshot.plugins[0]?.manifest.config.fields[0]?.description
+    );
+  });
+
   it('redacts provided tool descriptions before host and prompt exposure', () => {
     const plugin = createCredentialDescriptionPlugin();
     const host = createRuntimePluginHost({
@@ -32,15 +75,7 @@ describe('plugin tool description redaction', () => {
       throw new Error('Expected memory.secret_search to be model-facing.');
     }
 
-    expect(toolDefinition.description).toContain('api_key=[redacted]');
-    expect(toolDefinition.description).toContain('Bearer [redacted]');
-    expect(toolDefinition.description).toContain(
-      'https://[redacted]@example.test/?token=[redacted]'
-    );
-    expect(toolDefinition.description).not.toContain('super-secret');
-    expect(toolDefinition.description).not.toContain('secret-token');
-    expect(toolDefinition.description).not.toContain('user:pass');
-    expect(toolDefinition.description).not.toContain('tool-secret');
+    expectCredentialBearingTextRedacted(toolDefinition.description);
 
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
@@ -63,10 +98,9 @@ describe('plugin tool description redaction', () => {
     }
 
     expect(renderedTool.function.description).toBe(toolDefinition.description);
-    expect(JSON.stringify(renderedTool)).not.toContain('super-secret');
-    expect(JSON.stringify(renderedTool)).not.toContain('secret-token');
-    expect(JSON.stringify(renderedTool)).not.toContain('user:pass');
-    expect(JSON.stringify(renderedTool)).not.toContain('tool-secret');
+    expectCredentialBearingTextToHaveNoRawSecrets(
+      JSON.stringify(renderedTool)
+    );
   });
 
   it('redacts provided tool descriptions when rehydrating turn evidence snapshots', () => {
@@ -99,12 +133,7 @@ describe('plugin tool description redaction', () => {
     });
     const description = snapshot.plugins[0]?.providedTools[0]?.description;
 
-    expect(description).toContain('api_key=[redacted]');
-    expect(description).toContain('Bearer [redacted]');
-    expect(description).not.toContain('super-secret');
-    expect(description).not.toContain('secret-token');
-    expect(description).not.toContain('user:pass');
-    expect(description).not.toContain('tool-secret');
+    expectCredentialBearingTextRedacted(description);
   });
 });
 
@@ -133,7 +162,7 @@ function credentialDescriptionManifest() {
     displayName: 'Secret Description Fixture',
     version: '1.0.0',
     kind: 'memory_provider',
-    description: 'Test plugin.',
+    description: credentialBearingDescription,
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
@@ -141,7 +170,15 @@ function credentialDescriptionManifest() {
     },
     declaredPlugins: ['tool_provider'],
     config: {
-      fields: []
+      fields: [
+        {
+          name: 'memory_api_key',
+          description: credentialBearingDescription,
+          required: false,
+          secret: true,
+          redactionLabels: ['credential']
+        }
+      ]
     },
     localTrustLevel: 'test_fixture',
     runtimePolicy: {
@@ -164,6 +201,27 @@ function credentialDescriptionManifest() {
     },
     requestedApis: []
   };
+}
+
+function expectCredentialBearingTextRedacted(value: string | undefined): void {
+  expect(value).toBeDefined();
+  if (value === undefined) {
+    throw new Error('Expected credential-bearing text.');
+  }
+
+  expect(value).toContain('api_key=[redacted]');
+  expect(value).toContain('Bearer [redacted]');
+  expect(value).toContain(
+    'https://[redacted]@example.test/?token=[redacted]'
+  );
+  expectCredentialBearingTextToHaveNoRawSecrets(value);
+}
+
+function expectCredentialBearingTextToHaveNoRawSecrets(value: string): void {
+  expect(value).not.toContain('super-secret');
+  expect(value).not.toContain('secret-token');
+  expect(value).not.toContain('user:pass');
+  expect(value).not.toContain('tool-secret');
 }
 
 function credentialDescriptionTool() {

@@ -48,10 +48,12 @@ export function createRuntimePluginFileStore(
 
   return Object.freeze({
     readJson(path) {
-      const filePath = join(root, safeRelativePath(path));
+      const filePath = join(root, normalizeRuntimePluginFileStorePath(path));
 
       try {
-        return freezeJsonValue(JSON.parse(readFileSync(filePath, 'utf8')) as unknown);
+        return freezeRuntimePluginFileStoreJsonValue(
+          JSON.parse(readFileSync(filePath, 'utf8')) as unknown
+        );
       } catch (error: unknown) {
         if (isMissingFileError(error)) {
           return undefined;
@@ -61,14 +63,16 @@ export function createRuntimePluginFileStore(
       }
     },
     readJsonl(path) {
-      const filePath = join(root, safeRelativePath(path));
+      const filePath = join(root, normalizeRuntimePluginFileStorePath(path));
 
       try {
         return Object.freeze(
           readFileSync(filePath, 'utf8')
             .split('\n')
             .filter((line) => line.trim().length > 0)
-            .map((line) => freezeJsonValue(JSON.parse(line) as unknown))
+            .map((line) =>
+              freezeRuntimePluginFileStoreJsonValue(JSON.parse(line) as unknown)
+            )
         );
       } catch (error: unknown) {
         if (isMissingFileError(error)) {
@@ -79,20 +83,28 @@ export function createRuntimePluginFileStore(
       }
     },
     writeJsonAtomic(path, value) {
-      const filePath = join(root, safeRelativePath(path));
+      const filePath = join(root, normalizeRuntimePluginFileStorePath(path));
       const tmpPath = `${filePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
 
       mkdirSync(dirname(filePath), { recursive: true });
-      writeFileSync(tmpPath, `${JSON.stringify(freezeJsonValue(value))}\n`, 'utf8');
+      writeFileSync(
+        tmpPath,
+        `${JSON.stringify(freezeRuntimePluginFileStoreJsonValue(value))}\n`,
+        'utf8'
+      );
       renameSync(tmpPath, filePath);
       revision += 1;
       writeDurableRevision(root, revision);
     },
     appendJsonl(path, value) {
-      const filePath = join(root, safeRelativePath(path));
+      const filePath = join(root, normalizeRuntimePluginFileStorePath(path));
 
       mkdirSync(dirname(filePath), { recursive: true });
-      appendFileSync(filePath, `${JSON.stringify(freezeJsonValue(value))}\n`, 'utf8');
+      appendFileSync(
+        filePath,
+        `${JSON.stringify(freezeRuntimePluginFileStoreJsonValue(value))}\n`,
+        'utf8'
+      );
       revision += 1;
       writeDurableRevision(root, revision);
     },
@@ -109,12 +121,14 @@ function createInMemoryRuntimePluginFileStore(
 
   return Object.freeze({
     readJson(path) {
-      const value = state.files.get(safeRelativePath(path));
+      const value = state.files.get(normalizeRuntimePluginFileStorePath(path));
 
-      return value === undefined ? undefined : freezeJsonValue(value);
+      return value === undefined
+        ? undefined
+        : freezeRuntimePluginFileStoreJsonValue(value);
     },
     readJsonl(path) {
-      const value = state.files.get(safeRelativePath(path));
+      const value = state.files.get(normalizeRuntimePluginFileStorePath(path));
 
       if (value === undefined) {
         return Object.freeze([]);
@@ -124,16 +138,19 @@ function createInMemoryRuntimePluginFileStore(
         throw new TypeError('Plugin JSONL path already stores non-array JSON.');
       }
 
-      return Object.freeze(value.map(freezeJsonValue));
+      return Object.freeze(value.map(freezeRuntimePluginFileStoreJsonValue));
     },
     writeJsonAtomic(path, value) {
-      state.files.set(safeRelativePath(path), freezeJsonValue(value));
+      state.files.set(
+        normalizeRuntimePluginFileStorePath(path),
+        freezeRuntimePluginFileStoreJsonValue(value)
+      );
       state.revision += 1;
     },
     appendJsonl(path, value) {
-      const safePath = safeRelativePath(path);
+      const safePath = normalizeRuntimePluginFileStorePath(path);
       const current = state.files.get(safePath);
-      const nextLine = freezeJsonValue(value);
+      const nextLine = freezeRuntimePluginFileStoreJsonValue(value);
 
       if (current === undefined) {
         state.files.set(safePath, Object.freeze([nextLine]));
@@ -151,7 +168,7 @@ function createInMemoryRuntimePluginFileStore(
   } satisfies RuntimePluginFileStore);
 }
 
-function safeRelativePath(path: string): string {
+export function normalizeRuntimePluginFileStorePath(path: string): string {
   const normalized = path.trim();
 
   if (
@@ -286,7 +303,9 @@ function isMissingFileError(error: unknown): boolean {
   );
 }
 
-function freezeJsonValue(value: unknown): RuntimePluginJsonValue {
+export function freezeRuntimePluginFileStoreJsonValue(
+  value: unknown
+): RuntimePluginJsonValue {
   if (
     value === null ||
     typeof value === 'string' ||
@@ -304,17 +323,17 @@ function freezeJsonValue(value: unknown): RuntimePluginJsonValue {
   }
 
   if (Array.isArray(value)) {
-    return Object.freeze(value.map(freezeJsonValue));
+    return Object.freeze(value.map(freezeRuntimePluginFileStoreJsonValue));
   }
 
   if (typeof value === 'object') {
-    const frozen: Record<string, RuntimePluginJsonValue> = {};
+    const frozenEntries: Array<readonly [string, RuntimePluginJsonValue]> = [];
 
     for (const [key, item] of Object.entries(value)) {
-      frozen[key] = freezeJsonValue(item);
+      frozenEntries.push([key, freezeRuntimePluginFileStoreJsonValue(item)]);
     }
 
-    return Object.freeze(frozen);
+    return Object.freeze(Object.fromEntries(frozenEntries));
   }
 
   throw new TypeError('Plugin file value must be JSON serializable.');
