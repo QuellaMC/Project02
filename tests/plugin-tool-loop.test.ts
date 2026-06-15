@@ -544,6 +544,58 @@ describe('plugin-driven tool loop', () => {
     });
   });
 
+  it('keeps the completed turn when afterTurnCommitted evidence append fails', async () => {
+    const session = createConversationSession();
+    const logStore = createAfterTurnCommittedAppendFailingLogStore();
+    const pluginHost = createAfterTurnCommittedProbeHost(() => {}, {
+      status: 'failed',
+      summary: 'After commit fixture failed after terminal commit.'
+    });
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'terminal commit survives after hook log failure'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('hello', 'evt_after_commit_append_failure'),
+      session,
+      logStore,
+      roleModelAdapter: adapter,
+      pluginHost
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.rawEvent).toMatchObject({
+      kind: 'runtime_turn_completed',
+      status: 'completed'
+    });
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'hello',
+      'terminal commit survives after hook log failure'
+    ]);
+    expect(
+      logStore
+        .rawEvents()
+        .filter(
+          (event) =>
+            event.kind === 'runtime_turn_completed' ||
+            event.kind === 'runtime_turn_rejected'
+        )
+        .map((event) => event.kind)
+    ).toEqual(['runtime_turn_completed']);
+    expect(
+      logStore.rawEvents().some((event) => event.kind === 'after_turn_committed')
+    ).toBe(false);
+  });
+
   it('does not run afterTurnCommitted when terminal raw event append fails', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeTurnCompletedAppendFailingLogStore();
@@ -1253,6 +1305,64 @@ describe('plugin-driven tool loop', () => {
     expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_finished')).toBe(false);
   });
 
+  it('logs only valid pluginStoreRevision metadata from accepted tool output', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const pluginHost = createPluginStoreRevisionFixtureHost();
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'revision.zero',
+            input: {}
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'revision.valid',
+            input: {}
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'revision metadata checked'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('check revisions', 'evt_plugin_store_revision'),
+      session,
+      logStore,
+      roleModelAdapter: adapter,
+      pluginHost
+    });
+    const toolCallFinishedEvents = logStore
+      .rawEvents()
+      .filter((event) => event.kind === 'tool_call_finished');
+
+    expect(result.status).toBe('completed');
+    expect(toolCallFinishedEvents).toHaveLength(2);
+    expect(toolCallFinishedEvents[0]).toMatchObject({
+      toolName: 'revision.zero'
+    });
+    expect(toolCallFinishedEvents[0]).not.toHaveProperty(
+      'pluginStoreRevision'
+    );
+    expect(toolCallFinishedEvents[1]).toMatchObject({
+      toolName: 'revision.valid',
+      pluginStoreRevision: 2
+    });
+  });
+
 });
 
 function createNativePluginListAdapter(
@@ -1492,6 +1602,38 @@ function createRuntimeTurnCompletedAppendFailingLogStore(): RuntimeLogStore {
   } satisfies RuntimeLogStore);
 }
 
+function createAfterTurnCommittedAppendFailingLogStore(): RuntimeLogStore {
+  const logStore = createRuntimeLogStore();
+
+  return Object.freeze({
+    appendTrace(entry) {
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      if (record.kind === 'after_turn_committed') {
+        throw new Error('after-turn raw event append failed');
+      }
+
+      return logStore.appendRawEvent(record);
+    },
+    appendConversationMessage(record) {
+      return logStore.appendConversationMessage(record);
+    },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
 function createAfterTurnCommittedProbeHost(
   onAfterTurnCommitted: () => void,
   options: {
@@ -1574,6 +1716,87 @@ function createAfterTurnCommittedProbeHost(
       })
     ]
   });
+}
+
+function createPluginStoreRevisionFixtureHost() {
+  const pluginId = 'revision.fixture';
+
+  return createRuntimePluginHost({
+    plugins: [
+      createRuntimePlugin({
+        manifest: {
+          id: pluginId,
+          displayName: 'Revision Fixture',
+          version: '1.0.0',
+          kind: 'first_party',
+          description: 'Test plugin for tool output revision metadata.',
+          contractVersion: runtimePluginContractVersion,
+          compatibility: {
+            hostContractVersions: [runtimePluginContractVersion],
+            sourceSystem: 'test'
+          },
+          declaredPlugins: ['tool_provider', 'handle_tool_call'],
+          config: {
+            fields: []
+          },
+          localTrustLevel: 'test_fixture',
+          runtimePolicy: {
+            requiredForTurn: false,
+            sideEffectLevel: 'runtime_read',
+            confirmation: 'not_required',
+            timeoutMs: 1000,
+            sourceReferencesRequired: false,
+            redactionLabels: [],
+            failureBehavior: {
+              beforeRoleModelCall: 'degrade',
+              handleToolCall: 'reject_tool_call',
+              afterTurnCommitted: 'log_failure',
+              health: 'degrade'
+            }
+          },
+          activation: {
+            defaultEnabled: true,
+            reasons: ['test']
+          },
+          requestedApis: []
+        },
+        providedTools: [
+          createRevisionFixtureTool('revision.zero'),
+          createRevisionFixtureTool('revision.valid')
+        ],
+        lifecycleHooks: {
+          handleToolCall(call) {
+            return {
+              status: 'accepted',
+              output: {
+                pluginStoreRevision:
+                  call.toolName === 'revision.valid' ? 2 : 0
+              },
+              evidence: []
+            };
+          }
+        }
+      })
+    ]
+  });
+}
+
+function createRevisionFixtureTool(name: string) {
+  return {
+    name,
+    description: 'Return plugin store revision metadata.',
+    requiredForUserTurn: false,
+    maxCallsPerUserTurn: 1,
+    inputContract: {
+      type: 'object',
+      fields: [],
+      additionalFields: false
+    },
+    validationOwner: 'plugin_host',
+    sideEffectLevel: 'runtime_read',
+    requiresConfirmation: false,
+    sourceReferencesRequired: false
+  } as const;
 }
 
 function createTestEvent(message: string, eventId: string) {

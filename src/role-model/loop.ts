@@ -46,12 +46,13 @@ import {
   type RoleModelToolChatMessage,
   type RoleModelTurnContext
 } from './prompt.ts';
-import type {
-  RuntimePluginJsonObject,
-  RuntimePluginJsonValue,
-  RuntimePluginToolCall,
-  RuntimePluginToolCallResult,
-  RuntimePluginContext
+import {
+  redactRuntimePluginText,
+  type RuntimePluginJsonObject,
+  type RuntimePluginJsonValue,
+  type RuntimePluginToolCall,
+  type RuntimePluginToolCallResult,
+  type RuntimePluginContext
 } from '../plugins/types.ts';
 import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from '../runtime/event.ts';
 
@@ -813,13 +814,15 @@ function createRejectedToolRoutingEvidence(options: {
   readonly reason: string;
   readonly message: string;
 }): RoleModelPluginToolRoutingEvidence {
+  const message = redactRuntimePluginText(options.message);
+
   return Object.freeze({
     callId: options.callId,
     call: options.call,
     result: Object.freeze({
       status: 'rejected',
       reason: options.reason,
-      message: options.message,
+      message,
       evidence: Object.freeze([])
     } satisfies RuntimePluginToolCallResult)
   } satisfies RoleModelPluginToolRoutingEvidence);
@@ -913,7 +916,7 @@ function freezeRuntimePluginToolCallResult(
   if (result.status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
-      output: freezeRuntimePluginJsonValue(result.output),
+      output: freezeRuntimePluginToolOutputValue(result.output),
       evidence: Object.freeze([...result.evidence])
     } satisfies RuntimePluginToolCallResult);
   }
@@ -921,21 +924,63 @@ function freezeRuntimePluginToolCallResult(
   return Object.freeze({
     status: 'rejected',
     reason: result.reason,
-    message: result.message,
+    message: redactRuntimePluginText(result.message),
     evidence: Object.freeze([...result.evidence])
   } satisfies RuntimePluginToolCallResult);
+}
+
+function freezeRuntimePluginToolOutputObject(
+  value: Readonly<Record<string, unknown>>
+): RuntimePluginJsonObject {
+  const snapshotEntries: Array<readonly [string, RuntimePluginJsonValue]> = [];
+
+  for (const [key, item] of Object.entries(value)) {
+    snapshotEntries.push([key, freezeRuntimePluginToolOutputValue(item)]);
+  }
+
+  return Object.freeze(Object.fromEntries(snapshotEntries));
+}
+
+function freezeRuntimePluginToolOutputValue(
+  value: unknown
+): RuntimePluginJsonValue {
+  if (value === null || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return redactRuntimePluginText(value);
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new TypeError('Plugin tool output must be finite JSON.');
+    }
+
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map(freezeRuntimePluginToolOutputValue));
+  }
+
+  if (isJsonRecord(value)) {
+    return freezeRuntimePluginToolOutputObject(value);
+  }
+
+  throw new TypeError('Plugin tool output must be JSON serializable.');
 }
 
 function freezeRuntimePluginJsonObject(
   value: Readonly<Record<string, unknown>>
 ): RuntimePluginJsonObject {
-  const snapshot: Record<string, RuntimePluginJsonValue> = {};
+  const snapshotEntries: Array<readonly [string, RuntimePluginJsonValue]> = [];
 
   for (const [key, item] of Object.entries(value)) {
-    snapshot[key] = freezeRuntimePluginJsonValue(item);
+    snapshotEntries.push([key, freezeRuntimePluginJsonValue(item)]);
   }
 
-  return Object.freeze(snapshot);
+  return Object.freeze(Object.fromEntries(snapshotEntries));
 }
 
 function freezeRuntimePluginJsonValue(

@@ -859,7 +859,14 @@ function routableModelFacingPluginTools(
     return [];
   }
 
-  return Object.freeze(plugin.providedTools.filter(isModelFacingPluginTool));
+  return Object.freeze(
+    plugin.providedTools.filter((tool) =>
+      isModelFacingPluginTool({
+        plugin,
+        tool
+      })
+    )
+  );
 }
 
 function discoverableCurrentTurnPluginTools(
@@ -876,7 +883,7 @@ function isDiscoverableCurrentTurnTool(options: {
   readonly plugin: RuntimePlugin;
   readonly tool: RuntimePluginProvidedTool;
 }): boolean {
-  if (isModelFacingPluginTool(options.tool)) {
+  if (isModelFacingPluginTool(options)) {
     return options.plugin.lifecycleHooks.handleToolCall !== undefined;
   }
 
@@ -891,19 +898,32 @@ function isFirstPartyBuiltInModelTool(options: {
     options.plugin.manifest.localTrustLevel === 'first_party' &&
     options.tool.validationOwner === 'built_in_model_tools' &&
     isBuiltInModelToolName(options.tool.name) &&
-    !options.tool.requiresConfirmation &&
+    !toolRequiresConfirmation(options) &&
     options.tool.sideEffectLevel === 'none'
   );
 }
 
-function isModelFacingPluginTool(tool: RuntimePluginProvidedTool): boolean {
+function isModelFacingPluginTool(options: {
+  readonly plugin: RuntimePlugin;
+  readonly tool: RuntimePluginProvidedTool;
+}): boolean {
   return (
-    !isBuiltInModelToolName(tool.name) &&
-    tool.validationOwner === 'plugin_host' &&
-    !tool.requiresConfirmation &&
-    (tool.sideEffectLevel === 'none' ||
-      tool.sideEffectLevel === 'runtime_read' ||
-      tool.sideEffectLevel === 'local_memory_write')
+    !isBuiltInModelToolName(options.tool.name) &&
+    options.tool.validationOwner === 'plugin_host' &&
+    !toolRequiresConfirmation(options) &&
+    (options.tool.sideEffectLevel === 'none' ||
+      options.tool.sideEffectLevel === 'runtime_read' ||
+      options.tool.sideEffectLevel === 'local_memory_write')
+  );
+}
+
+function toolRequiresConfirmation(options: {
+  readonly plugin: RuntimePlugin;
+  readonly tool: RuntimePluginProvidedTool;
+}): boolean {
+  return (
+    options.plugin.manifest.runtimePolicy.confirmation === 'required' ||
+    options.tool.requiresConfirmation
   );
 }
 
@@ -1038,13 +1058,13 @@ function normalizeJsonValue(value: unknown): RuntimePluginJsonValue {
   }
 
   if (isRecord(value)) {
-    const snapshot: Record<string, RuntimePluginJsonValue> = {};
+    const snapshotEntries: Array<readonly [string, RuntimePluginJsonValue]> = [];
 
     for (const [key, item] of Object.entries(value)) {
-      snapshot[key] = normalizeJsonValue(item);
+      snapshotEntries.push([key, normalizeJsonValue(item)]);
     }
 
-    return Object.freeze(snapshot);
+    return Object.freeze(Object.fromEntries(snapshotEntries));
   }
 
   throw new TypeError('Plugin tool output must be JSON serializable.');

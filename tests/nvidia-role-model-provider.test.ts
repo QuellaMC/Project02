@@ -14,7 +14,8 @@ import {
   type NvidiaFetchClient
 } from '../src/role-model/providers/nvidia.ts';
 import {
-  renderRoleModelTurnContext
+  renderRoleModelTurnContext,
+  type RoleModelAssistantChatMessage
 } from '../src/role-model/prompt.ts';
 import {
   createRuntimeEventIdentity,
@@ -224,6 +225,55 @@ describe('NVIDIA role-model provider', () => {
         }
       ]
     });
+  });
+
+  it('preserves provider aliases in prior assistant tool-call history', () => {
+    const inputEnvelope = createNvidiaAliasCollisionInputEnvelope();
+    const priorAssistantMessage = Object.freeze({
+      role: 'assistant',
+      content: null,
+      tool_calls: Object.freeze([
+        {
+          id: 'call_memory_search_dot',
+          type: 'function',
+          function: {
+            name: 'memory_search',
+            arguments: '{}'
+          }
+        },
+        {
+          id: 'call_memory_search_plain',
+          type: 'function',
+          function: {
+            name: 'memory_search_2',
+            arguments: '{}'
+          }
+        },
+        {
+          id: 'call_memory_search_two',
+          type: 'function',
+          function: {
+            name: 'memory_search_2_2',
+            arguments: '{}'
+          }
+        }
+      ])
+    } satisfies RoleModelAssistantChatMessage);
+    const messages = renderNvidiaMessages(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope, {
+        additionalMessages: [priorAssistantMessage]
+      })
+    });
+    const assistantHistoryMessage = messages.find(
+      (message): message is RoleModelAssistantChatMessage =>
+        message.role === 'assistant' && message.tool_calls !== undefined
+    );
+
+    expect(
+      assistantHistoryMessage?.tool_calls?.map(
+        (toolCall) => toolCall.function.name
+      )
+    ).toEqual(['memory_search', 'memory_search_2', 'memory_search_2_2']);
   });
 
   it('normalizes final assistant content through visible_reply', async () => {

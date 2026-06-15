@@ -332,13 +332,26 @@ function sanitizeNvidiaToolCall(
     id: toolCall.id,
     type: 'function',
     function: Object.freeze({
-      name: providerToolNameForRuntimeToolName(
+      name: providerToolNameForNvidiaAssistantHistoryToolName(
         toolCall.function.name,
         toolNameMappings
       ),
       arguments: toolCall.function.arguments
     })
   } satisfies RoleModelChatToolCall);
+}
+
+function providerToolNameForNvidiaAssistantHistoryToolName(
+  toolName: string,
+  toolNameMappings: readonly RoleModelProviderToolNameMapping[]
+): string {
+  if (
+    toolNameMappings.some((mapping) => mapping.providerName === toolName)
+  ) {
+    return toolName;
+  }
+
+  return providerToolNameForRuntimeToolName(toolName, toolNameMappings);
 }
 
 function createProviderRejectedOutput(options: {

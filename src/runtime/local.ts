@@ -952,20 +952,22 @@ async function runSerializedLocalUserMessageEvent(
       afterCommitPluginContext
     );
 
-    if (
-      afterCommitResult.status === 'completed_with_failures' ||
-      afterCommitResult.evidence.length > 0
-    ) {
-      appendRawEvent({
-        ...identity,
-        kind: 'after_turn_committed',
-        eventType: event.type,
-        status: afterCommitResult.status,
-        ...visibleMessageIdsForTurnOption(committedVisibleMessages),
-        toolCallIds: Object.freeze([...finishedToolCallIds]),
-        payloadSummary,
-        ...runtimePluginEvidenceOption(afterCommitResult.evidence)
-      });
+    if (shouldRecordAfterTurnCommittedEvent(afterCommitResult)) {
+      try {
+        appendRawEvent({
+          ...identity,
+          kind: 'after_turn_committed',
+          eventType: event.type,
+          status: afterCommitResult.status,
+          ...visibleMessageIdsForTurnOption(committedVisibleMessages),
+          toolCallIds: Object.freeze([...finishedToolCallIds]),
+          payloadSummary,
+          ...runtimePluginEvidenceOption(afterCommitResult.evidence)
+        });
+      } catch {
+        // The completed turn is already durable; follow-up hook evidence cannot
+        // change the terminal commit decision.
+      }
     }
 
     return Object.freeze({
@@ -1057,9 +1059,23 @@ function pluginStoreRevisionOption(
     return {};
   }
 
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    return {};
+  }
+
   return {
     pluginStoreRevision: revision
   };
+}
+
+function shouldRecordAfterTurnCommittedEvent(afterCommitResult: {
+  readonly status: 'completed' | 'completed_with_failures';
+  readonly evidence: readonly unknown[];
+}): boolean {
+  return (
+    afterCommitResult.status === 'completed_with_failures' ||
+    afterCommitResult.evidence.length > 0
+  );
 }
 
 function decisionContextSessionIdFromEvidence(

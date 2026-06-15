@@ -24,6 +24,7 @@ import {
   type RoleModelAdapter,
   type RoleModelPluginToolHost
 } from '../src/role-model/loop.ts';
+import type { RoleModelChatMessage } from '../src/role-model/prompt.ts';
 
 describe('role-model loop plugin tool routing', () => {
   it('rejects non-degrading plugin tool failures before a later visible reply can commit', async () => {
@@ -364,6 +365,237 @@ describe('role-model loop plugin tool routing', () => {
       expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
     }
   );
+
+  it('redacts custom plugin host accepted string outputs before completion events and native replay', async () => {
+    let invocations = 0;
+    let handledCalls = 0;
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    const completedResults: RuntimePluginToolCallResult[] = [];
+    const redactedOutput = {
+      matched:
+        'api_key=[redacted] Bearer [redacted] https://[redacted]@example.test/?token=[redacted]',
+      nested: {
+        password: 'password=[redacted]'
+      },
+      list: ['credential=[redacted]']
+    };
+    const adapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        invocations += 1;
+        messagesByRound.push([...invocation.turnContext.messages]);
+
+        if (invocations === 1) {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'memory.search',
+                  input: {
+                    query: 'Mira'
+                  }
+                }
+              ]
+            }),
+            nativeAssistantMessage: {
+              role: 'assistant',
+              content: 'Searching memory.',
+              tool_calls: [
+                {
+                  id: 'call_memory_search_secret',
+                  type: 'function',
+                  function: {
+                    name: 'memory.search',
+                    arguments: '{"query":"Mira"}'
+                  }
+                }
+              ]
+            }
+          };
+        }
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'memory checked'
+                }
+              }
+            ]
+          })
+        };
+      }
+    } satisfies RoleModelAdapter);
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall() {
+        handledCalls += 1;
+
+        return Object.freeze({
+          status: 'accepted',
+          output: Object.freeze({
+            matched:
+              'api_key=super-secret Bearer secret-token https://user:pass@example.test/?token=abc',
+            nested: Object.freeze({
+              password: 'password=open-sesame'
+            }),
+            list: Object.freeze(['credential=door-code'])
+          }),
+          evidence: Object.freeze([])
+        } satisfies RuntimePluginToolCallResult);
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_custom_host_secret_output'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext(
+        'evt_custom_host_secret_output'
+      ),
+      onPluginToolCallCompleted(event) {
+        completedResults.push(event.result);
+      }
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(invocations).toBe(2);
+    expect(handledCalls).toBe(1);
+    expect(completedResults).toMatchObject([
+      {
+        status: 'accepted',
+        output: redactedOutput
+      }
+    ]);
+    expect(result.pluginToolResults[0]?.result).toMatchObject({
+      status: 'accepted',
+      output: redactedOutput
+    });
+    expect(result.inputEnvelope.toolObservations[0]?.result).toMatchObject({
+      status: 'accepted',
+      output: redactedOutput
+    });
+
+    const nativeToolMessage = messagesByRound[1]?.find(
+      (message) => message.role === 'tool'
+    );
+
+    expect(nativeToolMessage).toMatchObject({
+      role: 'tool',
+      tool_call_id: 'call_memory_search_secret'
+    });
+    expect(nativeToolMessage?.content).toContain('api_key=[redacted]');
+    expect(nativeToolMessage?.content).toContain('Bearer [redacted]');
+    expect(nativeToolMessage?.content).toContain('password=[redacted]');
+    expect(nativeToolMessage?.content).toContain('credential=[redacted]');
+
+    const serializedSurfaces = JSON.stringify({
+      completedResults,
+      pluginToolResults: result.pluginToolResults,
+      toolObservations: result.inputEnvelope.toolObservations,
+      nativeToolContent: nativeToolMessage?.content
+    });
+
+    expect(serializedSurfaces).not.toContain('super-secret');
+    expect(serializedSurfaces).not.toContain('secret-token');
+    expect(serializedSurfaces).not.toContain('open-sesame');
+    expect(serializedSurfaces).not.toContain('door-code');
+    expect(serializedSurfaces).not.toContain('user:pass');
+    expect(serializedSurfaces).not.toContain('token=abc');
+  });
+
+  it('redacts custom plugin host rejected messages before loop rejection evidence', async () => {
+    let invocations = 0;
+    const completedResults: RuntimePluginToolCallResult[] = [];
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued after rejected tool'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall() {
+        return Object.freeze({
+          status: 'rejected',
+          reason: 'handler_failed',
+          message:
+            'search backend failed api_key=super-secret Bearer secret-token',
+          evidence: Object.freeze([])
+        } satisfies RuntimePluginToolCallResult);
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_custom_host_secret_reject'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext(
+        'evt_custom_host_secret_reject'
+      ),
+      onPluginToolCallCompleted(event) {
+        completedResults.push(event.result);
+      }
+    });
+
+    expect(result.status).toBe('rejected');
+    if (result.status !== 'rejected') {
+      throw new Error('Expected custom host rejection to reject the loop.');
+    }
+
+    expect(result.rejection).toMatchObject({
+      reason: roleModelPluginToolRejectedRejectionReason,
+      details:
+        'Plugin tool "memory.search" rejected the tool call: search backend failed api_key=[redacted] Bearer [redacted]'
+    });
+    expect(result.pluginToolResults).toMatchObject([
+      {
+        result: {
+          status: 'rejected',
+          reason: 'handler_failed',
+          message:
+            'search backend failed api_key=[redacted] Bearer [redacted]'
+        }
+      }
+    ]);
+    expect(invocations).toBe(1);
+    expect(completedResults).toMatchObject([
+      {
+        status: 'rejected',
+        message: 'search backend failed api_key=[redacted] Bearer [redacted]'
+      }
+    ]);
+
+    const serializedSurfaces = JSON.stringify({
+      completedResults,
+      pluginToolResults: result.pluginToolResults,
+      rejection: result.rejection
+    });
+
+    expect(serializedSurfaces).not.toContain('super-secret');
+    expect(serializedSurfaces).not.toContain('secret-token');
+  });
 
   it('counts successful tool observations toward required plugin tools across the turn', async () => {
     let invocations = 0;

@@ -83,6 +83,9 @@ export type RenderRoleModelTurnContextOptions = {
   readonly additionalMessages?: readonly RoleModelChatMessage[];
 };
 
+const runtimeContextOpeningTagPattern = /<\s*runtime_context\b/giu;
+const runtimeContextClosingTagPattern = /<\s*\/\s*runtime_context\s*>/giu;
+
 export const roleModelStableSystemPromptText =
   'Use OpenAI-compatible chat-completions semantics. ' +
   'The conversation history is provided as normal user and assistant messages. ' +
@@ -323,8 +326,8 @@ function formatRuntimeContextLines(values: readonly string[]): readonly string[]
 function sanitizeRuntimeContextText(value: string): readonly string[] {
   return Object.freeze(
     value
-      .replaceAll('<runtime_context', '<runtime-context')
-      .replaceAll('</runtime_context>', '</runtime-context>')
+      .replaceAll(runtimeContextOpeningTagPattern, '<runtime-context')
+      .replaceAll(runtimeContextClosingTagPattern, '</runtime-context>')
       .split(/\r?\n/u)
       .map((line) => line.trim())
       .filter((line) => line.length > 0)

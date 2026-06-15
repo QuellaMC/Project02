@@ -24,6 +24,8 @@ import type {
   RuntimePlugin,
   RuntimePluginContext,
   RuntimePluginFileStore,
+  RuntimePluginJsonObject,
+  RuntimePluginJsonValue,
   RuntimePluginToolCallResult
 } from '../src/plugins/types.ts';
 import {
@@ -114,6 +116,36 @@ describe('runtime plugin host', () => {
       'memory.search'
     );
     expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
+  });
+
+  it('does not expose tools when the plugin manifest requires confirmation', async () => {
+    const plugin = createConfirmationRequiredMemorySearchPlugin();
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
+      'memory.search'
+    );
+    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginDiscoveryPluginId,
+        toolName: roleModelPluginListToolName,
+        input: {}
+      },
+      testPluginContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected plugin.list to be accepted.');
+    }
+
+    expect(JSON.stringify(result.output)).toContain(
+      'memory.confirmation-required.fixture'
+    );
+    expect(JSON.stringify(result.output)).not.toContain('memory.search');
   });
 
   it('turns handler failures into redacted rejected tool observations', async () => {
@@ -398,6 +430,44 @@ describe('runtime plugin host', () => {
     });
   });
 
+  it('preserves own __proto__ keys in accepted plugin tool output objects', async () => {
+    const plugin = createProtoKeyOutputPlugin();
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected memory.search to be accepted.');
+    }
+
+    const output = expectJsonObject(result.output);
+    const nested = expectJsonObject(output['nested']);
+
+    expect(Object.hasOwn(output, '__proto__')).toBe(true);
+    expect(output['__proto__']).toEqual({
+      polluted: true
+    });
+    expect(Object.hasOwn(nested, '__proto__')).toBe(true);
+    expect(nested['__proto__']).toBe('nested-value');
+    expect(JSON.stringify(output)).toContain(
+      '"__proto__":{"polluted":true}'
+    );
+    expect(JSON.stringify(output)).toContain(
+      '"nested":{"__proto__":"nested-value"}'
+    );
+  });
+
   it('rejects accepted source-required tool output backed only by unrelated source evidence', async () => {
     const plugin = createSourceRequiredMemorySearchPlugin({
       id: 'memory.source-required.unrelated.fixture',
@@ -636,6 +706,87 @@ function createDegradableMemorySearchPlugin(onHandle: () => void): RuntimePlugin
       }
     }
   });
+}
+
+function createConfirmationRequiredMemorySearchPlugin(): RuntimePlugin {
+  const id = 'memory.confirmation-required.fixture';
+  const manifest = memorySearchPluginManifest(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...manifest,
+      runtimePolicy: {
+        ...manifest.runtimePolicy,
+        confirmation: 'required'
+      }
+    },
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall(call, context) {
+        const query = call.input['query'];
+
+        if (typeof query !== 'string') {
+          throw new Error('Expected query string.');
+        }
+
+        return createAcceptedMemorySearchResult({
+          pluginId: id,
+          query,
+          context
+        });
+      }
+    }
+  });
+}
+
+function createProtoKeyOutputPlugin(): RuntimePlugin {
+  const id = 'memory.proto-output.fixture';
+
+  return createRuntimePlugin({
+    manifest: memorySearchPluginManifest(id),
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall(_call, context) {
+        return {
+          status: 'accepted',
+          output: createProtoKeyOutput(),
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId: id,
+              evidenceKind: 'tool_invocation',
+              status: 'accepted',
+              summary: 'Search completed.',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
+function createProtoKeyOutput(): RuntimePluginJsonObject {
+  const nested: Record<string, RuntimePluginJsonValue> = {};
+  Object.defineProperty(nested, '__proto__', {
+    value: 'nested-value',
+    enumerable: true
+  });
+
+  const output: Record<string, RuntimePluginJsonValue> = {
+    nested
+  };
+  Object.defineProperty(output, '__proto__', {
+    value: {
+      polluted: true
+    },
+    enumerable: true
+  });
+
+  return output;
 }
 
 function createRejectingMemorySearchPlugin(): RuntimePlugin {
@@ -1127,6 +1278,27 @@ function testIdentity() {
     traceId: 'trace_plugin_host',
     createdAt: '2026-06-15T00:00:00.000Z'
   });
+}
+
+function expectJsonObject(
+  value: RuntimePluginJsonValue | undefined
+): RuntimePluginJsonObject {
+  if (
+    value === undefined ||
+    value === null ||
+    typeof value !== 'object' ||
+    isJsonArray(value)
+  ) {
+    throw new Error('Expected JSON object.');
+  }
+
+  return value;
+}
+
+function isJsonArray(
+  value: RuntimePluginJsonValue
+): value is readonly RuntimePluginJsonValue[] {
+  return Array.isArray(value);
 }
 
 function createDeferred<T>(): Deferred<T> {
