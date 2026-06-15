@@ -4,9 +4,11 @@ import {
   createRuntimeEventIdentity
 } from '../src/runtime/event.ts';
 import {
+  createFirstPartyModelToolsPlugin,
   createRuntimePlugin,
   createRuntimePluginContext,
   createRuntimePluginEvidenceSnapshot,
+  firstPartyModelToolsPluginId,
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
 import {
@@ -19,6 +21,12 @@ import {
 import type {
   RuntimePlugin
 } from '../src/plugins/types.ts';
+import {
+  mapFirstPartyModelToolsPlugin
+} from '../src/plugins/adapter-proofs/index.ts';
+import {
+  visibleReplyModelToolName
+} from '../src/role-model/model-tools.ts';
 
 describe('runtime plugin host', () => {
   it('routes plugin.list through the host-owned discovery plugin', async () => {
@@ -83,6 +91,16 @@ describe('runtime plugin host', () => {
     ).toThrow(/declared more than once/iu);
   });
 
+  it('does not resolve tool-provider-only plugin tools as routable', () => {
+    const plugin = createMemorySearchToolProviderOnlyPlugin();
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
+      'memory.search'
+    );
+    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
+  });
+
   it('turns handler failures into rejected tool observations', async () => {
     const plugin = createMemorySearchPlugin('memory.failing', true);
     const host = createRuntimePluginHost({ plugins: [plugin] });
@@ -125,6 +143,81 @@ describe('runtime plugin host', () => {
       message: 'memory.search input missing required field "query".'
     });
   });
+
+  it('redacts accepted plugin tool output strings', async () => {
+    const plugin = createMemorySearchPlugin();
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query:
+            'api_key=super-secret Bearer secret-token https://user:pass@example.test/?token=abc'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected memory.search to be accepted.');
+    }
+
+    expect(result.output).toMatchObject({
+      matched:
+        'api_key=[redacted] Bearer [redacted] https://[redacted]@example.test/?token=[redacted]'
+    });
+  });
+
+  it('budgets beforeRoleModelCall runtime notes before prompting', async () => {
+    const plugin = createRuntimeNotesPlugin();
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected beforeRoleModelCall to complete.');
+    }
+
+    expect(result.runtimeNotes).toEqual(['short note']);
+    const budgetEvidence = result.evidence.find(
+      (evidence) =>
+        evidence.pluginId === plugin.manifest.id &&
+        evidence.evidenceKind === 'before_role_model_call' &&
+        evidence.status === 'degraded'
+    );
+    expect(budgetEvidence?.summary).toContain('runtime note');
+    expect(JSON.stringify(result.runtimeNotes)).not.toContain('super-secret');
+  });
+
+  it('accepts first-party model tools as tool-provider-only mappings', () => {
+    const plugin = createFirstPartyModelToolsPlugin();
+    const mapping = mapFirstPartyModelToolsPlugin();
+
+    expect(plugin.manifest.id).toBe(firstPartyModelToolsPluginId);
+    expect(plugin.manifest.declaredPlugins).toEqual(['tool_provider']);
+    expect(plugin.lifecycleHooks.handleToolCall).toBeUndefined();
+    expect(plugin.providedTools.map((tool) => tool.name)).toEqual([
+      visibleReplyModelToolName
+    ]);
+
+    expect(mapping.plugin.manifest.id).toBe(firstPartyModelToolsPluginId);
+    expect(mapping.plugin.manifest.declaredPlugins).toEqual(['tool_provider']);
+    expect(mapping.plugin.lifecycleHooks.handleToolCall).toBeUndefined();
+    expect(mapping.plugin.providedTools.map((tool) => tool.name)).toEqual([
+      visibleReplyModelToolName
+    ]);
+  });
+
+  it('rejects handleToolCall hooks without a matching declaration', () => {
+    expect(() => createMemorySearchPluginWithoutHandlerDeclaration()).toThrow(
+      /handleToolCall hooks must declare handle_tool_call/iu
+    );
+  });
 });
 
 function createMemorySearchPlugin(
@@ -132,65 +225,8 @@ function createMemorySearchPlugin(
   fails = false
 ): RuntimePlugin {
   return createRuntimePlugin({
-    manifest: {
-      id,
-      displayName: 'Memory Search Fixture',
-      version: '1.0.0',
-      kind: 'memory_provider',
-      description: 'Test plugin.',
-      contractVersion: runtimePluginContractVersion,
-      compatibility: {
-        hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test'
-      },
-      declaredPlugins: ['tool_provider', 'handle_tool_call'],
-      config: {
-        fields: []
-      },
-      localTrustLevel: 'test_fixture',
-      runtimePolicy: {
-        requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
-        confirmation: 'not_required',
-        timeoutMs: 1000,
-        sourceReferencesRequired: false,
-        redactionLabels: [],
-        failureBehavior: {
-          beforeRoleModelCall: 'degrade',
-          handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
-      },
-      activation: {
-        defaultEnabled: true,
-        reasons: ['test']
-      },
-      requestedApis: []
-    },
-    providedTools: [
-      {
-        name: 'memory.search',
-        description: 'Search memory.',
-        requiredForUserTurn: false,
-        maxCallsPerUserTurn: 1,
-        inputContract: {
-          type: 'object',
-          fields: [
-            {
-              name: 'query',
-              description: 'Search query.',
-              required: true
-            }
-          ],
-          additionalFields: false
-        },
-        validationOwner: 'plugin_host',
-        sideEffectLevel: 'runtime_read',
-        requiresConfirmation: false,
-        sourceReferencesRequired: false
-      }
-    ],
+    manifest: memorySearchPluginManifest(id),
+    providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
       handleToolCall(call, context) {
         if (fails) {
@@ -224,6 +260,133 @@ function createMemorySearchPlugin(
       }
     }
   });
+}
+
+function createMemorySearchToolProviderOnlyPlugin(): RuntimePlugin {
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest('memory.tool-provider-only.fixture'),
+      declaredPlugins: ['tool_provider']
+    },
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {}
+  });
+}
+
+function createRuntimeNotesPlugin(): RuntimePlugin {
+  const pluginId = 'memory.notes.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      declaredPlugins: ['before_role_model_call']
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall(context) {
+        return {
+          contextItems: [],
+          runtimeNotes: [
+            `${'large note '.repeat(140)}api_key=super-secret`,
+            'short note'
+          ],
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId,
+              evidenceKind: 'before_role_model_call',
+              status: 'accepted',
+              summary: 'Notes loaded.',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
+function createMemorySearchPluginWithoutHandlerDeclaration(): RuntimePlugin {
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest('memory.handler-mismatch.fixture'),
+      declaredPlugins: ['tool_provider']
+    },
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall() {
+        throw new Error('Handler should not run for invalid plugin fixture.');
+      }
+    }
+  });
+}
+
+function memorySearchPluginManifest(id: string) {
+  return {
+    id,
+    displayName: 'Memory Search Fixture',
+    version: '1.0.0',
+    kind: 'memory_provider',
+    description: 'Test plugin.',
+    contractVersion: runtimePluginContractVersion,
+    compatibility: {
+      hostContractVersions: [runtimePluginContractVersion],
+      sourceSystem: 'test'
+    },
+    declaredPlugins: ['tool_provider', 'handle_tool_call'],
+    config: {
+      fields: []
+    },
+    localTrustLevel: 'test_fixture',
+    runtimePolicy: {
+      requiredForTurn: false,
+      sideEffectLevel: 'runtime_read',
+      confirmation: 'not_required',
+      timeoutMs: 1000,
+      sourceReferencesRequired: false,
+      redactionLabels: [],
+      failureBehavior: {
+        beforeRoleModelCall: 'degrade',
+        handleToolCall: 'reject_tool_call',
+        afterTurnCommitted: 'log_failure',
+        health: 'degrade'
+      }
+    },
+    activation: {
+      defaultEnabled: true,
+      reasons: ['test']
+    },
+    requestedApis: []
+  };
+}
+
+function memorySearchProvidedTools() {
+  return [
+    {
+      name: 'memory.search',
+      description: 'Search memory.',
+      requiredForUserTurn: false,
+      maxCallsPerUserTurn: 1,
+      inputContract: {
+        type: 'object',
+        fields: [
+          {
+            name: 'query',
+            description: 'Search query.',
+            required: true
+          }
+        ],
+        additionalFields: false
+      },
+      validationOwner: 'plugin_host',
+      sideEffectLevel: 'runtime_read',
+      requiresConfirmation: false,
+      sourceReferencesRequired: false
+    }
+  ];
 }
 
 function testPluginContext() {

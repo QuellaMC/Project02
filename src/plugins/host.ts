@@ -56,6 +56,7 @@ export type CreateRuntimePluginHostOptions = {
   readonly enabledPluginIds?: readonly string[];
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
 };
 
 export type RuntimePluginBeforeRoleModelCallCompletedResult = {
@@ -88,6 +89,7 @@ export type RuntimePluginHealthHostResult = {
 };
 
 const runtimePluginContextEstimatedTokenBudget = 256;
+const runtimePluginRuntimeNoteBudgetPriority = 100;
 
 export type RuntimePluginHost = {
   registrySnapshot(): RuntimePluginRegistrySnapshot;
@@ -135,13 +137,37 @@ type HookInvocationResult =
 type CollectedPluginContextItem = {
   readonly plugin: RuntimePlugin;
   readonly item: RuntimePluginContextItem;
-  readonly originalIndex: number;
 };
 
-type BoundedPluginContextItemsResult =
+type CollectedPluginRuntimeNote = {
+  readonly plugin: RuntimePlugin;
+  readonly text: string;
+  readonly estimatedTokens: number;
+};
+
+type CollectedPluginPromptContext =
+  | {
+      readonly kind: 'context_item';
+      readonly plugin: RuntimePlugin;
+      readonly promptIndex: number;
+      readonly estimatedTokens: number;
+      readonly priority: number;
+      readonly contextItem: CollectedPluginContextItem;
+    }
+  | {
+      readonly kind: 'runtime_note';
+      readonly plugin: RuntimePlugin;
+      readonly promptIndex: number;
+      readonly estimatedTokens: number;
+      readonly priority: number;
+      readonly runtimeNote: CollectedPluginRuntimeNote;
+    };
+
+type BoundedPluginPromptContextResult =
   | {
       readonly status: 'completed';
       readonly contextItems: readonly RuntimePluginContextItem[];
+      readonly runtimeNotes: readonly string[];
       readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
     }
   | {
@@ -184,7 +210,9 @@ export function createRuntimePluginHost(
     },
     resolveToolPluginId(toolName) {
       return enabledPlugins.find((plugin) =>
-        plugin.providedTools.some((tool) => tool.name === toolName)
+        routableModelFacingPluginTools(plugin).some(
+          (tool) => tool.name === toolName
+        )
       )?.manifest.id;
     },
     async beforeRoleModelCall(context) {
@@ -192,7 +220,8 @@ export function createRuntimePluginHost(
         plugins: enabledPlugins,
         context,
         storeRoot: options.storeRoot,
-        sessionId: options.sessionId
+        sessionId: options.sessionId,
+        sessionIdentity: options.sessionIdentity
       });
     },
     async handleToolCall(call, context) {
@@ -201,7 +230,8 @@ export function createRuntimePluginHost(
         call,
         context,
         storeRoot: options.storeRoot,
-        sessionId: options.sessionId
+        sessionId: options.sessionId,
+        sessionIdentity: options.sessionIdentity
       });
     },
     async afterTurnCommitted(context) {
@@ -210,6 +240,7 @@ export function createRuntimePluginHost(
         context,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
+        sessionIdentity: options.sessionIdentity,
         hookName: 'afterTurnCommitted',
         evidenceKind: 'after_turn_committed',
         hookForPlugin: (plugin) =>
@@ -222,6 +253,7 @@ export function createRuntimePluginHost(
         context,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
+        sessionIdentity: options.sessionIdentity,
         hookName: 'onSessionEnd',
         evidenceKind: 'session_end',
         hookForPlugin: (plugin) => plugin.lifecycleHooks.onSessionEnd
@@ -232,7 +264,8 @@ export function createRuntimePluginHost(
         plugins: enabledPlugins,
         context,
         storeRoot: options.storeRoot,
-        sessionId: options.sessionId
+        sessionId: options.sessionId,
+        sessionIdentity: options.sessionIdentity
       });
     }
   } satisfies RuntimePluginHost);
@@ -252,6 +285,7 @@ function createPluginHookContext<TContext extends RuntimePluginContext>(options:
   readonly plugin: RuntimePlugin;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
 }): TContext {
   const grantsFileStore = options.plugin.manifest.requestedApis.includes('file_store');
   const sessionId = options.sessionId ?? options.context.sessionId;
@@ -263,6 +297,9 @@ function createPluginHookContext<TContext extends RuntimePluginContext>(options:
           fileStore: createRuntimePluginFileStore({
             ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
             sessionId,
+            ...(options.sessionIdentity === undefined
+              ? {}
+              : { sessionIdentity: options.sessionIdentity }),
             pluginId: options.plugin.manifest.id
           })
         }
@@ -425,9 +462,10 @@ async function runBeforeRoleModelCall(options: {
   readonly context: RuntimePluginContext;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
 }): Promise<RuntimePluginBeforeRoleModelCallHostResult> {
   const contextItems: CollectedPluginContextItem[] = [];
-  const runtimeNotes: string[] = [];
+  const runtimeNotes: CollectedPluginRuntimeNote[] = [];
   const evidence: RuntimePluginEvidenceSnapshot[] = [];
 
   for (const plugin of options.plugins) {
@@ -443,7 +481,8 @@ async function runBeforeRoleModelCall(options: {
         context: options.context,
         plugin,
         storeRoot: options.storeRoot,
-        sessionId: options.sessionId
+        sessionId: options.sessionId,
+        sessionIdentity: options.sessionIdentity
       }),
       hook
     });
@@ -452,11 +491,16 @@ async function runBeforeRoleModelCall(options: {
       for (const contextItem of result.value.contextItems) {
         contextItems.push({
           plugin,
-          item: contextItem,
-          originalIndex: contextItems.length
+          item: contextItem
         });
       }
-      runtimeNotes.push(...result.value.runtimeNotes);
+      for (const runtimeNote of result.value.runtimeNotes) {
+        runtimeNotes.push({
+          plugin,
+          text: runtimeNote,
+          estimatedTokens: estimateRuntimeNoteTokens(runtimeNote)
+        });
+      }
       evidence.push(...result.value.evidence);
       continue;
     }
@@ -492,9 +536,10 @@ async function runBeforeRoleModelCall(options: {
     }
   }
 
-  const boundedContext = boundPluginContextItems({
+  const boundedContext = boundPluginPromptContext({
     context: options.context,
-    contextItems
+    contextItems,
+    runtimeNotes
   });
   evidence.push(...boundedContext.evidence);
 
@@ -511,7 +556,7 @@ async function runBeforeRoleModelCall(options: {
   return Object.freeze({
     status: 'completed',
     contextItems: boundedContext.contextItems,
-    runtimeNotes: Object.freeze([...runtimeNotes]),
+    runtimeNotes: boundedContext.runtimeNotes,
     evidence: Object.freeze([...evidence])
   } satisfies RuntimePluginBeforeRoleModelCallHostResult);
 }
@@ -522,6 +567,7 @@ async function runHandleToolCall(options: {
   readonly context: RuntimePluginContext;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
 }): Promise<RuntimePluginToolCallResult> {
   const plugin = options.plugins.find(
     (candidate) => candidate.manifest.id === options.call.pluginId
@@ -558,7 +604,8 @@ async function runHandleToolCall(options: {
     context: options.context,
     plugin,
     storeRoot: options.storeRoot,
-    sessionId: options.sessionId
+    sessionId: options.sessionId,
+    sessionIdentity: options.sessionIdentity
   });
   const inputValidation =
     providedTool.validationOwner === 'plugin_host'
@@ -630,6 +677,7 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
   readonly context: TContext;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
   readonly hookName: 'afterTurnCommitted' | 'onSessionEnd';
   readonly evidenceKind: Extract<RuntimePluginEvidenceKind, 'after_turn_committed' | 'session_end'>;
   readonly hookForPlugin: (
@@ -652,7 +700,8 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
         context: options.context,
         plugin,
         storeRoot: options.storeRoot,
-        sessionId: options.sessionId
+        sessionId: options.sessionId,
+        sessionIdentity: options.sessionIdentity
       }),
       hookName: options.hookName,
       hook
@@ -903,10 +952,13 @@ function createRejectedToolCallResult(options: {
 function normalizeJsonValue(value: unknown): RuntimePluginJsonValue {
   if (
     value === null ||
-    typeof value === 'string' ||
     typeof value === 'boolean'
   ) {
     return value;
+  }
+
+  if (typeof value === 'string') {
+    return redactRuntimePluginText(value);
   }
 
   if (typeof value === 'number') {
@@ -939,6 +991,7 @@ async function runHealth(options: {
   readonly context: RuntimePluginContext;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
 }): Promise<RuntimePluginHealthHostResult> {
   const snapshots: RuntimePluginHealthSnapshot[] = [];
   const evidence: RuntimePluginEvidenceSnapshot[] = [];
@@ -961,7 +1014,8 @@ async function runHealth(options: {
                 context: options.context,
                 plugin,
                 storeRoot: options.storeRoot,
-                sessionId: options.sessionId
+                sessionId: options.sessionId,
+                sessionIdentity: options.sessionIdentity
               })
             )
         })
@@ -1184,12 +1238,17 @@ function normalizeContextItems(options: {
   );
 }
 
-function boundPluginContextItems(options: {
+function boundPluginPromptContext(options: {
   readonly context: RuntimePluginContext;
   readonly contextItems: readonly CollectedPluginContextItem[];
-}): BoundedPluginContextItemsResult {
-  const totalEstimatedTokens = options.contextItems.reduce(
-    (total, contextItem) => total + contextItem.item.budget.estimatedTokens,
+  readonly runtimeNotes: readonly CollectedPluginRuntimeNote[];
+}): BoundedPluginPromptContextResult {
+  const candidates = collectedPluginPromptContextCandidates({
+    contextItems: options.contextItems,
+    runtimeNotes: options.runtimeNotes
+  });
+  const totalEstimatedTokens = candidates.reduce(
+    (total, candidate) => total + candidate.estimatedTokens,
     0
   );
 
@@ -1199,41 +1258,55 @@ function boundPluginContextItems(options: {
       contextItems: Object.freeze(
         options.contextItems.map((contextItem) => contextItem.item)
       ),
+      runtimeNotes: Object.freeze(
+        options.runtimeNotes.map((runtimeNote) => runtimeNote.text)
+      ),
       evidence: Object.freeze([])
     });
   }
 
-  const retainedIndexes = new Set<number>();
+  const retainedCandidates = new Set<CollectedPluginPromptContext>();
   let retainedEstimatedTokens = 0;
 
-  for (const candidate of [...options.contextItems].sort(
-    compareCollectedContextItemPriority
+  for (const candidate of [...candidates].sort(
+    compareCollectedPromptContextPriority
   )) {
     const nextEstimatedTokens =
-      retainedEstimatedTokens + candidate.item.budget.estimatedTokens;
+      retainedEstimatedTokens + candidate.estimatedTokens;
 
     if (nextEstimatedTokens > runtimePluginContextEstimatedTokenBudget) {
       continue;
     }
 
-    retainedIndexes.add(candidate.originalIndex);
+    retainedCandidates.add(candidate);
     retainedEstimatedTokens = nextEstimatedTokens;
   }
 
-  const retainedContextItems = options.contextItems
-    .filter((contextItem) => retainedIndexes.has(contextItem.originalIndex))
-    .map((contextItem) => contextItem.item);
-  const droppedContextItems = options.contextItems.filter(
-    (contextItem) => !retainedIndexes.has(contextItem.originalIndex)
+  const retainedContextItems = candidates.flatMap((candidate) => {
+    if (candidate.kind !== 'context_item' || !retainedCandidates.has(candidate)) {
+      return [];
+    }
+
+    return [candidate.contextItem.item];
+  });
+  const retainedRuntimeNotes = candidates.flatMap((candidate) => {
+    if (candidate.kind !== 'runtime_note' || !retainedCandidates.has(candidate)) {
+      return [];
+    }
+
+    return [candidate.runtimeNote.text];
+  });
+  const droppedCandidates = candidates.filter(
+    (candidate) => !retainedCandidates.has(candidate)
   );
   const evidence = contextBudgetEvidence({
     context: options.context,
-    droppedContextItems,
+    droppedCandidates,
     retainedEstimatedTokens,
     totalEstimatedTokens
   });
   const rejectedContextItem =
-    firstDroppedContextItemThatRejectsTurn(droppedContextItems);
+    firstDroppedPromptContextThatRejectsTurn(droppedCandidates);
 
   if (rejectedContextItem !== undefined) {
     return Object.freeze({
@@ -1247,23 +1320,52 @@ function boundPluginContextItems(options: {
   return Object.freeze({
     status: 'completed',
     contextItems: Object.freeze(retainedContextItems),
+    runtimeNotes: Object.freeze(retainedRuntimeNotes),
     evidence
   });
 }
 
-function compareCollectedContextItemPriority(
-  left: CollectedPluginContextItem,
-  right: CollectedPluginContextItem
+function collectedPluginPromptContextCandidates(options: {
+  readonly contextItems: readonly CollectedPluginContextItem[];
+  readonly runtimeNotes: readonly CollectedPluginRuntimeNote[];
+}): readonly CollectedPluginPromptContext[] {
+  const candidates: CollectedPluginPromptContext[] = [];
+
+  for (const contextItem of options.contextItems) {
+    candidates.push({
+      kind: 'context_item',
+      plugin: contextItem.plugin,
+      promptIndex: candidates.length,
+      estimatedTokens: contextItem.item.budget.estimatedTokens,
+      priority: contextItem.item.budget.priority,
+      contextItem
+    });
+  }
+
+  for (const runtimeNote of options.runtimeNotes) {
+    candidates.push({
+      kind: 'runtime_note',
+      plugin: runtimeNote.plugin,
+      promptIndex: candidates.length,
+      estimatedTokens: runtimeNote.estimatedTokens,
+      priority: runtimePluginRuntimeNoteBudgetPriority,
+      runtimeNote
+    });
+  }
+
+  return Object.freeze(candidates);
+}
+
+function compareCollectedPromptContextPriority(
+  left: CollectedPluginPromptContext,
+  right: CollectedPluginPromptContext
 ): number {
-  return (
-    left.item.budget.priority - right.item.budget.priority ||
-    left.originalIndex - right.originalIndex
-  );
+  return left.priority - right.priority || left.promptIndex - right.promptIndex;
 }
 
 function contextBudgetEvidence(options: {
   readonly context: RuntimePluginContext;
-  readonly droppedContextItems: readonly CollectedPluginContextItem[];
+  readonly droppedCandidates: readonly CollectedPluginPromptContext[];
   readonly retainedEstimatedTokens: number;
   readonly totalEstimatedTokens: number;
 }): readonly RuntimePluginEvidenceSnapshot[] {
@@ -1271,23 +1373,23 @@ function contextBudgetEvidence(options: {
     string,
     {
       readonly plugin: RuntimePlugin;
-      readonly dropped: CollectedPluginContextItem[];
+      readonly dropped: CollectedPluginPromptContext[];
     }
   >();
 
-  for (const droppedContextItem of options.droppedContextItems) {
-    const pluginId = droppedContextItem.plugin.manifest.id;
+  for (const droppedCandidate of options.droppedCandidates) {
+    const pluginId = droppedCandidate.plugin.manifest.id;
     const entry = droppedByPlugin.get(pluginId);
 
     if (entry === undefined) {
       droppedByPlugin.set(pluginId, {
-        plugin: droppedContextItem.plugin,
-        dropped: [droppedContextItem]
+        plugin: droppedCandidate.plugin,
+        dropped: [droppedCandidate]
       });
       continue;
     }
 
-    entry.dropped.push(droppedContextItem);
+    entry.dropped.push(droppedCandidate);
   }
 
   return Object.freeze(
@@ -1300,7 +1402,7 @@ function contextBudgetEvidence(options: {
         evidenceKind: 'before_role_model_call',
         status: rejectsTurn ? 'rejected' : 'degraded',
         summary: contextBudgetEvidenceSummary({
-          droppedContextItems: entry.dropped,
+          droppedCandidates: entry.dropped,
           retainedEstimatedTokens: options.retainedEstimatedTokens,
           totalEstimatedTokens: options.totalEstimatedTokens
         }),
@@ -1310,38 +1412,61 @@ function contextBudgetEvidence(options: {
   );
 }
 
-function firstDroppedContextItemThatRejectsTurn(
-  droppedContextItems: readonly CollectedPluginContextItem[]
-): CollectedPluginContextItem | undefined {
-  return droppedContextItems.find((contextItem) =>
-    beforeRoleModelFailureRejectsTurn(contextItem.plugin)
+function firstDroppedPromptContextThatRejectsTurn(
+  droppedCandidates: readonly CollectedPluginPromptContext[]
+): CollectedPluginPromptContext | undefined {
+  return droppedCandidates.find((candidate) =>
+    beforeRoleModelFailureRejectsTurn(candidate.plugin)
   );
 }
 
 function requiredContextBudgetRejectionMessage(
-  contextItem: CollectedPluginContextItem
+  candidate: CollectedPluginPromptContext
 ): string {
+  if (candidate.kind === 'runtime_note') {
+    return `Required before-role-model plugin context exceeded the ${String(
+      runtimePluginContextEstimatedTokenBudget
+    )}-token budget; dropped runtime note from plugin "${candidate.plugin.manifest.id}".`;
+  }
+
   return `Required before-role-model plugin context exceeded the ${String(
     runtimePluginContextEstimatedTokenBudget
-  )}-token budget; dropped context item "${contextItem.item.id}".`;
+  )}-token budget; dropped context item "${candidate.contextItem.item.id}".`;
 }
 
 function contextBudgetEvidenceSummary(options: {
-  readonly droppedContextItems: readonly CollectedPluginContextItem[];
+  readonly droppedCandidates: readonly CollectedPluginPromptContext[];
   readonly retainedEstimatedTokens: number;
   readonly totalEstimatedTokens: number;
 }): string {
-  const droppedIds = options.droppedContextItems
-    .map((contextItem) => contextItem.item.id)
+  const droppedContextItems = options.droppedCandidates.filter(
+    (candidate) => candidate.kind === 'context_item'
+  );
+  const droppedRuntimeNoteCount =
+    options.droppedCandidates.length - droppedContextItems.length;
+  const droppedKinds: string[] = [];
+
+  if (droppedContextItems.length > 0) {
+    droppedKinds.push(`${String(droppedContextItems.length)} item(s)`);
+  }
+
+  if (droppedRuntimeNoteCount > 0) {
+    droppedKinds.push(`${String(droppedRuntimeNoteCount)} runtime note(s)`);
+  }
+
+  const droppedIds = droppedContextItems
+    .map((candidate) => candidate.contextItem.item.id)
     .join(', ');
 
   return `Plugin context budget kept ${String(
     options.retainedEstimatedTokens
-  )}/${String(runtimePluginContextEstimatedTokenBudget)} estimated tokens and dropped ${String(
-    options.droppedContextItems.length
-  )} item(s) from ${String(
+  )}/${String(runtimePluginContextEstimatedTokenBudget)} estimated tokens and dropped ${
+    droppedKinds.join(' and ')
+  } from ${String(
     options.totalEstimatedTokens
-  )} estimated tokens; dropped ids ${droppedIds}`;
+  )} estimated tokens${
+    droppedIds.length === 0 ? '' : `; dropped ids ${droppedIds}`
+  }`;
 }
 
 function normalizeRuntimeNotes(value: unknown): readonly string[] {
@@ -1354,6 +1479,10 @@ function normalizeRuntimeNotes(value: unknown): readonly string[] {
       return redactRuntimePluginText(item);
     })
   );
+}
+
+function estimateRuntimeNoteTokens(note: string): number {
+  return Math.max(1, Math.ceil(note.length / 4));
 }
 
 function normalizeEvidenceSnapshots(options: {

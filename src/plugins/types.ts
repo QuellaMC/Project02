@@ -1250,12 +1250,12 @@ function validatePluginDeclarationsAgainstRuntime(options: {
   }
 
   if (
-    options.providedTools.length > 0 &&
+    options.lifecycleHooks.handleToolCall !== undefined &&
     !options.manifest.declaredPlugins.includes('handle_tool_call')
   ) {
     return reject(
       'missing_required_declaration',
-      'Plugins with provided tools must declare handle_tool_call.'
+      'handleToolCall hooks must declare handle_tool_call.'
     );
   }
 

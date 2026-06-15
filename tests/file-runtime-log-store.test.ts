@@ -21,8 +21,19 @@ import {
   runLocalUserMessageEvent
 } from '../src/runtime/local.ts';
 import {
+  roleModelCommitValidationFailureRejectionReason
+} from '../src/role-model/contracts.ts';
+import {
   LocalRuntimeStorageContractError
 } from '../src/runtime/storage/layout.ts';
+import {
+  createRuntimePluginHost
+} from '../src/plugins/host.ts';
+import {
+  createRuntimePlugin,
+  createRuntimePluginHealthSnapshot,
+  runtimePluginContractVersion
+} from '../src/plugins/types.ts';
 import type {
   RoleModelAdapter
 } from '../src/role-model/loop.ts';
@@ -56,6 +67,82 @@ describe('file runtime log store plugin tool event validation', () => {
       'list tools',
       'I can use:\n- plugin.list\n- character_state.patch'
     ]);
+  });
+
+  it('persists decodable commit validation for plugin health rejections', async () => {
+    const storeRoot = createStoreRoot();
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'session-health-rejected',
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'session-health-rejected'
+    });
+    const session = createConversationSession({
+      id: 'session-health-rejected'
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'health check',
+        identity('evt_health_rejected')
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createHealthRejectingPluginHost()
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'plugin_health_rejected',
+      message: 'Plugin health unavailable: health fixture offline'
+    });
+    expect(logStore.conversationMessages()).toEqual([]);
+
+    const rawEvents = logStore.rawEvents();
+    const commitRejection = rawEvents.find(
+      (event) => event.kind === 'commit_validation_rejected'
+    );
+
+    expect(commitRejection).toMatchObject({
+      kind: 'commit_validation_rejected',
+      status: 'rejected',
+      reason: roleModelCommitValidationFailureRejectionReason,
+      commitValidation: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelCommitValidationFailureRejectionReason,
+            details: 'Plugin health unavailable: health fixture offline'
+          }
+        }
+      },
+      runtimePluginTurnEvidence: {
+        health: [
+          {
+            pluginId: 'health.reject.fixture',
+            status: 'unavailable',
+            summary: 'health fixture offline'
+          }
+        ]
+      }
+    });
+    expect(rawEvents.at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelCommitValidationFailureRejectionReason,
+      commitValidation: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelCommitValidationFailureRejectionReason,
+            details: 'Plugin health unavailable: health fixture offline'
+          }
+        }
+      }
+    });
   });
 
   it('rejects started tool calls without matching finished records', async () => {
@@ -159,4 +246,62 @@ function createMultilineVisibleReplyAdapter(): RoleModelAdapter {
       };
     }
   };
+}
+
+function createHealthRejectingPluginHost() {
+  return createRuntimePluginHost({
+    plugins: [
+      createRuntimePlugin({
+        manifest: {
+          id: 'health.reject.fixture',
+          displayName: 'Health Reject Fixture',
+          version: '1.0.0',
+          kind: 'first_party',
+          description: 'Test plugin that rejects turns during health checks.',
+          contractVersion: runtimePluginContractVersion,
+          compatibility: {
+            hostContractVersions: [runtimePluginContractVersion],
+            sourceSystem: 'test'
+          },
+          declaredPlugins: ['health'],
+          config: {
+            fields: []
+          },
+          localTrustLevel: 'test_fixture',
+          runtimePolicy: {
+            requiredForTurn: true,
+            sideEffectLevel: 'runtime_read',
+            confirmation: 'not_required',
+            timeoutMs: 1000,
+            sourceReferencesRequired: false,
+            redactionLabels: [],
+            failureBehavior: {
+              beforeRoleModelCall: 'degrade',
+              handleToolCall: 'reject_tool_call',
+              afterTurnCommitted: 'log_failure',
+              health: 'reject_turn'
+            }
+          },
+          activation: {
+            defaultEnabled: true,
+            reasons: ['test']
+          },
+          requestedApis: []
+        },
+        providedTools: [],
+        lifecycleHooks: {
+          health(context) {
+            return createRuntimePluginHealthSnapshot({
+              pluginId: 'health.reject.fixture',
+              status: 'unavailable',
+              checkedAt: context.timestamp,
+              summary: 'health fixture offline',
+              redactionLabels: []
+            });
+          }
+        }
+      })
+    ],
+    enabledPluginIds: ['health.reject.fixture']
+  });
 }

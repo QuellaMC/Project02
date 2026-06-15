@@ -2,6 +2,7 @@ import {
   appendFileSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   writeFileSync
 } from 'node:fs';
@@ -13,10 +14,16 @@ import type { RuntimePluginFileStore } from './types.ts';
 export type CreateRuntimePluginFileStoreOptions = {
   readonly storeRoot?: string;
   readonly sessionId: string;
+  readonly sessionIdentity?: object;
   readonly pluginId: string;
 };
 
-const inMemoryPluginStores = new Map<string, InMemoryPluginStoreState>();
+const durableRevisionFileName = '.project02-plugin-store-revision';
+const inMemoryPluginStoresByKey = new Map<string, InMemoryPluginStoreState>();
+const inMemoryPluginStoresBySessionIdentity = new WeakMap<
+  object,
+  Map<string, InMemoryPluginStoreState>
+>();
 
 type InMemoryPluginStoreState = {
   readonly files: Map<string, RuntimePluginJsonValue>;
@@ -37,7 +44,7 @@ export function createRuntimePluginFileStore(
     'plugins',
     options.pluginId
   );
-  let revision = 0;
+  let revision = readDurableRevision(root);
 
   return Object.freeze({
     readJson(path) {
@@ -79,6 +86,7 @@ export function createRuntimePluginFileStore(
       writeFileSync(tmpPath, `${JSON.stringify(freezeJsonValue(value))}\n`, 'utf8');
       renameSync(tmpPath, filePath);
       revision += 1;
+      writeDurableRevision(root, revision);
     },
     appendJsonl(path, value) {
       const filePath = join(root, safeRelativePath(path));
@@ -86,6 +94,7 @@ export function createRuntimePluginFileStore(
       mkdirSync(dirname(filePath), { recursive: true });
       appendFileSync(filePath, `${JSON.stringify(freezeJsonValue(value))}\n`, 'utf8');
       revision += 1;
+      writeDurableRevision(root, revision);
     },
     revision() {
       return revision;
@@ -96,16 +105,7 @@ export function createRuntimePluginFileStore(
 function createInMemoryRuntimePluginFileStore(
   options: CreateRuntimePluginFileStoreOptions
 ): RuntimePluginFileStore {
-  const key = `${options.sessionId}\u0000${options.pluginId}`;
-  let state = inMemoryPluginStores.get(key);
-
-  if (state === undefined) {
-    state = {
-      files: new Map<string, RuntimePluginJsonValue>(),
-      revision: 0
-    };
-    inMemoryPluginStores.set(key, state);
-  }
+  const state = inMemoryPluginStoreState(options);
 
   return Object.freeze({
     readJson(path) {
@@ -156,6 +156,7 @@ function safeRelativePath(path: string): string {
 
   if (
     normalized.length === 0 ||
+    normalized === durableRevisionFileName ||
     normalized.startsWith('/') ||
     normalized.includes('\\') ||
     normalized.split('/').some((part) => part.length === 0 || part === '.' || part === '..') ||
@@ -165,6 +166,115 @@ function safeRelativePath(path: string): string {
   }
 
   return normalized;
+}
+
+function inMemoryPluginStoreState(
+  options: CreateRuntimePluginFileStoreOptions
+): InMemoryPluginStoreState {
+  const key = `${options.sessionId}\u0000${options.pluginId}`;
+
+  if (options.sessionIdentity !== undefined) {
+    let stores = inMemoryPluginStoresBySessionIdentity.get(options.sessionIdentity);
+
+    if (stores === undefined) {
+      stores = new Map<string, InMemoryPluginStoreState>();
+      inMemoryPluginStoresBySessionIdentity.set(options.sessionIdentity, stores);
+    }
+
+    return pluginStoreStateForKey(stores, key);
+  }
+
+  return pluginStoreStateForKey(inMemoryPluginStoresByKey, key);
+}
+
+function pluginStoreStateForKey(
+  stores: Map<string, InMemoryPluginStoreState>,
+  key: string
+): InMemoryPluginStoreState {
+  let state = stores.get(key);
+
+  if (state === undefined) {
+    state = {
+      files: new Map<string, RuntimePluginJsonValue>(),
+      revision: 0
+    };
+    stores.set(key, state);
+  }
+
+  return state;
+}
+
+function readDurableRevision(root: string): number {
+  const revisionPath = join(root, durableRevisionFileName);
+
+  try {
+    const parsed = Number(readFileSync(revisionPath, 'utf8').trim());
+
+    if (Number.isSafeInteger(parsed) && parsed >= 0) {
+      return parsed;
+    }
+
+    throw new TypeError('Plugin file store revision is malformed.');
+  } catch (error: unknown) {
+    if (isMissingFileError(error)) {
+      return initialDurableRevision(root);
+    }
+
+    throw error;
+  }
+}
+
+function writeDurableRevision(root: string, revision: number): void {
+  const revisionPath = join(root, durableRevisionFileName);
+  const tmpPath = `${revisionPath}.${String(process.pid)}.${String(Date.now())}.tmp`;
+
+  mkdirSync(root, { recursive: true });
+  writeFileSync(tmpPath, `${String(revision)}\n`, 'utf8');
+  renameSync(tmpPath, revisionPath);
+}
+
+function initialDurableRevision(root: string): number {
+  try {
+    return countDurableStoreEntries(root);
+  } catch (error: unknown) {
+    if (isMissingFileError(error)) {
+      return 0;
+    }
+
+    throw error;
+  }
+}
+
+function countDurableStoreEntries(directory: string): number {
+  let count = 0;
+
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === durableRevisionFileName) {
+      continue;
+    }
+
+    const entryPath = join(directory, entry.name);
+
+    if (entry.isDirectory()) {
+      count += countDurableStoreEntries(entryPath);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    if (entry.name.endsWith('.jsonl')) {
+      count += readFileSync(entryPath, 'utf8')
+        .split('\n')
+        .filter((line) => line.trim().length > 0).length;
+      continue;
+    }
+
+    count += 1;
+  }
+
+  return count;
 }
 
 function isMissingFileError(error: unknown): boolean {
@@ -180,9 +290,16 @@ function freezeJsonValue(value: unknown): RuntimePluginJsonValue {
   if (
     value === null ||
     typeof value === 'string' ||
-    typeof value === 'number' ||
     typeof value === 'boolean'
   ) {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new TypeError('Plugin file value must be finite JSON.');
+    }
+
     return value;
   }
 

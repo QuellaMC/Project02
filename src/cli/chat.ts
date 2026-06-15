@@ -327,7 +327,7 @@ async function handleUserMessageThroughRuntime(
 
 function mapRuntimeResult(result: LocalRuntimeUserMessageResult): ChatRuntimeTurn {
   if (result.status === 'completed') {
-    const turn = result.turn as typeof result.turn | undefined;
+    const turn = result.turn;
 
     return {
       status: 'completed',

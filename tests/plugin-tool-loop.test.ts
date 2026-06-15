@@ -103,6 +103,76 @@ describe('plugin-driven tool loop', () => {
     expect(observations[0]?.result.status).toBe('accepted');
   });
 
+  it('isolates default in-memory Character State by session object', async () => {
+    const firstSession = createConversationSession();
+    const firstLogStore = createRuntimeLogStore();
+    const firstAdapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'character_state.patch',
+            input: {
+              mood: 'curious'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'first updated'
+            }
+          }
+        ]
+      }
+    ]);
+
+    await runLocalUserMessageEvent({
+      event: createTestEvent('first session', 'evt_session_isolation_first'),
+      session: firstSession,
+      logStore: firstLogStore,
+      roleModelAdapter: firstAdapter
+    });
+
+    const secondSession = createConversationSession();
+    const secondLogStore = createRuntimeLogStore();
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    const secondAdapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        messagesByRound.push([...invocation.turnContext.messages]);
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'second fresh'
+                }
+              }
+            ]
+          })
+        };
+      }
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('second session', 'evt_session_isolation_second'),
+      session: secondSession,
+      logStore: secondLogStore,
+      roleModelAdapter: secondAdapter
+    });
+    const firstUserMessage = messagesByRound[0]?.find(
+      (message) => message.role === 'user'
+    );
+
+    expect(result.status).toBe('completed');
+    expect(firstUserMessage?.content).toContain('mood=steady');
+    expect(firstUserMessage?.content).not.toContain('mood=curious');
+  });
+
   it('terminates on top-level text only without committing visible messages', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -120,7 +190,14 @@ describe('plugin-driven tool loop', () => {
       roleModelAdapter: adapter
     });
 
-    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected text-only turn to complete.');
+    }
+
+    const optionalTurn: typeof result.turn = undefined;
+
+    expect(optionalTurn).toBeUndefined();
+    expect(result).not.toHaveProperty('turn');
     expect(logStore.conversationMessages()).toEqual([]);
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_completed',
@@ -395,6 +472,7 @@ describe('plugin-driven tool loop', () => {
     expect(logStore.conversationMessages()).toEqual([]);
     expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_finished')).toBe(false);
   });
+
 });
 
 function createNativePluginListAdapter(

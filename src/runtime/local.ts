@@ -34,6 +34,7 @@ import {
   createDecisionContext,
   createRejectedRoleModelDecisionResult,
   getVisibleReplyToolCall,
+  roleModelCommitValidationFailureRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelDecisionRejection,
@@ -113,7 +114,7 @@ export type LocalRuntimeTurnProgressEvent =
 export type LocalRuntimeUserMessageCompletedResult = {
   readonly status: 'completed';
   readonly event: UserMessageRuntimeEvent;
-  readonly turn: CharacterTurnResult;
+  readonly turn?: CharacterTurnResult;
   readonly conversationMessages: readonly ConversationLogRecord[];
   readonly rawEvent: RawEventLogRecord;
   readonly rawEventLogRecords: readonly RawEventLogRecord[];
@@ -607,6 +608,7 @@ async function runSerializedLocalUserMessageEvent(
     runtimePluginContextForTurn = runtimePluginContext;
     const pluginHost = createPluginHostForTurn({
       pluginHost: options.pluginHost,
+      session: options.session,
       decisionContextSessionId: decisionContext.sessionId,
       logStore: options.logStore
     });
@@ -760,20 +762,31 @@ async function runSerializedLocalUserMessageEvent(
         healthResult: preCommitHealthResult
       })
     ) {
+      const message = healthResultRejectionMessage({
+        pluginHost,
+        healthResult: preCommitHealthResult
+      });
+      const commitValidation = createRejectedCommitValidationSnapshot({
+        identity,
+        rejection: createRejectedRoleModelDecisionResult(
+          roleModelCommitValidationFailureRejectionReason,
+          message
+        ).rejection,
+        sessionId: decisionContext.sessionId
+      });
+
       return await appendRejectedResult({
         runtimePluginEvidence: roleModelPluginEvidence,
         runtimePluginContextItems: beforeRoleModelCallResult.contextItems,
         runtimePluginToolInvocations: roleModelPluginToolInvocations,
         evidence: {
-          ...roleModelEvidence
+          ...roleModelEvidence,
+          commitValidation
         },
         healthResult: preCommitHealthResult,
-        message: healthResultRejectionMessage({
-          pluginHost,
-          healthResult: preCommitHealthResult
-        }),
+        message,
         rawKind: 'commit_validation_rejected',
-        rawReason: runtimePluginHealthRejectionReason,
+        rawReason: roleModelCommitValidationFailureRejectionReason,
         reason: runtimePluginHealthRejectionReason,
         runtimePluginContext,
         traceStep: 'commit_validation_rejected',
@@ -845,7 +858,7 @@ async function runSerializedLocalUserMessageEvent(
     return Object.freeze({
       status: 'completed',
       event,
-      turn: turn as CharacterTurnResult,
+      ...(turn === undefined ? {} : { turn }),
       conversationMessages: Object.freeze([...committedVisibleMessages]),
       rawEvent,
       rawEventLogRecords: Object.freeze([...rawEventLogRecords]),
@@ -1040,6 +1053,7 @@ function roleModelLoopAdapterOption(
 
 function createPluginHostForTurn(options: {
   readonly pluginHost: RuntimePluginHost | undefined;
+  readonly session: ConversationSession;
   readonly decisionContextSessionId: string;
   readonly logStore: RuntimeLogStore;
 }): RuntimePluginHost {
@@ -1051,7 +1065,8 @@ function createPluginHostForTurn(options: {
 
   return createDefaultProject02PluginHost({
     ...(sessionPaths === undefined ? {} : { storeRoot: sessionPaths.storeRoot }),
-    sessionId: sessionPaths?.sessionId ?? options.decisionContextSessionId
+    sessionId: sessionPaths?.sessionId ?? options.decisionContextSessionId,
+    sessionIdentity: options.session
   });
 }
 
