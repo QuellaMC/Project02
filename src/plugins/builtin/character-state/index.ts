@@ -1,5 +1,6 @@
 import {
   createRuntimePlugin,
+  createRuntimePluginEvidenceSnapshot,
   createRuntimePluginContextItem,
   runtimePluginContractVersion,
   type RuntimePluginContext,
@@ -32,6 +33,15 @@ export const characterStatePluginId = 'character-state';
 
 const characterStateEventsPath = 'events.jsonl';
 const characterStateCurrentPath = 'current.json';
+const characterStateStagedPatchSeparator = '\u0000';
+
+type StagedCharacterStatePatch = {
+  readonly event: RuntimePluginJsonObject;
+  readonly result: {
+    readonly after: CharacterRuntimeState;
+    readonly appliedChanges: readonly unknown[];
+  };
+};
 
 const characterStatePatchInputContract = Object.freeze({
   type: 'object',
@@ -71,6 +81,8 @@ const characterStatePatchInputContract = Object.freeze({
 } satisfies ModelToolInputContract);
 
 export function createCharacterStatePlugin(): RuntimePlugin {
+  const stagedPatches = new Map<string, StagedCharacterStatePatch>();
+
   return createRuntimePlugin({
     manifest: {
       id: characterStatePluginId,
@@ -87,7 +99,8 @@ export function createCharacterStatePlugin(): RuntimePlugin {
       declaredPlugins: [
         'tool_provider',
         'before_role_model_call',
-        'handle_tool_call'
+        'handle_tool_call',
+        'after_turn_committed'
       ],
       config: {
         fields: []
@@ -129,6 +142,10 @@ export function createCharacterStatePlugin(): RuntimePlugin {
     ],
     lifecycleHooks: {
       beforeRoleModelCall(context) {
+        clearStagedPatchesForSession({
+          stagedPatches,
+          sessionId: context.sessionId
+        });
         const state = readCurrentCharacterState(requiredFileStore(context));
         const brief = createLivingStateBrief(state);
 
@@ -208,26 +225,73 @@ export function createCharacterStatePlugin(): RuntimePlugin {
           result
         } satisfies RuntimePluginJsonObject);
 
-        fileStore.appendJsonl(characterStateEventsPath, event);
-        fileStore.writeJsonAtomic(characterStateCurrentPath, result.after);
+        stagedPatches.set(
+          stagedPatchKey(context),
+          Object.freeze({
+            event,
+            result: Object.freeze({
+              after: result.after,
+              appliedChanges: result.appliedChanges
+            })
+          } satisfies StagedCharacterStatePatch)
+        );
 
         return {
           status: 'accepted',
           output: Object.freeze({
             status: 'accepted',
             current: result.after.current,
-            appliedChanges: result.appliedChanges,
-            pluginStoreRevision: fileStore.revision()
+            appliedChanges: result.appliedChanges
           }),
           evidence: [
             createPluginToolEvidence({
               context,
               pluginId: characterStatePluginId,
               status: 'accepted',
-              summary: `Applied ${String(result.appliedChanges.length)} Character State changes.`
+              summary: `Planned ${String(result.appliedChanges.length)} Character State changes for turn commit.`
             })
           ]
         };
+      },
+      afterTurnCommitted(context) {
+        const key = stagedPatchKey(context);
+        const stagedPatch = stagedPatches.get(key);
+
+        if (stagedPatch === undefined) {
+          return {
+            status: 'completed',
+            evidence: []
+          };
+        }
+
+        try {
+          const fileStore = requiredFileStore(context);
+
+          fileStore.appendJsonl(characterStateEventsPath, stagedPatch.event);
+          fileStore.writeJsonAtomic(
+            characterStateCurrentPath,
+            stagedPatch.result.after
+          );
+
+          return {
+            status: 'completed',
+            evidence: [
+              createRuntimePluginEvidenceSnapshot({
+                eventId: context.eventId,
+                traceId: context.traceId,
+                createdAt: context.timestamp,
+                kind: 'runtime_plugin_evidence_snapshot',
+                pluginId: characterStatePluginId,
+                evidenceKind: 'after_turn_committed',
+                status: 'accepted',
+                summary: `Committed ${String(stagedPatch.result.appliedChanges.length)} staged Character State changes.`,
+                redactionLabels: context.privacy.redactionLabels
+              })
+            ]
+          };
+        } finally {
+          stagedPatches.delete(key);
+        }
       }
     }
   });
@@ -270,7 +334,6 @@ function rebuildCurrentCharacterState(
     });
   }
 
-  fileStore.writeJsonAtomic(characterStateCurrentPath, state);
   return state;
 }
 
@@ -284,4 +347,21 @@ function requiredFileStore(context: RuntimePluginContext): RuntimePluginFileStor
 
 function isJsonObject(value: unknown): value is RuntimePluginJsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stagedPatchKey(context: RuntimePluginContext): string {
+  return `${context.sessionId}${characterStateStagedPatchSeparator}${context.turnId}`;
+}
+
+function clearStagedPatchesForSession(options: {
+  readonly stagedPatches: Map<string, StagedCharacterStatePatch>;
+  readonly sessionId: string;
+}): void {
+  const prefix = `${options.sessionId}${characterStateStagedPatchSeparator}`;
+
+  for (const key of options.stagedPatches.keys()) {
+    if (key.startsWith(prefix)) {
+      options.stagedPatches.delete(key);
+    }
+  }
 }

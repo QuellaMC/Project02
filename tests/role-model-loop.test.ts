@@ -96,6 +96,142 @@ describe('role-model loop plugin tool routing', () => {
     expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
   });
 
+  it('rejects required plugin tool failures despite misleading degraded evidence', async () => {
+    let invocations = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued after required tool failed'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall(call, context) {
+        return createRejectedToolCallResult({
+          call,
+          context,
+          evidenceStatus: 'degraded',
+          policyOutcome: 'optional_degraded'
+        });
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_required_plugin_tool'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [requiredMemorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_required_plugin_tool')
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelPluginToolRejectedRejectionReason
+      }
+    });
+    expect(invocations).toBe(1);
+    expect(result.pluginToolResults[0]?.result.evidence).toMatchObject([
+      {
+        status: 'degraded',
+        policyOutcome: 'optional_degraded'
+      }
+    ]);
+  });
+
+  it('rejects handler failures when rejected evidence accompanies degraded evidence', async () => {
+    let invocations = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued after handler rejected'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall(call, context) {
+        return createRejectedToolCallResultWithEvidence({
+          call,
+          context,
+          evidence: [
+            {
+              status: 'degraded',
+              policyOutcome: 'optional_degraded'
+            },
+            {
+              status: 'rejected',
+              policyOutcome: 'handler_rejected'
+            }
+          ]
+        });
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_handler_rejected_plugin_tool'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext(
+        'evt_handler_rejected_plugin_tool'
+      )
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelPluginToolRejectedRejectionReason
+      }
+    });
+    expect(invocations).toBe(1);
+    expect(result.pluginToolResults[0]?.result.evidence).toMatchObject([
+      {
+        status: 'degraded',
+        policyOutcome: 'optional_degraded'
+      },
+      {
+        status: 'rejected',
+        policyOutcome: 'handler_rejected'
+      }
+    ]);
+  });
+
   it('continues prompting after optional degraded plugin tool failures', async () => {
     let invocations = 0;
     const adapter = createSequencedAdapter([
@@ -172,6 +308,11 @@ const memorySearchToolDefinition = Object.freeze({
   sourceReferencesRequired: false
 } satisfies RoleModelPluginToolDefinition);
 
+const requiredMemorySearchToolDefinition = Object.freeze({
+  ...memorySearchToolDefinition,
+  requiredForUserTurn: true
+} satisfies RoleModelPluginToolDefinition);
+
 function createSequencedAdapter(
   decisions: readonly Readonly<Record<string, unknown>>[],
   onInvoke: () => void
@@ -202,11 +343,31 @@ function createRejectedToolCallResult(options: {
   readonly evidenceStatus: 'rejected' | 'degraded';
   readonly policyOutcome: 'handler_rejected' | 'optional_degraded';
 }): RuntimePluginToolCallResult {
+  return createRejectedToolCallResultWithEvidence({
+    call: options.call,
+    context: options.context,
+    evidence: [
+      {
+        status: options.evidenceStatus,
+        policyOutcome: options.policyOutcome
+      }
+    ]
+  });
+}
+
+function createRejectedToolCallResultWithEvidence(options: {
+  readonly call: RuntimePluginToolCall;
+  readonly context: RuntimePluginContext;
+  readonly evidence: readonly {
+    readonly status: 'rejected' | 'degraded';
+    readonly policyOutcome: 'handler_rejected' | 'optional_degraded';
+  }[];
+}): RuntimePluginToolCallResult {
   return Object.freeze({
     status: 'rejected',
     reason: 'handler_failed',
     message: 'search backend failed',
-    evidence: [
+    evidence: options.evidence.map((evidence) =>
       createRuntimePluginEvidenceSnapshot({
         eventId: options.context.eventId,
         traceId: options.context.traceId,
@@ -214,12 +375,12 @@ function createRejectedToolCallResult(options: {
         kind: 'runtime_plugin_evidence_snapshot',
         pluginId: options.call.pluginId,
         evidenceKind: 'tool_invocation',
-        status: options.evidenceStatus,
+        status: evidence.status,
         summary: 'search backend failed',
-        policyOutcome: options.policyOutcome,
+        policyOutcome: evidence.policyOutcome,
         redactionLabels: []
       })
-    ]
+    )
   } satisfies RuntimePluginToolCallResult);
 }
 

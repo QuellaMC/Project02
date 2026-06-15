@@ -244,6 +244,55 @@ describe('NVIDIA role-model provider', () => {
       }
     });
   });
+
+  it('rejects non-finite native tool arguments before raw output normalization', async () => {
+    const fetchClient: NvidiaFetchClient = () => Promise.resolve({
+      ok: true,
+      status: 200,
+      json() {
+        return Promise.resolve({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: 'Checking the available plugins.',
+                tool_calls: [
+                  {
+                    id: 'call_plugin_list',
+                    type: 'function',
+                    function: {
+                      name: 'plugin.list',
+                      arguments: '{"score":1e999}'
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        });
+      },
+      text() {
+        return Promise.resolve('');
+      }
+    });
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(output.rawOutputText).toBe('');
+    expect(output.rejection?.reason).toBe('provider_error');
+    expect(output.rejection?.details).toContain('must be finite JSON');
+    expect(output.providerMetadata?.error?.code).toBe('malformed_response');
+    expect(output.providerMetadata?.error?.message).toContain(
+      'must be finite JSON'
+    );
+    expect(output.rawOutputText).not.toContain('null');
+  });
 });
 
 function createNvidiaTestInputEnvelope() {

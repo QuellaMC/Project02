@@ -622,8 +622,8 @@ async function runHandleToolCall(options: {
       context: hookContext,
       reason: 'invalid_input',
       message: inputValidation.details,
-      evidenceStatus: 'rejected',
-      policyOutcome: 'handler_rejected'
+      evidenceStatus: failureDegrades ? 'degraded' : 'rejected',
+      policyOutcome: failureDegrades ? 'optional_degraded' : 'handler_rejected'
     });
   }
 
@@ -886,6 +886,7 @@ function normalizeToolCallResult(options: {
       throw new TypeError('Plugin rejected tool result must include reason and message.');
     }
 
+    const redactedMessage = redactRuntimePluginText(message);
     const evidence = normalizeEvidenceSnapshots({
       plugin: options.plugin,
       context: options.context,
@@ -904,7 +905,7 @@ function normalizeToolCallResult(options: {
             context: options.context,
             evidenceKind: 'tool_invocation',
             status: 'rejected',
-            summary: message,
+            summary: redactedMessage,
             policyOutcome: 'handler_rejected'
           })
         ]);
@@ -912,7 +913,7 @@ function normalizeToolCallResult(options: {
     return Object.freeze({
       status: 'rejected',
       reason,
-      message,
+      message: redactedMessage,
       evidence: evidenceWithRejection
     } satisfies RuntimePluginToolCallResult);
   }
@@ -928,10 +929,12 @@ function createRejectedToolCallResult(options: {
   readonly evidenceStatus?: RuntimePluginEvidenceStatus;
   readonly policyOutcome?: RuntimePluginPolicyOutcome;
 }): RuntimePluginToolCallResult {
+  const message = redactRuntimePluginText(options.message);
+
   return Object.freeze({
     status: 'rejected',
     reason: options.reason,
-    message: options.message,
+    message,
     evidence: Object.freeze([
       createRuntimePluginEvidenceSnapshot({
         eventId: options.context.eventId,
@@ -941,7 +944,7 @@ function createRejectedToolCallResult(options: {
         pluginId: options.call.pluginId,
         evidenceKind: 'tool_invocation',
         status: options.evidenceStatus ?? 'rejected',
-        summary: options.message,
+        summary: message,
         policyOutcome: options.policyOutcome ?? 'handler_rejected',
         redactionLabels: options.context.privacy.redactionLabels
       })

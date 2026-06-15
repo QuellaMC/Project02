@@ -1,16 +1,33 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
   createConversationSession
 } from '../src/core/conversation.ts';
 import {
+  characterStatePluginId
+} from '../src/plugins/builtin/character-state/index.ts';
+import {
+  createRuntimePluginFileStore
+} from '../src/plugins/file-store.ts';
+import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
 } from '../src/runtime/event.ts';
 import {
+  createFileRuntimeLogStore
+} from '../src/runtime/storage/file-runtime-log-store.ts';
+import {
+  createLocalRuntimeSessionStore
+} from '../src/runtime/storage/session-store.ts';
+import {
   createRuntimeLogStore
 } from '../src/runtime/log.ts';
 import {
+  roleModelInvalidVisibleReplyRejectionReason,
   roleModelUnknownToolRejectionReason
 } from '../src/role-model/contracts.ts';
 import {
@@ -86,9 +103,9 @@ describe('plugin-driven tool loop', () => {
       toolPluginId: 'character-state',
       toolResult: {
         status: 'accepted'
-      },
-      pluginStoreRevision: 3
+      }
     });
+    expect(toolEvents[1]).not.toHaveProperty('pluginStoreRevision');
     expect(rawEvents.at(-1)).toMatchObject({
       kind: 'runtime_turn_completed',
       toolCallIds: ['round-1.1.character_state.patch']
@@ -101,6 +118,100 @@ describe('plugin-driven tool loop', () => {
     expect(observations[0]?.pluginId).toBe('character-state');
     expect(observations[0]?.toolName).toBe('character_state.patch');
     expect(observations[0]?.result.status).toBe('accepted');
+  });
+
+  it('persists character_state.patch only after an accepted turn commits', async () => {
+    const {
+      session,
+      logStore,
+      pluginStore
+    } = await createDurableCharacterStateHarness(
+      'session-plugin-patch-accepted'
+    );
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'character_state.patch',
+            input: {
+              mood: 'curious'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'state updated'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('hello', 'evt_plugin_patch_accepted'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    expect(result.status).toBe('completed');
+    expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
+    expect(pluginStore.readJson('current.json')).toMatchObject({
+      current: {
+        mood: 'curious'
+      }
+    });
+  });
+
+  it('does not persist character_state.patch when a later commit validation rejects the turn', async () => {
+    const {
+      session,
+      logStore,
+      pluginStore
+    } = await createDurableCharacterStateHarness(
+      'session-plugin-patch-rejected'
+    );
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'character_state.patch',
+            input: {
+              mood: 'curious'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: ''
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('hello', 'evt_plugin_patch_rejected'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'invalid_visible_reply'
+    });
+    expect(logStore.conversationMessages()).toEqual([]);
+    expect(pluginStore.readJsonl('events.jsonl')).toEqual([]);
+    expect(pluginStore.readJson('current.json')).toBeUndefined();
   });
 
   it('isolates default in-memory Character State by session object', async () => {
@@ -382,6 +493,119 @@ describe('plugin-driven tool loop', () => {
     ).toEqual([undefined, ['local-session:message-1', 'local-session:message-2']]);
   });
 
+  it('preserves role-model evidence when interim visible_reply is invalid', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: '   '
+            }
+          },
+          {
+            name: 'character_state.patch',
+            input: {
+              mood: 'curious'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'finished'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('needs invalid interim', 'evt_invalid_interim_visible'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: roleModelInvalidVisibleReplyRejectionReason
+    });
+    expect(logStore.conversationMessages()).toEqual([]);
+    expect(
+      logStore
+        .rawEvents()
+        .some((event) => event.kind === 'visible_reply_committed')
+    ).toBe(false);
+    expect(
+      logStore.rawEvents().some((event) => event.kind === 'tool_call_started')
+    ).toBe(false);
+
+    const rejectionEvents = logStore
+      .rawEvents()
+      .filter(
+        (event) =>
+          event.kind === 'commit_validation_rejected' ||
+          event.kind === 'runtime_turn_rejected'
+      );
+
+    expect(rejectionEvents).toHaveLength(2);
+
+    for (const event of rejectionEvents) {
+      expect(event).toMatchObject({
+        reason: roleModelInvalidVisibleReplyRejectionReason,
+        roleModelIOSnapshot: {
+          inputEnvelope: {
+            event: {
+              payload: {
+                currentUserMessage: 'needs invalid interim'
+              }
+            }
+          }
+        },
+        parsedRoleModelDecisionSnapshot: {
+          result: {
+            status: 'accepted',
+            decision: {
+              toolCalls: [
+                {
+                  name: 'visible_reply',
+                  input: {
+                    text: '   '
+                  }
+                },
+                {
+                  name: 'character_state.patch',
+                  input: {
+                    mood: 'curious'
+                  }
+                }
+              ]
+            }
+          }
+        },
+        commitValidation: {
+          sessionId: 'local-session',
+          result: {
+            status: 'rejected',
+            rejection: {
+              reason: roleModelInvalidVisibleReplyRejectionReason,
+              details: 'Character agent returned an empty reply.'
+            }
+          }
+        }
+      });
+      expect(event.roleModelIOSnapshot?.rawOutputText).toContain(
+        '"visible_reply"'
+      );
+    }
+  });
+
   it('feeds native assistant tool calls back as OpenAI tool result messages', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -430,6 +654,67 @@ describe('plugin-driven tool loop', () => {
     });
     expect(messagesByRound[1]?.[3]?.content).toContain('"toolName":"plugin.list"');
     expect(messagesByRound[1]?.[3]?.content).toContain('"status":"accepted"');
+  });
+
+  it('answers every native tool call when visible_reply shares an executable tool round', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    const adapter =
+      createNativeVisibleReplyAndPluginListAdapter(messagesByRound);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('check plugins with progress', 'evt_native_visible_tool'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    expect(result.status).toBe('completed');
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'check plugins with progress',
+      'Plugins are available after progress.'
+    ]);
+    expect(messagesByRound).toHaveLength(2);
+    expect(messagesByRound[1]?.map((message) => message.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'tool',
+      'tool'
+    ]);
+    expect(messagesByRound[1]?.[2]).toMatchObject({
+      role: 'assistant',
+      tool_calls: [
+        {
+          id: 'call_visible_reply',
+          function: {
+            name: 'visible_reply',
+            arguments: '{"text":"Checking plugins."}'
+          }
+        },
+        {
+          id: 'call_plugin_list_with_visible',
+          function: {
+            name: 'plugin.list',
+            arguments: '{}'
+          }
+        }
+      ]
+    });
+    expect(messagesByRound[1]?.[3]).toMatchObject({
+      role: 'tool',
+      tool_call_id: 'call_visible_reply'
+    });
+    expect(messagesByRound[1]?.[3]?.content).toContain(
+      '"toolName":"visible_reply"'
+    );
+    expect(messagesByRound[1]?.[4]).toMatchObject({
+      role: 'tool',
+      tool_call_id: 'call_plugin_list_with_visible'
+    });
+    expect(messagesByRound[1]?.[4]?.content).toContain('"toolName":"plugin.list"');
+    expect(messagesByRound[1]?.[4]?.content).toContain('"status":"accepted"');
   });
 
   it('rejects undeclared executable tools before plugin routing', async () => {
@@ -529,6 +814,74 @@ function createNativePluginListAdapter(
   } satisfies RoleModelAdapter);
 }
 
+function createNativeVisibleReplyAndPluginListAdapter(
+  messagesByRound: RoleModelChatMessage[][]
+): RoleModelAdapter {
+  let index = 0;
+
+  return Object.freeze({
+    invoke(_inputEnvelope, invocation) {
+      messagesByRound.push([...invocation.turnContext.messages]);
+      index += 1;
+
+      if (index === 1) {
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'Checking plugins.'
+                }
+              },
+              {
+                name: 'plugin.list',
+                input: {}
+              }
+            ],
+            text: 'Checking plugins.'
+          }),
+          nativeAssistantMessage: {
+            role: 'assistant',
+            content: 'Checking plugins.',
+            tool_calls: [
+              {
+                id: 'call_visible_reply',
+                type: 'function',
+                function: {
+                  name: 'visible_reply',
+                  arguments: '{"text":"Checking plugins."}'
+                }
+              },
+              {
+                id: 'call_plugin_list_with_visible',
+                type: 'function',
+                function: {
+                  name: 'plugin.list',
+                  arguments: '{}'
+                }
+              }
+            ]
+          }
+        };
+      }
+
+      return {
+        rawOutputText: JSON.stringify({
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'Plugins are available after progress.'
+              }
+            }
+          ]
+        })
+      };
+    }
+  } satisfies RoleModelAdapter);
+}
+
 function createSequencedAdapter(
   decisions: readonly Readonly<Record<string, unknown>>[]
 ): RoleModelAdapter {
@@ -559,4 +912,26 @@ function createTestEvent(message: string, eventId: string) {
       createdAt: '2026-06-15T00:00:00.000Z'
     })
   );
+}
+
+async function createDurableCharacterStateHarness(sessionId: string) {
+  const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
+
+  await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    sessionId,
+    createdAt: '2026-06-15T00:00:00.000Z'
+  });
+
+  return {
+    session: createConversationSession({ id: sessionId }),
+    logStore: createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    }),
+    pluginStore: createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId: characterStatePluginId
+    })
+  };
 }

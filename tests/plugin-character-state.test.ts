@@ -18,11 +18,14 @@ import {
   createRuntimePluginContext
 } from '../src/plugins/types.ts';
 import {
+  createRuntimePluginAfterTurnCommittedContext
+} from '../src/plugins/types.ts';
+import {
   createRuntimePluginFileStore
 } from '../src/plugins/file-store.ts';
 
 describe('Character State plugin', () => {
-  it('applies valid patches and records plugin-local state', async () => {
+  it('plans valid patches and records plugin-local state after turn commit', async () => {
     const { plugin, context, fileStore } =
       createCharacterStateHarness('session-character-state-valid');
 
@@ -53,6 +56,16 @@ describe('Character State plugin', () => {
         ]
       }
     });
+    expect(fileStore.readJsonl('events.jsonl')).toEqual([]);
+    expect(fileStore.readJson('current.json')).toBeUndefined();
+
+    const commitResult = await plugin.lifecycleHooks.afterTurnCommitted?.(
+      createCommittedContext('session-character-state-valid', fileStore)
+    );
+
+    expect(commitResult).toMatchObject({
+      status: 'completed'
+    });
     expect(fileStore.readJsonl('events.jsonl')).toHaveLength(1);
     expect(fileStore.readJson('current.json')).toMatchObject({
       current: {
@@ -82,11 +95,7 @@ describe('Character State plugin', () => {
       reason: 'invalid_state_value'
     });
     expect(fileStore.readJsonl('events.jsonl')).toEqual([]);
-    expect(fileStore.readJson('current.json')).toMatchObject({
-      current: {
-        mood: 'steady'
-      }
-    });
+    expect(fileStore.readJson('current.json')).toBeUndefined();
   });
 
   it('rebuilds current state from events.jsonl when the cache is missing', async () => {
@@ -106,6 +115,9 @@ describe('Character State plugin', () => {
         }
       },
       context
+    );
+    await plugin.lifecycleHooks.afterTurnCommitted?.(
+      createCommittedContext('session-character-state', context.fileStore)
     );
     unlinkSync(
       join(
@@ -150,6 +162,28 @@ function createCharacterStateHarness(sessionId: string, storeRoot?: string) {
   return {
     plugin: createCharacterStatePlugin(),
     context,
+    fileStore
+  };
+}
+
+function createCommittedContext(
+  sessionId: string,
+  fileStore: ReturnType<typeof createRuntimePluginFileStore>
+) {
+  return {
+    ...createRuntimePluginAfterTurnCommittedContext({
+      ...testIdentity(),
+      sessionId,
+      eventType: 'USER_MESSAGE',
+      currentUserMessage: 'hello',
+      character: {
+        id: 'mira',
+        displayName: 'Mira'
+      },
+      committedAt: '2026-06-15T00:00:00.000Z',
+      visibleMessages: []
+    }),
+    pluginId: characterStatePluginId,
     fileStore
   };
 }

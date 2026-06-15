@@ -557,18 +557,45 @@ function createNativeToolResultMessages(options: {
   readonly assistantMessage: RoleModelAssistantChatMessage;
   readonly results: readonly RoleModelPluginToolRoutingEvidence[];
 }): readonly RoleModelToolChatMessage[] {
-  const executableNativeToolCalls = (
-    options.assistantMessage.tool_calls ?? []
-  ).filter((call) => call.function.name !== visibleReplyModelToolName);
+  let executableResultIndex = 0;
+  const nativeToolCalls = options.assistantMessage.tool_calls ?? [];
+
+  if (nativeToolCalls.length === 0) {
+    return Object.freeze(
+      options.results.map((result) =>
+        Object.freeze({
+          role: 'tool',
+          tool_call_id: result.callId,
+          content: JSON.stringify(createNativeToolResultMessageContent(result))
+        } satisfies RoleModelToolChatMessage)
+      )
+    );
+  }
 
   return Object.freeze(
-    options.results.map((result, index) =>
-      Object.freeze({
+    nativeToolCalls.map((toolCall) => {
+      if (toolCall.function.name === visibleReplyModelToolName) {
+        return Object.freeze({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: JSON.stringify(createNativeVisibleReplyToolResultContent())
+        } satisfies RoleModelToolChatMessage);
+      }
+
+      const result = options.results[executableResultIndex];
+
+      executableResultIndex += 1;
+
+      return Object.freeze({
         role: 'tool',
-        tool_call_id: executableNativeToolCalls[index]?.id ?? result.callId,
-        content: JSON.stringify(createNativeToolResultMessageContent(result))
-      } satisfies RoleModelToolChatMessage)
-    )
+        tool_call_id: toolCall.id,
+        content: JSON.stringify(
+          result === undefined
+            ? createNativeMissingToolResultContent(toolCall.function.name)
+            : createNativeToolResultMessageContent(result)
+        )
+      } satisfies RoleModelToolChatMessage);
+    })
   );
 }
 
@@ -593,6 +620,29 @@ function createNativeToolResultMessageContent(
   });
 }
 
+function createNativeVisibleReplyToolResultContent(): Readonly<
+  Record<string, RuntimePluginJsonValue>
+> {
+  return Object.freeze({
+    status: 'accepted',
+    toolName: visibleReplyModelToolName,
+    output: Object.freeze({
+      kind: 'interim_visible_reply'
+    })
+  });
+}
+
+function createNativeMissingToolResultContent(
+  toolName: string
+): Readonly<Record<string, RuntimePluginJsonValue>> {
+  return Object.freeze({
+    status: 'rejected',
+    toolName,
+    reason: 'tool_result_missing',
+    message: `No routed plugin result was available for native tool call "${toolName}".`
+  });
+}
+
 async function routeExecutableToolCalls(options: {
   readonly toolCalls: readonly ModelToolCall[];
   readonly identity: RuntimeEventIdentity;
@@ -608,12 +658,13 @@ async function routeExecutableToolCalls(options: {
   const results: RoleModelPluginToolRoutingEvidence[] = [];
 
   for (const [index, toolCall] of options.toolCalls.entries()) {
-    const pluginId =
-      options.resolveToolPluginId?.(toolCall.name) ??
-      findPluginToolDefinition(
+    const toolDefinition = findPluginToolDefinition(
       options.inputEnvelope.pluginToolDefinitions,
       toolCall.name
-      )?.pluginId;
+    );
+    const pluginId =
+      options.resolveToolPluginId?.(toolCall.name) ??
+      toolDefinition?.pluginId;
 
     const routedCall = createRuntimePluginToolCall({
       identity: options.identity,
@@ -688,7 +739,12 @@ async function routeExecutableToolCalls(options: {
 
     results.push(routingEvidence);
 
-    if (pluginToolResultRejectsLoop(routingEvidence)) {
+    if (
+      pluginToolResultRejectsLoop({
+        routing: routingEvidence,
+        toolDefinition
+      })
+    ) {
       return createRejectedPluginToolRoutingResult({
         results,
         routing: routingEvidence
@@ -746,13 +802,22 @@ function createRejectedToolRoutingEvidence(options: {
   } satisfies RoleModelPluginToolRoutingEvidence);
 }
 
-function pluginToolResultRejectsLoop(
-  routing: RoleModelPluginToolRoutingEvidence
-): boolean {
-  const result = routing.result;
+function pluginToolResultRejectsLoop(options: {
+  readonly routing: RoleModelPluginToolRoutingEvidence;
+  readonly toolDefinition: RoleModelPluginToolDefinition | undefined;
+}): boolean {
+  const result = options.routing.result;
 
   if (result.status !== 'rejected') {
     return false;
+  }
+
+  if (options.toolDefinition?.requiredForUserTurn === true) {
+    return true;
+  }
+
+  if (result.evidence.some(toolInvocationEvidenceRejectsLoop)) {
+    return true;
   }
 
   return !result.evidence.some(
@@ -760,6 +825,24 @@ function pluginToolResultRejectsLoop(
       evidence.evidenceKind === 'tool_invocation' &&
       (evidence.status === 'degraded' ||
         evidence.policyOutcome === 'optional_degraded')
+  );
+}
+
+function toolInvocationEvidenceRejectsLoop(
+  evidence: RuntimePluginToolCallResult['evidence'][number]
+): boolean {
+  if (evidence.evidenceKind !== 'tool_invocation') {
+    return false;
+  }
+
+  if (evidence.status === 'rejected' || evidence.status === 'failed') {
+    return true;
+  }
+
+  return (
+    evidence.policyOutcome === 'handler_rejected' ||
+    evidence.policyOutcome === 'required_rejected' ||
+    evidence.policyOutcome === 'disallowed_tool_call'
   );
 }
 

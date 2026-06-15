@@ -45,6 +45,7 @@ import {
   createRoleModelAdapterFromCharacterAgent,
   runRoleModelLoop,
   type RoleModelAdapter,
+  type RoleModelLoopResult,
   type RoleModelPluginToolRoutingEvidence
 } from '../role-model/loop.ts';
 import {
@@ -639,56 +640,110 @@ async function runSerializedLocalUserMessageEvent(
       ]),
       pluginContextItems: beforeRoleModelCallResult.contextItems
     });
-    const roleModelResult = await runRoleModelLoop({
-      event,
-      decisionContext: roleModelDecisionContext,
-      pluginToolDefinitions: pluginHost.pluginToolDefinitions(),
-      pluginToolHost: pluginHost,
-      runtimePluginContext,
-      resolveToolPluginId(toolName) {
-        return pluginHost.resolveToolPluginId(toolName);
-      },
-      onPluginToolCallStarted(progressEvent) {
-        appendToolCallStarted({
-          callId: progressEvent.callId,
-          round: progressEvent.round,
-          call: progressEvent.call
-        });
-      },
-      async onPluginToolCallCompleted(progressEvent) {
-        appendToolCallFinished({
-          callId: progressEvent.callId,
-          round: progressEvent.round,
-          pluginId: progressEvent.pluginId,
-          toolName: progressEvent.toolName,
-          result: progressEvent.result
-        });
-        await emitProgress({
-          kind: 'tool_call_completed',
-          round: progressEvent.round,
-          status: progressEvent.status,
-          toolName: progressEvent.toolName
-        });
-      },
-      async onPluginToolCallsRequested(progressEvent) {
-        await emitProgress({
-          kind: 'tool_calls_requested',
-          round: progressEvent.round,
-          toolNames: progressEvent.toolNames
-        });
-      },
-      async onInterimVisibleReply(progressEvent) {
-        await appendVisibleReplyForDecision({
-          runtimePluginEvidence: beforeRoleModelCallResult.evidence,
-          final: false,
-          roleModelIOSnapshot: progressEvent.ioSnapshot,
-          parsedRoleModelDecisionSnapshot:
-            progressEvent.parsedDecisionSnapshot,
-          text: progressEvent.text
-        });
-      },
-      ...roleModelLoopAdapterOption(options)
-    });
+    let invalidInterimVisibleReplyRejection:
+      | {
+          readonly rejection: RoleModelDecisionRejection;
+          readonly evidence: RoleModelRawEvidence;
+        }
+      | undefined;
+    let roleModelResult: RoleModelLoopResult;
+
+    try {
+      roleModelResult = await runRoleModelLoop({
+        event,
+        decisionContext: roleModelDecisionContext,
+        pluginToolDefinitions: pluginHost.pluginToolDefinitions(),
+        pluginToolHost: pluginHost,
+        runtimePluginContext,
+        resolveToolPluginId(toolName) {
+          return pluginHost.resolveToolPluginId(toolName);
+        },
+        onPluginToolCallStarted(progressEvent) {
+          appendToolCallStarted({
+            callId: progressEvent.callId,
+            round: progressEvent.round,
+            call: progressEvent.call
+          });
+        },
+        async onPluginToolCallCompleted(progressEvent) {
+          appendToolCallFinished({
+            callId: progressEvent.callId,
+            round: progressEvent.round,
+            pluginId: progressEvent.pluginId,
+            toolName: progressEvent.toolName,
+            result: progressEvent.result
+          });
+          await emitProgress({
+            kind: 'tool_call_completed',
+            round: progressEvent.round,
+            status: progressEvent.status,
+            toolName: progressEvent.toolName
+          });
+        },
+        async onPluginToolCallsRequested(progressEvent) {
+          await emitProgress({
+            kind: 'tool_calls_requested',
+            round: progressEvent.round,
+            toolNames: progressEvent.toolNames
+          });
+        },
+        async onInterimVisibleReply(progressEvent) {
+          try {
+            normalizeCharacterAgentReply({
+              text: progressEvent.text
+            });
+          } catch (error: unknown) {
+            if (error instanceof CharacterReplyValidationError) {
+              const rejection = createInvalidVisibleReplyRejection(error);
+
+              invalidInterimVisibleReplyRejection = {
+                rejection,
+                evidence: {
+                  roleModelIOSnapshot: progressEvent.ioSnapshot,
+                  parsedRoleModelDecisionSnapshot:
+                    progressEvent.parsedDecisionSnapshot,
+                  commitValidation: createRejectedCommitValidationSnapshot({
+                    identity,
+                    rejection,
+                    sessionId: decisionContextSessionIdFromEvidence(
+                      progressEvent.ioSnapshot
+                    )
+                  })
+                }
+              };
+            }
+
+            throw error;
+          }
+
+          await appendVisibleReplyForDecision({
+            runtimePluginEvidence: beforeRoleModelCallResult.evidence,
+            final: false,
+            roleModelIOSnapshot: progressEvent.ioSnapshot,
+            parsedRoleModelDecisionSnapshot:
+              progressEvent.parsedDecisionSnapshot,
+            text: progressEvent.text
+          });
+        },
+        ...roleModelLoopAdapterOption(options)
+      });
+    } catch (error: unknown) {
+      if (
+        error instanceof CharacterReplyValidationError &&
+        invalidInterimVisibleReplyRejection !== undefined
+      ) {
+        return await appendRoleModelRejectedResult(
+          invalidInterimVisibleReplyRejection.rejection,
+          invalidInterimVisibleReplyRejection.evidence,
+          beforeRoleModelCallResult.evidence,
+          beforeRoleModelCallResult.contextItems,
+          [],
+          runtimePluginContext
+        );
+      }
+
+      throw error;
+    }
     const roleModelEvidence = {
       roleModelIOSnapshot: roleModelResult.ioSnapshot,
       parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot

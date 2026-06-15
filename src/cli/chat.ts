@@ -11,6 +11,7 @@ import {
   createNvidiaRoleModelProviderAdapter,
   createNvidiaRoleModelProviderConfigFromEnv
 } from '../role-model/providers/nvidia.ts';
+import { buildUserTurnDecisionContext } from '../role-model/decision-context.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
@@ -41,7 +42,11 @@ import {
   createLocalRuntimeSessionStore,
   LocalRuntimeSessionStoreError
 } from '../runtime/storage/session-store.ts';
-import type { RuntimePluginHost } from '../plugins/host.ts';
+import {
+  createDefaultProject02PluginHost,
+  createRuntimePluginContext,
+  type RuntimePluginHost
+} from '../plugins/index.ts';
 import type { RoleModelAdapter } from '../role-model/loop.ts';
 import {
   formatLocalRuntimeTerminalError,
@@ -178,7 +183,13 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
       const trimmedLine = line.trim();
 
       if (trimmedLine === exitCommand) {
-        lines.close();
+        await endChatSession({
+          session,
+          logStore,
+          ...(options.pluginHost === undefined
+            ? {}
+            : { pluginHost: options.pluginHost })
+        });
         return 0;
       }
 
@@ -253,11 +264,57 @@ export async function runChatCli(options: ChatCliOptions): Promise<number> {
 
       options.stdout.write(promptText);
     }
+
+    await endChatSession({
+      session,
+      logStore,
+      ...(options.pluginHost === undefined
+        ? {}
+        : { pluginHost: options.pluginHost })
+    });
   } finally {
     lines.close();
   }
 
   return 0;
+}
+
+type EndChatSessionOptions = {
+  readonly session: ConversationSession;
+  readonly logStore: RuntimeLogStore;
+  readonly pluginHost?: RuntimePluginHost;
+};
+
+async function endChatSession(options: EndChatSessionOptions): Promise<void> {
+  const identity = createRuntimeEventIdentity();
+  const decisionContext = buildUserTurnDecisionContext({
+    session: options.session
+  });
+  const context = createRuntimePluginContext({
+    ...identity,
+    sessionId: decisionContext.sessionId,
+    eventType: 'USER_MESSAGE',
+    currentUserMessage: exitCommand,
+    character: decisionContext.characterSnapshot
+  });
+
+  await pluginHostForSessionEnd(options).onSessionEnd(context);
+}
+
+function pluginHostForSessionEnd(
+  options: EndChatSessionOptions
+): RuntimePluginHost {
+  if (options.pluginHost !== undefined) {
+    return options.pluginHost;
+  }
+
+  const sessionPaths = options.logStore.localRuntimeSessionPaths;
+
+  return createDefaultProject02PluginHost({
+    ...(sessionPaths === undefined ? {} : { storeRoot: sessionPaths.storeRoot }),
+    sessionId: sessionPaths?.sessionId ?? options.session.id,
+    sessionIdentity: options.session
+  });
 }
 
 type HandleUserMessageThroughRuntimeOptions = {

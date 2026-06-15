@@ -3,7 +3,11 @@ import {
   type RoleModelInputEnvelope,
   type RoleModelProviderMetadata
 } from '../contracts.ts';
-import { visibleReplyModelToolName } from '../model-tools.ts';
+import {
+  validateModelToolInputAgainstContract,
+  visibleReplyModelToolName,
+  type ModelToolInputContract
+} from '../model-tools.ts';
 import {
   renderRoleModelTurnContext,
   type RoleModelAssistantChatMessage,
@@ -72,6 +76,12 @@ type NvidiaProviderErrorCode =
   | 'malformed_response'
   | 'missing_api_key'
   | 'provider_error';
+
+const nvidiaNativeToolArgumentsContract = Object.freeze({
+  type: 'object',
+  fields: Object.freeze([]),
+  additionalFields: true
+} satisfies ModelToolInputContract);
 
 export function createNvidiaRoleModelProviderConfigFromEnv(
   env: NvidiaRoleModelProviderEnvironment = process.env
@@ -611,9 +621,22 @@ function parseNvidiaToolCallArguments(
     );
   }
 
+  const validatedInput = validateModelToolInputAgainstContract({
+    toolName: call.function.name,
+    input: parsed,
+    inputContract: nvidiaNativeToolArgumentsContract
+  });
+
+  if (validatedInput.status === 'rejected') {
+    return rejectResponse(
+      'malformed_response',
+      `NVIDIA response message.tool_calls[${String(index)}].function.arguments must contain JSON-compatible finite values: ${validatedInput.details}`
+    );
+  }
+
   return Object.freeze({
     status: 'accepted',
-    input: parsed
+    input: validatedInput.input
   } satisfies ParsedNvidiaToolCallArguments);
 }
 
