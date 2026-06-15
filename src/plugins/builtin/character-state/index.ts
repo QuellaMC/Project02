@@ -117,7 +117,7 @@ export function createCharacterStatePlugin(): RuntimePlugin {
       Object.freeze({
         name: characterStatePatchModelToolName,
         description:
-          'Optionally propose a current character-state patch. The Character State plugin validates accepted fields and values.',
+          'Optionally patch your current Character State. The Character State plugin validates accepted fields and values.',
         requiredForUserTurn: false,
         maxCallsPerUserTurn: 1,
         inputContract: characterStatePatchInputContract,

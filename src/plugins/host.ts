@@ -317,7 +317,7 @@ function createRuntimePluginDiscoveryPlugin(
       {
         name: roleModelPluginListToolName,
         description:
-          'Return safe summaries for plugins available in the current turn.',
+          'List plugins available to you in the current turn. Call this when you need canonical plugin inventory.',
         requiredForUserTurn: false,
         maxCallsPerUserTurn: 1,
         inputContract: {

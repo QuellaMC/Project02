@@ -19,6 +19,9 @@ import {
 import type {
   RoleModelAdapter
 } from '../src/role-model/loop.ts';
+import type {
+  RoleModelChatMessage
+} from '../src/role-model/prompt.ts';
 
 describe('plugin-driven tool loop', () => {
   it('executes character_state.patch through the built-in plugin and continues', async () => {
@@ -136,6 +139,93 @@ describe('plugin-driven tool loop', () => {
     expect(logStore.rawEvents().at(-1)?.visibleMessageIds).toBeUndefined();
   });
 
+  it('commits multi-line final visible replies', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'I can use:\n- plugin.list\n- character_state.patch'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('list tools', 'evt_multiline_visible'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    expect(result.status).toBe('completed');
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'list tools',
+      'I can use:\n- plugin.list\n- character_state.patch'
+    ]);
+  });
+
+  it('does not expose plugin inventory through hidden runtime context', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    const adapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        messagesByRound.push([...invocation.turnContext.messages]);
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text:
+                    'I can see callable tools, but I need plugin.list for the canonical plugin inventory.'
+                }
+              }
+            ]
+          })
+        };
+      }
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent(
+        'what plugins are available?',
+        'evt_plugin_context_surface'
+      ),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    const firstUserMessage = messagesByRound[0]?.find(
+      (message) => message.role === 'user'
+    );
+
+    expect(result.status).toBe('completed');
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'what plugins are available?',
+      'I can see callable tools, but I need plugin.list for the canonical plugin inventory.'
+    ]);
+    expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_started')).toBe(
+      false
+    );
+    expect(firstUserMessage?.content).toContain(
+      '<runtime_context hidden_from_user="true">'
+    );
+    expect(firstUserMessage?.content).toContain('Character State:');
+    expect(firstUserMessage?.content).not.toContain('pluginId');
+    expect(firstUserMessage?.content).not.toContain('sourceReferences');
+    expect(firstUserMessage?.content).not.toContain('plugin.list');
+    expect(firstUserMessage?.content).not.toContain('visible_reply');
+    expect(firstUserMessage?.content).not.toContain('character_state.patch');
+  });
+
   it('shows interim visible_reply before executable tools without committing it', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -215,6 +305,56 @@ describe('plugin-driven tool loop', () => {
     ).toEqual([undefined, ['local-session:message-1', 'local-session:message-2']]);
   });
 
+  it('feeds native assistant tool calls back as OpenAI tool result messages', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    const adapter = createNativePluginListAdapter(messagesByRound);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('what plugins are available?', 'evt_native_tools'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    expect(result.status).toBe('completed');
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'what plugins are available?',
+      'Plugins are available.'
+    ]);
+    expect(messagesByRound).toHaveLength(2);
+    expect(messagesByRound[0]?.map((message) => message.role)).toEqual([
+      'system',
+      'user'
+    ]);
+    expect(messagesByRound[1]?.map((message) => message.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'tool'
+    ]);
+    expect(messagesByRound[1]?.[2]).toMatchObject({
+      role: 'assistant',
+      content: 'Checking plugins.',
+      tool_calls: [
+        {
+          id: 'call_plugin_list',
+          function: {
+            name: 'plugin.list',
+            arguments: '{}'
+          }
+        }
+      ]
+    });
+    expect(messagesByRound[1]?.[3]).toMatchObject({
+      role: 'tool',
+      tool_call_id: 'call_plugin_list'
+    });
+    expect(messagesByRound[1]?.[3]?.content).toContain('"toolName":"plugin.list"');
+    expect(messagesByRound[1]?.[3]?.content).toContain('"status":"accepted"');
+  });
+
   it('rejects undeclared executable tools before plugin routing', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -256,6 +396,60 @@ describe('plugin-driven tool loop', () => {
     expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_finished')).toBe(false);
   });
 });
+
+function createNativePluginListAdapter(
+  messagesByRound: RoleModelChatMessage[][]
+): RoleModelAdapter {
+  let index = 0;
+
+  return Object.freeze({
+    invoke(_inputEnvelope, invocation) {
+      messagesByRound.push([...invocation.turnContext.messages]);
+      index += 1;
+
+      if (index === 1) {
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'plugin.list',
+                input: {}
+              }
+            ],
+            text: 'Checking plugins.'
+          }),
+          nativeAssistantMessage: {
+            role: 'assistant',
+            content: 'Checking plugins.',
+            tool_calls: [
+              {
+                id: 'call_plugin_list',
+                type: 'function',
+                function: {
+                  name: 'plugin.list',
+                  arguments: '{}'
+                }
+              }
+            ]
+          }
+        };
+      }
+
+      return {
+        rawOutputText: JSON.stringify({
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'Plugins are available.'
+              }
+            }
+          ]
+        })
+      };
+    }
+  } satisfies RoleModelAdapter);
+}
 
 function createSequencedAdapter(
   decisions: readonly Readonly<Record<string, unknown>>[]

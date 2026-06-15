@@ -2,14 +2,19 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createDecisionContext,
-  createRoleModelInputEnvelope,
-  roleModelDecisionOutputContractText
+  createRoleModelInputEnvelope
 } from '../src/role-model/contracts.ts';
 import {
+  createNvidiaRoleModelProviderAdapter,
   createNvidiaRoleModelProviderConfigFromEnv,
   nvidiaModelEnvName,
-  renderNvidiaMessages
+  renderNvidiaMessages,
+  renderNvidiaTools,
+  type NvidiaFetchClient
 } from '../src/role-model/providers/nvidia.ts';
+import {
+  renderRoleModelTurnContext
+} from '../src/role-model/prompt.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
@@ -17,6 +22,12 @@ import {
 import {
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
+import {
+  createDefaultProject02PluginHost
+} from '../src/plugins/host.ts';
+import {
+  createRuntimePluginContextItem
+} from '../src/plugins/types.ts';
 
 describe('NVIDIA role-model provider', () => {
   it('reads the model name from environment configuration', () => {
@@ -28,74 +39,264 @@ describe('NVIDIA role-model provider', () => {
     ).toBe('nvidia/test-model');
   });
 
-  it('renders plugin-era tool instructions without legacy actions', () => {
-    const messages = renderNvidiaMessages(
-      createRoleModelInputEnvelope({
-        event: createUserMessageRuntimeEvent(
-          'hello',
-          createRuntimeEventIdentity({
-            eventId: 'evt_nvidia',
-            traceId: 'trace_nvidia',
-            createdAt: '2026-06-15T00:00:00.000Z'
-          })
-        ),
-        decisionContext: createDecisionContext({
-          sessionId: 'session-nvidia',
-          characterSnapshot: {
-            id: 'mira',
-            displayName: 'Mira'
-          }
-        }),
-        allowedTools: [visibleReplyModelToolName]
-      })
-    );
-    const rendered = messages.map((message) => message.content).join('\n');
-    const userPayload = JSON.parse(messages[1]?.content ?? '{}') as {
-      readonly responseContract?: {
-        readonly allowedTopLevelFields?: readonly string[];
-        readonly forbiddenTopLevelFields?: readonly string[];
-      };
-      readonly runtimeInput?: {
-        readonly event?: {
-          readonly payload?: {
-            readonly currentUserMessage?: string;
-          };
-        };
-      };
-    };
+  it('renders OpenAI-compatible messages and native tools', () => {
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const messages = renderNvidiaMessages(inputEnvelope);
+    const tools = renderNvidiaTools(inputEnvelope);
 
-    expect(roleModelDecisionOutputContractText).toContain(
-      'visible_reply is the only non-executed output tool'
-    );
-    expect(rendered).toContain(
-      'Do not include a top-level "version" field'
-    );
-    expect(rendered).toContain(
-      'the runtime stamps its internal decision version'
-    );
-    expect(rendered).toContain('Do not copy input envelope fields');
-    expect(Object.keys(userPayload)).toEqual([
-      'responseContract',
-      'runtimeInput'
+    expect(messages.map((message) => message.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'user'
     ]);
-    expect(userPayload.responseContract?.allowedTopLevelFields).toEqual([
-      'toolCalls',
-      'text'
+    expect(messages[0]?.content).toContain(
+      'Use OpenAI-compatible chat-completions semantics'
+    );
+    expect(messages[0]?.content).toContain(
+      'tools you, the assistant, can call through the runtime'
+    );
+    expect(messages[0]?.content).toContain(
+      'not commands the user runs'
+    );
+    expect(messages[0]?.content).toContain(
+      'call plugin.list and use its tool result'
+    );
+    expect(messages[0]?.content).toContain(
+      'not as commands the user should run'
+    );
+    expect(messages[0]?.content).toContain('Refer to extensions as plugins');
+    expect(messages[1]).toMatchObject({
+      role: 'user',
+      content: 'previous question'
+    });
+    expect(messages[2]).toMatchObject({
+      role: 'assistant',
+      content: 'previous answer'
+    });
+    expect(messages[3]?.content).toContain('hello');
+    expect(messages[3]?.content).toContain(
+      '<runtime_context hidden_from_user="true">'
+    );
+    expect(messages[3]?.content).toContain(
+      'runtime context is reference data, NOT new user input'
+    );
+    expect(messages[3]?.content).toContain(
+      'Runtime notes:\n- Use concise replies.'
+    );
+    expect(messages[3]?.content).toContain(
+      'Runtime context:\n- Character State: steady'
+    );
+    expect(messages[3]?.content).toContain('Character State: steady');
+    expect(messages[3]?.content).not.toContain('"event"');
+    expect(messages[3]?.content).not.toContain('"toolObservations"');
+    expect(messages[3]?.content).not.toContain('"version"');
+    expect(messages[3]?.content).not.toContain('pluginId');
+    expect(messages[3]?.content).not.toContain('sourceReferences');
+    expect(messages[3]?.content).not.toContain('confidence');
+    expect(messages[3]?.content).not.toContain('budget');
+    expect(messages[3]?.content).not.toContain(visibleReplyModelToolName);
+    expect(messages[3]?.content).not.toContain('character_state.patch');
+
+    expect(tools.map((tool) => tool.function.name)).toEqual([
+      visibleReplyModelToolName,
+      'plugin.list',
+      'character_state.patch'
     ]);
-    expect(userPayload.responseContract?.forbiddenTopLevelFields).toEqual(
-      expect.arrayContaining([
-        'event',
-        'recentVisibleMessages',
-        'toolObservations',
-        'pluginContextItems',
-        'characterSnapshot'
-      ])
-    );
-    expect(userPayload.runtimeInput?.event?.payload?.currentUserMessage).toBe(
-      'hello'
-    );
-    expect(rendered).not.toContain('mvp-006.tool_calls.v1');
-    expect(rendered).toContain(visibleReplyModelToolName);
-    expect(rendered).not.toContain('"action"');
+    expect(
+      tools.find((tool) => tool.function.name === visibleReplyModelToolName)
+        ?.function.parameters.properties['text']
+    ).toMatchObject({
+      type: 'string',
+      description: 'The reply text to show to the user.'
+    });
+    expect(
+      tools.find((tool) => tool.function.name === visibleReplyModelToolName)
+        ?.function.description
+    ).toContain('from you');
+    expect(
+      tools.find((tool) => tool.function.name === 'plugin.list')
+        ?.function.description
+    ).toContain('available to you');
+    expect(
+      tools.find((tool) => tool.function.name === 'character_state.patch')
+        ?.function.description
+    ).toContain('your current Character State');
+    expect(
+      tools.find((tool) => tool.function.name === 'plugin.list')
+        ?.function.parameters.additionalProperties
+    ).toBe(false);
+  });
+
+  it('normalizes final assistant content through visible_reply', async () => {
+    let capturedBody: unknown;
+    const fetchClient: NvidiaFetchClient = (_url, request) => {
+      capturedBody = JSON.parse(request.body);
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                message: {
+                  role: 'assistant',
+                  content: 'Hello from assistant content.\n- plugin.list'
+                }
+              }
+            ]
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient,
+      model: 'nvidia/test-model'
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(capturedBody).toMatchObject({
+      model: 'nvidia/test-model',
+      stream: false,
+      tool_choice: 'auto'
+    });
+    expect(
+      (capturedBody as { readonly messages?: readonly { readonly role: string }[] })
+        .messages?.map((message) => message.role)
+    ).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [
+        {
+          name: visibleReplyModelToolName,
+          input: {
+            text: 'Hello from assistant content.\n- plugin.list'
+          }
+        }
+      ]
+    });
+    expect(output.nativeAssistantMessage).toMatchObject({
+      role: 'assistant',
+      content: 'Hello from assistant content.\n- plugin.list'
+    });
+  });
+
+  it('normalizes native assistant tool calls without parsing content as JSON', async () => {
+    const fetchClient: NvidiaFetchClient = () => Promise.resolve({
+      ok: true,
+      status: 200,
+      json() {
+        return Promise.resolve({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: 'Checking the available plugins.',
+                tool_calls: [
+                  {
+                    id: 'call_plugin_list',
+                    type: 'function',
+                    function: {
+                      name: 'plugin.list',
+                      arguments: '{}'
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        });
+      },
+      text() {
+        return Promise.resolve('');
+      }
+    });
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [
+        {
+          name: 'plugin.list',
+          input: {}
+        }
+      ],
+      text: 'Checking the available plugins.'
+    });
+    expect(output.nativeAssistantMessage?.tool_calls?.[0]).toMatchObject({
+      id: 'call_plugin_list',
+      function: {
+        name: 'plugin.list',
+        arguments: '{}'
+      }
+    });
   });
 });
+
+function createNvidiaTestInputEnvelope() {
+  const pluginHost = createDefaultProject02PluginHost();
+
+  return createRoleModelInputEnvelope({
+    event: createUserMessageRuntimeEvent(
+      'hello',
+      createRuntimeEventIdentity({
+        eventId: 'evt_nvidia',
+        traceId: 'trace_nvidia',
+        createdAt: '2026-06-15T00:00:00.000Z'
+      })
+    ),
+    decisionContext: createDecisionContext({
+      sessionId: 'session-nvidia',
+      characterSnapshot: {
+        id: 'mira',
+        displayName: 'Mira'
+      },
+      recentVisibleMessages: [
+        {
+          id: 'm1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'previous question'
+        },
+        {
+          id: 'm2',
+          role: 'character',
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: 'previous answer'
+        }
+      ],
+      runtimeNotes: ['Use concise replies.'],
+      pluginContextItems: [
+        createRuntimePluginContextItem({
+          pluginId: 'character-state',
+          id: 'current',
+          kind: 'runtime_note',
+          text: 'Character State: steady',
+          budget: {
+            estimatedTokens: 8,
+            priority: 90
+          },
+          sourceReferences: [],
+          confidence: 1,
+          redactionLabels: []
+        })
+      ]
+    }),
+    pluginToolDefinitions: pluginHost.pluginToolDefinitions()
+  });
+}

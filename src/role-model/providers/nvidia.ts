@@ -3,9 +3,18 @@ import {
   type RoleModelInputEnvelope,
   type RoleModelProviderMetadata
 } from '../contracts.ts';
-import { renderRoleModelPromptMessages } from '../prompt.ts';
+import { visibleReplyModelToolName } from '../model-tools.ts';
+import {
+  renderRoleModelTurnContext,
+  type RoleModelAssistantChatMessage,
+  type RoleModelChatCompletionTool,
+  type RoleModelChatMessage,
+  type RoleModelChatToolCall,
+  type RoleModelTurnContext
+} from '../prompt.ts';
 import type {
   RoleModelAdapter,
+  RoleModelAdapterInvocation,
   RoleModelAdapterRawOutput
 } from '../loop.ts';
 
@@ -31,10 +40,8 @@ export type NvidiaRoleModelProviderEnvironment = {
   readonly NVIDIA_MODEL?: string;
 };
 
-export type NvidiaChatCompletionMessage = {
-  readonly role: 'system' | 'user';
-  readonly content: string;
-};
+export type NvidiaChatCompletionMessage = RoleModelChatMessage;
+export type NvidiaChatCompletionTool = RoleModelChatCompletionTool;
 
 export type NvidiaFetchRequest = {
   readonly method: 'POST';
@@ -86,7 +93,7 @@ export function createNvidiaRoleModelProviderAdapter(
   const fetchClient = options.fetchClient ?? defaultFetchClient;
 
   return Object.freeze({
-    async invoke(inputEnvelope) {
+    async invoke(inputEnvelope, invocation) {
       if (options.apiKey === undefined || options.apiKey.length === 0) {
         return createProviderRejectedOutput({
           code: 'missing_api_key',
@@ -96,10 +103,17 @@ export function createNvidiaRoleModelProviderAdapter(
         });
       }
 
-      const messages = renderNvidiaMessages(inputEnvelope);
+      const messages = renderNvidiaMessages(inputEnvelope, invocation);
+      const tools = renderNvidiaTools(inputEnvelope, invocation);
       const body = JSON.stringify({
         model,
         messages,
+        ...(tools.length === 0
+          ? {}
+          : {
+              tools,
+              tool_choice: 'auto'
+            }),
         stream: false,
         temperature: nvidiaRoleModelTemperature,
         top_p: nvidiaRoleModelTopP,
@@ -139,20 +153,21 @@ export function createNvidiaRoleModelProviderAdapter(
         }
 
         const responseBody = await response.json();
-        const rawOutputText = parseNvidiaResponseText(responseBody);
+        const rawOutput = parseNvidiaResponseMessage(responseBody);
 
-        if (rawOutputText.status === 'rejected') {
+        if (rawOutput.status === 'rejected') {
           return createProviderRejectedOutput({
-            code: rawOutputText.code,
+            code: rawOutput.code,
             endpoint,
-            message: rawOutputText.message,
+            message: rawOutput.message,
             model,
             status: response.status
           });
         }
 
         return Object.freeze({
-          rawOutputText: rawOutputText.text,
+          rawOutputText: rawOutput.rawOutputText,
+          nativeAssistantMessage: rawOutput.nativeAssistantMessage,
           providerMetadata: Object.freeze({
             ...baseMetadata,
             response: Object.freeze({
@@ -178,16 +193,55 @@ export function createNvidiaRoleModelProviderAdapter(
 }
 
 export function renderNvidiaMessages(
-  inputEnvelope: RoleModelInputEnvelope
+  inputEnvelope: RoleModelInputEnvelope,
+  invocation?: RoleModelAdapterInvocation
 ): readonly NvidiaChatCompletionMessage[] {
   return Object.freeze(
-    renderRoleModelPromptMessages(inputEnvelope).map((message) =>
-      Object.freeze({
-        role: message.role,
-        content: message.content
-      } satisfies NvidiaChatCompletionMessage)
+    turnContextForNvidia(inputEnvelope, invocation).messages.map((message) =>
+      sanitizeNvidiaMessage(message)
     )
   );
+}
+
+export function renderNvidiaTools(
+  inputEnvelope: RoleModelInputEnvelope,
+  invocation?: RoleModelAdapterInvocation
+): readonly NvidiaChatCompletionTool[] {
+  return Object.freeze([...turnContextForNvidia(inputEnvelope, invocation).tools]);
+}
+
+function turnContextForNvidia(
+  inputEnvelope: RoleModelInputEnvelope,
+  invocation?: RoleModelAdapterInvocation
+): RoleModelTurnContext {
+  return invocation?.turnContext ?? renderRoleModelTurnContext(inputEnvelope);
+}
+
+function sanitizeNvidiaMessage(
+  message: RoleModelChatMessage
+): NvidiaChatCompletionMessage {
+  if (message.role === 'assistant') {
+    return Object.freeze({
+      role: 'assistant',
+      content: message.content,
+      ...(message.tool_calls === undefined
+        ? {}
+        : { tool_calls: Object.freeze([...message.tool_calls]) })
+    } satisfies NvidiaChatCompletionMessage);
+  }
+
+  if (message.role === 'tool') {
+    return Object.freeze({
+      role: 'tool',
+      content: message.content,
+      tool_call_id: message.tool_call_id
+    } satisfies NvidiaChatCompletionMessage);
+  }
+
+  return Object.freeze({
+    role: message.role,
+    content: message.content
+  } satisfies NvidiaChatCompletionMessage);
 }
 
 function createProviderRejectedOutput(options: {
@@ -249,18 +303,21 @@ function createProviderMetadata(options: {
   } satisfies RoleModelProviderMetadata);
 }
 
-type ParsedNvidiaResponseText =
+type ParsedNvidiaResponseMessage =
   | {
       readonly status: 'accepted';
-      readonly text: string;
+      readonly rawOutputText: string;
+      readonly nativeAssistantMessage: RoleModelAssistantChatMessage;
     }
-  | {
-      readonly status: 'rejected';
-      readonly code: NvidiaProviderErrorCode;
-      readonly message: string;
-    };
+  | RejectedNvidiaProviderParseResult;
 
-function parseNvidiaResponseText(value: unknown): ParsedNvidiaResponseText {
+type RejectedNvidiaProviderParseResult = {
+  readonly status: 'rejected';
+  readonly code: NvidiaProviderErrorCode;
+  readonly message: string;
+};
+
+function parseNvidiaResponseMessage(value: unknown): ParsedNvidiaResponseMessage {
   if (!isJsonRecord(value)) {
     return rejectResponse('malformed_response', 'NVIDIA response must be an object.');
   }
@@ -293,34 +350,282 @@ function parseNvidiaResponseText(value: unknown): ParsedNvidiaResponseText {
     );
   }
 
-  const content = message['content'];
+  const contentResult = parseOptionalNvidiaMessageContent(message['content']);
 
-  if (typeof content !== 'string') {
-    return rejectResponse(
-      'malformed_response',
-      'NVIDIA response message.content must be a string.'
-    );
+  if (contentResult.status === 'rejected') {
+    return contentResult;
   }
 
-  if (content.length === 0) {
-    return rejectResponse('empty_output', 'NVIDIA response content is empty.');
+  const toolCallsResult = parseOptionalNvidiaToolCalls(message['tool_calls']);
+
+  if (toolCallsResult.status === 'rejected') {
+    return toolCallsResult;
+  }
+
+  const content = contentResult.content;
+  const toolCalls = toolCallsResult.toolCalls;
+  const rawOutputResult = createRawOutputTextFromNvidiaMessage({
+    content,
+    toolCalls
+  });
+
+  if (rawOutputResult.status === 'rejected') {
+    return rawOutputResult;
   }
 
   return Object.freeze({
     status: 'accepted',
-    text: content
-  } satisfies ParsedNvidiaResponseText);
+    rawOutputText: rawOutputResult.rawOutputText,
+    nativeAssistantMessage: Object.freeze({
+      role: 'assistant',
+      content,
+      ...(toolCalls.length === 0
+        ? {}
+        : { tool_calls: Object.freeze([...toolCalls]) })
+    } satisfies RoleModelAssistantChatMessage)
+  } satisfies ParsedNvidiaResponseMessage);
+}
+
+type ParsedNvidiaMessageContent =
+  | {
+      readonly status: 'accepted';
+      readonly content: string | null;
+    }
+  | RejectedNvidiaProviderParseResult;
+
+function parseOptionalNvidiaMessageContent(
+  value: unknown
+): ParsedNvidiaMessageContent {
+  if (value === undefined || value === null) {
+    return Object.freeze({
+      status: 'accepted',
+      content: null
+    } satisfies ParsedNvidiaMessageContent);
+  }
+
+  if (typeof value !== 'string') {
+    return rejectResponse(
+      'malformed_response',
+      'NVIDIA response message.content must be a string or null.'
+    );
+  }
+
+  return Object.freeze({
+    status: 'accepted',
+    content: value
+  } satisfies ParsedNvidiaMessageContent);
+}
+
+type ParsedNvidiaToolCalls =
+  | {
+      readonly status: 'accepted';
+      readonly toolCalls: readonly RoleModelChatToolCall[];
+    }
+  | RejectedNvidiaProviderParseResult;
+
+function parseOptionalNvidiaToolCalls(value: unknown): ParsedNvidiaToolCalls {
+  if (value === undefined || value === null) {
+    return Object.freeze({
+      status: 'accepted',
+      toolCalls: Object.freeze([])
+    } satisfies ParsedNvidiaToolCalls);
+  }
+
+  if (!Array.isArray(value)) {
+    return rejectResponse(
+      'malformed_response',
+      'NVIDIA response message.tool_calls must be an array.'
+    );
+  }
+
+  const toolCalls: RoleModelChatToolCall[] = [];
+
+  for (const [index, item] of value.entries()) {
+    const parsed = parseNvidiaToolCall(item, index);
+
+    if (parsed.status === 'rejected') {
+      return parsed;
+    }
+
+    toolCalls.push(parsed.toolCall);
+  }
+
+  return Object.freeze({
+    status: 'accepted',
+    toolCalls: Object.freeze(toolCalls)
+  } satisfies ParsedNvidiaToolCalls);
+}
+
+type ParsedNvidiaToolCall =
+  | {
+      readonly status: 'accepted';
+      readonly toolCall: RoleModelChatToolCall;
+    }
+  | RejectedNvidiaProviderParseResult;
+
+function parseNvidiaToolCall(
+  value: unknown,
+  index: number
+): ParsedNvidiaToolCall {
+  if (!isJsonRecord(value)) {
+    return rejectResponse(
+      'malformed_response',
+      `NVIDIA response message.tool_calls[${String(index)}] must be an object.`
+    );
+  }
+
+  const id = value['id'];
+  const type = value['type'];
+  const fn = value['function'];
+
+  if (typeof id !== 'string' || id.length === 0) {
+    return rejectResponse(
+      'malformed_response',
+      `NVIDIA response message.tool_calls[${String(index)}].id must be a string.`
+    );
+  }
+
+  if (type !== 'function' || !isJsonRecord(fn)) {
+    return rejectResponse(
+      'malformed_response',
+      `NVIDIA response message.tool_calls[${String(index)}] must be a function tool call.`
+    );
+  }
+
+  const name = fn['name'];
+  const args = fn['arguments'];
+
+  if (typeof name !== 'string' || name.length === 0) {
+    return rejectResponse(
+      'malformed_response',
+      `NVIDIA response message.tool_calls[${String(index)}].function.name must be a string.`
+    );
+  }
+
+  if (typeof args !== 'string') {
+    return rejectResponse(
+      'malformed_response',
+      `NVIDIA response message.tool_calls[${String(index)}].function.arguments must be a JSON string.`
+    );
+  }
+
+  return Object.freeze({
+    status: 'accepted',
+    toolCall: Object.freeze({
+      id,
+      type: 'function',
+      function: Object.freeze({
+        name,
+        arguments: args
+      })
+    } satisfies RoleModelChatToolCall)
+  } satisfies ParsedNvidiaToolCall);
+}
+
+type NvidiaRawOutputTextResult =
+  | {
+      readonly status: 'accepted';
+      readonly rawOutputText: string;
+    }
+  | RejectedNvidiaProviderParseResult;
+
+function createRawOutputTextFromNvidiaMessage(options: {
+  readonly content: string | null;
+  readonly toolCalls: readonly RoleModelChatToolCall[];
+}): NvidiaRawOutputTextResult {
+  if (options.toolCalls.length === 0) {
+    if (options.content === null || options.content.length === 0) {
+      return rejectResponse('empty_output', 'NVIDIA response content is empty.');
+    }
+
+    return Object.freeze({
+      status: 'accepted',
+      rawOutputText: JSON.stringify({
+        toolCalls: [
+          {
+            name: visibleReplyModelToolName,
+            input: {
+              text: options.content
+            }
+          }
+        ]
+      })
+    } satisfies NvidiaRawOutputTextResult);
+  }
+
+  const toolCalls: Array<{
+    readonly name: string;
+    readonly input: Readonly<Record<string, unknown>>;
+  }> = [];
+
+  for (const [index, call] of options.toolCalls.entries()) {
+    const parsedArgs = parseNvidiaToolCallArguments(call, index);
+
+    if (parsedArgs.status === 'rejected') {
+      return parsedArgs;
+    }
+
+    toolCalls.push({
+      name: call.function.name,
+      input: parsedArgs.input
+    });
+  }
+
+  return Object.freeze({
+    status: 'accepted',
+    rawOutputText: JSON.stringify({
+      toolCalls,
+      ...(options.content === null || options.content.length === 0
+        ? {}
+        : { text: options.content })
+    })
+  } satisfies NvidiaRawOutputTextResult);
+}
+
+type ParsedNvidiaToolCallArguments =
+  | {
+      readonly status: 'accepted';
+      readonly input: Readonly<Record<string, unknown>>;
+    }
+  | RejectedNvidiaProviderParseResult;
+
+function parseNvidiaToolCallArguments(
+  call: RoleModelChatToolCall,
+  index: number
+): ParsedNvidiaToolCallArguments {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(call.function.arguments);
+  } catch {
+    return rejectResponse(
+      'malformed_response',
+      `NVIDIA response message.tool_calls[${String(index)}].function.arguments must be valid JSON.`
+    );
+  }
+
+  if (!isJsonRecord(parsed)) {
+    return rejectResponse(
+      'malformed_response',
+      `NVIDIA response message.tool_calls[${String(index)}].function.arguments must parse to an object.`
+    );
+  }
+
+  return Object.freeze({
+    status: 'accepted',
+    input: parsed
+  } satisfies ParsedNvidiaToolCallArguments);
 }
 
 function rejectResponse(
   code: NvidiaProviderErrorCode,
   message: string
-): ParsedNvidiaResponseText {
+): RejectedNvidiaProviderParseResult {
   return Object.freeze({
     status: 'rejected',
     code,
     message
-  } satisfies ParsedNvidiaResponseText);
+  } satisfies RejectedNvidiaProviderParseResult);
 }
 
 async function responseErrorMessage(

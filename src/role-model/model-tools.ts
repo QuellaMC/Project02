@@ -79,15 +79,16 @@ export const requiredUserTurnBuiltInModelToolNames = Object.freeze([
 export const builtInModelToolDefinitions = Object.freeze([
   createBuiltInModelToolDefinition({
     name: visibleReplyModelToolName,
-    description: 'Return exactly one visible reply line for the user.',
+    description: 'Send one user-visible reply message from you.',
     requiredForUserTurn: false,
     inputContract: {
       type: 'object',
       fields: [
         {
           name: 'text',
-          description: 'One visible reply line.',
-          required: true
+          description: 'The reply text to show to the user.',
+          required: true,
+          valueType: 'string'
         }
       ],
       additionalFields: false

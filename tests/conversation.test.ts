@@ -66,6 +66,27 @@ describe('conversation core', () => {
     ]);
   });
 
+  it('allows multi-line character replies while keeping user input single-line', async () => {
+    const session = createConversationSession();
+    const agent: CharacterAgent = {
+      reply() {
+        return {
+          text: 'Tools available:\n- plugin.list\n- character_state.patch'
+        };
+      }
+    };
+
+    const result = await runCharacterTurn(session, 'list tools', agent);
+
+    expect(result.characterMessage.text).toBe(
+      'Tools available:\n- plugin.list\n- character_state.patch'
+    );
+    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+      'list tools',
+      'Tools available:\n- plugin.list\n- character_state.patch'
+    ]);
+  });
+
   it('passes recent visible transcript context to the character agent before committing the new turn', async () => {
     const session = createConversationSession();
     const observedContexts: VisibleMessage[][] = [];
@@ -440,7 +461,7 @@ describe('conversation core', () => {
     const agent: CharacterAgent = {
       reply() {
         return {
-          text: 'line one\nline two'
+          text: '   '
         };
       }
     };

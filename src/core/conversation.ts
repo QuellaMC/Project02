@@ -1,6 +1,8 @@
 import {
   normalizeOneLineMessage,
-  OneLineMessageValidationError
+  normalizeVisibleMessageText,
+  OneLineMessageValidationError,
+  VisibleMessageTextValidationError
 } from './message-validation.ts';
 
 export type CharacterProfile = {
@@ -307,13 +309,11 @@ function normalizeCharacterReply(reply: unknown): string {
   const characterReply = validateCharacterAgentReply(reply);
 
   try {
-    return normalizeOneLineMessage(characterReply.text);
+    return normalizeVisibleMessageText(characterReply.text);
   } catch (error: unknown) {
-    if (error instanceof OneLineMessageValidationError) {
+    if (error instanceof VisibleMessageTextValidationError) {
       throw new CharacterReplyValidationError(
-        error.reason === 'empty'
-          ? 'Character agent returned an empty reply.'
-          : 'Character agent returned a multi-line reply.'
+        'Character agent returned an empty reply.'
       );
     }
 
@@ -448,9 +448,9 @@ function freezeValidatedRestoredVisibleMessage(options: {
   let normalizedText: string;
 
   try {
-    normalizedText = normalizeOneLineMessage(options.message.text);
+    normalizedText = normalizeVisibleMessageText(options.message.text);
   } catch (error: unknown) {
-    if (error instanceof OneLineMessageValidationError) {
+    if (error instanceof VisibleMessageTextValidationError) {
       throw new ConversationRehydrationError(
         'Restored visible message text must already be normalized.'
       );

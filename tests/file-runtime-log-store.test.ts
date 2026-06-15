@@ -11,13 +11,53 @@ import {
   createLocalRuntimeSessionStore
 } from '../src/runtime/storage/session-store.ts';
 import {
-  createRuntimeEventIdentity
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent
 } from '../src/runtime/event.ts';
+import {
+  createConversationSession
+} from '../src/core/conversation.ts';
+import {
+  runLocalUserMessageEvent
+} from '../src/runtime/local.ts';
 import {
   LocalRuntimeStorageContractError
 } from '../src/runtime/storage/layout.ts';
+import type {
+  RoleModelAdapter
+} from '../src/role-model/loop.ts';
 
 describe('file runtime log store plugin tool event validation', () => {
+  it('persists multi-line visible conversation records', async () => {
+    const storeRoot = createStoreRoot();
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'session-multiline-visible',
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'session-multiline-visible'
+    });
+    const session = createConversationSession({
+      id: 'session-multiline-visible'
+    });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'list tools',
+        identity('evt_multiline_visible')
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter()
+    });
+
+    expect(result.status).toBe('completed');
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'list tools',
+      'I can use:\n- plugin.list\n- character_state.patch'
+    ]);
+  });
+
   it('rejects started tool calls without matching finished records', async () => {
     const storeRoot = createStoreRoot();
     await createLocalRuntimeSessionStore({ storeRoot }).createSession({
@@ -100,4 +140,23 @@ function appendTurnPrefix(
     kind: 'runtime_event_normalized',
     eventType: 'USER_MESSAGE'
   });
+}
+
+function createMultilineVisibleReplyAdapter(): RoleModelAdapter {
+  return {
+    invoke() {
+      return {
+        rawOutputText: JSON.stringify({
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'I can use:\n- plugin.list\n- character_state.patch'
+              }
+            }
+          ]
+        })
+      };
+    }
+  };
 }

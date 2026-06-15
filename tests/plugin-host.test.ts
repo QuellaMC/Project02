@@ -56,6 +56,22 @@ describe('runtime plugin host', () => {
     });
   });
 
+  it('does not inject plugin discovery inventory before model calls', async () => {
+    const plugin = createMemorySearchPlugin();
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [runtimePluginDiscoveryPluginId, plugin.manifest.id]
+    });
+
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      contextItems: [],
+      runtimeNotes: []
+    });
+  });
+
   it('rejects duplicate model-facing tool names across enabled plugins', () => {
     expect(() =>
       createRuntimePluginHost({

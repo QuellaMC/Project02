@@ -5,6 +5,7 @@ export const oneLineMessageMultilineErrorMessage =
 const lineBreakPattern = /[\r\n]/u;
 
 export type OneLineMessageValidationReason = 'empty' | 'multiline';
+export type VisibleMessageTextValidationReason = 'empty';
 
 export class OneLineMessageValidationError extends Error {
   readonly reason: OneLineMessageValidationReason;
@@ -20,6 +21,16 @@ export class OneLineMessageValidationError extends Error {
   }
 }
 
+export class VisibleMessageTextValidationError extends Error {
+  readonly reason: VisibleMessageTextValidationReason;
+
+  constructor(reason: VisibleMessageTextValidationReason) {
+    super('Provide a non-empty visible message.');
+    this.name = 'VisibleMessageTextValidationError';
+    this.reason = reason;
+  }
+}
+
 export function normalizeOneLineMessage(message: string | undefined): string {
   const normalizedMessage = message?.trim() ?? '';
 
@@ -29,6 +40,18 @@ export function normalizeOneLineMessage(message: string | undefined): string {
 
   if (lineBreakPattern.test(normalizedMessage)) {
     throw new OneLineMessageValidationError('multiline');
+  }
+
+  return normalizedMessage;
+}
+
+export function normalizeVisibleMessageText(
+  message: string | undefined
+): string {
+  const normalizedMessage = message?.replace(/\r\n?/gu, '\n').trim() ?? '';
+
+  if (normalizedMessage.length === 0) {
+    throw new VisibleMessageTextValidationError('empty');
   }
 
   return normalizedMessage;

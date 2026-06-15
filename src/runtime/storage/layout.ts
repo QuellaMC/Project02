@@ -6,8 +6,8 @@ import type {
   VisibleMessageRole
 } from '../../core/conversation.ts';
 import {
-  normalizeOneLineMessage,
-  OneLineMessageValidationError
+  normalizeVisibleMessageText,
+  VisibleMessageTextValidationError
 } from '../../core/message-validation.ts';
 import type {
   RuntimeEventIdentity,
@@ -613,9 +613,9 @@ function requiredNormalizedVisibleMessageText(
   let normalizedValue: string;
 
   try {
-    normalizedValue = normalizeOneLineMessage(value);
+    normalizedValue = normalizeVisibleMessageText(value);
   } catch (error: unknown) {
-    if (error instanceof OneLineMessageValidationError) {
+    if (error instanceof VisibleMessageTextValidationError) {
       throwMalformedRecord(key);
     }
 
@@ -1385,11 +1385,11 @@ function assertAcceptedCommitTextMatchesParsedDecision(options: {
   let normalizedParsedDecisionText: string;
 
   try {
-    normalizedParsedDecisionText = normalizeOneLineMessage(
+    normalizedParsedDecisionText = normalizeVisibleMessageText(
       parsedDecisionText
     );
   } catch (error: unknown) {
-    if (error instanceof OneLineMessageValidationError) {
+    if (error instanceof VisibleMessageTextValidationError) {
       throwMalformedRecord(
         'parsedRoleModelDecisionSnapshot.result.decision.action.text'
       );
@@ -1449,9 +1449,9 @@ function assertParsedDecisionTextFailsCommitValidation(
   parsedDecisionText: string
 ): void {
   try {
-    normalizeOneLineMessage(parsedDecisionText);
+    normalizeVisibleMessageText(parsedDecisionText);
   } catch (error: unknown) {
-    if (error instanceof OneLineMessageValidationError) {
+    if (error instanceof VisibleMessageTextValidationError) {
       return;
     }
 
