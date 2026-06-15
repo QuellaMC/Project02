@@ -134,18 +134,20 @@ export function modelToolDefinitionToChatTool(
 export function createRoleModelProviderToolNameMappings(
   runtimeNames: readonly string[]
 ): readonly RoleModelProviderToolNameMapping[] {
-  const usedProviderNames = new Map<string, number>();
+  const usedProviderNames = new Set<string>();
   const mappings: RoleModelProviderToolNameMapping[] = [];
 
   for (const runtimeName of runtimeNames) {
     const baseProviderName = roleModelProviderSafeToolName(runtimeName);
-    const previousCount = usedProviderNames.get(baseProviderName) ?? 0;
-    const providerName =
-      previousCount === 0
-        ? baseProviderName
-        : `${baseProviderName}_${String(previousCount + 1)}`;
+    let providerName = baseProviderName;
+    let suffix = 1;
 
-    usedProviderNames.set(baseProviderName, previousCount + 1);
+    while (usedProviderNames.has(providerName)) {
+      suffix += 1;
+      providerName = `${baseProviderName}_${String(suffix)}`;
+    }
+
+    usedProviderNames.add(providerName);
     mappings.push(
       Object.freeze({
         runtimeName,

@@ -732,10 +732,32 @@ async function routeExecutableToolCalls(options: {
       });
     }
 
+    let frozenHostResult: RuntimePluginToolCallResult;
+
+    try {
+      frozenHostResult = freezeRuntimePluginToolCallResult(hostResult);
+    } catch (error: unknown) {
+      const routingEvidence = createRejectedToolRoutingEvidence({
+        callId,
+        call: routedCall,
+        reason: 'invalid_tool_output',
+        message:
+          error instanceof Error
+            ? error.message
+            : `Tool "${toolCall.name}" returned invalid output.`
+      });
+
+      results.push(routingEvidence);
+      return createRejectedPluginToolRoutingResult({
+        results,
+        routing: routingEvidence
+      });
+    }
+
     const routingEvidence = Object.freeze({
       callId,
       call: routedCall,
-      result: freezeRuntimePluginToolCallResult(hostResult)
+      result: frozenHostResult
     } satisfies RoleModelPluginToolRoutingEvidence);
 
     results.push(routingEvidence);
@@ -922,9 +944,16 @@ function freezeRuntimePluginJsonValue(
   if (
     value === null ||
     typeof value === 'string' ||
-    typeof value === 'number' ||
     typeof value === 'boolean'
   ) {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new TypeError('Plugin tool output must be finite JSON.');
+    }
+
     return value;
   }
 
@@ -936,7 +965,7 @@ function freezeRuntimePluginJsonValue(
     return freezeRuntimePluginJsonObject(value);
   }
 
-  throw new TypeError('Plugin tool input must be JSON serializable.');
+  throw new TypeError('Plugin tool output must be JSON serializable.');
 }
 
 function createRoleModelAdapterRawOutput(

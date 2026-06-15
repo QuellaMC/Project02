@@ -715,6 +715,188 @@ describe('plugin-driven tool loop', () => {
     ).toEqual([undefined, ['local-session:message-1', 'local-session:message-2']]);
   });
 
+  it('continues after interim visible_reply progress callback failures', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const progress: unknown[] = [];
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'checking'
+            }
+          },
+          {
+            name: 'character_state.patch',
+            input: {
+              energy: 'high'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'finished'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('needs tool', 'evt_interim_progress_fails'),
+      session,
+      logStore,
+      roleModelAdapter: adapter,
+      onProgress(event) {
+        progress.push(event);
+
+        if (event.kind === 'visible_reply' && !event.final) {
+          throw new Error('interim progress observer failed');
+        }
+      }
+    });
+
+    expect(result.status).toBe('completed');
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'needs tool',
+      'finished'
+    ]);
+    expect(progress).toEqual([
+      {
+        kind: 'visible_reply',
+        final: false,
+        text: 'checking'
+      },
+      {
+        kind: 'tool_calls_requested',
+        round: 1,
+        toolNames: ['character_state.patch']
+      },
+      {
+        kind: 'tool_call_completed',
+        round: 1,
+        status: 'accepted',
+        toolName: 'character_state.patch'
+      },
+      {
+        kind: 'visible_reply',
+        final: true,
+        text: 'finished'
+      }
+    ]);
+    expect(
+      logStore.rawEvents().some((event) => event.kind === 'runtime_turn_rejected')
+    ).toBe(false);
+  });
+
+  it('keeps durable final visible_reply committed when progress callback fails', async () => {
+    const sessionId = 'session-final-progress-fails';
+    const {
+      session,
+      logStore,
+      storeRoot
+    } = await createDurableCharacterStateHarness(sessionId);
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'final reply'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('hello', 'evt_final_progress_fails'),
+      session,
+      logStore,
+      roleModelAdapter: adapter,
+      onProgress(event) {
+        if (event.kind === 'visible_reply' && event.final) {
+          throw new Error('final progress observer failed');
+        }
+      }
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.rawEvent).toMatchObject({
+      kind: 'runtime_turn_completed',
+      status: 'completed'
+    });
+    expect(
+      logStore.rawEvents().some((event) => event.kind === 'runtime_turn_rejected')
+    ).toBe(false);
+
+    const reopenedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+
+    expect(reopenedLogStore.conversationMessages().map((message) => message.text)).toEqual([
+      'hello',
+      'final reply'
+    ]);
+    expect(
+      reopenedLogStore
+        .rawEvents()
+        .filter(
+          (event) =>
+            event.kind === 'runtime_turn_completed' ||
+            event.kind === 'runtime_turn_rejected'
+        )
+        .map((event) => event.kind)
+    ).toEqual(['runtime_turn_completed']);
+
+    const restoredSession = createConversationSession({
+      id: sessionId,
+      visibleTranscript: reopenedLogStore.conversationMessages()
+    });
+    const followupResult = await runLocalUserMessageEvent({
+      event: createTestEvent('again', 'evt_final_progress_followup'),
+      session: restoredSession,
+      logStore: reopenedLogStore,
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'followup reply'
+              }
+            }
+          ]
+        }
+      ])
+    });
+
+    expect(followupResult.status).toBe('completed');
+    expect(reopenedLogStore.conversationMessages().map((message) => message.text)).toEqual([
+      'hello',
+      'final reply',
+      'again',
+      'followup reply'
+    ]);
+    expect(
+      reopenedLogStore
+        .rawEvents()
+        .filter(
+          (event) =>
+            event.kind === 'runtime_turn_completed' ||
+            event.kind === 'runtime_turn_rejected'
+        )
+        .map((event) => event.kind)
+    ).toEqual(['runtime_turn_completed', 'runtime_turn_completed']);
+  });
+
   it('preserves role-model evidence when interim visible_reply is invalid', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -1414,6 +1596,7 @@ async function createDurableCharacterStateHarness(sessionId: string) {
   });
 
   return {
+    storeRoot,
     session: createConversationSession({ id: sessionId }),
     logStore: createFileRuntimeLogStore({
       storeRoot,

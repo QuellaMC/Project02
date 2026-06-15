@@ -419,7 +419,11 @@ async function runSerializedLocalUserMessageEvent(
   async function emitProgress(
     progressEvent: LocalRuntimeTurnProgressEvent
   ): Promise<void> {
-    await options.onProgress?.(progressEvent);
+    try {
+      await options.onProgress?.(progressEvent);
+    } catch {
+      // Progress callbacks are observers; they must not change runtime commit semantics.
+    }
   }
 
   async function appendVisibleReplyForDecision(optionsForReply: {

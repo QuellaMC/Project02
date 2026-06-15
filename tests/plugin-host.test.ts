@@ -398,6 +398,110 @@ describe('runtime plugin host', () => {
     });
   });
 
+  it('rejects accepted source-required tool output backed only by unrelated source evidence', async () => {
+    const plugin = createSourceRequiredMemorySearchPlugin({
+      id: 'memory.source-required.unrelated.fixture',
+      evidenceKinds: ['policy', 'health']
+    });
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      message:
+        'Plugin "memory.source-required.unrelated.fixture" tool "memory.search" accepted result requires source references.'
+    });
+    expect(result.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'rejected',
+      policyOutcome: 'handler_rejected'
+    });
+  });
+
+  it('degrades optional source-required tool output backed only by unrelated source evidence', async () => {
+    const plugin = createSourceRequiredMemorySearchPlugin({
+      id: 'memory.source-required.degraded.fixture',
+      evidenceKinds: ['policy'],
+      handleToolCallFailure: 'degrade'
+    });
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+      message:
+        'Plugin "memory.source-required.degraded.fixture" tool "memory.search" accepted result requires source references.'
+    });
+    expect(result.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'degraded',
+      policyOutcome: 'optional_degraded'
+    });
+  });
+
+  it('accepts source-required tool output backed by accepted tool invocation source evidence', async () => {
+    const plugin = createSourceRequiredMemorySearchPlugin({
+      id: 'memory.source-required.accepted.fixture',
+      evidenceKinds: ['tool_invocation']
+    });
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected source-required memory.search to be accepted.');
+    }
+
+    expect(result.output).toEqual({
+      matched: 'Mira'
+    });
+    expect(result.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      sourceReferences: [
+        {
+          kind: 'memory',
+          id: 'source.tool_invocation'
+        }
+      ]
+    });
+  });
+
   it('budgets beforeRoleModelCall runtime notes before prompting', async () => {
     const plugin = createRuntimeNotesPlugin();
     const host = createRuntimePluginHost({ plugins: [plugin] });
@@ -548,6 +652,71 @@ function createRejectingMemorySearchPlugin(): RuntimePlugin {
           message:
             'lookup failed credential="open-sesame" https://user:pass@example.test/?token=abc',
           evidence: []
+        };
+      }
+    }
+  });
+}
+
+function createSourceRequiredMemorySearchPlugin(options: {
+  readonly id: string;
+  readonly evidenceKinds: readonly ('policy' | 'health' | 'tool_invocation')[];
+  readonly handleToolCallFailure?: 'reject_tool_call' | 'degrade';
+}): RuntimePlugin {
+  const manifest = memorySearchPluginManifest(options.id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...manifest,
+      runtimePolicy: {
+        ...manifest.runtimePolicy,
+        failureBehavior: {
+          ...manifest.runtimePolicy.failureBehavior,
+          handleToolCall:
+            options.handleToolCallFailure ??
+            manifest.runtimePolicy.failureBehavior.handleToolCall
+        }
+      }
+    },
+    providedTools: memorySearchProvidedTools().map((tool) =>
+      Object.freeze({
+        ...tool,
+        sourceReferencesRequired: true
+      })
+    ),
+    lifecycleHooks: {
+      handleToolCall(call, context) {
+        const query = call.input['query'];
+
+        if (typeof query !== 'string') {
+          throw new Error('Expected query string.');
+        }
+
+        return {
+          status: 'accepted',
+          output: {
+            matched: query
+          },
+          evidence: options.evidenceKinds.map((evidenceKind) =>
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId: options.id,
+              evidenceKind,
+              status: 'accepted',
+              summary: `${evidenceKind} evidence.`,
+              sourceReferences: [
+                {
+                  kind: 'memory',
+                  id: `source.${evidenceKind}`,
+                  title: `${evidenceKind} source`
+                }
+              ],
+              redactionLabels: []
+            })
+          )
         };
       }
     }

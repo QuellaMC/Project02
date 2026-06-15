@@ -1749,9 +1749,13 @@ function assertAcceptedToolEvidenceSourceReferences(options: {
 }): void {
   assertRequiredSourceReferences({
     sourceReferencesRequired: options.providedTool.sourceReferencesRequired,
-    sourceReferences: options.evidence.flatMap(
-      (evidence) => evidence.sourceReferences ?? []
-    ),
+    sourceReferences: options.evidence
+      .filter(
+        (evidence) =>
+          evidence.evidenceKind === 'tool_invocation' &&
+          evidence.status === 'accepted'
+      )
+      .flatMap((evidence) => evidence.sourceReferences ?? []),
     message: `Plugin "${options.plugin.manifest.id}" tool "${options.providedTool.name}" accepted result requires source references.`
   });
 }

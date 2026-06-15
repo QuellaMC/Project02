@@ -287,6 +287,84 @@ describe('role-model loop plugin tool routing', () => {
     expect(result.pluginToolResults[0]?.result.status).toBe('rejected');
   });
 
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY]
+  ])(
+    'rejects non-finite %s accepted plugin tool output from custom hosts',
+    async (label, outputValue) => {
+      let invocations = 0;
+      let handledCalls = 0;
+      const eventId = `evt_non_finite_${label.toLowerCase()}_plugin_output`;
+      const adapter = createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'memory.search',
+              input: {
+                query: 'Mira'
+              }
+            }
+          ]
+        },
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'continued after invalid output'
+              }
+            }
+          ]
+        }
+      ], () => {
+        invocations += 1;
+      });
+      const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+        handleToolCall() {
+          handledCalls += 1;
+
+          return Object.freeze({
+            status: 'accepted',
+            output: Object.freeze({
+              score: outputValue
+            }),
+            evidence: Object.freeze([])
+          } satisfies RuntimePluginToolCallResult);
+        }
+      });
+
+      const result = await runRoleModelLoop({
+        event: createTestEvent('search memory', eventId),
+        decisionContext: createTestDecisionContext(),
+        adapter,
+        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolHost,
+        runtimePluginContext: createTestPluginContext(eventId)
+      });
+
+      expect(result).toMatchObject({
+        status: 'rejected',
+        rejection: {
+          reason: roleModelPluginToolRejectedRejectionReason
+        }
+      });
+      expect(invocations).toBe(1);
+      expect(handledCalls).toBe(1);
+      expect(result.pluginToolResults).toHaveLength(1);
+      expect(result.pluginToolResults[0]).toMatchObject({
+        callId: 'round-1.1.memory.search',
+        result: {
+          status: 'rejected',
+          reason: 'invalid_tool_output',
+          message: 'Plugin tool output must be finite JSON.'
+        }
+      });
+      expect(result.rounds).toHaveLength(1);
+      expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
+    }
+  );
+
   it('counts successful tool observations toward required plugin tools across the turn', async () => {
     let invocations = 0;
     let handledCalls = 0;

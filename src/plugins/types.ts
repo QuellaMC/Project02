@@ -2299,9 +2299,10 @@ function redactBearerTokens(value: string): string {
 
 function redactSecretKeyValues(value: string): string {
   return value.replace(
-    /\b([A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|credential)[A-Za-z0-9_.-]*)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}]+)/giu,
+    /(["']?)(\b[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|credential)[A-Za-z0-9_.-]*\b)\1(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}]+)/giu,
     (
       _match: string,
+      keyQuote: string,
       key: string,
       separatorAndSpacing: string,
       rawValue: string
@@ -2309,7 +2310,7 @@ function redactSecretKeyValues(value: string): string {
       const quote =
         rawValue.startsWith('"') ? '"' : rawValue.startsWith("'") ? "'" : '';
 
-      return `${key}${separatorAndSpacing}${quote}[redacted]${quote}`;
+      return `${keyQuote}${key}${keyQuote}${separatorAndSpacing}${quote}[redacted]${quote}`;
     }
   );
 }

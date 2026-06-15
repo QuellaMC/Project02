@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createDecisionContext,
-  createRoleModelInputEnvelope
+  createRoleModelInputEnvelope,
+  type RoleModelPluginToolDefinition
 } from '../src/role-model/contracts.ts';
 import {
   createNvidiaRoleModelProviderAdapter,
@@ -129,6 +130,100 @@ describe('NVIDIA role-model provider', () => {
       tools.find((tool) => tool.function.name === 'plugin_list')
         ?.function.parameters.additionalProperties
     ).toBe(false);
+  });
+
+  it('keeps provider tool aliases globally unique for sanitized runtime collisions', async () => {
+    let capturedBody: unknown;
+    const fetchClient: NvidiaFetchClient = (_url, request) => {
+      capturedBody = JSON.parse(request.body);
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'tool_calls',
+                message: {
+                  role: 'assistant',
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: 'call_memory_search_dot',
+                      type: 'function',
+                      function: {
+                        name: 'memory_search',
+                        arguments: '{}'
+                      }
+                    },
+                    {
+                      id: 'call_memory_search_plain',
+                      type: 'function',
+                      function: {
+                        name: 'memory_search_2',
+                        arguments: '{}'
+                      }
+                    },
+                    {
+                      id: 'call_memory_search_two',
+                      type: 'function',
+                      function: {
+                        name: 'memory_search_2_2',
+                        arguments: '{}'
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaAliasCollisionInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(
+      (
+        capturedBody as {
+          readonly tools?: readonly {
+            readonly function: { readonly name: string };
+          }[];
+        }
+      ).tools?.map((tool) => tool.function.name)
+    ).toEqual([
+      visibleReplyModelToolName,
+      'memory_search',
+      'memory_search_2',
+      'memory_search_2_2'
+    ]);
+    expect(output.rejection).toBeUndefined();
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [
+        {
+          name: 'memory.search',
+          input: {}
+        },
+        {
+          name: 'memory_search',
+          input: {}
+        },
+        {
+          name: 'memory_search_2',
+          input: {}
+        }
+      ]
+    });
   });
 
   it('normalizes final assistant content through visible_reply', async () => {
@@ -417,4 +512,60 @@ function createNvidiaTestInputEnvelope() {
     }),
     pluginToolDefinitions: pluginHost.pluginToolDefinitions()
   });
+}
+
+function createNvidiaAliasCollisionInputEnvelope() {
+  return createRoleModelInputEnvelope({
+    event: createUserMessageRuntimeEvent(
+      'hello',
+      createRuntimeEventIdentity({
+        eventId: 'evt_nvidia_alias_collision',
+        traceId: 'trace_nvidia_alias_collision',
+        createdAt: '2026-06-15T00:00:00.000Z'
+      })
+    ),
+    decisionContext: createDecisionContext({
+      sessionId: 'session-nvidia-alias',
+      characterSnapshot: {
+        id: 'mira',
+        displayName: 'Mira'
+      }
+    }),
+    pluginToolDefinitions: [
+      createAliasCollisionToolDefinition({
+        pluginId: 'memory_alias_dot',
+        name: 'memory.search'
+      }),
+      createAliasCollisionToolDefinition({
+        pluginId: 'memory_alias_plain',
+        name: 'memory_search'
+      }),
+      createAliasCollisionToolDefinition({
+        pluginId: 'memory_alias_two',
+        name: 'memory_search_2'
+      })
+    ]
+  });
+}
+
+function createAliasCollisionToolDefinition(options: {
+  readonly pluginId: string;
+  readonly name: string;
+}): RoleModelPluginToolDefinition {
+  return Object.freeze({
+    pluginId: options.pluginId,
+    name: options.name,
+    description: `Alias collision fixture for ${options.name}.`,
+    requiredForUserTurn: false,
+    maxCallsPerUserTurn: 1,
+    inputContract: {
+      type: 'object',
+      fields: [],
+      additionalFields: false
+    },
+    validationOwner: 'plugin_host',
+    sideEffectLevel: 'runtime_read',
+    requiresConfirmation: false,
+    sourceReferencesRequired: false
+  } satisfies RoleModelPluginToolDefinition);
 }
