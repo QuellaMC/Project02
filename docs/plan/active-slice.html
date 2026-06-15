@@ -3,469 +3,107 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MVP-007 - Universal Agent Capability Contract</title>
+  <title>Source Layout Full Reset - Plugin-Named</title>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
     main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
     h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
     h1 { font-size: 2rem; }
     h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
-    h3 { margin-top: 22px; font-size: 1rem; }
     p { margin: 0 0 14px; }
-    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-    ul, ol { padding-left: 22px; }
+    ul { padding-left: 22px; }
     code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
     pre { overflow-x: auto; background: #202923; color: #f3f7f1; border-radius: 8px; padding: 16px; }
-    pre code { background: transparent; padding: 0; }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; }
     th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
     th { background: #edf1eb; }
-    blockquote { border-left: 4px solid #b9c6bd; margin: 16px 0; padding: 8px 14px; background: #fff; color: #34413d; }
     .status { display: inline-block; border: 1px solid #aebbad; border-radius: 999px; padding: 2px 10px; background: #fff; font-size: 0.9rem; }
     .meta { color: #4a5651; }
   </style>
 </head>
 <body>
   <main>
-    <h1>MVP-007 - Universal Agent Capability Contract</h1>
-    <p><span class="status">Status: implemented locally; PR review pending</span></p>
+    <h1>Source Layout Full Reset - Plugin-Named</h1>
+    <p><span class="status">Status: active implementation</span></p>
     <p class="meta">
-      Created: 2026-06-12. Updated: 2026-06-12. Active spec:
-      <code>docs/plan/active-slice.html</code>. Previous slice archived at
-      <code>docs/plan/completed/mvp-006-real-model-tools-character-state-patch.html</code>.
-      Suggested implementation branch: <code>feature/mvp-007-agent-capabilities</code>.
-    </p>
-
-    <h2>Implementation Status</h2>
-    <p>
-      MVP-007 is implemented locally across CT-01 through CT-05. The repo now has a static,
-      runtime-owned agent capability contract, a trusted in-process host, bounded capability
-      context and tool definitions, lifecycle hook evidence, inspect rendering, redaction policy,
-      and fixture-backed adapter proofs for first-party built-ins, OpenClaw-style manifests,
-      Hermes-style providers, TencentDB gateway shapes, and MCP-style tools and resources.
-    </p>
-    <p>
-      The implementation intentionally stops short of a full plugin system. It uses static,
-      in-process adapters and test fakes only. It does not add hot-loaded packages, dynamic imports,
-      marketplace installation, arbitrary plugin code execution, network calls, sidecars, plugin
-      management, or production TencentDB integration.
-    </p>
-
-    <h2>Source Context</h2>
-    <p>
-      Product direction comes from the Notion project hub
-      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>,
-      especially
-      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
-      <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
-      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>,
-      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>, and
-      <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.
-    </p>
-    <p>
-      Compatibility research for this draft used:
-      <a href="https://github.com/TencentCloud/TencentDB-Agent-Memory">TencentDB-Agent-Memory</a>,
-      its <code>openclaw.plugin.json</code>, its gateway endpoint shapes, its Hermes provider
-      README, the <a href="https://github.com/openclaw/openclaw">OpenClaw</a> memory-core manifest
-      and package contract, the
-      <a href="https://modelcontextprotocol.io/specification/2025-06-18">MCP 2025-06-18 specification</a>,
-      and the <a href="https://openai.github.io/openai-agents-python/">OpenAI Agents SDK</a>
-      concepts of agents, tools, handoffs, sessions, tracing, and MCP integration.
-    </p>
-    <p>
-      Local reusable research notes for implementation subthreads:
-      <a href="research/mvp-007-openclaw-contract-research.md">MVP-007 OpenClaw Contract Research</a>
-      and
-      <a href="research/mvp-007-hermes-tencent-memory-contract-research.md">MVP-007 Hermes/Tencent Memory Contract Research</a>.
-    </p>
-    <blockquote>
-      Long-term direction: the role model receives compact context and declared capabilities; the
-      model proposes tool or reply decisions; runtime-owned policy validates, commits, logs, and
-      invokes capability adapters.
-    </blockquote>
-    <p>
-      Local rebuild direction comes from <a href="../../AGENTS.md">AGENTS.md</a> and
-      <a href="../../AGENTS.repo.md">AGENTS.repo.md</a>. This slice is allowed to be broader than
-      the earliest relay slices because the current question is explicitly about the host boundary
-      needed before robust memory and plugin-like systems can be integrated.
-    </p>
-
-    <h2>Current Product Before This Slice</h2>
-    <p>
-      MVP-006 gives the repo a real model-provider path, a built-in model tool registry, a
-      durable current character state, and validated <code>visible_reply</code> plus optional
-      <code>character_state.patch</code> tool calls. The runtime still owns validation and commit.
-      Local chat remains deterministic by default and can opt into the NVIDIA-compatible provider.
-    </p>
-    <pre><code>terminal input
-  -> create USER_MESSAGE RuntimeEvent
-  -> load CharacterRuntimeState
-  -> build DecisionContext with recent visible messages and livingStateBrief
-  -> render role-model prompt with built-in tool schemas
-  -> provider or local adapter returns ordered toolCalls
-  -> parse and validate visible_reply and optional character_state.patch
-  -> commit visible reply, state patch, and evidence through local runtime logs
-  -> inspect reads provider, tool-call, and state-patch evidence</code></pre>
-    <p>
-      The limitation is now a host-boundary problem. Built-in tools work, but external memory,
-      retrieval, OpenClaw-style plugin manifests, Hermes memory providers, TencentDB gateway calls,
-      and MCP-style servers would each need custom runtime wiring. If implemented directly now,
-      they would likely duplicate tool description, context contribution, lifecycle, health,
-      policy, and evidence logic.
-    </p>
-
-    <h2>Product After This Slice</h2>
-    <p>
-      The runtime should have one small, explicit capability-host contract. First-party built-ins
-      and adapter fakes can register through that contract, contribute bounded model context,
-      expose model-callable tools, handle tool calls, run lifecycle hooks, report health, and
-      emit inspectable evidence. The current chat behavior should remain compatible unless a
-      capability is deliberately enabled in a test or future slice.
-    </p>
-    <pre><code>terminal input
-  -> create USER_MESSAGE RuntimeEvent
-  -> create RuntimeCapabilityContext
-  -> static capabilities contribute context items and provided tools before the model call
-  -> role-model input envelope receives bounded capability context and allowed tool definitions
-  -> model proposes visible_reply plus optional capability tool calls
-  -> runtime validates tool calls against capability policy
-  -> capability handlers return planned results, rejections, or evidence
-  -> runtime commits visible reply and durable evidence
-  -> after-turn hooks run only after commit; rejected turns do not write memory captures
-  -> inspect shows capability contributions, tool routing, hook outcomes, health, and redactions</code></pre>
-    <p>
-      This is not memory implementation yet. It is the host contract that lets TencentDB-Agent-Memory
-      or another memory backend be adapted later without replacing the role-model loop or creating a
-      second tool/runtime/event system.
+      Created: 2026-06-15. Active spec: <code>docs/plan/active-slice.html</code>.
+      Implementation branch: <code>feature/mvp-007-agent-capabilities</code>.
     </p>
 
     <h2>Goal</h2>
     <p>
-      Define and wire a universal agent capability contract for static, runtime-owned adapters. The
-      contract must cover manifest metadata, compatibility metadata, configuration shape,
-      lifecycle hooks, tool definitions, context-provider contributions, memory-style recall and
-      capture timing, policy, health, and inspectable evidence. It must prove compatibility through
-      fake adapters for OpenClaw-style manifests, Hermes-style memory providers, TencentDB gateway
-      endpoints, MCP-style tool/resource servers, and existing first-party built-ins.
+      Reset the pre-release source layout and public surface so the repository is organized around
+      current product boundaries instead of old MVP compatibility paths. The reset keeps plugin
+      terminology and keeps the MVP-007 plugin host direction.
     </p>
 
-    <h2>Core Design</h2>
-    <p>
-      The contract is universal at the boundary, not universal in implementation. Domain modules
-      continue to own domain logic. The capability host only provides one runtime-facing way to
-      declare, invoke, validate, log, and inspect capability behavior.
-    </p>
-    <pre><code>AgentCapability
-  -> manifest
-  -> configSchema
-  -> providedTools
-  -> contextProviders
-  -> lifecycleHooks
-  -> runtimePolicy
-  -> evidenceSchema
+    <h2>Before and After</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Before</th>
+          <th>After</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Most production files lived directly under <code>src/</code>, and many tests imported through a broad <code>src/index.ts</code> barrel.</td>
+          <td>Source code is grouped under <code>cli/</code>, <code>core/</code>, <code>runtime/</code>, <code>runtime/storage/</code>, <code>role-model/</code>, and <code>plugins/</code>. Tests import concrete modules.</td>
+        </tr>
+        <tr>
+          <td>The old relay command and relay tests stayed as compatibility scaffolding.</td>
+          <td><code>pnpm chat</code> and <code>pnpm inspect</code> are canonical. Relay code and script entries are removed.</td>
+        </tr>
+        <tr>
+          <td><code>character_state.patch</code> was defined both as a built-in model tool and as built-in plugin behavior.</td>
+          <td><code>visible_reply</code> is the only built-in visible output tool. <code>character_state.patch</code> is owned by the Character State plugin.</td>
+        </tr>
+        <tr>
+          <td>Top-level role-model <code>text</code> could look like a visible output path.</td>
+          <td>Top-level <code>text</code> is folded model text: hidden by default, optionally shown by CLI toggle, and never committed as visible conversation.</td>
+        </tr>
+        <tr>
+          <td>Adapter fixture mappers were exported beside production plugin APIs.</td>
+          <td>Adapter proof mappers live under <code>src/plugins/adapter-proofs/</code> and are not part of the production plugin index.</td>
+        </tr>
+      </tbody>
+    </table>
 
-RuntimeCapabilityHost
-  -> static registration of trusted in-process adapters
-  -> beforeRoleModelCall contribution phase
-  -> model tool-call routing phase
-  -> afterTurnCommitted capture phase
-  -> sessionEnd and health phases
-  -> policy, timeout, rejection, and evidence normalization</code></pre>
-    <p>
-      The common denominator across the researched agent systems is not a shared file format. It is
-      a repeated contract pattern: declare identity and compatibility, expose tools or context,
-      receive runtime context, run lifecycle hooks, return structured outputs or errors, and leave
-      audit evidence. MVP-007 turns that pattern into the repo's local contract.
-    </p>
-
-    <h2>Current Scope</h2>
+    <h2>Scope</h2>
     <ul>
-      <li>Shared TypeScript contracts for <code>AgentCapabilityManifest</code>, <code>AgentCapability</code>, <code>RuntimeCapabilityContext</code>, lifecycle hooks, provided tools, context items, health, configuration metadata, and evidence snapshots.</li>
-      <li>A static in-process capability registry for trusted first-party adapters and test adapters.</li>
-      <li>Runtime hook points for <code>beforeRoleModelCall</code>, <code>handleToolCall</code>, <code>afterTurnCommitted</code>, <code>onSessionEnd</code>, and <code>health</code>.</li>
-      <li>Bounded context-provider contributions that can be added to <code>DecisionContext</code> without exposing full runtime internals.</li>
-      <li>Capability-provided model tool definitions that reuse the existing allowed-tool and validation path instead of bypassing model-tool validation.</li>
-      <li>Memory-shaped lifecycle semantics: recall/search before prompt, capture/sync only after durable commit, session end after local session closure, and health checks for degraded providers.</li>
-      <li>Policy metadata for side-effect level, confirmation needs, timeout behavior, required vs optional capability failure, privacy/redaction labels, and source-reference requirements.</li>
-      <li>Durable evidence for capability registration, contribution, invocation, rejection, timeout, health, config fingerprint, context source references, and after-commit hook outcomes.</li>
-      <li>Inspect output that can show capability evidence without re-running providers or mutating runtime state.</li>
-      <li>A read-only capability discovery surface so the operator can inspect installed, registered, enabled, and available-for-turn capabilities, and the model can optionally call a bounded discovery tool for current-turn safe summaries.</li>
-      <li>Adapter-proof fixtures for OpenClaw-style manifests, TencentDB-Agent-Memory gateway endpoints, Hermes memory-provider behavior, MCP tool/resource concepts, and current first-party built-in tools.</li>
-      <li>Compatibility preservation for existing MVP-001 through MVP-006 CLI, durable storage, role-model evidence, provider selection, and character-state behavior.</li>
+      <li>Break old import paths, old CLI scripts, and compatibility-only tests because there is no official release.</li>
+      <li>Keep <code>plugin</code> names and <code>RuntimePlugin*</code> types.</li>
+      <li>Keep canonical chat, inspect, local runtime storage, role-model <code>toolCalls</code>, folded top-level <code>text</code>, and plugin evidence behavior.</li>
+      <li>Keep role-model decision versions internal: providers return <code>toolCalls</code> and optional folded <code>text</code>, while the runtime stamps durable decision versions.</li>
+      <li>Keep OpenClaw, Hermes, TencentDB, and MCP real-shape adapter proofs as fixture proof code.</li>
     </ul>
-
-    <h2>Explicit Non-Goals</h2>
-    <ul>
-      <li>No dynamic package loading, dynamic imports, npm plugin installation, marketplace, plugin discovery from disk, or arbitrary third-party code execution.</li>
-      <li>No sandbox, permissions UI, OAuth, secrets store, user-installed plugin management, or broad permission matrix.</li>
-      <li>No production TencentDB-Agent-Memory dependency, sidecar process supervisor, live gateway call, SQLite/sqlite-vec storage, BM25/vector index, or real embedding pipeline.</li>
-      <li>No native memory system that duplicates TencentDB-Agent-Memory internals.</li>
-      <li>No generic JSON Schema framework unless the slice proves the current simple input-contract shape cannot represent required compatibility fixtures.</li>
-      <li>No external side-effect integrations such as files, documents, calendars, email, money, browser automation, account changes, or outgoing messages.</li>
-      <li>No scheduler, background worker queue, proactive delivery, Live2D renderer, asset registry, or provider transport beyond local CLI paths already present.</li>
-      <li>No model-initiated plugin install, uninstall, enable, disable, config mutation, package update, or secrets inspection.</li>
-      <li>No replay UI and no re-execution of model calls or capability hooks from stored logs.</li>
-      <li>No breaking change to existing chat, trace, inspect, durable session, NVIDIA provider, built-in model tools, or character-state patch contracts unless this draft is explicitly revised.</li>
-    </ul>
-
-    <h2>Finished Slice</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Before MVP-007</th>
-          <th>After MVP-007</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Built-in tools are described by local tool registry code only.</td>
-          <td>Built-in tools can be represented as first-party capabilities through the same static host contract that future adapters use.</td>
-        </tr>
-        <tr>
-          <td>DecisionContext has recent visible messages, runtime notes, and living-state brief.</td>
-          <td>DecisionContext can also receive bounded capability-contributed context items with source references and budget metadata.</td>
-        </tr>
-        <tr>
-          <td>Memory integration would need custom recall, capture, and inspect wiring.</td>
-          <td>Memory-shaped adapters have standard before-prompt recall/search and after-commit capture/session-end hooks.</td>
-        </tr>
-        <tr>
-          <td>OpenClaw, Hermes, TencentDB, MCP, and first-party modules look like separate integration problems.</td>
-          <td>Each can be mapped into one internal capability contract by adapter code and tested with fixtures.</td>
-        </tr>
-        <tr>
-          <td>Capability failures would be ad hoc provider errors.</td>
-          <td>Failures have shared policy, timeout, rejection, health, and durable evidence semantics.</td>
-        </tr>
-        <tr>
-          <td>Inspect shows role-model, provider, tool-call, and state-patch evidence.</td>
-          <td>Inspect also shows capability registration, contributions, invocations, hook outcomes, health, redactions, and source refs.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <h2>Functional Requirements</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Requirement</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>FR-1</td>
-          <td>The repo defines a stable <code>AgentCapabilityManifest</code> with id, display name, version, kind, compatibility metadata, declared capabilities, config metadata, and local trust level.</td>
-        </tr>
-        <tr>
-          <td>FR-2</td>
-          <td>The repo defines <code>RuntimeCapabilityContext</code> containing session, turn, event, trace, timestamp, character, and privacy/redaction information without exposing mutable runtime internals.</td>
-        </tr>
-        <tr>
-          <td>FR-3</td>
-          <td>The static registry rejects duplicate ids, incompatible contract versions, missing required declarations, and unsupported capability kinds before runtime use.</td>
-        </tr>
-        <tr>
-          <td>FR-4</td>
-          <td>The <code>beforeRoleModelCall</code> hook can contribute bounded context items, model tool definitions, runtime notes, and evidence snapshots.</td>
-        </tr>
-        <tr>
-          <td>FR-5</td>
-          <td>Capability-provided tools enter the existing allowed-tool path and cannot mutate state directly from model output.</td>
-        </tr>
-        <tr>
-          <td>FR-6</td>
-          <td>The <code>handleToolCall</code> hook validates capability tool calls, returns accepted output or structured rejection, and records side-effect and confirmation metadata.</td>
-        </tr>
-        <tr>
-          <td>FR-7</td>
-          <td>The <code>afterTurnCommitted</code> hook runs only after durable visible conversation and raw-event evidence for an accepted turn; rejected role-model or commit decisions do not trigger memory capture.</td>
-        </tr>
-        <tr>
-          <td>FR-8</td>
-          <td>Capability failures follow explicit policy: required before-model failures reject the turn, optional before-model failures degrade with evidence, after-commit failures keep the turn committed and log failure evidence.</td>
-        </tr>
-        <tr>
-          <td>FR-9</td>
-          <td>Health checks and session-end hooks are callable through the host and produce inspectable, redacted evidence without changing visible conversation state.</td>
-        </tr>
-        <tr>
-          <td>FR-10</td>
-          <td>OpenClaw-style manifest fixtures, TencentDB gateway fixtures, Hermes memory-provider fixtures, MCP tool/resource fixtures, and first-party built-in fixtures can all map into the internal contract without special runtime paths.</td>
-        </tr>
-        <tr>
-          <td>FR-11</td>
-          <td>Existing MVP-006 local chat, inspect, durable storage, provider selection, and character-state patch tests remain compatible when no additional capability is enabled.</td>
-        </tr>
-        <tr>
-          <td>FR-12</td>
-          <td>The runtime exposes read-only capability discovery: operator inspect can show installed/registered/enabled/available-for-turn status, while any model-facing discovery tool returns only safe current-turn summaries without secrets, private config, filesystem paths, or disabled capability internals.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <h2>Acceptance Criteria</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Criterion</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>AC-1</td>
-          <td>A focused contract test can register first-party built-in tools and at least one fake memory capability through the same static registry.</td>
-        </tr>
-        <tr>
-          <td>AC-2</td>
-          <td>Duplicate capability ids, incompatible contract versions, missing required capability declarations, and malformed tool definitions are rejected before user-turn execution.</td>
-        </tr>
-        <tr>
-          <td>AC-3</td>
-          <td>A fake before-model memory capability can contribute bounded context items with source refs, and those items appear in the role-model input envelope with budget metadata.</td>
-        </tr>
-        <tr>
-          <td>AC-4</td>
-          <td>A fake capability-provided search tool can be allowed, called by a model decision, validated by the host, and logged without bypassing existing role-model tool validation.</td>
-        </tr>
-        <tr>
-          <td>AC-5</td>
-          <td>A fake after-commit memory capture hook runs after accepted durable commit evidence and does not run for malformed model output, invalid visible reply, invalid state patch, or input validation rejection.</td>
-        </tr>
-        <tr>
-          <td>AC-6</td>
-          <td>Optional capability failure degrades with clear evidence; required capability failure rejects before commit; after-commit failure keeps the accepted turn visible and durable.</td>
-        </tr>
-        <tr>
-          <td>AC-7</td>
-          <td>Inspect output can show capability manifests, contribution summaries, tool invocations, hook outcomes, health status, redacted config fingerprints, and source references for a stored turn.</td>
-        </tr>
-        <tr>
-          <td>AC-8</td>
-          <td>Adapter fixture tests prove the internal contract can represent OpenClaw manifest metadata, TencentDB recall/capture/search/session/health endpoints, Hermes prefetch/sync/search/session behavior, and MCP tools/resources.</td>
-        </tr>
-        <tr>
-          <td>AC-9</td>
-          <td>Automated tests use only fakes and fixtures; no live model provider, TencentDB sidecar, network service, database, or external plugin process is required.</td>
-        </tr>
-        <tr>
-          <td>AC-10</td>
-          <td><code>pnpm lint</code>, <code>pnpm typecheck</code>, <code>pnpm test</code>, HTML parsing for docs, and <code>git diff --check</code> pass before PR handoff.</td>
-        </tr>
-        <tr>
-          <td>AC-11</td>
-          <td>A fake discovery capability proves the model can request a bounded current-turn capability list, and inspect proves the operator can see fuller capability registration and enablement state with secrets redacted.</td>
-        </tr>
-      </tbody>
-    </table>
 
     <h2>Implementation Boundaries</h2>
+    <pre><code>src/
+  cli/
+  core/
+  runtime/
+    storage/
+  role-model/
+    providers/
+  plugins/
+    adapter-proofs/
+    builtin/character-state/</code></pre>
     <ul>
-      <li>The first concrete caller is the existing user-message turn path in <code>src/local-runtime.ts</code>; do not create a second runtime path.</li>
-      <li>Existing built-in model tools remain the initial first-party capability proof. Do not duplicate their validation or state-patch semantics.</li>
-      <li>Capability context contributions must be compact views. Raw memory stores, full transcript stores, and external indexes remain outside DecisionContext.</li>
-      <li>Adapters may normalize foreign contracts into local types. Foreign manifests must not become the runtime's internal source of truth.</li>
-      <li>Capability discovery is read-only. It may report ids, display names, kinds, enabled status, current-turn availability, provided tool names, health summaries, and redacted config fingerprints; it must not expose secrets or let the model manage plugins.</li>
-      <li>Evidence is additive. Capability evidence should attach to existing raw-event and inspect paths rather than creating a parallel log store.</li>
-      <li>Policy decisions belong in runtime-owned host code. Model output and adapter output may propose work, but they do not directly mutate durable state.</li>
+      <li><code>src/index.ts</code> remains a tiny package health entrypoint, not an internal dependency barrel.</li>
+      <li>Runtime code imports concrete modules directly.</li>
+      <li>Plugin-host validation decides which executable tools are model-facing for a turn.</li>
+      <li>No storage or CLI migration layer is added.</li>
     </ul>
 
-    <h2>Child Task Split</h2>
-    <p>
-      The split is intentionally sized for five month-scale child threads. CT-01 is the shared
-      contract gate; CT-02 through CT-05 can proceed independently after that gate by using fakes,
-      fixtures, and narrow integration points until parent review resolves the final merge shape.
-    </p>
-    <table>
-      <thead>
-        <tr>
-          <th>Task</th>
-          <th>Thread Scope</th>
-          <th>Dependency</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><a href="child-tasks/mvp-007-ct01-agent-capability-manifest-contract.md">CT-01</a></td>
-          <td>Freeze the universal manifest, capability, runtime context, tool, context item, policy, and evidence contracts.</td>
-          <td>Starts first. Other CTs consume this contract.</td>
-        </tr>
-        <tr>
-          <td><a href="child-tasks/mvp-007-ct02-runtime-lifecycle-hook-host.md">CT-02</a></td>
-          <td>Wire the static host into user-turn lifecycle hooks without changing default behavior.</td>
-          <td>Can begin after CT-01 draft exports exist.</td>
-        </tr>
-        <tr>
-          <td><a href="child-tasks/mvp-007-ct03-tool-context-provider-contract.md">CT-03</a></td>
-          <td>Implement capability-provided tools and context-provider contributions through the role-model contract.</td>
-          <td>Can begin after CT-01; integrates with CT-02 host.</td>
-        </tr>
-        <tr>
-          <td><a href="child-tasks/mvp-007-ct04-capability-evidence-policy-inspect.md">CT-04</a></td>
-          <td>Add policy outcomes, durable evidence, redaction, and inspect rendering for capabilities.</td>
-          <td>Can begin from CT-01 snapshot factories, then wire to CT-02 and CT-03.</td>
-        </tr>
-        <tr>
-          <td><a href="child-tasks/mvp-007-ct05-adapter-compatibility-proofs.md">CT-05</a></td>
-          <td>Prove OpenClaw, Hermes, TencentDB, MCP, and first-party built-ins map into the universal contract with fakes and fixtures.</td>
-          <td>Can begin after CT-01; depends on final host evidence for integration checks.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <h2>Thread Coordination</h2>
+    <h2>Acceptance Criteria</h2>
     <ul>
-      <li>CT-01 is the contract gate. It should land or be shared as the stable export set before other threads implement against it.</li>
-      <li>CT-01 and CT-05 should read the local research notes under <code>docs/plan/research/</code> before defining compatibility fields or adapter fixtures.</li>
-      <li>CT-02 through CT-05 should avoid editing each other's domain files until CT-01 is stable. Use fake adapters and fixture tests where possible.</li>
-      <li>Each child thread should keep changes inside its task packet, run focused tests, and hand off unresolved integration risks explicitly.</li>
-      <li>The parent integration review owns final naming, cross-task conflict resolution, compatibility checks, and this active-slice update.</li>
-    </ul>
-
-    <h2>Test Plan</h2>
-    <ul>
-      <li>Focused contract tests for manifest validation, registry validation, runtime context freezing, tool definitions, context items, hook results, and policy failures.</li>
-      <li>Role-model loop tests for capability-contributed context, capability-provided tool definitions, allowed-tool enforcement, and tool-call routing.</li>
-      <li>Local-runtime integration tests for before-model contributions, after-commit capture timing, rejected-turn non-capture, optional degradation, and required rejection.</li>
-      <li>Inspect tests for stored capability evidence and redaction.</li>
-      <li>Adapter fixture tests for OpenClaw-style manifest, TencentDB gateway, Hermes provider, MCP tools/resources, and first-party built-ins.</li>
-      <li>Regression tests proving default local chat and existing MVP-006 behavior do not change when no additional capability is registered.</li>
-    </ul>
-
-    <h2>Fake Vs Real Plugin Testing</h2>
-    <p>
-      MVP-007 should not execute real external plugin code in automated tests. The test strategy is
-      fake executable capabilities plus real-shape compatibility fixtures. This proves the host
-      contract and adapter mapping without introducing dynamic loading, sidecar processes, network
-      services, databases, or sandbox policy before the runtime boundary is stable.
-    </p>
-    <ul>
-      <li>Fake executable capabilities: in-process test adapters that implement the local <code>AgentCapability</code> contract for memory recall, memory capture, search tools, health, required failures, optional degradation, timeouts, and malformed tool declarations.</li>
-      <li>Real-shape fixtures: source-derived OpenClaw, Hermes/Tencent, MCP, and first-party built-in fixture data that maps into the local contract but is never executed as third-party code.</li>
-      <li>Future manual smoke: a production TencentDB-Agent-Memory sidecar or real OpenClaw package can be tested in a later adapter slice behind explicit opt-in setup, but it is not part of MVP-007 CI.</li>
-    </ul>
-    <p>
-      In short: CI gets fake plugins that actually run through the host, plus fixture plugins that
-      prove compatibility. Real plugin execution is a later integration milestone.
-    </p>
-
-    <h2>Questions Settled During Implementation</h2>
-    <ul>
-      <li>The first post-slice production adapter remains future work; MVP-007 proves TencentDB-Agent-Memory compatibility with fakes and fixtures only.</li>
-      <li>Capability-provided tools share the existing role-model tool-call envelope and validation path, with host-owned routing for non-built-in tools.</li>
-      <li>Required before-model capability failures reject the turn before commit; optional before-model failures degrade with evidence; after-commit failures preserve the accepted visible turn.</li>
-      <li>The contract uses the local input-contract shape for this slice. JSON Schema remains outside scope until a real adapter needs it.</li>
-    </ul>
-
-    <h2>Future Ideas Parked Outside MVP-007</h2>
-    <ul>
-      <li>Production TencentDB-Agent-Memory adapter with sidecar process management, config, secrets, and live gateway health.</li>
-      <li>Native unified retrieval index or exact source expansion if external memory providers cannot satisfy product needs.</li>
-      <li>User-facing capability enable/disable configuration, permission prompts, and safety review UI.</li>
-      <li>Background workers for async memory consolidation, compaction, scheduled directives, reminders, and proactive events.</li>
-      <li>Dynamic plugin installation and sandboxing after the static host contract has real pressure.</li>
-      <li>Replay and debugger UI for capability invocations and context contributions.</li>
+      <li>No production or test imports reference old top-level source files removed by the reset.</li>
+      <li>No relay command, relay module, or relay tests remain.</li>
+      <li><code>character_state.patch</code> appears in role-model decisions only through plugin-provided tool definitions.</li>
+      <li>Provider prompts do not ask the model to emit a top-level <code>version</code>; parsed decisions still carry the internal role-model contract version.</li>
+      <li>Folded top-level <code>text</code> tests prove it is hidden by default and not committed as visible conversation.</li>
+      <li><code>pnpm check</code>, strict unused-symbol TypeScript, <code>git diff --check</code>, and chat plus inspect smoke pass.</li>
     </ul>
   </main>
 </body>

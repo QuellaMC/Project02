@@ -2,15 +2,21 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createDecisionContext,
-  createNvidiaRoleModelProviderConfigFromEnv,
   createRoleModelInputEnvelope,
-  createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent,
+  roleModelDecisionOutputContractText
+} from '../src/role-model/contracts.ts';
+import {
+  createNvidiaRoleModelProviderConfigFromEnv,
   nvidiaModelEnvName,
-  renderNvidiaMessages,
-  roleModelDecisionOutputContractText,
+  renderNvidiaMessages
+} from '../src/role-model/providers/nvidia.ts';
+import {
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent
+} from '../src/runtime/event.ts';
+import {
   visibleReplyModelToolName
-} from '../src/index.ts';
+} from '../src/role-model/model-tools.ts';
 
 describe('NVIDIA role-model provider', () => {
   it('reads the model name from environment configuration', () => {
@@ -44,11 +50,51 @@ describe('NVIDIA role-model provider', () => {
       })
     );
     const rendered = messages.map((message) => message.content).join('\n');
+    const userPayload = JSON.parse(messages[1]?.content ?? '{}') as {
+      readonly responseContract?: {
+        readonly allowedTopLevelFields?: readonly string[];
+        readonly forbiddenTopLevelFields?: readonly string[];
+      };
+      readonly runtimeInput?: {
+        readonly event?: {
+          readonly payload?: {
+            readonly currentUserMessage?: string;
+          };
+        };
+      };
+    };
 
     expect(roleModelDecisionOutputContractText).toContain(
       'visible_reply is the only non-executed output tool'
     );
-    expect(rendered).toContain('outputContract');
+    expect(rendered).toContain(
+      'Do not include a top-level "version" field'
+    );
+    expect(rendered).toContain(
+      'the runtime stamps its internal decision version'
+    );
+    expect(rendered).toContain('Do not copy input envelope fields');
+    expect(Object.keys(userPayload)).toEqual([
+      'responseContract',
+      'runtimeInput'
+    ]);
+    expect(userPayload.responseContract?.allowedTopLevelFields).toEqual([
+      'toolCalls',
+      'text'
+    ]);
+    expect(userPayload.responseContract?.forbiddenTopLevelFields).toEqual(
+      expect.arrayContaining([
+        'event',
+        'recentVisibleMessages',
+        'toolObservations',
+        'pluginContextItems',
+        'characterSnapshot'
+      ])
+    );
+    expect(userPayload.runtimeInput?.event?.payload?.currentUserMessage).toBe(
+      'hello'
+    );
+    expect(rendered).not.toContain('mvp-006.tool_calls.v1');
     expect(rendered).toContain(visibleReplyModelToolName);
     expect(rendered).not.toContain('"action"');
   });

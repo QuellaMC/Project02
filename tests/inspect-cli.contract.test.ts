@@ -6,16 +6,25 @@ import { Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 
 import {
-  createConversationSession,
-  createFileRuntimeLogStore,
-  createLocalRuntimeSessionStore,
+  createConversationSession
+} from '../src/core/conversation.ts';
+import {
+  createFileRuntimeLogStore
+} from '../src/runtime/storage/file-runtime-log-store.ts';
+import {
+  createLocalRuntimeSessionStore
+} from '../src/runtime/storage/session-store.ts';
+import {
   createUserMessageRuntimeEvent,
-  createRuntimeEventIdentity,
-  roleModelDecisionContractVersion,
-  runLocalUserMessageEvent,
-  type RoleModelAdapter
-} from '../src/index.ts';
-import { runInspectCliFromArgs } from '../src/inspect-cli.ts';
+  createRuntimeEventIdentity
+} from '../src/runtime/event.ts';
+import {
+  runLocalUserMessageEvent
+} from '../src/runtime/local.ts';
+import type {
+  RoleModelAdapter
+} from '../src/role-model/loop.ts';
+import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
 
 describe('inspect CLI plugin evidence', () => {
   it('shows model rounds and per-tool plugin events', async () => {
@@ -78,7 +87,6 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
       if (calls === 1) {
         return {
           rawOutputText: JSON.stringify({
-            version: roleModelDecisionContractVersion,
             toolCalls: [
               {
                 name: 'character_state.patch',
@@ -93,7 +101,6 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
 
       return {
         rawOutputText: JSON.stringify({
-          version: roleModelDecisionContractVersion,
           toolCalls: [
             {
               name: 'visible_reply',

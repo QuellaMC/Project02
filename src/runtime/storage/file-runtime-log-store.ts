@@ -5,7 +5,7 @@ import {
   selectRecentVisibleMessages,
   type VisibleMessage,
   validateRestoredVisibleTranscript
-} from './conversation.ts';
+} from '../../core/conversation.ts';
 import {
   createLocalRuntimeSessionPaths,
   decodeConversationLogRecord,
@@ -17,14 +17,14 @@ import {
   LocalRuntimeStorageContractError,
   type LocalRuntimeSessionPaths,
   type LocalRuntimeSessionPathsOptions
-} from './local-storage.ts';
+} from './layout.ts';
 import type {
   ConversationLogRecord,
   RawEventLogRecord,
   RuntimeLogStore,
   RuntimeTraceEntry
-} from './runtime-log.ts';
-import { isTerminalRawEventLogRecord } from './runtime-log.ts';
+} from '../log.ts';
+import { isTerminalRawEventLogRecord } from '../log.ts';
 import { assertLocalRuntimeSessionReadable } from './session-store.ts';
 
 export type CreateFileRuntimeLogStoreOptions = LocalRuntimeSessionPathsOptions;

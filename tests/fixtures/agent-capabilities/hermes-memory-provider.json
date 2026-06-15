@@ -43,7 +43,7 @@
   },
   "behavior": {
     "prefetch": {
-      "context": "Hermes prefetch recalls that Mira should keep capability evidence compact.",
+      "context": "Hermes prefetch recalls that Mira should keep plugin evidence compact.",
       "estimatedTokens": 12,
       "confidence": 0.78
     },

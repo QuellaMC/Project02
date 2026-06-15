@@ -1,11 +1,11 @@
-import type { VisibleMessage } from './conversation.ts';
+import type { VisibleMessage } from '../core/conversation.ts';
 import {
   createParsedRoleModelDecisionSnapshot,
   createRoleModelIOSnapshot,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelDecisionRejection,
   type RoleModelIOSnapshot
-} from './role-model-contracts.ts';
+} from '../role-model/contracts.ts';
 import {
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginTurnEvidenceSnapshot,
@@ -13,9 +13,9 @@ import {
   type RuntimePluginToolCallResult,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginTurnEvidenceSnapshot
-} from './plugins/types.ts';
-import type { RuntimeEventIdentity, RuntimeEventType } from './runtime-event.ts';
-import type { LocalRuntimeSessionPaths } from './local-storage.ts';
+} from '../plugins/types.ts';
+import type { RuntimeEventIdentity, RuntimeEventType } from './event.ts';
+import type { LocalRuntimeSessionPaths } from './storage/layout.ts';
 
 export type RuntimeTurnStatus = 'completed' | 'rejected';
 

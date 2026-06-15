@@ -4,7 +4,7 @@ import {
   createLocalRuntimeSessionPaths,
   decodeRawEventLogRecord,
   localRuntimeStorageSchemaVersion
-} from '../src/index.ts';
+} from '../src/runtime/storage/layout.ts';
 
 describe('local storage plugin schema', () => {
   it('uses schema version 3 and no top-level character state path', () => {

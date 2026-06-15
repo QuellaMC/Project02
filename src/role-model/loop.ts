@@ -2,7 +2,7 @@ import {
   createDeterministicCharacterAgent,
   validateCharacterAgentReply,
   type CharacterAgent
-} from './conversation.ts';
+} from '../core/conversation.ts';
 import {
   roleModelPluginToolRejectedRejectionReason,
   createParsedRoleModelDecisionSnapshot,
@@ -31,7 +31,7 @@ import {
   type RoleModelIOSnapshot,
   type RoleModelProviderMetadata,
   type RoleModelToolObservation
-} from './role-model-contracts.ts';
+} from './contracts.ts';
 import {
   characterStatePatchModelToolName,
   visibleReplyModelToolName,
@@ -43,10 +43,10 @@ import type {
   RuntimePluginToolCall,
   RuntimePluginToolCallResult,
   RuntimePluginContext
-} from './plugins/types.ts';
-import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from './runtime-event.ts';
+} from '../plugins/types.ts';
+import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from '../runtime/event.ts';
 
-export { parseRoleModelDecision } from './role-model-contracts.ts';
+export { parseRoleModelDecision } from './contracts.ts';
 
 export type RoleModelAdapterRawOutput = {
   readonly rawOutputText: string;

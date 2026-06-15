@@ -2,11 +2,10 @@ import { Readable, Writable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  roleModelDecisionContractVersion,
-  type RoleModelAdapter
-} from '../src/index.ts';
-import { runChatCli } from '../src/chat-cli.ts';
+import type {
+  RoleModelAdapter
+} from '../src/role-model/loop.ts';
+import { runChatCli } from '../src/cli/chat.ts';
 
 describe('chat CLI folded top-level model text', () => {
   it('hides top-level model text by default', async () => {
@@ -30,7 +29,6 @@ function createTextOnlyAdapter(): RoleModelAdapter {
     invoke() {
       return {
         rawOutputText: JSON.stringify({
-          version: roleModelDecisionContractVersion,
           text: 'folded model note',
           toolCalls: []
         })

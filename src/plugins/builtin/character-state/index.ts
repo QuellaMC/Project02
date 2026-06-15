@@ -7,9 +7,14 @@ import {
 } from '../../types.ts';
 import {
   characterStatePatchModelToolName,
-  builtInModelToolDefinitionsForUserTurn
-} from '../../../model-tools.ts';
+  type ModelToolInputContract
+} from '../../../role-model/model-tools.ts';
 import {
+  characterAttentionValues,
+  characterCurrentActivityValues,
+  characterEnergyValues,
+  characterMoodValues,
+  characterSocialOrientationValues,
   createDefaultCharacterRuntimeState,
   createLivingStateBrief,
   decodeCharacterRuntimeState,
@@ -28,15 +33,44 @@ export const characterStatePluginId = 'character-state';
 const characterStateEventsPath = 'events.jsonl';
 const characterStateCurrentPath = 'current.json';
 
+const characterStatePatchInputContract = Object.freeze({
+  type: 'object',
+  fields: Object.freeze([
+    Object.freeze({
+      name: 'mood',
+      description: 'Current mood.',
+      required: false,
+      allowedValues: characterMoodValues
+    }),
+    Object.freeze({
+      name: 'energy',
+      description: 'Current energy.',
+      required: false,
+      allowedValues: characterEnergyValues
+    }),
+    Object.freeze({
+      name: 'attention',
+      description: 'Current attention.',
+      required: false,
+      allowedValues: characterAttentionValues
+    }),
+    Object.freeze({
+      name: 'currentActivity',
+      description: 'Current activity.',
+      required: false,
+      allowedValues: characterCurrentActivityValues
+    }),
+    Object.freeze({
+      name: 'socialOrientation',
+      description: 'Current social orientation.',
+      required: false,
+      allowedValues: characterSocialOrientationValues
+    })
+  ]),
+  additionalFields: false
+} satisfies ModelToolInputContract);
+
 export function createCharacterStatePlugin(): RuntimePlugin {
-  const characterStateTool = builtInModelToolDefinitionsForUserTurn().find(
-    (definition) => definition.name === characterStatePatchModelToolName
-  );
-
-  if (characterStateTool === undefined) {
-    throw new Error('character_state.patch built-in tool definition is missing.');
-  }
-
   return createRuntimePlugin({
     manifest: {
       id: characterStatePluginId,
@@ -81,12 +115,13 @@ export function createCharacterStatePlugin(): RuntimePlugin {
     },
     providedTools: [
       Object.freeze({
-        name: characterStateTool.name,
-        description: characterStateTool.description,
-        requiredForUserTurn: characterStateTool.requiredForUserTurn,
-        maxCallsPerUserTurn: characterStateTool.maxCallsPerUserTurn,
-        inputContract: characterStateTool.inputContract,
-        validationOwner: 'built_in_model_tools',
+        name: characterStatePatchModelToolName,
+        description:
+          'Optionally propose a current character-state patch. The Character State plugin validates accepted fields and values.',
+        requiredForUserTurn: false,
+        maxCallsPerUserTurn: 1,
+        inputContract: characterStatePatchInputContract,
+        validationOwner: 'plugin_host',
         sideEffectLevel: 'local_memory_write',
         requiresConfirmation: false,
         sourceReferencesRequired: false

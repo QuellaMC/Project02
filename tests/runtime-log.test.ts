@@ -2,14 +2,22 @@ import { describe, expect, it } from 'vitest';
 
 import {
   runtimePluginContractVersion,
-  createRuntimePluginTurnEvidenceSnapshot,
-  createRuntimeLogStore,
-  type ConversationLogRecordInput,
-  type RuntimePluginTurnEvidenceSnapshot,
-  type RawEventLogRecordInput,
-  type RuntimeEventIdentity,
-  type RuntimeTraceEntryInput
-} from '../src/index.ts';
+  createRuntimePluginTurnEvidenceSnapshot
+} from '../src/plugins/types.ts';
+import {
+  createRuntimeLogStore
+} from '../src/runtime/log.ts';
+import type {
+  ConversationLogRecordInput,
+  RawEventLogRecordInput,
+  RuntimeTraceEntryInput
+} from '../src/runtime/log.ts';
+import type {
+  RuntimePluginTurnEvidenceSnapshot
+} from '../src/plugins/types.ts';
+import type {
+  RuntimeEventIdentity
+} from '../src/runtime/event.ts';
 
 const identity = {
   eventId: 'evt_log_001',

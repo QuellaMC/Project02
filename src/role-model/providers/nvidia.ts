@@ -2,12 +2,12 @@ import {
   roleModelProviderErrorRejectionReason,
   type RoleModelInputEnvelope,
   type RoleModelProviderMetadata
-} from './role-model-contracts.ts';
-import { renderRoleModelPromptMessages } from './role-model-prompt.ts';
+} from '../contracts.ts';
+import { renderRoleModelPromptMessages } from '../prompt.ts';
 import type {
   RoleModelAdapter,
   RoleModelAdapterRawOutput
-} from './role-model-loop.ts';
+} from '../loop.ts';
 
 export const nvidiaRoleModelProviderName = 'nvidia';
 export const defaultNvidiaChatCompletionsEndpoint =

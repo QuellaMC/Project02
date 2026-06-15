@@ -9,8 +9,8 @@ import {
   type CharacterTurnOptions,
   type CharacterTurnResult,
   type ConversationSession
-} from './conversation.ts';
-import { buildUserTurnDecisionContext } from './decision-context.ts';
+} from '../core/conversation.ts';
+import { buildUserTurnDecisionContext } from '../role-model/decision-context.ts';
 import {
   runtimePluginContractVersion,
   createRuntimePluginToolInvocationSnapshot,
@@ -25,11 +25,11 @@ import {
   type RuntimePluginToolInvocationSnapshot,
   type RuntimePluginTurnEvidenceSnapshot,
   type RuntimePluginContext
-} from './plugins/types.ts';
+} from '../plugins/types.ts';
 import {
   runtimePluginBeforeRoleModelCallRejectionReason,
   type RuntimePluginHealthHostResult
-} from './plugins/index.ts';
+} from '../plugins/index.ts';
 import {
   createDecisionContext,
   createRejectedRoleModelDecisionResult,
@@ -39,24 +39,24 @@ import {
   type RoleModelDecisionRejection,
   type RoleModelDecisionRejectionReason,
   type RoleModelIOSnapshot
-} from './role-model-contracts.ts';
+} from '../role-model/contracts.ts';
 import {
   createRoleModelAdapterFromCharacterAgent,
   runRoleModelLoop,
   type RoleModelAdapter,
   type RoleModelPluginToolRoutingEvidence
-} from './role-model-loop.ts';
+} from '../role-model/loop.ts';
 import {
   createDefaultProject02PluginHost,
   type RuntimePluginHost
-} from './plugins/index.ts';
+} from '../plugins/index.ts';
 import {
   createUserMessageRuntimeEvent,
   RuntimeEventInputError,
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent
-} from './runtime-event.ts';
-import { createRoleModelCommitValidationSnapshot } from './runtime-log.ts';
+} from './event.ts';
+import { createRoleModelCommitValidationSnapshot } from './log.ts';
 import type {
   ConversationLogRecord,
   RawEventLogRecord,
@@ -66,7 +66,7 @@ import type {
   RoleModelCommitValidationSnapshot,
   RuntimeTraceEntry,
   RuntimeTraceStepName
-} from './runtime-log.ts';
+} from './log.ts';
 
 const runtimePluginHealthRejectionReason = 'plugin_health_rejected';
 

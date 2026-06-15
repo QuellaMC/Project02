@@ -4,38 +4,50 @@ import { pathToFileURL } from 'node:url';
 
 import {
   createConversationSession,
-  createFileRuntimeLogStore,
-  createLocalRuntimeSessionStore,
-  createRuntimeEventIdentity,
-  createLocalRuntimeStorageLayout,
+  type CharacterAgent,
+  type ConversationSession
+} from '../core/conversation.ts';
+import {
   createNvidiaRoleModelProviderAdapter,
-  createNvidiaRoleModelProviderConfigFromEnv,
-  createRuntimeLogStore,
+  createNvidiaRoleModelProviderConfigFromEnv
+} from '../role-model/providers/nvidia.ts';
+import {
+  createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
-  LocalRuntimeStorageContractError,
-  LocalRuntimeSessionStoreError,
-  normalizeLocalRuntimeSessionId,
+  RuntimeEventInputError
+} from '../runtime/event.ts';
+import {
   recordLocalUserMessageInputRejection,
   runLocalUserMessageEvent,
-  RuntimeEventInputError,
-  type CharacterAgent,
-  type ConversationSession,
+  type LocalRuntimeTurnProgressEvent,
   type LocalRuntimeUserMessageInputRejectedResult,
-  type LocalRuntimeUserMessageResult,
-  type RoleModelAdapter,
+  type LocalRuntimeUserMessageResult
+} from '../runtime/local.ts';
+import {
+  createRuntimeLogStore,
   type RawEventLogRecord,
   type RuntimeLogStore,
   type RuntimeTraceEntry,
   type RuntimeTraceStepName,
-  type LocalRuntimeTurnProgressEvent,
-  type RuntimePluginHost,
   type RuntimeTurnStatus
-} from './index.ts';
+} from '../runtime/log.ts';
+import { createFileRuntimeLogStore } from '../runtime/storage/file-runtime-log-store.ts';
+import {
+  createLocalRuntimeStorageLayout,
+  LocalRuntimeStorageContractError,
+  normalizeLocalRuntimeSessionId
+} from '../runtime/storage/layout.ts';
+import {
+  createLocalRuntimeSessionStore,
+  LocalRuntimeSessionStoreError
+} from '../runtime/storage/session-store.ts';
+import type { RuntimePluginHost } from '../plugins/host.ts';
+import type { RoleModelAdapter } from '../role-model/loop.ts';
 import {
   formatLocalRuntimeTerminalError,
   isLocalRuntimeTerminalError,
   type LocalRuntimeTerminalError
-} from './terminal-errors.ts';
+} from '../runtime/terminal-errors.ts';
 
 type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;

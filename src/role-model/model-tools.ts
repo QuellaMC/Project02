@@ -1,20 +1,10 @@
-import {
-  characterAttentionValues,
-  characterCurrentActivityValues,
-  characterEnergyValues,
-  characterMoodValues,
-  characterSocialOrientationValues
-} from './plugins/builtin/character-state/schema.ts';
-
 export const visibleReplyModelToolName = 'visible_reply';
 export const characterStatePatchModelToolName = 'character_state.patch';
 
 export type VisibleReplyModelToolName = typeof visibleReplyModelToolName;
 export type CharacterStatePatchModelToolName =
   typeof characterStatePatchModelToolName;
-export type BuiltInModelToolName =
-  | VisibleReplyModelToolName
-  | CharacterStatePatchModelToolName;
+export type BuiltInModelToolName = VisibleReplyModelToolName;
 
 export const modelToolInputFieldValueTypes = Object.freeze([
   'string',
@@ -65,25 +55,22 @@ export type VisibleReplyModelToolCall = {
   readonly input: VisibleReplyToolInput;
 };
 
-export type CharacterStatePatchModelToolCall = {
-  readonly name: CharacterStatePatchModelToolName;
-  readonly input: CharacterStatePatchToolInput;
-};
-
-export type BuiltInModelToolCall =
-  | VisibleReplyModelToolCall
-  | CharacterStatePatchModelToolCall;
-
 export type PluginModelToolCall = {
   readonly name: string;
   readonly input: Readonly<Record<string, unknown>>;
 };
 
+export type CharacterStatePatchModelToolCall = PluginModelToolCall & {
+  readonly name: CharacterStatePatchModelToolName;
+  readonly input: CharacterStatePatchToolInput;
+};
+
+export type BuiltInModelToolCall = VisibleReplyModelToolCall;
+
 export type ModelToolCall = BuiltInModelToolCall | PluginModelToolCall;
 
 export const userTurnBuiltInModelToolNames = Object.freeze([
-  visibleReplyModelToolName,
-  characterStatePatchModelToolName
+  visibleReplyModelToolName
 ] satisfies readonly BuiltInModelToolName[]);
 
 export const requiredUserTurnBuiltInModelToolNames = Object.freeze([
@@ -105,48 +92,6 @@ export const builtInModelToolDefinitions = Object.freeze([
       ],
       additionalFields: false
     }
-  }),
-  createBuiltInModelToolDefinition({
-    name: characterStatePatchModelToolName,
-    description:
-      'Optionally propose a current character-state patch. Runtime-owned Character State validates accepted fields and values.',
-    requiredForUserTurn: false,
-    inputContract: {
-      type: 'object',
-      fields: [
-        {
-          name: 'mood',
-          description: 'Current mood.',
-          required: false,
-          allowedValues: characterMoodValues
-        },
-        {
-          name: 'energy',
-          description: 'Current energy.',
-          required: false,
-          allowedValues: characterEnergyValues
-        },
-        {
-          name: 'attention',
-          description: 'Current attention.',
-          required: false,
-          allowedValues: characterAttentionValues
-        },
-        {
-          name: 'currentActivity',
-          description: 'Current activity.',
-          required: false,
-          allowedValues: characterCurrentActivityValues
-        },
-        {
-          name: 'socialOrientation',
-          description: 'Current social orientation.',
-          required: false,
-          allowedValues: characterSocialOrientationValues
-        }
-      ],
-      additionalFields: false
-    }
   })
 ] satisfies readonly BuiltInModelToolDefinition[]);
 
@@ -157,10 +102,7 @@ export function builtInModelToolDefinitionsForUserTurn(): readonly BuiltInModelT
 export function isBuiltInModelToolName(
   value: unknown
 ): value is BuiltInModelToolName {
-  return (
-    value === visibleReplyModelToolName ||
-    value === characterStatePatchModelToolName
-  );
+  return value === visibleReplyModelToolName;
 }
 
 export function createVisibleReplyModelToolCall(
@@ -186,11 +128,7 @@ export function createCharacterStatePatchModelToolCall(
 export function freezeBuiltInModelToolCall(
   call: BuiltInModelToolCall
 ): BuiltInModelToolCall {
-  if (call.name === visibleReplyModelToolName) {
-    return createVisibleReplyModelToolCall(call.input.text);
-  }
-
-  return createCharacterStatePatchModelToolCall(call.input);
+  return createVisibleReplyModelToolCall(call.input.text);
 }
 
 export function freezeBuiltInModelToolCalls(

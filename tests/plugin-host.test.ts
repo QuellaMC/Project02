@@ -1,16 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  createRuntimeEventIdentity,
+  createRuntimeEventIdentity
+} from '../src/runtime/event.ts';
+import {
   createRuntimePlugin,
   createRuntimePluginContext,
   createRuntimePluginEvidenceSnapshot,
+  runtimePluginContractVersion
+} from '../src/plugins/types.ts';
+import {
   createRuntimePluginHost,
-  roleModelPluginListToolName,
-  runtimePluginContractVersion,
-  runtimePluginDiscoveryPluginId,
-  type RuntimePlugin
-} from '../src/index.ts';
+  runtimePluginDiscoveryPluginId
+} from '../src/plugins/host.ts';
+import {
+  roleModelPluginListToolName
+} from '../src/role-model/contracts.ts';
+import type {
+  RuntimePlugin
+} from '../src/plugins/types.ts';
 
 describe('runtime plugin host', () => {
   it('routes plugin.list through the host-owned discovery plugin', async () => {

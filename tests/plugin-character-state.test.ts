@@ -5,13 +5,21 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 
 import {
-  characterStatePatchModelToolName,
+  characterStatePatchModelToolName
+} from '../src/role-model/model-tools.ts';
+import {
   characterStatePluginId,
-  createCharacterStatePlugin,
-  createRuntimeEventIdentity,
-  createRuntimePluginContext,
+  createCharacterStatePlugin
+} from '../src/plugins/builtin/character-state/index.ts';
+import {
+  createRuntimeEventIdentity
+} from '../src/runtime/event.ts';
+import {
+  createRuntimePluginContext
+} from '../src/plugins/types.ts';
+import {
   createRuntimePluginFileStore
-} from '../src/index.ts';
+} from '../src/plugins/file-store.ts';
 
 describe('Character State plugin', () => {
   it('applies valid patches and records plugin-local state', async () => {

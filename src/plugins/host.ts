@@ -30,12 +30,12 @@ import type {
 import {
   isBuiltInModelToolName,
   validateModelToolInputAgainstContract
-} from '../model-tools.ts';
+} from '../role-model/model-tools.ts';
 import {
   createRoleModelPluginToolDefinitions,
   roleModelPluginListToolName,
   type RoleModelPluginToolDefinition
-} from '../role-model-contracts.ts';
+} from '../role-model/contracts.ts';
 import { createCharacterStatePlugin } from './builtin/character-state/index.ts';
 import { createRuntimePluginFileStore } from './file-store.ts';
 
@@ -791,7 +791,9 @@ function isModelFacingPluginTool(tool: RuntimePluginProvidedTool): boolean {
     !isBuiltInModelToolName(tool.name) &&
     tool.validationOwner === 'plugin_host' &&
     !tool.requiresConfirmation &&
-    (tool.sideEffectLevel === 'none' || tool.sideEffectLevel === 'runtime_read')
+    (tool.sideEffectLevel === 'none' ||
+      tool.sideEffectLevel === 'runtime_read' ||
+      tool.sideEffectLevel === 'local_memory_write')
   );
 }
 

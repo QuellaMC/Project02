@@ -28,12 +28,12 @@ import {
 } from '../types.ts';
 import {
   modelToolInputFieldValueTypes
-} from '../../model-tools.ts';
+} from '../../role-model/model-tools.ts';
 import type {
   ModelToolInputFieldValueType,
   ModelToolInputContract,
   ModelToolInputField
-} from '../../model-tools.ts';
+} from '../../role-model/model-tools.ts';
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 

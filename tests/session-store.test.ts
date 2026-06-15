@@ -7,22 +7,38 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   ConversationRehydrationError,
   createConversationSession,
+  runCharacterTurn
+} from '../src/core/conversation.ts';
+import {
   createLocalRuntimeSessionPaths,
-  createLocalRuntimeSessionStore,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
-  createRuntimeLogStore,
-  createUserMessageRuntimeEvent,
   encodeStorageSchemaMarker,
-  LocalRuntimeStorageContractError,
-  LocalRuntimeSessionStoreError,
-  runCharacterTurn,
-  runLocalUserMessageEvent,
-  type ConversationLogRecord,
-  type LocalRuntimeStorageContractErrorCode,
-  type LocalRuntimeSessionConversationLogReader
-} from '../src/index.ts';
-import { assertLocalRuntimeSessionReadable } from '../src/session-store.ts';
+  LocalRuntimeStorageContractError
+} from '../src/runtime/storage/layout.ts';
+import {
+  createLocalRuntimeSessionStore,
+  LocalRuntimeSessionStoreError
+} from '../src/runtime/storage/session-store.ts';
+import {
+  createRuntimeLogStore
+} from '../src/runtime/log.ts';
+import {
+  createUserMessageRuntimeEvent
+} from '../src/runtime/event.ts';
+import {
+  runLocalUserMessageEvent
+} from '../src/runtime/local.ts';
+import type {
+  ConversationLogRecord
+} from '../src/runtime/log.ts';
+import type {
+  LocalRuntimeStorageContractErrorCode
+} from '../src/runtime/storage/layout.ts';
+import type {
+  LocalRuntimeSessionConversationLogReader
+} from '../src/runtime/storage/session-store.ts';
+import { assertLocalRuntimeSessionReadable } from '../src/runtime/storage/session-store.ts';
 
 const tempRoots: string[] = [];
 

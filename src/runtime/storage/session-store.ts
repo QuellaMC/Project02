@@ -13,7 +13,7 @@ import {
   createConversationSession,
   type ConversationSession,
   type VisibleMessage
-} from './conversation.ts';
+} from '../../core/conversation.ts';
 import {
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeSessionPaths,
@@ -26,8 +26,8 @@ import {
   type LocalRuntimeSessionMetadata,
   type LocalRuntimeStorageLayout,
   type LocalRuntimeStorageLayoutOptions
-} from './local-storage.ts';
-import type { ConversationLogRecord } from './runtime-log.ts';
+} from './layout.ts';
+import type { ConversationLogRecord } from '../log.ts';
 
 export type LocalRuntimeSessionStoreErrorCode =
   | 'conversation_log_reader_unavailable'

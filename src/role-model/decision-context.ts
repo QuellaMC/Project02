@@ -1,12 +1,12 @@
 import {
   selectRecentVisibleMessages,
   type ConversationSession
-} from './conversation.ts';
+} from '../core/conversation.ts';
 import {
   createDecisionContext,
   type DecisionContext
-} from './role-model-contracts.ts';
-import type { RuntimePluginContextItem } from './plugins/types.ts';
+} from './contracts.ts';
+import type { RuntimePluginContextItem } from '../plugins/types.ts';
 
 export type BuildUserTurnDecisionContextOptions = {
   readonly session: ConversationSession;

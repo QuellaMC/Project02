@@ -2,17 +2,82 @@ import { describe, expect, it } from 'vitest';
 
 import {
   characterStatePatchModelToolName,
+  visibleReplyModelToolName
+} from '../src/role-model/model-tools.ts';
+import {
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
-  roleModelMalformedOutputRejectionReason,
-  visibleReplyModelToolName
-} from '../src/index.ts';
+  roleModelUnsupportedEffectRejectionReason,
+  roleModelUnknownToolRejectionReason
+} from '../src/role-model/contracts.ts';
+import { createDefaultProject02PluginHost } from '../src/plugins/host.ts';
 
 describe('role-model contracts', () => {
-  it('accepts character_state.patch as executable plugin-owned input', () => {
+  it('stamps accepted versionless model output with the internal decision version', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
+        toolCalls: [
+          {
+            name: visibleReplyModelToolName,
+            input: {
+              text: 'hello'
+            }
+          }
+        ]
+      })
+    );
+
+    expect(result).toEqual({
+      status: 'accepted',
+      decision: {
         version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: visibleReplyModelToolName,
+            input: {
+              text: 'hello'
+            }
+          }
+        ]
+      }
+    });
+  });
+
+  it('ignores model-supplied version and keeps the internal decision version', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        version: 'mvp-007.runtime_plugin.v1',
+        toolCalls: [
+          {
+            name: visibleReplyModelToolName,
+            input: {
+              text: 'hello'
+            }
+          }
+        ]
+      })
+    );
+
+    expect(result).toEqual({
+      status: 'accepted',
+      decision: {
+        version: roleModelDecisionContractVersion,
+        toolCalls: [
+          {
+            name: visibleReplyModelToolName,
+            input: {
+              text: 'hello'
+            }
+          }
+        ]
+      }
+    });
+  });
+
+  it('accepts character_state.patch as executable plugin-owned input', () => {
+    const pluginHost = createDefaultProject02PluginHost();
+    const result = parseRoleModelDecision(
+      JSON.stringify({
         toolCalls: [
           {
             name: characterStatePatchModelToolName,
@@ -21,7 +86,9 @@ describe('role-model contracts', () => {
             }
           }
         ]
-      })
+      }),
+      [characterStatePatchModelToolName],
+      pluginHost.pluginToolDefinitions()
     );
 
     expect(result).toMatchObject({
@@ -39,7 +106,7 @@ describe('role-model contracts', () => {
     });
   });
 
-  it('accepts syntactically valid unknown executable tools for loop routing', () => {
+  it('rejects undeclared executable tools before loop routing', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
         version: roleModelDecisionContractVersion,
@@ -55,16 +122,9 @@ describe('role-model contracts', () => {
     );
 
     expect(result).toMatchObject({
-      status: 'accepted',
-      decision: {
-        toolCalls: [
-          {
-            name: 'memory.unknown',
-            input: {
-              query: 'Mira'
-            }
-          }
-        ]
+      status: 'rejected',
+      rejection: {
+        reason: roleModelUnknownToolRejectionReason
       }
     });
   });
@@ -82,7 +142,7 @@ describe('role-model contracts', () => {
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
-        reason: roleModelMalformedOutputRejectionReason
+        reason: roleModelUnsupportedEffectRejectionReason
       }
     });
   });

@@ -4,16 +4,16 @@ import type {
   CharacterProfile,
   VisibleMessage,
   VisibleMessageRole
-} from './conversation.ts';
+} from '../../core/conversation.ts';
 import {
   normalizeOneLineMessage,
   OneLineMessageValidationError
-} from './message-validation.ts';
+} from '../../core/message-validation.ts';
 import type {
   RuntimeEventIdentity,
   RuntimeEventType,
   UserMessageRuntimeEvent
-} from './runtime-event.ts';
+} from '../event.ts';
 import {
   createAcceptedRoleModelDecisionResult,
   createDecisionContext,
@@ -44,7 +44,7 @@ import {
   type RoleModelOutputContract,
   type RoleModelProviderMetadata,
   type RoleModelToolObservation
-} from './role-model-contracts.ts';
+} from '../../role-model/contracts.ts';
 import {
   characterStatePatchModelToolName,
   createCharacterStatePatchModelToolCall,
@@ -52,7 +52,7 @@ import {
   visibleReplyModelToolName,
   type PluginModelToolCall,
   type ModelToolCall
-} from './model-tools.ts';
+} from '../../role-model/model-tools.ts';
 import {
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
@@ -69,7 +69,7 @@ import {
   type RuntimePluginSourceReference,
   type RuntimePluginToolCallResult,
   type RuntimePluginTurnEvidenceSnapshot
-} from './plugins/types.ts';
+} from '../../plugins/types.ts';
 import {
   createRoleModelCommitValidationSnapshot,
   isTerminalRawEventLogRecordKind,
@@ -84,7 +84,7 @@ import {
   type RuntimeTraceEntry,
   type RuntimeTraceStepName,
   type RuntimeTurnStatus
-} from './runtime-log.ts';
+} from '../log.ts';
 
 export const defaultLocalRuntimeStoreRoot = '.project02-runtime';
 export const defaultLocalRuntimeSessionId = 'local-session';

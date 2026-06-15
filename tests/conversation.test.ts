@@ -11,7 +11,7 @@ import {
   type CharacterAgent,
   type CharacterAgentReply,
   type VisibleMessage
-} from '../src/index.ts';
+} from '../src/core/conversation.ts';
 
 type DeferredReply = {
   readonly promise: Promise<CharacterAgentReply>;

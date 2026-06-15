@@ -1,14 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  createConversationSession,
+  createConversationSession
+} from '../src/core/conversation.ts';
+import {
   createRuntimeEventIdentity,
-  createRuntimeLogStore,
-  createUserMessageRuntimeEvent,
-  roleModelDecisionContractVersion,
-  runLocalUserMessageEvent,
-  type RoleModelAdapter
-} from '../src/index.ts';
+  createUserMessageRuntimeEvent
+} from '../src/runtime/event.ts';
+import {
+  createRuntimeLogStore
+} from '../src/runtime/log.ts';
+import {
+  roleModelUnknownToolRejectionReason
+} from '../src/role-model/contracts.ts';
+import {
+  runLocalUserMessageEvent
+} from '../src/runtime/local.ts';
+import type {
+  RoleModelAdapter
+} from '../src/role-model/loop.ts';
 
 describe('plugin-driven tool loop', () => {
   it('executes character_state.patch through the built-in plugin and continues', async () => {
@@ -16,7 +26,6 @@ describe('plugin-driven tool loop', () => {
     const logStore = createRuntimeLogStore();
     const adapter = createSequencedAdapter([
       {
-        version: roleModelDecisionContractVersion,
         toolCalls: [
           {
             name: 'character_state.patch',
@@ -27,7 +36,6 @@ describe('plugin-driven tool loop', () => {
         ]
       },
       {
-        version: roleModelDecisionContractVersion,
         toolCalls: [
           {
             name: 'visible_reply',
@@ -97,7 +105,6 @@ describe('plugin-driven tool loop', () => {
     const logStore = createRuntimeLogStore();
     const adapter = createSequencedAdapter([
       {
-        version: roleModelDecisionContractVersion,
         text: 'folded model note',
         toolCalls: []
       }
@@ -135,7 +142,6 @@ describe('plugin-driven tool loop', () => {
     const progress: unknown[] = [];
     const adapter = createSequencedAdapter([
       {
-        version: roleModelDecisionContractVersion,
         toolCalls: [
           {
             name: 'visible_reply',
@@ -152,7 +158,6 @@ describe('plugin-driven tool loop', () => {
         ]
       },
       {
-        version: roleModelDecisionContractVersion,
         toolCalls: [
           {
             name: 'visible_reply',
@@ -210,12 +215,11 @@ describe('plugin-driven tool loop', () => {
     ).toEqual([undefined, ['local-session:message-1', 'local-session:message-2']]);
   });
 
-  it('turns unknown executable tools into observations and continues', async () => {
+  it('rejects undeclared executable tools before plugin routing', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
     const adapter = createSequencedAdapter([
       {
-        version: roleModelDecisionContractVersion,
         toolCalls: [
           {
             name: 'memory.unknown',
@@ -226,7 +230,6 @@ describe('plugin-driven tool loop', () => {
         ]
       },
       {
-        version: roleModelDecisionContractVersion,
         toolCalls: [
           {
             name: 'visible_reply',
@@ -245,24 +248,12 @@ describe('plugin-driven tool loop', () => {
       roleModelAdapter: adapter
     });
 
-    expect(result.status).toBe('completed');
-    const finishedTool = logStore
-      .rawEvents()
-      .find((event) => event.kind === 'tool_call_finished');
-
-    expect(finishedTool).toMatchObject({
-      toolCallId: 'round-1.1.memory.unknown',
-      toolName: 'memory.unknown',
-      toolPluginId: 'undeclared.memory.unknown',
-      toolResult: {
-        status: 'rejected',
-        reason: 'tool_not_declared'
-      }
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: roleModelUnknownToolRejectionReason
     });
-    expect(logStore.rawEvents().at(-1)).toMatchObject({
-      kind: 'runtime_turn_completed',
-      toolCallIds: ['round-1.1.memory.unknown']
-    });
+    expect(logStore.conversationMessages()).toEqual([]);
+    expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_finished')).toBe(false);
   });
 });
 

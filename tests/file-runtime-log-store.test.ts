@@ -5,11 +5,17 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 
 import {
-  createFileRuntimeLogStore,
-  createLocalRuntimeSessionStore,
-  createRuntimeEventIdentity,
+  createFileRuntimeLogStore
+} from '../src/runtime/storage/file-runtime-log-store.ts';
+import {
+  createLocalRuntimeSessionStore
+} from '../src/runtime/storage/session-store.ts';
+import {
+  createRuntimeEventIdentity
+} from '../src/runtime/event.ts';
+import {
   LocalRuntimeStorageContractError
-} from '../src/index.ts';
+} from '../src/runtime/storage/layout.ts';
 
 describe('file runtime log store plugin tool event validation', () => {
   it('rejects started tool calls without matching finished records', async () => {

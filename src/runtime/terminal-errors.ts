@@ -1,6 +1,6 @@
-import { ConversationRehydrationError } from './conversation.ts';
-import { LocalRuntimeStorageContractError } from './local-storage.ts';
-import { LocalRuntimeSessionStoreError } from './session-store.ts';
+import { ConversationRehydrationError } from '../core/conversation.ts';
+import { LocalRuntimeStorageContractError } from './storage/layout.ts';
+import { LocalRuntimeSessionStoreError } from './storage/session-store.ts';
 
 export type LocalRuntimeTerminalError =
   | ConversationRehydrationError

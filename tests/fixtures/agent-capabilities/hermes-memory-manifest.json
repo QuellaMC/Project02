@@ -4,9 +4,9 @@
   "version": "1.0.0-fixture",
   "kind": "memory_provider",
   "description": "Normalized Hermes memory provider fixture for MVP-007 contract validation.",
-  "contractVersion": "mvp-007.agent_capability.v1",
+  "contractVersion": "mvp-007.runtime_plugin.v1",
   "compatibility": {
-    "hostContractVersions": ["mvp-007.agent_capability.v1"],
+    "hostContractVersions": ["mvp-007.runtime_plugin.v1"],
     "sourceSystem": "hermes",
     "sourceVersion": "memory_tencentdb",
     "externalContract": "hermes-memory-provider",

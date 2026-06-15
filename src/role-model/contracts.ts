@@ -1,11 +1,11 @@
-import type { CharacterProfile, VisibleMessage } from './conversation.ts';
+import type { CharacterProfile, VisibleMessage } from '../core/conversation.ts';
 import {
   createRuntimePluginContextItem,
   createRuntimePluginProvidedTool,
   type RuntimePluginContextItem,
   type RuntimePluginJsonValue,
   type RuntimePluginProvidedTool
-} from './plugins/types.ts';
+} from '../plugins/types.ts';
 import {
   builtInModelToolDefinitionsForUserTurn,
   characterStatePatchModelToolName,
@@ -31,7 +31,7 @@ import {
 import type {
   RuntimeEventIdentity,
   UserMessageRuntimeEvent
-} from './runtime-event.ts';
+} from '../runtime/event.ts';
 
 export const roleModelDecisionContractVersion = 'mvp-006.tool_calls.v1';
 export const roleModelCharacterStatePatchToolName =
@@ -54,7 +54,7 @@ export function isRoleModelAllowedToolName(
 }
 
 export const roleModelDecisionOutputContractText =
-  'Return exactly one complete valid JSON CharacterDecision object with version "mvp-006.tool_calls.v1" and ordered toolCalls. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is the only non-executed output tool. Any other tool call is executed and fed back as a tool observation. If visible_reply appears with executable tools, it is interim visible output. A terminal response may use exactly one visible_reply, or may use top-level text only as folded model text with no visible final reply.';
+  'Return exactly one complete valid JSON CharacterDecision object with ordered toolCalls. The only allowed top-level response fields are "toolCalls" and optional "text". Do not include a version field; the runtime stamps the internal decision version after validation. Do not copy input envelope fields such as event, decisionContext, recentVisibleMessages, toolObservations, pluginContextItems, characterSnapshot, allowedTools, toolDefinitions, responseContract, or runtimeInput. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is the only non-executed output tool. Any other tool call is executed and fed back as a tool observation. If visible_reply appears with executable tools, it is interim visible output. A terminal response may use exactly one visible_reply, or may use top-level text only as folded model text with no visible final reply.';
 
 export type RoleModelOutputContract = {
   readonly version: string;
@@ -294,12 +294,22 @@ export function createRoleModelToolObservation(
 export function createCharacterDecision(
   toolCalls: readonly ModelToolCall[]
 ): CharacterDecision {
-  assertUserTurnToolCallCardinality(toolCalls, builtInModelToolDefinitionsForUserTurn());
+  assertVisibleReplyCardinality(toolCalls);
 
   return freezeCharacterDecision({
     version: roleModelDecisionContractVersion,
     toolCalls
   });
+}
+
+function assertVisibleReplyCardinality(toolCalls: readonly ModelToolCall[]): void {
+  const visibleReplyCount = toolCalls.filter(
+    (call) => call.name === visibleReplyModelToolName
+  ).length;
+
+  if (visibleReplyCount > 1) {
+    throw new TypeError('Decision must not include duplicate visible_reply tool calls.');
+  }
 }
 
 export function createVisibleReplyCharacterDecision(
@@ -529,14 +539,6 @@ function parseRoleModelDecisionObject(
     );
   }
 
-  const version = parsedOutput['version'];
-
-  if (version !== roleModelDecisionContractVersion) {
-    return createMalformedOutputResult(
-      `Decision version must be "${roleModelDecisionContractVersion}".`
-    );
-  }
-
   const unsupportedTopLevelKeys = findUnsupportedKeys(parsedOutput, [
     'version',
     'toolCalls',
@@ -726,20 +728,6 @@ function rejectToolCall(details: string): ParsedToolCallResult {
   };
 }
 
-function assertUserTurnToolCallCardinality(
-  toolCalls: readonly ModelToolCall[],
-  modelToolDefinitions: readonly RoleModelToolDefinition[]
-): void {
-  const result = validateUserTurnToolCallCardinality(
-    toolCalls,
-    modelToolDefinitions
-  );
-
-  if (result !== undefined) {
-    throw new TypeError(result.rejection.details ?? result.rejection.reason);
-  }
-}
-
 function validateUserTurnToolCallCardinality(
   toolCalls: readonly ModelToolCall[],
   modelToolDefinitions: readonly RoleModelToolDefinition[]
@@ -747,10 +735,6 @@ function validateUserTurnToolCallCardinality(
   const visibleReplyCount = toolCalls.filter(
     (call) => call.name === visibleReplyModelToolName
   ).length;
-  const characterStatePatchCount = toolCalls.filter(
-    (call) => call.name === characterStatePatchModelToolName
-  ).length;
-
   if (visibleReplyCount > 1) {
     return createRejectedRoleModelDecisionResult(
       roleModelDuplicateToolCallRejectionReason,
@@ -758,11 +742,17 @@ function validateUserTurnToolCallCardinality(
     );
   }
 
-  if (characterStatePatchCount > 1) {
-    return createRejectedRoleModelDecisionResult(
-      roleModelDuplicateToolCallRejectionReason,
-      'Decision must not include duplicate character_state.patch tool calls.'
+  for (const call of toolCalls) {
+    const definition = modelToolDefinitions.find(
+      (candidate) => candidate.name === call.name
     );
+
+    if (definition === undefined) {
+      return createRejectedRoleModelDecisionResult(
+        roleModelUnknownToolRejectionReason,
+        `Decision requested unsupported tool "${call.name}".`
+      );
+    }
   }
 
   for (const definition of modelToolDefinitions) {
@@ -906,10 +896,11 @@ export function createRoleModelPluginToolDefinitions(
 
     if (
       providedTool.sideEffectLevel !== 'none' &&
-      providedTool.sideEffectLevel !== 'runtime_read'
+      providedTool.sideEffectLevel !== 'runtime_read' &&
+      providedTool.sideEffectLevel !== 'local_memory_write'
     ) {
       throw new TypeError(
-        `Plugin tool "${providedTool.name}" must be read-only for CT-03.`
+        `Plugin tool "${providedTool.name}" must be read-only or local-memory-only for CT-03.`
       );
     }
 

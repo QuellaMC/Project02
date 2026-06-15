@@ -1,15 +1,15 @@
-import type { CharacterProfile, VisibleMessage } from '../conversation.ts';
+import type { CharacterProfile, VisibleMessage } from '../core/conversation.ts';
 import {
   builtInModelToolDefinitionsForUserTurn,
   modelToolInputFieldValueTypes,
   type ModelToolInputContract,
   type ModelToolInputField,
   type ModelToolInputFieldValueType
-} from '../model-tools.ts';
+} from '../role-model/model-tools.ts';
 import type {
   RuntimeEventIdentity,
   RuntimeEventType
-} from '../runtime-event.ts';
+} from '../runtime/event.ts';
 
 export const runtimePluginContractVersion =
   'mvp-007.runtime_plugin.v1';
@@ -849,7 +849,7 @@ export function createFirstPartyModelToolsPlugin(): RuntimePlugin {
       version: '1.0.0',
       kind: 'first_party',
       description:
-        'Represents the built-in visible_reply and character_state.patch tools through the shared plugin contract.',
+        'Represents the built-in visible_reply tool through the shared plugin contract.',
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],

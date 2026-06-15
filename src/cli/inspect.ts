@@ -1,26 +1,30 @@
 import { pathToFileURL } from 'node:url';
 
+import type { RoleModelDecisionResult } from '../role-model/contracts.ts';
 import {
-  createFileRuntimeLogStore,
-  createLocalRuntimeSessionStore,
-  createLocalRuntimeStorageLayout,
   isTerminalRawEventLogRecord,
-  LocalRuntimeStorageContractError,
-  normalizeLocalRuntimeSessionId,
   type ConversationLogRecord,
-  type RuntimePluginEvidenceSnapshot,
-  type RuntimePluginTurnEvidenceSnapshot,
-  type LocalRuntimeSessionMetadata,
   type RawEventLogRecord,
   type RoleModelCommitValidationResult,
-  type RoleModelDecisionResult,
   type RuntimeTraceEntry,
   type RuntimeTurnStatus
-} from './index.ts';
+} from '../runtime/log.ts';
+import { createFileRuntimeLogStore } from '../runtime/storage/file-runtime-log-store.ts';
+import {
+  createLocalRuntimeStorageLayout,
+  LocalRuntimeStorageContractError,
+  normalizeLocalRuntimeSessionId,
+  type LocalRuntimeSessionMetadata
+} from '../runtime/storage/layout.ts';
+import { createLocalRuntimeSessionStore } from '../runtime/storage/session-store.ts';
+import type {
+  RuntimePluginEvidenceSnapshot,
+  RuntimePluginTurnEvidenceSnapshot
+} from '../plugins/types.ts';
 import {
   formatLocalRuntimeTerminalError,
   isLocalRuntimeTerminalError
-} from './terminal-errors.ts';
+} from '../runtime/terminal-errors.ts';
 
 type InspectCliOptions = {
   readonly stdout: NodeJS.WritableStream;

@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  createDeterministicLocalRoleModelAdapter,
+  createDeterministicLocalRoleModelAdapter
+} from '../src/role-model/loop.ts';
+import {
   parseRoleModelDecision,
-  projectHealth,
-  roleModelDecisionContractVersion,
-  visibleReplyModelToolName
+  roleModelDecisionContractVersion
+} from '../src/role-model/contracts.ts';
+import {
+  projectHealth
 } from '../src/index.ts';
+import {
+  visibleReplyModelToolName
+} from '../src/role-model/model-tools.ts';
 
 describe('projectHealth', () => {
   it('reports the TypeScript baseline is callable', () => {
@@ -17,13 +23,12 @@ describe('projectHealth', () => {
   });
 });
 
-describe('public role-model loop exports', () => {
-  it('exposes the local adapter and parser through the package surface', () => {
+describe('role-model module smoke', () => {
+  it('exposes the local adapter and parser through concrete modules', () => {
     expect(createDeterministicLocalRoleModelAdapter()).toHaveProperty('invoke');
     expect(
       parseRoleModelDecision(
         JSON.stringify({
-          version: roleModelDecisionContractVersion,
           toolCalls: [
             {
               name: visibleReplyModelToolName,
@@ -37,7 +42,7 @@ describe('public role-model loop exports', () => {
     ).toEqual({
       status: 'accepted',
       decision: {
-        version: 'mvp-006.tool_calls.v1',
+        version: roleModelDecisionContractVersion,
         toolCalls: [
           {
             name: visibleReplyModelToolName,

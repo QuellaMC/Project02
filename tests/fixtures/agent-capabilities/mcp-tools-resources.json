@@ -45,7 +45,7 @@
       "name": "Memory Summary",
       "description": "A bounded resource summary.",
       "mimeType": "text/plain",
-      "fixtureText": "MCP resource fixture: project02 has a universal capability host contract.",
+      "fixtureText": "MCP resource fixture: project02 has a universal plugin host contract.",
       "estimatedTokens": 10
     },
     {
