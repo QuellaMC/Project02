@@ -411,7 +411,9 @@ async function runSerializedLocalUserMessageEvent(
   appendTrace('runtime_turn_started');
 
   const committedVisibleMessages: ConversationLogRecord[] = [];
+  const startedPluginToolCalls = new Map<string, RuntimePluginToolCall>();
   const finishedToolCallIds: string[] = [];
+  const finishedPluginToolResults: RoleModelPluginToolRoutingEvidence[] = [];
   let userConversationMessage: ConversationLogRecord | undefined;
 
   async function emitProgress(
@@ -668,6 +670,7 @@ async function runSerializedLocalUserMessageEvent(
           return pluginHost.resolveToolPluginId(toolName);
         },
         onPluginToolCallStarted(progressEvent) {
+          startedPluginToolCalls.set(progressEvent.callId, progressEvent.call);
           appendToolCallStarted({
             callId: progressEvent.callId,
             round: progressEvent.round,
@@ -675,6 +678,21 @@ async function runSerializedLocalUserMessageEvent(
           });
         },
         async onPluginToolCallCompleted(progressEvent) {
+          const call = startedPluginToolCalls.get(progressEvent.callId);
+
+          if (call === undefined) {
+            throw new Error(
+              `Completed plugin tool call is missing start evidence: ${progressEvent.callId}.`
+            );
+          }
+
+          finishedPluginToolResults.push(
+            Object.freeze({
+              callId: progressEvent.callId,
+              call,
+              result: progressEvent.result
+            } satisfies RoleModelPluginToolRoutingEvidence)
+          );
           appendToolCallFinished({
             callId: progressEvent.callId,
             round: progressEvent.round,
@@ -741,12 +759,19 @@ async function runSerializedLocalUserMessageEvent(
         error instanceof CharacterReplyValidationError &&
         invalidInterimVisibleReplyRejection !== undefined
       ) {
+        const invalidInterimPluginEvidence = combineRuntimePluginEvidence(
+          beforeRoleModelCallResult.evidence,
+          pluginToolEvidenceFromRouting(finishedPluginToolResults)
+        );
+        const invalidInterimToolInvocations =
+          pluginToolInvocationsFromRouting(finishedPluginToolResults);
+
         return await appendRoleModelRejectedResult(
           invalidInterimVisibleReplyRejection.rejection,
           invalidInterimVisibleReplyRejection.evidence,
-          beforeRoleModelCallResult.evidence,
+          invalidInterimPluginEvidence,
           beforeRoleModelCallResult.contextItems,
-          [],
+          invalidInterimToolInvocations,
           runtimePluginContext
         );
       }
@@ -915,7 +940,25 @@ async function runSerializedLocalUserMessageEvent(
         committedAt: options.committedAt ?? options.event.createdAt,
         visibleMessages: committedVisibleMessages
       });
-    await pluginHost.afterTurnCommitted(afterCommitPluginContext);
+    const afterCommitResult = await pluginHost.afterTurnCommitted(
+      afterCommitPluginContext
+    );
+
+    if (
+      afterCommitResult.status === 'completed_with_failures' ||
+      afterCommitResult.evidence.length > 0
+    ) {
+      appendRawEvent({
+        ...identity,
+        kind: 'after_turn_committed',
+        eventType: event.type,
+        status: afterCommitResult.status,
+        ...visibleMessageIdsForTurnOption(committedVisibleMessages),
+        toolCallIds: Object.freeze([...finishedToolCallIds]),
+        payloadSummary,
+        ...runtimePluginEvidenceOption(afterCommitResult.evidence)
+      });
+    }
 
     return Object.freeze({
       status: 'completed',

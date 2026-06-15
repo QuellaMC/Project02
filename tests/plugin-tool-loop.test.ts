@@ -18,6 +18,7 @@ import {
 } from '../src/plugins/host.ts';
 import {
   createRuntimePlugin,
+  createRuntimePluginEvidenceSnapshot,
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
 import {
@@ -116,12 +117,16 @@ describe('plugin-driven tool loop', () => {
       }
     });
     expect(toolEvents[1]).not.toHaveProperty('pluginStoreRevision');
-    expect(rawEvents.at(-1)).toMatchObject({
+    const terminalEvent = rawEvents.find(
+      (event) => event.kind === 'runtime_turn_completed'
+    );
+
+    expect(terminalEvent).toMatchObject({
       kind: 'runtime_turn_completed',
       toolCallIds: ['round-1.1.character_state.patch']
     });
     const observations =
-      rawEvents.at(-1)?.roleModelIOSnapshot?.inputEnvelope.toolObservations ?? [];
+      terminalEvent?.roleModelIOSnapshot?.inputEnvelope.toolObservations ?? [];
 
     expect(observations).toHaveLength(1);
     expect(observations[0]?.round).toBe(1);
@@ -395,11 +400,13 @@ describe('plugin-driven tool loop', () => {
     expect(logStore.conversationMessages()).toEqual([]);
   });
 
-  it('commits runtime_turn_completed before afterTurnCommitted hooks run', async () => {
+  it('runs afterTurnCommitted after visible messages and terminal evidence commit', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
+    let visibleMessagesVisibleToHook = false;
     let terminalEventVisibleToHook = false;
     const pluginHost = createAfterTurnCommittedProbeHost(() => {
+      visibleMessagesVisibleToHook = logStore.conversationMessages().length === 2;
       terminalEventVisibleToHook = logStore
         .rawEvents()
         .some((event) => event.kind === 'runtime_turn_completed');
@@ -426,7 +433,67 @@ describe('plugin-driven tool loop', () => {
     });
 
     expect(result.status).toBe('completed');
+    expect(visibleMessagesVisibleToHook).toBe(true);
     expect(terminalEventVisibleToHook).toBe(true);
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_completed',
+      status: 'completed'
+    });
+  });
+
+  it('persists afterTurnCommitted failures as follow-up turn evidence', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const pluginHost = createAfterTurnCommittedProbeHost(() => {}, {
+      status: 'failed',
+      summary: 'After commit fixture failed.'
+    });
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'after commit evidence is durable'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('hello', 'evt_after_commit_failure'),
+      session,
+      logStore,
+      roleModelAdapter: adapter,
+      pluginHost
+    });
+    const terminalEvent = logStore.rawEvents().find(
+      (event) => event.kind === 'runtime_turn_completed'
+    );
+    const afterCommitEvent = logStore.rawEvents().at(-1);
+
+    expect(result.status).toBe('completed');
+    expect(result.rawEvent).toMatchObject({
+      kind: 'runtime_turn_completed',
+      status: 'completed'
+    });
+    expect(terminalEvent).toMatchObject({
+      kind: 'runtime_turn_completed',
+      status: 'completed'
+    });
+    expect(afterCommitEvent).toMatchObject({
+      kind: 'after_turn_committed',
+      status: 'completed_with_failures',
+      runtimePluginEvidence: [
+        {
+          pluginId: 'after-commit.fixture',
+          evidenceKind: 'after_turn_committed',
+          status: 'failed',
+          summary: 'After commit fixture failed.'
+        }
+      ]
+    });
   });
 
   it('does not run afterTurnCommitted when terminal raw event append fails', async () => {
@@ -709,6 +776,97 @@ describe('plugin-driven tool loop', () => {
       });
       expect(event.roleModelIOSnapshot?.rawOutputText).toContain(
         '"visible_reply"'
+      );
+    }
+  });
+
+  it('preserves prior tool evidence when a later interim visible_reply is invalid', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'character_state.patch',
+            input: {
+              mood: 'curious'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: '   '
+            }
+          },
+          {
+            name: 'plugin.list',
+            input: {}
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent(
+        'needs invalid later interim',
+        'evt_invalid_later_interim_visible'
+      ),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+    const rejectionEvents = logStore
+      .rawEvents()
+      .filter(
+        (event) =>
+          event.kind === 'commit_validation_rejected' ||
+          event.kind === 'runtime_turn_rejected'
+      );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: roleModelInvalidVisibleReplyRejectionReason
+    });
+    expect(rejectionEvents).toHaveLength(2);
+
+    for (const event of rejectionEvents) {
+      expect(event).toMatchObject({
+        reason: roleModelInvalidVisibleReplyRejectionReason,
+        toolCallIds: ['round-1.1.character_state.patch']
+      });
+      expect(event.runtimePluginEvidence).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            pluginId: 'character-state',
+            evidenceKind: 'tool_invocation',
+            status: 'accepted'
+          })
+        ])
+      );
+      const characterStateInvocation =
+        event.runtimePluginTurnEvidence?.toolInvocations.find(
+          (invocation) =>
+            invocation.pluginId === 'character-state' &&
+            invocation.toolName === 'character_state.patch'
+        );
+
+      expect(characterStateInvocation).toMatchObject({
+        result: {
+          status: 'accepted'
+        }
+      });
+      expect(characterStateInvocation?.result.evidence).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            pluginId: 'character-state',
+            evidenceKind: 'tool_invocation',
+            status: 'accepted'
+          })
+        ])
       );
     }
   });
@@ -1065,7 +1223,11 @@ function createRuntimeTurnCompletedAppendFailingLogStore(): RuntimeLogStore {
 }
 
 function createAfterTurnCommittedProbeHost(
-  onAfterTurnCommitted: () => void
+  onAfterTurnCommitted: () => void,
+  options: {
+    readonly status?: 'completed' | 'failed';
+    readonly summary?: string;
+  } = {}
 ) {
   const pluginId = 'after-commit.fixture';
 
@@ -1110,8 +1272,28 @@ function createAfterTurnCommittedProbeHost(
         },
         providedTools: [],
         lifecycleHooks: {
-          afterTurnCommitted() {
+          afterTurnCommitted(context) {
             onAfterTurnCommitted();
+
+            if (options.status === 'failed') {
+              return {
+                status: 'failed',
+                evidence: [
+                  createRuntimePluginEvidenceSnapshot({
+                    eventId: context.eventId,
+                    traceId: context.traceId,
+                    createdAt: context.timestamp,
+                    kind: 'runtime_plugin_evidence_snapshot',
+                    pluginId,
+                    evidenceKind: 'after_turn_committed',
+                    status: 'failed',
+                    summary:
+                      options.summary ?? 'After commit fixture failed.',
+                    redactionLabels: []
+                  })
+                ]
+              };
+            }
 
             return {
               status: 'completed',

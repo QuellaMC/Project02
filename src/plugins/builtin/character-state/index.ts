@@ -16,6 +16,7 @@ import {
   characterEnergyValues,
   characterMoodValues,
   characterSocialOrientationValues,
+  characterRuntimeStatesEqual,
   createDefaultCharacterRuntimeState,
   createLivingStateBrief,
   decodeCharacterRuntimeState,
@@ -301,22 +302,39 @@ function readCurrentCharacterState(
   fileStore: RuntimePluginFileStore
 ): CharacterRuntimeState {
   const current = fileStore.readJson(characterStateCurrentPath);
+  const events = fileStore.readJsonl(characterStateEventsPath);
 
-  if (current === undefined) {
-    return rebuildCurrentCharacterState(fileStore);
+  if (events.length === 0) {
+    if (current === undefined) {
+      return createDefaultCharacterRuntimeState();
+    }
+
+    return decodeCharacterRuntimeState(current, (field) => {
+      throw new TypeError(`Stored Character State plugin field "${field}" is malformed.`);
+    });
   }
 
-  return decodeCharacterRuntimeState(current, (field) => {
+  const rebuilt = rebuildCurrentCharacterStateFromEvents(events);
+
+  if (current === undefined) {
+    return rebuilt;
+  }
+
+  const cached = decodeCharacterRuntimeState(current, (field) => {
     throw new TypeError(`Stored Character State plugin field "${field}" is malformed.`);
   });
+
+  // The event log is authoritative; current.json is a cache that may lag if a
+  // prior commit appended the event and then failed to write the snapshot.
+  return characterRuntimeStatesEqual(cached, rebuilt) ? cached : rebuilt;
 }
 
-function rebuildCurrentCharacterState(
-  fileStore: RuntimePluginFileStore
+function rebuildCurrentCharacterStateFromEvents(
+  events: readonly unknown[]
 ): CharacterRuntimeState {
   let state = createDefaultCharacterRuntimeState();
 
-  for (const event of fileStore.readJsonl(characterStateEventsPath)) {
+  for (const event of events) {
     if (!isJsonObject(event) || event['type'] !== 'character_state.patch') {
       throw new TypeError('Stored Character State plugin event is malformed.');
     }

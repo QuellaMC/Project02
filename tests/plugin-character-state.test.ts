@@ -12,10 +12,16 @@ import {
   createCharacterStatePlugin
 } from '../src/plugins/builtin/character-state/index.ts';
 import {
+  createDefaultCharacterRuntimeState
+} from '../src/plugins/builtin/character-state/schema.ts';
+import {
   createRuntimeEventIdentity
 } from '../src/runtime/event.ts';
 import {
   createRuntimePluginContext
+} from '../src/plugins/types.ts';
+import type {
+  RuntimePluginFileStore
 } from '../src/plugins/types.ts';
 import {
   createRuntimePluginAfterTurnCommittedContext
@@ -136,6 +142,47 @@ describe('Character State plugin', () => {
 
     expect(beforeResult?.contextItems[0]?.text).toContain('energy=high');
   });
+
+  it('recovers current state from events when current snapshot write fails after append', async () => {
+    const { plugin, context, fileStore } =
+      createCharacterStateHarness('session-character-state-split-write');
+
+    fileStore.writeJsonAtomic('current.json', createDefaultCharacterRuntimeState());
+
+    await plugin.lifecycleHooks.handleToolCall?.(
+      {
+        ...testIdentity(),
+        pluginId: characterStatePluginId,
+        toolName: characterStatePatchModelToolName,
+        input: {
+          mood: 'curious'
+        }
+      },
+      context
+    );
+
+    expect(() =>
+      plugin.lifecycleHooks.afterTurnCommitted?.(
+        createCommittedContext(
+          'session-character-state-split-write',
+          createCurrentWriteFailingFileStore(fileStore)
+        )
+      )
+    ).toThrow('current snapshot write failed');
+
+    expect(fileStore.readJsonl('events.jsonl')).toHaveLength(1);
+    expect(fileStore.readJson('current.json')).toMatchObject({
+      current: {
+        mood: 'steady'
+      }
+    });
+
+    const beforeResult = await plugin.lifecycleHooks.beforeRoleModelCall?.(
+      context
+    );
+
+    expect(beforeResult?.contextItems[0]?.text).toContain('mood=curious');
+  });
 });
 
 function createCharacterStateHarness(sessionId: string, storeRoot?: string) {
@@ -186,6 +233,32 @@ function createCommittedContext(
     pluginId: characterStatePluginId,
     fileStore
   };
+}
+
+function createCurrentWriteFailingFileStore(
+  fileStore: RuntimePluginFileStore
+): RuntimePluginFileStore {
+  return Object.freeze({
+    readJson(path) {
+      return fileStore.readJson(path);
+    },
+    readJsonl(path) {
+      return fileStore.readJsonl(path);
+    },
+    writeJsonAtomic(path, value) {
+      if (path === 'current.json') {
+        throw new Error('current snapshot write failed');
+      }
+
+      fileStore.writeJsonAtomic(path, value);
+    },
+    appendJsonl(path, value) {
+      fileStore.appendJsonl(path, value);
+    },
+    revision() {
+      return fileStore.revision();
+    }
+  } satisfies RuntimePluginFileStore);
 }
 
 function testIdentity() {

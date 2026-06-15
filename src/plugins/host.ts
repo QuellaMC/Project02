@@ -360,7 +360,7 @@ function createRevocableRuntimePluginFileStore(
 function assertPluginFileStoreWritesActive(writesRevoked: boolean): void {
   if (writesRevoked) {
     throw new Error(
-      'Plugin fileStore writes are no longer allowed after hook timeout.'
+      'Plugin fileStore writes are no longer allowed after hook completion.'
     );
   }
 }
@@ -1825,6 +1825,7 @@ async function withPluginHookTimeout<T>(options: {
     if (timeoutId !== undefined) {
       clearTimeout(timeoutId);
     }
+    options.revokeFileStoreWrites();
   }
 }
 

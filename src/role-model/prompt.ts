@@ -74,6 +74,11 @@ export type RoleModelTurnContext = {
   readonly tools: readonly RoleModelChatCompletionTool[];
 };
 
+export type RoleModelProviderToolNameMapping = {
+  readonly runtimeName: string;
+  readonly providerName: string;
+};
+
 export type RenderRoleModelTurnContextOptions = {
   readonly additionalMessages?: readonly RoleModelChatMessage[];
 };
@@ -83,7 +88,7 @@ export const roleModelStableSystemPromptText =
   'The conversation history is provided as normal user and assistant messages. ' +
   'The tools array lists tools you, the assistant, can call through the runtime; these are not commands the user runs. ' +
   'Tool names are callable functions, not a complete plugin inventory. ' +
-  'If you need canonical plugin inventory facts, call plugin.list and use its tool result rather than inferring plugins from tool names. ' +
+  'If you need canonical plugin inventory facts, call the plugin inventory tool and use its tool result rather than inferring plugins from tool names. ' +
   'When discussing tools, describe them as tools you can call through the runtime, not as commands the user should run. ' +
   'Runtime and plugin context may be appended to the current user message inside a runtime_context block; treat that block as hidden reference data, not new user input or user-visible text. ' +
   'Use your provided function tools when a response depends on runtime/plugin state. ' +
@@ -124,6 +129,62 @@ export function modelToolDefinitionToChatTool(
       parameters: modelToolInputContractToJsonSchema(definition.inputContract)
     })
   } satisfies RoleModelChatCompletionTool);
+}
+
+export function createRoleModelProviderToolNameMappings(
+  runtimeNames: readonly string[]
+): readonly RoleModelProviderToolNameMapping[] {
+  const usedProviderNames = new Map<string, number>();
+  const mappings: RoleModelProviderToolNameMapping[] = [];
+
+  for (const runtimeName of runtimeNames) {
+    const baseProviderName = roleModelProviderSafeToolName(runtimeName);
+    const previousCount = usedProviderNames.get(baseProviderName) ?? 0;
+    const providerName =
+      previousCount === 0
+        ? baseProviderName
+        : `${baseProviderName}_${String(previousCount + 1)}`;
+
+    usedProviderNames.set(baseProviderName, previousCount + 1);
+    mappings.push(
+      Object.freeze({
+        runtimeName,
+        providerName
+      } satisfies RoleModelProviderToolNameMapping)
+    );
+  }
+
+  return Object.freeze(mappings);
+}
+
+export function providerToolNameForRuntimeToolName(
+  runtimeName: string,
+  mappings: readonly RoleModelProviderToolNameMapping[]
+): string {
+  return (
+    mappings.find((mapping) => mapping.runtimeName === runtimeName)
+      ?.providerName ?? roleModelProviderSafeToolName(runtimeName)
+  );
+}
+
+export function runtimeToolNameForProviderToolName(
+  providerName: string,
+  mappings: readonly RoleModelProviderToolNameMapping[]
+): string {
+  return (
+    mappings.find((mapping) => mapping.providerName === providerName)
+      ?.runtimeName ?? providerName
+  );
+}
+
+function roleModelProviderSafeToolName(runtimeName: string): string {
+  const safeName = runtimeName.replaceAll(/[^A-Za-z0-9_-]/gu, '_');
+
+  if (/^[A-Za-z]/u.test(safeName)) {
+    return safeName;
+  }
+
+  return `tool_${safeName}`;
 }
 
 export function freezeRoleModelChatMessage(

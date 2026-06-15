@@ -458,7 +458,10 @@ function createTurnEvidenceEntry(options: {
       terminalRawEvent: options.rawEvent
     }),
     ...roleModelEvidenceForRawEvent(options.rawEvent),
-    ...pluginEvidenceForRawEvent(options.rawEvent),
+    ...pluginEvidenceForTurn({
+      rawEvents: options.rawEvents,
+      terminalRawEvent: options.rawEvent
+    }),
     ...(options.rawEvent.reason === undefined
       ? {}
       : { reason: options.rawEvent.reason })
@@ -594,11 +597,19 @@ function toolEventsForTurn(options: {
   );
 }
 
-function pluginEvidenceForRawEvent(
-  rawEvent: RawEventLogRecord
-): { readonly pluginEvidence?: InspectPluginEvidence } {
-  const turnEvidence = rawEvent.runtimePluginTurnEvidence;
-  const simpleEvidence = rawEvent.runtimePluginEvidence ?? [];
+function pluginEvidenceForTurn(options: {
+  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly terminalRawEvent: RawEventLogRecord;
+}): { readonly pluginEvidence?: InspectPluginEvidence } {
+  const turnEvidence = options.terminalRawEvent.runtimePluginTurnEvidence;
+  const simpleEvidence = options.rawEvents
+    .filter((rawEvent) =>
+      sameTurnPluginEvidenceRawEvent({
+        rawEvent,
+        terminalRawEvent: options.terminalRawEvent
+      })
+    )
+    .flatMap((rawEvent) => rawEvent.runtimePluginEvidence ?? []);
 
   if (turnEvidence === undefined && simpleEvidence.length === 0) {
     return {};
@@ -622,6 +633,18 @@ function pluginEvidenceForRawEvent(
       health: pluginHealthSnapshots(turnEvidence)
     } satisfies InspectPluginEvidence)
   };
+}
+
+function sameTurnPluginEvidenceRawEvent(options: {
+  readonly rawEvent: RawEventLogRecord;
+  readonly terminalRawEvent: RawEventLogRecord;
+}): boolean {
+  return (
+    options.rawEvent.eventId === options.terminalRawEvent.eventId &&
+    options.rawEvent.traceId === options.terminalRawEvent.traceId &&
+    (options.rawEvent === options.terminalRawEvent ||
+      options.rawEvent.kind === 'after_turn_committed')
+  );
 }
 
 function pluginListings(

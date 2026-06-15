@@ -189,6 +189,7 @@ const rawEventKinds = [
   'character_reply_rejected',
   'commit_validation_rejected',
   'runtime_turn_completed',
+  'after_turn_committed',
   'runtime_turn_rejected'
 ] as const satisfies readonly RawEventLogRecordKind[];
 

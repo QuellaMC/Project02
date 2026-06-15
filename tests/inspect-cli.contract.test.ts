@@ -67,6 +67,13 @@ describe('inspect CLI plugin evidence', () => {
         {
           readonly modelRounds: readonly unknown[];
           readonly toolEvents: readonly [{ readonly pluginId: string }];
+          readonly pluginEvidence: {
+            readonly evidence: readonly {
+              readonly pluginId: string;
+              readonly evidenceKind: string;
+              readonly status: string;
+            }[];
+          };
         }
       ];
     };
@@ -74,6 +81,15 @@ describe('inspect CLI plugin evidence', () => {
     expect(exitCode).toBe(0);
     expect(output.turns[0].modelRounds).toHaveLength(2);
     expect(output.turns[0].toolEvents[0].pluginId).toBe('character-state');
+    expect(output.turns[0].pluginEvidence.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pluginId: 'character-state',
+          evidenceKind: 'after_turn_committed',
+          status: 'accepted'
+        })
+      ])
+    );
   });
 });
 

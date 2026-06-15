@@ -8,6 +8,7 @@ import {
   createRuntimePlugin,
   createRuntimePluginContext,
   createRuntimePluginEvidenceSnapshot,
+  createRuntimePluginHealthSnapshot,
   firstPartyModelToolsPluginId,
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
@@ -21,6 +22,7 @@ import {
 import type {
   RuntimePlugin,
   RuntimePluginContext,
+  RuntimePluginFileStore,
   RuntimePluginToolCallResult
 } from '../src/plugins/types.ts';
 import {
@@ -184,6 +186,98 @@ describe('runtime plugin host', () => {
 
     expect(fileStore.readJson('late-write.json')).toBeUndefined();
     expect(fileStore.revision()).toBe(0);
+  });
+
+  it('blocks retained fileStore writes after beforeRoleModelCall completes', async () => {
+    let retainedFileStore: RuntimePluginFileStore | undefined;
+    const sessionIdentity = {};
+    const plugin = createRetainedBeforeRoleModelFileStorePlugin((fileStore) => {
+      retainedFileStore = fileStore;
+    });
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      sessionIdentity
+    });
+
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    expectRetainedFileStoreWriteBlocked(retainedFileStore, 'after-before.json');
+
+    const fileStore = createPluginHostTestFileStore({
+      pluginId: plugin.manifest.id,
+      sessionIdentity
+    });
+
+    expect(fileStore.readJson('during-before.json')).toEqual({ value: 'during' });
+    expect(fileStore.readJson('after-before.json')).toBeUndefined();
+    expect(fileStore.revision()).toBe(1);
+  });
+
+  it('blocks retained fileStore writes after handleToolCall completes', async () => {
+    let retainedFileStore: RuntimePluginFileStore | undefined;
+    const sessionIdentity = {};
+    const plugin = createRetainedHandleToolCallFileStorePlugin((fileStore) => {
+      retainedFileStore = fileStore;
+    });
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      sessionIdentity
+    });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    expectRetainedFileStoreWriteBlocked(retainedFileStore, 'after-handle.json');
+
+    const fileStore = createPluginHostTestFileStore({
+      pluginId: plugin.manifest.id,
+      sessionIdentity
+    });
+
+    expect(fileStore.readJson('during-handle.json')).toEqual({ value: 'during' });
+    expect(fileStore.readJson('after-handle.json')).toBeUndefined();
+    expect(fileStore.revision()).toBe(1);
+  });
+
+  it('blocks retained fileStore writes after health completes', async () => {
+    let retainedFileStore: RuntimePluginFileStore | undefined;
+    const sessionIdentity = {};
+    const plugin = createRetainedHealthFileStorePlugin((fileStore) => {
+      retainedFileStore = fileStore;
+    });
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      sessionIdentity
+    });
+
+    const result = await host.health(testPluginContext());
+
+    expect(result.snapshots).toHaveLength(1);
+    expect(result.snapshots[0]).toMatchObject({
+      pluginId: plugin.manifest.id,
+      status: 'ok'
+    });
+    expectRetainedFileStoreWriteBlocked(retainedFileStore, 'after-health.json');
+
+    const fileStore = createPluginHostTestFileStore({
+      pluginId: plugin.manifest.id,
+      sessionIdentity
+    });
+
+    expect(fileStore.readJson('during-health.json')).toEqual({ value: 'during' });
+    expect(fileStore.readJson('after-health.json')).toBeUndefined();
+    expect(fileStore.revision()).toBe(1);
   });
 
   it('rejects plugin-host-owned invalid input before invoking the handler', async () => {
@@ -505,6 +599,143 @@ function createRuntimeNotesPlugin(): RuntimePlugin {
         };
       }
     }
+  });
+}
+
+function createRetainedBeforeRoleModelFileStorePlugin(
+  retainFileStore: (fileStore: RuntimePluginFileStore) => void
+): RuntimePlugin {
+  const pluginId = 'memory.retained-before.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      declaredPlugins: ['before_role_model_call'],
+      requestedApis: ['file_store']
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall(context) {
+        writeDuringHookAndRetainFileStore({
+          context,
+          path: 'during-before.json',
+          retainFileStore
+        });
+
+        return {
+          contextItems: [],
+          runtimeNotes: [],
+          evidence: []
+        };
+      }
+    }
+  });
+}
+
+function createRetainedHandleToolCallFileStorePlugin(
+  retainFileStore: (fileStore: RuntimePluginFileStore) => void
+): RuntimePlugin {
+  const pluginId = 'memory.retained-handle.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      requestedApis: ['file_store']
+    },
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall(call, context) {
+        writeDuringHookAndRetainFileStore({
+          context,
+          path: 'during-handle.json',
+          retainFileStore
+        });
+
+        const query = call.input['query'];
+        if (typeof query !== 'string') {
+          throw new Error('Expected query string.');
+        }
+
+        return createAcceptedMemorySearchResult({
+          pluginId,
+          query,
+          context
+        });
+      }
+    }
+  });
+}
+
+function createRetainedHealthFileStorePlugin(
+  retainFileStore: (fileStore: RuntimePluginFileStore) => void
+): RuntimePlugin {
+  const pluginId = 'memory.retained-health.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      declaredPlugins: ['health'],
+      requestedApis: ['file_store']
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      health(context) {
+        writeDuringHookAndRetainFileStore({
+          context,
+          path: 'during-health.json',
+          retainFileStore
+        });
+
+        return createRuntimePluginHealthSnapshot({
+          pluginId,
+          status: 'ok',
+          checkedAt: context.timestamp,
+          summary: 'Health check completed.',
+          redactionLabels: []
+        });
+      }
+    }
+  });
+}
+
+function writeDuringHookAndRetainFileStore(options: {
+  readonly context: RuntimePluginContext;
+  readonly path: string;
+  readonly retainFileStore: (fileStore: RuntimePluginFileStore) => void;
+}): void {
+  if (options.context.fileStore === undefined) {
+    throw new Error('Expected plugin hook context to include fileStore.');
+  }
+
+  options.context.fileStore.writeJsonAtomic(options.path, {
+    value: 'during'
+  });
+  options.retainFileStore(options.context.fileStore);
+}
+
+function expectRetainedFileStoreWriteBlocked(
+  fileStore: RuntimePluginFileStore | undefined,
+  path: string
+): void {
+  if (fileStore === undefined) {
+    throw new Error('Expected retained fileStore.');
+  }
+
+  expect(() => {
+    fileStore.writeJsonAtomic(path, {
+      value: 'after'
+    });
+  }).toThrow(/after hook completion/iu);
+}
+
+function createPluginHostTestFileStore(options: {
+  readonly pluginId: string;
+  readonly sessionIdentity: object;
+}): RuntimePluginFileStore {
+  return createRuntimePluginFileStore({
+    sessionId: 'session-plugin-host',
+    sessionIdentity: options.sessionIdentity,
+    pluginId: options.pluginId
   });
 }
 

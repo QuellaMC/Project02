@@ -883,6 +883,8 @@ function assertRawEventTerminalOrder(
     isTerminalRecord: isTerminalRawEventLogRecord,
     isPrerequisiteEvidence: (rawEvent) =>
       rawEvent.kind === 'runtime_event_received',
+    isAllowedAfterTerminalRecord: (rawEvent) =>
+      rawEvent.kind === 'after_turn_committed',
     recordAfterTerminalMessage:
       'Raw event log contains records after terminal turn evidence.',
     terminalWithoutPrerequisiteMessage:
@@ -897,6 +899,7 @@ function assertTerminalEvidenceOrder<T extends {
   readonly records: readonly T[];
   readonly isTerminalRecord: (record: T) => boolean;
   readonly isPrerequisiteEvidence: (record: T) => boolean;
+  readonly isAllowedAfterTerminalRecord?: (record: T) => boolean;
   readonly recordAfterTerminalMessage: string;
   readonly terminalWithoutPrerequisiteMessage: string;
 }): void {
@@ -906,7 +909,10 @@ function assertTerminalEvidenceOrder<T extends {
   for (const record of options.records) {
     const identityKey = runtimeEventIdentityKey(record);
 
-    if (terminalTurnIdentities.has(identityKey)) {
+    if (
+      terminalTurnIdentities.has(identityKey) &&
+      options.isAllowedAfterTerminalRecord?.(record) !== true
+    ) {
       throw new LocalRuntimeStorageContractError(
         'malformed_record',
         options.recordAfterTerminalMessage
@@ -963,6 +969,10 @@ function assertRawEventTurnsDoNotOverlap(
 
   for (const rawEvent of rawEvents) {
     const identityKey = runtimeEventIdentityKey(rawEvent);
+
+    if (rawEvent.kind === 'after_turn_committed') {
+      continue;
+    }
 
     if (openTurnIdentity !== undefined && openTurnIdentity !== identityKey) {
       throw new LocalRuntimeStorageContractError(

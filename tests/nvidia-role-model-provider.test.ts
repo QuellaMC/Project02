@@ -60,7 +60,7 @@ describe('NVIDIA role-model provider', () => {
       'not commands the user runs'
     );
     expect(messages[0]?.content).toContain(
-      'call plugin.list and use its tool result'
+      'call the plugin inventory tool and use its tool result'
     );
     expect(messages[0]?.content).toContain(
       'not as commands the user should run'
@@ -100,9 +100,12 @@ describe('NVIDIA role-model provider', () => {
 
     expect(tools.map((tool) => tool.function.name)).toEqual([
       visibleReplyModelToolName,
-      'plugin.list',
-      'character_state.patch'
+      'plugin_list',
+      'character_state_patch'
     ]);
+    expect(tools.every((tool) => /^[A-Za-z][A-Za-z0-9_-]*$/u.test(tool.function.name))).toBe(
+      true
+    );
     expect(
       tools.find((tool) => tool.function.name === visibleReplyModelToolName)
         ?.function.parameters.properties['text']
@@ -115,15 +118,15 @@ describe('NVIDIA role-model provider', () => {
         ?.function.description
     ).toContain('from you');
     expect(
-      tools.find((tool) => tool.function.name === 'plugin.list')
+      tools.find((tool) => tool.function.name === 'plugin_list')
         ?.function.description
     ).toContain('available to you');
     expect(
-      tools.find((tool) => tool.function.name === 'character_state.patch')
+      tools.find((tool) => tool.function.name === 'character_state_patch')
         ?.function.description
     ).toContain('your current Character State');
     expect(
-      tools.find((tool) => tool.function.name === 'plugin.list')
+      tools.find((tool) => tool.function.name === 'plugin_list')
         ?.function.parameters.additionalProperties
     ).toBe(false);
   });
@@ -204,8 +207,16 @@ describe('NVIDIA role-model provider', () => {
                     id: 'call_plugin_list',
                     type: 'function',
                     function: {
-                      name: 'plugin.list',
+                      name: 'plugin_list',
                       arguments: '{}'
+                    }
+                  },
+                  {
+                    id: 'call_character_state_patch',
+                    type: 'function',
+                    function: {
+                      name: 'character_state_patch',
+                      arguments: '{"mood":"curious"}'
                     }
                   }
                 ]
@@ -232,17 +243,32 @@ describe('NVIDIA role-model provider', () => {
         {
           name: 'plugin.list',
           input: {}
+        },
+        {
+          name: 'character_state.patch',
+          input: {
+            mood: 'curious'
+          }
         }
       ],
       text: 'Checking the available plugins.'
     });
-    expect(output.nativeAssistantMessage?.tool_calls?.[0]).toMatchObject({
-      id: 'call_plugin_list',
-      function: {
-        name: 'plugin.list',
-        arguments: '{}'
+    expect(output.nativeAssistantMessage?.tool_calls).toMatchObject([
+      {
+        id: 'call_plugin_list',
+        function: {
+          name: 'plugin_list',
+          arguments: '{}'
+        }
+      },
+      {
+        id: 'call_character_state_patch',
+        function: {
+          name: 'character_state_patch',
+          arguments: '{"mood":"curious"}'
+        }
       }
-    });
+    ]);
   });
 
   it('rejects non-finite native tool arguments before raw output normalization', async () => {
@@ -261,7 +287,7 @@ describe('NVIDIA role-model provider', () => {
                     id: 'call_plugin_list',
                     type: 'function',
                     function: {
-                      name: 'plugin.list',
+                      name: 'plugin_list',
                       arguments: '{"score":1e999}'
                     }
                   }

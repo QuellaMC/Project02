@@ -57,6 +57,7 @@ export type RawEventLogRecordKind =
   | 'character_reply_rejected'
   | 'commit_validation_rejected'
   | 'runtime_turn_completed'
+  | 'after_turn_committed'
   | 'runtime_turn_rejected';
 
 export type RawEventLogPayloadSummary = {
