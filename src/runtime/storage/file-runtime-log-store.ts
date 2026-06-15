@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 import {
   ConversationRehydrationError,
@@ -92,6 +92,12 @@ export function createFileRuntimeLogStore(
 
       return storedRecord;
     },
+    removeConversationMessages(messageIds) {
+      removeConversationLogRecords({
+        paths,
+        messageIds
+      });
+    },
     traceEntries() {
       assertSessionReadable();
       return Object.freeze([
@@ -128,6 +134,24 @@ function appendJsonLine(options: {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
       `Could not append local runtime log file: ${options.filePath}.`
+    );
+  }
+}
+
+function writeJsonLines(options: {
+  readonly filePath: string;
+  readonly lines: readonly string[];
+}): void {
+  try {
+    writeFileSync(
+      options.filePath,
+      options.lines.map((line) => `${line}\n`).join(''),
+      'utf8'
+    );
+  } catch {
+    throw new LocalRuntimeStorageContractError(
+      'write_failed',
+      `Could not rewrite local runtime log file: ${options.filePath}.`
     );
   }
 }
@@ -498,6 +522,41 @@ function readAppendableConversationLogRecords(
   });
 
   return evidence.conversationMessages;
+}
+
+function removeConversationLogRecords(options: {
+  readonly paths: LocalRuntimeSessionPaths;
+  readonly messageIds: readonly string[];
+}): void {
+  const ids = new Set(options.messageIds);
+
+  if (ids.size === 0) {
+    return;
+  }
+
+  const evidence = readRuntimeSessionEvidence(options.paths, 'append');
+  const conversationMessages = evidence.conversationMessages.filter(
+    (message) => !ids.has(message.id)
+  );
+
+  if (conversationMessages.length === evidence.conversationMessages.length) {
+    return;
+  }
+
+  assertDurableRuntimeSessionEvidence({
+    paths: options.paths,
+    evidence: Object.freeze({
+      traceEntries: evidence.traceEntries,
+      rawEvents: evidence.rawEvents,
+      conversationMessages: Object.freeze(conversationMessages)
+    } satisfies DurableRuntimeSessionEvidence),
+    mode: 'appendConversation'
+  });
+
+  writeJsonLines({
+    filePath: options.paths.conversationPath,
+    lines: conversationMessages.map(encodeConversationLogRecord)
+  });
 }
 
 function readAppendableRawEventLogRecords(

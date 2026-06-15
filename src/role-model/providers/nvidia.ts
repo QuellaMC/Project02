@@ -86,6 +86,7 @@ const nvidiaNativeToolArgumentsContract = Object.freeze({
   fields: Object.freeze([]),
   additionalFields: true
 } satisfies ModelToolInputContract);
+const terminalNvidiaFinishReasons = Object.freeze(['stop', 'tool_calls']);
 
 export function createNvidiaRoleModelProviderConfigFromEnv(
   env: NvidiaRoleModelProviderEnvironment = process.env
@@ -440,6 +441,14 @@ function parseNvidiaResponseMessage(
     );
   }
 
+  const finishReasonResult = parseNvidiaFinishReason(
+    firstChoice['finish_reason']
+  );
+
+  if (finishReasonResult.status === 'rejected') {
+    return finishReasonResult;
+  }
+
   const message = firstChoice['message'];
 
   if (!isJsonRecord(message)) {
@@ -484,6 +493,30 @@ function parseNvidiaResponseMessage(
         : { tool_calls: Object.freeze([...toolCalls]) })
     } satisfies RoleModelAssistantChatMessage)
   } satisfies ParsedNvidiaResponseMessage);
+}
+
+function parseNvidiaFinishReason(
+  value: unknown
+): { readonly status: 'accepted' } | RejectedNvidiaProviderParseResult {
+  if (value === undefined || value === null) {
+    return Object.freeze({ status: 'accepted' });
+  }
+
+  if (typeof value !== 'string') {
+    return rejectResponse(
+      'malformed_response',
+      'NVIDIA response choice.finish_reason must be a string or null.'
+    );
+  }
+
+  if (terminalNvidiaFinishReasons.includes(value)) {
+    return Object.freeze({ status: 'accepted' });
+  }
+
+  return rejectResponse(
+    'provider_error',
+    `NVIDIA response finish_reason "${value}" is not terminal.`
+  );
 }
 
 type ParsedNvidiaMessageContent =

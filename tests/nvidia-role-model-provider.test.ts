@@ -143,6 +143,7 @@ describe('NVIDIA role-model provider', () => {
           return Promise.resolve({
             choices: [
               {
+                finish_reason: 'stop',
                 message: {
                   role: 'assistant',
                   content: 'Hello from assistant content.\n- plugin.list'
@@ -191,6 +192,47 @@ describe('NVIDIA role-model provider', () => {
     });
   });
 
+  it('rejects length-finished assistant content as partial output', async () => {
+    const fetchClient: NvidiaFetchClient = () => Promise.resolve({
+      ok: true,
+      status: 200,
+      json() {
+        return Promise.resolve({
+          choices: [
+            {
+              finish_reason: 'length',
+              message: {
+                role: 'assistant',
+                content: 'This reply was truncated mid-sentence'
+              }
+            }
+          ]
+        });
+      },
+      text() {
+        return Promise.resolve('');
+      }
+    });
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(output.rawOutputText).toBe('');
+    expect(output.rejection).toMatchObject({
+      reason: 'provider_error',
+      details: 'NVIDIA response finish_reason "length" is not terminal.'
+    });
+    expect(output.providerMetadata?.error).toMatchObject({
+      code: 'provider_error',
+      message: 'NVIDIA response finish_reason "length" is not terminal.'
+    });
+  });
+
   it('normalizes native assistant tool calls without parsing content as JSON', async () => {
     const fetchClient: NvidiaFetchClient = () => Promise.resolve({
       ok: true,
@@ -199,6 +241,7 @@ describe('NVIDIA role-model provider', () => {
         return Promise.resolve({
           choices: [
             {
+              finish_reason: 'tool_calls',
               message: {
                 role: 'assistant',
                 content: 'Checking the available plugins.',

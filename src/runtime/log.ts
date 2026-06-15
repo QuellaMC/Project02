@@ -128,6 +128,7 @@ export type RuntimeLogStore = {
   appendTrace(entry: RuntimeTraceEntryInput): RuntimeTraceEntry;
   appendRawEvent(record: RawEventLogRecordInput): RawEventLogRecord;
   appendConversationMessage(record: ConversationLogRecordInput): ConversationLogRecord;
+  removeConversationMessages(messageIds: readonly string[]): void;
   traceEntries(): readonly RuntimeTraceEntry[];
   rawEvents(): readonly RawEventLogRecord[];
   conversationMessages(): readonly ConversationLogRecord[];
@@ -273,6 +274,17 @@ export function createRuntimeLogStore(): RuntimeLogStore {
       conversationMessages.push(storedRecord);
 
       return storedRecord;
+    },
+    removeConversationMessages(messageIds) {
+      const ids = new Set(messageIds);
+
+      for (let index = conversationMessages.length - 1; index >= 0; index -= 1) {
+        const message = conversationMessages[index];
+
+        if (message !== undefined && ids.has(message.id)) {
+          conversationMessages.splice(index, 1);
+        }
+      }
     },
     traceEntries() {
       return Object.freeze([...traceEntries]);

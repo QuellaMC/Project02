@@ -1404,7 +1404,7 @@ function collectedPluginPromptContextCandidates(options: {
       kind: 'context_item',
       plugin: contextItem.plugin,
       promptIndex: candidates.length,
-      estimatedTokens: contextItem.item.budget.estimatedTokens,
+      estimatedTokens: estimateContextItemTokens(contextItem.item),
       priority: contextItem.item.budget.priority,
       contextItem
     });
@@ -1550,7 +1550,18 @@ function normalizeRuntimeNotes(value: unknown): readonly string[] {
 }
 
 function estimateRuntimeNoteTokens(note: string): number {
-  return Math.max(1, Math.ceil(note.length / 4));
+  return estimateRuntimeTextTokens(note);
+}
+
+function estimateContextItemTokens(item: RuntimePluginContextItem): number {
+  return Math.max(
+    item.budget.estimatedTokens,
+    estimateRuntimeTextTokens(item.text)
+  );
+}
+
+function estimateRuntimeTextTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
 }
 
 function normalizeEvidenceSnapshots(options: {

@@ -7,6 +7,7 @@ import {
 import {
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
+  roleModelMalformedOutputRejectionReason,
   roleModelUnsupportedEffectRejectionReason,
   roleModelUnknownToolRejectionReason
 } from '../src/role-model/contracts.ts';
@@ -102,6 +103,47 @@ describe('role-model contracts', () => {
             }
           }
         ]
+      }
+    });
+  });
+
+  it('accepts top-level text only when no tool calls are present', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        toolCalls: [],
+        text: 'folded model note'
+      })
+    );
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      decision: {
+        toolCalls: []
+      },
+      nonCommittedText: 'folded model note'
+    });
+  });
+
+  it('rejects top-level text when tool calls are present', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        toolCalls: [
+          {
+            name: visibleReplyModelToolName,
+            input: {
+              text: 'committed reply'
+            }
+          }
+        ],
+        text: 'second non-committed reply'
+      })
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'Decision text is only allowed when toolCalls is empty.'
       }
     });
   });

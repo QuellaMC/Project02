@@ -480,7 +480,7 @@ async function runSerializedLocalUserMessageEvent(
         options.characterTurnOptions
       );
 
-      let userRecord: ConversationLogRecord;
+      let userRecord: ConversationLogRecord | undefined;
       let characterRecord: ConversationLogRecord;
 
       try {
@@ -495,6 +495,10 @@ async function runSerializedLocalUserMessageEvent(
           committedAt
         });
       } catch (error: unknown) {
+        if (userRecord !== undefined) {
+          options.logStore.removeConversationMessages([userRecord.id]);
+        }
+
         rollbackLastCharacterTurn(options.session, turn);
         throw error;
       }

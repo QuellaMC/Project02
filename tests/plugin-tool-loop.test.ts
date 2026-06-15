@@ -400,6 +400,54 @@ describe('plugin-driven tool loop', () => {
     expect(logStore.conversationMessages()).toEqual([]);
   });
 
+  it('removes a durable user row when paired character append fails', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-log-store-'));
+    const sessionId = 'session-character-append-fails';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const fileLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const logStore = createCharacterAppendFailingLogStore(fileLogStore);
+    const session = createConversationSession({ id: sessionId });
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'this should not leave an unmatched user row'
+            }
+          }
+        ]
+      }
+    ]);
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestEvent('hello', 'evt_character_append_fails'),
+        session,
+        logStore,
+        roleModelAdapter: adapter
+      })
+    ).rejects.toThrow('character append failed');
+
+    const reopenedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+
+    expect(session.visibleTranscript).toEqual([]);
+    expect(reopenedLogStore.conversationMessages()).toEqual([]);
+    expect(reopenedLogStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected'
+    });
+  });
+
   it('runs afterTurnCommitted after visible messages and terminal evidence commit', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -1043,8 +1091,7 @@ function createNativePluginListAdapter(
                 name: 'plugin.list',
                 input: {}
               }
-            ],
-            text: 'Checking plugins.'
+            ]
           }),
           nativeAssistantMessage: {
             role: 'assistant',
@@ -1103,8 +1150,7 @@ function createNativeVisibleReplyAndPluginListAdapter(
                 name: 'plugin.list',
                 input: {}
               }
-            ],
-            text: 'Checking plugins.'
+            ]
           }),
           nativeAssistantMessage: {
             role: 'assistant',
@@ -1181,6 +1227,45 @@ function createConversationAppendFailingLogStore(): RuntimeLogStore {
     appendConversationMessage() {
       throw new Error('conversation append failed');
     },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
+function createCharacterAppendFailingLogStore(
+  logStore: RuntimeLogStore
+): RuntimeLogStore {
+  let conversationAppendCount = 0;
+
+  return Object.freeze({
+    appendTrace(entry) {
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      return logStore.appendRawEvent(record);
+    },
+    appendConversationMessage(record) {
+      conversationAppendCount += 1;
+
+      if (conversationAppendCount === 2) {
+        throw new Error('character append failed');
+      }
+
+      return logStore.appendConversationMessage(record);
+    },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
+    },
     traceEntries() {
       return logStore.traceEntries();
     },
@@ -1209,6 +1294,9 @@ function createRuntimeTurnCompletedAppendFailingLogStore(): RuntimeLogStore {
     },
     appendConversationMessage(record) {
       return logStore.appendConversationMessage(record);
+    },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
     },
     traceEntries() {
       return logStore.traceEntries();

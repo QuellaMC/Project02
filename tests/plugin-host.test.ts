@@ -7,6 +7,7 @@ import {
   createFirstPartyModelToolsPlugin,
   createRuntimePlugin,
   createRuntimePluginContext,
+  createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
   firstPartyModelToolsPluginId,
@@ -419,6 +420,30 @@ describe('runtime plugin host', () => {
     expect(JSON.stringify(result.runtimeNotes)).not.toContain('super-secret');
   });
 
+  it('budgets beforeRoleModelCall context item text with a host-side estimate', async () => {
+    const plugin = createUnderestimatedContextItemPlugin();
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected beforeRoleModelCall to complete.');
+    }
+
+    expect(result.contextItems).toEqual([]);
+    const budgetEvidence = result.evidence.find(
+      (evidence) =>
+        evidence.pluginId === plugin.manifest.id &&
+        evidence.evidenceKind === 'before_role_model_call' &&
+        evidence.status === 'degraded'
+    );
+
+    expect(budgetEvidence?.summary).toContain('1 item(s)');
+    expect(budgetEvidence?.summary).toContain('dropped ids oversized-context');
+    expect(JSON.stringify(result.contextItems)).not.toContain('oversized context');
+  });
+
   it('accepts first-party model tools as tool-provider-only mappings', () => {
     const plugin = createFirstPartyModelToolsPlugin();
     const mapping = mapFirstPartyModelToolsPlugin();
@@ -593,6 +618,52 @@ function createRuntimeNotesPlugin(): RuntimePlugin {
               evidenceKind: 'before_role_model_call',
               status: 'accepted',
               summary: 'Notes loaded.',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
+function createUnderestimatedContextItemPlugin(): RuntimePlugin {
+  const pluginId = 'memory.underestimated-context.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      declaredPlugins: ['before_role_model_call']
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall(context) {
+        return {
+          contextItems: [
+            createRuntimePluginContextItem({
+              pluginId,
+              id: 'oversized-context',
+              kind: 'memory',
+              text: 'oversized context '.repeat(160),
+              budget: {
+                estimatedTokens: 1,
+                priority: 1
+              },
+              sourceReferences: [],
+              redactionLabels: context.privacy.redactionLabels
+            })
+          ],
+          runtimeNotes: [],
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId,
+              evidenceKind: 'before_role_model_call',
+              status: 'accepted',
+              summary: 'Loaded oversized context item.',
               redactionLabels: []
             })
           ]

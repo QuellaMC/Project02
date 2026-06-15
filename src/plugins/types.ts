@@ -638,7 +638,7 @@ export function validateRuntimePluginProvidedTool(
   return accept(
     Object.freeze({
       name: name.value,
-      description: description.value,
+      description: redactRuntimePluginText(description.value),
       requiredForUserTurn: requiredForUserTurn.value,
       maxCallsPerUserTurn: maxCallsPerUserTurn.value,
       inputContract: inputContract.value,
