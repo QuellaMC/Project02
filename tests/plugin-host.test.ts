@@ -29,6 +29,16 @@ import {
 import {
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
+import {
+  createRuntimePluginFileStore
+} from '../src/plugins/file-store.ts';
+
+type Deferred<T> = {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T | PromiseLike<T>) => void;
+};
+
+type LateFileStoreWriteOutcome = 'blocked' | 'missing_file_store' | 'written';
 
 describe('runtime plugin host', () => {
   it('routes plugin.list through the host-owned discovery plugin', async () => {
@@ -130,6 +140,50 @@ describe('runtime plugin host', () => {
     });
     expect(JSON.stringify(result)).not.toContain('super-secret');
     expect(JSON.stringify(result)).not.toContain('secret-token');
+  });
+
+  it('blocks fileStore writes attempted after handleToolCall timeout', async () => {
+    const continueAfterTimeout = createDeferred<null>();
+    const lateWrite = createDeferred<LateFileStoreWriteOutcome>();
+    const sessionIdentity = {};
+    const plugin = createLateFileStoreWritePlugin({
+      continueAfterTimeout: continueAfterTimeout.promise,
+      recordLateWriteOutcome: lateWrite.resolve
+    });
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      sessionIdentity
+    });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_timeout'
+    });
+
+    continueAfterTimeout.resolve(null);
+
+    await expect(lateWrite.promise).resolves.toBe('blocked');
+
+    const fileStore = createRuntimePluginFileStore({
+      sessionId: 'session-plugin-host',
+      sessionIdentity,
+      pluginId: plugin.manifest.id
+    });
+
+    expect(fileStore.readJson('late-write.json')).toBeUndefined();
+    expect(fileStore.revision()).toBe(0);
   });
 
   it('rejects plugin-host-owned invalid input before invoking the handler', async () => {
@@ -454,6 +508,55 @@ function createRuntimeNotesPlugin(): RuntimePlugin {
   });
 }
 
+function createLateFileStoreWritePlugin(options: {
+  readonly continueAfterTimeout: Promise<null>;
+  readonly recordLateWriteOutcome: (outcome: LateFileStoreWriteOutcome) => void;
+}): RuntimePlugin {
+  const pluginId = 'memory.late-file-store-write.fixture';
+  const manifest = memorySearchPluginManifest(pluginId);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...manifest,
+      runtimePolicy: {
+        ...manifest.runtimePolicy,
+        timeoutMs: 5
+      },
+      requestedApis: ['file_store']
+    },
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {
+      async handleToolCall(_call, context) {
+        await options.continueAfterTimeout;
+
+        if (context.fileStore === undefined) {
+          options.recordLateWriteOutcome('missing_file_store');
+          return createAcceptedMemorySearchResult({
+            pluginId,
+            query: 'missing-file-store',
+            context
+          });
+        }
+
+        try {
+          context.fileStore.writeJsonAtomic('late-write.json', {
+            value: 'late'
+          });
+          options.recordLateWriteOutcome('written');
+        } catch {
+          options.recordLateWriteOutcome('blocked');
+        }
+
+        return createAcceptedMemorySearchResult({
+          pluginId,
+          query: 'late-write',
+          context
+        });
+      }
+    }
+  });
+}
+
 function createMemorySearchPluginWithoutHandlerDeclaration(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
@@ -552,5 +655,21 @@ function testIdentity() {
     eventId: 'evt_plugin_host',
     traceId: 'trace_plugin_host',
     createdAt: '2026-06-15T00:00:00.000Z'
+  });
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve: Deferred<T>['resolve'] | undefined;
+  const promise = new Promise<T>((resolveValue) => {
+    resolve = resolveValue;
+  });
+
+  if (resolve === undefined) {
+    throw new Error('Expected deferred promise resolver to be initialized.');
+  }
+
+  return Object.freeze({
+    promise,
+    resolve
   });
 }

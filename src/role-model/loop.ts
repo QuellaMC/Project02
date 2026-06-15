@@ -255,7 +255,8 @@ export async function runRoleModelLoop(
         ? parseRoleModelDecision(
             rawOutputValidation.rawOutputText,
             inputEnvelope.allowedTools,
-            inputEnvelope.pluginToolDefinitions
+            inputEnvelope.pluginToolDefinitions,
+            toolObservations
           )
         : rawOutputValidation.decisionResult;
     const parsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
@@ -975,7 +976,15 @@ function validateRoleModelAdapterRawOutput(
     return createMalformedAdapterRawOutputResult();
   }
 
-  const providerMetadata = optionalProviderMetadata(rawOutput['providerMetadata']);
+  const providerMetadataResult = optionalProviderMetadata(
+    rawOutput['providerMetadata']
+  );
+
+  if (providerMetadataResult.status === 'rejected') {
+    return createMalformedAdapterRawOutputResult(providerMetadataResult.details);
+  }
+
+  const providerMetadata = providerMetadataResult.providerMetadata;
   const rejection = optionalRoleModelDecisionRejection(rawOutput['rejection']);
   const nativeAssistantMessage = optionalRoleModelAssistantChatMessage(
     rawOutput['nativeAssistantMessage']
@@ -1123,19 +1132,27 @@ function optionalRoleModelChatToolCall(
 
 function optionalProviderMetadata(
   value: unknown
-): RoleModelProviderMetadata | undefined {
+):
+  | {
+      readonly status: 'accepted';
+      readonly providerMetadata?: RoleModelProviderMetadata;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly details: string;
+    } {
   if (value === undefined) {
-    return undefined;
+    return Object.freeze({ status: 'accepted' });
   }
 
   if (!isJsonRecord(value)) {
-    return undefined;
+    return Object.freeze({ status: 'accepted' });
   }
 
   const provider = value['provider'];
 
   if (provider !== 'local' && provider !== 'nvidia') {
-    return undefined;
+    return Object.freeze({ status: 'accepted' });
   }
 
   const model = value['model'];
@@ -1143,18 +1160,41 @@ function optionalProviderMetadata(
   const response = optionalProviderResponseMetadata(value['response']);
   const error = optionalProviderErrorMetadata(value['error']);
 
+  if (request?.status === 'rejected') {
+    return request;
+  }
+
+  if (response?.status === 'rejected') {
+    return response;
+  }
+
   return Object.freeze({
-    provider,
-    ...(typeof model === 'string' ? { model } : {}),
-    ...(request === undefined ? {} : { request }),
-    ...(response === undefined ? {} : { response }),
-    ...(error === undefined ? {} : { error })
-  } satisfies RoleModelProviderMetadata);
+    status: 'accepted',
+    providerMetadata: Object.freeze({
+      provider,
+      ...(typeof model === 'string' ? { model } : {}),
+      ...(request === undefined ? {} : { request: request.request }),
+      ...(response === undefined ? {} : { response: response.response }),
+      ...(error === undefined ? {} : { error })
+    } satisfies RoleModelProviderMetadata)
+  });
 }
+
+type ProviderRequestMetadata = NonNullable<RoleModelProviderMetadata['request']>;
+type ProviderResponseMetadata = NonNullable<RoleModelProviderMetadata['response']>;
 
 function optionalProviderRequestMetadata(
   value: unknown
-): RoleModelProviderMetadata['request'] | undefined {
+):
+  | {
+      readonly status: 'accepted';
+      readonly request: ProviderRequestMetadata;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly details: string;
+    }
+  | undefined {
   if (!isJsonRecord(value)) {
     return undefined;
   }
@@ -1162,24 +1202,53 @@ function optionalProviderRequestMetadata(
   const endpoint = value['endpoint'];
   const messageCount = value['messageCount'];
 
+  if (typeof messageCount === 'number' && !Number.isFinite(messageCount)) {
+    return Object.freeze({
+      status: 'rejected',
+      details: 'providerMetadata.request.messageCount must be finite JSON.'
+    });
+  }
+
   return Object.freeze({
-    ...(typeof endpoint === 'string' ? { endpoint } : {}),
-    ...(typeof messageCount === 'number' ? { messageCount } : {}),
-    stream: false
+    status: 'accepted',
+    request: Object.freeze({
+      ...(typeof endpoint === 'string' ? { endpoint } : {}),
+      ...(typeof messageCount === 'number' ? { messageCount } : {}),
+      stream: false
+    })
   });
 }
 
 function optionalProviderResponseMetadata(
   value: unknown
-): RoleModelProviderMetadata['response'] | undefined {
+):
+  | {
+      readonly status: 'accepted';
+      readonly response: ProviderResponseMetadata;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly details: string;
+    }
+  | undefined {
   if (!isJsonRecord(value)) {
     return undefined;
   }
 
   const status = value['status'];
 
+  if (typeof status === 'number' && !Number.isFinite(status)) {
+    return Object.freeze({
+      status: 'rejected',
+      details: 'providerMetadata.response.status must be finite JSON.'
+    });
+  }
+
   return Object.freeze({
-    ...(typeof status === 'number' ? { status } : {})
+    status: 'accepted',
+    response: Object.freeze({
+      ...(typeof status === 'number' ? { status } : {})
+    })
   });
 }
 

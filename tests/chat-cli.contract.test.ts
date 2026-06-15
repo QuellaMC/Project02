@@ -1,7 +1,13 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  createConversationSession
+} from '../src/core/conversation.ts';
 import {
   createRuntimePluginHost
 } from '../src/plugins/host.ts';
@@ -12,10 +18,20 @@ import {
   type RuntimePlugin,
   type RuntimePluginContext
 } from '../src/plugins/types.ts';
+import {
+  createRuntimeLogStore
+} from '../src/runtime/log.ts';
+import {
+  createFileRuntimeLogStore
+} from '../src/runtime/storage/file-runtime-log-store.ts';
+import {
+  createLocalRuntimeSessionStore
+} from '../src/runtime/storage/session-store.ts';
 import type {
   RoleModelAdapter
 } from '../src/role-model/loop.ts';
 import { runChatCli } from '../src/cli/chat.ts';
+import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
 
 describe('chat CLI folded top-level model text', () => {
   it('hides top-level model text by default', async () => {
@@ -37,6 +53,7 @@ describe('chat CLI folded top-level model text', () => {
 describe('chat CLI plugin lifecycle', () => {
   it('runs session-end hooks when /exit closes the chat', async () => {
     const sessionEndContexts: RuntimePluginContext[] = [];
+    const logStore = createRuntimeLogStore();
     const pluginHost = createRuntimePluginHost({
       plugins: [
         createSessionEndPlugin((context) => {
@@ -49,6 +66,7 @@ describe('chat CLI plugin lifecycle', () => {
       stdin: Readable.from(['/exit\n']),
       stdout: collect(() => {}),
       stderr: collect(() => {}),
+      logStore,
       pluginHost
     });
 
@@ -60,6 +78,120 @@ describe('chat CLI plugin lifecycle', () => {
       character: {
         id: 'mira',
         displayName: 'Mira'
+      }
+    });
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_completed',
+      status: 'completed',
+      runtimePluginEvidence: [
+        {
+          pluginId: 'chat.session-end.fixture',
+          evidenceKind: 'session_end',
+          status: 'accepted',
+          summary: 'Session end observed.'
+        }
+      ],
+      runtimePluginTurnEvidence: {
+        evidence: [
+          {
+            pluginId: 'chat.session-end.fixture',
+            evidenceKind: 'session_end',
+            status: 'accepted',
+            summary: 'Session end observed.'
+          }
+        ]
+      }
+    });
+  });
+
+  it('persists session-end hook failures when stdin closes normally', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-session-end-'));
+    const sessionId = 'session-end-failure';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-16T00:00:00.000Z'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const pluginHost = createRuntimePluginHost({
+      plugins: [createFailingSessionEndPlugin()]
+    });
+
+    const exitCode = await runChatCli({
+      stdin: Readable.from([]),
+      stdout: collect(() => {}),
+      stderr: collect(() => {}),
+      session: createConversationSession({ id: sessionId }),
+      logStore,
+      pluginHost
+    });
+
+    expect(exitCode).toBe(0);
+
+    const storedRawEvents = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    }).rawEvents();
+
+    expect(storedRawEvents.at(-1)).toMatchObject({
+      kind: 'runtime_turn_completed',
+      status: 'completed_with_failures',
+      payloadSummary: {
+        rawInput: '/exit',
+        normalizedCurrentUserMessage: '/exit'
+      },
+      runtimePluginEvidence: [
+        {
+          pluginId: 'chat.session-end.failure.fixture',
+          evidenceKind: 'session_end',
+          status: 'failed',
+          summary: 'Session end fixture failed.'
+        }
+      ]
+    });
+
+    let stdout = '';
+    const inspectExitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--session', sessionId],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {})
+      }
+    );
+    const output = JSON.parse(stdout) as {
+      readonly turns: readonly [
+        {
+          readonly status: string;
+          readonly pluginEvidence: {
+            readonly evidence: readonly [
+              {
+                readonly pluginId: string;
+                readonly evidenceKind: string;
+                readonly status: string;
+                readonly summary: string;
+              }
+            ];
+          };
+        }
+      ];
+    };
+
+    expect(inspectExitCode).toBe(0);
+    expect(output.turns[0]).toMatchObject({
+      status: 'completed_with_failures',
+      pluginEvidence: {
+        evidence: [
+          {
+            pluginId: 'chat.session-end.failure.fixture',
+            evidenceKind: 'session_end',
+            status: 'failed',
+            summary: 'Session end fixture failed.'
+          }
+        ]
       }
     });
   });
@@ -137,6 +269,70 @@ function createSessionEndPlugin(
               evidenceKind: 'session_end',
               status: 'accepted',
               summary: 'Session end observed.',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
+function createFailingSessionEndPlugin(): RuntimePlugin {
+  const pluginId = 'chat.session-end.failure.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      id: pluginId,
+      displayName: 'Chat Session End Failure Fixture',
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'Test plugin for failed chat session end lifecycle.',
+      contractVersion: runtimePluginContractVersion,
+      compatibility: {
+        hostContractVersions: [runtimePluginContractVersion],
+        sourceSystem: 'test'
+      },
+      declaredPlugins: ['on_session_end'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'reject_tool_call',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test']
+      },
+      requestedApis: []
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      onSessionEnd(context) {
+        return {
+          status: 'failed',
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId,
+              evidenceKind: 'session_end',
+              status: 'failed',
+              summary: 'Session end fixture failed.',
               redactionLabels: []
             })
           ]

@@ -379,7 +379,8 @@ export function createParsedRoleModelDecisionSnapshot(
 export function parseRoleModelDecision(
   rawOutputText: string,
   allowedTools: readonly RoleModelAllowedToolName[] = roleModelAllowedToolNames,
-  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[] = []
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[] = [],
+  toolObservations: readonly RoleModelToolObservation[] = []
 ): RoleModelDecisionResult {
   let parsedOutput: unknown;
 
@@ -392,7 +393,8 @@ export function parseRoleModelDecision(
   return parseRoleModelDecisionObject(
     parsedOutput,
     allowedTools,
-    pluginToolDefinitions
+    pluginToolDefinitions,
+    toolObservations
   );
 }
 
@@ -510,7 +512,8 @@ export function getCharacterStatePatchToolCall(
 function parseRoleModelDecisionObject(
   parsedOutput: unknown,
   allowedTools: readonly RoleModelAllowedToolName[],
-  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[]
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
+  toolObservations: readonly RoleModelToolObservation[]
 ): RoleModelDecisionResult {
   const frozenPluginToolDefinitions = createRoleModelPluginToolDefinitions(
     pluginToolDefinitions
@@ -574,7 +577,8 @@ function parseRoleModelDecisionObject(
 
   const cardinalityResult = validateUserTurnToolCallCardinality(
     toolCalls,
-    allowedModelToolDefinitions
+    allowedModelToolDefinitions,
+    toolObservations
   );
 
   if (cardinalityResult !== undefined) {
@@ -730,7 +734,8 @@ function rejectToolCall(details: string): ParsedToolCallResult {
 
 function validateUserTurnToolCallCardinality(
   toolCalls: readonly ModelToolCall[],
-  modelToolDefinitions: readonly RoleModelToolDefinition[]
+  modelToolDefinitions: readonly RoleModelToolDefinition[],
+  toolObservations: readonly RoleModelToolObservation[]
 ): RejectedRoleModelDecisionResult | undefined {
   const visibleReplyCount = toolCalls.filter(
     (call) => call.name === visibleReplyModelToolName
@@ -760,9 +765,21 @@ function validateUserTurnToolCallCardinality(
       continue;
     }
 
-    const count = toolCalls.filter((call) => call.name === definition.name).length;
+    const currentDecisionCount = toolCalls.filter(
+      (call) => call.name === definition.name
+    ).length;
+    const previousTurnCount = toolObservations.filter(
+      (observation) => observation.toolName === definition.name
+    ).length;
+    const successfulPreviousTurnCount = toolObservations.filter(
+      (observation) =>
+        observation.toolName === definition.name &&
+        observation.result.status === 'accepted'
+    ).length;
+    const count = previousTurnCount + currentDecisionCount;
+    const requiredCount = successfulPreviousTurnCount + currentDecisionCount;
 
-    if (definition.requiredForUserTurn && count === 0) {
+    if (definition.requiredForUserTurn && requiredCount === 0) {
       return createRejectedRoleModelDecisionResult(
         roleModelMissingRequiredToolCallRejectionReason,
         `Decision must include required ${definition.name} tool call.`
@@ -1079,6 +1096,21 @@ function freezeRuntimePluginJsonValue(
 function freezeProviderMetadata(
   metadata: RoleModelProviderMetadata
 ): RoleModelProviderMetadata {
+  const messageCount =
+    metadata.request?.messageCount === undefined
+      ? undefined
+      : finiteProviderMetadataNumber(
+          metadata.request.messageCount,
+          'providerMetadata.request.messageCount'
+        );
+  const status =
+    metadata.response?.status === undefined
+      ? undefined
+      : finiteProviderMetadataNumber(
+          metadata.response.status,
+          'providerMetadata.response.status'
+        );
+
   return Object.freeze({
     provider: metadata.provider,
     ...(metadata.model === undefined ? {} : { model: metadata.model }),
@@ -1089,9 +1121,7 @@ function freezeProviderMetadata(
             ...(metadata.request.endpoint === undefined
               ? {}
               : { endpoint: metadata.request.endpoint }),
-            ...(metadata.request.messageCount === undefined
-              ? {}
-              : { messageCount: metadata.request.messageCount }),
+            ...(messageCount === undefined ? {} : { messageCount }),
             stream: false
           })
         }),
@@ -1099,9 +1129,7 @@ function freezeProviderMetadata(
       ? {}
       : {
           response: Object.freeze({
-            ...(metadata.response.status === undefined
-              ? {}
-              : { status: metadata.response.status })
+            ...(status === undefined ? {} : { status })
           })
         }),
     ...(metadata.error === undefined
@@ -1113,6 +1141,14 @@ function freezeProviderMetadata(
           })
         })
   } satisfies RoleModelProviderMetadata);
+}
+
+function finiteProviderMetadataNumber(value: number, field: string): number {
+  if (!Number.isFinite(value)) {
+    throw new TypeError(`${field} must be finite JSON.`);
+  }
+
+  return value;
 }
 
 function freezeCharacterDecision(decision: CharacterDecision): CharacterDecision {

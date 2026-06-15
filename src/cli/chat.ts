@@ -26,6 +26,8 @@ import {
 } from '../runtime/local.ts';
 import {
   createRuntimeLogStore,
+  runtimePluginEvidenceOption,
+  runtimePluginTurnEvidenceOption,
   type RawEventLogRecord,
   type RuntimeLogStore,
   type RuntimeTraceEntry,
@@ -45,6 +47,7 @@ import {
 import {
   createDefaultProject02PluginHost,
   createRuntimePluginContext,
+  type RuntimePluginHookHostResult,
   type RuntimePluginHost
 } from '../plugins/index.ts';
 import type { RoleModelAdapter } from '../role-model/loop.ts';
@@ -290,6 +293,7 @@ async function endChatSession(options: EndChatSessionOptions): Promise<void> {
   const decisionContext = buildUserTurnDecisionContext({
     session: options.session
   });
+  const pluginHost = pluginHostForSessionEnd(options);
   const context = createRuntimePluginContext({
     ...identity,
     sessionId: decisionContext.sessionId,
@@ -297,8 +301,66 @@ async function endChatSession(options: EndChatSessionOptions): Promise<void> {
     currentUserMessage: exitCommand,
     character: decisionContext.characterSnapshot
   });
+  const sessionEndResult = await pluginHost.onSessionEnd(context);
 
-  await pluginHostForSessionEnd(options).onSessionEnd(context);
+  if (!shouldRecordSessionEndResult(pluginHost, sessionEndResult)) {
+    return;
+  }
+
+  const payloadSummary = {
+    rawInput: exitCommand,
+    normalizedCurrentUserMessage: exitCommand
+  };
+
+  options.logStore.appendTrace({
+    ...identity,
+    step: 'runtime_event_received'
+  });
+  options.logStore.appendRawEvent({
+    ...identity,
+    kind: 'runtime_event_received',
+    eventType: 'USER_MESSAGE',
+    payloadSummary
+  });
+  options.logStore.appendRawEvent({
+    ...identity,
+    kind: 'runtime_turn_completed',
+    eventType: 'USER_MESSAGE',
+    status: sessionEndResult.status,
+    payloadSummary,
+    ...runtimePluginEvidenceOption(sessionEndResult.evidence),
+    ...runtimePluginTurnEvidenceOption({
+      identity,
+      pluginHost,
+      contextItems: [],
+      toolInvocations: [],
+      evidence: sessionEndResult.evidence,
+      health: []
+    })
+  });
+  options.logStore.appendTrace({
+    ...identity,
+    step: 'raw_event_log_appended'
+  });
+  options.logStore.appendTrace({
+    ...identity,
+    step: 'runtime_turn_completed'
+  });
+}
+
+function shouldRecordSessionEndResult(
+  pluginHost: RuntimePluginHost,
+  result: RuntimePluginHookHostResult
+): boolean {
+  return (
+    result.evidence.length > 0 ||
+    result.status === 'completed_with_failures' ||
+    pluginHost
+      .registrySnapshot()
+      .plugins.some((plugin) =>
+        plugin.registeredLifecycleHooks.includes('on_session_end')
+      )
+  );
 }
 
 function pluginHostForSessionEnd(

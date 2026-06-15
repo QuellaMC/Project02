@@ -3,6 +3,7 @@ import {
   CharacterInputError,
   CharacterReplyValidationError,
   normalizeCharacterAgentReply,
+  rollbackLastCharacterTurn,
   runCharacterTurn,
   type CharacterAgent,
   type CharacterAgentReply,
@@ -12,18 +13,14 @@ import {
 } from '../core/conversation.ts';
 import { buildUserTurnDecisionContext } from '../role-model/decision-context.ts';
 import {
-  runtimePluginContractVersion,
   createRuntimePluginToolInvocationSnapshot,
-  createRuntimePluginTurnEvidenceSnapshot,
   createRuntimePluginAfterTurnCommittedContext,
   createRuntimePluginContext,
   type RuntimePluginContextItem,
   type RuntimePluginEvidenceSnapshot,
-  type RuntimePluginHealthSnapshot,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult,
   type RuntimePluginToolInvocationSnapshot,
-  type RuntimePluginTurnEvidenceSnapshot,
   type RuntimePluginContext
 } from '../plugins/types.ts';
 import {
@@ -58,7 +55,11 @@ import {
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent
 } from './event.ts';
-import { createRoleModelCommitValidationSnapshot } from './log.ts';
+import {
+  createRoleModelCommitValidationSnapshot,
+  runtimePluginEvidenceOption,
+  runtimePluginTurnEvidenceOption
+} from './log.ts';
 import type {
   ConversationLogRecord,
   RawEventLogRecord,
@@ -477,16 +478,24 @@ async function runSerializedLocalUserMessageEvent(
         options.characterTurnOptions
       );
 
-      const userRecord = options.logStore.appendConversationMessage({
-        ...turn.userMessage,
-        ...identity,
-        committedAt
-      });
-      const characterRecord = options.logStore.appendConversationMessage({
-        ...turn.characterMessage,
-        ...identity,
-        committedAt
-      });
+      let userRecord: ConversationLogRecord;
+      let characterRecord: ConversationLogRecord;
+
+      try {
+        userRecord = options.logStore.appendConversationMessage({
+          ...turn.userMessage,
+          ...identity,
+          committedAt
+        });
+        characterRecord = options.logStore.appendConversationMessage({
+          ...turn.characterMessage,
+          ...identity,
+          committedAt
+        });
+      } catch (error: unknown) {
+        rollbackLastCharacterTurn(options.session, turn);
+        throw error;
+      }
 
       userConversationMessage = userRecord;
       visibleMessagesForThisReply = Object.freeze([userRecord, characterRecord]);
@@ -859,22 +868,8 @@ async function runSerializedLocalUserMessageEvent(
             parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot,
             text: visibleReplyText
           });
-    const afterCommitPluginContext =
-      createRuntimePluginAfterTurnCommittedContext({
-        ...identity,
-        sessionId: decisionContext.sessionId,
-        eventType: event.type,
-        currentUserMessage: event.payload.currentUserMessage,
-        character: decisionContext.characterSnapshot,
-        committedAt: options.committedAt ?? options.event.createdAt,
-        visibleMessages: committedVisibleMessages
-      });
-
-    const afterTurnCommittedResult =
-      await pluginHost.afterTurnCommitted(afterCommitPluginContext);
-    const completedPluginEvidence = combineRuntimePluginEvidence(
+    const terminalPluginEvidence = combineRuntimePluginEvidence(
       roleModelPluginEvidence,
-      afterTurnCommittedResult.evidence,
       preCommitHealthResult.evidence
     );
 
@@ -896,19 +891,31 @@ async function runSerializedLocalUserMessageEvent(
           ...(turn === undefined ? {} : { acceptedVisibleReplyText: turn.reply.text })
         }
       }),
-      ...runtimePluginEvidenceOption(completedPluginEvidence),
+      ...runtimePluginEvidenceOption(terminalPluginEvidence),
       ...runtimePluginTurnEvidenceOption({
         identity,
         pluginHost,
         contextItems: beforeRoleModelCallResult.contextItems,
         toolInvocations: roleModelPluginToolInvocations,
-        evidence: completedPluginEvidence,
+        evidence: terminalPluginEvidence,
         health: preCommitHealthResult.snapshots
       })
     });
 
     appendTrace('raw_event_log_appended');
     appendTrace('runtime_turn_completed');
+
+    const afterCommitPluginContext =
+      createRuntimePluginAfterTurnCommittedContext({
+        ...identity,
+        sessionId: decisionContext.sessionId,
+        eventType: event.type,
+        currentUserMessage: event.payload.currentUserMessage,
+        character: decisionContext.characterSnapshot,
+        committedAt: options.committedAt ?? options.event.createdAt,
+        visibleMessages: committedVisibleMessages
+      });
+    await pluginHost.afterTurnCommitted(afterCommitPluginContext);
 
     return Object.freeze({
       status: 'completed',
@@ -1249,69 +1256,6 @@ function combineRuntimePluginEvidence(
   ...evidenceGroups: readonly (readonly RuntimePluginEvidenceSnapshot[])[]
 ): readonly RuntimePluginEvidenceSnapshot[] {
   return Object.freeze(evidenceGroups.flatMap((evidence) => evidence));
-}
-
-function runtimePluginEvidenceOption(
-  evidence: readonly RuntimePluginEvidenceSnapshot[] | undefined
-): { readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[] } {
-  if (evidence === undefined || evidence.length === 0) {
-    return {};
-  }
-
-  return {
-    runtimePluginEvidence: Object.freeze([...evidence])
-  };
-}
-
-function runtimePluginTurnEvidenceOption(options: {
-  readonly identity: RuntimeEventIdentity;
-  readonly pluginHost: RuntimePluginHost | undefined;
-  readonly contextItems: readonly RuntimePluginContextItem[];
-  readonly toolInvocations: readonly RuntimePluginToolInvocationSnapshot[];
-  readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
-  readonly health: readonly RuntimePluginHealthSnapshot[];
-}): { readonly runtimePluginTurnEvidence?: RuntimePluginTurnEvidenceSnapshot } {
-  if (options.pluginHost === undefined) {
-    return {};
-  }
-
-  const registry = options.pluginHost.registrySnapshot();
-  const enabledPluginIds = new Set(options.pluginHost.enabledPluginIds());
-  const healthStatuses = new Map(
-    options.health.map((snapshot) => [snapshot.pluginId, snapshot.status])
-  );
-
-  return {
-    runtimePluginTurnEvidence: createRuntimePluginTurnEvidenceSnapshot({
-      ...options.identity,
-      kind: 'runtime_plugin_turn_evidence_snapshot',
-      contractVersion: runtimePluginContractVersion,
-      plugins: registry.plugins.map((registration) => {
-        const enabled = enabledPluginIds.has(registration.manifest.id);
-        const healthStatus = healthStatuses.get(registration.manifest.id);
-
-        return {
-          pluginId: registration.manifest.id,
-          manifest: registration.manifest,
-          providedTools: registration.providedTools,
-          registeredLifecycleHooks: registration.registeredLifecycleHooks,
-          installed: true,
-          registered: true,
-          enabled,
-          availableForTurn: enabled,
-          redactionLabels: registration.manifest.runtimePolicy.redactionLabels,
-          ...(healthStatus === undefined ? {} : { healthStatus }),
-          ...(registration.manifest.config.fingerprint === undefined
-            ? {}
-            : { configFingerprint: registration.manifest.config.fingerprint })
-        };
-      }),
-      contextItems: options.contextItems,
-      toolInvocations: options.toolInvocations,
-      evidence: options.evidence,
-      health: options.health
-    })
-  };
 }
 
 function createFixedReplyAgent(replyText: string): CharacterAgent {

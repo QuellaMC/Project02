@@ -14,6 +14,13 @@ import {
   createRuntimePluginFileStore
 } from '../src/plugins/file-store.ts';
 import {
+  createRuntimePluginHost
+} from '../src/plugins/host.ts';
+import {
+  createRuntimePlugin,
+  runtimePluginContractVersion
+} from '../src/plugins/types.ts';
+import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
 } from '../src/runtime/event.ts';
@@ -25,6 +32,9 @@ import {
 } from '../src/runtime/storage/session-store.ts';
 import {
   createRuntimeLogStore
+} from '../src/runtime/log.ts';
+import type {
+  RuntimeLogStore
 } from '../src/runtime/log.ts';
 import {
   roleModelInvalidVisibleReplyRejectionReason,
@@ -355,6 +365,103 @@ describe('plugin-driven tool loop', () => {
       'list tools',
       'I can use:\n- plugin.list\n- character_state.patch'
     ]);
+  });
+
+  it('rolls back visible session messages when conversation log append fails', async () => {
+    const session = createConversationSession();
+    const logStore = createConversationAppendFailingLogStore();
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'this should not remain in memory'
+            }
+          }
+        ]
+      }
+    ]);
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestEvent('hello', 'evt_conversation_append_fails'),
+        session,
+        logStore,
+        roleModelAdapter: adapter
+      })
+    ).rejects.toThrow('conversation append failed');
+    expect(session.visibleTranscript).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
+  });
+
+  it('commits runtime_turn_completed before afterTurnCommitted hooks run', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    let terminalEventVisibleToHook = false;
+    const pluginHost = createAfterTurnCommittedProbeHost(() => {
+      terminalEventVisibleToHook = logStore
+        .rawEvents()
+        .some((event) => event.kind === 'runtime_turn_completed');
+    });
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'terminal evidence comes first'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('hello', 'evt_after_commit_order'),
+      session,
+      logStore,
+      roleModelAdapter: adapter,
+      pluginHost
+    });
+
+    expect(result.status).toBe('completed');
+    expect(terminalEventVisibleToHook).toBe(true);
+  });
+
+  it('does not run afterTurnCommitted when terminal raw event append fails', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeTurnCompletedAppendFailingLogStore();
+    let afterTurnCommittedCalls = 0;
+    const pluginHost = createAfterTurnCommittedProbeHost(() => {
+      afterTurnCommittedCalls += 1;
+    });
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'terminal append should fail first'
+            }
+          }
+        ]
+      }
+    ]);
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestEvent('hello', 'evt_terminal_append_fails'),
+        session,
+        logStore,
+        roleModelAdapter: adapter,
+        pluginHost
+      })
+    ).rejects.toThrow('terminal raw event append failed');
+    expect(afterTurnCommittedCalls).toBe(0);
+    expect(logStore.rawEvents().some((event) => event.kind === 'runtime_turn_completed')).toBe(
+      false
+    );
   });
 
   it('does not expose plugin inventory through hidden runtime context', async () => {
@@ -901,6 +1008,120 @@ function createSequencedAdapter(
       };
     }
   } satisfies RoleModelAdapter);
+}
+
+function createConversationAppendFailingLogStore(): RuntimeLogStore {
+  const logStore = createRuntimeLogStore();
+
+  return Object.freeze({
+    appendTrace(entry) {
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      return logStore.appendRawEvent(record);
+    },
+    appendConversationMessage() {
+      throw new Error('conversation append failed');
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
+function createRuntimeTurnCompletedAppendFailingLogStore(): RuntimeLogStore {
+  const logStore = createRuntimeLogStore();
+
+  return Object.freeze({
+    appendTrace(entry) {
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      if (record.kind === 'runtime_turn_completed') {
+        throw new Error('terminal raw event append failed');
+      }
+
+      return logStore.appendRawEvent(record);
+    },
+    appendConversationMessage(record) {
+      return logStore.appendConversationMessage(record);
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
+function createAfterTurnCommittedProbeHost(
+  onAfterTurnCommitted: () => void
+) {
+  const pluginId = 'after-commit.fixture';
+
+  return createRuntimePluginHost({
+    plugins: [
+      createRuntimePlugin({
+        manifest: {
+          id: pluginId,
+          displayName: 'After Commit Fixture',
+          version: '1.0.0',
+          kind: 'memory_provider',
+          description: 'Test plugin for after-turn commit ordering.',
+          contractVersion: runtimePluginContractVersion,
+          compatibility: {
+            hostContractVersions: [runtimePluginContractVersion],
+            sourceSystem: 'test'
+          },
+          declaredPlugins: ['after_turn_committed'],
+          config: {
+            fields: []
+          },
+          localTrustLevel: 'test_fixture',
+          runtimePolicy: {
+            requiredForTurn: false,
+            sideEffectLevel: 'local_memory_write',
+            confirmation: 'not_required',
+            timeoutMs: 1000,
+            sourceReferencesRequired: false,
+            redactionLabels: [],
+            failureBehavior: {
+              beforeRoleModelCall: 'degrade',
+              handleToolCall: 'reject_tool_call',
+              afterTurnCommitted: 'log_failure',
+              health: 'degrade'
+            }
+          },
+          activation: {
+            defaultEnabled: true,
+            reasons: ['test']
+          },
+          requestedApis: []
+        },
+        providedTools: [],
+        lifecycleHooks: {
+          afterTurnCommitted() {
+            onAfterTurnCommitted();
+
+            return {
+              status: 'completed',
+              evidence: []
+            };
+          }
+        }
+      })
+    ]
+  });
 }
 
 function createTestEvent(message: string, eventId: string) {

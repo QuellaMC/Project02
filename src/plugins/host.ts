@@ -25,7 +25,8 @@ import type {
   RuntimePluginRegistrySnapshot,
   RuntimePluginSourceReference,
   RuntimePluginAfterTurnCommittedContext,
-  RuntimePluginContext
+  RuntimePluginContext,
+  RuntimePluginFileStore
 } from './types.ts';
 import {
   isBuiltInModelToolName,
@@ -177,6 +178,16 @@ type BoundedPluginPromptContextResult =
       readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
     };
 
+type PluginHookContextScope<TContext extends RuntimePluginContext> = {
+  readonly context: TContext;
+  readonly revokeFileStoreWrites: () => void;
+};
+
+type RevocableRuntimePluginFileStore = {
+  readonly fileStore: RuntimePluginFileStore;
+  revokeWrites(): void;
+};
+
 export function createRuntimePluginHost(
   options: CreateRuntimePluginHostOptions = {}
 ): RuntimePluginHost {
@@ -286,27 +297,72 @@ function createPluginHookContext<TContext extends RuntimePluginContext>(options:
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
-}): TContext {
+}): PluginHookContextScope<TContext> {
   const grantsFileStore = options.plugin.manifest.requestedApis.includes('file_store');
   const sessionId = options.sessionId ?? options.context.sessionId;
+  const fileStore = grantsFileStore
+    ? createRevocableRuntimePluginFileStore(
+        createRuntimePluginFileStore({
+          ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+          sessionId,
+          ...(options.sessionIdentity === undefined
+            ? {}
+            : { sessionIdentity: options.sessionIdentity }),
+          pluginId: options.plugin.manifest.id
+        })
+      )
+    : undefined;
   const context = Object.freeze({
     ...options.context,
     pluginId: options.plugin.manifest.id,
-    ...(grantsFileStore
-      ? {
-          fileStore: createRuntimePluginFileStore({
-            ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-            sessionId,
-            ...(options.sessionIdentity === undefined
-              ? {}
-              : { sessionIdentity: options.sessionIdentity }),
-            pluginId: options.plugin.manifest.id
-          })
-        }
-      : {})
+    ...(fileStore === undefined ? {} : { fileStore: fileStore.fileStore })
   });
 
-  return context;
+  return Object.freeze({
+    context,
+    revokeFileStoreWrites: () => {
+      fileStore?.revokeWrites();
+    }
+  });
+}
+
+function createRevocableRuntimePluginFileStore(
+  fileStore: RuntimePluginFileStore
+): RevocableRuntimePluginFileStore {
+  let writesRevoked = false;
+
+  return Object.freeze({
+    fileStore: Object.freeze({
+      readJson(path) {
+        return fileStore.readJson(path);
+      },
+      readJsonl(path) {
+        return fileStore.readJsonl(path);
+      },
+      writeJsonAtomic(path, value) {
+        assertPluginFileStoreWritesActive(writesRevoked);
+        fileStore.writeJsonAtomic(path, value);
+      },
+      appendJsonl(path, value) {
+        assertPluginFileStoreWritesActive(writesRevoked);
+        fileStore.appendJsonl(path, value);
+      },
+      revision() {
+        return fileStore.revision();
+      }
+    } satisfies RuntimePluginFileStore),
+    revokeWrites() {
+      writesRevoked = true;
+    }
+  } satisfies RevocableRuntimePluginFileStore);
+}
+
+function assertPluginFileStoreWritesActive(writesRevoked: boolean): void {
+  if (writesRevoked) {
+    throw new Error(
+      'Plugin fileStore writes are no longer allowed after hook timeout.'
+    );
+  }
 }
 
 function createRuntimePluginDiscoveryPlugin(
@@ -475,15 +531,17 @@ async function runBeforeRoleModelCall(options: {
       continue;
     }
 
+    const hookContext = createPluginHookContext({
+      context: options.context,
+      plugin,
+      storeRoot: options.storeRoot,
+      sessionId: options.sessionId,
+      sessionIdentity: options.sessionIdentity
+    });
     const result = await invokeBeforeRoleModelCallHook({
       plugin,
-      context: createPluginHookContext({
-        context: options.context,
-        plugin,
-        storeRoot: options.storeRoot,
-        sessionId: options.sessionId,
-        sessionIdentity: options.sessionIdentity
-      }),
+      context: hookContext.context,
+      revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
       hook
     });
 
@@ -619,7 +677,7 @@ async function runHandleToolCall(options: {
   if (inputValidation?.status === 'rejected') {
     return createRejectedToolCallResult({
       call: options.call,
-      context: hookContext,
+      context: hookContext.context,
       reason: 'invalid_input',
       message: inputValidation.details,
       evidenceStatus: failureDegrades ? 'degraded' : 'rejected',
@@ -642,11 +700,12 @@ async function runHandleToolCall(options: {
     return normalizeToolCallResult({
       plugin,
       providedTool,
-      context: hookContext,
+      context: hookContext.context,
       value: await withPluginHookTimeout({
         plugin,
         hookName: 'handleToolCall',
-        operation: async () => await hook(options.call, hookContext)
+        revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
+        operation: async () => await hook(options.call, hookContext.context)
       })
     });
   } catch (error: unknown) {
@@ -694,15 +753,17 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
       continue;
     }
 
+    const hookContext = createPluginHookContext({
+      context: options.context,
+      plugin,
+      storeRoot: options.storeRoot,
+      sessionId: options.sessionId,
+      sessionIdentity: options.sessionIdentity
+    });
     const result = await invokeHook({
       plugin,
-      context: createPluginHookContext({
-        context: options.context,
-        plugin,
-        storeRoot: options.storeRoot,
-        sessionId: options.sessionId,
-        sessionIdentity: options.sessionIdentity
-      }),
+      context: hookContext.context,
+      revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
       hookName: options.hookName,
       hook
     });
@@ -1006,21 +1067,21 @@ async function runHealth(options: {
       continue;
     }
 
+    const hookContext = createPluginHookContext({
+      context: options.context,
+      plugin,
+      storeRoot: options.storeRoot,
+      sessionId: options.sessionId,
+      sessionIdentity: options.sessionIdentity
+    });
+
     try {
       const snapshot = createRuntimePluginHealthSnapshot(
         await withPluginHookTimeout({
           plugin,
           hookName: 'health',
-          operation: async () =>
-            await hook(
-              createPluginHookContext({
-                context: options.context,
-                plugin,
-                storeRoot: options.storeRoot,
-                sessionId: options.sessionId,
-                sessionIdentity: options.sessionIdentity
-              })
-            )
+          revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
+          operation: async () => await hook(hookContext.context)
         })
       );
 
@@ -1114,6 +1175,7 @@ function healthSnapshotEvidenceStatus(options: {
 async function invokeBeforeRoleModelCallHook(options: {
   readonly plugin: RuntimePlugin;
   readonly context: RuntimePluginContext;
+  readonly revokeFileStoreWrites: () => void;
   readonly hook: NonNullable<RuntimePlugin['lifecycleHooks']['beforeRoleModelCall']>;
 }): Promise<BeforeRoleModelCallInvocationResult> {
   try {
@@ -1125,6 +1187,7 @@ async function invokeBeforeRoleModelCallHook(options: {
         value: await withPluginHookTimeout({
           plugin: options.plugin,
           hookName: 'beforeRoleModelCall',
+          revokeFileStoreWrites: options.revokeFileStoreWrites,
           operation: async () => await options.hook(options.context)
         })
       })
@@ -1142,6 +1205,7 @@ async function invokeBeforeRoleModelCallHook(options: {
 async function invokeHook<TContext extends RuntimePluginContext>(options: {
   readonly plugin: RuntimePlugin;
   readonly context: TContext;
+  readonly revokeFileStoreWrites: () => void;
   readonly hookName: 'afterTurnCommitted' | 'onSessionEnd';
   readonly hook: (context: TContext) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>;
 }): Promise<HookInvocationResult> {
@@ -1154,6 +1218,7 @@ async function invokeHook<TContext extends RuntimePluginContext>(options: {
         value: await withPluginHookTimeout({
           plugin: options.plugin,
           hookName: options.hookName,
+          revokeFileStoreWrites: options.revokeFileStoreWrites,
           operation: async () => await options.hook(options.context)
         })
       })
@@ -1734,6 +1799,7 @@ class PluginHookTimeoutError extends Error {
 async function withPluginHookTimeout<T>(options: {
   readonly plugin: RuntimePlugin;
   readonly hookName: string;
+  readonly revokeFileStoreWrites: () => void;
   readonly operation: () => T | Promise<T>;
 }): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -1744,6 +1810,7 @@ async function withPluginHookTimeout<T>(options: {
       Promise.resolve().then(options.operation),
       new Promise<T>((_resolve, reject) => {
         timeoutId = setTimeout(() => {
+          options.revokeFileStoreWrites();
           reject(
             new PluginHookTimeoutError({
               pluginId: options.plugin.manifest.id,

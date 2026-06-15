@@ -194,6 +194,7 @@ const rawEventKinds = [
 
 const runtimeTurnStatuses = [
   'completed',
+  'completed_with_failures',
   'rejected'
 ] as const satisfies readonly RuntimeTurnStatus[];
 const runtimePluginEvidenceKinds = [
@@ -746,7 +747,10 @@ function assertTerminalRawEventSemantics(options: {
   }
 
   if (options.kind === 'runtime_turn_completed') {
-    if (options.status !== 'completed') {
+    if (
+      options.status !== 'completed' &&
+      options.status !== 'completed_with_failures'
+    ) {
       throwMalformedRecord('status');
     }
 
@@ -1328,7 +1332,8 @@ function assertRoleModelCommitStatusMatchesRawEvent(options: {
 
     if (
       options.kind === 'runtime_turn_completed' &&
-      options.status !== 'completed'
+      options.status !== 'completed' &&
+      options.status !== 'completed_with_failures'
     ) {
       throwMalformedRecord('commitValidation.result.status');
     }

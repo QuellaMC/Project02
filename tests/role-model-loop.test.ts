@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createDecisionContext,
+  roleModelDuplicateToolCallRejectionReason,
+  roleModelMalformedOutputRejectionReason,
   roleModelPluginToolRejectedRejectionReason,
-  type RoleModelPluginToolDefinition
+  type RoleModelPluginToolDefinition,
+  type RoleModelProviderMetadata
 } from '../src/role-model/contracts.ts';
 import {
   createRuntimePluginContext,
@@ -283,6 +286,169 @@ describe('role-model loop plugin tool routing', () => {
     expect(result.pluginToolResults).toHaveLength(1);
     expect(result.pluginToolResults[0]?.result.status).toBe('rejected');
   });
+
+  it('counts successful tool observations toward required plugin tools across the turn', async () => {
+    let invocations = 0;
+    let handledCalls = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'memory checked'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall() {
+        handledCalls += 1;
+
+        return createAcceptedToolCallResult();
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_required_observed'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [requiredMemorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_required_observed')
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(invocations).toBe(2);
+    expect(handledCalls).toBe(1);
+    expect(result.pluginToolResults).toHaveLength(1);
+    expect(result.rounds).toHaveLength(2);
+  });
+
+  it('rejects plugin tool repeats across rounds against maxCallsPerUserTurn', async () => {
+    let invocations = 0;
+    let handledCalls = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira again'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall() {
+        handledCalls += 1;
+
+        return createAcceptedToolCallResult();
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_repeated_tool'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_repeated_tool')
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelDuplicateToolCallRejectionReason
+      }
+    });
+    if (result.status !== 'rejected') {
+      throw new Error('Expected repeated tool call to be rejected.');
+    }
+
+    expect(result.rejection.details).toContain('maxCallsPerUserTurn is 1');
+    expect(invocations).toBe(2);
+    expect(handledCalls).toBe(1);
+    expect(result.pluginToolResults).toHaveLength(1);
+    expect(result.rounds).toHaveLength(2);
+  });
+
+  it('rejects non-finite provider request metadata before snapshots can serialize it', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_non_finite_provider_request'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createProviderMetadataAdapter(
+        Object.freeze({
+          provider: 'local',
+          request: Object.freeze({
+            messageCount: Number.NaN,
+            stream: false
+          })
+        } satisfies RoleModelProviderMetadata)
+      )
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'providerMetadata.request.messageCount must be finite JSON.'
+      }
+    });
+    expect(result.ioSnapshot.rawOutputText).toBe('');
+    expect(result.ioSnapshot).not.toHaveProperty('providerMetadata');
+  });
+
+  it('rejects non-finite provider response metadata before snapshots can serialize it', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_non_finite_provider_response'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createProviderMetadataAdapter(
+        Object.freeze({
+          provider: 'local',
+          response: Object.freeze({
+            status: Number.POSITIVE_INFINITY
+          })
+        } satisfies RoleModelProviderMetadata)
+      )
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'providerMetadata.response.status must be finite JSON.'
+      }
+    });
+    expect(result.ioSnapshot.rawOutputText).toBe('');
+    expect(result.ioSnapshot).not.toHaveProperty('providerMetadata');
+  });
 });
 
 const memorySearchToolDefinition = Object.freeze({
@@ -335,6 +501,38 @@ function createSequencedAdapter(
       };
     }
   } satisfies RoleModelAdapter);
+}
+
+function createProviderMetadataAdapter(
+  providerMetadata: RoleModelProviderMetadata
+): RoleModelAdapter {
+  return Object.freeze({
+    invoke() {
+      return {
+        rawOutputText: JSON.stringify({
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'hello'
+              }
+            }
+          ]
+        }),
+        providerMetadata
+      };
+    }
+  } satisfies RoleModelAdapter);
+}
+
+function createAcceptedToolCallResult(): RuntimePluginToolCallResult {
+  return Object.freeze({
+    status: 'accepted',
+    output: Object.freeze({
+      ok: true
+    }),
+    evidence: Object.freeze([])
+  } satisfies RuntimePluginToolCallResult);
 }
 
 function createRejectedToolCallResult(options: {
