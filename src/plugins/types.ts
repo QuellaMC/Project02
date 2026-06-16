@@ -1258,6 +1258,19 @@ function validatePluginDeclarationsAgainstRuntime(options: {
     );
   }
 
+  const seenToolNames = new Set<string>();
+
+  for (const tool of options.providedTools) {
+    if (seenToolNames.has(tool.name)) {
+      return reject(
+        'duplicate_declaration',
+        `Plugin provided tool "${tool.name}" is declared more than once.`
+      );
+    }
+
+    seenToolNames.add(tool.name);
+  }
+
   if (
     options.lifecycleHooks.handleToolCall !== undefined &&
     !options.manifest.declaredPlugins.includes('handle_tool_call')
@@ -1921,7 +1934,7 @@ function requiredSourceReference(
   }
 
   const kind = value['kind'];
-  const id = requiredIdentifier(value['id'], 'id');
+  const id = requiredNonEmptyString(value['id'], 'id');
   const title = optionalString(value['title'], 'title');
   const uri = optionalString(value['uri'], 'uri');
 

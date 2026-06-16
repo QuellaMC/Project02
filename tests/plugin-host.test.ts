@@ -109,6 +109,65 @@ describe('runtime plugin host', () => {
     ).toThrow(/declared more than once/iu);
   });
 
+  it('rejects duplicate provided tool names inside one plugin', () => {
+    const [tool] = memorySearchProvidedTools();
+
+    if (tool === undefined) {
+      throw new Error('Expected memory search fixture tool.');
+    }
+
+    expect(() =>
+      createRuntimePlugin({
+        manifest: memorySearchPluginManifest('memory.duplicate-tool.fixture'),
+        providedTools: [
+          tool,
+          {
+            ...tool,
+            description: 'Duplicate memory search.'
+          }
+        ],
+        lifecycleHooks: {
+          handleToolCall() {
+            throw new Error('Duplicate tool fixture should not be called.');
+          }
+        }
+      })
+    ).toThrow(/provided tool "memory\.search" is declared more than once/iu);
+  });
+
+  it('rejects duplicate provided tool names with conflicting routable declarations', () => {
+    const [tool] = memorySearchProvidedTools();
+
+    if (tool === undefined) {
+      throw new Error('Expected memory search fixture tool.');
+    }
+
+    expect(() =>
+      createRuntimePlugin({
+        manifest: memorySearchPluginManifest(
+          'memory.duplicate-routable-tool.fixture'
+        ),
+        providedTools: [
+          {
+            ...tool,
+            description: 'Non-routable memory search.',
+            requiresConfirmation: true
+          },
+          {
+            ...tool,
+            description: 'Model-facing memory search.',
+            requiresConfirmation: false
+          }
+        ],
+        lifecycleHooks: {
+          handleToolCall() {
+            throw new Error('Duplicate tool fixture should not be called.');
+          }
+        }
+      })
+    ).toThrow(/provided tool "memory\.search" is declared more than once/iu);
+  });
+
   it('does not resolve tool-provider-only plugin tools as routable', () => {
     const plugin = createMemorySearchToolProviderOnlyPlugin();
     const host = createRuntimePluginHost({ plugins: [plugin] });

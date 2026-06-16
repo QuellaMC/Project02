@@ -4,8 +4,10 @@ import {
   type RoleModelProviderMetadata
 } from '../contracts.ts';
 import {
+  createVisibleReplyModelToolCall,
   validateModelToolInputAgainstContract,
   visibleReplyModelToolName,
+  type ModelToolCall,
   type ModelToolInputContract
 } from '../model-tools.ts';
 import {
@@ -707,10 +709,7 @@ function createRawOutputTextFromNvidiaMessage(options: {
     } satisfies NvidiaRawOutputTextResult);
   }
 
-  const toolCalls: Array<{
-    readonly name: string;
-    readonly input: Readonly<Record<string, unknown>>;
-  }> = [];
+  const toolCalls: ModelToolCall[] = [];
 
   for (const [index, call] of options.toolCalls.entries()) {
     const runtimeToolName = runtimeToolNameForProviderToolName(
@@ -733,13 +732,17 @@ function createRawOutputTextFromNvidiaMessage(options: {
     });
   }
 
+  const normalizedToolCalls =
+    options.content === null ||
+    options.content.length === 0 ||
+    toolCalls.some((call) => call.name === visibleReplyModelToolName)
+      ? toolCalls
+      : [createVisibleReplyModelToolCall(options.content), ...toolCalls];
+
   return Object.freeze({
     status: 'accepted',
     rawOutputText: JSON.stringify({
-      toolCalls,
-      ...(options.content === null || options.content.length === 0
-        ? {}
-        : { text: options.content })
+      toolCalls: normalizedToolCalls
     })
   } satisfies NvidiaRawOutputTextResult);
 }

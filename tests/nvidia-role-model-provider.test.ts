@@ -453,7 +453,7 @@ describe('NVIDIA role-model provider', () => {
     });
   });
 
-  it('normalizes native assistant tool calls without parsing content as JSON', async () => {
+  it('normalizes native assistant tool calls and content without top-level text', async () => {
     const fetchClient: NvidiaFetchClient = () => Promise.resolve({
       ok: true,
       status: 200,
@@ -501,8 +501,16 @@ describe('NVIDIA role-model provider', () => {
       turnContext: renderRoleModelTurnContext(inputEnvelope)
     });
 
-    expect(JSON.parse(output.rawOutputText)).toEqual({
+    const rawDecision: unknown = JSON.parse(output.rawOutputText);
+
+    expect(rawDecision).toEqual({
       toolCalls: [
+        {
+          name: visibleReplyModelToolName,
+          input: {
+            text: 'Checking the available plugins.'
+          }
+        },
         {
           name: 'plugin.list',
           input: {}
@@ -513,9 +521,9 @@ describe('NVIDIA role-model provider', () => {
             mood: 'curious'
           }
         }
-      ],
-      text: 'Checking the available plugins.'
+      ]
     });
+    expect(rawDecision).not.toHaveProperty('text');
     expect(output.nativeAssistantMessage?.tool_calls).toMatchObject([
       {
         id: 'call_plugin_list',
@@ -532,6 +540,60 @@ describe('NVIDIA role-model provider', () => {
         }
       }
     ]);
+  });
+
+  it('does not duplicate visible_reply when native tool calls already include it', async () => {
+    const fetchClient: NvidiaFetchClient = () => Promise.resolve({
+      ok: true,
+      status: 200,
+      json() {
+        return Promise.resolve({
+          choices: [
+            {
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: 'Extra assistant content.',
+                tool_calls: [
+                  {
+                    id: 'call_visible_reply',
+                    type: 'function',
+                    function: {
+                      name: visibleReplyModelToolName,
+                      arguments: '{"text":"Native visible reply."}'
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        });
+      },
+      text() {
+        return Promise.resolve('');
+      }
+    });
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+    const rawDecision: unknown = JSON.parse(output.rawOutputText);
+
+    expect(rawDecision).toEqual({
+      toolCalls: [
+        {
+          name: visibleReplyModelToolName,
+          input: {
+            text: 'Native visible reply.'
+          }
+        }
+      ]
+    });
+    expect(rawDecision).not.toHaveProperty('text');
   });
 
   it('rejects non-finite native tool arguments before raw output normalization', async () => {
