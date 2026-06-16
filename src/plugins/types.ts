@@ -1075,8 +1075,13 @@ function createRuntimePluginJsonObject(
 
 function createRuntimePluginJsonValue(
   value: unknown,
-  field: string
+  field: string,
+  key?: string
 ): RuntimePluginJsonValue {
+  if (key !== undefined && isRuntimePluginCredentialKey(key)) {
+    return '[redacted]';
+  }
+
   if (value === null || typeof value === 'boolean') {
     return value;
   }
@@ -1103,7 +1108,11 @@ function createRuntimePluginJsonValue(
     const snapshot: Record<string, RuntimePluginJsonValue> = {};
 
     for (const [key, item] of Object.entries(value)) {
-      snapshot[key] = createRuntimePluginJsonValue(item, `${field}.${key}`);
+      snapshot[key] = createRuntimePluginJsonValue(
+        item,
+        `${field}.${key}`,
+        key
+      );
     }
 
     return Object.freeze(snapshot);
@@ -2293,13 +2302,28 @@ export function redactRuntimePluginText(value: string): string {
   );
 }
 
+const runtimePluginCredentialKeySource =
+  String.raw`\b[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|credential)[A-Za-z0-9_.-]*\b`;
+const runtimePluginCredentialKeyPattern = new RegExp(
+  runtimePluginCredentialKeySource,
+  'iu'
+);
+const runtimePluginSecretKeyValuePattern = new RegExp(
+  String.raw`(["']?)(${runtimePluginCredentialKeySource})\1(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}]+)`,
+  'giu'
+);
+
+export function isRuntimePluginCredentialKey(value: string): boolean {
+  return runtimePluginCredentialKeyPattern.test(value);
+}
+
 function redactBearerTokens(value: string): string {
   return value.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, 'Bearer [redacted]');
 }
 
 function redactSecretKeyValues(value: string): string {
   return value.replace(
-    /(["']?)(\b[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|credential)[A-Za-z0-9_.-]*\b)\1(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}]+)/giu,
+    runtimePluginSecretKeyValuePattern,
     (
       _match: string,
       keyQuote: string,

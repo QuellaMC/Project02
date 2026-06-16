@@ -18,6 +18,7 @@ import {
   createRuntimePluginContext,
   type RuntimePluginContextItem,
   type RuntimePluginEvidenceSnapshot,
+  type RuntimePluginHealthSnapshot,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult,
   type RuntimePluginToolInvocationSnapshot,
@@ -1283,10 +1284,11 @@ function healthResultRejectsTurn(options: {
     options.pluginHost
   );
 
-  return options.healthResult.snapshots.some(
-    (snapshot) =>
-      snapshot.status === 'unavailable' &&
-      rejectingPluginIds.has(snapshot.pluginId)
+  return options.healthResult.snapshots.some((snapshot) =>
+    healthSnapshotRejectsTurn({
+      snapshot,
+      rejectingPluginIds
+    })
   );
 }
 
@@ -1311,17 +1313,28 @@ function healthResultRejectionMessage(options: {
   const rejectingPluginIds = healthRejectingPluginIds(
     options.pluginHost
   );
-  const unavailableSnapshot = options.healthResult.snapshots.find(
-    (snapshot) =>
-      snapshot.status === 'unavailable' &&
-      rejectingPluginIds.has(snapshot.pluginId)
+  const rejectingSnapshot = options.healthResult.snapshots.find((snapshot) =>
+    healthSnapshotRejectsTurn({
+      snapshot,
+      rejectingPluginIds
+    })
   );
 
-  if (unavailableSnapshot !== undefined) {
-    return `Plugin health unavailable: ${unavailableSnapshot.summary}`;
+  if (rejectingSnapshot !== undefined) {
+    return `Plugin health ${rejectingSnapshot.status}: ${rejectingSnapshot.summary}`;
   }
 
   return 'Plugin health policy rejected the turn.';
+}
+
+function healthSnapshotRejectsTurn(options: {
+  readonly snapshot: RuntimePluginHealthSnapshot;
+  readonly rejectingPluginIds: ReadonlySet<string>;
+}): boolean {
+  return (
+    options.snapshot.status !== 'ok' &&
+    options.rejectingPluginIds.has(options.snapshot.pluginId)
+  );
 }
 
 function healthRejectingPluginIds(

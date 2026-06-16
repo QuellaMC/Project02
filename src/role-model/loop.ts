@@ -48,6 +48,7 @@ import {
   type RoleModelTurnContext
 } from './prompt.ts';
 import {
+  isRuntimePluginCredentialKey,
   redactRuntimePluginText,
   type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
@@ -687,6 +688,7 @@ async function routeExecutableToolCalls(options: {
       toolCall
     });
     const callId = createToolCallId({
+      eventId: options.identity.eventId,
       index,
       round: options.round,
       toolName: toolCall.name
@@ -918,11 +920,12 @@ function undeclaredToolPluginId(toolName: string): string {
 }
 
 function createToolCallId(options: {
+  readonly eventId: string;
   readonly index: number;
   readonly round: number;
   readonly toolName: string;
 }): string {
-  return `round-${String(options.round)}.${String(options.index + 1)}.${options.toolName}`;
+  return `${options.eventId}.round-${String(options.round)}.${String(options.index + 1)}.${options.toolName}`;
 }
 
 function freezeRuntimePluginToolCallResult(
@@ -950,7 +953,12 @@ function freezeRuntimePluginToolOutputObject(
   const snapshotEntries: Array<readonly [string, RuntimePluginJsonValue]> = [];
 
   for (const [key, item] of Object.entries(value)) {
-    snapshotEntries.push([key, freezeRuntimePluginToolOutputValue(item)]);
+    snapshotEntries.push([
+      key,
+      isRuntimePluginCredentialKey(key)
+        ? '[redacted]'
+        : freezeRuntimePluginToolOutputValue(item)
+    ]);
   }
 
   return Object.freeze(Object.fromEntries(snapshotEntries));

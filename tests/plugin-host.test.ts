@@ -484,6 +484,68 @@ describe('runtime plugin host', () => {
     expect(JSON.stringify(result)).not.toContain('abc');
   });
 
+  it('preserves degraded evidence from optional rejected plugin tool results', async () => {
+    const plugin = createDegradedRejectingMemorySearchPlugin();
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_rejected',
+      message: 'search backend degraded'
+    });
+    expect(result.evidence).toHaveLength(1);
+    expect(result.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'degraded',
+      policyOutcome: 'optional_degraded'
+    });
+  });
+
+  it('synthesizes degraded fallback evidence for optional rejected plugin tool results with degrade policy', async () => {
+    const plugin = createRejectingMemorySearchPlugin({
+      id: 'memory.rejecting.degraded.fixture',
+      handleToolCallFailure: 'degrade'
+    });
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_rejected',
+      message:
+        'lookup failed credential="[redacted]" https://[redacted]@example.test/?token=[redacted]'
+    });
+    expect(result.evidence).toHaveLength(1);
+    expect(result.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'degraded',
+      policyOutcome: 'optional_degraded'
+    });
+  });
+
   it('redacts accepted plugin tool output strings', async () => {
     const plugin = createMemorySearchPlugin();
     const host = createRuntimePluginHost({ plugins: [plugin] });
@@ -510,6 +572,47 @@ describe('runtime plugin host', () => {
       matched:
         'api_key=[redacted] Bearer [redacted] https://[redacted]@example.test/?token=[redacted]'
     });
+  });
+
+  it('redacts accepted plugin tool output values with credential-shaped keys', async () => {
+    const plugin = createCredentialKeyOutputPlugin();
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected memory.search to be accepted.');
+    }
+
+    expect(result.output).toMatchObject({
+      api_key: '[redacted]',
+      nested: {
+        password: '[redacted]',
+        safe: 'kept'
+      },
+      list: [
+        {
+          access_token: '[redacted]',
+          label: 'kept'
+        }
+      ]
+    });
+
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('super-secret');
+    expect(serialized).not.toContain('open-sesame');
+    expect(serialized).not.toContain('secret-token');
   });
 
   it('preserves own __proto__ keys in accepted plugin tool output objects', async () => {
@@ -821,6 +924,48 @@ function createConfirmationRequiredMemorySearchPlugin(): RuntimePlugin {
   });
 }
 
+function createCredentialKeyOutputPlugin(): RuntimePlugin {
+  const id = 'memory.credential-key-output.fixture';
+
+  return createRuntimePlugin({
+    manifest: memorySearchPluginManifest(id),
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall(_call, context) {
+        return {
+          status: 'accepted',
+          output: {
+            api_key: 'super-secret',
+            nested: {
+              password: 'open-sesame',
+              safe: 'kept'
+            },
+            list: [
+              {
+                access_token: 'secret-token',
+                label: 'kept'
+              }
+            ]
+          },
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId: id,
+              evidenceKind: 'tool_invocation',
+              status: 'accepted',
+              summary: 'Search completed.',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
 function createProtoKeyOutputPlugin(): RuntimePlugin {
   const id = 'memory.proto-output.fixture';
 
@@ -871,11 +1016,26 @@ function createProtoKeyOutput(): RuntimePluginJsonObject {
   return output;
 }
 
-function createRejectingMemorySearchPlugin(): RuntimePlugin {
-  const id = 'memory.rejecting.fixture';
+function createRejectingMemorySearchPlugin(options: {
+  readonly id?: string;
+  readonly handleToolCallFailure?: 'reject_tool_call' | 'degrade';
+} = {}): RuntimePlugin {
+  const id = options.id ?? 'memory.rejecting.fixture';
+  const manifest = memorySearchPluginManifest(id);
 
   return createRuntimePlugin({
-    manifest: memorySearchPluginManifest(id),
+    manifest: {
+      ...manifest,
+      runtimePolicy: {
+        ...manifest.runtimePolicy,
+        failureBehavior: {
+          ...manifest.runtimePolicy.failureBehavior,
+          handleToolCall:
+            options.handleToolCallFailure ??
+            manifest.runtimePolicy.failureBehavior.handleToolCall
+        }
+      }
+    },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
       handleToolCall() {
@@ -885,6 +1045,38 @@ function createRejectingMemorySearchPlugin(): RuntimePlugin {
           message:
             'lookup failed credential="open-sesame" https://user:pass@example.test/?token=abc',
           evidence: []
+        };
+      }
+    }
+  });
+}
+
+function createDegradedRejectingMemorySearchPlugin(): RuntimePlugin {
+  const id = 'memory.rejecting.optional-degraded.fixture';
+
+  return createRuntimePlugin({
+    manifest: memorySearchPluginManifest(id),
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall(_call, context) {
+        return {
+          status: 'rejected',
+          reason: 'handler_rejected',
+          message: 'search backend degraded',
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId: id,
+              evidenceKind: 'tool_invocation',
+              status: 'degraded',
+              summary: 'search backend degraded',
+              policyOutcome: 'optional_degraded',
+              redactionLabels: []
+            })
+          ]
         };
       }
     }

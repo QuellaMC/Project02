@@ -35,6 +35,9 @@ import {
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
 import type {
+  RuntimePluginHealthStatus
+} from '../src/plugins/types.ts';
+import type {
   RoleModelAdapter
 } from '../src/role-model/loop.ts';
 
@@ -139,6 +142,94 @@ describe('file runtime log store plugin tool event validation', () => {
           rejection: {
             reason: roleModelCommitValidationFailureRejectionReason,
             details: 'Plugin health unavailable: health fixture offline'
+          }
+        }
+      }
+    });
+  });
+
+  it('rejects degraded health snapshots when plugin health policy rejects turns', async () => {
+    const storeRoot = createStoreRoot();
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'session-health-degraded-rejected',
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'session-health-degraded-rejected'
+    });
+    const session = createConversationSession({
+      id: 'session-health-degraded-rejected'
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'health check',
+        identity('evt_health_degraded_rejected')
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createHealthRejectingPluginHost({
+        status: 'degraded',
+        summary: 'health fixture backpressure'
+      })
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'plugin_health_rejected',
+      message: 'Plugin health degraded: health fixture backpressure'
+    });
+    expect(logStore.conversationMessages()).toEqual([]);
+
+    const rawEvents = logStore.rawEvents();
+    const commitRejection = rawEvents.find(
+      (event) => event.kind === 'commit_validation_rejected'
+    );
+
+    expect(commitRejection).toMatchObject({
+      kind: 'commit_validation_rejected',
+      status: 'rejected',
+      reason: roleModelCommitValidationFailureRejectionReason,
+      commitValidation: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelCommitValidationFailureRejectionReason,
+            details: 'Plugin health degraded: health fixture backpressure'
+          }
+        }
+      },
+      runtimePluginEvidence: [
+        {
+          pluginId: 'health.reject.fixture',
+          evidenceKind: 'health',
+          status: 'degraded',
+          summary: 'Plugin health degraded: health fixture backpressure',
+          policyOutcome: 'health_degraded'
+        }
+      ],
+      runtimePluginTurnEvidence: {
+        health: [
+          {
+            pluginId: 'health.reject.fixture',
+            status: 'degraded',
+            summary: 'health fixture backpressure'
+          }
+        ]
+      }
+    });
+    expect(rawEvents.at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: roleModelCommitValidationFailureRejectionReason,
+      commitValidation: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelCommitValidationFailureRejectionReason,
+            details: 'Plugin health degraded: health fixture backpressure'
           }
         }
       }
@@ -291,7 +382,13 @@ function createMultilineVisibleReplyAdapter(): RoleModelAdapter {
   };
 }
 
-function createHealthRejectingPluginHost() {
+function createHealthRejectingPluginHost(options?: {
+  readonly status?: RuntimePluginHealthStatus;
+  readonly summary?: string;
+}) {
+  const status = options?.status ?? 'unavailable';
+  const summary = options?.summary ?? 'health fixture offline';
+
   return createRuntimePluginHost({
     plugins: [
       createRuntimePlugin({
@@ -336,9 +433,9 @@ function createHealthRejectingPluginHost() {
           health(context) {
             return createRuntimePluginHealthSnapshot({
               pluginId: 'health.reject.fixture',
-              status: 'unavailable',
+              status,
               checkedAt: context.timestamp,
-              summary: 'health fixture offline',
+              summary,
               redactionLabels: []
             });
           }

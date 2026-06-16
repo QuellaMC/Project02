@@ -101,7 +101,7 @@ describe('plugin-driven tool loop', () => {
       'tool_call_finished'
     ]);
     expect(toolEvents[0]).toMatchObject({
-      toolCallId: 'round-1.1.character_state.patch',
+      toolCallId: 'evt_plugin_patch.round-1.1.character_state.patch',
       toolName: 'character_state.patch',
       toolPluginId: 'character-state',
       toolInput: {
@@ -109,7 +109,7 @@ describe('plugin-driven tool loop', () => {
       }
     });
     expect(toolEvents[1]).toMatchObject({
-      toolCallId: 'round-1.1.character_state.patch',
+      toolCallId: 'evt_plugin_patch.round-1.1.character_state.patch',
       toolName: 'character_state.patch',
       toolPluginId: 'character-state',
       toolResult: {
@@ -123,7 +123,7 @@ describe('plugin-driven tool loop', () => {
 
     expect(terminalEvent).toMatchObject({
       kind: 'runtime_turn_completed',
-      toolCallIds: ['round-1.1.character_state.patch']
+      toolCallIds: ['evt_plugin_patch.round-1.1.character_state.patch']
     });
     const observations =
       terminalEvent?.roleModelIOSnapshot?.inputEnvelope.toolObservations ?? [];
@@ -191,7 +191,7 @@ describe('plugin-driven tool loop', () => {
     }
 
     expect(toolStartEvent).toMatchObject({
-      toolCallId: 'round-1.1.character_state.patch',
+      toolCallId: 'evt_tool_round_evidence.round-1.1.character_state.patch',
       toolRound: 1,
       roleModelIOSnapshot: {
         inputEnvelope: {
@@ -229,6 +229,61 @@ describe('plugin-driven tool loop', () => {
     expect(terminalEvent?.roleModelIOSnapshot?.rawOutputText).not.toContain(
       'character_state.patch'
     );
+  });
+
+  it('persists repeated same tool calls across separate durable turns', async () => {
+    const sessionId = 'session-repeated-tool-turns';
+    const {
+      session,
+      logStore,
+      storeRoot
+    } = await createDurableCharacterStateHarness(sessionId);
+
+    for (const eventId of ['evt_repeated_tool_first', 'evt_repeated_tool_second']) {
+      const result = await runLocalUserMessageEvent({
+        event: createTestEvent('update state', eventId),
+        session,
+        logStore,
+        roleModelAdapter: createSequencedAdapter([
+          {
+            toolCalls: [
+              {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'curious'
+                }
+              }
+            ]
+          },
+          {
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: `state updated for ${eventId}`
+                }
+              }
+            ]
+          }
+        ])
+      });
+
+      expect(result.status).toBe('completed');
+    }
+
+    const reopenedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const toolStartIds = reopenedLogStore
+      .rawEvents()
+      .filter((event) => event.kind === 'tool_call_started')
+      .map((event) => event.toolCallId);
+
+    expect(toolStartIds).toEqual([
+      'evt_repeated_tool_first.round-1.1.character_state.patch',
+      'evt_repeated_tool_second.round-1.1.character_state.patch'
+    ]);
   });
 
   it('persists character_state.patch only after an accepted turn commits', async () => {
@@ -1291,7 +1346,9 @@ describe('plugin-driven tool loop', () => {
     for (const event of rejectionEvents) {
       expect(event).toMatchObject({
         reason: roleModelInvalidVisibleReplyRejectionReason,
-        toolCallIds: ['round-1.1.character_state.patch']
+        toolCallIds: [
+          'evt_invalid_later_interim_visible.round-1.1.character_state.patch'
+        ]
       });
       expect(event.runtimePluginEvidence).toEqual(
         expect.arrayContaining([

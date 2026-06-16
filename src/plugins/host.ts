@@ -5,6 +5,7 @@ import {
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
   createRuntimePluginRegistrySnapshot,
+  isRuntimePluginCredentialKey,
   redactRuntimePluginText
 } from './types.ts';
 import type {
@@ -1182,6 +1183,17 @@ function evidenceRecordsStatus(options: {
   );
 }
 
+function evidenceRecordsToolInvocationDegrade(
+  evidence: readonly RuntimePluginEvidenceSnapshot[]
+): boolean {
+  return evidence.some(
+    (item) =>
+      item.evidenceKind === 'tool_invocation' &&
+      (item.status === 'degraded' ||
+        item.policyOutcome === 'optional_degraded')
+  );
+}
+
 function pluginToolDefinitionsForEnabledPlugins(
   plugins: readonly RuntimePlugin[]
 ): readonly RoleModelPluginToolDefinition[] {
@@ -1328,11 +1340,16 @@ function normalizeToolCallResult(options: {
       context: options.context,
       value: options.value['evidence']
     });
-    const evidenceWithRejection = evidenceRecordsStatus({
+    const failureDegrades = handleToolCallFailureDegrades({
+      plugin: options.plugin,
+      providedTool: options.providedTool
+    });
+    const evidenceAlreadyExplainsRejectedResult = evidenceRecordsStatus({
       evidence,
       evidenceKind: 'tool_invocation',
       statuses: ['rejected', 'failed']
-    })
+    }) || evidenceRecordsToolInvocationDegrade(evidence);
+    const evidenceWithFallback = evidenceAlreadyExplainsRejectedResult
       ? evidence
       : Object.freeze([
           ...evidence,
@@ -1340,9 +1357,11 @@ function normalizeToolCallResult(options: {
             plugin: options.plugin,
             context: options.context,
             evidenceKind: 'tool_invocation',
-            status: 'rejected',
+            status: failureDegrades ? 'degraded' : 'rejected',
             summary: redactedMessage,
-            policyOutcome: 'handler_rejected'
+            policyOutcome: failureDegrades
+              ? 'optional_degraded'
+              : 'handler_rejected'
           })
         ]);
 
@@ -1350,7 +1369,7 @@ function normalizeToolCallResult(options: {
       status: 'rejected',
       reason,
       message: redactedMessage,
-      evidence: evidenceWithRejection
+      evidence: evidenceWithFallback
     } satisfies RuntimePluginToolCallResult);
   }
 
@@ -1416,7 +1435,10 @@ function normalizeJsonValue(value: unknown): RuntimePluginJsonValue {
     const snapshotEntries: Array<readonly [string, RuntimePluginJsonValue]> = [];
 
     for (const [key, item] of Object.entries(value)) {
-      snapshotEntries.push([key, normalizeJsonValue(item)]);
+      snapshotEntries.push([
+        key,
+        isRuntimePluginCredentialKey(key) ? '[redacted]' : normalizeJsonValue(item)
+      ]);
     }
 
     return Object.freeze(Object.fromEntries(snapshotEntries));

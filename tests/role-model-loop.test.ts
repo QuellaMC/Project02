@@ -11,12 +11,18 @@ import {
   type RoleModelProviderMetadata
 } from '../src/role-model/contracts.ts';
 import {
+  createRuntimePlugin,
   createRuntimePluginContext,
   createRuntimePluginEvidenceSnapshot,
+  runtimePluginContractVersion,
   type RuntimePluginContext,
+  type RuntimePlugin,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult
 } from '../src/plugins/types.ts';
+import {
+  createRuntimePluginHost
+} from '../src/plugins/host.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
@@ -88,7 +94,7 @@ describe('role-model loop plugin tool routing', () => {
     expect(handledCalls).toBe(1);
     expect(result.pluginToolResults).toHaveLength(1);
     expect(result.pluginToolResults[0]).toMatchObject({
-      callId: 'round-1.1.memory.search',
+      callId: 'evt_rejected_plugin_tool.round-1.1.memory.search',
       call: {
         pluginId: 'memory.search.fixture',
         toolName: 'memory.search'
@@ -290,6 +296,61 @@ describe('role-model loop plugin tool routing', () => {
     expect(result.pluginToolResults[0]?.result.status).toBe('rejected');
   });
 
+  it('continues prompting when the real plugin host degrades optional rejected tool results', async () => {
+    let invocations = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued after degraded host result'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost = createRuntimePluginHost({
+      plugins: [createDegradingRejectedMemorySearchPlugin()]
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_host_degraded_plugin_tool'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: pluginToolHost.pluginToolDefinitions(),
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_host_degraded_plugin_tool')
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(invocations).toBe(2);
+    expect(result.pluginToolResults).toHaveLength(1);
+    expect(result.pluginToolResults[0]?.result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_rejected',
+      evidence: [
+        {
+          evidenceKind: 'tool_invocation',
+          status: 'degraded',
+          policyOutcome: 'optional_degraded'
+        }
+      ]
+    });
+  });
+
   it.each([
     ['NaN', Number.NaN],
     ['Infinity', Number.POSITIVE_INFINITY]
@@ -356,7 +417,7 @@ describe('role-model loop plugin tool routing', () => {
       expect(handledCalls).toBe(1);
       expect(result.pluginToolResults).toHaveLength(1);
       expect(result.pluginToolResults[0]).toMatchObject({
-        callId: 'round-1.1.memory.search',
+        callId: `${eventId}.round-1.1.memory.search`,
         result: {
           status: 'rejected',
           reason: 'invalid_tool_output',
@@ -376,10 +437,18 @@ describe('role-model loop plugin tool routing', () => {
     const redactedOutput = {
       matched:
         'api_key=[redacted] Bearer [redacted] https://[redacted]@example.test/?token=[redacted]',
+      api_key: '[redacted]',
       nested: {
-        password: 'password=[redacted]'
+        password: '[redacted]',
+        client_secret: '[redacted]'
       },
-      list: ['credential=[redacted]']
+      list: [
+        'credential=[redacted]',
+        {
+          access_token: '[redacted]',
+          label: 'kept'
+        }
+      ]
     };
     const adapter: RoleModelAdapter = Object.freeze({
       invoke(_inputEnvelope, invocation) {
@@ -438,10 +507,18 @@ describe('role-model loop plugin tool routing', () => {
           output: Object.freeze({
             matched:
               'api_key=super-secret Bearer secret-token https://user:pass@example.test/?token=abc',
+            api_key: 'key-only-secret',
             nested: Object.freeze({
-              password: 'password=open-sesame'
+              password: 'password=open-sesame',
+              client_secret: 'structured-only-secret'
             }),
-            list: Object.freeze(['credential=door-code'])
+            list: Object.freeze([
+              'credential=door-code',
+              Object.freeze({
+                access_token: 'list-only-secret',
+                label: 'kept'
+              })
+            ])
           }),
           evidence: Object.freeze([])
         } satisfies RuntimePluginToolCallResult);
@@ -489,9 +566,12 @@ describe('role-model loop plugin tool routing', () => {
       tool_call_id: 'call_memory_search_secret'
     });
     expect(nativeToolMessage?.content).toContain('api_key=[redacted]');
+    expect(nativeToolMessage?.content).toContain('"api_key":"[redacted]"');
     expect(nativeToolMessage?.content).toContain('Bearer [redacted]');
-    expect(nativeToolMessage?.content).toContain('password=[redacted]');
+    expect(nativeToolMessage?.content).toContain('"password":"[redacted]"');
+    expect(nativeToolMessage?.content).toContain('"client_secret":"[redacted]"');
     expect(nativeToolMessage?.content).toContain('credential=[redacted]');
+    expect(nativeToolMessage?.content).toContain('"access_token":"[redacted]"');
 
     const serializedSurfaces = JSON.stringify({
       completedResults,
@@ -501,9 +581,12 @@ describe('role-model loop plugin tool routing', () => {
     });
 
     expect(serializedSurfaces).not.toContain('super-secret');
+    expect(serializedSurfaces).not.toContain('key-only-secret');
     expect(serializedSurfaces).not.toContain('secret-token');
     expect(serializedSurfaces).not.toContain('open-sesame');
+    expect(serializedSurfaces).not.toContain('structured-only-secret');
     expect(serializedSurfaces).not.toContain('door-code');
+    expect(serializedSurfaces).not.toContain('list-only-secret');
     expect(serializedSurfaces).not.toContain('user:pass');
     expect(serializedSurfaces).not.toContain('token=abc');
   });
@@ -839,6 +922,82 @@ const requiredMemorySearchToolDefinition = Object.freeze({
   ...memorySearchToolDefinition,
   requiredForUserTurn: true
 } satisfies RoleModelPluginToolDefinition);
+
+function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
+  const id = 'memory.search.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      id,
+      displayName: 'Memory Search Fixture',
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'Search memory.',
+      contractVersion: runtimePluginContractVersion,
+      compatibility: {
+        hostContractVersions: [runtimePluginContractVersion],
+        sourceSystem: 'test'
+      },
+      declaredPlugins: ['tool_provider', 'handle_tool_call'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'degrade',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test']
+      },
+      requestedApis: []
+    },
+    providedTools: [
+      {
+        name: 'memory.search',
+        description: 'Search memory.',
+        requiredForUserTurn: false,
+        maxCallsPerUserTurn: 1,
+        inputContract: {
+          type: 'object',
+          fields: [
+            {
+              name: 'query',
+              description: 'Search query.',
+              required: true
+            }
+          ],
+          additionalFields: false
+        },
+        validationOwner: 'plugin_host',
+        sideEffectLevel: 'runtime_read',
+        requiresConfirmation: false,
+        sourceReferencesRequired: false
+      }
+    ],
+    lifecycleHooks: {
+      handleToolCall() {
+        return {
+          status: 'rejected',
+          reason: 'handler_rejected',
+          message: 'search backend degraded',
+          evidence: []
+        };
+      }
+    }
+  });
+}
 
 function createSequencedAdapter(
   decisions: readonly Readonly<Record<string, unknown>>[],
