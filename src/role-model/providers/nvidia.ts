@@ -25,6 +25,7 @@ import type {
   RoleModelAdapterInvocation,
   RoleModelAdapterRawOutput
 } from '../loop.ts';
+import { redactRuntimePluginText } from '../../plugins/types.ts';
 
 export const nvidiaRoleModelProviderName = 'nvidia';
 export const defaultNvidiaChatCompletionsEndpoint =
@@ -385,11 +386,17 @@ function createProviderMetadata(options: {
   readonly model: string;
   readonly status?: number;
 }): RoleModelProviderMetadata {
+  const redactedEndpoint = redactRuntimePluginText(options.endpoint);
+  const redactedMessage =
+    options.message === undefined
+      ? undefined
+      : redactRuntimePluginText(options.message);
+
   return Object.freeze({
     provider: nvidiaRoleModelProviderName,
     model: options.model,
     request: Object.freeze({
-      endpoint: options.endpoint,
+      endpoint: redactedEndpoint,
       ...(options.messageCount === undefined
         ? {}
         : { messageCount: options.messageCount }),
@@ -402,12 +409,12 @@ function createProviderMetadata(options: {
             status: options.status
           })
         }),
-    ...(options.code === undefined || options.message === undefined
+    ...(options.code === undefined || redactedMessage === undefined
       ? {}
       : {
           error: Object.freeze({
             code: options.code,
-            message: options.message
+            message: redactedMessage
           })
         })
   } satisfies RoleModelProviderMetadata);

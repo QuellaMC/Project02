@@ -777,16 +777,128 @@ describe('plugin-driven tool loop', () => {
       })
     ).rejects.toThrow('terminal raw event append failed');
     expect(afterTurnCommittedCalls).toBe(0);
-    expect(session.visibleTranscript).toEqual([]);
-    expect(logStore.conversationMessages()).toEqual([]);
+    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+      'hello',
+      'terminal append should fail first'
+    ]);
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'hello',
+      'terminal append should fail first'
+    ]);
     expect(logStore.rawEvents().some((event) => event.kind === 'runtime_turn_completed')).toBe(
       false
     );
+    const visibleMessageIds = logStore
+      .conversationMessages()
+      .map((message) => message.id);
+
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
-      status: 'rejected'
+      status: 'rejected',
+      visibleMessageIds
     });
-    expect(logStore.rawEvents().at(-1)?.visibleMessageIds).toBeUndefined();
+  });
+
+  it('keeps durable visible-reply evidence valid when terminal raw event append fails', async () => {
+    const sessionId = 'session-terminal-append-visible-reply-evidence';
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
+
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+
+    const fileLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const logStore = createRuntimeTurnCompletedAppendFailingLogStore(fileLogStore);
+    const pluginHost = createRuntimePluginHost({ plugins: [] });
+    const session = createConversationSession({ id: sessionId });
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'terminal append fails after visible evidence'
+            }
+          }
+        ]
+      }
+    ]);
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestEvent('hello', 'evt_terminal_append_visible_evidence'),
+        session,
+        logStore,
+        roleModelAdapter: adapter,
+        pluginHost
+      })
+    ).rejects.toThrow('terminal raw event append failed');
+
+    const reopenedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const conversationMessages = reopenedLogStore.conversationMessages();
+    const visibleMessageIds = conversationMessages.map((message) => message.id);
+    const rawEvents = reopenedLogStore.rawEvents();
+
+    expect(conversationMessages.map((message) => message.text)).toEqual([
+      'hello',
+      'terminal append fails after visible evidence'
+    ]);
+    expect(
+      rawEvents
+        .filter(
+          (event) =>
+            event.kind === 'runtime_turn_completed' ||
+            event.kind === 'runtime_turn_rejected'
+        )
+        .map((event) => event.kind)
+    ).toEqual(['runtime_turn_rejected']);
+    expect(
+      rawEvents.find((event) => event.kind === 'visible_reply_committed')
+        ?.visibleMessageIds
+    ).toEqual(visibleMessageIds);
+    expect(rawEvents.at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      visibleMessageIds
+    });
+
+    const restoredSession = createConversationSession({
+      id: sessionId,
+      visibleTranscript: conversationMessages
+    });
+    const followupResult = await runLocalUserMessageEvent({
+      event: createTestEvent('again', 'evt_terminal_append_followup'),
+      session: restoredSession,
+      logStore: reopenedLogStore,
+      pluginHost,
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'followup after rejection evidence'
+              }
+            }
+          ]
+        }
+      ])
+    });
+
+    expect(followupResult.status).toBe('completed');
+    expect(reopenedLogStore.conversationMessages().map((message) => message.text)).toEqual([
+      'hello',
+      'terminal append fails after visible evidence',
+      'again',
+      'followup after rejection evidence'
+    ]);
   });
 
   it('does not commit handleToolCall fileStore writes when finish logging fails', async () => {
@@ -1800,9 +1912,9 @@ function createCharacterAppendFailingLogStore(
   } satisfies RuntimeLogStore);
 }
 
-function createRuntimeTurnCompletedAppendFailingLogStore(): RuntimeLogStore {
-  const logStore = createRuntimeLogStore();
-
+function createRuntimeTurnCompletedAppendFailingLogStore(
+  logStore: RuntimeLogStore = createRuntimeLogStore()
+): RuntimeLogStore {
   return Object.freeze({
     appendTrace(entry) {
       return logStore.appendTrace(entry);

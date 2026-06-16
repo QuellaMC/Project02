@@ -41,6 +41,81 @@ describe('NVIDIA role-model provider', () => {
     ).toBe('nvidia/test-model');
   });
 
+  it('redacts credential-bearing custom endpoints in successful provider metadata', async () => {
+    const endpoint =
+      'https://user:pass@example.test/v1/chat/completions?safe=value&token=endpoint-secret';
+    let capturedUrl: string | undefined;
+    const fetchClient: NvidiaFetchClient = (url) => {
+      capturedUrl = url;
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: 'Hello.'
+                }
+              }
+            ]
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      endpoint,
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(capturedUrl).toBe(endpoint);
+    expect(output.providerMetadata?.request?.endpoint).toBe(
+      'https://[redacted]@example.test/v1/chat/completions?safe=value&token=[redacted]'
+    );
+    expect(JSON.stringify(output.providerMetadata)).not.toContain('user:pass');
+    expect(JSON.stringify(output.providerMetadata)).not.toContain(
+      'endpoint-secret'
+    );
+  });
+
+  it('redacts credential-bearing custom endpoints echoed into rejected provider metadata', async () => {
+    const endpoint =
+      'https://user:pass@example.test/v1/chat/completions?token=endpoint-secret';
+    const fetchClient: NvidiaFetchClient = () =>
+      Promise.reject(new Error(`connect failed for ${endpoint}`));
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      endpoint,
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+    const serializedMetadata = JSON.stringify(output.providerMetadata);
+
+    expect(output.rejection?.reason).toBe('provider_error');
+    expect(output.providerMetadata?.request?.endpoint).toBe(
+      'https://[redacted]@example.test/v1/chat/completions?token=[redacted]'
+    );
+    expect(output.providerMetadata?.error?.message).toBe(
+      'connect failed for https://[redacted]@example.test/v1/chat/completions?token=[redacted]'
+    );
+    expect(serializedMetadata).not.toContain('user:pass');
+    expect(serializedMetadata).not.toContain('endpoint-secret');
+  });
+
   it('renders OpenAI-compatible messages and native tools', () => {
     const inputEnvelope = createNvidiaTestInputEnvelope();
     const messages = renderNvidiaMessages(inputEnvelope);

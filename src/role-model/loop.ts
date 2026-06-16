@@ -772,10 +772,14 @@ async function routeExecutableToolCalls(options: {
       });
     }
 
+    const routableHostResult = normalizeRoutablePluginToolResult({
+      result: frozenHostResult,
+      toolName: toolCall.name
+    });
     const routingEvidence = Object.freeze({
       callId,
       call: routedCall,
-      result: frozenHostResult
+      result: routableHostResult
     } satisfies RoleModelPluginToolRoutingEvidence);
 
     results.push(routingEvidence);
@@ -843,6 +847,25 @@ function createRejectedToolRoutingEvidence(options: {
       evidence: Object.freeze([])
     } satisfies RuntimePluginToolCallResult)
   } satisfies RoleModelPluginToolRoutingEvidence);
+}
+
+function normalizeRoutablePluginToolResult(options: {
+  readonly result: RuntimePluginToolCallResult;
+  readonly toolName: string;
+}): RuntimePluginToolCallResult {
+  if (
+    options.result.status === 'accepted' &&
+    options.result.evidence.some(toolInvocationEvidenceRejectsLoop)
+  ) {
+    return Object.freeze({
+      status: 'rejected',
+      reason: 'blocking_tool_invocation_evidence',
+      message: `Tool "${options.toolName}" returned accepted output with blocking tool invocation evidence.`,
+      evidence: options.result.evidence
+    } satisfies RuntimePluginToolCallResult);
+  }
+
+  return options.result;
 }
 
 function pluginToolResultRejectsLoop(options: {

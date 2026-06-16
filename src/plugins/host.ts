@@ -1194,6 +1194,20 @@ function evidenceRecordsToolInvocationDegrade(
   );
 }
 
+function evidenceRecordsBlockingToolInvocation(
+  evidence: readonly RuntimePluginEvidenceSnapshot[]
+): boolean {
+  return evidence.some(
+    (item) =>
+      item.evidenceKind === 'tool_invocation' &&
+      (item.status === 'rejected' ||
+        item.status === 'failed' ||
+        item.policyOutcome === 'handler_rejected' ||
+        item.policyOutcome === 'required_rejected' ||
+        item.policyOutcome === 'disallowed_tool_call')
+  );
+}
+
 function pluginToolDefinitionsForEnabledPlugins(
   plugins: readonly RuntimePlugin[]
 ): readonly RoleModelPluginToolDefinition[] {
@@ -1318,6 +1332,15 @@ function normalizeToolCallResult(options: {
       providedTool: options.providedTool,
       evidence
     });
+
+    if (evidenceRecordsBlockingToolInvocation(evidence)) {
+      return Object.freeze({
+        status: 'rejected',
+        reason: 'blocking_tool_invocation_evidence',
+        message: `Plugin "${options.plugin.manifest.id}" tool "${options.providedTool.name}" accepted result included blocking tool invocation evidence.`,
+        evidence
+      } satisfies RuntimePluginToolCallResult);
+    }
 
     return Object.freeze({
       status: 'accepted',

@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -24,7 +24,17 @@ import {
   roleModelCommitValidationFailureRejectionReason
 } from '../src/role-model/contracts.ts';
 import {
+  characterStatePatchModelToolName,
+  visibleReplyModelToolName
+} from '../src/role-model/model-tools.ts';
+import {
+  roleModelDecisionContractVersion
+} from '../src/role-model/contracts.ts';
+import {
   LocalRuntimeStorageContractError
+} from '../src/runtime/storage/layout.ts';
+import {
+  createLocalRuntimeStorageLayout
 } from '../src/runtime/storage/layout.ts';
 import {
   createRuntimePluginHost
@@ -42,6 +52,94 @@ import type {
 } from '../src/role-model/loop.ts';
 
 describe('file runtime log store plugin tool event validation', () => {
+  it('decodes legacy schema 1 role-model snapshots with character_state.patch as a former built-in allowed tool', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'legacy-schema-1-role-model';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    writeFileSync(
+      createLocalRuntimeStorageLayout({ storeRoot }).schemaPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        createdAt: '2026-06-15T00:00:00.000Z'
+      })}\n`,
+      'utf8'
+    );
+
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    mkdirSync(paths.sessionRoot, { recursive: true });
+    writeJsonLines(paths.tracePath, [
+      {
+        ...identity('evt_legacy_schema1_patch'),
+        step: 'runtime_event_received'
+      },
+      {
+        ...identity('evt_legacy_schema1_patch'),
+        step: 'runtime_turn_completed'
+      }
+    ]);
+    writeJsonLines(paths.rawEventsPath, [
+      {
+        ...identity('evt_legacy_schema1_patch'),
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE'
+      },
+      {
+        ...identity('evt_legacy_schema1_patch'),
+        kind: 'runtime_event_normalized',
+        eventType: 'USER_MESSAGE',
+        payloadSummary: {
+          rawInput: 'remember the mood',
+          normalizedCurrentUserMessage: 'remember the mood'
+        }
+      },
+      legacySchema1PatchCompletedEvent(sessionId)
+    ]);
+
+    const completed = logStore
+      .rawEvents()
+      .find((event) => event.kind === 'runtime_turn_completed');
+
+    expect(completed?.roleModelIOSnapshot?.inputEnvelope.allowedTools).toEqual([
+      visibleReplyModelToolName,
+      characterStatePatchModelToolName
+    ]);
+    expect(
+      completed?.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions
+    ).toMatchObject([
+      {
+        pluginId: 'character-state',
+        name: characterStatePatchModelToolName
+      }
+    ]);
+    expect(
+      completed?.parsedRoleModelDecisionSnapshot?.result
+    ).toMatchObject({
+      status: 'accepted',
+      decision: {
+        toolCalls: [
+          {
+            name: characterStatePatchModelToolName,
+            input: {
+              mood: 'curious'
+            }
+          }
+        ]
+      }
+    });
+  });
+
   it('persists multi-line visible conversation records', async () => {
     const storeRoot = createStoreRoot();
     await createLocalRuntimeSessionStore({ storeRoot }).createSession({
@@ -361,6 +459,95 @@ function appendTurnPrefix(
     kind: 'runtime_event_normalized',
     eventType: 'USER_MESSAGE'
   });
+}
+
+function writeJsonLines(filePath: string, records: readonly object[]): void {
+  writeFileSync(
+    filePath,
+    records.map((record) => `${JSON.stringify(record)}\n`).join(''),
+    'utf8'
+  );
+}
+
+function legacySchema1PatchCompletedEvent(sessionId: string): object {
+  const eventIdentity = identity('evt_legacy_schema1_patch');
+  const rawOutputText = JSON.stringify({
+    toolCalls: [
+      {
+        name: characterStatePatchModelToolName,
+        input: {
+          mood: 'curious'
+        }
+      }
+    ]
+  });
+
+  return {
+    ...eventIdentity,
+    kind: 'runtime_turn_completed',
+    eventType: 'USER_MESSAGE',
+    status: 'completed',
+    roleModelIOSnapshot: {
+      ...eventIdentity,
+      kind: 'role_model_io_snapshot',
+      sessionId,
+      inputEnvelope: {
+        event: {
+          ...eventIdentity,
+          type: 'USER_MESSAGE',
+          payload: {
+            currentUserMessage: 'remember the mood'
+          }
+        },
+        decisionContext: {
+          sessionId,
+          characterSnapshot: {
+            id: 'mira',
+            displayName: 'Mira'
+          },
+          recentVisibleMessages: [],
+          runtimeNotes: []
+        },
+        allowedTools: [
+          visibleReplyModelToolName,
+          characterStatePatchModelToolName
+        ],
+        toolObservations: [],
+        outputContract: {
+          version: roleModelDecisionContractVersion,
+          text: 'legacy schema 1 output contract text'
+        }
+      },
+      rawOutputText
+    },
+    parsedRoleModelDecisionSnapshot: {
+      ...eventIdentity,
+      kind: 'role_model_decision_snapshot',
+      sessionId,
+      result: {
+        status: 'accepted',
+        decision: {
+          version: roleModelDecisionContractVersion,
+          toolCalls: [
+            {
+              name: characterStatePatchModelToolName,
+              input: {
+                mood: 'curious'
+              }
+            }
+          ]
+        }
+      }
+    },
+    commitValidation: {
+      ...eventIdentity,
+      kind: 'role_model_commit_validation_snapshot',
+      sessionId,
+      result: {
+        status: 'accepted'
+      }
+    }
+  };
 }
 
 function createMultilineVisibleReplyAdapter(): RoleModelAdapter {

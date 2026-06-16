@@ -1197,7 +1197,7 @@ function assertRawEventVisibleReferencesMatchConversationMessages(options: {
       rawEvent
     });
 
-    if (rawEvent.kind === 'runtime_turn_completed') {
+    if (isVisibleMessageTerminalRawEventLogRecord(rawEvent)) {
       priorVisibleMessages.push(
         ...visibleConversationMessagesForRawEvent({
           messagesById,

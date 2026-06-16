@@ -244,6 +244,82 @@ describe('role-model loop plugin tool routing', () => {
     ]);
   });
 
+  it.each(['rejected', 'failed'] as const)(
+    'rejects accepted plugin tool results with %s tool invocation evidence',
+    async (evidenceStatus) => {
+      let invocations = 0;
+      let handledCalls = 0;
+      const adapter = createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'memory.search',
+              input: {
+                query: 'Mira'
+              }
+            }
+          ]
+        },
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'continued after contradictory tool evidence'
+              }
+            }
+          ]
+        }
+      ], () => {
+        invocations += 1;
+      });
+      const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+        handleToolCall(call, context) {
+          handledCalls += 1;
+
+          return createAcceptedToolCallResultWithBlockingEvidence({
+            call,
+            context,
+            evidenceStatus
+          });
+        }
+      });
+
+      const result = await runRoleModelLoop({
+        event: createTestEvent(
+          'search memory',
+          `evt_accepted_${evidenceStatus}_evidence_plugin_tool`
+        ),
+        decisionContext: createTestDecisionContext(),
+        adapter,
+        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolHost,
+        runtimePluginContext: createTestPluginContext(
+          `evt_accepted_${evidenceStatus}_evidence_plugin_tool`
+        )
+      });
+
+      expect(result).toMatchObject({
+        status: 'rejected',
+        rejection: {
+          reason: roleModelPluginToolRejectedRejectionReason
+        }
+      });
+      expect(invocations).toBe(1);
+      expect(handledCalls).toBe(1);
+      expect(result.pluginToolResults[0]?.result).toMatchObject({
+        status: 'rejected',
+        reason: 'blocking_tool_invocation_evidence',
+        evidence: [
+          {
+            evidenceKind: 'tool_invocation',
+            status: evidenceStatus
+          }
+        ]
+      });
+    }
+  );
+
   it('continues prompting after optional degraded plugin tool failures', async () => {
     let invocations = 0;
     const adapter = createSequencedAdapter([
@@ -1052,6 +1128,34 @@ function createAcceptedToolCallResult(): RuntimePluginToolCallResult {
       ok: true
     }),
     evidence: Object.freeze([])
+  } satisfies RuntimePluginToolCallResult);
+}
+
+function createAcceptedToolCallResultWithBlockingEvidence(options: {
+  readonly call: RuntimePluginToolCall;
+  readonly context: RuntimePluginContext;
+  readonly evidenceStatus: 'rejected' | 'failed';
+}): RuntimePluginToolCallResult {
+  return Object.freeze({
+    status: 'accepted',
+    output: Object.freeze({
+      ok: true
+    }),
+    evidence: Object.freeze([
+      createRuntimePluginEvidenceSnapshot({
+        eventId: options.context.eventId,
+        traceId: options.context.traceId,
+        createdAt: options.context.timestamp,
+        kind: 'runtime_plugin_evidence_snapshot',
+        pluginId: options.call.pluginId,
+        evidenceKind: 'tool_invocation',
+        status: options.evidenceStatus,
+        summary: 'search backend failed',
+        policyOutcome:
+          options.evidenceStatus === 'failed' ? 'timeout' : 'handler_rejected',
+        redactionLabels: []
+      })
+    ])
   } satisfies RuntimePluginToolCallResult);
 }
 

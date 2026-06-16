@@ -247,6 +247,23 @@ const commitOwnedRoleModelRejectionReasons = [
   roleModelPluginToolRejectedRejectionReason,
   roleModelCommitValidationFailureRejectionReason
 ] as const satisfies readonly RoleModelDecisionRejectionReason[];
+const legacySchema1CharacterStatePatchPluginToolDefinition = Object.freeze({
+  pluginId: 'character-state',
+  name: characterStatePatchModelToolName,
+  description:
+    'Legacy schema 1 compatibility definition for persisted character_state.patch evidence.',
+  requiredForUserTurn: false,
+  maxCallsPerUserTurn: 1,
+  inputContract: {
+    type: 'object',
+    fields: [],
+    additionalFields: true
+  },
+  validationOwner: 'plugin_host',
+  sideEffectLevel: 'local_memory_write',
+  requiresConfirmation: false,
+  sourceReferencesRequired: false
+} satisfies RoleModelPluginToolDefinition);
 
 export function createLocalRuntimeStorageLayout(
   options: LocalRuntimeStorageLayoutOptions = {}
@@ -1531,19 +1548,48 @@ function requiredRoleModelInputEnvelope(
   if (!isRecord(value)) {
     throwMalformedRecord('roleModelInputEnvelope');
   }
+  const allowedTools = requiredRoleModelAllowedTools(value['allowedTools']);
+  const pluginToolDefinitions = roleModelPluginToolDefinitionsWithLegacyCompat({
+    allowedTools,
+    pluginToolDefinitions: optionalRoleModelPluginToolDefinitions(
+      value['pluginToolDefinitions']
+    )
+  });
 
   return createRoleModelInputEnvelope({
     event: requiredUserMessageRuntimeEvent(value['event']),
     decisionContext: requiredDecisionContext(value['decisionContext']),
-    allowedTools: requiredRoleModelAllowedTools(value['allowedTools']),
-    pluginToolDefinitions: optionalRoleModelPluginToolDefinitions(
-      value['pluginToolDefinitions']
-    ),
+    allowedTools,
+    pluginToolDefinitions,
     toolObservations: optionalRoleModelToolObservations(
       value['toolObservations']
     ),
     outputContract: requiredRoleModelOutputContract(value['outputContract'])
   });
+}
+
+function roleModelPluginToolDefinitionsWithLegacyCompat(options: {
+  readonly allowedTools: readonly RoleModelAllowedToolName[];
+  readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
+}): readonly RoleModelPluginToolDefinition[] {
+  if (!options.allowedTools.includes(characterStatePatchModelToolName)) {
+    return options.pluginToolDefinitions;
+  }
+
+  if (
+    options.pluginToolDefinitions.some(
+      (definition) => definition.name === characterStatePatchModelToolName
+    )
+  ) {
+    return options.pluginToolDefinitions;
+  }
+
+  // Schema 1 stored character_state.patch as a built-in tool before plugin
+  // definitions were persisted with role-model envelopes.
+  return Object.freeze([
+    ...options.pluginToolDefinitions,
+    legacySchema1CharacterStatePatchPluginToolDefinition
+  ]);
 }
 
 function requiredUserMessageRuntimeEvent(

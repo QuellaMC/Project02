@@ -915,48 +915,36 @@ async function runSerializedLocalUserMessageEvent(
       preCommitHealthResult.evidence
     );
 
-    let rawEvent: RawEventLogRecord;
-
-    try {
-      rawEvent = appendRawEvent({
+    const rawEvent = appendRawEvent({
+      ...identity,
+      kind: 'runtime_turn_completed',
+      eventType: event.type,
+      status: 'completed',
+      ...visibleMessageIdsForTurnOption(committedVisibleMessages),
+      toolCallIds: Object.freeze([...finishedToolCallIds]),
+      payloadSummary,
+      roleModelIOSnapshot: roleModelResult.ioSnapshot,
+      parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot,
+      commitValidation: createRoleModelCommitValidationSnapshot({
         ...identity,
-        kind: 'runtime_turn_completed',
-        eventType: event.type,
-        status: 'completed',
-        ...visibleMessageIdsForTurnOption(committedVisibleMessages),
-        toolCallIds: Object.freeze([...finishedToolCallIds]),
-        payloadSummary,
-        roleModelIOSnapshot: roleModelResult.ioSnapshot,
-        parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot,
-        commitValidation: createRoleModelCommitValidationSnapshot({
-          ...identity,
-          sessionId: decisionContext.sessionId,
-          result: {
-            status: 'accepted',
-            ...(turn === undefined
-              ? {}
-              : { acceptedVisibleReplyText: turn.reply.text })
-          }
-        }),
-        ...runtimePluginEvidenceOption(terminalPluginEvidence),
-        ...runtimePluginTurnEvidenceOption({
-          identity,
-          pluginHost,
-          contextItems: beforeRoleModelCallResult.contextItems,
-          toolInvocations: roleModelPluginToolInvocations,
-          evidence: terminalPluginEvidence,
-          health: preCommitHealthResult.snapshots
-        })
-      });
-    } catch (error: unknown) {
-      rollbackCommittedVisibleMessagesForTerminalAppendFailure({
-        session: options.session,
-        logStore: options.logStore,
-        turn,
-        committedVisibleMessages
-      });
-      throw error;
-    }
+        sessionId: decisionContext.sessionId,
+        result: {
+          status: 'accepted',
+          ...(turn === undefined
+            ? {}
+            : { acceptedVisibleReplyText: turn.reply.text })
+        }
+      }),
+      ...runtimePluginEvidenceOption(terminalPluginEvidence),
+      ...runtimePluginTurnEvidenceOption({
+        identity,
+        pluginHost,
+        contextItems: beforeRoleModelCallResult.contextItems,
+        toolInvocations: roleModelPluginToolInvocations,
+        evidence: terminalPluginEvidence,
+        health: preCommitHealthResult.snapshots
+      })
+    });
 
     appendTrace('raw_event_log_appended');
     appendTrace('runtime_turn_completed');
@@ -1059,31 +1047,6 @@ function visibleMessageIdsForTurnOption(
   return {
     visibleMessageIds: Object.freeze(messages.map((message) => message.id))
   };
-}
-
-function rollbackCommittedVisibleMessagesForTerminalAppendFailure(options: {
-  readonly session: ConversationSession;
-  readonly logStore: RuntimeLogStore;
-  readonly turn: CharacterTurnResult | undefined;
-  readonly committedVisibleMessages: ConversationLogRecord[];
-}): void {
-  if (options.committedVisibleMessages.length === 0) {
-    return;
-  }
-
-  const messageIds = options.committedVisibleMessages.map((message) => message.id);
-  const visibleTranscript = options.session.visibleTranscript;
-  const canRollbackSessionTurn =
-    options.turn !== undefined &&
-    visibleTranscript.at(-2) === options.turn.userMessage &&
-    visibleTranscript.at(-1) === options.turn.characterMessage;
-
-  options.logStore.removeConversationMessages(messageIds);
-  options.committedVisibleMessages.splice(0, options.committedVisibleMessages.length);
-
-  if (canRollbackSessionTurn) {
-    rollbackLastCharacterTurn(options.session, options.turn);
-  }
 }
 
 function pluginStoreRevisionOption(

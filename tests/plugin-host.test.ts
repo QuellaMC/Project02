@@ -546,6 +546,38 @@ describe('runtime plugin host', () => {
     });
   });
 
+  it.each(['rejected', 'failed'] as const)(
+    'downgrades accepted plugin tool results with %s tool invocation evidence',
+    async (evidenceStatus) => {
+      const plugin =
+        createAcceptedBlockingEvidenceMemorySearchPlugin(evidenceStatus);
+      const host = createRuntimePluginHost({ plugins: [plugin] });
+
+      const result = await host.handleToolCall(
+        {
+          ...testIdentity(),
+          pluginId: plugin.manifest.id,
+          toolName: 'memory.search',
+          input: {
+            query: 'Mira'
+          }
+        },
+        testPluginContext()
+      );
+
+      expect(result).toMatchObject({
+        status: 'rejected',
+        reason: 'blocking_tool_invocation_evidence',
+        message: `Plugin "${plugin.manifest.id}" tool "memory.search" accepted result included blocking tool invocation evidence.`
+      });
+      expect(result.evidence).toHaveLength(1);
+      expect(result.evidence[0]).toMatchObject({
+        evidenceKind: 'tool_invocation',
+        status: evidenceStatus
+      });
+    }
+  );
+
   it('redacts accepted plugin tool output strings', async () => {
     const plugin = createMemorySearchPlugin();
     const host = createRuntimePluginHost({ plugins: [plugin] });
@@ -1074,6 +1106,48 @@ function createDegradedRejectingMemorySearchPlugin(): RuntimePlugin {
               status: 'degraded',
               summary: 'search backend degraded',
               policyOutcome: 'optional_degraded',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
+function createAcceptedBlockingEvidenceMemorySearchPlugin(
+  evidenceStatus: 'rejected' | 'failed'
+): RuntimePlugin {
+  const id = `memory.accepted-blocking.${evidenceStatus}.fixture`;
+
+  return createRuntimePlugin({
+    manifest: memorySearchPluginManifest(id),
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall(call, context) {
+        const query = call.input['query'];
+
+        if (typeof query !== 'string') {
+          throw new Error('Expected query string.');
+        }
+
+        return {
+          status: 'accepted',
+          output: {
+            matched: query
+          },
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId: id,
+              evidenceKind: 'tool_invocation',
+              status: evidenceStatus,
+              summary: 'Search did not complete.',
+              policyOutcome:
+                evidenceStatus === 'failed' ? 'timeout' : 'handler_rejected',
               redactionLabels: []
             })
           ]
