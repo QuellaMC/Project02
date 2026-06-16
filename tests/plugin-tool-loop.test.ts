@@ -18,6 +18,7 @@ import {
 } from '../src/plugins/host.ts';
 import {
   createRuntimePlugin,
+  createRuntimePluginAfterTurnCommittedContext,
   createRuntimePluginEvidenceSnapshot,
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
@@ -969,6 +970,97 @@ describe('plugin-driven tool loop', () => {
       kind: 'runtime_turn_rejected',
       status: 'rejected'
     });
+  });
+
+  it('clears staged handleToolCall fileStore writes after a rejected terminal turn', async () => {
+    const sessionId = 'session-staged-write-rejected-terminal';
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
+
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+
+    const session = createConversationSession({ id: sessionId });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const pluginHost = createRuntimePluginHost({
+      storeRoot,
+      sessionId,
+      plugins: [createHandleFileStoreWritePlugin()]
+    });
+    const pluginStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId: handleFileStoreWritePluginId
+    });
+    const event = createUserMessageRuntimeEvent(
+      'write memory',
+      createRuntimeEventIdentity({
+        eventId: 'evt_staged_write_rejected_terminal',
+        traceId: 'trace_staged_write_rejected_terminal',
+        createdAt: '2026-06-15T00:00:00.000Z'
+      })
+    );
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: handleFileStoreWriteToolName,
+            input: {
+              value: 'stale side effect'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: ''
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event,
+      session,
+      logStore,
+      roleModelAdapter: adapter,
+      pluginHost
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'invalid_visible_reply'
+    });
+    expect(pluginStore.readJson('state.json')).toBeUndefined();
+    expect(pluginStore.revision()).toBe(0);
+
+    await pluginHost.afterTurnCommitted(
+      createRuntimePluginAfterTurnCommittedContext({
+        eventId: event.eventId,
+        traceId: event.traceId,
+        createdAt: event.createdAt,
+        sessionId,
+        eventType: event.type,
+        currentUserMessage: event.payload.currentUserMessage,
+        character: {
+          id: 'mira',
+          displayName: 'Mira'
+        },
+        committedAt: event.createdAt,
+        visibleMessages: []
+      })
+    );
+
+    expect(pluginStore.readJson('state.json')).toBeUndefined();
+    expect(pluginStore.revision()).toBe(0);
   });
 
   it('does not expose plugin inventory through hidden runtime context', async () => {

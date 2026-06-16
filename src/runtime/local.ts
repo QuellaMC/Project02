@@ -287,6 +287,14 @@ async function runSerializedLocalUserMessageEvent(
     const evidence = optionsForRejection.evidence ?? {};
     const pluginHostForEvidence =
       runtimePluginHostForTurn ?? options.pluginHost;
+    if (
+      pluginHostForEvidence !== undefined &&
+      optionsForRejection.runtimePluginContext !== undefined
+    ) {
+      pluginHostForEvidence.discardStagedFileStoreWrites(
+        optionsForRejection.runtimePluginContext
+      );
+    }
     const healthResult =
       optionsForRejection.healthResult ??
       (await pluginHealthForTurn({
@@ -1020,6 +1028,14 @@ async function runSerializedLocalUserMessageEvent(
       });
     }
 
+    if (
+      runtimePluginHostForTurn !== undefined &&
+      runtimePluginContextForTurn !== undefined
+    ) {
+      runtimePluginHostForTurn.discardStagedFileStoreWrites(
+        runtimePluginContextForTurn
+      );
+    }
     appendRawEvent({
       ...identity,
       kind: 'runtime_turn_rejected',

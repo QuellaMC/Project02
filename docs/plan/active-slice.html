@@ -52,7 +52,7 @@
         </tr>
         <tr>
           <td>The old relay command and relay tests stayed as compatibility scaffolding.</td>
-          <td><code>pnpm chat</code> and <code>pnpm inspect</code> are canonical. Relay code and script entries are removed.</td>
+          <td><code>pnpm chat</code> and <code>pnpm inspect</code> are canonical. Legacy relay core code is removed, while <code>pnpm relay &lt;message&gt;</code> remains as a narrow compatibility wrapper to the chat CLI until callers migrate.</td>
         </tr>
         <tr>
           <td><code>character_state.patch</code> was defined both as a built-in model tool and as built-in plugin behavior.</td>
@@ -71,7 +71,7 @@
 
     <h2>Scope</h2>
     <ul>
-      <li>Break old import paths, old CLI scripts, and compatibility-only tests because there is no official release.</li>
+      <li>Break old import paths and compatibility-only implementation tests because there is no official release, while preserving shipped command names that external smoke paths may still invoke.</li>
       <li>Keep <code>plugin</code> names and <code>RuntimePlugin*</code> types.</li>
       <li>Keep canonical chat, inspect, local runtime storage, role-model <code>toolCalls</code>, folded top-level <code>text</code>, and plugin evidence behavior.</li>
       <li>Keep role-model decision versions internal: providers return <code>toolCalls</code> and optional folded <code>text</code>, while the runtime stamps durable decision versions.</li>
@@ -93,13 +93,13 @@
       <li><code>src/index.ts</code> remains a tiny package health entrypoint, not an internal dependency barrel.</li>
       <li>Runtime code imports concrete modules directly.</li>
       <li>Plugin-host validation decides which executable tools are model-facing for a turn.</li>
-      <li>No storage or CLI migration layer is added.</li>
+      <li>No storage migration layer or broad CLI compatibility framework is added; <code>pnpm relay &lt;message&gt;</code> is the only command-name compatibility wrapper.</li>
     </ul>
 
     <h2>Acceptance Criteria</h2>
     <ul>
       <li>No production or test imports reference old top-level source files removed by the reset.</li>
-      <li>No relay command, relay module, or relay tests remain.</li>
+      <li>No legacy relay core remains; the relay command is a compatibility wrapper to the chat CLI and has focused wrapper coverage.</li>
       <li><code>character_state.patch</code> appears in role-model decisions only through plugin-provided tool definitions.</li>
       <li>Provider prompts do not ask the model to emit a top-level <code>version</code>; parsed decisions still carry the internal role-model contract version.</li>
       <li>Folded top-level <code>text</code> tests prove it is hidden by default and not committed as visible conversation.</li>

@@ -428,6 +428,110 @@ describe('runtime plugin host', () => {
     expect(fileStore.revision()).toBe(1);
   });
 
+  it('discards staged handleToolCall fileStore writes for a rejected turn context', async () => {
+    const sessionIdentity = {};
+    const plugin = createStagedAppendFileStorePlugin();
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      sessionIdentity
+    });
+    const context = testPluginContext();
+    const fileStore = createPluginHostTestFileStore({
+      pluginId: plugin.manifest.id,
+      sessionIdentity
+    });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'rejected'
+        }
+      },
+      context
+    );
+
+    expect(result.status).toBe('accepted');
+
+    host.discardStagedFileStoreWrites(context);
+
+    const afterCommitResult = await host.afterTurnCommitted(
+      testPluginAfterTurnCommittedContext()
+    );
+
+    expect(afterCommitResult.status).toBe('completed');
+    expect(fileStore.readJsonl('events.jsonl')).toEqual([]);
+    expect(fileStore.revision()).toBe(0);
+  });
+
+  it('isolates staged handleToolCall fileStore writes by trace for same-turn retries', async () => {
+    const sessionIdentity = {};
+    const plugin = createStagedAppendFileStorePlugin();
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      sessionIdentity
+    });
+    const rejectedContext = testPluginContext({
+      eventId: 'evt_same_turn_retry',
+      traceId: 'trace_rejected_attempt'
+    });
+    const retryContext = testPluginContext({
+      eventId: 'evt_same_turn_retry',
+      traceId: 'trace_retry_attempt'
+    });
+    const fileStore = createPluginHostTestFileStore({
+      pluginId: plugin.manifest.id,
+      sessionIdentity
+    });
+
+    await host.handleToolCall(
+      {
+        ...testIdentity({
+          eventId: 'evt_same_turn_retry',
+          traceId: 'trace_rejected_attempt'
+        }),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'rejected-attempt'
+        }
+      },
+      rejectedContext
+    );
+    await host.handleToolCall(
+      {
+        ...testIdentity({
+          eventId: 'evt_same_turn_retry',
+          traceId: 'trace_retry_attempt'
+        }),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'retry-attempt'
+        }
+      },
+      retryContext
+    );
+
+    const afterCommitResult = await host.afterTurnCommitted(
+      testPluginAfterTurnCommittedContext({
+        eventId: 'evt_same_turn_retry',
+        traceId: 'trace_retry_attempt'
+      })
+    );
+
+    expect(afterCommitResult.status).toBe('completed');
+    expect(fileStore.readJsonl('events.jsonl')).toEqual([
+      {
+        value: 'retry-attempt',
+        traceId: 'trace_retry_attempt'
+      }
+    ]);
+    expect(fileStore.revision()).toBe(1);
+  });
+
   it('blocks retained fileStore writes after health completes', async () => {
     let retainedFileStore: RuntimePluginFileStore | undefined;
     const sessionIdentity = {};
@@ -849,6 +953,51 @@ describe('runtime plugin host', () => {
           id: 'source.tool_invocation'
         }
       ]
+    });
+  });
+
+  it('degrades optional source-required runtime notes before prompting', async () => {
+    const plugin = createSourceRequiredRuntimeNotesPlugin({
+      id: 'memory.source-required-notes.degraded.fixture'
+    });
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected optional source-required notes to degrade.');
+    }
+
+    expect(result.runtimeNotes).toEqual([]);
+    expect(result.evidence[0]).toMatchObject({
+      evidenceKind: 'before_role_model_call',
+      status: 'degraded',
+      policyOutcome: 'optional_degraded',
+      summary:
+        'Optional before-role-model plugin hook degraded: Plugin "memory.source-required-notes.degraded.fixture" runtime notes require source references.'
+    });
+  });
+
+  it('rejects required source-required runtime notes before prompting', async () => {
+    const plugin = createSourceRequiredRuntimeNotesPlugin({
+      id: 'memory.source-required-notes.required.fixture',
+      requiredForTurn: true
+    });
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      pluginId: plugin.manifest.id,
+      message:
+        'Plugin "memory.source-required-notes.required.fixture" runtime notes require source references.'
+    });
+    expect(result.evidence[0]).toMatchObject({
+      evidenceKind: 'before_role_model_call',
+      status: 'rejected',
+      policyOutcome: 'required_rejected'
     });
   });
 
@@ -1392,6 +1541,53 @@ function createRuntimeNotesPlugin(): RuntimePlugin {
   });
 }
 
+function createSourceRequiredRuntimeNotesPlugin(options: {
+  readonly id: string;
+  readonly requiredForTurn?: boolean;
+}): RuntimePlugin {
+  const manifest = memorySearchPluginManifest(options.id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...manifest,
+      declaredPlugins: ['before_role_model_call'],
+      runtimePolicy: {
+        ...manifest.runtimePolicy,
+        requiredForTurn: options.requiredForTurn ?? false,
+        sourceReferencesRequired: true
+      }
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall(context) {
+        return {
+          contextItems: [],
+          runtimeNotes: ['unsourced runtime note'],
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId: options.id,
+              evidenceKind: 'before_role_model_call',
+              status: 'accepted',
+              summary: 'Loaded runtime note.',
+              sourceReferences: [
+                {
+                  kind: 'memory',
+                  id: 'source.before_role_model_call'
+                }
+              ],
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
 function createUnderestimatedContextItemPlugin(): RuntimePlugin {
   const pluginId = 'memory.underestimated-context.fixture';
 
@@ -1652,6 +1848,41 @@ function createRetainedHandleToolCallFileStorePlugin(
   });
 }
 
+function createStagedAppendFileStorePlugin(): RuntimePlugin {
+  const pluginId = 'memory.staged-append.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      requestedApis: ['file_store']
+    },
+    providedTools: localMemoryWriteSearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall(call, context) {
+        if (context.fileStore === undefined) {
+          throw new Error('Expected staged append fixture to receive fileStore.');
+        }
+
+        const query = call.input['query'];
+        if (typeof query !== 'string') {
+          throw new Error('Expected query string.');
+        }
+
+        context.fileStore.appendJsonl('events.jsonl', {
+          value: query,
+          traceId: context.traceId
+        });
+
+        return createAcceptedMemorySearchResult({
+          pluginId,
+          query,
+          context
+        });
+      }
+    }
+  });
+}
+
 function createRetainedHealthFileStorePlugin(
   retainFileStore: (fileStore: RuntimePluginFileStore) => void
 ): RuntimePlugin {
@@ -1868,9 +2099,14 @@ function localMemoryWriteSearchProvidedTools() {
   );
 }
 
-function testPluginContext() {
+function testPluginContext(
+  identity: {
+    readonly eventId?: string;
+    readonly traceId?: string;
+  } = {}
+) {
   return createRuntimePluginContext({
-    ...testIdentity(),
+    ...testIdentity(identity),
     sessionId: 'session-plugin-host',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'hello',
@@ -1881,9 +2117,14 @@ function testPluginContext() {
   });
 }
 
-function testPluginAfterTurnCommittedContext() {
+function testPluginAfterTurnCommittedContext(
+  identity: {
+    readonly eventId?: string;
+    readonly traceId?: string;
+  } = {}
+) {
   return createRuntimePluginAfterTurnCommittedContext({
-    ...testIdentity(),
+    ...testIdentity(identity),
     sessionId: 'session-plugin-host',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'hello',
@@ -1896,10 +2137,15 @@ function testPluginAfterTurnCommittedContext() {
   });
 }
 
-function testIdentity() {
+function testIdentity(
+  options: {
+    readonly eventId?: string;
+    readonly traceId?: string;
+  } = {}
+) {
   return createRuntimeEventIdentity({
-    eventId: 'evt_plugin_host',
-    traceId: 'trace_plugin_host',
+    eventId: options.eventId ?? 'evt_plugin_host',
+    traceId: options.traceId ?? 'trace_plugin_host',
     createdAt: '2026-06-15T00:00:00.000Z'
   });
 }

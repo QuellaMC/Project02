@@ -113,6 +113,7 @@ export type RuntimePluginHost = {
   afterTurnCommitted(
     context: RuntimePluginAfterTurnCommittedContext
   ): Promise<RuntimePluginHookHostResult>;
+  discardStagedFileStoreWrites(context: RuntimePluginContext): void;
   onSessionEnd(
     context: RuntimePluginContext
   ): Promise<RuntimePluginHookHostResult>;
@@ -312,6 +313,13 @@ export function createRuntimePluginHost(
           ...hookResult.evidence
         ])
       } satisfies RuntimePluginHookHostResult);
+    },
+    discardStagedFileStoreWrites(context) {
+      discardStagedFileStoreWritesForTurn({
+        plugins: enabledPlugins,
+        context,
+        stagedFileStoreWrites
+      });
     },
     async onSessionEnd(context) {
       return await runHookPhase({
@@ -666,11 +674,26 @@ function commitStagedFileStoreWritesForTurn(options: {
   } satisfies RuntimePluginHookHostResult);
 }
 
+function discardStagedFileStoreWritesForTurn(options: {
+  readonly plugins: readonly RuntimePlugin[];
+  readonly context: RuntimePluginContext;
+  readonly stagedFileStoreWrites: Map<string, StagedRuntimePluginFileStoreState>;
+}): void {
+  for (const plugin of options.plugins) {
+    options.stagedFileStoreWrites.delete(
+      stagedFileStoreKey({
+        context: options.context,
+        plugin
+      })
+    );
+  }
+}
+
 function stagedFileStoreKey(options: {
   readonly context: RuntimePluginContext;
   readonly plugin: RuntimePlugin;
 }): string {
-  return `${options.context.sessionId}\u0000${options.context.turnId}\u0000${options.plugin.manifest.id}`;
+  return `${options.context.sessionId}\u0000${options.context.turnId}\u0000${options.context.eventId}\u0000${options.context.traceId}\u0000${options.plugin.manifest.id}`;
 }
 
 function isRuntimePluginJsonArray(
@@ -1662,12 +1685,20 @@ function normalizeBeforeRoleModelCallResult(options: {
     throw new TypeError('beforeRoleModelCall hook result must be an object.');
   }
 
+  const contextItems = normalizeContextItems({
+    plugin: options.plugin,
+    value: options.value['contextItems']
+  });
+  const runtimeNotes = normalizeRuntimeNotes(options.value['runtimeNotes']);
+
+  assertRuntimeNotesSourceReferences({
+    plugin: options.plugin,
+    runtimeNotes
+  });
+
   return Object.freeze({
-    contextItems: normalizeContextItems({
-      plugin: options.plugin,
-      value: options.value['contextItems']
-    }),
-    runtimeNotes: normalizeRuntimeNotes(options.value['runtimeNotes']),
+    contextItems,
+    runtimeNotes,
     evidence: normalizeEvidenceSnapshots({
       plugin: options.plugin,
       context: options.context,
@@ -2159,6 +2190,22 @@ function assertContextItemSourceReferences(options: {
       options.plugin.manifest.runtimePolicy.sourceReferencesRequired,
     sourceReferences: options.contextItem.sourceReferences,
     message: `Plugin "${options.plugin.manifest.id}" context item "${options.contextItem.id}" requires source references.`
+  });
+}
+
+function assertRuntimeNotesSourceReferences(options: {
+  readonly plugin: RuntimePlugin;
+  readonly runtimeNotes: readonly string[];
+}): void {
+  if (options.runtimeNotes.length === 0) {
+    return;
+  }
+
+  assertRequiredSourceReferences({
+    sourceReferencesRequired:
+      options.plugin.manifest.runtimePolicy.sourceReferencesRequired,
+    sourceReferences: undefined,
+    message: `Plugin "${options.plugin.manifest.id}" runtime notes require source references.`
   });
 }
 

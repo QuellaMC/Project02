@@ -9,6 +9,7 @@ import {
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
   roleModelMalformedOutputRejectionReason,
+  roleModelTerminalEmptyOutputRejectionDetails,
   roleModelUnsupportedEffectRejectionReason,
   roleModelUnknownToolRejectionReason
 } from '../src/role-model/contracts.ts';
@@ -123,6 +124,40 @@ describe('role-model contracts', () => {
         toolCalls: []
       },
       nonCommittedText: 'folded model note'
+    });
+  });
+
+  it('rejects empty top-level text when no tool calls are present', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        toolCalls: [],
+        text: ''
+      })
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: roleModelTerminalEmptyOutputRejectionDetails
+      }
+    });
+  });
+
+  it('rejects whitespace-only top-level text when no tool calls are present', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        toolCalls: [],
+        text: ' \n\t '
+      })
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: roleModelTerminalEmptyOutputRejectionDetails
+      }
     });
   });
 

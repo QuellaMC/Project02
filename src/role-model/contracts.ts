@@ -615,6 +615,16 @@ function parseRoleModelDecisionObject(
     return createMalformedOutputResult('Decision text must be a string.');
   }
 
+  if (
+    topLevelText !== undefined &&
+    toolCalls.length === 0 &&
+    topLevelText.trim().length === 0
+  ) {
+    return createMalformedOutputResult(
+      roleModelTerminalEmptyOutputRejectionDetails
+    );
+  }
+
   if (topLevelText !== undefined && toolCalls.length > 0) {
     return createMalformedOutputResult(
       'Decision text is only allowed when toolCalls is empty.'
