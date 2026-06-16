@@ -1848,7 +1848,7 @@ function compareCollectedPromptContextPriority(
   left: CollectedPluginPromptContext,
   right: CollectedPluginPromptContext
 ): number {
-  return left.priority - right.priority || left.promptIndex - right.promptIndex;
+  return right.priority - left.priority || left.promptIndex - right.promptIndex;
 }
 
 function contextBudgetEvidence(options: {

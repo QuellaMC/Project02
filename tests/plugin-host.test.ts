@@ -38,6 +38,10 @@ import {
 import {
   createRuntimePluginFileStore
 } from '../src/plugins/file-store.ts';
+import {
+  characterStatePluginId,
+  createCharacterStatePlugin
+} from '../src/plugins/builtin/character-state/index.ts';
 
 type Deferred<T> = {
   readonly promise: Promise<T>;
@@ -894,6 +898,40 @@ describe('runtime plugin host', () => {
     expect(JSON.stringify(result.contextItems)).not.toContain('oversized context');
   });
 
+  it('retains higher-priority Character State and runtime notes before lower-priority context', async () => {
+    const pressurePlugin = createLowPriorityBudgetPressurePlugin();
+    const host = createRuntimePluginHost({
+      plugins: [createCharacterStatePlugin(), pressurePlugin],
+      sessionIdentity: {
+        test: 'priority-budget-pressure'
+      }
+    });
+
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected beforeRoleModelCall to complete.');
+    }
+
+    expect(
+      result.contextItems.map((item) => `${item.pluginId}:${item.id}`)
+    ).toEqual([`${characterStatePluginId}:current`]);
+    expect(result.contextItems[0]?.budget.priority).toBe(90);
+    expect(result.runtimeNotes).toEqual(['runtime note from host']);
+    const budgetEvidence = result.evidence.find(
+      (evidence) =>
+        evidence.pluginId === pressurePlugin.manifest.id &&
+        evidence.evidenceKind === 'before_role_model_call' &&
+        evidence.status === 'degraded'
+    );
+
+    expect(budgetEvidence?.summary).toContain(
+      'dropped ids low-priority-bulk'
+    );
+    expect(JSON.stringify(result.contextItems)).not.toContain('low ');
+  });
+
   it('accepts first-party model tools as tool-provider-only mappings', () => {
     const plugin = createFirstPartyModelToolsPlugin();
     const mapping = mapFirstPartyModelToolsPlugin();
@@ -1391,6 +1429,52 @@ function createUnderestimatedContextItemPlugin(): RuntimePlugin {
               evidenceKind: 'before_role_model_call',
               status: 'accepted',
               summary: 'Loaded oversized context item.',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
+function createLowPriorityBudgetPressurePlugin(): RuntimePlugin {
+  const pluginId = 'memory.low-priority-budget-pressure.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      declaredPlugins: ['before_role_model_call']
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall(context) {
+        return {
+          contextItems: [
+            createRuntimePluginContextItem({
+              pluginId,
+              id: 'low-priority-bulk',
+              kind: 'memory',
+              text: 'low '.repeat(254),
+              budget: {
+                estimatedTokens: 254,
+                priority: 1
+              },
+              sourceReferences: [],
+              redactionLabels: context.privacy.redactionLabels
+            })
+          ],
+          runtimeNotes: ['runtime note from host'],
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId,
+              evidenceKind: 'before_role_model_call',
+              status: 'accepted',
+              summary: 'Loaded low-priority budget pressure context.',
               redactionLabels: []
             })
           ]
