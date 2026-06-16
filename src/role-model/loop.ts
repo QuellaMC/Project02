@@ -17,6 +17,7 @@ import {
   roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelDecisionRejectionReasons,
   roleModelMalformedOutputRejectionReason,
+  roleModelTerminalEmptyOutputRejectionDetails,
   type AcceptedRoleModelDecisionResult,
   type CharacterDecision,
   type DecisionContext,
@@ -130,6 +131,8 @@ export type RoleModelPluginToolCallStartedEvent = {
   readonly callId: string;
   readonly round: number;
   readonly call: RuntimePluginToolCall;
+  readonly ioSnapshot: RoleModelIOSnapshot;
+  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
 };
 
 export type RoleModelPluginToolCallCompletedEvent = {
@@ -298,13 +301,19 @@ export async function runRoleModelLoop(
       ) {
         const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
           roleModelMalformedOutputRejectionReason,
-          'Terminal model output must include visible_reply or top-level text.'
+          roleModelTerminalEmptyOutputRejectionDetails
         );
+        const rejectedParsedDecisionSnapshot =
+          createParsedRoleModelDecisionSnapshot({
+            ...identity,
+            sessionId,
+            result: rejectedDecisionResult
+          });
         const loopRound = createRoleModelLoopRound({
           pluginToolResults: [],
           inputEnvelope,
           ioSnapshot,
-          parsedDecisionSnapshot,
+          parsedDecisionSnapshot: rejectedParsedDecisionSnapshot,
           round
         });
 
@@ -315,7 +324,7 @@ export async function runRoleModelLoop(
           decisionResult: rejectedDecisionResult,
           inputEnvelope,
           ioSnapshot,
-          parsedDecisionSnapshot,
+          parsedDecisionSnapshot: rejectedParsedDecisionSnapshot,
           rounds
         });
       }
@@ -388,6 +397,8 @@ export async function runRoleModelLoop(
       toolCalls: executableToolCalls,
       identity,
       inputEnvelope,
+      ioSnapshot,
+      parsedDecisionSnapshot,
       round,
       ...(options.resolveToolPluginId === undefined
         ? {}
@@ -649,6 +660,8 @@ async function routeExecutableToolCalls(options: {
   readonly toolCalls: readonly ModelToolCall[];
   readonly identity: RuntimeEventIdentity;
   readonly inputEnvelope: RoleModelInputEnvelope;
+  readonly ioSnapshot: RoleModelIOSnapshot;
+  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
   readonly round: number;
   readonly pluginToolHost?: RoleModelPluginToolHost;
   readonly onPluginToolCallStarted?: (
@@ -682,7 +695,9 @@ async function routeExecutableToolCalls(options: {
     await options.onPluginToolCallStarted?.({
       callId,
       round: options.round,
-      call: routedCall
+      call: routedCall,
+      ioSnapshot: options.ioSnapshot,
+      parsedDecisionSnapshot: options.parsedDecisionSnapshot
     });
 
     if (

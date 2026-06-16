@@ -5,12 +5,14 @@ import {
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
 import {
+  isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
   roleModelMalformedOutputRejectionReason,
   roleModelUnsupportedEffectRejectionReason,
   roleModelUnknownToolRejectionReason
 } from '../src/role-model/contracts.ts';
+import type { RoleModelPluginToolDefinition } from '../src/role-model/contracts.ts';
 import { createDefaultProject02PluginHost } from '../src/plugins/host.ts';
 
 describe('role-model contracts', () => {
@@ -122,6 +124,75 @@ describe('role-model contracts', () => {
       },
       nonCommittedText: 'folded model note'
     });
+  });
+
+  it('replays final visible replies with prior required plugin observations from the input envelope', () => {
+    const requiredToolName = 'memory.lookup';
+    const pluginToolDefinitions = [
+      {
+        pluginId: 'memory',
+        name: requiredToolName,
+        description: 'Look up relevant memory before answering.',
+        requiredForUserTurn: true,
+        maxCallsPerUserTurn: 1,
+        inputContract: {
+          type: 'object',
+          fields: [],
+          additionalFields: true
+        },
+        validationOwner: 'plugin_host',
+        sideEffectLevel: 'runtime_read',
+        requiresConfirmation: false,
+        sourceReferencesRequired: false
+      }
+    ] satisfies readonly RoleModelPluginToolDefinition[];
+    const toolObservations = [
+      {
+        round: 1,
+        pluginId: 'memory',
+        toolName: requiredToolName,
+        input: {
+          query: 'Mira'
+        },
+        result: {
+          status: 'accepted',
+          output: {
+            summary: 'Mira likes concise replies.'
+          }
+        }
+      }
+    ] as const;
+    const allowedTools = [visibleReplyModelToolName, requiredToolName];
+    const rawOutputText = JSON.stringify({
+      toolCalls: [
+        {
+          name: visibleReplyModelToolName,
+          input: {
+            text: 'Got it.'
+          }
+        }
+      ]
+    });
+    const decisionResult = parseRoleModelDecision(
+      rawOutputText,
+      allowedTools,
+      pluginToolDefinitions,
+      toolObservations
+    );
+
+    expect(decisionResult).toMatchObject({
+      status: 'accepted'
+    });
+    expect(
+      isRoleModelRawOutputReplayableDecisionEvidence({
+        rawOutputText,
+        providerMetadata: undefined,
+        decisionResult,
+        allowedTools,
+        pluginToolDefinitions,
+        toolObservations
+      })
+    ).toBe(true);
   });
 
   it('rejects top-level text when tool calls are present', () => {

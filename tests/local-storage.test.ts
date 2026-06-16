@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createLocalRuntimeSessionPaths,
+  decodeStorageSchemaMarker,
   decodeRawEventLogRecord,
   localRuntimeStorageSchemaVersion
 } from '../src/runtime/storage/layout.ts';
@@ -12,6 +13,20 @@ describe('local storage plugin schema', () => {
     expect(createLocalRuntimeSessionPaths()).not.toHaveProperty(
       'characterStatePath'
     );
+  });
+
+  it('decodes MVP-006 schema 1 markers as a compatible local store', () => {
+    expect(
+      decodeStorageSchemaMarker(
+        JSON.stringify({
+          schemaVersion: 1,
+          createdAt: '2026-06-04T00:00:00.000Z'
+        })
+      )
+    ).toEqual({
+      schemaVersion: 1,
+      createdAt: '2026-06-04T00:00:00.000Z'
+    });
   });
 
   it('decodes plugin tool call records', () => {

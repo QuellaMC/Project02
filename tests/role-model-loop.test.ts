@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createDecisionContext,
+  isRoleModelRawOutputReplayableDecisionEvidence,
   roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
   roleModelPluginToolRejectedRejectionReason,
+  roleModelTerminalEmptyOutputRejectionDetails,
   type RoleModelPluginToolDefinition,
   type RoleModelProviderMetadata
 } from '../src/role-model/contracts.ts';
@@ -707,6 +709,55 @@ describe('role-model loop plugin tool routing', () => {
     expect(handledCalls).toBe(1);
     expect(result.pluginToolResults).toHaveLength(1);
     expect(result.rounds).toHaveLength(2);
+  });
+
+  it('stores a rejected parsed snapshot for terminal empty toolCalls output', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_empty_tool_calls'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createSequencedAdapter([
+        {
+          toolCalls: []
+        }
+      ], () => undefined)
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: roleModelTerminalEmptyOutputRejectionDetails
+      },
+      parsedDecisionSnapshot: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelMalformedOutputRejectionReason,
+            details: roleModelTerminalEmptyOutputRejectionDetails
+          }
+        }
+      }
+    });
+    if (result.status !== 'rejected') {
+      throw new Error('Expected empty toolCalls output to reject the loop.');
+    }
+
+    expect(result.rounds).toHaveLength(1);
+    expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
+    expect(result.rounds[0]?.parsedDecisionSnapshot.result).toEqual(
+      result.decisionResult
+    );
+    expect(
+      isRoleModelRawOutputReplayableDecisionEvidence({
+        rawOutputText: result.ioSnapshot.rawOutputText,
+        providerMetadata: result.ioSnapshot.providerMetadata,
+        decisionResult: result.parsedDecisionSnapshot.result,
+        allowedTools: result.ioSnapshot.inputEnvelope.allowedTools,
+        pluginToolDefinitions:
+          result.ioSnapshot.inputEnvelope.pluginToolDefinitions,
+        toolObservations: result.ioSnapshot.inputEnvelope.toolObservations
+      })
+    ).toBe(true);
   });
 
   it('rejects non-finite provider request metadata before snapshots can serialize it', async () => {

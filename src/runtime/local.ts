@@ -561,6 +561,8 @@ async function runSerializedLocalUserMessageEvent(
     readonly callId: string;
     readonly round: number;
     readonly call: RuntimePluginToolCall;
+    readonly roleModelIOSnapshot: RoleModelIOSnapshot;
+    readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
   }): void {
     appendTrace('tool_call_started');
     appendRawEvent({
@@ -572,6 +574,9 @@ async function runSerializedLocalUserMessageEvent(
       toolName: optionsForTool.call.toolName,
       toolPluginId: optionsForTool.call.pluginId,
       toolInput: optionsForTool.call.input,
+      roleModelIOSnapshot: optionsForTool.roleModelIOSnapshot,
+      parsedRoleModelDecisionSnapshot:
+        optionsForTool.parsedRoleModelDecisionSnapshot,
       payloadSummary
     });
   }
@@ -682,7 +687,10 @@ async function runSerializedLocalUserMessageEvent(
           appendToolCallStarted({
             callId: progressEvent.callId,
             round: progressEvent.round,
-            call: progressEvent.call
+            call: progressEvent.call,
+            roleModelIOSnapshot: progressEvent.ioSnapshot,
+            parsedRoleModelDecisionSnapshot:
+              progressEvent.parsedDecisionSnapshot
           });
         },
         async onPluginToolCallCompleted(progressEvent) {

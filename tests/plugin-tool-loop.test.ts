@@ -135,6 +135,102 @@ describe('plugin-driven tool loop', () => {
     expect(observations[0]?.result.status).toBe('accepted');
   });
 
+  it('persists role-model evidence on tool-authorizing rounds without interim replies', async () => {
+    const sessionId = 'session-tool-round-evidence';
+    const {
+      session,
+      logStore,
+      storeRoot
+    } = await createDurableCharacterStateHarness(sessionId);
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'character_state.patch',
+            input: {
+              mood: 'curious'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'state updated'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('hello', 'evt_tool_round_evidence'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    expect(result.status).toBe('completed');
+
+    const reopenedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const reopenedRawEvents = reopenedLogStore.rawEvents();
+    const toolStartEvents = reopenedRawEvents.filter(
+      (event) => event.kind === 'tool_call_started'
+    );
+    const toolStartEvent = toolStartEvents[0];
+
+    expect(toolStartEvents).toHaveLength(1);
+
+    if (toolStartEvent === undefined) {
+      throw new Error('Expected tool_call_started evidence.');
+    }
+
+    expect(toolStartEvent).toMatchObject({
+      toolCallId: 'round-1.1.character_state.patch',
+      toolRound: 1,
+      roleModelIOSnapshot: {
+        inputEnvelope: {
+          toolObservations: []
+        }
+      },
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'accepted',
+          decision: {
+            toolCalls: [
+              {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'curious'
+                }
+              }
+            ]
+          }
+        }
+      }
+    });
+    expect(toolStartEvent.roleModelIOSnapshot?.rawOutputText).toContain(
+      'character_state.patch'
+    );
+    expect(toolStartEvent.commitValidation).toBeUndefined();
+
+    const terminalEvent = reopenedRawEvents.find(
+      (event) => event.kind === 'runtime_turn_completed'
+    );
+
+    expect(terminalEvent?.roleModelIOSnapshot?.rawOutputText).toContain(
+      'visible_reply'
+    );
+    expect(terminalEvent?.roleModelIOSnapshot?.rawOutputText).not.toContain(
+      'character_state.patch'
+    );
+  });
+
   it('persists character_state.patch only after an accepted turn commits', async () => {
     const {
       session,

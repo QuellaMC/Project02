@@ -161,6 +161,8 @@ export const roleModelAdapterRawOutputMissingTextRejectionDetails =
   'Adapter raw output must include string rawOutputText.';
 export const roleModelAdapterRejectionNotReplayableDetails =
   'Adapter rejection must be replayable from rawOutputText.';
+export const roleModelTerminalEmptyOutputRejectionDetails =
+  'Terminal model output must include visible_reply or top-level text.';
 
 export type RoleModelDecisionRejectionReason =
   | typeof roleModelMalformedOutputRejectionReason
@@ -404,11 +406,13 @@ export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
   readonly decisionResult: RoleModelDecisionResult;
   readonly allowedTools?: readonly RoleModelAllowedToolName[];
   readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
+  readonly toolObservations?: readonly RoleModelToolObservation[];
 }): boolean {
   const parsedRawOutputDecision = parseRoleModelDecision(
     options.rawOutputText,
     options.allowedTools,
-    options.pluginToolDefinitions
+    options.pluginToolDefinitions,
+    options.toolObservations
   );
 
   return (
@@ -420,11 +424,31 @@ export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
       rawOutputText: options.rawOutputText,
       decisionResult: options.decisionResult
     }) ||
+    isRoleModelTerminalEmptyOutputRejectionEvidence({
+      parsedRawOutputDecision,
+      decisionResult: options.decisionResult
+    }) ||
     isRoleModelProviderErrorRawOutputEvidence({
       rawOutputText: options.rawOutputText,
       providerMetadata: options.providerMetadata,
       decisionResult: options.decisionResult
     })
+  );
+}
+
+function isRoleModelTerminalEmptyOutputRejectionEvidence(options: {
+  readonly parsedRawOutputDecision: RoleModelDecisionResult;
+  readonly decisionResult: RoleModelDecisionResult;
+}): boolean {
+  return (
+    options.parsedRawOutputDecision.status === 'accepted' &&
+    options.parsedRawOutputDecision.decision.toolCalls.length === 0 &&
+    options.parsedRawOutputDecision.nonCommittedText === undefined &&
+    options.decisionResult.status === 'rejected' &&
+    options.decisionResult.rejection.reason ===
+      roleModelMalformedOutputRejectionReason &&
+    options.decisionResult.rejection.details ===
+      roleModelTerminalEmptyOutputRejectionDetails
   );
 }
 

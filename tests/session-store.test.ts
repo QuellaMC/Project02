@@ -384,6 +384,60 @@ describe('local runtime session store', () => {
     );
   });
 
+  it('keeps MVP-006 schema 1 session catalogs readable through the current layout', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const metadata = {
+      sessionId: 'mira-local',
+      createdAt: '2026-06-04T00:00:00.000Z',
+      updatedAt: '2026-06-04T00:00:00.000Z'
+    };
+
+    await mkdir(paths.sessionRoot, { recursive: true });
+    await writeFile(
+      layout.schemaPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        createdAt: '2026-06-04T00:00:00.000Z'
+      })}\n`,
+      'utf8'
+    );
+    await writeFile(
+      layout.sessionCatalogPath,
+      `${JSON.stringify(metadata)}\n`,
+      'utf8'
+    );
+
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['2026-06-04T00:05:00.000Z'])
+    });
+
+    await expect(store.listSessions()).resolves.toEqual([metadata]);
+    await expect(store.readSession('mira-local')).resolves.toEqual(metadata);
+    expect(
+      assertLocalRuntimeSessionReadable({
+        storeRoot,
+        sessionId: 'mira-local'
+      })
+    ).toEqual(metadata);
+
+    await expect(store.selectSession('mira-local')).resolves.toEqual({
+      ...metadata,
+      updatedAt: '2026-06-04T00:05:00.000Z'
+    });
+    await expect(readFile(layout.schemaPath, 'utf8')).resolves.toBe(
+      `${JSON.stringify({
+        schemaVersion: 1,
+        createdAt: '2026-06-04T00:00:00.000Z'
+      })}\n`
+    );
+  });
+
   it('tolerates empty orphan session directories when the catalog was never created', async () => {
     const storeRoot = await createTempStoreRoot();
     const layout = createLocalRuntimeStorageLayout({ storeRoot });

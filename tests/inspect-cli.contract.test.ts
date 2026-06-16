@@ -65,7 +65,14 @@ describe('inspect CLI plugin evidence', () => {
     const output = JSON.parse(stdout) as {
       readonly turns: readonly [
         {
-          readonly modelRounds: readonly unknown[];
+          readonly modelRounds: readonly {
+            readonly rawEventKind: string;
+            readonly roleModelEvidence: {
+              readonly output?: {
+                readonly rawOutputText: string;
+              };
+            };
+          }[];
           readonly toolEvents: readonly [{ readonly pluginId: string }];
           readonly pluginEvidence: {
             readonly evidence: readonly {
@@ -80,6 +87,13 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(exitCode).toBe(0);
     expect(output.turns[0].modelRounds).toHaveLength(2);
+    expect(output.turns[0].modelRounds.map((round) => round.rawEventKind)).toEqual([
+      'tool_call_started',
+      'visible_reply_committed'
+    ]);
+    expect(
+      output.turns[0].modelRounds[0]?.roleModelEvidence.output?.rawOutputText
+    ).toContain('character_state.patch');
     expect(output.turns[0].toolEvents[0].pluginId).toBe('character-state');
     expect(output.turns[0].pluginEvidence.evidence).toEqual(
       expect.arrayContaining([

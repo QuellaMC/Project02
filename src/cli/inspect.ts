@@ -534,28 +534,49 @@ function modelRoundsForTurn(options: {
   readonly rawEvents: readonly RawEventLogRecord[];
   readonly terminalRawEvent: RawEventLogRecord;
 }): readonly InspectRoleModelRoundEvidence[] {
-  return Object.freeze(
-    options.rawEvents
-      .filter(
-        (rawEvent) =>
-          rawEvent.eventId === options.terminalRawEvent.eventId &&
-          rawEvent.traceId === options.terminalRawEvent.traceId
-      )
-      .flatMap((rawEvent) => {
-        const evidence = roleModelEvidenceForRawEvent(rawEvent).roleModelEvidence;
+  const seenEvidenceKeys = new Set<string>();
+  const rounds: InspectRoleModelRoundEvidence[] = [];
 
-        if (evidence === undefined) {
-          return [];
-        }
+  for (const rawEvent of options.rawEvents) {
+    if (
+      rawEvent.eventId !== options.terminalRawEvent.eventId ||
+      rawEvent.traceId !== options.terminalRawEvent.traceId
+    ) {
+      continue;
+    }
 
-        return [
-          Object.freeze({
-            rawEventKind: rawEvent.kind,
-            roleModelEvidence: evidence
-          } satisfies InspectRoleModelRoundEvidence)
-        ];
-      })
-  );
+    const evidence = roleModelEvidenceForRawEvent(rawEvent).roleModelEvidence;
+
+    if (evidence === undefined) {
+      continue;
+    }
+
+    const evidenceKey = roleModelRoundEvidenceKey(evidence);
+
+    if (seenEvidenceKeys.has(evidenceKey)) {
+      continue;
+    }
+
+    seenEvidenceKeys.add(evidenceKey);
+    rounds.push(
+      Object.freeze({
+        rawEventKind: rawEvent.kind,
+        roleModelEvidence: evidence
+      } satisfies InspectRoleModelRoundEvidence)
+    );
+  }
+
+  return Object.freeze(rounds);
+}
+
+function roleModelRoundEvidenceKey(
+  evidence: InspectRoleModelEvidence
+): string {
+  return JSON.stringify({
+    input: evidence.input,
+    output: evidence.output,
+    parsedDecision: evidence.parsedDecision
+  });
 }
 
 function toolEventsForTurn(options: {

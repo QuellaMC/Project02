@@ -90,6 +90,13 @@ export const defaultLocalRuntimeStoreRoot = '.project02-runtime';
 export const defaultLocalRuntimeSessionId = 'local-session';
 export const localRuntimeStorageSchemaVersion = 3;
 
+export type LocalRuntimeReadableStorageSchemaVersion =
+  | 1
+  | typeof localRuntimeStorageSchemaVersion;
+
+export const localRuntimeReadableStorageSchemaVersions: readonly LocalRuntimeReadableStorageSchemaVersion[] =
+  Object.freeze([1, localRuntimeStorageSchemaVersion]);
+
 export type LocalRuntimeStorageContractErrorCode =
   | 'invalid_session_id'
   | 'malformed_record'
@@ -135,7 +142,7 @@ export type LocalRuntimeSessionPathsOptions = LocalRuntimeStorageLayoutOptions &
 };
 
 export type LocalRuntimeStorageSchemaMarker = {
-  readonly schemaVersion: typeof localRuntimeStorageSchemaVersion;
+  readonly schemaVersion: LocalRuntimeReadableStorageSchemaVersion;
   readonly createdAt: string;
 };
 
@@ -331,7 +338,7 @@ export function decodeStorageSchemaMarker(line: string): LocalRuntimeStorageSche
     throwMalformedSchemaMarker('schemaVersion');
   }
 
-  if (schemaVersion !== localRuntimeStorageSchemaVersion) {
+  if (!isLocalRuntimeReadableStorageSchemaVersion(schemaVersion)) {
     throw new LocalRuntimeStorageContractError(
       'unsupported_schema_version',
       `Unsupported local runtime storage schema version: ${String(schemaVersion)}.`
@@ -339,9 +346,17 @@ export function decodeStorageSchemaMarker(line: string): LocalRuntimeStorageSche
   }
 
   return Object.freeze({
-    schemaVersion: localRuntimeStorageSchemaVersion,
+    schemaVersion,
     createdAt: requiredRecordString(record, 'createdAt', 'malformed_schema_marker')
   } satisfies LocalRuntimeStorageSchemaMarker);
+}
+
+function isLocalRuntimeReadableStorageSchemaVersion(
+  schemaVersion: number
+): schemaVersion is LocalRuntimeReadableStorageSchemaVersion {
+  return localRuntimeReadableStorageSchemaVersions.some(
+    (readableVersion) => readableVersion === schemaVersion
+  );
 }
 
 export function encodeRuntimeTraceEntry(entry: RuntimeTraceEntry): string {
@@ -1162,20 +1177,21 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
     | undefined;
   readonly commitValidation: RoleModelCommitValidationSnapshot | undefined;
 }): void {
-  const evidenceCount = [
+  const roleModelEvidenceCount = [
     options.roleModelIOSnapshot,
-    options.parsedRoleModelDecisionSnapshot,
-    options.commitValidation
+    options.parsedRoleModelDecisionSnapshot
   ].filter((value) => value !== undefined).length;
 
-  if (evidenceCount === 0) {
+  if (
+    roleModelEvidenceCount === 0 &&
+    options.commitValidation === undefined
+  ) {
     return;
   }
 
   if (
     options.roleModelIOSnapshot === undefined ||
-    options.parsedRoleModelDecisionSnapshot === undefined ||
-    options.commitValidation === undefined
+    options.parsedRoleModelDecisionSnapshot === undefined
   ) {
     throwMalformedRecord('roleModelEvidence');
   }
@@ -1205,11 +1221,6 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
     expected: options.identity,
     field: 'parsedRoleModelDecisionSnapshot'
   });
-  assertMatchingRoleModelIdentity({
-    actual: commitValidation,
-    expected: options.identity,
-    field: 'commitValidation'
-  });
   assertMatchingRoleModelSession({
     actual: roleModelIOSnapshot.inputEnvelope.decisionContext.sessionId,
     expected: roleModelIOSnapshot.sessionId,
@@ -1220,11 +1231,6 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
     expected: roleModelIOSnapshot.sessionId,
     field: 'parsedRoleModelDecisionSnapshot.sessionId'
   });
-  assertMatchingRoleModelSession({
-    actual: commitValidation.sessionId,
-    expected: roleModelIOSnapshot.sessionId,
-    field: 'commitValidation.sessionId'
-  });
   assertParsedRoleModelDecisionMatchesRawOutput({
     roleModelIOSnapshot,
     parsedRoleModelDecisionSnapshot
@@ -1232,6 +1238,29 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
   assertParsedRoleModelDecisionAllowedByEnvelope({
     roleModelIOSnapshot,
     parsedRoleModelDecisionSnapshot
+  });
+
+  if (commitValidation === undefined) {
+    if (options.kind !== 'tool_call_started') {
+      throwMalformedRecord('commitValidation');
+    }
+
+    if (options.status !== undefined || options.reason !== undefined) {
+      throwMalformedRecord('commitValidation');
+    }
+
+    return;
+  }
+
+  assertMatchingRoleModelSession({
+    actual: commitValidation.sessionId,
+    expected: roleModelIOSnapshot.sessionId,
+    field: 'commitValidation.sessionId'
+  });
+  assertMatchingRoleModelIdentity({
+    actual: commitValidation,
+    expected: options.identity,
+    field: 'commitValidation'
   });
   assertRoleModelCommitStatusMatchesRawEvent({
     kind: options.kind,
@@ -1273,7 +1302,8 @@ function assertParsedRoleModelDecisionMatchesRawOutput(options: {
       decisionResult: options.parsedRoleModelDecisionSnapshot.result,
       allowedTools: options.roleModelIOSnapshot.inputEnvelope.allowedTools,
       pluginToolDefinitions:
-        options.roleModelIOSnapshot.inputEnvelope.pluginToolDefinitions
+        options.roleModelIOSnapshot.inputEnvelope.pluginToolDefinitions,
+      toolObservations: options.roleModelIOSnapshot.inputEnvelope.toolObservations
     })
   ) {
     return;
