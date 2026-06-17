@@ -10,8 +10,7 @@ import {
   roleModelDecisionContractVersion,
   roleModelMalformedOutputRejectionReason,
   roleModelTerminalEmptyOutputRejectionDetails,
-  roleModelUnsupportedEffectRejectionReason,
-  roleModelUnknownToolRejectionReason
+  roleModelUnsupportedEffectRejectionReason
 } from '../src/role-model/contracts.ts';
 import type { RoleModelPluginToolDefinition } from '../src/role-model/contracts.ts';
 import { createDefaultProject02PluginHost } from '../src/plugins/host.ts';
@@ -254,7 +253,7 @@ describe('role-model contracts', () => {
     });
   });
 
-  it('rejects undeclared executable tools before loop routing', () => {
+  it('accepts undeclared executable tools for loop routing', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
         version: roleModelDecisionContractVersion,
@@ -270,9 +269,16 @@ describe('role-model contracts', () => {
     );
 
     expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelUnknownToolRejectionReason
+      status: 'accepted',
+      decision: {
+        toolCalls: [
+          {
+            name: 'memory.unknown',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
       }
     });
   });

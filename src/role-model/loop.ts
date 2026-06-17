@@ -48,10 +48,13 @@ import {
   type RoleModelTurnContext
 } from './prompt.ts';
 import {
+  createRuntimePluginEvidenceSnapshot,
   isRuntimePluginCredentialKey,
   redactRuntimePluginText,
+  type RuntimePluginEvidenceStatus,
   type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
+  type RuntimePluginPolicyOutcome,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult,
   type RuntimePluginContext
@@ -65,6 +68,14 @@ export type RoleModelAdapterRawOutput = {
   readonly providerMetadata?: RoleModelProviderMetadata;
   readonly rejection?: RoleModelDecisionRejection;
   readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
+  readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
+};
+
+export type RoleModelNativeToolCallArgumentError = {
+  readonly executableIndex: number;
+  readonly toolName: string;
+  readonly reason: string;
+  readonly message: string;
 };
 
 export type RoleModelAdapterInvocation = {
@@ -248,6 +259,10 @@ export async function runRoleModelLoop(
       rawOutputValidation.status === 'accepted'
         ? rawOutputValidation.nativeAssistantMessage
         : undefined;
+    const nativeToolCallArgumentErrors =
+      rawOutputValidation.status === 'accepted'
+        ? (rawOutputValidation.nativeToolCallArgumentErrors ?? [])
+        : [];
     const ioSnapshot = createRoleModelIOSnapshot({
       ...identity,
       sessionId,
@@ -412,7 +427,8 @@ export async function runRoleModelLoop(
         : { pluginToolHost: options.pluginToolHost }),
       ...(options.runtimePluginContext === undefined
         ? {}
-        : { runtimePluginContext: options.runtimePluginContext })
+        : { runtimePluginContext: options.runtimePluginContext }),
+      nativeToolCallArgumentErrors
     });
 
     for (const result of pluginToolRouting.results) {
@@ -438,17 +454,6 @@ export async function runRoleModelLoop(
 
     rounds.push(loopRound);
 
-    if (pluginToolRouting.status === 'rejected') {
-      return createRejectedRoleModelLoopResult({
-        pluginToolResults: allPluginToolResults,
-        decisionResult: pluginToolRouting.decisionResult,
-        inputEnvelope,
-        ioSnapshot,
-        parsedDecisionSnapshot,
-        rounds
-      });
-    }
-
     nativeAdditionalMessages = appendNativeToolRoundMessages({
       assistantMessage: nativeAssistantMessage,
       previousMessages: nativeAdditionalMessages,
@@ -465,16 +470,10 @@ export async function runRoleModelLoop(
   }
 }
 
-type PluginToolRoutingResult =
-  | {
-      readonly status: 'accepted';
-      readonly results: readonly RoleModelPluginToolRoutingEvidence[];
-    }
-  | {
-      readonly status: 'rejected';
-      readonly results: readonly RoleModelPluginToolRoutingEvidence[];
-      readonly decisionResult: RejectedRoleModelDecisionResult;
-    };
+type PluginToolRoutingResult = {
+  readonly status: 'accepted';
+  readonly results: readonly RoleModelPluginToolRoutingEvidence[];
+};
 
 function createRoleModelLoopRound(options: {
   readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
@@ -670,6 +669,7 @@ async function routeExecutableToolCalls(options: {
   ) => Promise<void> | void;
   readonly resolveToolPluginId?: (toolName: string) => string | undefined;
   readonly runtimePluginContext?: RuntimePluginContext;
+  readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
 }): Promise<PluginToolRoutingResult> {
   const results: RoleModelPluginToolRoutingEvidence[] = [];
 
@@ -702,6 +702,29 @@ async function routeExecutableToolCalls(options: {
       parsedDecisionSnapshot: options.parsedDecisionSnapshot
     });
 
+    const nativeToolCallArgumentError =
+      options.nativeToolCallArgumentErrors?.find(
+        (error) =>
+          error.executableIndex === index && error.toolName === toolCall.name
+      );
+
+    if (nativeToolCallArgumentError !== undefined) {
+      results.push(
+        createRejectedToolRoutingEvidence({
+          callId,
+          call: routedCall,
+          ...(options.runtimePluginContext === undefined
+            ? {}
+            : { context: options.runtimePluginContext }),
+          reason: nativeToolCallArgumentError.reason,
+          message: nativeToolCallArgumentError.message,
+          evidenceStatus: 'rejected',
+          policyOutcome: 'handler_rejected'
+        })
+      );
+      continue;
+    }
+
     if (
       pluginId === undefined ||
       options.pluginToolHost === undefined ||
@@ -710,19 +733,21 @@ async function routeExecutableToolCalls(options: {
       const routingEvidence = createRejectedToolRoutingEvidence({
         callId,
         call: routedCall,
+        ...(options.runtimePluginContext === undefined
+          ? {}
+          : { context: options.runtimePluginContext }),
         reason:
           pluginId === undefined ? 'tool_not_declared' : 'tool_host_missing',
         message:
           pluginId === undefined
             ? `Tool "${toolCall.name}" is not declared for this turn.`
-            : `Tool "${toolCall.name}" has no host handler for this turn.`
+            : `Tool "${toolCall.name}" has no host handler for this turn.`,
+        policyOutcome:
+          pluginId === undefined ? 'disallowed_tool_call' : 'handler_rejected'
       });
 
       results.push(routingEvidence);
-      return createRejectedPluginToolRoutingResult({
-        results,
-        routing: routingEvidence
-      });
+      continue;
     }
 
     let hostResult: RuntimePluginToolCallResult;
@@ -736,18 +761,18 @@ async function routeExecutableToolCalls(options: {
       const routingEvidence = createRejectedToolRoutingEvidence({
         callId,
         call: routedCall,
+        context: options.runtimePluginContext,
         reason: 'handler_failed',
         message:
           error instanceof Error
             ? error.message
-            : `Tool "${toolCall.name}" handler failed.`
+            : `Tool "${toolCall.name}" handler failed.`,
+        evidenceStatus: 'failed',
+        policyOutcome: 'handler_rejected'
       });
 
       results.push(routingEvidence);
-      return createRejectedPluginToolRoutingResult({
-        results,
-        routing: routingEvidence
-      });
+      continue;
     }
 
     let frozenHostResult: RuntimePluginToolCallResult;
@@ -758,18 +783,18 @@ async function routeExecutableToolCalls(options: {
       const routingEvidence = createRejectedToolRoutingEvidence({
         callId,
         call: routedCall,
+        context: options.runtimePluginContext,
         reason: 'invalid_tool_output',
         message:
           error instanceof Error
             ? error.message
-            : `Tool "${toolCall.name}" returned invalid output.`
+            : `Tool "${toolCall.name}" returned invalid output.`,
+        evidenceStatus: 'failed',
+        policyOutcome: 'handler_rejected'
       });
 
       results.push(routingEvidence);
-      return createRejectedPluginToolRoutingResult({
-        results,
-        routing: routingEvidence
-      });
+      continue;
     }
 
     const routableHostResult = normalizeRoutablePluginToolResult({
@@ -783,18 +808,6 @@ async function routeExecutableToolCalls(options: {
     } satisfies RoleModelPluginToolRoutingEvidence);
 
     results.push(routingEvidence);
-
-    if (
-      pluginToolResultRejectsLoop({
-        routing: routingEvidence,
-        toolDefinition
-      })
-    ) {
-      return createRejectedPluginToolRoutingResult({
-        results,
-        routing: routingEvidence
-      });
-    }
   }
 
   return createAcceptedPluginToolRoutingResult(results);
@@ -809,31 +822,14 @@ function createAcceptedPluginToolRoutingResult(
   } satisfies PluginToolRoutingResult);
 }
 
-function createRejectedPluginToolRoutingResult(options: {
-  readonly results: readonly RoleModelPluginToolRoutingEvidence[];
-  readonly routing: RoleModelPluginToolRoutingEvidence;
-}): PluginToolRoutingResult {
-  const result = options.routing.result;
-
-  if (result.status !== 'rejected') {
-    throw new Error('Expected rejected plugin tool routing result.');
-  }
-
-  return Object.freeze({
-    status: 'rejected',
-    results: Object.freeze([...options.results]),
-    decisionResult: createRejectedRoleModelDecisionResult(
-      roleModelPluginToolRejectedRejectionReason,
-      `Plugin tool "${options.routing.call.toolName}" rejected the tool call: ${result.message}`
-    )
-  } satisfies PluginToolRoutingResult);
-}
-
 function createRejectedToolRoutingEvidence(options: {
   readonly callId: string;
   readonly call: RuntimePluginToolCall;
+  readonly context?: RuntimePluginContext;
   readonly reason: string;
   readonly message: string;
+  readonly evidenceStatus?: RuntimePluginEvidenceStatus;
+  readonly policyOutcome?: RuntimePluginPolicyOutcome;
 }): RoleModelPluginToolRoutingEvidence {
   const message = redactRuntimePluginText(options.message);
 
@@ -844,7 +840,23 @@ function createRejectedToolRoutingEvidence(options: {
       status: 'rejected',
       reason: options.reason,
       message,
-      evidence: Object.freeze([])
+      evidence:
+        options.context === undefined
+          ? Object.freeze([])
+          : Object.freeze([
+              createRuntimePluginEvidenceSnapshot({
+                eventId: options.context.eventId,
+                traceId: options.context.traceId,
+                createdAt: options.context.timestamp,
+                kind: 'runtime_plugin_evidence_snapshot',
+                pluginId: options.call.pluginId,
+                evidenceKind: 'tool_invocation',
+                status: options.evidenceStatus ?? 'rejected',
+                summary: message,
+                policyOutcome: options.policyOutcome ?? 'handler_rejected',
+                redactionLabels: options.context.privacy.redactionLabels
+              })
+            ])
     } satisfies RuntimePluginToolCallResult)
   } satisfies RoleModelPluginToolRoutingEvidence);
 }
@@ -866,32 +878,6 @@ function normalizeRoutablePluginToolResult(options: {
   }
 
   return options.result;
-}
-
-function pluginToolResultRejectsLoop(options: {
-  readonly routing: RoleModelPluginToolRoutingEvidence;
-  readonly toolDefinition: RoleModelPluginToolDefinition | undefined;
-}): boolean {
-  const result = options.routing.result;
-
-  if (result.status !== 'rejected') {
-    return false;
-  }
-
-  if (options.toolDefinition?.requiredForUserTurn === true) {
-    return true;
-  }
-
-  if (result.evidence.some(toolInvocationEvidenceRejectsLoop)) {
-    return true;
-  }
-
-  return !result.evidence.some(
-    (evidence) =>
-      evidence.evidenceKind === 'tool_invocation' &&
-      (evidence.status === 'degraded' ||
-        evidence.policyOutcome === 'optional_degraded')
-  );
 }
 
 function toolInvocationEvidenceRejectsLoop(
@@ -1073,6 +1059,7 @@ type RoleModelAdapterRawOutputValidationResult =
       readonly rawOutputText: string;
       readonly providerMetadata?: RoleModelProviderMetadata;
       readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
+      readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
     }
   | {
       readonly status: 'rejected';
@@ -1109,6 +1096,19 @@ function validateRoleModelAdapterRawOutput(
   const nativeAssistantMessage = optionalRoleModelAssistantChatMessage(
     rawOutput['nativeAssistantMessage']
   );
+  const nativeToolCallArgumentErrors =
+    optionalRoleModelNativeToolCallArgumentErrors(
+      rawOutput['nativeToolCallArgumentErrors']
+    );
+
+  if (
+    rawOutput['nativeToolCallArgumentErrors'] !== undefined &&
+    nativeToolCallArgumentErrors === undefined
+  ) {
+    return createMalformedAdapterRawOutputResult(
+      'Role-model adapter native tool-call argument errors are malformed.'
+    );
+  }
 
   if (rejection !== undefined) {
     const decisionResult = createRejectedRoleModelDecisionResult(
@@ -1142,7 +1142,8 @@ function validateRoleModelAdapterRawOutput(
     status: 'accepted',
     rawOutputText,
     ...providerMetadataOption(providerMetadata),
-    ...nativeAssistantMessageOption(nativeAssistantMessage)
+    ...nativeAssistantMessageOption(nativeAssistantMessage),
+    ...nativeToolCallArgumentErrorsOption(nativeToolCallArgumentErrors)
   } satisfies RoleModelAdapterRawOutputValidationResult);
 }
 
@@ -1169,6 +1170,68 @@ function nativeAssistantMessageOption(
   nativeAssistantMessage: RoleModelAssistantChatMessage | undefined
 ): { readonly nativeAssistantMessage?: RoleModelAssistantChatMessage } {
   return nativeAssistantMessage === undefined ? {} : { nativeAssistantMessage };
+}
+
+function nativeToolCallArgumentErrorsOption(
+  nativeToolCallArgumentErrors:
+    | readonly RoleModelNativeToolCallArgumentError[]
+    | undefined
+): {
+  readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
+} {
+  return nativeToolCallArgumentErrors === undefined
+    ? {}
+    : { nativeToolCallArgumentErrors };
+}
+
+function optionalRoleModelNativeToolCallArgumentErrors(
+  value: unknown
+): readonly RoleModelNativeToolCallArgumentError[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const errors: RoleModelNativeToolCallArgumentError[] = [];
+
+  for (const item of value) {
+    if (!isJsonRecord(item)) {
+      return undefined;
+    }
+
+    const executableIndex = item['executableIndex'];
+    const toolName = item['toolName'];
+    const reason = item['reason'];
+    const message = item['message'];
+
+    if (
+      typeof executableIndex !== 'number' ||
+      !Number.isInteger(executableIndex) ||
+      executableIndex < 0 ||
+      typeof toolName !== 'string' ||
+      toolName.length === 0 ||
+      typeof reason !== 'string' ||
+      reason.length === 0 ||
+      typeof message !== 'string' ||
+      message.length === 0
+    ) {
+      return undefined;
+    }
+
+    errors.push(
+      Object.freeze({
+        executableIndex,
+        toolName,
+        reason,
+        message: redactRuntimePluginText(message)
+      } satisfies RoleModelNativeToolCallArgumentError)
+    );
+  }
+
+  return Object.freeze(errors);
 }
 
 function optionalRoleModelAssistantChatMessage(

@@ -24,14 +24,11 @@ import type {
   RuntimePluginFileStore
 } from '../src/plugins/types.ts';
 import {
-  createRuntimePluginAfterTurnCommittedContext
-} from '../src/plugins/types.ts';
-import {
   createRuntimePluginFileStore
 } from '../src/plugins/file-store.ts';
 
 describe('Character State plugin', () => {
-  it('plans valid patches and records plugin-local state after turn commit', async () => {
+  it('writes valid patches during handleToolCall', async () => {
     const { plugin, context, fileStore } =
       createCharacterStateHarness('session-character-state-valid');
 
@@ -61,16 +58,6 @@ describe('Character State plugin', () => {
           }
         ]
       }
-    });
-    expect(fileStore.readJsonl('events.jsonl')).toEqual([]);
-    expect(fileStore.readJson('current.json')).toBeUndefined();
-
-    const commitResult = await plugin.lifecycleHooks.afterTurnCommitted?.(
-      createCommittedContext('session-character-state-valid', fileStore)
-    );
-
-    expect(commitResult).toMatchObject({
-      status: 'completed'
     });
     expect(fileStore.readJsonl('events.jsonl')).toHaveLength(1);
     expect(fileStore.readJson('current.json')).toMatchObject({
@@ -122,9 +109,6 @@ describe('Character State plugin', () => {
       },
       context
     );
-    await plugin.lifecycleHooks.afterTurnCommitted?.(
-      createCommittedContext('session-character-state', context.fileStore)
-    );
     unlinkSync(
       join(
         storeRoot,
@@ -149,7 +133,7 @@ describe('Character State plugin', () => {
 
     fileStore.writeJsonAtomic('current.json', createDefaultCharacterRuntimeState());
 
-    await plugin.lifecycleHooks.handleToolCall?.(
+    const result = await plugin.lifecycleHooks.handleToolCall?.(
       {
         ...testIdentity(),
         pluginId: characterStatePluginId,
@@ -158,18 +142,28 @@ describe('Character State plugin', () => {
           mood: 'curious'
         }
       },
-      context
+      {
+        ...context,
+        fileStore: createCurrentWriteFailingFileStore(fileStore)
+      }
     );
 
-    expect(() =>
-      plugin.lifecycleHooks.afterTurnCommitted?.(
-        createCommittedContext(
-          'session-character-state-split-write',
-          createCurrentWriteFailingFileStore(fileStore)
-        )
+    expect(result).toMatchObject({
+      status: 'accepted',
+      output: {
+        current: {
+          mood: 'curious'
+        },
+        warnings: ['Character State current snapshot write failed: current snapshot write failed']
+      }
+    });
+    expect(
+      result?.evidence.some(
+        (evidence) =>
+          evidence.evidenceKind === 'tool_invocation' &&
+          evidence.status === 'degraded'
       )
-    ).toThrow('current snapshot write failed');
-
+    ).toBe(true);
     expect(fileStore.readJsonl('events.jsonl')).toHaveLength(1);
     expect(fileStore.readJson('current.json')).toMatchObject({
       current: {
@@ -209,28 +203,6 @@ function createCharacterStateHarness(sessionId: string, storeRoot?: string) {
   return {
     plugin: createCharacterStatePlugin(),
     context,
-    fileStore
-  };
-}
-
-function createCommittedContext(
-  sessionId: string,
-  fileStore: ReturnType<typeof createRuntimePluginFileStore>
-) {
-  return {
-    ...createRuntimePluginAfterTurnCommittedContext({
-      ...testIdentity(),
-      sessionId,
-      eventType: 'USER_MESSAGE',
-      currentUserMessage: 'hello',
-      character: {
-        id: 'mira',
-        displayName: 'Mira'
-      },
-      committedAt: '2026-06-15T00:00:00.000Z',
-      visibleMessages: []
-    }),
-    pluginId: characterStatePluginId,
     fileStore
   };
 }

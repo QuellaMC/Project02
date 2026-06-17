@@ -787,19 +787,6 @@ function validateUserTurnToolCallCardinality(
     );
   }
 
-  for (const call of toolCalls) {
-    const definition = modelToolDefinitions.find(
-      (candidate) => candidate.name === call.name
-    );
-
-    if (definition === undefined) {
-      return createRejectedRoleModelDecisionResult(
-        roleModelUnknownToolRejectionReason,
-        `Decision requested unsupported tool "${call.name}".`
-      );
-    }
-  }
-
   for (const definition of modelToolDefinitions) {
     if (isBuiltInModelToolName(definition.name)) {
       continue;
@@ -808,15 +795,12 @@ function validateUserTurnToolCallCardinality(
     const currentDecisionCount = toolCalls.filter(
       (call) => call.name === definition.name
     ).length;
-    const previousTurnCount = toolObservations.filter(
-      (observation) => observation.toolName === definition.name
-    ).length;
     const successfulPreviousTurnCount = toolObservations.filter(
       (observation) =>
         observation.toolName === definition.name &&
         observation.result.status === 'accepted'
     ).length;
-    const count = previousTurnCount + currentDecisionCount;
+    const count = successfulPreviousTurnCount + currentDecisionCount;
     const requiredCount = successfulPreviousTurnCount + currentDecisionCount;
 
     if (definition.requiredForUserTurn && requiredCount === 0) {

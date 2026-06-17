@@ -34,15 +34,6 @@ export const characterStatePluginId = 'character-state';
 
 const characterStateEventsPath = 'events.jsonl';
 const characterStateCurrentPath = 'current.json';
-const characterStateStagedPatchSeparator = '\u0000';
-
-type StagedCharacterStatePatch = {
-  readonly event: RuntimePluginJsonObject;
-  readonly result: {
-    readonly after: CharacterRuntimeState;
-    readonly appliedChanges: readonly unknown[];
-  };
-};
 
 const characterStatePatchInputContract = Object.freeze({
   type: 'object',
@@ -82,8 +73,6 @@ const characterStatePatchInputContract = Object.freeze({
 } satisfies ModelToolInputContract);
 
 export function createCharacterStatePlugin(): RuntimePlugin {
-  const stagedPatches = new Map<string, StagedCharacterStatePatch>();
-
   return createRuntimePlugin({
     manifest: {
       id: characterStatePluginId,
@@ -100,8 +89,7 @@ export function createCharacterStatePlugin(): RuntimePlugin {
       declaredPlugins: [
         'tool_provider',
         'before_role_model_call',
-        'handle_tool_call',
-        'after_turn_committed'
+        'handle_tool_call'
       ],
       config: {
         fields: []
@@ -143,10 +131,6 @@ export function createCharacterStatePlugin(): RuntimePlugin {
     ],
     lifecycleHooks: {
       beforeRoleModelCall(context) {
-        clearStagedPatchesForSession({
-          stagedPatches,
-          sessionId: context.sessionId
-        });
         const state = readCurrentCharacterState(requiredFileStore(context));
         const brief = createLivingStateBrief(state);
 
@@ -226,16 +210,66 @@ export function createCharacterStatePlugin(): RuntimePlugin {
           result
         } satisfies RuntimePluginJsonObject);
 
-        stagedPatches.set(
-          stagedPatchKey(context),
-          Object.freeze({
-            event,
-            result: Object.freeze({
-              after: result.after,
-              appliedChanges: result.appliedChanges
-            })
-          } satisfies StagedCharacterStatePatch)
-        );
+        try {
+          fileStore.appendJsonl(characterStateEventsPath, event);
+        } catch (error: unknown) {
+          const message = `Character State event append failed: ${characterStateErrorMessage(error)}`;
+
+          return {
+            status: 'rejected',
+            reason: 'character_state_event_write_failed',
+            message,
+            evidence: [
+              createRuntimePluginEvidenceSnapshot({
+                eventId: context.eventId,
+                traceId: context.traceId,
+                createdAt: context.timestamp,
+                kind: 'runtime_plugin_evidence_snapshot',
+                pluginId: characterStatePluginId,
+                evidenceKind: 'tool_invocation',
+                status: 'failed',
+                summary: message,
+                policyOutcome: 'handler_rejected',
+                redactionLabels: context.privacy.redactionLabels
+              })
+            ]
+          };
+        }
+
+        try {
+          fileStore.writeJsonAtomic(characterStateCurrentPath, result.after);
+        } catch (error: unknown) {
+          const warning = `Character State current snapshot write failed: ${characterStateErrorMessage(error)}`;
+
+          return {
+            status: 'accepted',
+            output: Object.freeze({
+              status: 'accepted',
+              current: result.after.current,
+              appliedChanges: result.appliedChanges,
+              warnings: [warning]
+            }),
+            evidence: [
+              createPluginToolEvidence({
+                context,
+                pluginId: characterStatePluginId,
+                status: 'accepted',
+                summary: `Applied ${String(result.appliedChanges.length)} Character State changes.`
+              }),
+              createRuntimePluginEvidenceSnapshot({
+                eventId: context.eventId,
+                traceId: context.traceId,
+                createdAt: context.timestamp,
+                kind: 'runtime_plugin_evidence_snapshot',
+                pluginId: characterStatePluginId,
+                evidenceKind: 'tool_invocation',
+                status: 'degraded',
+                summary: warning,
+                redactionLabels: context.privacy.redactionLabels
+              })
+            ]
+          };
+        }
 
         return {
           status: 'accepted',
@@ -249,50 +283,10 @@ export function createCharacterStatePlugin(): RuntimePlugin {
               context,
               pluginId: characterStatePluginId,
               status: 'accepted',
-              summary: `Planned ${String(result.appliedChanges.length)} Character State changes for turn commit.`
+              summary: `Applied ${String(result.appliedChanges.length)} Character State changes.`
             })
           ]
         };
-      },
-      afterTurnCommitted(context) {
-        const key = stagedPatchKey(context);
-        const stagedPatch = stagedPatches.get(key);
-
-        if (stagedPatch === undefined) {
-          return {
-            status: 'completed',
-            evidence: []
-          };
-        }
-
-        try {
-          const fileStore = requiredFileStore(context);
-
-          fileStore.appendJsonl(characterStateEventsPath, stagedPatch.event);
-          fileStore.writeJsonAtomic(
-            characterStateCurrentPath,
-            stagedPatch.result.after
-          );
-
-          return {
-            status: 'completed',
-            evidence: [
-              createRuntimePluginEvidenceSnapshot({
-                eventId: context.eventId,
-                traceId: context.traceId,
-                createdAt: context.timestamp,
-                kind: 'runtime_plugin_evidence_snapshot',
-                pluginId: characterStatePluginId,
-                evidenceKind: 'after_turn_committed',
-                status: 'accepted',
-                summary: `Committed ${String(stagedPatch.result.appliedChanges.length)} staged Character State changes.`,
-                redactionLabels: context.privacy.redactionLabels
-              })
-            ]
-          };
-        } finally {
-          stagedPatches.delete(key);
-        }
       }
     }
   });
@@ -367,19 +361,10 @@ function isJsonObject(value: unknown): value is RuntimePluginJsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function stagedPatchKey(context: RuntimePluginContext): string {
-  return `${context.sessionId}${characterStateStagedPatchSeparator}${context.turnId}`;
-}
-
-function clearStagedPatchesForSession(options: {
-  readonly stagedPatches: Map<string, StagedCharacterStatePatch>;
-  readonly sessionId: string;
-}): void {
-  const prefix = `${options.sessionId}${characterStateStagedPatchSeparator}`;
-
-  for (const key of options.stagedPatches.keys()) {
-    if (key.startsWith(prefix)) {
-      options.stagedPatches.delete(key);
-    }
+function characterStateErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
   }
+
+  return 'Character State write failed.';
 }

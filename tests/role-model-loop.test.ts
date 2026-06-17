@@ -5,7 +5,6 @@ import {
   isRoleModelRawOutputReplayableDecisionEvidence,
   roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
-  roleModelPluginToolRejectedRejectionReason,
   roleModelTerminalEmptyOutputRejectionDetails,
   type RoleModelPluginToolDefinition,
   type RoleModelProviderMetadata
@@ -35,7 +34,7 @@ import {
 import type { RoleModelChatMessage } from '../src/role-model/prompt.ts';
 
 describe('role-model loop plugin tool routing', () => {
-  it('rejects non-degrading plugin tool failures before a later visible reply can commit', async () => {
+  it('continues after non-degrading plugin tool failures', async () => {
     let invocations = 0;
     let handledCalls = 0;
     const adapter = createSequencedAdapter([
@@ -85,12 +84,9 @@ describe('role-model loop plugin tool routing', () => {
     });
 
     expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelPluginToolRejectedRejectionReason
-      }
+      status: 'accepted'
     });
-    expect(invocations).toBe(1);
+    expect(invocations).toBe(2);
     expect(handledCalls).toBe(1);
     expect(result.pluginToolResults).toHaveLength(1);
     expect(result.pluginToolResults[0]).toMatchObject({
@@ -104,11 +100,11 @@ describe('role-model loop plugin tool routing', () => {
         reason: 'handler_failed'
       }
     });
-    expect(result.rounds).toHaveLength(1);
+    expect(result.rounds).toHaveLength(2);
     expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
   });
 
-  it('rejects required plugin tool failures despite misleading degraded evidence', async () => {
+  it('requires a successful required plugin tool result before final output', async () => {
     let invocations = 0;
     const adapter = createSequencedAdapter([
       {
@@ -157,10 +153,10 @@ describe('role-model loop plugin tool routing', () => {
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
-        reason: roleModelPluginToolRejectedRejectionReason
+        reason: 'missing_required_tool_call'
       }
     });
-    expect(invocations).toBe(1);
+    expect(invocations).toBe(2);
     expect(result.pluginToolResults[0]?.result.evidence).toMatchObject([
       {
         status: 'degraded',
@@ -169,7 +165,7 @@ describe('role-model loop plugin tool routing', () => {
     ]);
   });
 
-  it('rejects handler failures when rejected evidence accompanies degraded evidence', async () => {
+  it('continues after handler failures with rejected evidence', async () => {
     let invocations = 0;
     const adapter = createSequencedAdapter([
       {
@@ -226,12 +222,9 @@ describe('role-model loop plugin tool routing', () => {
     });
 
     expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelPluginToolRejectedRejectionReason
-      }
+      status: 'accepted'
     });
-    expect(invocations).toBe(1);
+    expect(invocations).toBe(2);
     expect(result.pluginToolResults[0]?.result.evidence).toMatchObject([
       {
         status: 'degraded',
@@ -245,7 +238,7 @@ describe('role-model loop plugin tool routing', () => {
   });
 
   it.each(['rejected', 'failed'] as const)(
-    'rejects accepted plugin tool results with %s tool invocation evidence',
+    'converts accepted plugin tool results with %s tool invocation evidence into rejected observations',
     async (evidenceStatus) => {
       let invocations = 0;
       let handledCalls = 0;
@@ -300,12 +293,9 @@ describe('role-model loop plugin tool routing', () => {
       });
 
       expect(result).toMatchObject({
-        status: 'rejected',
-        rejection: {
-          reason: roleModelPluginToolRejectedRejectionReason
-        }
+        status: 'accepted'
       });
-      expect(invocations).toBe(1);
+      expect(invocations).toBe(2);
       expect(handledCalls).toBe(1);
       expect(result.pluginToolResults[0]?.result).toMatchObject({
         status: 'rejected',
@@ -484,12 +474,9 @@ describe('role-model loop plugin tool routing', () => {
       });
 
       expect(result).toMatchObject({
-        status: 'rejected',
-        rejection: {
-          reason: roleModelPluginToolRejectedRejectionReason
-        }
+        status: 'accepted'
       });
-      expect(invocations).toBe(1);
+      expect(invocations).toBe(2);
       expect(handledCalls).toBe(1);
       expect(result.pluginToolResults).toHaveLength(1);
       expect(result.pluginToolResults[0]).toMatchObject({
@@ -500,7 +487,7 @@ describe('role-model loop plugin tool routing', () => {
           message: 'Plugin tool output must be finite JSON.'
         }
       });
-      expect(result.rounds).toHaveLength(1);
+      expect(result.rounds).toHaveLength(2);
       expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
     }
   );
@@ -720,16 +707,7 @@ describe('role-model loop plugin tool routing', () => {
       }
     });
 
-    expect(result.status).toBe('rejected');
-    if (result.status !== 'rejected') {
-      throw new Error('Expected custom host rejection to reject the loop.');
-    }
-
-    expect(result.rejection).toMatchObject({
-      reason: roleModelPluginToolRejectedRejectionReason,
-      details:
-        'Plugin tool "memory.search" rejected the tool call: search backend failed api_key=[redacted] Bearer [redacted]'
-    });
+    expect(result.status).toBe('accepted');
     expect(result.pluginToolResults).toMatchObject([
       {
         result: {
@@ -740,7 +718,7 @@ describe('role-model loop plugin tool routing', () => {
         }
       }
     ]);
-    expect(invocations).toBe(1);
+    expect(invocations).toBe(2);
     expect(completedResults).toMatchObject([
       {
         status: 'rejected',
@@ -750,8 +728,7 @@ describe('role-model loop plugin tool routing', () => {
 
     const serializedSurfaces = JSON.stringify({
       completedResults,
-      pluginToolResults: result.pluginToolResults,
-      rejection: result.rejection
+      pluginToolResults: result.pluginToolResults
     });
 
     expect(serializedSurfaces).not.toContain('super-secret');

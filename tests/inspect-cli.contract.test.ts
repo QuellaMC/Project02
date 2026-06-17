@@ -99,8 +99,9 @@ describe('inspect CLI plugin evidence', () => {
       expect.arrayContaining([
         expect.objectContaining({
           pluginId: 'character-state',
-          evidenceKind: 'after_turn_committed',
-          status: 'accepted'
+          evidenceKind: 'tool_invocation',
+          status: 'accepted',
+          summary: 'Applied 1 Character State changes.'
         })
       ])
     );

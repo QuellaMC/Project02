@@ -384,7 +384,7 @@ describe('runtime plugin host', () => {
     expect(fileStore.revision()).toBe(1);
   });
 
-  it('blocks retained fileStore writes after handleToolCall completes', async () => {
+  it('writes during handleToolCall and blocks retained fileStore writes after completion', async () => {
     let retainedFileStore: RuntimePluginFileStore | undefined;
     const sessionIdentity = {};
     const plugin = createRetainedHandleToolCallFileStorePlugin((fileStore) => {
@@ -415,9 +415,9 @@ describe('runtime plugin host', () => {
       sessionIdentity
     });
 
-    expect(fileStore.readJson('during-handle.json')).toBeUndefined();
+    expect(fileStore.readJson('during-handle.json')).toEqual({ value: 'during' });
     expect(fileStore.readJson('after-handle.json')).toBeUndefined();
-    expect(fileStore.revision()).toBe(0);
+    expect(fileStore.revision()).toBe(1);
 
     const afterCommitResult = await host.afterTurnCommitted(
       testPluginAfterTurnCommittedContext()
@@ -428,7 +428,7 @@ describe('runtime plugin host', () => {
     expect(fileStore.revision()).toBe(1);
   });
 
-  it('discards staged handleToolCall fileStore writes for a rejected turn context', async () => {
+  it('keeps immediate handleToolCall fileStore writes for a later rejected turn context', async () => {
     const sessionIdentity = {};
     const plugin = createStagedAppendFileStorePlugin();
     const host = createRuntimePluginHost({
@@ -455,18 +455,21 @@ describe('runtime plugin host', () => {
 
     expect(result.status).toBe('accepted');
 
-    host.discardStagedFileStoreWrites(context);
-
     const afterCommitResult = await host.afterTurnCommitted(
       testPluginAfterTurnCommittedContext()
     );
 
     expect(afterCommitResult.status).toBe('completed');
-    expect(fileStore.readJsonl('events.jsonl')).toEqual([]);
-    expect(fileStore.revision()).toBe(0);
+    expect(fileStore.readJsonl('events.jsonl')).toEqual([
+      {
+        value: 'rejected',
+        traceId: context.traceId
+      }
+    ]);
+    expect(fileStore.revision()).toBe(1);
   });
 
-  it('isolates staged handleToolCall fileStore writes by trace for same-turn retries', async () => {
+  it('records immediate handleToolCall fileStore writes for same-turn retries', async () => {
     const sessionIdentity = {};
     const plugin = createStagedAppendFileStorePlugin();
     const host = createRuntimePluginHost({
@@ -515,21 +518,17 @@ describe('runtime plugin host', () => {
       retryContext
     );
 
-    const afterCommitResult = await host.afterTurnCommitted(
-      testPluginAfterTurnCommittedContext({
-        eventId: 'evt_same_turn_retry',
-        traceId: 'trace_retry_attempt'
-      })
-    );
-
-    expect(afterCommitResult.status).toBe('completed');
     expect(fileStore.readJsonl('events.jsonl')).toEqual([
+      {
+        value: 'rejected-attempt',
+        traceId: 'trace_rejected_attempt'
+      },
       {
         value: 'retry-attempt',
         traceId: 'trace_retry_attempt'
       }
     ]);
-    expect(fileStore.revision()).toBe(1);
+    expect(fileStore.revision()).toBe(2);
   });
 
   it('blocks retained fileStore writes after health completes', async () => {

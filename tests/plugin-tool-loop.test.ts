@@ -39,8 +39,7 @@ import type {
   RuntimeLogStore
 } from '../src/runtime/log.ts';
 import {
-  roleModelInvalidVisibleReplyRejectionReason,
-  roleModelUnknownToolRejectionReason
+  roleModelInvalidVisibleReplyRejectionReason
 } from '../src/role-model/contracts.ts';
 import {
   runLocalUserMessageEvent
@@ -287,7 +286,81 @@ describe('plugin-driven tool loop', () => {
     ]);
   });
 
-  it('persists character_state.patch only after an accepted turn commits', async () => {
+  it('lets the model retry character_state.patch after invalid input', async () => {
+    const {
+      session,
+      logStore,
+      pluginStore
+    } = await createDurableCharacterStateHarness(
+      'session-plugin-patch-invalid-retry'
+    );
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'character_state.patch',
+            input: {
+              activity: 'reflecting'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'character_state.patch',
+            input: {
+              currentActivity: 'reflecting'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'state corrected'
+            }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('correct state', 'evt_plugin_patch_invalid_retry'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+    const toolFinishedEvents = logStore
+      .rawEvents()
+      .filter((event) => event.kind === 'tool_call_finished');
+
+    expect(result.status).toBe('completed');
+    expect(toolFinishedEvents).toHaveLength(2);
+    expect(toolFinishedEvents[0]).toMatchObject({
+      toolName: 'character_state.patch',
+      toolResult: {
+        status: 'rejected',
+        reason: 'invalid_input'
+      }
+    });
+    expect(toolFinishedEvents[1]).toMatchObject({
+      toolName: 'character_state.patch',
+      toolResult: {
+        status: 'accepted'
+      }
+    });
+    expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
+    expect(pluginStore.readJson('current.json')).toMatchObject({
+      current: {
+        currentActivity: 'reflecting'
+      }
+    });
+  });
+
+  it('persists character_state.patch during handleToolCall', async () => {
     const {
       session,
       logStore,
@@ -334,7 +407,7 @@ describe('plugin-driven tool loop', () => {
     });
   });
 
-  it('does not persist character_state.patch when a later commit validation rejects the turn', async () => {
+  it('keeps character_state.patch when a later commit validation rejects the turn', async () => {
     const {
       session,
       logStore,
@@ -377,8 +450,12 @@ describe('plugin-driven tool loop', () => {
       reason: 'invalid_visible_reply'
     });
     expect(logStore.conversationMessages()).toEqual([]);
-    expect(pluginStore.readJsonl('events.jsonl')).toEqual([]);
-    expect(pluginStore.readJson('current.json')).toBeUndefined();
+    expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
+    expect(pluginStore.readJson('current.json')).toMatchObject({
+      current: {
+        mood: 'curious'
+      }
+    });
   });
 
   it('isolates default in-memory Character State by session object', async () => {
@@ -902,7 +979,7 @@ describe('plugin-driven tool loop', () => {
     ]);
   });
 
-  it('does not commit handleToolCall fileStore writes when finish logging fails', async () => {
+  it('keeps immediate handleToolCall fileStore writes when finish logging fails', async () => {
     const sessionId = 'session-tool-finish-log-failure';
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
 
@@ -961,8 +1038,7 @@ describe('plugin-driven tool loop', () => {
       })
     ).rejects.toThrow('tool_call_finished raw event append failed');
 
-    expect(pluginStore.readJson('state.json')).toBeUndefined();
-    expect(pluginStore.revision()).toBe(0);
+    expect(pluginStore.readJson('state.json')).toEqual({ value: 'side effect' });
     expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_finished')).toBe(
       false
     );
@@ -972,7 +1048,7 @@ describe('plugin-driven tool loop', () => {
     });
   });
 
-  it('clears staged handleToolCall fileStore writes after a rejected terminal turn', async () => {
+  it('keeps immediate handleToolCall fileStore writes after a rejected terminal turn', async () => {
     const sessionId = 'session-staged-write-rejected-terminal';
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
 
@@ -1039,8 +1115,9 @@ describe('plugin-driven tool loop', () => {
       status: 'rejected',
       reason: 'invalid_visible_reply'
     });
-    expect(pluginStore.readJson('state.json')).toBeUndefined();
-    expect(pluginStore.revision()).toBe(0);
+    expect(pluginStore.readJson('state.json')).toEqual({
+      value: 'stale side effect'
+    });
 
     await pluginHost.afterTurnCommitted(
       createRuntimePluginAfterTurnCommittedContext({
@@ -1059,8 +1136,9 @@ describe('plugin-driven tool loop', () => {
       })
     );
 
-    expect(pluginStore.readJson('state.json')).toBeUndefined();
-    expect(pluginStore.revision()).toBe(0);
+    expect(pluginStore.readJson('state.json')).toEqual({
+      value: 'stale side effect'
+    });
   });
 
   it('does not expose plugin inventory through hidden runtime context', async () => {
@@ -1698,7 +1776,101 @@ describe('plugin-driven tool loop', () => {
     expect(messagesByRound[1]?.[4]?.content).toContain('"status":"accepted"');
   });
 
-  it('rejects undeclared executable tools before plugin routing', async () => {
+  it('feeds native tool argument errors back as rejected tool result messages', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    let index = 0;
+    const adapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        messagesByRound.push([...invocation.turnContext.messages]);
+        index += 1;
+
+        if (index === 1) {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'plugin.list',
+                  input: {}
+                }
+              ]
+            }),
+            nativeAssistantMessage: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_bad_args',
+                  type: 'function',
+                  function: {
+                    name: 'plugin.list',
+                    arguments: '{"score":1e999}'
+                  }
+                }
+              ]
+            },
+            nativeToolCallArgumentErrors: [
+              {
+                executableIndex: 0,
+                toolName: 'plugin.list',
+                reason: 'invalid_native_tool_arguments',
+                message: 'plugin.list arguments must contain finite JSON values.'
+              }
+            ]
+          };
+        }
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'Recovered after argument error.'
+                }
+              }
+            ]
+          })
+        };
+      }
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('check plugins after bad args', 'evt_native_bad_args'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    expect(result.status).toBe('completed');
+    expect(messagesByRound).toHaveLength(2);
+    expect(messagesByRound[1]?.map((message) => message.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'tool'
+    ]);
+    expect(messagesByRound[1]?.[3]).toMatchObject({
+      role: 'tool',
+      tool_call_id: 'call_bad_args'
+    });
+    expect(messagesByRound[1]?.[3]?.content).toContain('"status":"rejected"');
+    expect(messagesByRound[1]?.[3]?.content).toContain(
+      '"reason":"invalid_native_tool_arguments"'
+    );
+    expect(
+      logStore.rawEvents().find((event) => event.kind === 'tool_call_finished')
+    ).toMatchObject({
+      toolName: 'plugin.list',
+      toolResult: {
+        status: 'rejected',
+        reason: 'invalid_native_tool_arguments'
+      }
+    });
+  });
+
+  it('continues after undeclared executable tools return rejected tool results', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
     const adapter = createSequencedAdapter([
@@ -1731,12 +1903,21 @@ describe('plugin-driven tool loop', () => {
       roleModelAdapter: adapter
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      reason: roleModelUnknownToolRejectionReason
+    expect(result.status).toBe('completed');
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'try unknown',
+      'continued'
+    ]);
+    expect(
+      logStore.rawEvents().find((event) => event.kind === 'tool_call_finished')
+    ).toMatchObject({
+      kind: 'tool_call_finished',
+      toolName: 'memory.unknown',
+      toolResult: {
+        status: 'rejected',
+        reason: 'tool_not_declared'
+      }
     });
-    expect(logStore.conversationMessages()).toEqual([]);
-    expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_finished')).toBe(false);
   });
 
   it('logs only valid pluginStoreRevision metadata from accepted tool output', async () => {

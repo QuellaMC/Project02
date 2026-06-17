@@ -596,7 +596,7 @@ describe('NVIDIA role-model provider', () => {
     expect(rawDecision).not.toHaveProperty('text');
   });
 
-  it('rejects non-finite native tool arguments before raw output normalization', async () => {
+  it('surfaces non-finite native tool arguments as tool-call argument errors', async () => {
     const fetchClient: NvidiaFetchClient = () => Promise.resolve({
       ok: true,
       status: 200,
@@ -635,13 +635,32 @@ describe('NVIDIA role-model provider', () => {
       turnContext: renderRoleModelTurnContext(inputEnvelope)
     });
 
-    expect(output.rawOutputText).toBe('');
-    expect(output.rejection?.reason).toBe('provider_error');
-    expect(output.rejection?.details).toContain('must be finite JSON');
-    expect(output.providerMetadata?.error?.code).toBe('malformed_response');
-    expect(output.providerMetadata?.error?.message).toContain(
-      'must be finite JSON'
-    );
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [
+        {
+          name: visibleReplyModelToolName,
+          input: {
+            text: 'Checking the available plugins.'
+          }
+        },
+        {
+          name: 'plugin.list',
+          input: {}
+        }
+      ]
+    });
+    expect(output.rejection).toBeUndefined();
+    expect(output.nativeToolCallArgumentErrors).toEqual([
+      {
+        executableIndex: 0,
+        toolName: 'plugin.list',
+        reason: 'invalid_native_tool_arguments',
+        message:
+          'NVIDIA response message.tool_calls[0].function.arguments must contain JSON-compatible finite values: plugin.list input field "score" must be finite JSON.'
+      }
+    ]);
+    expect(output.providerMetadata?.error).toBeUndefined();
+    expect(output.providerMetadata?.response?.status).toBe(200);
     expect(output.rawOutputText).not.toContain('null');
   });
 });
