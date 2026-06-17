@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createConversationSession,
   createDeterministicLocalRoleModelAdapter,
+  createRuntimeEventIdentity,
+  createRuntimeLogStore,
+  createUserMessageRuntimeEvent,
   parseRoleModelDecision,
   projectHealth,
-  roleModelVisibleReplyActionName
+  roleModelDecisionContractVersion,
+  runLocalUserMessageEvent,
+  visibleReplyModelToolName
 } from '../src/index.ts';
 
 describe('projectHealth', () => {
@@ -16,25 +22,29 @@ describe('projectHealth', () => {
   });
 });
 
-describe('public role-model loop exports', () => {
-  it('exposes the local adapter and parser through the package surface', () => {
+describe('role-model module smoke', () => {
+  it('exposes the local adapter and parser through the root barrel', () => {
     expect(createDeterministicLocalRoleModelAdapter()).toHaveProperty('invoke');
     expect(
       parseRoleModelDecision(
         JSON.stringify({
-          action: {
-            type: roleModelVisibleReplyActionName,
-            text: 'hello'
-          }
+          toolCalls: [
+            {
+              name: visibleReplyModelToolName,
+              input: {
+                text: 'hello'
+              }
+            }
+          ]
         })
       )
     ).toEqual({
       status: 'accepted',
       decision: {
-        version: 'mvp-006.tool_calls.v1',
+        version: roleModelDecisionContractVersion,
         toolCalls: [
           {
-            name: roleModelVisibleReplyActionName,
+            name: visibleReplyModelToolName,
             input: {
               text: 'hello'
             }
@@ -42,5 +52,33 @@ describe('public role-model loop exports', () => {
         ]
       }
     });
+  });
+
+  it('keeps root runtime compatibility exports usable together', async () => {
+    const session = createConversationSession({
+      id: 'root-compat-session'
+    });
+    const logStore = createRuntimeLogStore();
+
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        createRuntimeEventIdentity({
+          eventId: 'evt_root_compat',
+          traceId: 'trace_root_compat',
+          createdAt: '2026-06-16T00:00:00.000Z'
+        })
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createDeterministicLocalRoleModelAdapter(),
+      committedAt: '2026-06-16T00:00:01.000Z'
+    });
+
+    expect(result.status).toBe('completed');
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'hello',
+      "I'm here. Tell me what you need."
+    ]);
   });
 });

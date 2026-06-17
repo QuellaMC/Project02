@@ -11,7 +11,7 @@ import {
   type CharacterAgent,
   type CharacterAgentReply,
   type VisibleMessage
-} from '../src/index.ts';
+} from '../src/core/conversation.ts';
 
 type DeferredReply = {
   readonly promise: Promise<CharacterAgentReply>;
@@ -63,6 +63,27 @@ describe('conversation core', () => {
     expect(session.visibleTranscript).toEqual([
       result.userMessage,
       result.characterMessage
+    ]);
+  });
+
+  it('allows multi-line character replies while keeping user input single-line', async () => {
+    const session = createConversationSession();
+    const agent: CharacterAgent = {
+      reply() {
+        return {
+          text: 'Tools available:\n- plugin.list\n- character_state.patch'
+        };
+      }
+    };
+
+    const result = await runCharacterTurn(session, 'list tools', agent);
+
+    expect(result.characterMessage.text).toBe(
+      'Tools available:\n- plugin.list\n- character_state.patch'
+    );
+    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+      'list tools',
+      'Tools available:\n- plugin.list\n- character_state.patch'
     ]);
   });
 
@@ -440,7 +461,7 @@ describe('conversation core', () => {
     const agent: CharacterAgent = {
       reply() {
         return {
-          text: 'line one\nline two'
+          text: '   '
         };
       }
     };

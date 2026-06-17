@@ -1,11 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  createRuntimeLogStore,
-  type ConversationLogRecordInput,
-  type RawEventLogRecordInput,
-  type RuntimeTraceEntryInput
-} from '../src/index.ts';
+  runtimePluginContractVersion,
+  createRuntimePluginTurnEvidenceSnapshot
+} from '../src/plugins/types.ts';
+import {
+  createRuntimeLogStore
+} from '../src/runtime/log.ts';
+import type {
+  ConversationLogRecordInput,
+  RawEventLogRecordInput,
+  RuntimeTraceEntryInput
+} from '../src/runtime/log.ts';
+import type {
+  RuntimePluginTurnEvidenceSnapshot
+} from '../src/plugins/types.ts';
+import type {
+  RuntimeEventIdentity
+} from '../src/runtime/event.ts';
 
 const identity = {
   eventId: 'evt_log_001',
@@ -62,7 +74,8 @@ describe('runtime log store', () => {
       eventType: 'USER_MESSAGE',
       status: 'completed',
       visibleMessageIds,
-      payloadSummary
+      payloadSummary,
+      runtimePluginTurnEvidence: createMinimalPluginTurnEvidence(identity)
     };
 
     const receivedRecord = store.appendRawEvent(received);
@@ -77,6 +90,21 @@ describe('runtime log store', () => {
       visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
       payloadSummary: {
         normalizedCurrentUserMessage: 'hello'
+      },
+      runtimePluginTurnEvidence: {
+        ...createMinimalPluginTurnEvidence(identity),
+        evidence: [
+          {
+            ...identity,
+            kind: 'runtime_plugin_evidence_snapshot',
+            pluginId: 'memory.fixture',
+            evidenceKind: 'policy',
+            status: 'failed',
+            summary: 'handler token=[redacted]',
+            policyOutcome: 'handler_rejected',
+            redactionLabels: ['secret']
+          }
+        ]
       }
     });
     expect(Object.isFrozen(appended)).toBe(true);
@@ -130,3 +158,28 @@ describe('runtime log store', () => {
     expect(store.conversationMessages()).toEqual([]);
   });
 });
+
+function createMinimalPluginTurnEvidence(
+  eventIdentity: RuntimeEventIdentity
+): RuntimePluginTurnEvidenceSnapshot {
+  return createRuntimePluginTurnEvidenceSnapshot({
+    ...eventIdentity,
+    kind: 'runtime_plugin_turn_evidence_snapshot',
+    contractVersion: runtimePluginContractVersion,
+    plugins: [],
+    contextItems: [],
+    evidence: [
+      {
+        ...eventIdentity,
+        kind: 'runtime_plugin_evidence_snapshot',
+        pluginId: 'memory.fixture',
+        evidenceKind: 'policy',
+        status: 'failed',
+        summary: 'handler token=secret-token',
+        policyOutcome: 'handler_rejected',
+        redactionLabels: ['secret']
+      }
+    ],
+    health: []
+  });
+}

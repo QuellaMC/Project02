@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MVP-006 - Real Model Tools And Character State Patch</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 1080px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    h3 { margin-top: 22px; font-size: 1rem; }
+    p { margin: 0 0 14px; }
+    a { color: #0f5e5a; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul, ol { padding-left: 22px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    pre { overflow-x: auto; background: #202923; color: #f3f7f1; border-radius: 8px; padding: 16px; }
+    pre code { background: transparent; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; }
+    th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #edf1eb; }
+    blockquote { border-left: 4px solid #b9c6bd; margin: 16px 0; padding: 8px 14px; background: #fff; color: #34413d; }
+    .status { display: inline-block; border: 1px solid #aebbad; border-radius: 999px; padding: 2px 10px; background: #fff; font-size: 0.9rem; }
+    .meta { color: #4a5651; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MVP-006 - Real Model Tools And Character State Patch</h1>
+    <p><span class="status">Status: completed on main</span></p>
+    <p class="meta">
+      Created: 2026-06-10. Updated: 2026-06-12. Completed spec:
+      <code>docs/plan/completed/mvp-006-real-model-tools-character-state-patch.html</code>. Previous slice archived at
+      <code>docs/plan/completed/mvp-005-structured-role-model-user-turn-foundation.html</code>.
+      Suggested implementation branch: <code>feature/mvp-006-provider-tools-state</code>.
+    </p>
+
+    <h2>Implementation Status</h2>
+    <p>
+      CT-01 through CT-05 are integrated in the local working tree. The runtime now accepts the
+      versioned <code>toolCalls</code> decision shape, preserves MVP-005
+      <code>action.visible_reply</code> compatibility parsing, can opt into the NVIDIA-compatible
+      provider with <code>--provider nvidia</code> or
+      <code>PROJECT02_ROLE_MODEL_PROVIDER=nvidia</code>, and keeps deterministic local chat as the
+      default path.
+    </p>
+    <p>
+      Character State owns the current state fields, living-state brief, patch validation,
+      no-op evidence, immutable before/after snapshots, and file-backed
+      <code>character-state.json</code> storage under the existing per-session runtime directory.
+      Inspect reads stored provider, tool-call, and state-patch evidence without replaying model
+      calls or mutating stored state.
+    </p>
+    <p>
+      Automated tests use fake adapters and fake provider clients only. Manual NVIDIA smoke remains
+      opt-in: set <code>NVIDIA_API_KEY</code> and run
+      <code>pnpm chat -- --provider nvidia</code>. No live provider call is required for CI or local
+      acceptance checks.
+    </p>
+    <p>
+      Parallel CT review found and resolved four integration risks before PR handoff: provider error
+      diagnostics now redact echoed API keys, stored <code>livingStateBrief</code> text fails closed
+      if it does not match state, public durable log reads compare accepted state-patch evidence
+      against <code>character-state.json</code>, and trace summaries include provider/tool/state
+      status while state writes wait until visible conversation logging succeeds.
+    </p>
+
+    <h2>Source Context</h2>
+    <p>
+      Product direction comes from the Notion project hub
+      <a href="https://www.notion.so/35e8995c0c5e81a8b2bff80957fd22b9">Live Character Framework</a>,
+      especially
+      <a href="https://www.notion.so/35f8995c0c5e81888bc5e024bf99a714">02 - Runtime Architecture</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8119889fd2128f88c3b4">03 - Role Model Loop &amp; Decision Contract</a>,
+      <a href="https://www.notion.so/35f8995c0c5e815a8d06ee90d6ffba17">06 - Character State Engine &amp; Retrieval Management</a>,
+      <a href="https://www.notion.so/35f8995c0c5e8192aec8c301c5269774">08 - Runtime Logging &amp; Trace</a>, and
+      <a href="https://www.notion.so/35f8995c0c5e8175add2fde14f5cdf94">09 - MVP Roadmap &amp; Open Questions</a>.
+    </p>
+    <blockquote>
+      Long-term direction: the model receives a compact DecisionContext, may request scoped
+      capabilities, and the runtime validates, commits, logs, and emits effects.
+    </blockquote>
+    <p>
+      Local rebuild direction comes from <a href="../../AGENTS.md">AGENTS.md</a> and
+      <a href="../../AGENTS.repo.md">AGENTS.repo.md</a>. This slice keeps the rebuilt mainline small
+      and runnable while deliberately adding the first real provider pressure and the first
+      built-in model tool shape.
+    </p>
+
+    <h2>Current Product Before This Slice</h2>
+    <p>
+      MVP-005 gives the repo a structured role-model-shaped local user turn. A local/fake adapter
+      returns a parsed <code>CharacterDecision</code>, the runtime validates the supported
+      <code>visible_reply</code> action, commits visible conversation records, and stores role-model
+      input/output, parsed decision, and commit evidence in the existing durable local logs.
+    </p>
+    <pre><code>terminal input
+  -> create USER_MESSAGE RuntimeEvent
+  -> build DecisionContext from session, static character profile, recent visible messages, runtime notes
+  -> local fake role-model adapter returns {"action":{"type":"visible_reply","text":"..."}}
+  -> parse CharacterDecision
+  -> validate visible_reply
+  -> commit visible conversation and role-model evidence
+  -> chat CLI prints Mira's reply</code></pre>
+    <p>
+      The limitation is now practical, not just architectural. The runtime still has no real model
+      provider path, no provider prompt pressure, no model-facing tool registry, no optional model
+      capability calls, and no durable current character state. Mira can keep visible conversation
+      continuity, but she cannot persist a compact current state such as attention, mood, activity,
+      or social stance unless a future subsystem invents its own path.
+    </p>
+
+    <h2>Product After This Slice</h2>
+    <p>
+      Local chat should be able to run with either the existing deterministic local adapter or an
+      env-gated NVIDIA-compatible chat-completions provider. The model-facing contract should move
+      from one hard-coded action to a small built-in tool system. The first tools are
+      <code>visible_reply</code> and <code>character_state.patch</code>. The model may request a
+      visible reply and may optionally request a character-state patch; the runtime still validates
+      and commits everything.
+    </p>
+    <pre><code>terminal input
+  -> create USER_MESSAGE RuntimeEvent
+  -> load CharacterRuntimeState
+  -> build DecisionContext with recent visible messages and livingStateBrief
+  -> render provider prompt with built-in tool schemas
+  -> local adapter or NVIDIA provider returns toolCalls JSON
+  -> parse and validate requested tool calls
+  -> route character_state.patch validation to Character State
+  -> validate all requested tool calls before intended mutation
+  -> commit visible reply, accepted state patch, and evidence without intentional partial commits
+  -> inspect shows provider, tool-call, state before/after, and rejection evidence</code></pre>
+    <p>
+      This is the first real-world pressure test for the role-model foundation. It should expose
+      malformed JSON, provider errors, unsupported tool calls, state-patch mistakes, and prompt
+      contract gaps while keeping the default local path deterministic and testable.
+    </p>
+
+    <h2>Goal</h2>
+    <p>
+      Add a minimal built-in model tool system, an env-gated NVIDIA role-model provider adapter, and
+      a Character State module that owns state schema, brief creation, patch validation, and patch
+      application. The runtime should accept model-requested <code>visible_reply</code> and optional
+      <code>character_state.patch</code> tool calls only after validation, then commit visible
+      conversation, state updates, and evidence through the existing runtime/log boundaries.
+    </p>
+
+    <h2>Core Design</h2>
+    <p>
+      The tool system is plugin-like in organization but built in for this slice. It does not load
+      external plugins, execute arbitrary code, or expose direct mutation APIs to the model.
+    </p>
+    <pre><code>Model-facing tool registry
+  -> describes allowed tools and input schemas for the current call
+  -> parses requested tool calls from model output
+  -> rejects unknown, duplicate, missing, or disallowed tool calls
+
+Character State module
+  -> owns CharacterRuntimeState, living-state brief, state-patch validation, patch application
+  -> does not call the model and does not own visible replies
+
+Runtime commit path
+  -> asks tool handlers to validate and plan effects
+  -> commits accepted visible reply and state patch after validation
+  -> logs before/after state, requested tool calls, accepted plans, and rejection reasons</code></pre>
+    <p>
+      From the model's perspective, <code>character_state.patch</code> is an optional tool. From the
+      runtime's perspective, it is a proposed durable mutation that must be validated and committed
+      by runtime-owned code. Both descriptions refer to the same object at different boundaries.
+    </p>
+
+    <h2>Current Scope</h2>
+    <ul>
+      <li>A built-in model tool registry for the user-turn role-model path.</li>
+      <li>Model-safe built-in JSON contract descriptions for <code>visible_reply</code> and <code>character_state.patch</code>, derived from local TypeScript validators rather than a general schema framework.</li>
+      <li>A versioned <code>CharacterDecision</code> shape based on ordered <code>toolCalls</code>.</li>
+      <li>Compatibility parsing for the existing MVP-005 <code>action.type = "visible_reply"</code> shape while the runtime migrates to tool calls.</li>
+      <li>A minimal Character State module with <code>CharacterRuntimeState</code>, <code>LivingStateCurrent</code>, <code>LivingStateBrief</code>, patch validation, patch application, and immutable snapshots.</li>
+      <li>A deliberately small state shape: <code>mood</code>, <code>energy</code>, <code>attention</code>, <code>currentActivity</code>, and <code>socialOrientation</code>, with tight enums and no history arrays.</li>
+      <li>In-memory and file-backed state storage integrated with the existing per-session local storage layout, without creating a second session root.</li>
+      <li>DecisionContext extension so the model sees <code>livingStateBrief</code> in addition to recent visible messages.</li>
+      <li>An NVIDIA chat-completions role-model provider adapter selected by CLI flag or environment default and authenticated only through environment variables.</li>
+      <li>Provider request rendering that instructs the model to return one JSON object with supported tool calls, not prose or markdown.</li>
+      <li>Provider response parsing, provider error mapping, timeout handling if needed, and raw provider evidence stored in existing role-model evidence snapshots.</li>
+      <li>Runtime validation before intended mutation for accepted <code>visible_reply</code> plus optional <code>character_state.patch</code>, without building a general cross-file transaction framework.</li>
+      <li>Inspect output for allowed tools, requested tool calls, provider metadata, state before/after, accepted state patch, and rejection evidence.</li>
+      <li>Default local chat, trace mode, durable sessions, inspect, and relay compatibility preserved.</li>
+    </ul>
+
+    <h2>Explicit Non-Goals</h2>
+    <ul>
+      <li>No committed API keys, tokens, provider secrets, or sample bearer tokens.</li>
+      <li>No live provider calls in automated tests; tests use fake adapters or injected fetch clients.</li>
+      <li>No streaming provider UX in this slice. The first provider path uses a complete non-streaming response for deterministic parsing.</li>
+      <li>No OpenAI, Anthropic, local LLM, or multi-provider abstraction beyond the one NVIDIA-compatible adapter and a narrow adapter interface.</li>
+      <li>No external plugin loading, package-based plugin API, dynamic tool discovery, or user-installed tool system.</li>
+      <li>No external side-effect tools, documents, calendars, accounts, web search, file actions, money, messages, or permission matrix.</li>
+      <li>No retrieval index, embeddings, memory search, exact source expansion, summaries, or <code>context.retrieve(query)</code>.</li>
+      <li>No scheduler, scheduled directive store, timers, reminders, due events, background worker, or proactive delivery.</li>
+      <li>No life incidents, virtual body drift, need thresholds, Live2D semantic status, asset registry, or renderer integration.</li>
+      <li>No full Runtime Kernel, Character State Engine, Role Model Loop, or Commit and Effects Engine restoration from <code>legacy/typescript</code>.</li>
+      <li>No public API break for MVP-001 relay, MVP-002 conversation core, MVP-003 trace mode, MVP-004 durable sessions, or MVP-005 role-model evidence unless this draft is explicitly revised.</li>
+    </ul>
+
+    <h2>Finished Slice</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Before MVP-006</th>
+          <th>After MVP-006</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>The role-model path only accepts a hard-coded <code>visible_reply</code> action.</td>
+          <td>The role-model path accepts a versioned ordered <code>toolCalls</code> decision with built-in <code>visible_reply</code> and <code>character_state.patch</code> tools.</td>
+        </tr>
+        <tr>
+          <td>The model adapter is deterministic local code.</td>
+          <td>The runtime can still use deterministic local code, but can also call the configured NVIDIA provider for manual/live testing.</td>
+        </tr>
+        <tr>
+          <td>DecisionContext includes a static character profile and recent visible messages.</td>
+          <td>DecisionContext also includes a compact <code>livingStateBrief</code> loaded from durable current character state.</td>
+        </tr>
+        <tr>
+          <td>Mira has no durable current state beyond visible transcript and runtime evidence.</td>
+          <td>Mira has a minimal durable current state with validated before/after patches.</td>
+        </tr>
+        <tr>
+          <td>Unsupported model effects are rejected as generic unsupported output.</td>
+          <td>Unknown, disallowed, duplicate, malformed, or semantically invalid tool calls are rejected with tool-specific reasons.</td>
+        </tr>
+        <tr>
+          <td>Inspect shows role-model input/output, parsed decision, visible reply, and commit validation.</td>
+          <td>Inspect also shows allowed tools, requested tool calls, provider metadata, and state patch before/after evidence.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Functional Requirements</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Requirement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>FR-1</td>
+          <td>The repo defines shared built-in model tool contracts for tool definition metadata, allowed tool lists, tool-call input, parsed tool-call results, and tool rejection reasons.</td>
+        </tr>
+        <tr>
+          <td>FR-2</td>
+          <td>The role-model input envelope renders simple built-in JSON contract descriptions for <code>visible_reply</code> and <code>character_state.patch</code>, and the model sees only tools allowed for the current call type.</td>
+        </tr>
+        <tr>
+          <td>FR-3</td>
+          <td>The parsed CharacterDecision supports ordered <code>toolCalls</code> and preserves compatibility with the existing single <code>visible_reply</code> action shape during migration.</td>
+        </tr>
+        <tr>
+          <td>FR-4</td>
+          <td>The runtime rejects unknown, malformed, disallowed, duplicate, missing-required, or invalid tool calls before appending visible conversation messages or state changes.</td>
+        </tr>
+        <tr>
+          <td>FR-5</td>
+          <td><code>visible_reply</code> remains the required visible user-turn tool and preserves existing one-line reply validation semantics.</td>
+        </tr>
+        <tr>
+          <td>FR-6</td>
+          <td><code>character_state.patch</code> is optional for user turns, model-facing, and routed to Character State for validation and patch planning; it never mutates state from the role-model loop. Valid no-op patches are accepted and logged with no applied changes.</td>
+        </tr>
+        <tr>
+          <td>FR-7</td>
+          <td>Character State owns <code>CharacterRuntimeState</code>, <code>LivingStateCurrent</code>, <code>LivingStateBrief</code>, default state creation, state loading, patch validation, and patch application.</td>
+        </tr>
+        <tr>
+          <td>FR-8</td>
+          <td>The local runtime loads current state before building DecisionContext and stores immutable state before/after snapshots for accepted state patches.</td>
+        </tr>
+        <tr>
+          <td>FR-9</td>
+          <td>The provider adapter calls the NVIDIA chat-completions endpoint only when selected by CLI flag or environment default and only with an API key read from an environment variable such as <code>NVIDIA_API_KEY</code>.</td>
+        </tr>
+        <tr>
+          <td>FR-10</td>
+          <td>The provider adapter records provider name, model name, request summary, response status, raw output text, and provider error details as role-model evidence without logging secrets.</td>
+        </tr>
+        <tr>
+          <td>FR-11</td>
+          <td>Accepted user turns validate all model output before intended mutation, then commit visible conversation records, role-model evidence, tool-call evidence, and accepted state patch evidence through the existing local runtime/log storage without a new general transaction layer.</td>
+        </tr>
+        <tr>
+          <td>FR-12</td>
+          <td>Rejected provider output, malformed tool calls, invalid visible replies, or invalid state patches persist rejection evidence and do not append fake visible conversation messages or intentional partial state changes.</td>
+        </tr>
+        <tr>
+          <td>FR-13</td>
+          <td>The chat CLI can select the provider explicitly, can report missing provider config clearly, and keeps the deterministic local adapter as the default testable path.</td>
+        </tr>
+        <tr>
+          <td>FR-14</td>
+          <td>The inspect CLI shows provider/tool/state evidence for stored turns without re-calling providers, repairing storage, or mutating runtime state.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Acceptance Criteria</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Criterion</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>AC-1</td>
+          <td>Focused contract tests prove the built-in registry exposes exactly the allowed model tools for a user turn and rejects unsupported tool names.</td>
+        </tr>
+        <tr>
+          <td>AC-2</td>
+          <td>A valid tool-call decision containing <code>visible_reply</code> only produces the same visible conversation behavior as MVP-005.</td>
+        </tr>
+        <tr>
+          <td>AC-3</td>
+          <td>A valid tool-call decision containing <code>visible_reply</code> and a changing <code>character_state.patch</code> commits the visible reply and state change after all model output is validated.</td>
+        </tr>
+        <tr>
+          <td>AC-4</td>
+          <td>A valid no-op <code>character_state.patch</code> is accepted, commits the visible reply, and logs <code>appliedChanges: []</code> or equivalent no-op evidence.</td>
+        </tr>
+        <tr>
+          <td>AC-5</td>
+          <td>Invalid state patches, malformed tool calls, duplicate state patches, missing visible replies, and provider prose instead of JSON are rejected with durable evidence and no intentional partial commits.</td>
+        </tr>
+        <tr>
+          <td>AC-6</td>
+          <td>DecisionContext tests prove <code>livingStateBrief</code> is loaded from current state, immutable, compact, and does not duplicate the current user message.</td>
+        </tr>
+        <tr>
+          <td>AC-7</td>
+          <td>File-backed state tests prove current state survives process restart, malformed state records fail closed, and state uses the existing session storage root.</td>
+        </tr>
+        <tr>
+          <td>AC-8</td>
+          <td>Provider adapter tests use an injected fake fetch/client to prove request shape, non-streaming response parsing, provider error mapping, missing-key errors, and secret redaction.</td>
+        </tr>
+        <tr>
+          <td>AC-9</td>
+          <td>A manual live smoke path can run with <code>NVIDIA_API_KEY</code> set and provider selection enabled by <code>--provider nvidia</code> or <code>PROJECT02_ROLE_MODEL_PROVIDER=nvidia</code>, while automated checks skip live provider calls by default.</td>
+        </tr>
+        <tr>
+          <td>AC-10</td>
+          <td><code>pnpm inspect -- --store &lt;path&gt; --session &lt;session-id&gt;</code> can show allowed tools, requested tool calls, provider metadata, state before/after, and rejection reasons.</td>
+        </tr>
+        <tr>
+          <td>AC-11</td>
+          <td>Default <code>pnpm chat</code>, <code>pnpm chat -- --trace</code>, durable session flags, <code>pnpm inspect</code>, <code>pnpm relay</code>, and MVP-005 compatibility tests still pass.</td>
+        </tr>
+        <tr>
+          <td>AC-12</td>
+          <td><code>pnpm lint</code>, <code>pnpm typecheck</code>, <code>pnpm test</code>, strict unused-symbol TypeScript, whitespace checks, and HTML sanity checks pass.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Parallel Child Tasks</h2>
+    <p>
+      This slice is intentionally shaped for five large, independently owned subthreads. CT-01
+      should freeze the shared model-tool contract before other threads depend deeply on tool-call
+      shapes. CT-02 and CT-03 can proceed in parallel after the tool boundary is clear because the
+      provider adapter only returns raw model output while Character State owns state semantics.
+      CT-04 integrates the accepted contracts into runtime commit behavior, and CT-05 owns CLI,
+      inspect, docs, live smoke, and integration review.
+    </p>
+    <ul>
+      <li><a href="child-tasks/mvp-006-ct01-built-in-model-tool-registry.md">CT-01 - Built-In Model Tool Registry</a></li>
+      <li><a href="child-tasks/mvp-006-ct02-nvidia-provider-adapter.md">CT-02 - NVIDIA Provider Adapter</a></li>
+      <li><a href="child-tasks/mvp-006-ct03-character-state-core.md">CT-03 - Character State Core</a></li>
+      <li><a href="child-tasks/mvp-006-ct04-runtime-commit-integration.md">CT-04 - Runtime Commit Integration</a></li>
+      <li><a href="child-tasks/mvp-006-ct05-cli-inspect-docs-review.md">CT-05 - CLI, Inspect, Docs, And Review</a></li>
+    </ul>
+
+    <h2>Coordination Notes</h2>
+    <ul>
+      <li>CT-01 owns the generic tool-call envelope, tool names, cardinality rules, parsing, compatibility conversion, and rejection taxonomy.</li>
+      <li>CT-02 owns provider HTTP mapping, env config loading, injected adapter/client creation, fake-client tests, and provider errors. CT-02 does not own final chat CLI flag parsing.</li>
+      <li>CT-03 owns <code>character_state.patch</code> input semantics, state field enums, default state, the single state store API/path, patch validation, patch application, and no-op patch evidence.</li>
+      <li>CT-04 owns runtime orchestration and calls CT-03 APIs. It must not revalidate state enums or create a second state validator.</li>
+      <li>CT-05 owns public CLI flags, env-vs-CLI precedence documentation, inspect formatting, docs, live smoke instructions, and final integration review.</li>
+    </ul>
+
+    <h2>Implementation Boundaries</h2>
+    <ul>
+      <li>A new model-tool module owns built-in tool metadata, allowed-tool filtering, tool-call parsing, compatibility conversion, and generic tool rejection reasons.</li>
+      <li>The visible reply tool should wrap existing reply validation and commit behavior instead of copying one-line reply validation or visible message allocation.</li>
+      <li>The Character State module owns state types, defaults, brief projection, patch validation, and patch application. Other modules should not duplicate state enum validation or state merge rules.</li>
+      <li>The character-state tool is a thin built-in adapter that exposes model-safe schema and routes validation/planning into Character State.</li>
+      <li>The NVIDIA provider adapter owns HTTP request/response mapping only. It should not know how to commit visible replies or apply character state.</li>
+      <li>The Role Model Loop owns prompt/envelope rendering, provider/local adapter invocation, raw output capture, and parsed decision snapshots.</li>
+      <li>The commit path owns validation-before-mutation ordering, fail-closed rejection evidence, and commit orchestration for visible conversation plus accepted state patches. It should not build a broad cross-file transaction framework for this slice.</li>
+      <li>The existing local storage, file runtime log store, and session store remain the only durable local storage layout for this slice.</li>
+      <li><code>src/chat-cli.ts</code> owns terminal UX, provider selection flags, session flags, trace output, and clear error messages.</li>
+      <li><code>src/inspect-cli.ts</code> owns read-only debug output and must not mutate runtime state or call providers.</li>
+      <li>The relay command remains the MVP-001 smoke path and should not move into the model-tool path in this slice.</li>
+    </ul>
+
+    <h2>Minimal User Experience</h2>
+    <ul>
+      <li><code>pnpm chat</code> should still work locally without an API key.</li>
+      <li>A provider-selected chat path should fail clearly when <code>NVIDIA_API_KEY</code> is missing.</li>
+      <li>A provider-selected chat path should call the configured model when <code>--provider nvidia</code> is passed or <code>PROJECT02_ROLE_MODEL_PROVIDER=nvidia</code> is set. The CLI flag wins over the environment default.</li>
+      <li>Accepted turns should print Mira's visible reply and may update Mira's current living state when the model requests <code>character_state.patch</code>.</li>
+      <li>Valid no-op state patches should be accepted and visible in inspect as no-op evidence.</li>
+      <li>Rejected provider output or invalid state patches should report a clear runtime error and must not append fake visible messages or intentional partial state changes.</li>
+      <li><code>pnpm chat -- --trace</code> should keep JSON Lines trace summaries on <code>stderr</code> and may include provider/tool/state commit status when useful.</li>
+      <li><code>pnpm inspect -- --store &lt;path&gt; --session &lt;session-id&gt;</code> should expose provider, tool-call, and state evidence without replaying or mutating a turn.</li>
+    </ul>
+
+    <h2>Test Plan</h2>
+    <ul>
+      <li>Model-tool contract tests for tool definitions, allowed-tool filtering, tool-call parsing, compatibility conversion, rejection reasons, immutability, and unsupported fields.</li>
+      <li>Character State tests for default state, living-state brief creation, patch validation, patch application, no-op patch evidence, immutable before/after snapshots, and invalid enum/value rejection.</li>
+      <li>Provider adapter tests with fake clients for request shape, response parsing, missing config, HTTP/provider errors, timeout behavior if implemented, non-streaming mode, and secret redaction.</li>
+      <li>Context-builder tests proving current state is loaded into <code>livingStateBrief</code>, recent visible messages still behave as before, and the current user message stays only in the top-level event.</li>
+      <li>Runtime commit tests for visible reply only, visible reply plus changing state patch, visible reply plus no-op state patch, malformed provider output, duplicate/unknown/disallowed tool calls, invalid state patches, and no intentional partial commits.</li>
+      <li>File-storage tests for state persistence, state/raw-event consistency, corrupt state failure modes, and process-restart inspect behavior.</li>
+      <li>CLI tests for default local chat, provider selection, missing API key errors, trace mode, inspect output, durable session flags, and relay compatibility.</li>
+      <li>A manual live smoke command documented but not required for automated checks unless <code>NVIDIA_API_KEY</code> is explicitly present.</li>
+      <li>Docs and HTML sanity checks for active slice, child task packets, completed MVP-005 archive, and dated journal updates.</li>
+    </ul>
+
+    <h2>Review Decisions Requested</h2>
+    <ul>
+      <li>Slice status: this draft proposes adding the first real model provider and the first built-in model tool system before retrieval, scheduling, external tools, Live2D, or provider webhooks.</li>
+      <li>Provider scope: this draft proposes one NVIDIA-compatible provider path selected by CLI flag or environment default, non-streaming first, with fake-client tests and a manual live smoke path. CLI flags take precedence over environment defaults.</li>
+      <li>Tool-system scope: this draft proposes built-in model tools only. It does not propose external plugins, arbitrary tool execution, dynamic loading, or a permission matrix.</li>
+      <li>State ownership: this draft proposes that Character State owns all state logic; <code>character_state.patch</code> is only the model-facing built-in tool adapter.</li>
+      <li>Commit semantics: this draft proposes validation-before-mutation user-turn commits. If any required tool call or optional state patch is invalid, the turn rejects without intentional partial visible or state commits. Valid no-op state patches are accepted with explicit no-op evidence.</li>
+      <li>Secret handling: this draft treats any pasted provider key as exposed and requires environment variables only, with no committed secrets or docs that contain private tokens.</li>
+      <li>Compatibility: this draft preserves the local fake adapter as default and supports old MVP-005 visible-reply decision shape during migration.</li>
+    </ul>
+
+    <h2>Future Pressure</h2>
+    <p>
+      Once a real provider, built-in model tool registry, and Character State patch path are working,
+      later slices can add streaming provider UX, retrieval as <code>context.retrieve(query)</code>,
+      external productivity tools, scheduled directives, incident lifecycle, virtual body, Live2D
+      semantic status, provider webhooks, replay, or a real plugin mechanism. Those later slices
+      should register capabilities through the built-in model-tool boundary rather than inventing
+      separate model-output contracts.
+    </p>
+  </main>
+</body>
+</html>

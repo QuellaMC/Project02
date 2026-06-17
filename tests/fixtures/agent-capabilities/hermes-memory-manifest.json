@@ -1,0 +1,62 @@
+{
+  "id": "hermes.memory_tencentdb.fixture",
+  "displayName": "Hermes memory provider fixture",
+  "version": "1.0.0-fixture",
+  "kind": "memory_provider",
+  "description": "Normalized Hermes memory provider fixture for MVP-007 contract validation.",
+  "contractVersion": "mvp-007.runtime_plugin.v1",
+  "compatibility": {
+    "hostContractVersions": ["mvp-007.runtime_plugin.v1"],
+    "sourceSystem": "hermes",
+    "sourceVersion": "memory_tencentdb",
+    "externalContract": "hermes-memory-provider",
+    "notes": ["prefetch, sync, search, session end, health, circuit breaker metadata"]
+  },
+  "declaredCapabilities": [
+    "context_provider",
+    "before_role_model_call",
+    "tool_provider",
+    "handle_tool_call",
+    "after_turn_committed",
+    "on_session_end",
+    "health"
+  ],
+  "config": {
+    "fingerprint": "fixture-redacted-hermes-config",
+    "fields": [
+      {
+        "name": "gateway_cmd",
+        "description": "Command used by Hermes to start the gateway.",
+        "required": false,
+        "secret": false,
+        "redactionLabels": []
+      },
+      {
+        "name": "llm_api_key",
+        "description": "LLM API key used by the memory gateway.",
+        "required": false,
+        "secret": true,
+        "redactionLabels": ["secret"]
+      }
+    ]
+  },
+  "localTrustLevel": "test_fixture",
+  "runtimePolicy": {
+    "requiredForTurn": false,
+    "sideEffectLevel": "local_memory_write",
+    "confirmation": "not_required",
+    "timeoutMs": 2000,
+    "sourceReferencesRequired": true,
+    "redactionLabels": ["secret"],
+    "failureBehavior": {
+      "beforeRoleModelCall": "degrade",
+      "handleToolCall": "degrade",
+      "afterTurnCommitted": "log_failure",
+      "health": "degrade"
+    }
+  },
+  "activation": {
+    "defaultEnabled": false,
+    "reasons": ["fixture_only"]
+  }
+}
