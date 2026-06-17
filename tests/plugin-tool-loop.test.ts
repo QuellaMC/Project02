@@ -101,7 +101,8 @@ describe('plugin-driven tool loop', () => {
       'tool_call_finished'
     ]);
     expect(toolEvents[0]).toMatchObject({
-      toolCallId: 'evt_plugin_patch.round-1.1.character_state.patch',
+      toolCallId:
+        'evt_plugin_patch.trace_evt_plugin_patch.round-1.1.character_state.patch',
       toolName: 'character_state.patch',
       toolPluginId: 'character-state',
       toolInput: {
@@ -109,7 +110,8 @@ describe('plugin-driven tool loop', () => {
       }
     });
     expect(toolEvents[1]).toMatchObject({
-      toolCallId: 'evt_plugin_patch.round-1.1.character_state.patch',
+      toolCallId:
+        'evt_plugin_patch.trace_evt_plugin_patch.round-1.1.character_state.patch',
       toolName: 'character_state.patch',
       toolPluginId: 'character-state',
       toolResult: {
@@ -123,7 +125,9 @@ describe('plugin-driven tool loop', () => {
 
     expect(terminalEvent).toMatchObject({
       kind: 'runtime_turn_completed',
-      toolCallIds: ['evt_plugin_patch.round-1.1.character_state.patch']
+      toolCallIds: [
+        'evt_plugin_patch.trace_evt_plugin_patch.round-1.1.character_state.patch'
+      ]
     });
     const observations =
       terminalEvent?.roleModelIOSnapshot?.inputEnvelope.toolObservations ?? [];
@@ -191,7 +195,8 @@ describe('plugin-driven tool loop', () => {
     }
 
     expect(toolStartEvent).toMatchObject({
-      toolCallId: 'evt_tool_round_evidence.round-1.1.character_state.patch',
+      toolCallId:
+        'evt_tool_round_evidence.trace_evt_tool_round_evidence.round-1.1.character_state.patch',
       toolRound: 1,
       roleModelIOSnapshot: {
         inputEnvelope: {
@@ -281,8 +286,8 @@ describe('plugin-driven tool loop', () => {
       .map((event) => event.toolCallId);
 
     expect(toolStartIds).toEqual([
-      'evt_repeated_tool_first.round-1.1.character_state.patch',
-      'evt_repeated_tool_second.round-1.1.character_state.patch'
+      'evt_repeated_tool_first.trace_evt_repeated_tool_first.round-1.1.character_state.patch',
+      'evt_repeated_tool_second.trace_evt_repeated_tool_second.round-1.1.character_state.patch'
     ]);
   });
 
@@ -1629,7 +1634,7 @@ describe('plugin-driven tool loop', () => {
       expect(event).toMatchObject({
         reason: roleModelInvalidVisibleReplyRejectionReason,
         toolCallIds: [
-          'evt_invalid_later_interim_visible.round-1.1.character_state.patch'
+          'evt_invalid_later_interim_visible.trace_evt_invalid_later_interim_visible.round-1.1.character_state.patch'
         ]
       });
       expect(event.runtimePluginEvidence).toEqual(

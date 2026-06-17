@@ -242,6 +242,55 @@ describe('runtime plugin file store', () => {
     expect(legacyDurable.revision()).toBe(1);
   });
 
+  it('rejects JSON reads on paths that already store JSONL', () => {
+    const stores = [
+      createRuntimePluginFileStore({
+        sessionId: 'session-mixed-jsonl-json-memory',
+        pluginId: 'plugin.mixed-mode'
+      }),
+      createRuntimePluginFileStore({
+        storeRoot: createTempRoot(),
+        sessionId: 'session-mixed-jsonl-json-durable',
+        pluginId: 'plugin.mixed-mode'
+      })
+    ];
+
+    for (const store of stores) {
+      store.appendJsonl('events.jsonl', { value: 'jsonl' });
+
+      expect(() => {
+        store.readJson('events.jsonl');
+      }).toThrow(/stores JSONL/iu);
+      expect(store.readJsonl('events.jsonl')).toEqual([
+        { value: 'jsonl' }
+      ]);
+      expect(store.revision()).toBe(1);
+    }
+
+    const storeRoot = createTempRoot();
+    const firstDurable = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: 'session-mixed-jsonl-json-reopened',
+      pluginId: 'plugin.mixed-mode-reopened'
+    });
+
+    firstDurable.appendJsonl('events.jsonl', { value: 'jsonl' });
+
+    const secondDurable = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: 'session-mixed-jsonl-json-reopened',
+      pluginId: 'plugin.mixed-mode-reopened'
+    });
+
+    expect(() => {
+      secondDurable.readJson('events.jsonl');
+    }).toThrow(/stores JSONL/iu);
+    expect(secondDurable.readJsonl('events.jsonl')).toEqual([
+      { value: 'jsonl' }
+    ]);
+    expect(secondDurable.revision()).toBe(1);
+  });
+
   it('keeps durable JSONL paths appendable across store instances', () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-durable-jsonl-mode';

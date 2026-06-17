@@ -577,6 +577,35 @@ async function runBeforeRoleModelCall(options: {
     });
 
     if (result.status === 'accepted') {
+      if (evidenceRecordsBlockingBeforeRoleModelCall(result.value.evidence)) {
+        const rejectsTurn = beforeRoleModelFailureRejectsTurn(plugin);
+        const message = `Plugin "${plugin.manifest.id}" accepted beforeRoleModelCall result included blocking before-role-model evidence.`;
+        const failureEvidence = createHookFailureEvidence({
+          plugin,
+          context: options.context,
+          evidenceKind: 'before_role_model_call',
+          status: rejectsTurn ? 'rejected' : 'degraded',
+          summary: rejectsTurn
+            ? `Required before-role-model plugin hook rejected the turn: ${message}`
+            : `Optional before-role-model plugin hook degraded: ${message}`,
+          policyOutcome: rejectsTurn ? 'required_rejected' : 'optional_degraded'
+        });
+
+        evidence.push(...result.value.evidence, failureEvidence);
+
+        if (rejectsTurn) {
+          return Object.freeze({
+            status: 'rejected',
+            reason: runtimePluginBeforeRoleModelCallRejectionReason,
+            pluginId: plugin.manifest.id,
+            message,
+            evidence: Object.freeze([...evidence])
+          } satisfies RuntimePluginBeforeRoleModelCallHostResult);
+        }
+
+        continue;
+      }
+
       for (const contextItem of result.value.contextItems) {
         contextItems.push({
           plugin,
@@ -882,6 +911,18 @@ function evidenceRecordsToolInvocationDegrade(
   );
 }
 
+function evidenceRecordsBlockingBeforeRoleModelCall(
+  evidence: readonly RuntimePluginEvidenceSnapshot[]
+): boolean {
+  return evidence.some(
+    (item) =>
+      item.evidenceKind === 'before_role_model_call' &&
+      (item.status === 'rejected' ||
+        item.status === 'failed' ||
+        item.policyOutcome === 'required_rejected')
+  );
+}
+
 function evidenceRecordsBlockingToolInvocation(
   evidence: readonly RuntimePluginEvidenceSnapshot[]
 ): boolean {
@@ -1043,6 +1084,12 @@ function normalizeToolCallResult(options: {
 
     if (typeof reason !== 'string' || typeof message !== 'string') {
       throw new TypeError('Plugin rejected tool result must include reason and message.');
+    }
+
+    if (reason.trim().length === 0 || message.trim().length === 0) {
+      throw new TypeError(
+        'Plugin rejected tool result reason and message must be non-empty.'
+      );
     }
 
     const redactedMessage = redactRuntimePluginText(message);

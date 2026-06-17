@@ -90,7 +90,8 @@ describe('role-model loop plugin tool routing', () => {
     expect(handledCalls).toBe(1);
     expect(result.pluginToolResults).toHaveLength(1);
     expect(result.pluginToolResults[0]).toMatchObject({
-      callId: 'evt_rejected_plugin_tool.round-1.1.memory.search',
+      callId:
+        'evt_rejected_plugin_tool.trace_evt_rejected_plugin_tool.round-1.1.memory.search',
       call: {
         pluginId: 'memory.search.fixture',
         toolName: 'memory.search'
@@ -102,6 +103,69 @@ describe('role-model loop plugin tool routing', () => {
     });
     expect(result.rounds).toHaveLength(2);
     expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
+  });
+
+  it('scopes plugin tool call IDs by trace identity when eventId is reused', async () => {
+    async function runWithTrace(traceId: string): Promise<string | undefined> {
+      const adapter = createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'memory.search',
+              input: {
+                query: 'Mira'
+              }
+            }
+          ]
+        },
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'memory checked'
+              }
+            }
+          ]
+        }
+      ], () => undefined);
+      const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+        handleToolCall() {
+          return createAcceptedToolCallResult();
+        }
+      });
+
+      const result = await runRoleModelLoop({
+        event: createTestEvent(
+          'search memory',
+          'evt_replayed_tool_call',
+          traceId
+        ),
+        decisionContext: createTestDecisionContext(),
+        adapter,
+        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolHost,
+        runtimePluginContext: createTestPluginContext(
+          'evt_replayed_tool_call',
+          traceId
+        )
+      });
+
+      expect(result.status).toBe('accepted');
+
+      return result.pluginToolResults[0]?.callId;
+    }
+
+    const firstCallId = await runWithTrace('trace_retry_first');
+    const secondCallId = await runWithTrace('trace_retry_second');
+
+    expect(firstCallId).toBe(
+      'evt_replayed_tool_call.trace_retry_first.round-1.1.memory.search'
+    );
+    expect(secondCallId).toBe(
+      'evt_replayed_tool_call.trace_retry_second.round-1.1.memory.search'
+    );
+    expect(firstCallId).not.toBe(secondCallId);
   });
 
   it('requires a successful required plugin tool result before final output', async () => {
@@ -480,7 +544,7 @@ describe('role-model loop plugin tool routing', () => {
       expect(handledCalls).toBe(1);
       expect(result.pluginToolResults).toHaveLength(1);
       expect(result.pluginToolResults[0]).toMatchObject({
-        callId: `${eventId}.round-1.1.memory.search`,
+        callId: `${eventId}.trace_${eventId}.round-1.1.memory.search`,
         result: {
           status: 'rejected',
           reason: 'invalid_tool_output',
@@ -896,6 +960,42 @@ describe('role-model loop plugin tool routing', () => {
     ).toBe(true);
   });
 
+  it('redacts adapter-supplied provider endpoints before IO snapshots expose them', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_provider_endpoint_redaction'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createProviderMetadataAdapter(
+        Object.freeze({
+          provider: 'local',
+          request: Object.freeze({
+            endpoint:
+              'https://user:pass@example.test/chat?keep=ok&token=super-secret',
+            messageCount: 1,
+            stream: false
+          })
+        } satisfies RoleModelProviderMetadata)
+      )
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(result.ioSnapshot.providerMetadata).toMatchObject({
+      provider: 'local',
+      request: {
+        endpoint:
+          'https://[redacted]@example.test/chat?keep=ok&token=[redacted]',
+        messageCount: 1,
+        stream: false
+      }
+    });
+
+    const serializedProviderMetadata = JSON.stringify(
+      result.ioSnapshot.providerMetadata
+    );
+
+    expect(serializedProviderMetadata).not.toContain('user:pass');
+    expect(serializedProviderMetadata).not.toContain('super-secret');
+  });
+
   it('rejects non-finite provider request metadata before snapshots can serialize it', async () => {
     const result = await runRoleModelLoop({
       event: createTestEvent('hello', 'evt_non_finite_provider_request'),
@@ -1193,11 +1293,14 @@ function createTestDecisionContext() {
   });
 }
 
-function createTestPluginContext(eventId: string): RuntimePluginContext {
+function createTestPluginContext(
+  eventId: string,
+  traceId = `trace_${eventId}`
+): RuntimePluginContext {
   return createRuntimePluginContext({
     ...createRuntimeEventIdentity({
       eventId,
-      traceId: `trace_${eventId}`,
+      traceId,
       createdAt: '2026-06-15T00:00:00.000Z'
     }),
     sessionId: 'session-loop',
@@ -1210,12 +1313,16 @@ function createTestPluginContext(eventId: string): RuntimePluginContext {
   });
 }
 
-function createTestEvent(message: string, eventId: string) {
+function createTestEvent(
+  message: string,
+  eventId: string,
+  traceId = `trace_${eventId}`
+) {
   return createUserMessageRuntimeEvent(
     message,
     createRuntimeEventIdentity({
       eventId,
-      traceId: `trace_${eventId}`,
+      traceId,
       createdAt: '2026-06-15T00:00:00.000Z'
     })
   );

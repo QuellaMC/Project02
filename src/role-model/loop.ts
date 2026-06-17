@@ -689,6 +689,7 @@ async function routeExecutableToolCalls(options: {
     });
     const callId = createToolCallId({
       eventId: options.identity.eventId,
+      traceId: options.identity.traceId,
       index,
       round: options.round,
       toolName: toolCall.name
@@ -932,9 +933,10 @@ function createToolCallId(options: {
   readonly eventId: string;
   readonly index: number;
   readonly round: number;
+  readonly traceId: string;
   readonly toolName: string;
 }): string {
-  return `${options.eventId}.round-${String(options.round)}.${String(options.index + 1)}.${options.toolName}`;
+  return `${options.eventId}.${options.traceId}.round-${String(options.round)}.${String(options.index + 1)}.${options.toolName}`;
 }
 
 function freezeRuntimePluginToolCallResult(
@@ -1395,7 +1397,9 @@ function optionalProviderRequestMetadata(
   return Object.freeze({
     status: 'accepted',
     request: Object.freeze({
-      ...(typeof endpoint === 'string' ? { endpoint } : {}),
+      ...(typeof endpoint === 'string'
+        ? { endpoint: redactRuntimePluginText(endpoint) }
+        : {}),
       ...(typeof messageCount === 'number' ? { messageCount } : {}),
       stream: false
     })

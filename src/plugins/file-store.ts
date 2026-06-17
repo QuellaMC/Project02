@@ -57,7 +57,10 @@ export function createRuntimePluginFileStore(
 
   return Object.freeze({
     readJson(path) {
-      const filePath = join(root, normalizeRuntimePluginFileStorePath(path));
+      const safePath = normalizeRuntimePluginFileStorePath(path);
+      const filePath = join(root, safePath);
+
+      assertJsonPathMode(pathModes.get(safePath));
 
       try {
         return freezeRuntimePluginFileStoreJsonValue(
@@ -150,7 +153,10 @@ function createInMemoryRuntimePluginFileStore(
 
   return Object.freeze({
     readJson(path) {
-      const value = state.files.get(normalizeRuntimePluginFileStorePath(path));
+      const safePath = normalizeRuntimePluginFileStorePath(path);
+      const value = state.files.get(safePath);
+
+      assertJsonPathMode(state.pathModes.get(safePath));
 
       return value === undefined
         ? undefined
@@ -428,6 +434,14 @@ function assertJsonlPathMode(
 ): void {
   if (mode === 'json') {
     throw new TypeError('Plugin JSONL path already stores non-array JSON.');
+  }
+}
+
+function assertJsonPathMode(
+  mode: RuntimePluginFileStorePathMode | undefined
+): void {
+  if (mode === 'jsonl') {
+    throw new TypeError('Plugin JSON path already stores JSONL.');
   }
 }
 

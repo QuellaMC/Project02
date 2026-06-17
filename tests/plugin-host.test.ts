@@ -650,6 +650,49 @@ describe('runtime plugin host', () => {
     expect(JSON.stringify(result)).not.toContain('abc');
   });
 
+  it.each([
+    ['empty reason', '', 'search backend failed'],
+    ['empty message', 'handler_rejected', ''],
+    ['blank reason', '   ', 'search backend failed'],
+    ['blank message', 'handler_rejected', '   ']
+  ] as const)(
+    'rejects plugin-returned rejected tool result with %s',
+    async (_caseName, rejectionReason, rejectionMessage) => {
+      const plugin = createRejectingMemorySearchPlugin({
+        id: `memory.rejecting.${_caseName.replace(' ', '-')}.fixture`,
+        rejectionReason,
+        rejectionMessage
+      });
+      const host = createRuntimePluginHost({ plugins: [plugin] });
+
+      const result = await host.handleToolCall(
+        {
+          ...testIdentity(),
+          pluginId: plugin.manifest.id,
+          toolName: 'memory.search',
+          input: {
+            query: 'Mira'
+          }
+        },
+        testPluginContext()
+      );
+
+      expect(result).toMatchObject({
+        status: 'rejected',
+        reason: 'handler_failed',
+        message:
+          'Plugin rejected tool result reason and message must be non-empty.'
+      });
+      expect(result.evidence[0]).toMatchObject({
+        evidenceKind: 'tool_invocation',
+        status: 'rejected',
+        summary:
+          'Plugin rejected tool result reason and message must be non-empty.',
+        policyOutcome: 'handler_rejected'
+      });
+    }
+  );
+
   it('preserves degraded evidence from optional rejected plugin tool results', async () => {
     const plugin = createDegradedRejectingMemorySearchPlugin();
     const host = createRuntimePluginHost({ plugins: [plugin] });
@@ -1000,6 +1043,66 @@ describe('runtime plugin host', () => {
     });
   });
 
+  it.each(['rejected', 'failed'] as const)(
+    'rejects required accepted beforeRoleModelCall results with %s evidence',
+    async (evidenceStatus) => {
+      const plugin = createAcceptedBlockingBeforeRoleModelCallPlugin({
+        id: `memory.before-blocking.required.${evidenceStatus}.fixture`,
+        requiredForTurn: true,
+        evidenceStatus
+      });
+      const host = createRuntimePluginHost({ plugins: [plugin] });
+
+      const result = await host.beforeRoleModelCall(testPluginContext());
+
+      expect(result).toMatchObject({
+        status: 'rejected',
+        pluginId: plugin.manifest.id,
+        message: `Plugin "${plugin.manifest.id}" accepted beforeRoleModelCall result included blocking before-role-model evidence.`
+      });
+      expect(result.evidence).toEqual([
+        expect.objectContaining({
+          evidenceKind: 'before_role_model_call',
+          status: evidenceStatus
+        }),
+        expect.objectContaining({
+          evidenceKind: 'before_role_model_call',
+          status: 'rejected',
+          policyOutcome: 'required_rejected'
+        })
+      ]);
+    }
+  );
+
+  it('degrades optional accepted beforeRoleModelCall results with blocking evidence', async () => {
+    const plugin = createAcceptedBlockingBeforeRoleModelCallPlugin({
+      id: 'memory.before-blocking.optional.fixture',
+      evidenceStatus: 'rejected'
+    });
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected optional blocking beforeRoleModelCall evidence to degrade.');
+    }
+
+    expect(result.contextItems).toEqual([]);
+    expect(result.runtimeNotes).toEqual([]);
+    expect(result.evidence).toEqual([
+      expect.objectContaining({
+        evidenceKind: 'before_role_model_call',
+        status: 'rejected'
+      }),
+      expect.objectContaining({
+        evidenceKind: 'before_role_model_call',
+        status: 'degraded',
+        policyOutcome: 'optional_degraded'
+      })
+    ]);
+  });
+
   it('budgets beforeRoleModelCall runtime notes before prompting', async () => {
     const plugin = createRuntimeNotesPlugin();
     const host = createRuntimePluginHost({ plugins: [plugin] });
@@ -1296,6 +1399,8 @@ function createProtoKeyOutput(): RuntimePluginJsonObject {
 function createRejectingMemorySearchPlugin(options: {
   readonly id?: string;
   readonly handleToolCallFailure?: 'reject_tool_call' | 'degrade';
+  readonly rejectionReason?: string;
+  readonly rejectionMessage?: string;
 } = {}): RuntimePlugin {
   const id = options.id ?? 'memory.rejecting.fixture';
   const manifest = memorySearchPluginManifest(id);
@@ -1318,8 +1423,9 @@ function createRejectingMemorySearchPlugin(options: {
       handleToolCall() {
         return {
           status: 'rejected',
-          reason: 'handler_rejected',
+          reason: options.rejectionReason ?? 'handler_rejected',
           message:
+            options.rejectionMessage ??
             'lookup failed credential="open-sesame" https://user:pass@example.test/?token=abc',
           evidence: []
         };
@@ -1578,6 +1684,66 @@ function createSourceRequiredRuntimeNotesPlugin(options: {
                   id: 'source.before_role_model_call'
                 }
               ],
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
+function createAcceptedBlockingBeforeRoleModelCallPlugin(options: {
+  readonly id: string;
+  readonly requiredForTurn?: boolean;
+  readonly evidenceStatus: 'rejected' | 'failed';
+}): RuntimePlugin {
+  const manifest = memorySearchPluginManifest(options.id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...manifest,
+      declaredPlugins: ['before_role_model_call'],
+      runtimePolicy: {
+        ...manifest.runtimePolicy,
+        requiredForTurn: options.requiredForTurn ?? false
+      }
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall(context) {
+        return {
+          contextItems: [
+            createRuntimePluginContextItem({
+              pluginId: options.id,
+              id: 'blocked-context',
+              kind: 'memory',
+              text: 'blocked context',
+              budget: {
+                estimatedTokens: 1,
+                priority: 1
+              },
+              sourceReferences: [],
+              redactionLabels: context.privacy.redactionLabels
+            })
+          ],
+          runtimeNotes: ['blocked runtime note'],
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId: options.id,
+              evidenceKind: 'before_role_model_call',
+              status: options.evidenceStatus,
+              summary: 'Before-role-model context blocked.',
+              policyOutcome:
+                options.evidenceStatus === 'failed'
+                  ? 'timeout'
+                  : options.requiredForTurn === true
+                    ? 'required_rejected'
+                    : 'handler_rejected',
               redactionLabels: []
             })
           ]

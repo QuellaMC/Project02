@@ -1105,17 +1105,16 @@ function createRuntimePluginJsonValue(
   }
 
   if (isRecord(value)) {
-    const snapshot: Record<string, RuntimePluginJsonValue> = {};
+    const snapshotEntries: Array<readonly [string, RuntimePluginJsonValue]> = [];
 
     for (const [key, item] of Object.entries(value)) {
-      snapshot[key] = createRuntimePluginJsonValue(
-        item,
-        `${field}.${key}`,
-        key
-      );
+      snapshotEntries.push([
+        key,
+        createRuntimePluginJsonValue(item, `${field}.${key}`, key)
+      ]);
     }
 
-    return Object.freeze(snapshot);
+    return Object.freeze(Object.fromEntries(snapshotEntries));
   }
 
   throw new TypeError(`Plugin field "${field}" must be JSON serializable.`);
