@@ -1,923 +1,352 @@
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
-import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
 
-import { runChatCli as runChatCliInProcess } from '../src/chat-cli.ts';
+import { describe, expect, it } from 'vitest';
+
 import {
-  createConversationSession,
-  createFileCharacterStateStore,
-  createFileRuntimeLogStore,
-  createLocalRuntimeSessionStore,
-  createLocalRuntimeSessionPaths,
-  createLocalRuntimeStorageLayout,
-  createLocalRuntimeStorageSchemaMarker,
-  defaultNvidiaRoleModelName,
-  encodeStorageSchemaMarker,
-  LocalRuntimeStorageContractError,
-  roleModelDecisionContractVersion,
-  roleModelVisibleReplyActionName,
-  type CharacterAgent,
-  type RoleModelAdapter,
-  type RuntimeLogStore
-} from '../src/index.ts';
+  createConversationSession
+} from '../src/core/conversation.ts';
+import {
+  createRuntimePluginHost
+} from '../src/plugins/host.ts';
+import {
+  createRuntimePlugin,
+  createRuntimePluginEvidenceSnapshot,
+  runtimePluginContractVersion,
+  type RuntimePlugin,
+  type RuntimePluginContext
+} from '../src/plugins/types.ts';
+import {
+  createRuntimeLogStore
+} from '../src/runtime/log.ts';
+import {
+  createFileRuntimeLogStore
+} from '../src/runtime/storage/file-runtime-log-store.ts';
+import {
+  createLocalRuntimeSessionStore
+} from '../src/runtime/storage/session-store.ts';
+import type {
+  RoleModelAdapter
+} from '../src/role-model/loop.ts';
+import { runChatCli } from '../src/cli/chat.ts';
+import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
 
-type CommandResult = {
-  readonly exitCode: number;
-  readonly stdout: string;
-  readonly stderr: string;
-};
-
-type TraceSummary = {
-  readonly eventId: string;
-  readonly traceId: string;
-  readonly status: 'completed' | 'rejected';
-  readonly steps: readonly string[];
-  readonly provider?: {
-    readonly name: string;
-    readonly model?: string;
-    readonly responseStatus?: number;
-    readonly errorCode?: string;
-    readonly errorMessage?: string;
-  };
-  readonly toolCalls?: readonly string[];
-  readonly characterStatePatch?: {
-    readonly status: string;
-    readonly appliedChangeCount?: number;
-    readonly rejectionReason?: string;
-  };
-  readonly error?: string;
-};
-
-const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const tempStoreRoots: string[] = [];
-let tempSessionCounter = 0;
-
-const successfulTraceSteps = [
-  'runtime_event_received',
-  'runtime_event_normalized',
-  'runtime_turn_started',
-  'visible_reply_committed',
-  'raw_event_log_appended',
-  'runtime_turn_completed'
-] as const;
-
-const rejectedInputTraceSteps = [
-  'runtime_event_received',
-  'input_validation_rejected',
-  'raw_event_log_appended',
-  'runtime_turn_rejected'
-] as const;
-
-const unexpectedFailureTraceSteps = [
-  'runtime_event_received',
-  'runtime_event_normalized',
-  'runtime_turn_started',
-  'raw_event_log_appended',
-  'runtime_turn_rejected'
-] as const;
-
-describe('node src/chat-cli.ts', () => {
-  afterEach(async () => {
-    await Promise.all(
-      tempStoreRoots.splice(0).map(async (root) => {
-        await rm(root, { recursive: true, force: true });
-      })
-    );
-  });
-
-  it('runs a two-turn local character session', async () => {
-    const result = await runFreshChatCli('hello\nstill there?\n/exit\n');
-
-    expect(result).toEqual({
-      exitCode: 0,
-      stdout:
-        'Mira is ready.\n' +
-        "You: Mira: I'm here. Tell me what you need.\n" +
-        'You: Mira: I remember you said "hello" Stay with me for a minute.\n' +
-        'You: ',
-      stderr: ''
-    });
-  });
-
-  it('fails clearly when the NVIDIA provider is selected without an API key', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const result = await runCommand(
-      'node',
-      [
-        'src/chat-cli.ts',
-        '--store',
-        storeRoot,
-        '--new-session',
-        createTempSessionId(),
-        '--provider',
-        'nvidia'
-      ],
-      'hello\n',
-      {
-        NVIDIA_API_KEY: '',
-        PROJECT02_ROLE_MODEL_PROVIDER: ''
-      }
-    );
-
-    expect(result).toEqual({
-      exitCode: 1,
-      stdout: 'Mira is ready.\nYou: ',
-      stderr: 'Error: NVIDIA provider requires NVIDIA_API_KEY.\n'
-    });
-  });
-
-  it('emits provider error status in trace mode when NVIDIA configuration is missing', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const result = await runCommand(
-      'node',
-      [
-        'src/chat-cli.ts',
-        '--store',
-        storeRoot,
-        '--new-session',
-        createTempSessionId(),
-        '--trace',
-        '--provider',
-        'nvidia'
-      ],
-      'hello\n',
-      {
-        NVIDIA_API_KEY: '',
-        PROJECT02_ROLE_MODEL_PROVIDER: ''
-      }
-    );
-    const traceSummaries = parseTraceSummaries(result.stderr);
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe('Mira is ready.\nYou: ');
-    expect(traceSummaries).toEqual([
-      expect.objectContaining({
-        status: 'rejected',
-        provider: {
-          name: 'nvidia',
-          model: defaultNvidiaRoleModelName,
-          errorCode: 'missing_api_key',
-          errorMessage: 'NVIDIA provider requires NVIDIA_API_KEY.'
-        },
-        characterStatePatch: {
-          status: 'not_requested'
-        },
-        error: 'NVIDIA provider requires NVIDIA_API_KEY.'
-      })
-    ]);
-  });
-
-  it('uses the provider environment default but lets the CLI flag choose local', async () => {
-    const envSelected = await runCommand(
-      'node',
-      ['src/chat-cli.ts', '--store', await createTempStoreRoot()],
-      'hello\n',
-      {
-        NVIDIA_API_KEY: '',
-        PROJECT02_ROLE_MODEL_PROVIDER: 'nvidia'
-      }
-    );
-    const cliSelected = await runCommand(
-      'node',
-      [
-        'src/chat-cli.ts',
-        '--store',
-        await createTempStoreRoot(),
-        '--provider',
-        'local'
-      ],
-      'hello\n/exit\n',
-      {
-        NVIDIA_API_KEY: '',
-        PROJECT02_ROLE_MODEL_PROVIDER: 'nvidia'
-      }
-    );
-
-    expect(envSelected.stderr).toBe(
-      'Error: NVIDIA provider requires NVIDIA_API_KEY.\n'
-    );
-    expect(cliSelected).toEqual({
-      exitCode: 0,
-      stdout:
-        'Mira is ready.\n' +
-        "You: Mira: I'm here. Tell me what you need.\n" +
-        'You: ',
-      stderr: ''
-    });
-  });
-
-  it('exits cleanly when /exit is the first input', async () => {
-    const result = await runFreshChatCli('/exit\n');
-
-    expect(result).toEqual({
-      exitCode: 0,
-      stdout: 'Mira is ready.\nYou: ',
-      stderr: ''
-    });
-  });
-
-  it('reports invalid input, keeps the session open, and does not emit a character reply for the invalid turn', async () => {
-    const result = await runFreshChatCli('\nhello\n/exit\n');
-
-    expect(result).toEqual({
-      exitCode: 0,
-      stdout:
-        'Mira is ready.\n' +
-        "You: You: Mira: I'm here. Tell me what you need.\n" +
-        'You: ',
-      stderr: 'Error: Provide exactly one non-empty message.\n'
-    });
-  });
-
-  it('emits trace JSONL to stderr without changing normal chat stdout', async () => {
-    const result = await runFreshChatCli('hello\nstill there?\n/exit\n', [
-      '--trace'
-    ]);
-    const traceSummaries = parseTraceSummaries(result.stderr);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(
-      'Mira is ready.\n' +
-      "You: Mira: I'm here. Tell me what you need.\n" +
-      'You: Mira: I remember you said "hello" Stay with me for a minute.\n' +
-      'You: '
-    );
-    expect(traceSummaries).toHaveLength(2);
-    expect(traceSummaries).toEqual([
-      expect.objectContaining({
-        status: 'completed',
-        steps: successfulTraceSteps,
-        toolCalls: ['visible_reply'],
-        characterStatePatch: {
-          status: 'not_requested'
-        }
-      }),
-      expect.objectContaining({
-        status: 'completed',
-        steps: successfulTraceSteps,
-        toolCalls: ['visible_reply'],
-        characterStatePatch: {
-          status: 'not_requested'
-        }
-      })
-    ]);
-    expect(traceSummaries[0]?.eventId).toMatch(/^evt_/u);
-    expect(traceSummaries[0]?.traceId).toMatch(/^trace_/u);
-    expect(traceSummaries[0]?.eventId).not.toBe(traceSummaries[0]?.traceId);
-    expect(traceSummaries[1]?.eventId).toMatch(/^evt_/u);
-    expect(traceSummaries[1]?.traceId).toMatch(/^trace_/u);
-    expect(traceSummaries[0]?.eventId).not.toBe(traceSummaries[1]?.eventId);
-    expect(traceSummaries[0]?.traceId).not.toBe(traceSummaries[1]?.traceId);
-  });
-
-  it('emits rejected trace JSONL for invalid input and keeps the session open', async () => {
-    const result = await runFreshChatCli('\nhello\n/exit\n', ['--trace']);
-    const traceSummaries = parseTraceSummaries(result.stderr);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(
-      'Mira is ready.\n' +
-      "You: You: Mira: I'm here. Tell me what you need.\n" +
-      'You: '
-    );
-    expect(traceSummaries).toEqual([
-      expect.objectContaining({
-        status: 'rejected',
-        steps: rejectedInputTraceSteps,
-        error: 'Provide exactly one non-empty message.'
-      }),
-      expect.objectContaining({
-        status: 'completed',
-        steps: successfulTraceSteps,
-        toolCalls: ['visible_reply'],
-        characterStatePatch: {
-          status: 'not_requested'
-        }
-      })
-    ]);
-  });
-
-  it('emits rejected trace JSONL before exiting when runtime handling fails unexpectedly', async () => {
-    const stdout = new CapturingWritable();
-    const stderr = new CapturingWritable();
-    const throwingAgent: CharacterAgent = {
-      reply() {
-        throw new Error('agent transport unavailable');
-      }
-    };
-
-    const exitCode = await runChatCliInProcess({
-      stdin: Readable.from(['hello\n']),
-      stdout,
-      stderr,
-      traceMode: true,
-      agent: throwingAgent
-    });
-    const traceSummaries = parseTraceSummaries(stderr.contents());
-
-    expect(exitCode).toBe(1);
-    expect(stdout.contents()).toBe('Mira is ready.\nYou: ');
-    expect(traceSummaries).toEqual([
-      expect.objectContaining({
-        status: 'rejected',
-        steps: unexpectedFailureTraceSteps,
-        error: 'Chat failed before producing a reply.'
-      })
-    ]);
-  });
-
-  it('reports storage failures during a turn without masking them as reply failures', async () => {
-    const stdout = new CapturingWritable();
-    const stderr = new CapturingWritable();
-
-    const exitCode = await runChatCliInProcess({
-      stdin: Readable.from(['hello\n']),
-      stdout,
-      stderr,
-      logStore: createWriteFailingLogStore()
-    });
-
-    expect(exitCode).toBe(1);
-    expect(stdout.contents()).toBe('Mira is ready.\nYou: ');
-    expect(stderr.contents()).toBe(
-      'Error: Local runtime store could not be written.\n'
-    );
-  });
-
-  it('uses file-backed state when runChatCli receives a file-backed log store', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const sessionId = createTempSessionId();
-    const sessionStore = createLocalRuntimeSessionStore({ storeRoot });
-    await sessionStore.createSession({ sessionId });
-    const session = createConversationSession({ id: sessionId });
-    const stdout = new CapturingWritable();
-    const stderr = new CapturingWritable();
-
-    const exitCode = await runChatCliInProcess({
+describe('chat CLI folded top-level model text', () => {
+  it('hides top-level model text by default', async () => {
+    let stdout = '';
+    const exitCode = await runChatCli({
       stdin: Readable.from(['hello\n/exit\n']),
-      stdout,
-      stderr,
-      session,
-      logStore: createFileRuntimeLogStore({
-        storeRoot,
-        sessionId
+      stdout: collect((chunk) => {
+        stdout += chunk;
       }),
-      roleModelAdapter: createRawOutputAdapter(
-        JSON.stringify({
-          version: roleModelDecisionContractVersion,
-          toolCalls: [
-            {
-              name: roleModelVisibleReplyActionName,
-              input: {
-                text: 'durable state reply'
-              }
-            },
-            {
-              name: 'character_state.patch',
-              input: {
-                mood: 'curious'
-              }
-            }
-          ]
-        })
-      )
+      stderr: collect(() => {}),
+      roleModelAdapter: createTextOnlyAdapter()
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout.contents()).toBe(
-      'Mira is ready.\nYou: Mira: durable state reply\nYou: '
-    );
-    expect(stderr.contents()).toBe('');
-    expect(
-      createFileCharacterStateStore({
-        storeRoot,
-        sessionId
-      }).readCurrentState().current.mood
-    ).toBe('curious');
-    expect(() =>
-      createFileRuntimeLogStore({
-        storeRoot,
-        sessionId
-      }).rawEvents()
-    ).not.toThrow(
-      'Stored character state does not match accepted character state patch evidence.'
-    );
+    expect(stdout).not.toContain('folded model note');
   });
+});
 
-  it('does not emit a trace summary for /exit', async () => {
-    const result = await runFreshChatCli('/exit\n', ['--trace']);
-
-    expect(result).toEqual({
-      exitCode: 0,
-      stdout: 'Mira is ready.\nYou: ',
-      stderr: ''
-    });
-  });
-
-  it('creates a durable session and resumes persisted visible context by session ID', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const first = await runChatCli('hello\n/exit\n', [
-      '--store',
-      storeRoot,
-      '--new-session',
-      'mira-local'
-    ]);
-    const second = await runChatCli('still there?\n/exit\n', [
-      '--store',
-      storeRoot,
-      '--session',
-      'mira-local'
-    ]);
-
-    expect(first).toEqual({
-      exitCode: 0,
-      stdout:
-        'Mira is ready.\n' +
-        "You: Mira: I'm here. Tell me what you need.\n" +
-        'You: ',
-      stderr: ''
-    });
-    expect(second).toEqual({
-      exitCode: 0,
-      stdout:
-        'Mira is ready.\n' +
-        'You: Mira: I remember you said "hello" Stay with me for a minute.\n' +
-        'You: ',
-      stderr: ''
-    });
-  });
-
-  it('creates and resumes the default session in a selected durable store', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const first = await runChatCli('hello\n/exit\n', ['--store', storeRoot]);
-    const second = await runChatCli('still there?\n/exit\n', [
-      '--store',
-      storeRoot
-    ]);
-
-    expect(first.exitCode).toBe(0);
-    expect(first.stderr).toBe('');
-    expect(second).toEqual({
-      exitCode: 0,
-      stdout:
-        'Mira is ready.\n' +
-        'You: Mira: I remember you said "hello" Stay with me for a minute.\n' +
-        'You: ',
-      stderr: ''
-    });
-  });
-
-  it('does not append selection metadata when selected-session validation fails', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const layout = createLocalRuntimeStorageLayout({
-      storeRoot
-    });
-    const paths = createLocalRuntimeSessionPaths({
-      storeRoot,
-      sessionId: 'mira-local'
-    });
-
-    await expect(
-      runChatCli('hello\n/exit\n', [
-        '--store',
-        storeRoot,
-        '--new-session',
-        'mira-local'
-      ])
-    ).resolves.toMatchObject({
-      exitCode: 0
-    });
-
-    const catalogBefore = await readFile(layout.sessionCatalogPath, 'utf8');
-
-    await writeFile(paths.conversationPath, '{"eventId":"evt_partial"}', 'utf8');
-
-    const result = await runChatCli('/exit\n', [
-      '--store',
-      storeRoot,
-      '--session',
-      'mira-local'
-    ]);
-
-    expect(result).toEqual({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'Error: Local runtime store write did not complete.\n'
-    });
-    await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe(
-      catalogBefore
-    );
-  });
-
-  it('fails loudly instead of repairing a partial default store with a missing schema marker', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const paths = createLocalRuntimeSessionPaths({
-      storeRoot
-    });
-
-    await mkdir(paths.sessionRoot, { recursive: true });
-    await writeFile(paths.conversationPath, '{"orphan":true}\n', 'utf8');
-
-    const result = await runChatCli('/exit\n', ['--store', storeRoot]);
-
-    expect(result).toEqual({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'Error: Local runtime store is missing required files.\n'
-    });
-  });
-
-  it('fails loudly instead of treating a missing session catalog as empty when session logs exist', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const layout = createLocalRuntimeStorageLayout({
-      storeRoot
-    });
-    const paths = createLocalRuntimeSessionPaths({
-      storeRoot
-    });
-
-    await mkdir(paths.sessionRoot, { recursive: true });
-    await writeFile(
-      layout.schemaPath,
-      `${encodeStorageSchemaMarker(
-        createLocalRuntimeStorageSchemaMarker({
-          createdAt: '2026-06-04T00:00:00.000Z'
+describe('chat CLI plugin lifecycle', () => {
+  it('runs session-end hooks when /exit closes the chat', async () => {
+    const sessionEndContexts: RuntimePluginContext[] = [];
+    const logStore = createRuntimeLogStore();
+    const pluginHost = createRuntimePluginHost({
+      plugins: [
+        createSessionEndPlugin((context) => {
+          sessionEndContexts.push(context);
         })
-      )}\n`,
-      'utf8'
-    );
-    await writeFile(paths.conversationPath, '{"orphan":true}\n', 'utf8');
-
-    const result = await runChatCli('/exit\n', ['--store', storeRoot]);
-
-    expect(result).toEqual({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'Error: Local runtime store is missing required files.\n'
-    });
-  });
-
-  it('rejects --new-session when that session already exists', async () => {
-    const storeRoot = await createTempStoreRoot();
-
-    await expect(
-      runChatCli('/exit\n', ['--store', storeRoot, '--new-session', 'fresh'])
-    ).resolves.toMatchObject({
-      exitCode: 0
+      ]
     });
 
-    const result = await runChatCli('/exit\n', [
-      '--store',
-      storeRoot,
-      '--new-session',
-      'fresh'
-    ]);
-
-    expect(result).toEqual({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'Error: Local runtime session "fresh" already exists.\n'
-    });
-  });
-
-  it('rejects --session when the selected session does not exist', async () => {
-    const storeRoot = await createTempStoreRoot();
-
-    await expect(
-      runChatCli('/exit\n', ['--store', storeRoot, '--new-session', 'existing'])
-    ).resolves.toMatchObject({
-      exitCode: 0
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['/exit\n']),
+      stdout: collect(() => {}),
+      stderr: collect(() => {}),
+      logStore,
+      pluginHost
     });
 
-    const result = await runChatCli('/exit\n', [
-      '--store',
-      storeRoot,
-      '--session',
-      'missing'
-    ]);
-
-    expect(result).toEqual({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'Error: Local runtime session "missing" does not exist.\n'
+    expect(exitCode).toBe(0);
+    expect(sessionEndContexts).toHaveLength(1);
+    expect(sessionEndContexts[0]).toMatchObject({
+      sessionId: 'local-session',
+      currentUserMessage: '/exit',
+      character: {
+        id: 'mira',
+        displayName: 'Mira'
+      }
     });
-  });
-
-  it('rejects unsafe --session values through the CT-01 session ID validator', async () => {
-    const result = await runChatCli('/exit\n', ['--session', 'a/b']);
-
-    expect(result).toEqual({
-      exitCode: 1,
-      stdout: '',
-      stderr:
-        'Error: Local runtime session ID must use only letters, numbers, dots, underscores, or hyphens.\n'
-    });
-  });
-
-  it('rejects empty --store values through the CT-01 store-root validator', async () => {
-    const result = await runChatCli('/exit\n', ['--store', '']);
-
-    expect(result).toEqual({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'Error: Local runtime store root must be non-empty.\n'
-    });
-  });
-
-  it('rejects ambiguous durable session creation and resume flags', async () => {
-    const result = await runChatCli('/exit\n', [
-      '--session',
-      'existing',
-      '--new-session',
-      'fresh'
-    ]);
-
-    expect(result).toEqual({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'Error: Use either --session or --new-session, not both.\n'
-    });
-  });
-
-  it('rejects missing durable flag values before starting the chat loop', async () => {
-    const result = await runChatCli('/exit\n', ['--store']);
-
-    expect(result).toEqual({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'Error: --store requires a value.\n'
-    });
-  });
-});
-
-describe('pnpm --silent chat', () => {
-  afterEach(async () => {
-    await Promise.all(
-      tempStoreRoots.splice(0).map(async (root) => {
-        await rm(root, { recursive: true, force: true });
-      })
-    );
-  });
-
-  it('runs the chat package script without package-manager output', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const result = await runCommand(
-      'pnpm',
-      ['--silent', 'chat', '--', '--store', storeRoot],
-      '/exit\n'
-    );
-
-    expect(result).toEqual({
-      exitCode: 0,
-      stdout: 'Mira is ready.\nYou: ',
-      stderr: ''
-    });
-  });
-
-  it('passes trace mode arguments through the chat package script', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const result = await runCommand(
-      'pnpm',
-      [
-        '--silent',
-        'chat',
-        '--',
-        '--store',
-        storeRoot,
-        '--new-session',
-        'package-trace',
-        '--trace'
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_completed',
+      status: 'completed',
+      runtimePluginEvidence: [
+        {
+          pluginId: 'chat.session-end.fixture',
+          evidenceKind: 'session_end',
+          status: 'accepted',
+          summary: 'Session end observed.'
+        }
       ],
-      'hello\n/exit\n'
-    );
-    const traceSummaries = parseTraceSummaries(result.stderr);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(
-      'Mira is ready.\n' +
-      "You: Mira: I'm here. Tell me what you need.\n" +
-      'You: '
-    );
-    expect(traceSummaries).toEqual([
-      expect.objectContaining({
-        status: 'completed',
-        steps: successfulTraceSteps
-      })
-    ]);
+      runtimePluginTurnEvidence: {
+        evidence: [
+          {
+            pluginId: 'chat.session-end.fixture',
+            evidenceKind: 'session_end',
+            status: 'accepted',
+            summary: 'Session end observed.'
+          }
+        ]
+      }
+    });
   });
-});
 
-describe('MVP-001 relay compatibility', () => {
-  it('keeps the relay package script contract intact', async () => {
-    const result = await runCommand('pnpm', ['--silent', 'relay', '--', 'hello'], '');
+  it('persists session-end hook failures when stdin closes normally', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-session-end-'));
+    const sessionId = 'session-end-failure';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-16T00:00:00.000Z'
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const pluginHost = createRuntimePluginHost({
+      plugins: [createFailingSessionEndPlugin()]
+    });
 
-    expect(result).toEqual({
-      exitCode: 0,
-      stdout: 'relay: hello\n',
-      stderr: ''
+    const exitCode = await runChatCli({
+      stdin: Readable.from([]),
+      stdout: collect(() => {}),
+      stderr: collect(() => {}),
+      session: createConversationSession({ id: sessionId }),
+      logStore,
+      pluginHost
+    });
+
+    expect(exitCode).toBe(0);
+
+    const storedRawEvents = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    }).rawEvents();
+
+    expect(storedRawEvents.at(-1)).toMatchObject({
+      kind: 'runtime_turn_completed',
+      status: 'completed_with_failures',
+      payloadSummary: {
+        rawInput: '/exit',
+        normalizedCurrentUserMessage: '/exit'
+      },
+      runtimePluginEvidence: [
+        {
+          pluginId: 'chat.session-end.failure.fixture',
+          evidenceKind: 'session_end',
+          status: 'failed',
+          summary: 'Session end fixture failed.'
+        }
+      ]
+    });
+
+    let stdout = '';
+    const inspectExitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--session', sessionId],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {})
+      }
+    );
+    const output = JSON.parse(stdout) as {
+      readonly turns: readonly [
+        {
+          readonly status: string;
+          readonly pluginEvidence: {
+            readonly evidence: readonly [
+              {
+                readonly pluginId: string;
+                readonly evidenceKind: string;
+                readonly status: string;
+                readonly summary: string;
+              }
+            ];
+          };
+        }
+      ];
+    };
+
+    expect(inspectExitCode).toBe(0);
+    expect(output.turns[0]).toMatchObject({
+      status: 'completed_with_failures',
+      pluginEvidence: {
+        evidence: [
+          {
+            pluginId: 'chat.session-end.failure.fixture',
+            evidenceKind: 'session_end',
+            status: 'failed',
+            summary: 'Session end fixture failed.'
+          }
+        ]
+      }
     });
   });
 });
 
-async function runChatCli(
-  stdin: string,
-  args: readonly string[] = []
-): Promise<CommandResult> {
-  return await runCommand('node', ['src/chat-cli.ts', ...args], stdin);
-}
-
-async function runFreshChatCli(
-  stdin: string,
-  args: readonly string[] = []
-): Promise<CommandResult> {
-  const storeRoot = await createTempStoreRoot();
-  const sessionId = createTempSessionId();
-
-  return await runChatCli(stdin, [
-    '--store',
-    storeRoot,
-    '--new-session',
-    sessionId,
-    ...args
-  ]);
-}
-
-async function createTempStoreRoot(): Promise<string> {
-  const storeRoot = await mkdtemp(join(tmpdir(), 'project02-chat-cli-'));
-
-  tempStoreRoots.push(storeRoot);
-  return storeRoot;
-}
-
-function createTempSessionId(): string {
-  tempSessionCounter += 1;
-  return `test-session-${String(tempSessionCounter)}`;
-}
-
-function createRawOutputAdapter(rawOutputText: string): RoleModelAdapter {
+function createTextOnlyAdapter(): RoleModelAdapter {
   return {
     invoke() {
-      return Object.freeze({
-        rawOutputText
-      });
+      return {
+        rawOutputText: JSON.stringify({
+          text: 'folded model note',
+          toolCalls: []
+        })
+      };
     }
   };
 }
 
-async function runCommand(
-  command: string,
-  args: readonly string[],
-  stdin: string,
-  env: NodeJS.ProcessEnv = {}
-): Promise<CommandResult> {
-  const child = spawn(command, args, {
-    cwd: projectRoot,
-    env: {
-      ...process.env,
-      ...env
+function createSessionEndPlugin(
+  onSessionEnd: (context: RuntimePluginContext) => void
+): RuntimePlugin {
+  const pluginId = 'chat.session-end.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      id: pluginId,
+      displayName: 'Chat Session End Fixture',
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'Test plugin for chat session end lifecycle.',
+      contractVersion: runtimePluginContractVersion,
+      compatibility: {
+        hostContractVersions: [runtimePluginContractVersion],
+        sourceSystem: 'test'
+      },
+      declaredPlugins: ['on_session_end'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'reject_tool_call',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test']
+      },
+      requestedApis: []
     },
-    stdio: ['pipe', 'pipe', 'pipe']
-  });
+    providedTools: [],
+    lifecycleHooks: {
+      onSessionEnd(context) {
+        onSessionEnd(context);
 
-  child.stdin.end(stdin);
-
-  const [stdout, stderr, exitCode] = await Promise.all([
-    collectStream(child.stdout),
-    collectStream(child.stderr),
-    waitForExit(child)
-  ]);
-
-  return {
-    exitCode,
-    stdout,
-    stderr
-  };
-}
-
-async function collectStream(stream: Readable): Promise<string> {
-  const chunks: Buffer[] = [];
-
-  return await new Promise((resolvePromise, rejectPromise) => {
-    stream.on('data', (chunk: unknown) => {
-      if (typeof chunk === 'string') {
-        chunks.push(Buffer.from(chunk));
-        return;
+        return {
+          status: 'completed',
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId,
+              evidenceKind: 'session_end',
+              status: 'accepted',
+              summary: 'Session end observed.',
+              redactionLabels: []
+            })
+          ]
+        };
       }
-
-      if (Buffer.isBuffer(chunk)) {
-        chunks.push(chunk);
-      }
-    });
-    stream.on('end', () => {
-      resolvePromise(Buffer.concat(chunks).toString('utf8'));
-    });
-    stream.on('error', rejectPromise);
-  });
-}
-
-async function waitForExit(child: ChildProcess): Promise<number> {
-  return await new Promise((resolvePromise, rejectPromise) => {
-    child.on('close', (code) => {
-      resolvePromise(code ?? 1);
-    });
-    child.on('error', rejectPromise);
-  });
-}
-
-function parseTraceSummaries(stderr: string): readonly TraceSummary[] {
-  if (stderr === '') {
-    return [];
-  }
-
-  return stderr
-    .trimEnd()
-    .split('\n')
-    .map((line) => {
-      const parsed = JSON.parse(line) as unknown;
-
-      if (!isTraceSummary(parsed)) {
-        throw new Error(`Expected trace JSON line, received: ${line}`);
-      }
-
-      return parsed;
-    });
-}
-
-function isTraceSummary(value: unknown): value is TraceSummary {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const error = value['error'];
-
-  return (
-    typeof value['eventId'] === 'string' &&
-    typeof value['traceId'] === 'string' &&
-    (value['status'] === 'completed' || value['status'] === 'rejected') &&
-    isStringArray(value['steps']) &&
-    (error === undefined || typeof error === 'string')
-  );
-}
-
-function isStringArray(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string');
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function createWriteFailingLogStore(): RuntimeLogStore {
-  return {
-    appendTrace() {
-      throw new LocalRuntimeStorageContractError(
-        'write_failed',
-        'Injected write failure.'
-      );
-    },
-    appendRawEvent() {
-      throw new LocalRuntimeStorageContractError(
-        'write_failed',
-        'Injected write failure.'
-      );
-    },
-    appendConversationMessage() {
-      throw new LocalRuntimeStorageContractError(
-        'write_failed',
-        'Injected write failure.'
-      );
-    },
-    traceEntries() {
-      return [];
-    },
-    rawEvents() {
-      return [];
-    },
-    conversationMessages() {
-      return [];
     }
-  } satisfies RuntimeLogStore;
+  });
 }
 
-class CapturingWritable extends Writable {
-  private readonly chunks: Buffer[] = [];
+function createFailingSessionEndPlugin(): RuntimePlugin {
+  const pluginId = 'chat.session-end.failure.fixture';
 
-  override _write(
-    chunk: Buffer | string,
-    encoding: BufferEncoding,
-    callback: (error?: Error | null) => void
-  ): void {
-    this.chunks.push(
-      typeof chunk === 'string' ? Buffer.from(chunk, encoding) : Buffer.from(chunk)
-    );
-    callback();
-  }
+  return createRuntimePlugin({
+    manifest: {
+      id: pluginId,
+      displayName: 'Chat Session End Failure Fixture',
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'Test plugin for failed chat session end lifecycle.',
+      contractVersion: runtimePluginContractVersion,
+      compatibility: {
+        hostContractVersions: [runtimePluginContractVersion],
+        sourceSystem: 'test'
+      },
+      declaredPlugins: ['on_session_end'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'reject_tool_call',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test']
+      },
+      requestedApis: []
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      onSessionEnd(context) {
+        return {
+          status: 'failed',
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId,
+              evidenceKind: 'session_end',
+              status: 'failed',
+              summary: 'Session end fixture failed.',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
 
-  contents(): string {
-    return Buffer.concat(this.chunks).toString('utf8');
-  }
+function collect(write: (chunk: string) => void): Writable {
+  return new Writable({
+    write(chunk, _encoding, callback) {
+      write(String(chunk));
+      callback();
+    }
+  });
 }

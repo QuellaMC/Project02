@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  buildUserTurnDecisionContext,
+  buildUserTurnDecisionContext
+} from '../src/role-model/decision-context.ts';
+import {
   createConversationSession,
   defaultRecentVisibleMessageLimit,
   localCharacterProfile,
-  runCharacterTurn,
-  type CharacterAgent,
-  type VisibleMessage
-} from '../src/index.ts';
+  runCharacterTurn
+} from '../src/core/conversation.ts';
+import type {
+  CharacterAgent,
+  VisibleMessage
+} from '../src/core/conversation.ts';
 
 type MutableVisibleMessage = {
   id: string;
@@ -36,12 +40,14 @@ describe('user-turn decision context builder', () => {
       sessionId: 'session-fresh',
       characterSnapshot: localCharacterProfile,
       recentVisibleMessages: [],
-      runtimeNotes: ['local USER_MESSAGE turn', 'recent visible only']
+      runtimeNotes: ['local USER_MESSAGE turn', 'recent visible only'],
+      pluginContextItems: []
     });
     expect(Object.isFrozen(context)).toBe(true);
     expect(Object.isFrozen(context.characterSnapshot)).toBe(true);
     expect(Object.isFrozen(context.recentVisibleMessages)).toBe(true);
     expect(Object.isFrozen(context.runtimeNotes)).toBe(true);
+    expect(Object.isFrozen(context.pluginContextItems)).toBe(true);
     expect(() => {
       Reflect.apply(Array.prototype.push, context.runtimeNotes, ['tampered']);
     }).toThrow(TypeError);

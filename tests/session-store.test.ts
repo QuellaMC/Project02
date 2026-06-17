@@ -7,22 +7,38 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   ConversationRehydrationError,
   createConversationSession,
+  runCharacterTurn
+} from '../src/core/conversation.ts';
+import {
   createLocalRuntimeSessionPaths,
-  createLocalRuntimeSessionStore,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
-  createRuntimeLogStore,
-  createUserMessageRuntimeEvent,
   encodeStorageSchemaMarker,
-  LocalRuntimeStorageContractError,
-  LocalRuntimeSessionStoreError,
-  runCharacterTurn,
-  runLocalUserMessageEvent,
-  type ConversationLogRecord,
-  type LocalRuntimeStorageContractErrorCode,
-  type LocalRuntimeSessionConversationLogReader
-} from '../src/index.ts';
-import { assertLocalRuntimeSessionReadable } from '../src/session-store.ts';
+  LocalRuntimeStorageContractError
+} from '../src/runtime/storage/layout.ts';
+import {
+  createLocalRuntimeSessionStore,
+  LocalRuntimeSessionStoreError
+} from '../src/runtime/storage/session-store.ts';
+import {
+  createRuntimeLogStore
+} from '../src/runtime/log.ts';
+import {
+  createUserMessageRuntimeEvent
+} from '../src/runtime/event.ts';
+import {
+  runLocalUserMessageEvent
+} from '../src/runtime/local.ts';
+import type {
+  ConversationLogRecord
+} from '../src/runtime/log.ts';
+import type {
+  LocalRuntimeStorageContractErrorCode
+} from '../src/runtime/storage/layout.ts';
+import type {
+  LocalRuntimeSessionConversationLogReader
+} from '../src/runtime/storage/session-store.ts';
+import { assertLocalRuntimeSessionReadable } from '../src/runtime/storage/session-store.ts';
 
 const tempRoots: string[] = [];
 
@@ -365,6 +381,60 @@ describe('local runtime session store', () => {
     await expectStorageErrorCode(
       async () => await store.listSessions(),
       'malformed_record'
+    );
+  });
+
+  it('keeps MVP-006 schema 1 session catalogs readable through the current layout', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'mira-local'
+    });
+    const metadata = {
+      sessionId: 'mira-local',
+      createdAt: '2026-06-04T00:00:00.000Z',
+      updatedAt: '2026-06-04T00:00:00.000Z'
+    };
+
+    await mkdir(paths.sessionRoot, { recursive: true });
+    await writeFile(
+      layout.schemaPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        createdAt: '2026-06-04T00:00:00.000Z'
+      })}\n`,
+      'utf8'
+    );
+    await writeFile(
+      layout.sessionCatalogPath,
+      `${JSON.stringify(metadata)}\n`,
+      'utf8'
+    );
+
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['2026-06-04T00:05:00.000Z'])
+    });
+
+    await expect(store.listSessions()).resolves.toEqual([metadata]);
+    await expect(store.readSession('mira-local')).resolves.toEqual(metadata);
+    expect(
+      assertLocalRuntimeSessionReadable({
+        storeRoot,
+        sessionId: 'mira-local'
+      })
+    ).toEqual(metadata);
+
+    await expect(store.selectSession('mira-local')).resolves.toEqual({
+      ...metadata,
+      updatedAt: '2026-06-04T00:05:00.000Z'
+    });
+    await expect(readFile(layout.schemaPath, 'utf8')).resolves.toBe(
+      `${JSON.stringify({
+        schemaVersion: 1,
+        createdAt: '2026-06-04T00:00:00.000Z'
+      })}\n`
     );
   });
 

@@ -1,545 +1,1329 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  CharacterReplyValidationError,
-  localCharacterProfile,
-  type CharacterAgent,
-  type CharacterAgentReply,
-  type VisibleMessage
-} from '../src/conversation.ts';
-import {
   createDecisionContext,
-  getRequiredVisibleReplyText,
-  createRoleModelInputEnvelope,
-  roleModelAdapterRejectionNotReplayableDetails,
-  roleModelDecisionContractVersion,
+  isRoleModelRawOutputReplayableDecisionEvidence,
+  roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
-  roleModelProviderErrorRejectionReason,
-  roleModelUnsupportedEffectRejectionReason,
-  roleModelVisibleReplyActionName
-} from '../src/role-model-contracts.ts';
+  roleModelTerminalEmptyOutputRejectionDetails,
+  type RoleModelPluginToolDefinition,
+  type RoleModelProviderMetadata
+} from '../src/role-model/contracts.ts';
 import {
-  createDeterministicLocalRoleModelAdapter,
-  createRoleModelAdapterFromCharacterAgent,
-  parseRoleModelDecision,
+  createRuntimePlugin,
+  createRuntimePluginContext,
+  createRuntimePluginEvidenceSnapshot,
+  runtimePluginContractVersion,
+  type RuntimePluginContext,
+  type RuntimePlugin,
+  type RuntimePluginToolCall,
+  type RuntimePluginToolCallResult
+} from '../src/plugins/types.ts';
+import {
+  createRuntimePluginHost
+} from '../src/plugins/host.ts';
+import {
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent
+} from '../src/runtime/event.ts';
+import {
   runRoleModelLoop,
   type RoleModelAdapter,
-  type RoleModelAdapterRawOutput
-} from '../src/role-model-loop.ts';
-import { createUserMessageRuntimeEvent } from '../src/runtime-event.ts';
+  type RoleModelPluginToolHost
+} from '../src/role-model/loop.ts';
+import type { RoleModelChatMessage } from '../src/role-model/prompt.ts';
 
-describe('role model loop', () => {
-  it('runs a fresh local USER_MESSAGE turn through the deterministic adapter and captures snapshots', async () => {
-    const event = createTestUserMessageEvent('hello', 'evt_role_fresh');
-    const decisionContext = createDecisionContext({
-      sessionId: 'local-session',
-      characterSnapshot: localCharacterProfile
-    });
-    const expectedReply = "I'm here. Tell me what you need.";
-    const expectedRawOutputText = JSON.stringify({
-      version: roleModelDecisionContractVersion,
-      toolCalls: [
-        {
-          name: roleModelVisibleReplyActionName,
-          input: {
-            text: expectedReply
+describe('role-model loop plugin tool routing', () => {
+  it('continues after non-degrading plugin tool failures', async () => {
+    let invocations = 0;
+    let handledCalls = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
           }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued after rejected tool'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall(call, context) {
+        handledCalls += 1;
+
+        return createRejectedToolCallResult({
+          call,
+          context,
+          evidenceStatus: 'rejected',
+          policyOutcome: 'handler_rejected'
+        });
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_rejected_plugin_tool'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_rejected_plugin_tool')
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted'
+    });
+    expect(invocations).toBe(2);
+    expect(handledCalls).toBe(1);
+    expect(result.pluginToolResults).toHaveLength(1);
+    expect(result.pluginToolResults[0]).toMatchObject({
+      callId:
+        'evt_rejected_plugin_tool.trace_evt_rejected_plugin_tool.round-1.1.memory.search',
+      call: {
+        pluginId: 'memory.search.fixture',
+        toolName: 'memory.search'
+      },
+      result: {
+        status: 'rejected',
+        reason: 'handler_failed'
+      }
+    });
+    expect(result.rounds).toHaveLength(2);
+    expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
+  });
+
+  it('scopes plugin tool call IDs by trace identity when eventId is reused', async () => {
+    async function runWithTrace(traceId: string): Promise<string | undefined> {
+      const adapter = createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'memory.search',
+              input: {
+                query: 'Mira'
+              }
+            }
+          ]
+        },
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'memory checked'
+              }
+            }
+          ]
+        }
+      ], () => undefined);
+      const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+        handleToolCall() {
+          return createAcceptedToolCallResult();
+        }
+      });
+
+      const result = await runRoleModelLoop({
+        event: createTestEvent(
+          'search memory',
+          'evt_replayed_tool_call',
+          traceId
+        ),
+        decisionContext: createTestDecisionContext(),
+        adapter,
+        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolHost,
+        runtimePluginContext: createTestPluginContext(
+          'evt_replayed_tool_call',
+          traceId
+        )
+      });
+
+      expect(result.status).toBe('accepted');
+
+      return result.pluginToolResults[0]?.callId;
+    }
+
+    const firstCallId = await runWithTrace('trace_retry_first');
+    const secondCallId = await runWithTrace('trace_retry_second');
+
+    expect(firstCallId).toBe(
+      'evt_replayed_tool_call.trace_retry_first.round-1.1.memory.search'
+    );
+    expect(secondCallId).toBe(
+      'evt_replayed_tool_call.trace_retry_second.round-1.1.memory.search'
+    );
+    expect(firstCallId).not.toBe(secondCallId);
+  });
+
+  it('requires a successful required plugin tool result before final output', async () => {
+    let invocations = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued after required tool failed'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall(call, context) {
+        return createRejectedToolCallResult({
+          call,
+          context,
+          evidenceStatus: 'degraded',
+          policyOutcome: 'optional_degraded'
+        });
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_required_plugin_tool'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [requiredMemorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_required_plugin_tool')
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: 'missing_required_tool_call'
+      }
+    });
+    expect(invocations).toBe(2);
+    expect(result.pluginToolResults[0]?.result.evidence).toMatchObject([
+      {
+        status: 'degraded',
+        policyOutcome: 'optional_degraded'
+      }
+    ]);
+  });
+
+  it('continues after handler failures with rejected evidence', async () => {
+    let invocations = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued after handler rejected'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall(call, context) {
+        return createRejectedToolCallResultWithEvidence({
+          call,
+          context,
+          evidence: [
+            {
+              status: 'degraded',
+              policyOutcome: 'optional_degraded'
+            },
+            {
+              status: 'rejected',
+              policyOutcome: 'handler_rejected'
+            }
+          ]
+        });
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_handler_rejected_plugin_tool'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext(
+        'evt_handler_rejected_plugin_tool'
+      )
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted'
+    });
+    expect(invocations).toBe(2);
+    expect(result.pluginToolResults[0]?.result.evidence).toMatchObject([
+      {
+        status: 'degraded',
+        policyOutcome: 'optional_degraded'
+      },
+      {
+        status: 'rejected',
+        policyOutcome: 'handler_rejected'
+      }
+    ]);
+  });
+
+  it.each(['rejected', 'failed'] as const)(
+    'converts accepted plugin tool results with %s tool invocation evidence into rejected observations',
+    async (evidenceStatus) => {
+      let invocations = 0;
+      let handledCalls = 0;
+      const adapter = createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'memory.search',
+              input: {
+                query: 'Mira'
+              }
+            }
+          ]
+        },
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'continued after contradictory tool evidence'
+              }
+            }
+          ]
+        }
+      ], () => {
+        invocations += 1;
+      });
+      const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+        handleToolCall(call, context) {
+          handledCalls += 1;
+
+          return createAcceptedToolCallResultWithBlockingEvidence({
+            call,
+            context,
+            evidenceStatus
+          });
+        }
+      });
+
+      const result = await runRoleModelLoop({
+        event: createTestEvent(
+          'search memory',
+          `evt_accepted_${evidenceStatus}_evidence_plugin_tool`
+        ),
+        decisionContext: createTestDecisionContext(),
+        adapter,
+        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolHost,
+        runtimePluginContext: createTestPluginContext(
+          `evt_accepted_${evidenceStatus}_evidence_plugin_tool`
+        )
+      });
+
+      expect(result).toMatchObject({
+        status: 'accepted'
+      });
+      expect(invocations).toBe(2);
+      expect(handledCalls).toBe(1);
+      expect(result.pluginToolResults[0]?.result).toMatchObject({
+        status: 'rejected',
+        reason: 'blocking_tool_invocation_evidence',
+        evidence: [
+          {
+            evidenceKind: 'tool_invocation',
+            status: evidenceStatus
+          }
+        ]
+      });
+    }
+  );
+
+  it('continues prompting after optional degraded plugin tool failures', async () => {
+    let invocations = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued after degraded tool'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall(call, context) {
+        return createRejectedToolCallResult({
+          call,
+          context,
+          evidenceStatus: 'degraded',
+          policyOutcome: 'optional_degraded'
+        });
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_degraded_plugin_tool'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_degraded_plugin_tool')
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(invocations).toBe(2);
+    expect(result.pluginToolResults).toHaveLength(1);
+    expect(result.pluginToolResults[0]?.result.status).toBe('rejected');
+  });
+
+  it('continues prompting when the real plugin host degrades optional rejected tool results', async () => {
+    let invocations = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued after degraded host result'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost = createRuntimePluginHost({
+      plugins: [createDegradingRejectedMemorySearchPlugin()]
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_host_degraded_plugin_tool'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: pluginToolHost.pluginToolDefinitions(),
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_host_degraded_plugin_tool')
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(invocations).toBe(2);
+    expect(result.pluginToolResults).toHaveLength(1);
+    expect(result.pluginToolResults[0]?.result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_rejected',
+      evidence: [
+        {
+          evidenceKind: 'tool_invocation',
+          status: 'degraded',
+          policyOutcome: 'optional_degraded'
         }
       ]
     });
-
-    const result = await runRoleModelLoop({
-      event,
-      decisionContext
-    });
-
-    expect(result.status).toBe('accepted');
-
-    if (result.status !== 'accepted') {
-      throw new Error('Expected accepted role model result.');
-    }
-
-    expect(getRequiredVisibleReplyText(result.decision)).toBe(expectedReply);
-    expect(result.inputEnvelope.event).toEqual(event);
-    expect(result.inputEnvelope.event.payload.currentUserMessage).toBe('hello');
-    expect(result.inputEnvelope.decisionContext).toEqual(decisionContext);
-    expect(
-      'currentUserMessage' in
-        result.inputEnvelope.decisionContext.characterSnapshot
-    ).toBe(false);
-    expect(result.ioSnapshot).toEqual({
-      eventId: 'evt_role_fresh',
-      traceId: 'trace_evt_role_fresh',
-      createdAt: '2026-06-09T12:00:00.000Z',
-      kind: 'role_model_io_snapshot',
-      sessionId: 'local-session',
-      inputEnvelope: result.inputEnvelope,
-      rawOutputText: expectedRawOutputText
-    });
-    expect(result.parsedDecisionSnapshot).toEqual({
-      eventId: 'evt_role_fresh',
-      traceId: 'trace_evt_role_fresh',
-      createdAt: '2026-06-09T12:00:00.000Z',
-      kind: 'role_model_decision_snapshot',
-      sessionId: 'local-session',
-      result: result.decisionResult
-    });
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(Object.isFrozen(result.ioSnapshot)).toBe(true);
-    expect(Object.isFrozen(result.parsedDecisionSnapshot)).toBe(true);
   });
 
-  it('preserves current context-aware deterministic reply behavior through the local adapter', async () => {
-    const previousUserMessage = createVisibleMessage({
-      id: 'local-session:message-1',
-      role: 'user',
-      speakerId: 'local-user',
-      speakerName: 'You',
-      text: 'are you there?'
-    });
-    const previousCharacterMessage = createVisibleMessage({
-      id: 'local-session:message-2',
-      role: 'character',
-      speakerId: 'mira',
-      speakerName: 'Mira',
-      text: "I'm here. Tell me what you need."
-    });
-    const event = createTestUserMessageEvent('I am tired', 'evt_role_context');
-    const decisionContext = createDecisionContext({
-      sessionId: 'local-session',
-      characterSnapshot: localCharacterProfile,
-      recentVisibleMessages: [previousUserMessage, previousCharacterMessage]
-    });
-
-    const result = await runRoleModelLoop({
-      event,
-      decisionContext,
-      adapter: createDeterministicLocalRoleModelAdapter()
-    });
-
-    expect(result.status).toBe('accepted');
-
-    if (result.status !== 'accepted') {
-      throw new Error('Expected accepted role model result.');
-    }
-
-    expect(getRequiredVisibleReplyText(result.decision)).toBe(
-      'I remember you said "are you there?" Stay with me for a minute.'
-    );
-    expect(JSON.parse(result.ioSnapshot.rawOutputText)).toEqual({
-      version: roleModelDecisionContractVersion,
-      toolCalls: result.decision.toolCalls
-    });
-  });
-
-  it('rejects malformed custom character-agent replies before JSON wrapping', async () => {
-    const malformedReplies: readonly unknown[] = [null, {}, { text: 42 }];
-
-    for (const [index, malformedReply] of malformedReplies.entries()) {
-      const agent: CharacterAgent = {
-        reply() {
-          // Bypass the static agent contract to exercise runtime boundary validation.
-          return malformedReply as CharacterAgentReply;
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY]
+  ])(
+    'rejects non-finite %s accepted plugin tool output from custom hosts',
+    async (label, outputValue) => {
+      let invocations = 0;
+      let handledCalls = 0;
+      const eventId = `evt_non_finite_${label.toLowerCase()}_plugin_output`;
+      const adapter = createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'memory.search',
+              input: {
+                query: 'Mira'
+              }
+            }
+          ]
+        },
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'continued after invalid output'
+              }
+            }
+          ]
         }
-      };
-      const adapter = createRoleModelAdapterFromCharacterAgent(agent);
-      const inputEnvelope = createRoleModelInputEnvelope({
-        event: createTestUserMessageEvent(
-          'hello',
-          `evt_role_malformed_agent_${String(index)}`
-        ),
-        decisionContext: createDecisionContext({
-          sessionId: 'local-session',
-          characterSnapshot: localCharacterProfile
-        })
+      ], () => {
+        invocations += 1;
       });
-      const invokePromise = adapter.invoke(inputEnvelope);
+      const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+        handleToolCall() {
+          handledCalls += 1;
 
-      await expect(invokePromise).rejects.toThrow(CharacterReplyValidationError);
-      await expect(invokePromise).rejects.toThrow(
-        'Character agent returned an invalid reply.'
-      );
+          return Object.freeze({
+            status: 'accepted',
+            output: Object.freeze({
+              score: outputValue
+            }),
+            evidence: Object.freeze([])
+          } satisfies RuntimePluginToolCallResult);
+        }
+      });
+
+      const result = await runRoleModelLoop({
+        event: createTestEvent('search memory', eventId),
+        decisionContext: createTestDecisionContext(),
+        adapter,
+        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolHost,
+        runtimePluginContext: createTestPluginContext(eventId)
+      });
+
+      expect(result).toMatchObject({
+        status: 'accepted'
+      });
+      expect(invocations).toBe(2);
+      expect(handledCalls).toBe(1);
+      expect(result.pluginToolResults).toHaveLength(1);
+      expect(result.pluginToolResults[0]).toMatchObject({
+        callId: `${eventId}.trace_${eventId}.round-1.1.memory.search`,
+        result: {
+          status: 'rejected',
+          reason: 'invalid_tool_output',
+          message: 'Plugin tool output must be finite JSON.'
+        }
+      });
+      expect(result.rounds).toHaveLength(2);
+      expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
     }
-  });
+  );
 
-  it('rejects malformed raw output before commit while keeping model I/O evidence', async () => {
-    const event = createTestUserMessageEvent('hello', 'evt_role_malformed');
-    const result = await runRoleModelLoop({
-      event,
-      decisionContext: createDecisionContext({
-        sessionId: 'local-session',
-        characterSnapshot: localCharacterProfile
-      }),
-      adapter: createRawOutputAdapter('not json')
+  it('redacts custom plugin host accepted string outputs before completion events and native replay', async () => {
+    let invocations = 0;
+    let handledCalls = 0;
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    const completedResults: RuntimePluginToolCallResult[] = [];
+    const redactedOutput = {
+      matched:
+        'api_key=[redacted] Bearer [redacted] https://[redacted]@example.test/?token=[redacted]',
+      api_key: '[redacted]',
+      nested: {
+        password: '[redacted]',
+        client_secret: '[redacted]'
+      },
+      list: [
+        'credential=[redacted]',
+        {
+          access_token: '[redacted]',
+          label: 'kept'
+        }
+      ]
+    };
+    const adapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        invocations += 1;
+        messagesByRound.push([...invocation.turnContext.messages]);
+
+        if (invocations === 1) {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'memory.search',
+                  input: {
+                    query: 'Mira'
+                  }
+                }
+              ]
+            }),
+            nativeAssistantMessage: {
+              role: 'assistant',
+              content: 'Searching memory.',
+              tool_calls: [
+                {
+                  id: 'call_memory_search_secret',
+                  type: 'function',
+                  function: {
+                    name: 'memory.search',
+                    arguments: '{"query":"Mira"}'
+                  }
+                }
+              ]
+            }
+          };
+        }
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'memory checked'
+                }
+              }
+            ]
+          })
+        };
+      }
+    } satisfies RoleModelAdapter);
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall() {
+        handledCalls += 1;
+
+        return Object.freeze({
+          status: 'accepted',
+          output: Object.freeze({
+            matched:
+              'api_key=super-secret Bearer secret-token https://user:pass@example.test/?token=abc',
+            api_key: 'key-only-secret',
+            nested: Object.freeze({
+              password: 'password=open-sesame',
+              client_secret: 'structured-only-secret'
+            }),
+            list: Object.freeze([
+              'credential=door-code',
+              Object.freeze({
+                access_token: 'list-only-secret',
+                label: 'kept'
+              })
+            ])
+          }),
+          evidence: Object.freeze([])
+        } satisfies RuntimePluginToolCallResult);
+      }
     });
 
-    expect(result.status).toBe('rejected');
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_custom_host_secret_output'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext(
+        'evt_custom_host_secret_output'
+      ),
+      onPluginToolCallCompleted(event) {
+        completedResults.push(event.result);
+      }
+    });
 
+    expect(result.status).toBe('accepted');
+    expect(invocations).toBe(2);
+    expect(handledCalls).toBe(1);
+    expect(completedResults).toMatchObject([
+      {
+        status: 'accepted',
+        output: redactedOutput
+      }
+    ]);
+    expect(result.pluginToolResults[0]?.result).toMatchObject({
+      status: 'accepted',
+      output: redactedOutput
+    });
+    expect(result.inputEnvelope.toolObservations[0]?.result).toMatchObject({
+      status: 'accepted',
+      output: redactedOutput
+    });
+
+    const nativeToolMessage = messagesByRound[1]?.find(
+      (message) => message.role === 'tool'
+    );
+
+    expect(nativeToolMessage).toMatchObject({
+      role: 'tool',
+      tool_call_id: 'call_memory_search_secret'
+    });
+    expect(nativeToolMessage?.content).toContain('api_key=[redacted]');
+    expect(nativeToolMessage?.content).toContain('"api_key":"[redacted]"');
+    expect(nativeToolMessage?.content).toContain('Bearer [redacted]');
+    expect(nativeToolMessage?.content).toContain('"password":"[redacted]"');
+    expect(nativeToolMessage?.content).toContain('"client_secret":"[redacted]"');
+    expect(nativeToolMessage?.content).toContain('credential=[redacted]');
+    expect(nativeToolMessage?.content).toContain('"access_token":"[redacted]"');
+
+    const serializedSurfaces = JSON.stringify({
+      completedResults,
+      pluginToolResults: result.pluginToolResults,
+      toolObservations: result.inputEnvelope.toolObservations,
+      nativeToolContent: nativeToolMessage?.content
+    });
+
+    expect(serializedSurfaces).not.toContain('super-secret');
+    expect(serializedSurfaces).not.toContain('key-only-secret');
+    expect(serializedSurfaces).not.toContain('secret-token');
+    expect(serializedSurfaces).not.toContain('open-sesame');
+    expect(serializedSurfaces).not.toContain('structured-only-secret');
+    expect(serializedSurfaces).not.toContain('door-code');
+    expect(serializedSurfaces).not.toContain('list-only-secret');
+    expect(serializedSurfaces).not.toContain('user:pass');
+    expect(serializedSurfaces).not.toContain('token=abc');
+  });
+
+  it('redacts custom plugin host rejected messages before loop rejection evidence', async () => {
+    let invocations = 0;
+    const completedResults: RuntimePluginToolCallResult[] = [];
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued after rejected tool'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall() {
+        return Object.freeze({
+          status: 'rejected',
+          reason: 'handler_failed',
+          message:
+            'search backend failed api_key=super-secret Bearer secret-token',
+          evidence: Object.freeze([])
+        } satisfies RuntimePluginToolCallResult);
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_custom_host_secret_reject'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext(
+        'evt_custom_host_secret_reject'
+      ),
+      onPluginToolCallCompleted(event) {
+        completedResults.push(event.result);
+      }
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(result.pluginToolResults).toMatchObject([
+      {
+        result: {
+          status: 'rejected',
+          reason: 'handler_failed',
+          message:
+            'search backend failed api_key=[redacted] Bearer [redacted]'
+        }
+      }
+    ]);
+    expect(invocations).toBe(2);
+    expect(completedResults).toMatchObject([
+      {
+        status: 'rejected',
+        message: 'search backend failed api_key=[redacted] Bearer [redacted]'
+      }
+    ]);
+
+    const serializedSurfaces = JSON.stringify({
+      completedResults,
+      pluginToolResults: result.pluginToolResults
+    });
+
+    expect(serializedSurfaces).not.toContain('super-secret');
+    expect(serializedSurfaces).not.toContain('secret-token');
+  });
+
+  it('counts successful tool observations toward required plugin tools across the turn', async () => {
+    let invocations = 0;
+    let handledCalls = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'memory checked'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall() {
+        handledCalls += 1;
+
+        return createAcceptedToolCallResult();
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_required_observed'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [requiredMemorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_required_observed')
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(invocations).toBe(2);
+    expect(handledCalls).toBe(1);
+    expect(result.pluginToolResults).toHaveLength(1);
+    expect(result.rounds).toHaveLength(2);
+  });
+
+  it('rejects plugin tool repeats across rounds against maxCallsPerUserTurn', async () => {
+    let invocations = 0;
+    let handledCalls = 0;
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira again'
+            }
+          }
+        ]
+      }
+    ], () => {
+      invocations += 1;
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall() {
+        handledCalls += 1;
+
+        return createAcceptedToolCallResult();
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_repeated_tool'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_repeated_tool')
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelDuplicateToolCallRejectionReason
+      }
+    });
     if (result.status !== 'rejected') {
-      throw new Error('Expected rejected role model result.');
+      throw new Error('Expected repeated tool call to be rejected.');
     }
 
-    expect(result.rejection.reason).toBe(roleModelMalformedOutputRejectionReason);
-    expect(result.ioSnapshot.rawOutputText).toBe('not json');
-    expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
-    expect(result.parsedDecisionSnapshot.result).toEqual({
+    expect(result.rejection.details).toContain('maxCallsPerUserTurn is 1');
+    expect(invocations).toBe(2);
+    expect(handledCalls).toBe(1);
+    expect(result.pluginToolResults).toHaveLength(1);
+    expect(result.rounds).toHaveLength(2);
+  });
+
+  it('stores a rejected parsed snapshot for terminal empty toolCalls output', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_empty_tool_calls'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createSequencedAdapter([
+        {
+          toolCalls: []
+        }
+      ], () => undefined)
+    });
+
+    expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
         reason: roleModelMalformedOutputRejectionReason,
-        details: 'Adapter output must be valid JSON.'
-      }
-    });
-  });
-
-  it('rejects adapter raw outputs without string rawOutputText before snapshotting evidence', async () => {
-    const malformedRawOutputs: readonly unknown[] = [
-      {},
-      {
-        rawOutputText: undefined
-      }
-    ];
-
-    for (const [index, rawOutput] of malformedRawOutputs.entries()) {
-      const result = await runRoleModelLoop({
-        event: createTestUserMessageEvent(
-          'hello',
-          `evt_role_malformed_adapter_${String(index)}`
-        ),
-        decisionContext: createDecisionContext({
-          sessionId: 'local-session',
-          characterSnapshot: localCharacterProfile
-        }),
-        adapter: createMalformedRawOutputAdapter(rawOutput)
-      });
-
-      expect(result.status).toBe('rejected');
-
-      if (result.status !== 'rejected') {
-        throw new Error('Expected rejected role model result.');
-      }
-
-      expect(result.rejection).toEqual({
-        reason: roleModelMalformedOutputRejectionReason,
-        details: 'Adapter raw output must include string rawOutputText.'
-      });
-      expect(result.ioSnapshot.rawOutputText).toBe('');
-      expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
-      expect(result.parsedDecisionSnapshot.result).toEqual({
-        status: 'rejected',
-        rejection: {
-          reason: roleModelMalformedOutputRejectionReason,
-          details: 'Adapter raw output must include string rawOutputText.'
-        }
-      });
-    }
-  });
-
-  it('rejects explicit adapter rejections when raw output cannot replay to the same rejection', async () => {
-    const result = await runRoleModelLoop({
-      event: createTestUserMessageEvent(
-        'hello',
-        'evt_role_unreplayable_rejection'
-      ),
-      decisionContext: createDecisionContext({
-        sessionId: 'local-session',
-        characterSnapshot: localCharacterProfile
-      }),
-      adapter: createMalformedRawOutputAdapter({
-        rawOutputText: 'rate limit',
-        rejection: {
-          reason: roleModelProviderErrorRejectionReason,
-          details: 'rate limit'
-        }
-      })
-    });
-
-    expect(result.status).toBe('rejected');
-
-    if (result.status !== 'rejected') {
-      throw new Error('Expected rejected role model result.');
-    }
-
-    expect(result.rejection).toEqual({
-      reason: roleModelMalformedOutputRejectionReason,
-      details: roleModelAdapterRejectionNotReplayableDetails
-    });
-    expect(result.ioSnapshot.rawOutputText).toBe('');
-    expect(result.ioSnapshot.providerMetadata).toBeUndefined();
-    expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
-  });
-
-  it('preserves explicit adapter rejections when raw output replays to the same rejection', async () => {
-    const result = await runRoleModelLoop({
-      event: createTestUserMessageEvent(
-        'hello',
-        'evt_role_replayable_rejection'
-      ),
-      decisionContext: createDecisionContext({
-        sessionId: 'local-session',
-        characterSnapshot: localCharacterProfile
-      }),
-      adapter: createMalformedRawOutputAdapter({
-        rawOutputText: 'not json',
-        rejection: {
-          reason: roleModelMalformedOutputRejectionReason,
-          details: 'Adapter output must be valid JSON.'
-        }
-      })
-    });
-
-    expect(result.status).toBe('rejected');
-
-    if (result.status !== 'rejected') {
-      throw new Error('Expected rejected role model result.');
-    }
-
-    expect(result.rejection).toEqual({
-      reason: roleModelMalformedOutputRejectionReason,
-      details: 'Adapter output must be valid JSON.'
-    });
-    expect(result.ioSnapshot.rawOutputText).toBe('not json');
-    expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
-  });
-
-  it('rejects empty provider-error adapter outputs without matching provider error metadata', async () => {
-    const malformedProviderErrorOutputs: readonly unknown[] = [
-      {
-        rawOutputText: '',
-        rejection: {
-          reason: roleModelProviderErrorRejectionReason,
-          details: 'Provider request failed.'
-        }
+        details: roleModelTerminalEmptyOutputRejectionDetails
       },
-      {
-        rawOutputText: '',
-        providerMetadata: {
-          provider: 'nvidia',
-          error: {
-            code: 'provider_error'
+      parsedDecisionSnapshot: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: roleModelMalformedOutputRejectionReason,
+            details: roleModelTerminalEmptyOutputRejectionDetails
           }
-        },
-        rejection: {
-          reason: roleModelProviderErrorRejectionReason,
-          details: 'Provider request failed.'
-        }
-      },
-      {
-        rawOutputText: '',
-        providerMetadata: {
-          provider: 'nvidia',
-          error: {
-            code: 'provider_error',
-            message: 'Different provider details.'
-          }
-        },
-        rejection: {
-          reason: roleModelProviderErrorRejectionReason,
-          details: 'Provider request failed.'
         }
       }
-    ];
-
-    for (const [index, rawOutput] of malformedProviderErrorOutputs.entries()) {
-      const result = await runRoleModelLoop({
-        event: createTestUserMessageEvent(
-          'hello',
-          `evt_role_malformed_provider_error_${String(index)}`
-        ),
-        decisionContext: createDecisionContext({
-          sessionId: 'local-session',
-          characterSnapshot: localCharacterProfile
-        }),
-        adapter: createMalformedRawOutputAdapter(rawOutput)
-      });
-
-      expect(result.status).toBe('rejected');
-
-      if (result.status !== 'rejected') {
-        throw new Error('Expected rejected role model result.');
-      }
-
-      expect(result.rejection).toEqual({
-        reason: roleModelMalformedOutputRejectionReason,
-        details: roleModelAdapterRejectionNotReplayableDetails
-      });
-      expect(result.ioSnapshot.rawOutputText).toBe('');
-      expect(result.ioSnapshot.providerMetadata).toBeUndefined();
-      expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
+    });
+    if (result.status !== 'rejected') {
+      throw new Error('Expected empty toolCalls output to reject the loop.');
     }
+
+    expect(result.rounds).toHaveLength(1);
+    expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
+    expect(result.rounds[0]?.parsedDecisionSnapshot.result).toEqual(
+      result.decisionResult
+    );
+    expect(
+      isRoleModelRawOutputReplayableDecisionEvidence({
+        rawOutputText: result.ioSnapshot.rawOutputText,
+        providerMetadata: result.ioSnapshot.providerMetadata,
+        decisionResult: result.parsedDecisionSnapshot.result,
+        allowedTools: result.ioSnapshot.inputEnvelope.allowedTools,
+        pluginToolDefinitions:
+          result.ioSnapshot.inputEnvelope.pluginToolDefinitions,
+        toolObservations: result.ioSnapshot.inputEnvelope.toolObservations
+      })
+    ).toBe(true);
   });
 
-  it('preserves empty provider-error adapter outputs with matching provider error metadata', async () => {
+  it('redacts adapter-supplied provider endpoints before IO snapshots expose them', async () => {
     const result = await runRoleModelLoop({
-      event: createTestUserMessageEvent('hello', 'evt_role_provider_error'),
-      decisionContext: createDecisionContext({
-        sessionId: 'local-session',
-        characterSnapshot: localCharacterProfile
-      }),
-      adapter: createMalformedRawOutputAdapter({
-        rawOutputText: '',
-        providerMetadata: {
-          provider: 'nvidia',
-          model: 'nvidia/test-model',
-          request: {
-            endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
+      event: createTestEvent('hello', 'evt_provider_endpoint_redaction'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createProviderMetadataAdapter(
+        Object.freeze({
+          provider: 'local',
+          request: Object.freeze({
+            endpoint:
+              'https://user:pass@example.test/chat?keep=ok&token=super-secret',
+            messageCount: 1,
             stream: false
-          },
-          error: {
-            code: 'provider_error',
-            message: 'Provider request failed.'
-          }
-        },
-        rejection: {
-          reason: roleModelProviderErrorRejectionReason,
-          details: 'Provider request failed.'
-        }
-      })
+          })
+        } satisfies RoleModelProviderMetadata)
+      )
     });
 
-    expect(result.status).toBe('rejected');
+    expect(result.status).toBe('accepted');
+    expect(result.ioSnapshot.providerMetadata).toMatchObject({
+      provider: 'local',
+      request: {
+        endpoint:
+          'https://[redacted]@example.test/chat?keep=ok&token=[redacted]',
+        messageCount: 1,
+        stream: false
+      }
+    });
 
-    if (result.status !== 'rejected') {
-      throw new Error('Expected rejected role model result.');
-    }
+    const serializedProviderMetadata = JSON.stringify(
+      result.ioSnapshot.providerMetadata
+    );
 
-    expect(result.rejection).toEqual({
-      reason: roleModelProviderErrorRejectionReason,
-      details: 'Provider request failed.'
+    expect(serializedProviderMetadata).not.toContain('user:pass');
+    expect(serializedProviderMetadata).not.toContain('super-secret');
+  });
+
+  it('rejects non-finite provider request metadata before snapshots can serialize it', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_non_finite_provider_request'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createProviderMetadataAdapter(
+        Object.freeze({
+          provider: 'local',
+          request: Object.freeze({
+            messageCount: Number.NaN,
+            stream: false
+          })
+        } satisfies RoleModelProviderMetadata)
+      )
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'providerMetadata.request.messageCount must be finite JSON.'
+      }
     });
     expect(result.ioSnapshot.rawOutputText).toBe('');
-    expect(result.ioSnapshot.providerMetadata).toMatchObject({
-      provider: 'nvidia',
-      error: {
-        code: 'provider_error',
-        message: 'Provider request failed.'
-      }
-    });
-    expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
+    expect(result.ioSnapshot).not.toHaveProperty('providerMetadata');
   });
 
-  it('rejects unsupported action and effect shapes with the CT-01 unsupported reason', async () => {
-    const unsupportedOutputs = [
-      JSON.stringify({
-        action: {
-          type: 'tool_call',
-          name: 'search'
-        }
-      }),
-      JSON.stringify({
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: 'I can do that.'
-        },
-        effects: [
-          {
-            type: 'schedule_reminder'
-          }
-        ]
-      })
-    ];
+  it('rejects non-finite provider response metadata before snapshots can serialize it', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_non_finite_provider_response'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createProviderMetadataAdapter(
+        Object.freeze({
+          provider: 'local',
+          response: Object.freeze({
+            status: Number.POSITIVE_INFINITY
+          })
+        } satisfies RoleModelProviderMetadata)
+      )
+    });
 
-    for (const rawOutputText of unsupportedOutputs) {
-      const result = await runRoleModelLoop({
-        event: createTestUserMessageEvent(
-          'hello',
-          `evt_${String(rawOutputText.length)}`
-        ),
-        decisionContext: createDecisionContext({
-          sessionId: 'local-session',
-          characterSnapshot: localCharacterProfile
-        }),
-        adapter: createRawOutputAdapter(rawOutputText)
-      });
-
-      expect(result.status).toBe('rejected');
-
-      if (result.status !== 'rejected') {
-        throw new Error('Expected rejected role model result.');
-      }
-
-      expect(result.rejection.reason).toBe(
-        roleModelUnsupportedEffectRejectionReason
-      );
-      expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
-    }
-  });
-
-  it('parses empty and multiline visible_reply text as shape-valid for CT-04 validation', () => {
-    const emptyReplyResult = parseRoleModelDecision(
-      JSON.stringify({
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: ''
-        }
-      })
-    );
-    const multilineReplyResult = parseRoleModelDecision(
-      JSON.stringify({
-        action: {
-          type: roleModelVisibleReplyActionName,
-          text: 'line one\nline two'
-        }
-      })
-    );
-
-    expect(emptyReplyResult).toEqual({
-      status: 'accepted',
-      decision: {
-        version: roleModelDecisionContractVersion,
-        toolCalls: [
-          {
-            name: roleModelVisibleReplyActionName,
-            input: {
-              text: ''
-            }
-          }
-        ]
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'providerMetadata.response.status must be finite JSON.'
       }
     });
-    expect(multilineReplyResult).toEqual({
-      status: 'accepted',
-      decision: {
-        version: roleModelDecisionContractVersion,
-        toolCalls: [
-          {
-            name: roleModelVisibleReplyActionName,
-            input: {
-              text: 'line one\nline two'
-            }
-          }
-        ]
-      }
-    });
+    expect(result.ioSnapshot.rawOutputText).toBe('');
+    expect(result.ioSnapshot).not.toHaveProperty('providerMetadata');
   });
 });
 
-function createTestUserMessageEvent(message: string, eventId: string) {
-  return createUserMessageRuntimeEvent(message, {
-    eventId,
-    traceId: `trace_${eventId}`,
-    createdAt: '2026-06-09T12:00:00.000Z'
+const memorySearchToolDefinition = Object.freeze({
+  pluginId: 'memory.search.fixture',
+  name: 'memory.search',
+  description: 'Search memory.',
+  requiredForUserTurn: false,
+  maxCallsPerUserTurn: 1,
+  inputContract: {
+    type: 'object',
+    fields: [
+      {
+        name: 'query',
+        description: 'Search query.',
+        required: true
+      }
+    ],
+    additionalFields: false
+  },
+  validationOwner: 'plugin_host',
+  sideEffectLevel: 'runtime_read',
+  requiresConfirmation: false,
+  sourceReferencesRequired: false
+} satisfies RoleModelPluginToolDefinition);
+
+const requiredMemorySearchToolDefinition = Object.freeze({
+  ...memorySearchToolDefinition,
+  requiredForUserTurn: true
+} satisfies RoleModelPluginToolDefinition);
+
+function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
+  const id = 'memory.search.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      id,
+      displayName: 'Memory Search Fixture',
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'Search memory.',
+      contractVersion: runtimePluginContractVersion,
+      compatibility: {
+        hostContractVersions: [runtimePluginContractVersion],
+        sourceSystem: 'test'
+      },
+      declaredPlugins: ['tool_provider', 'handle_tool_call'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'degrade',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test']
+      },
+      requestedApis: []
+    },
+    providedTools: [
+      {
+        name: 'memory.search',
+        description: 'Search memory.',
+        requiredForUserTurn: false,
+        maxCallsPerUserTurn: 1,
+        inputContract: {
+          type: 'object',
+          fields: [
+            {
+              name: 'query',
+              description: 'Search query.',
+              required: true
+            }
+          ],
+          additionalFields: false
+        },
+        validationOwner: 'plugin_host',
+        sideEffectLevel: 'runtime_read',
+        requiresConfirmation: false,
+        sourceReferencesRequired: false
+      }
+    ],
+    lifecycleHooks: {
+      handleToolCall() {
+        return {
+          status: 'rejected',
+          reason: 'handler_rejected',
+          message: 'search backend degraded',
+          evidence: []
+        };
+      }
+    }
   });
 }
 
-function createVisibleMessage(message: VisibleMessage): VisibleMessage {
-  return Object.freeze(message);
+function createSequencedAdapter(
+  decisions: readonly Readonly<Record<string, unknown>>[],
+  onInvoke: () => void
+): RoleModelAdapter {
+  let index = 0;
+
+  return Object.freeze({
+    invoke() {
+      const decision = decisions[index] ?? decisions.at(-1);
+
+      if (decision === undefined) {
+        throw new Error('Sequenced adapter needs at least one decision.');
+      }
+
+      index += 1;
+      onInvoke();
+
+      return {
+        rawOutputText: JSON.stringify(decision)
+      };
+    }
+  } satisfies RoleModelAdapter);
 }
 
-function createRawOutputAdapter(rawOutputText: string): RoleModelAdapter {
-  return {
+function createProviderMetadataAdapter(
+  providerMetadata: RoleModelProviderMetadata
+): RoleModelAdapter {
+  return Object.freeze({
     invoke() {
-      return Object.freeze({
-        rawOutputText
-      });
+      return {
+        rawOutputText: JSON.stringify({
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'hello'
+              }
+            }
+          ]
+        }),
+        providerMetadata
+      };
     }
-  };
+  } satisfies RoleModelAdapter);
 }
 
-function createMalformedRawOutputAdapter(rawOutput: unknown): RoleModelAdapter {
-  return {
-    invoke() {
-      // Bypass the static adapter contract to exercise runtime boundary validation.
-      return rawOutput as RoleModelAdapterRawOutput;
+function createAcceptedToolCallResult(): RuntimePluginToolCallResult {
+  return Object.freeze({
+    status: 'accepted',
+    output: Object.freeze({
+      ok: true
+    }),
+    evidence: Object.freeze([])
+  } satisfies RuntimePluginToolCallResult);
+}
+
+function createAcceptedToolCallResultWithBlockingEvidence(options: {
+  readonly call: RuntimePluginToolCall;
+  readonly context: RuntimePluginContext;
+  readonly evidenceStatus: 'rejected' | 'failed';
+}): RuntimePluginToolCallResult {
+  return Object.freeze({
+    status: 'accepted',
+    output: Object.freeze({
+      ok: true
+    }),
+    evidence: Object.freeze([
+      createRuntimePluginEvidenceSnapshot({
+        eventId: options.context.eventId,
+        traceId: options.context.traceId,
+        createdAt: options.context.timestamp,
+        kind: 'runtime_plugin_evidence_snapshot',
+        pluginId: options.call.pluginId,
+        evidenceKind: 'tool_invocation',
+        status: options.evidenceStatus,
+        summary: 'search backend failed',
+        policyOutcome:
+          options.evidenceStatus === 'failed' ? 'timeout' : 'handler_rejected',
+        redactionLabels: []
+      })
+    ])
+  } satisfies RuntimePluginToolCallResult);
+}
+
+function createRejectedToolCallResult(options: {
+  readonly call: RuntimePluginToolCall;
+  readonly context: RuntimePluginContext;
+  readonly evidenceStatus: 'rejected' | 'degraded';
+  readonly policyOutcome: 'handler_rejected' | 'optional_degraded';
+}): RuntimePluginToolCallResult {
+  return createRejectedToolCallResultWithEvidence({
+    call: options.call,
+    context: options.context,
+    evidence: [
+      {
+        status: options.evidenceStatus,
+        policyOutcome: options.policyOutcome
+      }
+    ]
+  });
+}
+
+function createRejectedToolCallResultWithEvidence(options: {
+  readonly call: RuntimePluginToolCall;
+  readonly context: RuntimePluginContext;
+  readonly evidence: readonly {
+    readonly status: 'rejected' | 'degraded';
+    readonly policyOutcome: 'handler_rejected' | 'optional_degraded';
+  }[];
+}): RuntimePluginToolCallResult {
+  return Object.freeze({
+    status: 'rejected',
+    reason: 'handler_failed',
+    message: 'search backend failed',
+    evidence: options.evidence.map((evidence) =>
+      createRuntimePluginEvidenceSnapshot({
+        eventId: options.context.eventId,
+        traceId: options.context.traceId,
+        createdAt: options.context.timestamp,
+        kind: 'runtime_plugin_evidence_snapshot',
+        pluginId: options.call.pluginId,
+        evidenceKind: 'tool_invocation',
+        status: evidence.status,
+        summary: 'search backend failed',
+        policyOutcome: evidence.policyOutcome,
+        redactionLabels: []
+      })
+    )
+  } satisfies RuntimePluginToolCallResult);
+}
+
+function createTestDecisionContext() {
+  return createDecisionContext({
+    sessionId: 'session-loop',
+    characterSnapshot: {
+      id: 'mira',
+      displayName: 'Mira'
     }
-  };
+  });
+}
+
+function createTestPluginContext(
+  eventId: string,
+  traceId = `trace_${eventId}`
+): RuntimePluginContext {
+  return createRuntimePluginContext({
+    ...createRuntimeEventIdentity({
+      eventId,
+      traceId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    }),
+    sessionId: 'session-loop',
+    eventType: 'USER_MESSAGE',
+    currentUserMessage: 'search memory',
+    character: {
+      id: 'mira',
+      displayName: 'Mira'
+    }
+  });
+}
+
+function createTestEvent(
+  message: string,
+  eventId: string,
+  traceId = `trace_${eventId}`
+) {
+  return createUserMessageRuntimeEvent(
+    message,
+    createRuntimeEventIdentity({
+      eventId,
+      traceId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    })
+  );
 }

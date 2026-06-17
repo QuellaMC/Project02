@@ -1,0 +1,77 @@
+{
+  "protocolVersion": "2025-06-18",
+  "server": {
+    "id": "project02-memory-mcp-fixture",
+    "name": "Project02 MCP fixture"
+  },
+  "capabilities": {
+    "tools": true,
+    "resources": true,
+    "prompts": true,
+    "sampling": true
+  },
+  "tools": [
+    {
+      "name": "knowledge.lookup",
+      "description": "Look up a bounded knowledge item.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Lookup query."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum result count."
+          }
+        }
+      },
+      "fixtureResponse": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Capability adapters should expose bounded context."
+          }
+        ]
+      }
+    }
+  ],
+  "resources": [
+    {
+      "uri": "mcp://project02/memory-summary",
+      "name": "Memory Summary",
+      "description": "A bounded resource summary.",
+      "mimeType": "text/plain",
+      "fixtureText": "MCP resource fixture: project02 has a universal plugin host contract.",
+      "estimatedTokens": 10
+    },
+    {
+      "uri": "mcp://project02/tool-policy",
+      "name": "Tool Policy",
+      "description": "A resource describing local tool policy.",
+      "mimeType": "text/plain",
+      "fixtureText": "MCP resource fixture: runtime policy validates model-requested tool calls.",
+      "estimatedTokens": 10
+    }
+  ],
+  "unsupportedFields": [
+    {
+      "fieldPath": "capabilities.prompts",
+      "disposition": "future_extension",
+      "evidence": "Prompt templates are outside CT-05 adapter proof scope."
+    },
+    {
+      "fieldPath": "capabilities.sampling",
+      "disposition": "future_extension",
+      "evidence": "Model sampling requests would require a runtime policy decision in a later slice."
+    },
+    {
+      "fieldPath": "resourceSubscriptions",
+      "disposition": "ignored_with_evidence",
+      "evidence": "Resource change subscriptions are not represented by the static fixture."
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "id": "memory_tencentdb.fixture",
+  "displayName": "TencentDB Agent Memory fixture",
+  "version": "1.0.0-fixture",
+  "kind": "memory_provider",
+  "description": "Normalized TencentDB-Agent-Memory gateway fixture for MVP-007 contract validation.",
+  "contractVersion": "mvp-007.runtime_plugin.v1",
+  "compatibility": {
+    "hostContractVersions": ["mvp-007.runtime_plugin.v1"],
+    "sourceSystem": "TencentDB-Agent-Memory",
+    "sourceVersion": "main",
+    "externalContract": "tdai-gateway-http",
+    "notes": ["recall before prompt, capture after commit, session end, health"]
+  },
+  "declaredCapabilities": [
+    "context_provider",
+    "before_role_model_call",
+    "tool_provider",
+    "handle_tool_call",
+    "after_turn_committed",
+    "on_session_end",
+    "health"
+  ],
+  "config": {
+    "fingerprint": "fixture-redacted-gateway-config",
+    "fields": [
+      {
+        "name": "gateway_host",
+        "description": "Gateway host.",
+        "required": true,
+        "secret": false,
+        "redactionLabels": []
+      },
+      {
+        "name": "gateway_api_key",
+        "description": "Gateway bearer token.",
+        "required": false,
+        "secret": true,
+        "redactionLabels": ["secret"]
+      }
+    ]
+  },
+  "localTrustLevel": "test_fixture",
+  "runtimePolicy": {
+    "requiredForTurn": false,
+    "sideEffectLevel": "local_memory_write",
+    "confirmation": "not_required",
+    "timeoutMs": 2000,
+    "sourceReferencesRequired": true,
+    "redactionLabels": ["secret"],
+    "failureBehavior": {
+      "beforeRoleModelCall": "degrade",
+      "handleToolCall": "degrade",
+      "afterTurnCommitted": "log_failure",
+      "health": "degrade"
+    }
+  },
+  "activation": {
+    "defaultEnabled": false,
+    "reasons": ["fixture_only"]
+  }
+}
