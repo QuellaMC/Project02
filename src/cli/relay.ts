@@ -1,16 +1,24 @@
-import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 
+import {
+  createConversationSession,
+  type CharacterAgent
+} from '../core/conversation.ts';
 import {
   normalizeOneLineMessage,
   OneLineMessageValidationError
 } from '../core/message-validation.ts';
-import { runChatCli } from './chat.ts';
+import { createUserMessageRuntimeEvent } from '../runtime/event.ts';
+import { runLocalUserMessageEvent } from '../runtime/local.ts';
+import { createRuntimeLogStore } from '../runtime/log.ts';
 
 type RelayCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
+  readonly agent?: CharacterAgent;
 };
+
+const relayMissingReplyErrorMessage = 'Relay completed without a visible reply.';
 
 export async function runRelayCli(
   args: readonly string[],
@@ -18,12 +26,29 @@ export async function runRelayCli(
 ): Promise<number> {
   try {
     const message = readMessageArg(args);
-
-    return await runChatCli({
-      stdin: Readable.from([`${message}\n/exit\n`]),
-      stdout: options.stdout,
-      stderr: options.stderr
+    const session = createConversationSession();
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(message),
+      session,
+      logStore: createRuntimeLogStore(),
+      rawInput: message,
+      ...(options.agent === undefined ? {} : { agent: options.agent })
     });
+
+    if (result.status === 'rejected') {
+      options.stderr.write(`Error: ${result.message}\n`);
+      return 1;
+    }
+
+    const replyText = result.turn?.characterMessage.text;
+
+    if (replyText === undefined) {
+      options.stderr.write(`Error: ${relayMissingReplyErrorMessage}\n`);
+      return 1;
+    }
+
+    options.stdout.write(`${session.character.displayName}: ${replyText}\n`);
+    return 0;
   } catch (error: unknown) {
     if (error instanceof OneLineMessageValidationError) {
       options.stderr.write(`Error: ${error.message}\n`);

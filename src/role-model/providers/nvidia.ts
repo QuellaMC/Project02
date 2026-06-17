@@ -368,18 +368,22 @@ function createProviderRejectedOutput(options: {
   readonly model: string;
   readonly status?: number;
 }): RoleModelAdapterRawOutput {
+  const providerMetadata = createProviderMetadata({
+    code: options.code,
+    endpoint: options.endpoint,
+    message: options.message,
+    model: options.model,
+    ...(options.status === undefined ? {} : { status: options.status })
+  });
+  const rejectionDetails =
+    providerMetadata.error?.message ?? redactRuntimePluginText(options.message);
+
   return Object.freeze({
     rawOutputText: '',
-    providerMetadata: createProviderMetadata({
-      code: options.code,
-      endpoint: options.endpoint,
-      message: options.message,
-      model: options.model,
-      ...(options.status === undefined ? {} : { status: options.status })
-    }),
+    providerMetadata,
     rejection: Object.freeze({
       reason: roleModelProviderErrorRejectionReason,
-      details: options.message
+      details: rejectionDetails
     })
   } satisfies RoleModelAdapterRawOutput);
 }

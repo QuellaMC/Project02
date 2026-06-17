@@ -253,14 +253,7 @@ export function mapTencentDbMemoryGatewayFixture(
 
         return Object.freeze({
           contextItems: Object.freeze([contextItem]),
-          runtimeNotes: Object.freeze([
-            `TencentDB recall strategy: ${
-              optionalString(
-                recall.response['strategy'],
-                'endpoints.recall.response.strategy'
-              ) ?? 'unspecified'
-            }`
-          ]),
+          runtimeNotes: Object.freeze([]),
           evidence: Object.freeze([
             createEvidence({
               pluginId: manifestId,
@@ -450,9 +443,7 @@ export function mapHermesMemoryProviderFixture(
 
         return Object.freeze({
           contextItems: Object.freeze([contextItem]),
-          runtimeNotes: Object.freeze([
-            `Hermes degradation: ${degradationSummary(degradation)}`
-          ]),
+          runtimeNotes: Object.freeze([]),
           evidence: Object.freeze([
             createEvidence({
               pluginId: manifestId,
@@ -651,9 +642,7 @@ export function mapMcpToolsResourcesFixture(
 
         return Object.freeze({
           contextItems: Object.freeze(contextItems),
-          runtimeNotes: Object.freeze([
-            `Mapped ${String(resources.length)} MCP resources for ${protocolVersion}.`
-          ]),
+          runtimeNotes: Object.freeze([]),
           evidence: Object.freeze([
             createEvidence({
               pluginId: manifestId,

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createDecisionContext,
   createRoleModelInputEnvelope,
+  roleModelProviderErrorRejectionReason,
   type RoleModelPluginToolDefinition
 } from '../src/role-model/contracts.ts';
 import {
@@ -30,6 +31,9 @@ import {
 import {
   createRuntimePluginContextItem
 } from '../src/plugins/types.ts';
+import {
+  runRoleModelLoop
+} from '../src/role-model/loop.ts';
 
 describe('NVIDIA role-model provider', () => {
   it('reads the model name from environment configuration', () => {
@@ -89,9 +93,12 @@ describe('NVIDIA role-model provider', () => {
     );
   });
 
-  it('redacts credential-bearing custom endpoints echoed into rejected provider metadata', async () => {
+  it('redacts credential-bearing custom endpoints in replayable provider rejections', async () => {
     const endpoint =
       'https://user:pass@example.test/v1/chat/completions?token=endpoint-secret';
+    const redactedEndpoint =
+      'https://[redacted]@example.test/v1/chat/completions?token=[redacted]';
+    const redactedFailureMessage = `connect failed for ${redactedEndpoint}`;
     const fetchClient: NvidiaFetchClient = () =>
       Promise.reject(new Error(`connect failed for ${endpoint}`));
     const adapter = createNvidiaRoleModelProviderAdapter({
@@ -103,17 +110,41 @@ describe('NVIDIA role-model provider', () => {
     const output = await adapter.invoke(inputEnvelope, {
       turnContext: renderRoleModelTurnContext(inputEnvelope)
     });
-    const serializedMetadata = JSON.stringify(output.providerMetadata);
+    const serializedOutput = JSON.stringify(output);
 
-    expect(output.rejection?.reason).toBe('provider_error');
-    expect(output.providerMetadata?.request?.endpoint).toBe(
-      'https://[redacted]@example.test/v1/chat/completions?token=[redacted]'
+    expect(output.providerMetadata?.request?.endpoint).toBe(redactedEndpoint);
+    expect(output.providerMetadata?.error?.message).toBe(redactedFailureMessage);
+    expect(output.rejection).toEqual({
+      reason: roleModelProviderErrorRejectionReason,
+      details: redactedFailureMessage
+    });
+    expect(output.rejection?.details).toBe(
+      output.providerMetadata?.error?.message
     );
-    expect(output.providerMetadata?.error?.message).toBe(
-      'connect failed for https://[redacted]@example.test/v1/chat/completions?token=[redacted]'
+    expect(serializedOutput).not.toContain('user:pass');
+    expect(serializedOutput).not.toContain('endpoint-secret');
+
+    const loopResult = await runRoleModelLoop({
+      event: inputEnvelope.event,
+      decisionContext: inputEnvelope.decisionContext,
+      pluginToolDefinitions: inputEnvelope.pluginToolDefinitions,
+      adapter
+    });
+
+    if (loopResult.status !== 'rejected') {
+      throw new Error('Expected NVIDIA provider failure to reject.');
+    }
+
+    expect(loopResult.rejection).toEqual({
+      reason: roleModelProviderErrorRejectionReason,
+      details: redactedFailureMessage
+    });
+    expect(loopResult.ioSnapshot.providerMetadata?.error?.message).toBe(
+      redactedFailureMessage
     );
-    expect(serializedMetadata).not.toContain('user:pass');
-    expect(serializedMetadata).not.toContain('endpoint-secret');
+    expect(loopResult.ioSnapshot.rawOutputText).toBe('');
+    expect(JSON.stringify(loopResult)).not.toContain('user:pass');
+    expect(JSON.stringify(loopResult)).not.toContain('endpoint-secret');
   });
 
   it('renders OpenAI-compatible messages and native tools', () => {

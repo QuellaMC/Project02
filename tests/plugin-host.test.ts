@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -30,7 +31,10 @@ import type {
   RuntimePluginToolCallResult
 } from '../src/plugins/types.ts';
 import {
-  mapFirstPartyModelToolsPlugin
+  mapHermesMemoryProviderFixture,
+  mapFirstPartyModelToolsPlugin,
+  mapMcpToolsResourcesFixture,
+  mapTencentDbMemoryGatewayFixture
 } from '../src/plugins/adapter-proofs/index.ts';
 import {
   visibleReplyModelToolName
@@ -1183,6 +1187,87 @@ describe('runtime plugin host', () => {
     expect(JSON.stringify(result.contextItems)).not.toContain('low ');
   });
 
+  it.each([
+    [
+      'TencentDB',
+      'tencentdb-memory-gateway.json',
+      mapTencentDbMemoryGatewayFixture,
+      'memory_tencentdb.gateway.fixture',
+      ['tdai.recall.fixture'],
+      'Mira remembers that the user prefers short implementation notes.'
+    ],
+    [
+      'Hermes',
+      'hermes-memory-provider.json',
+      mapHermesMemoryProviderFixture,
+      'hermes.memory_tencentdb.fixture',
+      ['hermes.prefetch.fixture'],
+      'Hermes prefetch recalls that Mira should keep plugin evidence compact.'
+    ],
+    [
+      'MCP',
+      'mcp-tools-resources.json',
+      mapMcpToolsResourcesFixture,
+      'mcp.tools_resources.fixture',
+      ['mcp.resource.1', 'mcp.resource.2'],
+      'MCP resource fixture: project02 has a universal plugin host contract.'
+    ]
+  ] as const)(
+    'keeps source-backed beforeRoleModelCall context for source-required %s proof adapter',
+    async (
+      _name,
+      fixtureName,
+      mapFixture,
+      expectedPluginId,
+      expectedContextIds,
+      expectedText
+    ) => {
+      const mapping = mapFixture(readAgentCapabilityFixture(fixtureName));
+      const host = createRuntimePluginHost({
+        plugins: [mapping.plugin],
+        enabledPluginIds: [mapping.plugin.manifest.id]
+      });
+
+      const result = await host.beforeRoleModelCall(testPluginContext());
+
+      expect(result.status).toBe('completed');
+      if (result.status !== 'completed') {
+        throw new Error('Expected source-required proof adapter to complete.');
+      }
+
+      expect(result.runtimeNotes).toEqual([]);
+      expect(result.contextItems.map((item) => item.id)).toEqual(
+        expectedContextIds
+      );
+      expect(result.contextItems.map((item) => item.pluginId)).toEqual(
+        expectedContextIds.map(() => expectedPluginId)
+      );
+      expect(
+        result.contextItems.every((item) => item.sourceReferences.length > 0)
+      ).toBe(true);
+      expect(
+        result.contextItems.some((item) => item.text.includes(expectedText))
+      ).toBe(true);
+
+      const acceptedEvidence = result.evidence.find(
+        (evidence) =>
+          evidence.pluginId === expectedPluginId &&
+          evidence.evidenceKind === 'before_role_model_call' &&
+          evidence.status === 'accepted'
+      );
+
+      expect(acceptedEvidence?.sourceReferences?.length).toBeGreaterThan(0);
+      expect(
+        result.evidence.find(
+          (evidence) =>
+            evidence.pluginId === expectedPluginId &&
+            evidence.evidenceKind === 'before_role_model_call' &&
+            evidence.status === 'degraded'
+        )
+      ).toBeUndefined();
+    }
+  );
+
   it('accepts first-party model tools as tool-provider-only mappings', () => {
     const plugin = createFirstPartyModelToolsPlugin();
     const mapping = mapFirstPartyModelToolsPlugin();
@@ -2313,6 +2398,17 @@ function testIdentity(
     traceId: options.traceId ?? 'trace_plugin_host',
     createdAt: '2026-06-15T00:00:00.000Z'
   });
+}
+
+function readAgentCapabilityFixture(fileName: string): unknown {
+  const parsed: unknown = JSON.parse(
+    readFileSync(
+      new URL(`./fixtures/agent-capabilities/${fileName}`, import.meta.url),
+      'utf8'
+    )
+  );
+
+  return parsed;
 }
 
 function expectJsonObject(
