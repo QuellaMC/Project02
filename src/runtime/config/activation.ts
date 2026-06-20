@@ -18,6 +18,7 @@ import type {
 } from './types.ts';
 import {
   pluginHasConfigErrors,
+  runtimeConfigDiagnosticPathMatchesPlugin,
   resolveProject02RuntimeConfig
 } from './resolve.ts';
 
@@ -196,7 +197,10 @@ export function resolveRuntimePluginActivation(options: {
         ]),
         diagnostics: Object.freeze(
           diagnostics.filter((diagnostic) =>
-            diagnostic.path?.startsWith(`plugins.${plugin.manifest.id}`) === true
+            runtimeConfigDiagnosticPathMatchesPlugin({
+              path: diagnostic.path,
+              pluginId: plugin.manifest.id
+            })
           )
         )
       } satisfies RuntimePluginActivationSnapshot)

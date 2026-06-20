@@ -10,6 +10,7 @@ import {
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginJsonObject,
   type RuntimePluginProvidedTool,
+  type RuntimePluginSourceReference,
   type RuntimePluginToolCallResult
 } from '../types.ts';
 import {
@@ -201,22 +202,24 @@ export function createMemoryProviderRuntimePlugin(
                   output: {
                     items: items.map(memoryItemOutput)
                   },
-                  summary: `Returned ${String(items.length)} memory search result(s).`
+                  summary: `Returned ${String(items.length)} memory search result(s).`,
+                  sourceReferences: items.flatMap((item) => item.sourceReferences)
                 });
               }
 
               if (call.toolName === addToolName && provider.add !== undefined) {
                 const text = boundedText(stringInput(call.input, 'text'), 600);
+                const inputSourceReferences = [
+                  {
+                    kind: 'conversation',
+                    id: context.eventId,
+                    title: 'Current conversation turn'
+                  }
+                ] as const satisfies readonly RuntimePluginSourceReference[];
                 const result = await provider.add({
                   sessionId: context.sessionId,
                   text,
-                  sourceReferences: [
-                    {
-                      kind: 'conversation',
-                      id: context.eventId,
-                      title: 'Current conversation turn'
-                    }
-                  ]
+                  sourceReferences: inputSourceReferences
                 });
 
                 return acceptedToolResult({
@@ -226,7 +229,11 @@ export function createMemoryProviderRuntimePlugin(
                     id: result.id,
                     sourceReferences: result.sourceReferences
                   },
-                  summary: 'Added one memory item.'
+                  summary: 'Added one memory item.',
+                  sourceReferences: [
+                    ...inputSourceReferences,
+                    ...result.sourceReferences
+                  ]
                 });
               }
 
@@ -272,6 +279,7 @@ function acceptedToolResult(options: {
   readonly pluginId: string;
   readonly output: RuntimePluginJsonObject;
   readonly summary: string;
+  readonly sourceReferences?: readonly RuntimePluginSourceReference[];
 }): RuntimePluginToolCallResult {
   return {
     status: 'accepted',
@@ -282,7 +290,10 @@ function acceptedToolResult(options: {
         pluginId: options.pluginId,
         evidenceKind: 'tool_invocation',
         status: 'accepted',
-        summary: options.summary
+        summary: options.summary,
+        ...(options.sourceReferences === undefined
+          ? {}
+          : { sourceReferences: options.sourceReferences })
       })
     ]
   };
@@ -309,7 +320,12 @@ function memoryEvidence(options: {
   readonly status: RuntimePluginEvidenceSnapshot['status'];
   readonly summary: string;
   readonly sourceItems?: readonly MemoryRecallItem[];
+  readonly sourceReferences?: readonly RuntimePluginSourceReference[];
 }): RuntimePluginEvidenceSnapshot {
+  const sourceReferences =
+    options.sourceReferences ??
+    options.sourceItems?.flatMap((item) => item.sourceReferences);
+
   return createRuntimePluginEvidenceSnapshot({
     eventId: options.context.eventId,
     traceId: options.context.traceId,
@@ -319,13 +335,7 @@ function memoryEvidence(options: {
     evidenceKind: options.evidenceKind,
     status: options.status,
     summary: boundedText(options.summary, 160),
-    ...(options.sourceItems === undefined
-      ? {}
-      : {
-          sourceReferences: options.sourceItems.flatMap(
-            (item) => item.sourceReferences
-          )
-        }),
+    ...(sourceReferences === undefined ? {} : { sourceReferences }),
     redactionLabels: ['memory']
   });
 }

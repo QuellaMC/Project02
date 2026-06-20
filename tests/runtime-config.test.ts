@@ -383,6 +383,137 @@ describe('runtime config CLI', () => {
     expect(afterUnset).not.toContain('"backend"');
   });
 
+  it('refuses to mutate malformed existing config files', async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-malformed-'));
+    const configPath = join(configRoot, 'config.json');
+    const malformedConfig = '{"version":';
+    let stderr = '';
+
+    writeFileSync(configPath, malformedConfig, 'utf8');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'set', 'storeRoot', 'next-store'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        }
+      )
+    ).toBe(1);
+
+    expect(stderr).toContain('Cannot mutate runtime config because it failed to load');
+    expect(stderr).toContain('Runtime config file is not valid JSON');
+    expect(readFileSync(configPath, 'utf8')).toBe(malformedConfig);
+  });
+
+  it('fails get when config loading reports errors', async () => {
+    const configPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-invalid-get-')), 'config.json'),
+      {
+        storeRoot: 42
+      }
+    );
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--config', configPath, 'get', 'storeRoot'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      })
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Runtime config field must be a non-empty string.');
+  });
+
+  it('gets dotted plugin ID config paths', async () => {
+    const configPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-dotted-get-')), 'config.json'),
+      {
+        plugins: {
+          'memory.recall': {
+            config: {
+              backend: 'local'
+            }
+          }
+        }
+      }
+    );
+    let stdout = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'get', 'plugins.memory.recall.config.backend'],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(stdout) as unknown).toBe('local');
+  });
+
+  it('sets and unsets plugin config fields named enabled literally', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-enabled-field-'));
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'set', 'plugins.memory.config.enabled', 'true'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    const afterSet: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(afterSet).toMatchObject({
+      plugins: {
+        memory: {
+          config: {
+            enabled: true
+          }
+        }
+      }
+    });
+    expect(JSON.stringify(afterSet)).not.toContain('"memory.config"');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'unset', 'plugins.memory.config.enabled'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    const afterUnset: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(afterUnset).toMatchObject({
+      plugins: {
+        memory: {
+          config: {}
+        }
+      }
+    });
+  });
+
   it('reports activation warnings from runtime config check', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-check-'));
     let stdout = '';

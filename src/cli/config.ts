@@ -6,7 +6,10 @@ import {
   createRuntimeConfigInspectShape,
   defaultRuntimeConfigEnvPath,
   defaultRuntimeConfigPath,
+  diagnosticsHaveErrors,
+  getRuntimeConfigValueAtPath,
   loadProject02RuntimeConfig,
+  type LoadedProject02RuntimeConfig,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue
 } from '../runtime/config/index.ts';
@@ -83,7 +86,8 @@ export async function runRuntimeConfigCliFromArgs(
         ...parsed.location,
         env: options.env ?? process.env
       });
-      const value = valueAtPath(loaded.config, parsed.command.path);
+      assertRuntimeConfigLoaded(loaded);
+      const value = getRuntimeConfigValueAtPath(loaded.config, parsed.command.path);
 
       writeJson(options.stdout, value ?? null);
       return 0;
@@ -284,23 +288,15 @@ function requiredArg(args: readonly string[], index: number, message: string): s
   return value;
 }
 
-function valueAtPath(value: unknown, path: string): unknown {
-  const parts = path.split('.');
-  let current = value;
-
-  for (const part of parts) {
-    if (
-      typeof current !== 'object' ||
-      current === null ||
-      Array.isArray(current)
-    ) {
-      return undefined;
-    }
-
-    current = (current as Readonly<Record<string, unknown>>)[part];
+function assertRuntimeConfigLoaded(loaded: LoadedProject02RuntimeConfig): void {
+  if (!diagnosticsHaveErrors(loaded.diagnostics)) {
+    return;
   }
 
-  return current;
+  throw new RuntimeConfigCliUsageError(
+    loaded.diagnostics.find((diagnostic) => diagnostic.severity === 'error')
+      ?.message ?? 'Runtime config is invalid.'
+  );
 }
 
 function writeJson(stdout: NodeJS.WritableStream, value: unknown): void {

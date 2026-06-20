@@ -101,8 +101,65 @@ export function pluginHasConfigErrors(options: {
   return options.diagnostics.some(
     (diagnostic) =>
       diagnostic.severity === 'error' &&
-      diagnostic.path?.startsWith(`plugins.${options.pluginId}.config`) === true
+      runtimeConfigDiagnosticPathMatchesPluginConfig({
+        path: diagnostic.path,
+        pluginId: options.pluginId
+      })
   );
+}
+
+export function runtimeConfigDiagnosticPathMatchesPlugin(options: {
+  readonly path: string | undefined;
+  readonly pluginId: string;
+}): boolean {
+  const pluginPath = `plugins.${options.pluginId}`;
+
+  return (
+    options.path === pluginPath ||
+    pluginIdFromEnabledDiagnosticPath(options.path) === options.pluginId ||
+    runtimeConfigDiagnosticPathMatchesPluginConfig(options)
+  );
+}
+
+export function runtimeConfigDiagnosticPathMatchesPluginConfig(options: {
+  readonly path: string | undefined;
+  readonly pluginId: string;
+}): boolean {
+  return pluginIdFromConfigDiagnosticPath(options.path) === options.pluginId;
+}
+
+function pluginIdFromConfigDiagnosticPath(path: string | undefined): string | undefined {
+  return pluginIdFromTrailingSegmentPath(path, 'config');
+}
+
+function pluginIdFromEnabledDiagnosticPath(path: string | undefined): string | undefined {
+  return pluginIdFromTrailingSegmentPath(path, 'enabled');
+}
+
+function pluginIdFromTrailingSegmentPath(
+  path: string | undefined,
+  segment: string
+): string | undefined {
+  const prefix = 'plugins.';
+
+  if (path === undefined || !path.startsWith(prefix)) {
+    return undefined;
+  }
+
+  const segmentMarker = `.${segment}`;
+  const segmentIndex = path.lastIndexOf(segmentMarker);
+
+  if (segmentIndex < prefix.length) {
+    return undefined;
+  }
+
+  const suffix = path.slice(segmentIndex + segmentMarker.length);
+
+  if (suffix.length > 0 && !suffix.startsWith('.')) {
+    return undefined;
+  }
+
+  return path.slice(prefix.length, segmentIndex);
 }
 
 function resolvePluginConfig(options: {

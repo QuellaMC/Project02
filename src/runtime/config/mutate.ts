@@ -40,6 +40,17 @@ export function applyRuntimeConfigMutation(
     ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
   });
+  const blockingDiagnostic = loaded.diagnostics.find(
+    (diagnostic) =>
+      diagnostic.severity === 'error' && diagnostic.code !== 'runtime_config_missing'
+  );
+
+  if (blockingDiagnostic !== undefined) {
+    throw new TypeError(
+      `Cannot mutate runtime config because it failed to load: ${blockingDiagnostic.message}`
+    );
+  }
+
   const currentConfig = loaded.config ?? { version: runtimeConfigVersion };
   const effectiveStoreRoot = currentConfig.storeRoot ?? options.storeRoot;
   const effectiveLayout = createLocalRuntimeStorageLayout(
@@ -55,6 +66,65 @@ export function applyRuntimeConfigMutation(
     envPath,
     config: nextConfig
   } satisfies RuntimeConfigMutationResult);
+}
+
+export function getRuntimeConfigValueAtPath(
+  config: Project02RuntimeConfig | undefined,
+  path: string
+): unknown {
+  const parts = parseConfigPath(path);
+
+  if (config === undefined) {
+    return undefined;
+  }
+
+  if (parts.length === 1) {
+    const [field] = parts;
+
+    return rootConfigValue(config, field);
+  }
+
+  if (parts[0] !== 'plugins') {
+    return undefined;
+  }
+
+  if (parts.length === 1) {
+    return config.plugins;
+  }
+
+  const pluginPath = tryParsePluginMutationPath(parts, path);
+
+  if (pluginPath !== undefined) {
+    const pluginConfig = config.plugins?.[pluginPath.pluginId];
+
+    if (pluginPath.kind === 'enabled') {
+      return pluginConfig?.enabled;
+    }
+
+    return pluginConfig?.config?.[pluginPath.fieldName];
+  }
+
+  return config.plugins?.[parts.slice(1).join('.')];
+}
+
+function rootConfigValue(
+  config: Project02RuntimeConfig,
+  field: string | undefined
+): unknown {
+  switch (field) {
+    case 'version':
+      return config.version;
+    case 'storeRoot':
+      return config.storeRoot;
+    case 'enabledPlugins':
+      return config.enabledPlugins;
+    case 'defaultMemoryProvider':
+      return config.defaultMemoryProvider;
+    case 'plugins':
+      return config.plugins;
+    default:
+      return undefined;
+  }
 }
 
 function runtimeConfigPathFromEnv(env: NodeJS.ProcessEnv): string | undefined {
@@ -332,19 +402,6 @@ function parsePluginMutationPath(
   const lastPart = parts.at(-1);
   const penultimatePart = parts.at(-2);
 
-  if (lastPart === 'enabled') {
-    const pluginId = parts.slice(1, -1).join('.');
-
-    if (pluginId.length === 0) {
-      throw new TypeError('Runtime config plugin path must include a plugin id.');
-    }
-
-    return Object.freeze({
-      kind: 'enabled',
-      pluginId
-    });
-  }
-
   if (penultimatePart === 'config' && lastPart !== undefined) {
     const pluginId = parts.slice(1, -2).join('.');
 
@@ -363,7 +420,31 @@ function parsePluginMutationPath(
     });
   }
 
+  if (lastPart === 'enabled') {
+    const pluginId = parts.slice(1, -1).join('.');
+
+    if (pluginId.length === 0) {
+      throw new TypeError('Runtime config plugin path must include a plugin id.');
+    }
+
+    return Object.freeze({
+      kind: 'enabled',
+      pluginId
+    });
+  }
+
   throw new TypeError(`Unsupported runtime config path: ${path}.`);
+}
+
+function tryParsePluginMutationPath(
+  parts: readonly string[],
+  path: string
+): ParsedPluginMutationPath | undefined {
+  try {
+    return parsePluginMutationPath(parts, path);
+  } catch {
+    return undefined;
+  }
 }
 
 function freezeConfig(config: Project02RuntimeConfig): Project02RuntimeConfig {

@@ -8,6 +8,9 @@ import {
   createRuntimePluginContext
 } from '../src/plugins/index.ts';
 import {
+  createRuntimePluginHost
+} from '../src/plugins/host.ts';
+import {
   createRuntimePluginAfterTurnCommittedContext
 } from '../src/plugins/types.ts';
 
@@ -149,6 +152,10 @@ describe('memory provider runtime plugin helper', () => {
       }
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [plugin.manifest.id]
+    });
 
     expect(plugin.providedTools.map((tool) => tool.name)).toEqual([
       'memory.search',
@@ -156,7 +163,7 @@ describe('memory provider runtime plugin helper', () => {
     ]);
     expect(plugin.providedTools.every((tool) => tool.sourceReferencesRequired)).toBe(true);
 
-    const search = await plugin.lifecycleHooks.handleToolCall?.(
+    const search = await host.handleToolCall(
       {
         eventId: 'evt_memory',
         traceId: 'trace_memory',
@@ -168,6 +175,10 @@ describe('memory provider runtime plugin helper', () => {
       testContext()
     );
 
+    expect(search.status).toBe('accepted');
+    if (search.status !== 'accepted') {
+      throw new Error('Expected memory.search to be accepted.');
+    }
     expect(search).toMatchObject({
       status: 'accepted',
       output: {
@@ -178,7 +189,59 @@ describe('memory provider runtime plugin helper', () => {
         ]
       }
     });
-    expect(search?.evidence[0]?.evidenceKind).toBe('tool_invocation');
+    expect(search.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      sourceReferences: [
+        {
+          kind: 'memory',
+          id: 'result-1'
+        }
+      ]
+    });
+
+    const add = await host.handleToolCall(
+      {
+        eventId: 'evt_memory',
+        traceId: 'trace_memory',
+        createdAt: '2026-06-21T00:00:00.000Z',
+        pluginId: 'memory.tools',
+        toolName: 'memory.add',
+        input: { text: 'New durable memory.' }
+      },
+      testContext()
+    );
+
+    expect(add.status).toBe('accepted');
+    if (add.status !== 'accepted') {
+      throw new Error('Expected memory.add to be accepted.');
+    }
+    expect(add).toMatchObject({
+      status: 'accepted',
+      output: {
+        id: 'added',
+        sourceReferences: [
+          {
+            kind: 'memory',
+            id: 'added'
+          }
+        ]
+      }
+    });
+    expect(add.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      sourceReferences: [
+        {
+          kind: 'conversation',
+          id: 'evt_memory'
+        },
+        {
+          kind: 'memory',
+          id: 'added'
+        }
+      ]
+    });
   });
 });
 

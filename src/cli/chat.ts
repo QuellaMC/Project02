@@ -193,7 +193,7 @@ export async function runChatCliFromArgs(
       ...options,
       ...durableRuntime,
       ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
-      pluginHost: configuredHost.host,
+      pluginHost: options.pluginHost ?? configuredHost.host,
       traceMode: options.traceMode === true || parsedArgs.traceMode
     });
   } catch (error: unknown) {

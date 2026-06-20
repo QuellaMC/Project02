@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -22,6 +22,9 @@ import {
   createRuntimeLogStore
 } from '../src/runtime/log.ts';
 import {
+  runtimeConfigVersion
+} from '../src/runtime/config/index.ts';
+import {
   createFileRuntimeLogStore
 } from '../src/runtime/storage/file-runtime-log-store.ts';
 import {
@@ -30,7 +33,7 @@ import {
 import type {
   RoleModelAdapter
 } from '../src/role-model/loop.ts';
-import { runChatCli } from '../src/cli/chat.ts';
+import { runChatCli, runChatCliFromArgs } from '../src/cli/chat.ts';
 import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
 
 describe('chat CLI folded top-level model text', () => {
@@ -101,6 +104,57 @@ describe('chat CLI plugin lifecycle', () => {
           }
         ]
       }
+    });
+  });
+
+  it('preserves an injected plugin host when running from parsed args', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-injected-host-'));
+    const configPath = join(storeRoot, 'config.json');
+    const sessionId = 'injected-host-session';
+    const sessionEndContexts: RuntimePluginContext[] = [];
+    const pluginHost = createRuntimePluginHost({
+      plugins: [
+        createSessionEndPlugin((context) => {
+          sessionEndContexts.push(context);
+        })
+      ]
+    });
+
+    writeFileSync(
+      configPath,
+      `${JSON.stringify({ version: runtimeConfigVersion }, null, 2)}\n`,
+      'utf8'
+    );
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--config', configPath, '--new-session', sessionId],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(() => {}),
+        pluginHost
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(sessionEndContexts).toHaveLength(1);
+
+    const storedRawEvents = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    }).rawEvents();
+
+    expect(storedRawEvents.at(-1)).toMatchObject({
+      kind: 'runtime_turn_completed',
+      status: 'completed',
+      runtimePluginEvidence: [
+        {
+          pluginId: 'chat.session-end.fixture',
+          evidenceKind: 'session_end',
+          status: 'accepted',
+          summary: 'Session end observed.'
+        }
+      ]
     });
   });
 
