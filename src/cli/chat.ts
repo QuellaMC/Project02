@@ -50,12 +50,26 @@ import {
   type RuntimePluginHookHostResult,
   type RuntimePluginHost
 } from '../plugins/index.ts';
+import {
+  createConfiguredProject02PluginHost,
+  diagnosticsHaveErrors,
+  loadProject02RuntimeConfig
+} from '../runtime/config/index.ts';
 import type { RoleModelAdapter } from '../role-model/loop.ts';
 import {
   formatLocalRuntimeTerminalError,
   isLocalRuntimeTerminalError,
   type LocalRuntimeTerminalError
 } from '../runtime/terminal-errors.ts';
+import {
+  parseRuntimeLocationFlag,
+  RuntimeLocationCliUsageError,
+  type RuntimeLocationCliState
+} from './runtime-location.ts';
+import {
+  loadRuntimeConfigEnvFile,
+  RuntimeEnvFileError
+} from './runtime-env.ts';
 
 type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -75,6 +89,7 @@ type ChatCliArgs = {
   readonly traceMode: boolean;
   readonly provider?: ChatProviderName;
   readonly storeRoot?: string;
+  readonly configPath?: string;
   readonly sessionId?: string;
   readonly newSessionId?: string;
 };
@@ -145,19 +160,47 @@ export async function runChatCliFromArgs(
   try {
     loadDefaultDotEnvFile();
     const parsedArgs = parseChatCliArgs(args);
+    const loadedConfig = loadProject02RuntimeConfig(parsedArgs);
 
-    validateDurableSessionArgs(parsedArgs);
-    const durableRuntime = await createDurableChatRuntime(parsedArgs);
+    loadRuntimeConfigEnvFile({
+      loadedConfig,
+      ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot })
+    });
+
+    if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
+      throw new ChatCliUsageError(loadedConfig.diagnostics[0]?.message ?? 'Runtime config is invalid.');
+    }
+
+    const initialConfiguredHost = await createConfiguredProject02PluginHost({
+      loadedConfig,
+      ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot })
+    });
+    const runtimeArgs = {
+      ...parsedArgs,
+      storeRoot: initialConfiguredHost.resolvedConfig.storeRoot
+    } satisfies ChatCliArgs;
+
+    validateDurableSessionArgs(runtimeArgs);
+    const durableRuntime = await createDurableChatRuntime(runtimeArgs);
+    const configuredHost = await createConfiguredProject02PluginHost({
+      loadedConfig,
+      storeRoot: initialConfiguredHost.resolvedConfig.storeRoot,
+      sessionId: durableRuntime.session.id,
+      sessionIdentity: durableRuntime.session
+    });
     const roleModelAdapter = createSelectedRoleModelAdapter(parsedArgs);
     return await runChatCli({
       ...options,
       ...durableRuntime,
       ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
+      pluginHost: configuredHost.host,
       traceMode: options.traceMode === true || parsedArgs.traceMode
     });
   } catch (error: unknown) {
     if (
       error instanceof ChatCliUsageError ||
+      error instanceof RuntimeLocationCliUsageError ||
+      error instanceof RuntimeEnvFileError ||
       isLocalRuntimeTerminalError(error)
     ) {
       options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
@@ -668,7 +711,7 @@ function writeTraceSummary(
 function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
   let traceMode = false;
   let provider: ChatProviderName | undefined;
-  let storeRoot: string | undefined;
+  let location: RuntimeLocationCliState = {};
   let sessionId: string | undefined;
   let newSessionId: string | undefined;
 
@@ -698,13 +741,15 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
       continue;
     }
 
-    if (arg === '--store') {
-      if (storeRoot !== undefined) {
-        throw new ChatCliUsageError('--store can only be provided once.');
-      }
+    const locationResult = parseRuntimeLocationFlag({
+      args,
+      index,
+      state: location
+    });
 
-      storeRoot = readFlagValue(args, index, '--store');
-      index += 1;
+    if (locationResult.status === 'matched') {
+      location = locationResult.state;
+      index = locationResult.nextIndex;
       continue;
     }
 
@@ -738,7 +783,8 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
   return {
     traceMode,
     ...providerOption(provider ?? providerFromEnvironment(process.env)),
-    ...(storeRoot === undefined ? {} : { storeRoot }),
+    ...(location.storeRoot === undefined ? {} : { storeRoot: location.storeRoot }),
+    ...(location.configPath === undefined ? {} : { configPath: location.configPath }),
     ...(sessionId === undefined ? {} : { sessionId }),
     ...(newSessionId === undefined ? {} : { newSessionId })
   } satisfies ChatCliArgs;
@@ -891,9 +937,17 @@ function isMissingDefaultSessionStore(error: unknown): boolean {
 }
 
 function formatTerminalErrorMessage(
-  error: ChatCliUsageError | LocalRuntimeTerminalError
+  error:
+    | ChatCliUsageError
+    | RuntimeLocationCliUsageError
+    | RuntimeEnvFileError
+    | LocalRuntimeTerminalError
 ): string {
-  if (error instanceof ChatCliUsageError) {
+  if (
+    error instanceof ChatCliUsageError ||
+    error instanceof RuntimeLocationCliUsageError ||
+    error instanceof RuntimeEnvFileError
+  ) {
     return error.message;
   }
 
@@ -902,9 +956,15 @@ function formatTerminalErrorMessage(
 
 function isFormattedTerminalError(
   error: unknown
-): error is ChatCliUsageError | LocalRuntimeTerminalError {
+): error is
+  | ChatCliUsageError
+  | RuntimeLocationCliUsageError
+  | RuntimeEnvFileError
+  | LocalRuntimeTerminalError {
   return (
     error instanceof ChatCliUsageError ||
+    error instanceof RuntimeLocationCliUsageError ||
+    error instanceof RuntimeEnvFileError ||
     isLocalRuntimeTerminalError(error)
   );
 }

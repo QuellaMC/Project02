@@ -7,6 +7,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createRuntimePluginFileStore
 } from '../src/plugins/file-store.ts';
+import {
+  createLocalRuntimePluginPaths,
+  LocalRuntimeStorageContractError
+} from '../src/runtime/storage/layout.ts';
 import type {
   RuntimePluginJsonObject
 } from '../src/plugins/types.ts';
@@ -38,6 +42,23 @@ describe('runtime plugin file store', () => {
         pluginId: '../outside-plugin'
       })
     ).toThrow(/plugin ID/iu);
+
+    let pluginIdError: unknown;
+
+    try {
+      createRuntimePluginFileStore({
+        storeRoot,
+        sessionId: 'session-safe',
+        pluginId: '../outside-plugin'
+      });
+    } catch (error: unknown) {
+      pluginIdError = error;
+    }
+
+    expect(pluginIdError).toBeInstanceOf(LocalRuntimeStorageContractError);
+    expect(pluginIdError).toMatchObject({
+      code: 'invalid_plugin_id'
+    });
   });
 
   it('seeds and persists durable revisions from existing plugin files', () => {
@@ -331,7 +352,11 @@ function pluginRoot(
   sessionId: string,
   pluginId: string
 ): string {
-  return join(storeRoot, 'sessions', sessionId, 'plugins', pluginId);
+  return createLocalRuntimePluginPaths({
+    storeRoot,
+    sessionId,
+    pluginId
+  }).pluginRoot;
 }
 
 function createProtoKeyValue(): RuntimePluginJsonObject {

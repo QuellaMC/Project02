@@ -25,6 +25,24 @@ import {
   formatLocalRuntimeTerminalError,
   isLocalRuntimeTerminalError
 } from '../runtime/terminal-errors.ts';
+import {
+  createConfiguredProject02PluginHost,
+  createRuntimeConfigInspectShape,
+  diagnosticsHaveErrors,
+  loadProject02RuntimeConfig,
+  type Project02ConfiguredPluginHost,
+  type RuntimeConfigDiagnostic,
+  type RuntimeConfigInspectShape
+} from '../runtime/config/index.ts';
+import {
+  parseRuntimeLocationFlag,
+  RuntimeLocationCliUsageError,
+  type RuntimeLocationCliState
+} from './runtime-location.ts';
+import {
+  loadRuntimeConfigEnvFile,
+  RuntimeEnvFileError
+} from './runtime-env.ts';
 
 type InspectCliOptions = {
   readonly stdout: NodeJS.WritableStream;
@@ -35,18 +53,26 @@ type InspectCliArgs =
   | {
       readonly mode: 'sessions';
       readonly storeRoot?: string;
+      readonly configPath?: string;
     }
   | {
       readonly mode: 'session';
       readonly storeRoot?: string;
+      readonly configPath?: string;
       readonly sessionId: string;
     };
 
 type InspectSessionListOutput = {
+  readonly runtimeConfig: RuntimeConfigInspectShape;
+  readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
+  readonly plugins: readonly InspectConfiguredPlugin[];
   readonly sessions: readonly LocalRuntimeSessionMetadata[];
 };
 
 type InspectSessionOutput = {
+  readonly runtimeConfig: RuntimeConfigInspectShape;
+  readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
+  readonly plugins: readonly InspectConfiguredPlugin[];
   readonly session: LocalRuntimeSessionMetadata;
   readonly counts: {
     readonly traceEntries: number;
@@ -54,6 +80,16 @@ type InspectSessionOutput = {
     readonly conversationMessages: number;
   };
   readonly turns: readonly InspectTurnEvidence[];
+};
+
+type InspectConfiguredPlugin = {
+  readonly pluginId: string;
+  readonly kind: string;
+  readonly enabled: boolean;
+  readonly activationStatus: string;
+  readonly activationReasons: readonly string[];
+  readonly diagnostics: readonly unknown[];
+  readonly config?: unknown;
 };
 
 type InspectTurnEvidence = {
@@ -263,6 +299,8 @@ export async function runInspectCliFromArgs(
   } catch (error: unknown) {
     if (
       error instanceof InspectCliUsageError ||
+      error instanceof RuntimeLocationCliUsageError ||
+      error instanceof RuntimeEnvFileError ||
       isLocalRuntimeTerminalError(error)
     ) {
       options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
@@ -274,7 +312,7 @@ export async function runInspectCliFromArgs(
 }
 
 function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
-  let storeRoot: string | undefined;
+  let location: RuntimeLocationCliState = {};
   let sessionsMode = false;
   let sessionId: string | undefined;
 
@@ -289,13 +327,15 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
       continue;
     }
 
-    if (arg === '--store') {
-      if (storeRoot !== undefined) {
-        throw new InspectCliUsageError('--store can only be provided once.');
-      }
+    const locationResult = parseRuntimeLocationFlag({
+      args,
+      index,
+      state: location
+    });
 
-      storeRoot = readFlagValue(args, index, '--store');
-      index += 1;
+    if (locationResult.status === 'matched') {
+      location = locationResult.state;
+      index = locationResult.nextIndex;
       continue;
     }
 
@@ -328,7 +368,8 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
   if (sessionsMode) {
     return {
       mode: 'sessions',
-      ...(storeRoot === undefined ? {} : { storeRoot })
+      ...(location.storeRoot === undefined ? {} : { storeRoot: location.storeRoot }),
+      ...(location.configPath === undefined ? {} : { configPath: location.configPath })
     } satisfies InspectCliArgs;
   }
 
@@ -339,7 +380,8 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
   return {
     mode: 'session',
     sessionId,
-    ...(storeRoot === undefined ? {} : { storeRoot })
+    ...(location.storeRoot === undefined ? {} : { storeRoot: location.storeRoot }),
+    ...(location.configPath === undefined ? {} : { configPath: location.configPath })
   } satisfies InspectCliArgs;
 }
 
@@ -367,10 +409,16 @@ async function writeSessionList(
   args: InspectCliArgs & { readonly mode: 'sessions' },
   stdout: NodeJS.WritableStream
 ): Promise<void> {
-  const sessionStore = createLocalRuntimeSessionStore(storageOptions(args));
+  const runtimeConfig = await inspectRuntimeConfig(args);
+  const sessionStore = createLocalRuntimeSessionStore({
+    storeRoot: runtimeConfig.resolvedConfig.storeRoot
+  });
   const sessions = await sessionStore.listSessions();
 
   writeJson(stdout, {
+    runtimeConfig: createRuntimeConfigInspectShape(runtimeConfig.resolvedConfig),
+    activationDiagnostics: Object.freeze([...runtimeConfig.activation.diagnostics]),
+    plugins: inspectConfiguredPlugins(runtimeConfig),
     sessions
   } satisfies InspectSessionListOutput);
 }
@@ -379,10 +427,14 @@ async function writeSessionEvidence(
   args: InspectCliArgs & { readonly mode: 'session' },
   stdout: NodeJS.WritableStream
 ): Promise<void> {
-  const sessionStore = createLocalRuntimeSessionStore(storageOptions(args));
+  const runtimeConfig = await inspectRuntimeConfig(args);
+  const storage = {
+    storeRoot: runtimeConfig.resolvedConfig.storeRoot
+  };
+  const sessionStore = createLocalRuntimeSessionStore(storage);
   const session = await sessionStore.readSession(args.sessionId);
   const logStore = createFileRuntimeLogStore({
-    ...storageOptions(args),
+    ...storage,
     sessionId: session.sessionId
   });
   const traceEntries = logStore.traceEntries();
@@ -390,6 +442,9 @@ async function writeSessionEvidence(
   const conversationMessages = logStore.conversationMessages();
 
   writeJson(stdout, {
+    runtimeConfig: createRuntimeConfigInspectShape(runtimeConfig.resolvedConfig),
+    activationDiagnostics: Object.freeze([...runtimeConfig.activation.diagnostics]),
+    plugins: inspectConfiguredPlugins(runtimeConfig),
     session,
     counts: {
       traceEntries: traceEntries.length,
@@ -402,6 +457,51 @@ async function writeSessionEvidence(
       traceEntries
     })
   } satisfies InspectSessionOutput);
+}
+
+async function inspectRuntimeConfig(args: {
+  readonly storeRoot?: string;
+  readonly configPath?: string;
+}): Promise<Project02ConfiguredPluginHost> {
+  const loadedConfig = loadProject02RuntimeConfig(args);
+  loadRuntimeConfigEnvFile({
+    loadedConfig,
+    ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot })
+  });
+
+  if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
+    throw new InspectCliUsageError(
+      loadedConfig.diagnostics[0]?.message ?? 'Runtime config is invalid.'
+    );
+  }
+
+  return await createConfiguredProject02PluginHost({
+    loadedConfig,
+    ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot })
+  });
+}
+
+function inspectConfiguredPlugins(
+  runtimeConfig: Project02ConfiguredPluginHost
+): readonly InspectConfiguredPlugin[] {
+  return Object.freeze(
+    runtimeConfig.activation.plugins.map((plugin) =>
+      Object.freeze({
+        pluginId: plugin.pluginId,
+        kind: plugin.kind,
+        enabled: plugin.enabled,
+        activationStatus: plugin.activationStatus,
+        activationReasons: Object.freeze([...plugin.activationReasons]),
+        diagnostics: Object.freeze([...plugin.diagnostics]),
+        ...(runtimeConfig.resolvedConfig.redactedPluginConfigs[plugin.pluginId] === undefined
+          ? {}
+          : {
+              config:
+                runtimeConfig.resolvedConfig.redactedPluginConfigs[plugin.pluginId]
+            })
+      } satisfies InspectConfiguredPlugin)
+    )
+  );
 }
 
 function createTurnEvidence(options: {
@@ -994,18 +1094,22 @@ function visibleMessageFromSnapshot(message: {
   } satisfies InspectVisibleMessage);
 }
 
-function storageOptions(args: { readonly storeRoot?: string }): { readonly storeRoot?: string } {
-  return args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot };
-}
-
 function writeJson(stdout: NodeJS.WritableStream, value: unknown): void {
   stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 function formatTerminalErrorMessage(
-  error: InspectCliUsageError | Parameters<typeof formatLocalRuntimeTerminalError>[0]
+  error:
+    | InspectCliUsageError
+    | RuntimeLocationCliUsageError
+    | RuntimeEnvFileError
+    | Parameters<typeof formatLocalRuntimeTerminalError>[0]
 ): string {
-  if (error instanceof InspectCliUsageError) {
+  if (
+    error instanceof InspectCliUsageError ||
+    error instanceof RuntimeLocationCliUsageError ||
+    error instanceof RuntimeEnvFileError
+  ) {
     return error.message;
   }
 

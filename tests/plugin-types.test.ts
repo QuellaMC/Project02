@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createRuntimePlugin,
   createRuntimePluginContextItem,
-  createRuntimePluginEvidenceSnapshot
+  createRuntimePluginEvidenceSnapshot,
+  runtimePluginContractVersion
 } from '../src/plugins/types.ts';
 
 describe('runtime plugin source references', () => {
@@ -106,5 +108,79 @@ describe('runtime plugin source references', () => {
         })
       ).toThrow('Plugin field "id" must be a non-empty string.');
     }
+  });
+});
+
+describe('runtime plugin config metadata', () => {
+  it('accepts optional config metadata fields without resolved config values', () => {
+    const plugin = createRuntimePlugin({
+      manifest: {
+        id: 'metadata.fixture',
+        displayName: 'Metadata Fixture',
+        version: '1.0.0',
+        kind: 'tool_provider',
+        description: 'Config metadata fixture.',
+        contractVersion: runtimePluginContractVersion,
+        compatibility: {
+          hostContractVersions: [runtimePluginContractVersion],
+          sourceSystem: 'test'
+        },
+        declaredPlugins: ['plugin_discovery'],
+        config: {
+          fields: [
+            {
+              name: 'backend',
+              description: 'Backend selection.',
+              required: true,
+              secret: false,
+              valueType: 'enum',
+              defaultValueSummary: 'local',
+              allowedValues: ['local', 'cloud'],
+              redactionLabels: [],
+              configFingerprint: 'declared-backend-v1'
+            },
+            {
+              name: 'apiKey',
+              description: 'API key.',
+              required: false,
+              secret: true,
+              valueType: 'secret',
+              envVar: 'MEMORY_API_KEY',
+              redactionLabels: ['secret']
+            }
+          ],
+          fingerprint: 'declared-config-v1'
+        },
+        localTrustLevel: 'test_fixture',
+        runtimePolicy: {
+          requiredForTurn: false,
+          sideEffectLevel: 'runtime_read',
+          confirmation: 'not_required',
+          timeoutMs: 1000,
+          sourceReferencesRequired: false,
+          redactionLabels: [],
+          failureBehavior: {
+            beforeRoleModelCall: 'degrade',
+            handleToolCall: 'degrade',
+            afterTurnCommitted: 'log_failure',
+            health: 'degrade'
+          }
+        },
+        activation: {
+          defaultEnabled: false,
+          reasons: ['test']
+        },
+        requestedApis: []
+      }
+    });
+
+    expect(plugin.manifest.config.fields[0]).toMatchObject({
+      name: 'backend',
+      valueType: 'enum',
+      allowedValues: ['local', 'cloud'],
+      configFingerprint: 'declared-backend-v1'
+    });
+    expect(JSON.stringify(plugin.manifest)).not.toContain('resolvedConfig');
+    expect(JSON.stringify(plugin.manifest)).not.toContain('MEMORY_API_KEY=');
   });
 });

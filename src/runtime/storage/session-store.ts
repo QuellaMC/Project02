@@ -337,6 +337,13 @@ async function localRuntimeStoreHasExistingContent(
         continue;
       }
 
+      if (
+        entry.isFile() &&
+        isRuntimeHomeControlFile(layout, join(layout.storeRoot, entry.name))
+      ) {
+        continue;
+      }
+
       return true;
     }
 
@@ -351,6 +358,13 @@ async function localRuntimeStoreHasExistingContent(
       `Could not inspect local runtime store root: ${layout.storeRoot}.`
     );
   }
+}
+
+function isRuntimeHomeControlFile(
+  layout: LocalRuntimeStorageLayout,
+  entryPath: string
+): boolean {
+  return entryPath === layout.configPath || entryPath === layout.envPath;
 }
 
 async function readStorageSchemaMarker(

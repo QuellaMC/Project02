@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Writable } from 'node:stream';
@@ -25,6 +25,7 @@ import type {
   RoleModelAdapter
 } from '../src/role-model/loop.ts';
 import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
+import { runtimeConfigVersion } from '../src/runtime/config/index.ts';
 
 describe('inspect CLI plugin evidence', () => {
   it('shows model rounds and per-tool plugin events', async () => {
@@ -105,6 +106,66 @@ describe('inspect CLI plugin evidence', () => {
         })
       ])
     );
+  });
+
+  it('shows runtime config source and configured plugin activation', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-config-'));
+    const configPath = join(storeRoot, 'config.json');
+
+    writeFileSync(
+      configPath,
+      `${JSON.stringify(
+        {
+          version: runtimeConfigVersion,
+          storeRoot,
+          plugins: {
+            'unknown-plugin': {
+              enabled: true
+            },
+            'character-state': {
+              enabled: false
+            }
+          }
+        },
+        null,
+        2
+      )}\n`,
+      'utf8'
+    );
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'session-config',
+      createdAt: '2026-06-21T00:00:00.000Z'
+    });
+
+    let stdout = '';
+    const exitCode = await runInspectCliFromArgs(
+      ['--config', configPath, '--sessions'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {})
+      }
+    );
+    const output: unknown = JSON.parse(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(output).toMatchObject({
+      runtimeConfig: {
+        source: 'path',
+        path: configPath,
+        storeRoot
+      },
+      plugins: [
+        expect.objectContaining({
+          pluginId: 'character-state',
+          enabled: false
+        })
+      ]
+    });
+    expect(stdout).toContain('"activationDiagnostics"');
+    expect(stdout).toContain('"runtime_config_unknown_plugin"');
+    expect(stdout).toContain('"disabled_by_config"');
   });
 });
 

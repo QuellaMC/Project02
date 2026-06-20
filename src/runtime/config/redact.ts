@@ -1,0 +1,78 @@
+import {
+  isRuntimePluginCredentialKey,
+  redactRuntimePluginText
+} from '../../plugins/types.ts';
+import type {
+  RuntimeConfigValue,
+  RedactedRuntimeConfigField,
+  ResolvedRuntimeConfigField
+} from './types.ts';
+
+export function redactRuntimeConfigText(value: string): string {
+  return redactRuntimePluginText(value);
+}
+
+export function redactRuntimeConfigValue(
+  value: RuntimeConfigValue,
+  options: { readonly secret?: boolean; readonly key?: string } = {}
+): RuntimeConfigValue {
+  if (options.secret === true || isSecretValue(value)) {
+    return '[redacted]';
+  }
+
+  if (options.key !== undefined && isRuntimePluginCredentialKey(options.key)) {
+    return '[redacted]';
+  }
+
+  if (typeof value === 'string') {
+    return redactRuntimePluginText(value);
+  }
+
+  if (
+    value === null ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const items: readonly RuntimeConfigValue[] = value;
+
+    return Object.freeze(
+      items.map((item) => redactRuntimeConfigValue(item))
+    );
+  }
+
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(value).map(([key, item]: readonly [string, RuntimeConfigValue]) => [
+        key,
+        redactRuntimeConfigValue(item, { key })
+      ])
+    ) as Readonly<Record<string, RuntimeConfigValue>>
+  );
+}
+
+export function redactResolvedRuntimeConfigField(
+  field: ResolvedRuntimeConfigField
+): RedactedRuntimeConfigField {
+  return Object.freeze({
+    name: field.name,
+    secret: field.secret,
+    source: field.source,
+    resolved: field.resolved,
+    ...(field.value === undefined
+      ? {}
+      : { value: redactRuntimeConfigValue(field.value, { secret: field.secret }) })
+  } satisfies RedactedRuntimeConfigField);
+}
+
+function isSecretValue(value: RuntimeConfigValue): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    ('$env' in value || '$plaintextSecret' in value)
+  );
+}

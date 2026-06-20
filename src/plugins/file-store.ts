@@ -8,7 +8,9 @@ import {
 } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 
-import { normalizeLocalRuntimeSessionId } from '../runtime/storage/layout.ts';
+import {
+  createLocalRuntimePluginPaths
+} from '../runtime/storage/layout.ts';
 import type { RuntimePluginJsonValue } from './types.ts';
 import type { RuntimePluginFileStore } from './types.ts';
 
@@ -21,7 +23,6 @@ export type CreateRuntimePluginFileStoreOptions = {
 
 const durableRevisionFileName = '.project02-plugin-store-revision';
 const durablePathModesFileName = '.project02-plugin-store-modes.json';
-const durablePluginIdPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
 const inMemoryPluginStoresByKey = new Map<string, InMemoryPluginStoreState>();
 const inMemoryPluginStoresBySessionIdentity = new WeakMap<
   object,
@@ -43,15 +44,11 @@ export function createRuntimePluginFileStore(
     return createInMemoryRuntimePluginFileStore(options);
   }
 
-  const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);
-  const pluginId = normalizeDurablePluginStorePluginId(options.pluginId);
-  const root = join(
-    options.storeRoot,
-    'sessions',
-    sessionId,
-    'plugins',
-    pluginId
-  );
+  const root = createLocalRuntimePluginPaths({
+    storeRoot: options.storeRoot,
+    sessionId: options.sessionId,
+    pluginId: options.pluginId
+  }).pluginRoot;
   let revision = readDurableRevision(root);
   const pathModes = readDurablePathModes(root);
 
@@ -225,16 +222,6 @@ export function normalizeRuntimePluginFileStorePath(path: string): string {
   }
 
   return normalized;
-}
-
-function normalizeDurablePluginStorePluginId(pluginId: string): string {
-  if (!durablePluginIdPattern.test(pluginId)) {
-    throw new TypeError(
-      'Plugin file store plugin ID must start with a letter and use only letters, numbers, dots, underscores, or hyphens.'
-    );
-  }
-
-  return pluginId;
 }
 
 function inMemoryPluginStoreState(
