@@ -72,6 +72,7 @@ export async function createConfiguredProject02PluginHost(options: {
   readonly sessionId?: string;
   readonly sessionIdentity?: object;
   readonly strictUnknownPlugins?: boolean;
+  readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
 }): Promise<Project02ConfiguredPluginHost> {
   const factories = options.factories ?? defaultRuntimePluginFactories();
@@ -82,7 +83,8 @@ export async function createConfiguredProject02PluginHost(options: {
   const resolvedConfig = resolveProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-    pluginManifests: initialPlugins.map((plugin) => plugin.manifest)
+    pluginManifests: initialPlugins.map((plugin) => plugin.manifest),
+    ...(options.env === undefined ? {} : { env: options.env })
   });
   const plugins = await instantiatePlugins({
     factories,

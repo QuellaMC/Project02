@@ -21,6 +21,11 @@ export type LoadProject02RuntimeConfigOptions = {
   readonly env?: NodeJS.ProcessEnv;
 };
 
+export type Project02RuntimeConfigValidationResult = {
+  readonly config?: Project02RuntimeConfig;
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+};
+
 export function loadProject02RuntimeConfig(
   options: LoadProject02RuntimeConfigOptions = {}
 ): LoadedProject02RuntimeConfig {
@@ -57,7 +62,7 @@ export function loadProject02RuntimeConfig(
 
   try {
     const parsed = JSON.parse(readFileSync(location.path, 'utf8')) as unknown;
-    const accepted = parseProject02RuntimeConfig(parsed);
+    const accepted = validateProject02RuntimeConfig(parsed);
 
     return Object.freeze({
       source: location.source,
@@ -80,6 +85,17 @@ export function loadProject02RuntimeConfig(
       ]
     } satisfies LoadedProject02RuntimeConfig);
   }
+}
+
+export function validateProject02RuntimeConfig(
+  value: unknown
+): Project02RuntimeConfigValidationResult {
+  const accepted = parseProject02RuntimeConfig(value);
+
+  return Object.freeze({
+    ...(accepted.config === undefined ? {} : { config: accepted.config }),
+    diagnostics: Object.freeze([...accepted.diagnostics])
+  } satisfies Project02RuntimeConfigValidationResult);
 }
 
 export function defaultRuntimeConfigPath(storeRoot?: string): string {

@@ -60,6 +60,10 @@ export function createMemoryProviderRuntimePlugin(
     declaredPlugins.push('health');
   }
 
+  if (provider.close !== undefined) {
+    declaredPlugins.push('on_session_end');
+  }
+
   if (provider.search !== undefined) {
     providedTools.push(memorySearchTool(searchToolName));
   }
@@ -268,6 +272,26 @@ export function createMemoryProviderRuntimePlugin(
                 summary: boundedText(result?.summary ?? 'Health unavailable.', 160),
                 redactionLabels: ['memory']
               });
+            }
+          }),
+      ...(provider.close === undefined
+        ? {}
+        : {
+            async onSessionEnd(context) {
+              await provider.close?.();
+
+              return {
+                status: 'completed',
+                evidence: [
+                  memoryEvidence({
+                    context,
+                    pluginId,
+                    evidenceKind: 'session_end',
+                    status: 'accepted',
+                    summary: 'Closed memory provider.'
+                  })
+                ]
+              };
             }
           })
     }

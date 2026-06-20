@@ -276,7 +276,8 @@ function resolveSecretField(options: {
         : undefined;
 
   if (envRef !== undefined) {
-    const resolved = options.env[envRef.$env] !== undefined;
+    const secretValue = options.env[envRef.$env];
+    const resolved = secretValue !== undefined && secretValue.length > 0;
 
     if (!resolved && options.field.required) {
       options.diagnostics.push(
@@ -293,7 +294,7 @@ function resolveSecretField(options: {
       field: options.field,
       source: `env:${envRef.$env}`,
       resolved,
-      ...(resolved ? { value: options.env[envRef.$env] ?? '' } : {})
+      ...(resolved ? { value: secretValue } : {})
     });
   }
 

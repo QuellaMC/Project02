@@ -41,7 +41,8 @@ export async function runRuntimeConfigCliFromArgs(
   options: RuntimeConfigCliOptions
 ): Promise<number> {
   try {
-    const parsed = parseRuntimeConfigCliArgs(args, options.env ?? process.env);
+    const env = options.env ?? process.env;
+    const parsed = parseRuntimeConfigCliArgs(args, env);
 
     if (parsed.command.kind === 'path') {
       options.stdout.write(`${defaultRuntimeConfigPath(parsed.location.storeRoot)}\n`);
@@ -56,7 +57,7 @@ export async function runRuntimeConfigCliFromArgs(
     if (parsed.command.kind === 'check') {
       const loaded = loadProject02RuntimeConfig({
         ...parsed.location,
-        env: options.env ?? process.env
+        env
       });
       loadRuntimeConfigEnvFile({
         loadedConfig: loaded,
@@ -68,7 +69,8 @@ export async function runRuntimeConfigCliFromArgs(
         loadedConfig: loaded,
         ...(parsed.location.storeRoot === undefined
           ? {}
-          : { storeRoot: parsed.location.storeRoot })
+          : { storeRoot: parsed.location.storeRoot }),
+        env
       });
 
       writeJson(options.stdout, {
@@ -84,7 +86,7 @@ export async function runRuntimeConfigCliFromArgs(
     if (parsed.command.kind === 'get') {
       const loaded = loadProject02RuntimeConfig({
         ...parsed.location,
-        env: options.env ?? process.env
+        env
       });
       assertRuntimeConfigLoaded(loaded);
       const value = getRuntimeConfigValueAtPath(loaded.config, parsed.command.path);
@@ -95,7 +97,7 @@ export async function runRuntimeConfigCliFromArgs(
 
     const result = applyRuntimeConfigControlOperation({
       ...parsed.location,
-      env: options.env ?? process.env,
+      env,
       operation: parsed.command.operation
     });
 

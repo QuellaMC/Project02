@@ -10,7 +10,10 @@ import {
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue
 } from './types.ts';
-import { loadProject02RuntimeConfig } from './load.ts';
+import {
+  loadProject02RuntimeConfig,
+  validateProject02RuntimeConfig
+} from './load.ts';
 
 export type ApplyRuntimeConfigMutationOptions = {
   readonly configPath?: string;
@@ -57,8 +60,13 @@ export function applyRuntimeConfigMutation(
     effectiveStoreRoot === undefined ? {} : { storeRoot: effectiveStoreRoot }
   );
   const envPath = effectiveLayout.envPath;
-  const nextConfig = mutateConfig(currentConfig, options.operation, envPath);
+  const nextConfig = validateMutatedRuntimeConfig(
+    mutateConfig(currentConfig, options.operation)
+  );
 
+  if (options.operation.kind === 'secret_set') {
+    writeEnvSecret(envPath, options.operation.envVar, options.operation.secretValue);
+  }
   writeJsonAtomic(configPath, nextConfig, 0o600);
 
   return Object.freeze({
@@ -139,8 +147,7 @@ function runtimeConfigPathFromEnv(env: NodeJS.ProcessEnv): string | undefined {
 
 function mutateConfig(
   config: Project02RuntimeConfig,
-  operation: RuntimeConfigMutationOperation,
-  envPath: string
+  operation: RuntimeConfigMutationOperation
 ): Project02RuntimeConfig {
   switch (operation.kind) {
     case 'set':
@@ -156,7 +163,6 @@ function mutateConfig(
         ? unsetConfigPath(config, 'defaultMemoryProvider')
         : setConfigPath(config, 'defaultMemoryProvider', operation.pluginId);
     case 'secret_set':
-      writeEnvSecret(envPath, operation.envVar, operation.secretValue);
       return setPluginConfigField(
         config,
         operation.pluginId,
@@ -164,6 +170,29 @@ function mutateConfig(
         { $env: operation.envVar }
       );
   }
+}
+
+function validateMutatedRuntimeConfig(
+  config: Project02RuntimeConfig
+): Project02RuntimeConfig {
+  const accepted = validateProject02RuntimeConfig(config);
+  const blockingDiagnostic = accepted.diagnostics.find(
+    (diagnostic) => diagnostic.severity === 'error'
+  );
+
+  if (blockingDiagnostic !== undefined) {
+    throw new TypeError(
+      `Cannot mutate runtime config because the mutation would produce invalid config: ${blockingDiagnostic.message}`
+    );
+  }
+
+  if (accepted.config === undefined) {
+    throw new TypeError(
+      'Cannot mutate runtime config because the mutation would produce empty config.'
+    );
+  }
+
+  return accepted.config;
 }
 
 function setPluginEnabled(
@@ -343,9 +372,28 @@ function writeEnvSecret(envPath: string, envVar: string, secretValue: string): v
   const lines = current
     .split('\n')
     .filter((line) => line.trim().length > 0 && !line.startsWith(`${envVar}=`));
-  const next = `${[...lines, `${envVar}=${JSON.stringify(secretValue)}`].join('\n')}\n`;
+  const next = `${[
+    ...lines,
+    `${envVar}=${formatDotenvSecretValue(secretValue)}`
+  ].join('\n')}\n`;
 
   writeTextAtomic(envPath, next, 0o600);
+}
+
+function formatDotenvSecretValue(value: string): string {
+  for (const delimiter of ['"', "'", '`'] as const) {
+    if (!value.includes(delimiter)) {
+      return `${delimiter}${value}${delimiter}`;
+    }
+  }
+
+  if (/^[^\s#]+$/u.test(value)) {
+    return value;
+  }
+
+  throw new TypeError(
+    'Secret value cannot be written to the runtime config env file because it contains every supported dotenv quote delimiter and cannot be safely written as an unquoted value.'
+  );
 }
 
 function writeJsonAtomic(

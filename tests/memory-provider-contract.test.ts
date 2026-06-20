@@ -129,6 +129,42 @@ describe('memory provider runtime plugin helper', () => {
     });
   });
 
+  it('runs provider close on the session-end lifecycle', async () => {
+    const closedSessions: string[] = [];
+    const provider: Project02MemoryProvider = {
+      id: 'memory.close',
+      displayName: 'Close Provider',
+      close() {
+        closedSessions.push('closed');
+
+        return Promise.resolve();
+      }
+    };
+    const plugin = createMemoryProviderRuntimePlugin(provider);
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [plugin.manifest.id]
+    });
+    const result = await host.onSessionEnd(testContext());
+    const registeredPlugin = host
+      .registrySnapshot()
+      .plugins.find((snapshot) => snapshot.manifest.id === 'memory.close');
+
+    expect(plugin.manifest.declaredPlugins).toContain('on_session_end');
+    expect(registeredPlugin?.registeredLifecycleHooks).toContain('on_session_end');
+    expect(closedSessions).toEqual(['closed']);
+    expect(result).toMatchObject({
+      status: 'completed',
+      evidence: [
+        {
+          pluginId: 'memory.close',
+          evidenceKind: 'session_end',
+          status: 'accepted'
+        }
+      ]
+    });
+  });
+
   it('exposes optional search and add tools when methods exist', async () => {
     const provider: Project02MemoryProvider = {
       id: 'memory.tools',

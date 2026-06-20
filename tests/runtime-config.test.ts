@@ -1,6 +1,7 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { loadEnvFile } from 'node:process';
 import { Writable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
@@ -149,6 +150,42 @@ describe('runtime config loading and resolution', () => {
     expect(JSON.stringify(resolved)).not.toContain('plaintext-secret');
   });
 
+  it('treats empty env values for required secrets as missing', () => {
+    const envVar = 'PROJECT02_EMPTY_SECRET_3447588015';
+    const configPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-empty-secret-')), 'config.json'),
+      {
+        plugins: {
+          'memory.required': {
+            config: {
+              apiKey: { $env: envVar }
+            }
+          }
+        }
+      }
+    );
+    const resolved = resolveProject02RuntimeConfig({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      pluginManifests: [requiredSecretPlugin().manifest],
+      env: { [envVar]: '' }
+    });
+    const resolvedField = resolved.pluginConfigs['memory.required']?.['apiKey'];
+
+    expect(resolvedField).toMatchObject({
+      source: `env:${envVar}`,
+      resolved: false
+    });
+    expect(resolvedField).not.toHaveProperty('value');
+    expect(resolved.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_required_secret_missing',
+          path: 'plugins.memory.required.config.apiKey'
+        })
+      ])
+    );
+  });
+
   it('lets explicit per-plugin disable win over legacy enabledPlugins', async () => {
     const configPath = writeRuntimeConfig(
       join(mkdtempSync(join(tmpdir(), 'project02-config-disable-')), 'config.json'),
@@ -205,6 +242,53 @@ describe('runtime config loading and resolution', () => {
         })
       ])
     );
+  });
+
+  it('uses supplied env maps when creating configured plugin hosts', async () => {
+    const envVar = 'PROJECT02_SUPPLIED_ONLY_SECRET_3447588016';
+    const previousEnvValue = process.env[envVar];
+    process.env[envVar] = '';
+
+    try {
+      const configPath = writeRuntimeConfig(
+        join(mkdtempSync(join(tmpdir(), 'project02-config-supplied-env-')), 'config.json'),
+        {
+          plugins: {
+            'memory.required': {
+              enabled: true,
+              config: {
+                apiKey: { $env: envVar }
+              }
+            }
+          }
+        }
+      );
+      const configured = await createConfiguredProject02PluginHost({
+        loadedConfig: loadProject02RuntimeConfig({ configPath }),
+        factories: {
+          'memory.required': () => requiredSecretPlugin()
+        },
+        env: { [envVar]: 'from-supplied-env' }
+      });
+
+      expect(configured.activation.enabledPluginIds).toContain('memory.required');
+      expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
+        'runtime_config_required_secret_missing'
+      );
+      expect(
+        configured.resolvedConfig.pluginConfigs['memory.required']?.['apiKey']
+      ).toMatchObject({
+        source: `env:${envVar}`,
+        resolved: true,
+        value: 'from-supplied-env'
+      });
+    } finally {
+      if (previousEnvValue === undefined) {
+        Reflect.deleteProperty(process.env, envVar);
+      } else {
+        process.env[envVar] = previousEnvValue;
+      }
+    }
   });
 
   it('blocks automatic memory activation when multiple providers are enabled without a default', async () => {
@@ -406,6 +490,80 @@ describe('runtime config CLI', () => {
     expect(stderr).toContain('Cannot mutate runtime config because it failed to load');
     expect(stderr).toContain('Runtime config file is not valid JSON');
     expect(readFileSync(configPath, 'utf8')).toBe(malformedConfig);
+  });
+
+  it('refuses to write mutations that would fail runtime config validation', async () => {
+    const emptyStoreRoot = mkdtempSync(join(tmpdir(), 'project02-config-invalid-set-'));
+    const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-invalid-env-ref-'));
+    const configPath = writeRuntimeConfig(join(configRoot, 'config.json'), {
+      storeRoot: 'original-store'
+    });
+    const originalConfig = readFileSync(configPath, 'utf8');
+    let enabledPluginsStderr = '';
+    let envRefStderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', emptyStoreRoot, 'set', 'enabledPlugins', '[""]'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect((chunk) => {
+            enabledPluginsStderr += chunk;
+          })
+        }
+      )
+    ).toBe(1);
+    expect(enabledPluginsStderr).toContain(
+      'Cannot mutate runtime config because the mutation would produce invalid config'
+    );
+    expect(enabledPluginsStderr).toContain('array of non-empty strings');
+    expect(existsSync(join(emptyStoreRoot, 'config.json'))).toBe(false);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'set', 'plugins.foo.config.bar', '{"$env":""}'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect((chunk) => {
+            envRefStderr += chunk;
+          })
+        }
+      )
+    ).toBe(1);
+    expect(envRefStderr).toContain(
+      'Cannot mutate runtime config because the mutation would produce invalid config'
+    );
+    expect(envRefStderr).toContain('Runtime config values must be JSON-compatible');
+    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
+  });
+
+  it('writes dotenv secrets so quotes and backslashes round-trip through env loading', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-escaping-'));
+    const envVar = 'PROJECT02_SECRET_ROUNDTRIP_QUOTES';
+    const secretValue = String.raw`single' double" slash\ value`;
+
+    Reflect.deleteProperty(process.env, envVar);
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {}),
+          env: { [envVar]: secretValue }
+        }
+      )
+    ).toBe(0);
+
+    const envPath = join(storeRoot, '.env');
+
+    expect(readFileSync(envPath, 'utf8')).toBe(`${envVar}=\`${secretValue}\`\n`);
+
+    try {
+      loadEnvFile(envPath);
+      expect(process.env[envVar]).toBe(secretValue);
+    } finally {
+      Reflect.deleteProperty(process.env, envVar);
+    }
   });
 
   it('fails get when config loading reports errors', async () => {
