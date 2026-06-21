@@ -404,6 +404,15 @@ function shouldValidatePluginConfig(options: {
     return false;
   }
 
+  if (
+    !pluginCanRequireConfigValidation({
+      config: options.config,
+      manifest: options.manifest
+    })
+  ) {
+    return false;
+  }
+
   if (configured?.enabled === true) {
     return true;
   }
@@ -416,24 +425,21 @@ function shouldValidatePluginConfig(options: {
     return false;
   }
 
-  return defaultEnabledPluginNeedsConfigValidation({
-    config: options.config,
-    manifest: options.manifest
-  });
+  return true;
 }
 
-function defaultEnabledPluginNeedsConfigValidation(options: {
+function pluginCanRequireConfigValidation(options: {
   readonly config: Project02RuntimeConfig | undefined;
   readonly manifest: RuntimePluginManifest;
 }): boolean {
   if (
-    options.manifest.kind === 'memory_provider' &&
-    options.config?.defaultMemoryProvider !== undefined
+    options.manifest.kind !== 'memory_provider' ||
+    options.config?.defaultMemoryProvider === undefined
   ) {
-    return options.config.defaultMemoryProvider === options.manifest.id;
+    return true;
   }
 
-  return true;
+  return options.config.defaultMemoryProvider === options.manifest.id;
 }
 
 function pushUnknownPluginConfigFieldDiagnostics(options: {

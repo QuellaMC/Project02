@@ -221,9 +221,10 @@ export async function createConfiguredProject02PluginHost(options: {
       ? {}
       : { constructionCleanup: options.constructionCleanup })
   });
+  let host: RuntimePluginHost;
 
-  return Object.freeze({
-    host: createRuntimePluginHost({
+  try {
+    host = createRuntimePluginHost({
       plugins,
       enabledPluginIds: activation.enabledPluginIds,
       storeRoot: resolvedConfig.storeRoot,
@@ -231,7 +232,24 @@ export async function createConfiguredProject02PluginHost(options: {
       ...(options.sessionIdentity === undefined
         ? {}
         : { sessionIdentity: options.sessionIdentity })
-    }),
+    });
+  } catch (error: unknown) {
+    await cleanupPartiallyInstantiatedPlugins({
+      plugins,
+      resolvedConfig,
+      ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
+      ...(options.sessionIdentity === undefined
+        ? {}
+        : { sessionIdentity: options.sessionIdentity }),
+      ...(options.constructionCleanup === undefined
+        ? {}
+        : { constructionCleanup: options.constructionCleanup })
+    });
+    throw error;
+  }
+
+  return Object.freeze({
+    host,
     plugins,
     resolvedConfig,
     activation

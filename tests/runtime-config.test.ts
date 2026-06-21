@@ -2458,7 +2458,7 @@ describe('runtime config CLI', () => {
 
     const afterUnset = readFileSync(join(storeRoot, 'config.json'), 'utf8');
 
-    expect(afterUnset).toContain('"memory.recall"');
+    expect(afterUnset).not.toContain('"memory.recall"');
     expect(afterUnset).not.toContain('"backend"');
 
     expect(
@@ -2560,13 +2560,7 @@ describe('runtime config CLI', () => {
       readFileSync(join(storeRoot, 'config.json'), 'utf8')
     );
 
-    expect(afterUnset).toMatchObject({
-      plugins: {
-        memory: {
-          config: {}
-        }
-      }
-    });
+    expect(afterUnset).toEqual({ version: runtimeConfigVersion });
   });
 
   it('redacts dotted credential plugin config field names on get', async () => {
@@ -2662,13 +2656,7 @@ describe('runtime config CLI', () => {
       readFileSync(join(storeRoot, 'config.json'), 'utf8')
     );
 
-    expect(afterUnset).toMatchObject({
-      plugins: {
-        memory: {
-          config: {}
-        }
-      }
-    });
+    expect(afterUnset).toEqual({ version: runtimeConfigVersion });
   });
 
   it('sets, gets, unsets, and checks plugin config fields starting with config', async () => {
@@ -2775,13 +2763,7 @@ describe('runtime config CLI', () => {
       readFileSync(join(storeRoot, 'config.json'), 'utf8')
     );
 
-    expect(afterUnset).toMatchObject({
-      plugins: {
-        memory: {
-          config: {}
-        }
-      }
-    });
+    expect(afterUnset).toEqual({ version: runtimeConfigVersion });
 
     expect(
       await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
@@ -2877,8 +2859,7 @@ describe('runtime config CLI', () => {
     expect(afterUnset).toMatchObject({
       plugins: {
         'memory.config.api': {
-          enabled: true,
-          config: {}
+          enabled: true
         }
       }
     });
@@ -3474,13 +3455,79 @@ describe('runtime config CLI', () => {
       readFileSync(join(storeRoot, 'config.json'), 'utf8')
     );
 
-    expect(afterUnset).toMatchObject({
-      plugins: {
-        memory: {
-          config: {}
+    expect(afterUnset).toEqual({ version: runtimeConfigVersion });
+  });
+
+  it('drops empty plugin wrappers after unsetting the last plugin field', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-unset-empty-'));
+    let enabledUnsetCheckStdout = '';
+    let configUnsetCheckStdout = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'plugin', 'enable', 'typo'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
         }
-      }
-    });
+      )
+    ).toBe(0);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'unset', 'plugins.typo.enabled'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(readFileSync(join(storeRoot, 'config.json'), 'utf8')) as unknown)
+      .toEqual({ version: runtimeConfigVersion });
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        stdout: collect((chunk) => {
+          enabledUnsetCheckStdout += chunk;
+        }),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+    expect(enabledUnsetCheckStdout).not.toContain('runtime_config_unknown_plugin');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'set', 'plugins.typo.config.backend', 'local'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'unset', 'plugins.typo.config.backend'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(readFileSync(join(storeRoot, 'config.json'), 'utf8')) as unknown)
+      .toEqual({ version: runtimeConfigVersion });
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        stdout: collect((chunk) => {
+          configUnsetCheckStdout += chunk;
+        }),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+    expect(configUnsetCheckStdout).not.toContain('runtime_config_unknown_plugin');
   });
 
   it('reports activation warnings from runtime config check', async () => {

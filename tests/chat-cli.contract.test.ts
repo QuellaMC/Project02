@@ -12,6 +12,9 @@ import {
   createRuntimePluginHost
 } from '../src/plugins/host.ts';
 import {
+  createRuntimePluginFileStore
+} from '../src/plugins/file-store.ts';
+import {
   createRuntimePlugin,
   createRuntimePluginEvidenceSnapshot,
   runtimePluginContractVersion,
@@ -466,11 +469,33 @@ describe('chat CLI plugin lifecycle', () => {
     });
   });
 
-  it('closes configured pre-session plugins when later session creation fails', async () => {
+  it('closes configured pre-session plugins read-only when later session creation fails', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-cleanup-'));
     const sessionId = 'pre-session-cleanup';
-    const configuredPlugin = createSessionEndPlugin(() => {});
     const sessionEndContexts: RuntimePluginContext[] = [];
+    const cleanupWriteBlocked: boolean[] = [];
+    const configuredPlugin = createSessionEndPlugin(
+      (context) => {
+        sessionEndContexts.push(context);
+
+        if (context.fileStore === undefined) {
+          throw new Error('Expected startup cleanup context to include fileStore.');
+        }
+
+        try {
+          context.fileStore.writeJsonAtomic('cleanup.json', {
+            value: 'should-not-write'
+          });
+          cleanupWriteBlocked.push(false);
+        } catch {
+          cleanupWriteBlocked.push(true);
+        }
+      },
+      {
+        sideEffectLevel: 'local_memory_write',
+        requestedApis: ['file_store']
+      }
+    );
     let factoryCalls = 0;
     let stdout = '';
     let stderr = '';
@@ -503,9 +528,7 @@ describe('chat CLI plugin lifecycle', () => {
             create() {
               factoryCalls += 1;
 
-              return createSessionEndPlugin((context) => {
-                sessionEndContexts.push(context);
-              });
+              return configuredPlugin;
             }
           }
         }
@@ -525,6 +548,14 @@ describe('chat CLI plugin lifecycle', () => {
     expect(sessionEndContexts[0]?.currentUserMessage).toContain(
       'chat startup failed'
     );
+    expect(cleanupWriteBlocked).toEqual([true]);
+    expect(
+      createRuntimePluginFileStore({
+        storeRoot,
+        sessionId,
+        pluginId: configuredPlugin.manifest.id
+      }).readJson('cleanup.json')
+    ).toBeUndefined();
   });
 
   it('aborts manifest-backed factory construction failures before creating a durable session', async () => {
@@ -776,6 +807,8 @@ function createSessionEndPlugin(
       RuntimePlugin['lifecycleHooks']['beforeRoleModelCall']
     >;
     readonly requiredForTurn?: boolean;
+    readonly requestedApis?: RuntimePlugin['manifest']['requestedApis'];
+    readonly sideEffectLevel?: RuntimePlugin['manifest']['runtimePolicy']['sideEffectLevel'];
   } = {}
 ): RuntimePlugin {
   const pluginId = options.pluginId ?? 'chat.session-end.fixture';
@@ -803,7 +836,7 @@ function createSessionEndPlugin(
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
         requiredForTurn: options.requiredForTurn === true,
-        sideEffectLevel: 'runtime_read',
+        sideEffectLevel: options.sideEffectLevel ?? 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,
@@ -820,7 +853,7 @@ function createSessionEndPlugin(
         defaultEnabled: true,
         reasons: ['test']
       },
-      requestedApis: []
+      requestedApis: options.requestedApis ?? []
     },
     providedTools: [],
     lifecycleHooks: {

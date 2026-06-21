@@ -489,25 +489,27 @@ function unsetConfigPath(
   const plugins = { ...(config.plugins ?? {}) };
 
   if (pluginPath.kind === 'enabled') {
-    plugins[pluginPath.pluginId] = freezePluginConfig({
+    return setOrDeletePluginWrapper(config, plugins, pluginPath.pluginId, {
       ...(currentPlugin.config === undefined ? {} : { config: currentPlugin.config })
     });
-    return freezeConfig({ ...config, plugins });
   }
 
-  const nextPluginConfig = Object.freeze(
-    Object.fromEntries(
-      Object.entries(currentPlugin.config ?? {}).filter(
-        ([key]) => key !== pluginPath.fieldName
-      )
-    ) as Readonly<Record<string, RuntimeConfigValue>>
+  const nextPluginConfigEntries = Object.entries(currentPlugin.config ?? {}).filter(
+    ([key]) => key !== pluginPath.fieldName
   );
 
-  plugins[pluginPath.pluginId] = freezePluginConfig({
-    ...currentPlugin,
-    config: nextPluginConfig
+  return setOrDeletePluginWrapper(config, plugins, pluginPath.pluginId, {
+    ...(currentPlugin.enabled === undefined ? {} : { enabled: currentPlugin.enabled }),
+    ...(nextPluginConfigEntries.length === 0
+      ? {}
+      : {
+          config: Object.freeze(
+            Object.fromEntries(nextPluginConfigEntries) as Readonly<
+              Record<string, RuntimeConfigValue>
+            >
+          )
+        })
   });
-  return freezeConfig({ ...config, plugins });
 }
 
 type PreparedEnvSecretWrite = {
@@ -1011,6 +1013,66 @@ function tryParsePluginMutationPath(
 
 function freezeConfig(config: Project02RuntimeConfig): Project02RuntimeConfig {
   return Object.freeze(config);
+}
+
+function setOrDeletePluginWrapper(
+  config: Project02RuntimeConfig,
+  plugins: Record<string, Project02RuntimePluginConfig>,
+  pluginId: string,
+  pluginConfig: Project02RuntimePluginConfig
+): Project02RuntimeConfig {
+  if (isEmptyPluginWrapper(pluginConfig)) {
+    return freezeConfigWithPluginWrappers(
+      config,
+      pluginWrappersWithout(plugins, pluginId)
+    );
+  }
+
+  plugins[pluginId] = freezePluginConfig(pluginConfig);
+  return freezeConfigWithPluginWrappers(config, plugins);
+}
+
+function pluginWrappersWithout(
+  plugins: Readonly<Record<string, Project02RuntimePluginConfig>>,
+  pluginId: string
+): Record<string, Project02RuntimePluginConfig> {
+  return Object.fromEntries(
+    Object.entries(plugins).filter(([entryPluginId]) => entryPluginId !== pluginId)
+  );
+}
+
+function isEmptyPluginWrapper(config: Project02RuntimePluginConfig): boolean {
+  return (
+    config.enabled === undefined &&
+    (config.config === undefined || Object.keys(config.config).length === 0)
+  );
+}
+
+function freezeConfigWithPluginWrappers(
+  config: Project02RuntimeConfig,
+  plugins: Readonly<Record<string, Project02RuntimePluginConfig>>
+): Project02RuntimeConfig {
+  const pluginEntries = Object.entries(plugins);
+
+  if (pluginEntries.length > 0) {
+    return freezeConfig({
+      ...config,
+      plugins: Object.freeze(
+        Object.fromEntries(pluginEntries) as Readonly<
+          Record<string, Project02RuntimePluginConfig>
+        >
+      )
+    });
+  }
+
+  return freezeConfig({
+    version: config.version,
+    ...(config.storeRoot === undefined ? {} : { storeRoot: config.storeRoot }),
+    ...(config.enabledPlugins === undefined ? {} : { enabledPlugins: config.enabledPlugins }),
+    ...(config.defaultMemoryProvider === undefined
+      ? {}
+      : { defaultMemoryProvider: config.defaultMemoryProvider })
+  });
 }
 
 function freezePluginConfig(

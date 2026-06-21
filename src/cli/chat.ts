@@ -346,7 +346,8 @@ async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
       eventType: 'USER_MESSAGE',
       currentUserMessage: startupFailurePluginCleanupMessage,
       character: createConversationSession().character
-    })
+    }),
+    { allowFileStoreWrites: false }
   );
 }
 

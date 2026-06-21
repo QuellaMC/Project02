@@ -15,6 +15,7 @@ import {
   characterStatePluginId,
   createRuntimePluginFileStore,
   createRuntimePlugin,
+  memorySearchTool,
   runtimePluginDiscoveryPluginId,
   runtimePluginContractVersion,
   type RuntimePluginContext
@@ -345,6 +346,83 @@ describe('runtime config activation diagnostics', () => {
         enabled: false,
         activationStatus: 'disabled'
       })
+    );
+  });
+
+  it('skips required config validation for explicitly enabled unselected memory providers', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-memory-enabled-default-selected-')
+    );
+    const selectedPlugin = requiredSecretPlugin('memory.selected');
+    const unselectedPlugin = requiredSecretPlugin('memory.unselected');
+    const envVar = 'PROJECT02_EXPLICIT_SELECTED_MEMORY_SECRET_3449174646';
+    let selectedFactoryCalls = 0;
+    let unselectedFactoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: selectedPlugin.manifest.id,
+      plugins: {
+        [selectedPlugin.manifest.id]: {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        },
+        [unselectedPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      env: {
+        [envVar]: 'selected-memory-secret'
+      },
+      factories: {
+        [selectedPlugin.manifest.id]: {
+          manifest: selectedPlugin.manifest,
+          create() {
+            selectedFactoryCalls += 1;
+
+            return selectedPlugin;
+          }
+        },
+        [unselectedPlugin.manifest.id]: {
+          manifest: unselectedPlugin.manifest,
+          create() {
+            unselectedFactoryCalls += 1;
+
+            return unselectedPlugin;
+          }
+        }
+      }
+    });
+    const unselectedActivation = configured.activation.plugins.find(
+      (plugin) => plugin.pluginId === unselectedPlugin.manifest.id
+    );
+
+    expect(configured.activation.enabledPluginIds).toEqual([
+      selectedPlugin.manifest.id
+    ]);
+    expect(configured.activation.defaultMemoryProvider).toBe(
+      selectedPlugin.manifest.id
+    );
+    expect(selectedFactoryCalls).toBe(1);
+    expect(unselectedFactoryCalls).toBe(0);
+    expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_required_secret_missing'
+    );
+    expect(unselectedActivation).toMatchObject({
+      pluginId: unselectedPlugin.manifest.id,
+      enabled: false,
+      activationStatus: 'disabled'
+    });
+    expect(unselectedActivation?.activationReasons).toEqual(
+      expect.arrayContaining([
+        'enabled_by_config',
+        'not_selected_as_default_memory_provider'
+      ])
     );
   });
 
@@ -709,6 +787,87 @@ describe('runtime config activation diagnostics', () => {
     expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
   });
 
+  it('cleans up created plugins when host construction fails after factories succeed', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-host-throw-cleanup-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const cleanupContexts: RuntimePluginContext[] = [];
+    const cleanupWriteBlocked: boolean[] = [];
+    const cleanupPlugin = fileStoreSessionEndPlugin('first.cleanup', (context) => {
+      cleanupContexts.push(context);
+
+      if (context.fileStore === undefined) {
+        throw new Error('Expected host cleanup context to include fileStore.');
+      }
+
+      try {
+        context.fileStore.writeJsonAtomic('cleanup.json', {
+          value: 'should-not-write'
+        });
+        cleanupWriteBlocked.push(false);
+      } catch {
+        cleanupWriteBlocked.push(true);
+      }
+    });
+    const firstToolPlugin = modelFacingMemorySearchPlugin('memory.first');
+    const secondToolPlugin = modelFacingMemorySearchPlugin('memory.second');
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        [cleanupPlugin.manifest.id]: {
+          enabled: true
+        },
+        [firstToolPlugin.manifest.id]: {
+          enabled: true
+        },
+        [secondToolPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    await expect(
+      createConfiguredProject02PluginHost({
+        loadedConfig: loadProject02RuntimeConfig({ configPath }),
+        storeRoot,
+        factories: {
+          [cleanupPlugin.manifest.id]: {
+            manifest: cleanupPlugin.manifest,
+            create: () => cleanupPlugin
+          },
+          [firstToolPlugin.manifest.id]: {
+            manifest: firstToolPlugin.manifest,
+            create: () => firstToolPlugin
+          },
+          [secondToolPlugin.manifest.id]: {
+            manifest: secondToolPlugin.manifest,
+            create: () => secondToolPlugin
+          }
+        }
+      })
+    ).rejects.toThrow(/declared more than once/iu);
+
+    const cleanupContext = cleanupContexts[0];
+
+    if (cleanupContext === undefined) {
+      throw new Error('Expected host construction cleanup to run.');
+    }
+
+    const cleanupStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: cleanupContext.sessionId,
+      pluginId: cleanupPlugin.manifest.id
+    });
+
+    expect(cleanupContext).toMatchObject({
+      sessionId: 'configured-plugin-construction-cleanup',
+      currentUserMessage: 'configured plugin construction failed before host creation'
+    });
+    expect(cleanupWriteBlocked).toEqual([true]);
+    expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
+  });
+
   it('accepts manifest-backed factories that return their declared manifest', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-manifest-match-')
@@ -913,6 +1072,31 @@ function fileStoreSessionEndPlugin(
         onSessionEnd(context);
         return {
           status: 'completed',
+          evidence: []
+        };
+      }
+    }
+  });
+}
+
+function modelFacingMemorySearchPlugin(id: string) {
+  const plugin = firstPartyPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      declaredPlugins: [
+        'plugin_discovery',
+        'tool_provider',
+        'handle_tool_call'
+      ]
+    },
+    providedTools: [memorySearchTool('memory.search')],
+    lifecycleHooks: {
+      handleToolCall() {
+        return {
+          status: 'accepted',
+          output: {},
           evidence: []
         };
       }
