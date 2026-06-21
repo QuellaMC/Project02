@@ -43,6 +43,7 @@ export function applyRuntimeConfigMutation(
     ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
   });
+  const selectedConfigPath = loaded.path ?? configPath;
   const blockingDiagnostic = loaded.diagnostics.find(
     (diagnostic) =>
       diagnostic.severity === 'error' && diagnostic.code !== 'runtime_config_missing'
@@ -67,10 +68,10 @@ export function applyRuntimeConfigMutation(
   if (options.operation.kind === 'secret_set') {
     writeEnvSecret(envPath, options.operation.envVar, options.operation.secretValue);
   }
-  writeJsonAtomic(configPath, nextConfig, 0o600);
+  writeJsonAtomic(selectedConfigPath, nextConfig, 0o600);
 
   return Object.freeze({
-    configPath,
+    configPath: selectedConfigPath,
     envPath,
     config: nextConfig
   } satisfies RuntimeConfigMutationResult);

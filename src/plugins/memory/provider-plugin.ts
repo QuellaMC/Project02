@@ -43,6 +43,8 @@ export function createMemoryProviderRuntimePlugin(
   const addToolName = `${toolNamespace}.add`;
   const providedTools: RuntimePluginProvidedTool[] = [];
   const declaredPlugins = ['plugin_discovery'] as string[];
+  const canWriteMemory =
+    provider.add !== undefined || provider.captureTurn !== undefined;
 
   if (provider.recall !== undefined) {
     declaredPlugins.push('before_role_model_call');
@@ -92,9 +94,9 @@ export function createMemoryProviderRuntimePlugin(
       localTrustLevel: 'trusted_adapter',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: provider.add === undefined
-          ? 'runtime_read'
-          : 'local_memory_write',
+        sideEffectLevel: canWriteMemory
+          ? 'local_memory_write'
+          : 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1500,
         sourceReferencesRequired: true,
@@ -123,13 +125,15 @@ export function createMemoryProviderRuntimePlugin(
                 currentUserMessage: context.currentUserMessage,
                 maxItems: memoryProviderMaxItems
               });
-              const items = boundedMemoryItems(result?.items ?? []);
+              const items = boundedMemoryItems(
+                sourceBackedMemoryItems(result?.items ?? [])
+              );
 
               return {
                 contextItems: items.map((item) =>
                   createRuntimePluginContextItem({
                     pluginId,
-                    id: item.id,
+                    id: memoryContextItemId(item.id),
                     kind: 'memory',
                     text: item.text,
                     budget: {
@@ -200,8 +204,8 @@ export function createMemoryProviderRuntimePlugin(
                   query,
                   maxItems: memoryProviderMaxItems
                 });
-                const items = sourceBackedMemoryItems(
-                  boundedMemoryItems(result.items)
+                const items = boundedMemoryItems(
+                  sourceBackedMemoryItems(result.items)
                 );
 
                 return acceptedToolResult({
@@ -348,8 +352,17 @@ function sourceBackedMemoryItems(
   items: readonly MemoryRecallItem[]
 ): readonly MemoryRecallItem[] {
   return Object.freeze(
-    items.filter((item) => item.sourceReferences.length > 0)
+    items.filter((item) =>
+      Array.isArray(item.sourceReferences) && item.sourceReferences.length > 0
+    )
   );
+}
+
+function memoryContextItemId(providerItemId: string): string {
+  const sanitized = providerItemId.replaceAll(/[^A-Za-z0-9._-]/gu, '_');
+  const suffix = sanitized.length === 0 ? 'item' : sanitized;
+
+  return boundedText(`memory.${suffix}`, 128);
 }
 
 function searchSourceReferences(options: {

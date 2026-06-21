@@ -923,6 +923,135 @@ describe('runtime config loading and resolution', () => {
       ['memory.two', 'blocked']
     ]);
   });
+
+  it('treats a typoed explicit default memory provider as an activation error when another provider is enabled', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-memory-default-typo-'));
+    const enabledPlugin = memoryProviderPlugin('memory.enabled');
+    const factories = {
+      'memory.enabled': {
+        manifest: enabledPlugin.manifest,
+        create: () => enabledPlugin
+      }
+    };
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: 'memory.typo',
+      plugins: {
+        'memory.enabled': {
+          enabled: true
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories
+    });
+
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
+          path: 'defaultMemoryProvider'
+        })
+      ])
+    );
+    expect(configured.activation.plugins[0]).toMatchObject({
+      pluginId: 'memory.enabled',
+      enabled: false,
+      activationStatus: 'disabled'
+    });
+    expect(configured.activation.plugins[0]?.activationReasons).toContain(
+      'not_selected_as_default_memory_provider'
+    );
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories
+      })
+    ).toBe(1);
+    expect(stdout).toContain('"default_memory_provider_unavailable"');
+    expect(stdout).toContain('"severity": "error"');
+  });
+
+  it('treats an inactive explicit default memory provider as an activation error when another provider is enabled', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-memory-default-inactive-'));
+    const enabledPlugin = memoryProviderPlugin('memory.enabled');
+    const disabledPlugin = memoryProviderPlugin('memory.disabled');
+    const factories = {
+      'memory.enabled': {
+        manifest: enabledPlugin.manifest,
+        create: () => enabledPlugin
+      },
+      'memory.disabled': {
+        manifest: disabledPlugin.manifest,
+        create: () => disabledPlugin
+      }
+    };
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: 'memory.disabled',
+      plugins: {
+        'memory.enabled': {
+          enabled: true
+        },
+        'memory.disabled': {
+          enabled: false
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories
+    });
+
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
+          path: 'defaultMemoryProvider'
+        })
+      ])
+    );
+    expect(
+      configured.activation.plugins.map((plugin) => [
+        plugin.pluginId,
+        plugin.activationStatus
+      ])
+    ).toEqual([
+      ['memory.enabled', 'disabled'],
+      ['memory.disabled', 'disabled']
+    ]);
+    expect(configured.activation.plugins[0]?.activationReasons).toContain(
+      'not_selected_as_default_memory_provider'
+    );
+    expect(configured.activation.plugins[1]?.activationReasons).toContain(
+      'disabled_by_config'
+    );
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories
+      })
+    ).toBe(1);
+    expect(stdout).toContain('"default_memory_provider_unavailable"');
+    expect(stdout).toContain('"severity": "error"');
+  });
 });
 
 describe('runtime config CLI', () => {
@@ -1057,6 +1186,31 @@ describe('runtime config CLI', () => {
 
     expect(unsetResult.config.storeRoot).toBeUndefined();
     expect(unsetResult.envPath).toBe(join(initialStoreRoot, '.env'));
+  });
+
+  it('writes mutations to the normalized selected config path', () => {
+    const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-normalized-write-'));
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      storeRoot: 'initial-store'
+    });
+    const paddedConfigPath = ' runtime.json ';
+    const previousCwd = process.cwd();
+
+    try {
+      process.chdir(configRoot);
+
+      const result = applyRuntimeConfigMutation({
+        configPath: paddedConfigPath,
+        operation: { kind: 'set', path: 'storeRoot', value: 'next-store' }
+      });
+      const config: unknown = JSON.parse(readFileSync(configPath, 'utf8'));
+
+      expect(result.configPath).toBe('runtime.json');
+      expect(config).toMatchObject({ storeRoot: 'next-store' });
+      expect(existsSync(join(configRoot, paddedConfigPath))).toBe(false);
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 
   it('prints the explicit config path selected by --config', async () => {

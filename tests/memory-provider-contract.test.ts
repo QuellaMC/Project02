@@ -85,6 +85,148 @@ describe('memory provider runtime plugin helper', () => {
     });
   });
 
+  it('normalizes provider recall IDs before creating context items', async () => {
+    const provider: Project02MemoryProvider = {
+      id: 'memory.recall-id-normalization',
+      displayName: 'Recall ID Normalization Provider',
+      recall() {
+        return Promise.resolve({
+          items: [
+            {
+              id: '123',
+              text: 'Numeric provider row ID should still become context.',
+              sourceReferences: [
+                {
+                  kind: 'memory',
+                  id: '123',
+                  title: 'Provider memory row'
+                }
+              ]
+            }
+          ]
+        });
+      }
+    };
+    const plugin = createMemoryProviderRuntimePlugin(provider);
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [plugin.manifest.id]
+    });
+
+    const result = await host.beforeRoleModelCall(testContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected numeric provider recall ID to be accepted.');
+    }
+    expect(result.contextItems[0]).toMatchObject({
+      id: 'memory.123',
+      sourceReferences: [
+        {
+          kind: 'memory',
+          id: '123',
+          title: 'Provider memory row'
+        }
+      ]
+    });
+    expect(result.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pluginId: 'memory.recall-id-normalization',
+          evidenceKind: 'before_role_model_call',
+          status: 'accepted'
+        })
+      ])
+    );
+    expect(result.evidence).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pluginId: 'memory.recall-id-normalization',
+          status: 'degraded'
+        })
+      ])
+    );
+  });
+
+  it('omits source-less recall items without rejecting valid recall rows', async () => {
+    const provider: Project02MemoryProvider = {
+      id: 'memory.recall-source-filter',
+      displayName: 'Recall Source Filter Provider',
+      recall() {
+        return Promise.resolve({
+          items: [
+            {
+              id: 'source-less',
+              text: 'This unauditable item should be omitted.',
+              sourceReferences: []
+            },
+            {
+              id: 'source-backed',
+              text: 'This auditable item should remain.',
+              sourceReferences: [
+                {
+                  kind: 'memory',
+                  id: 'source-backed'
+                }
+              ]
+            }
+          ]
+        });
+      }
+    };
+    const plugin = createMemoryProviderRuntimePlugin(provider);
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [plugin.manifest.id]
+    });
+
+    const result = await host.beforeRoleModelCall(testContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected source-backed recall row to be accepted.');
+    }
+    expect(result.contextItems.map((item) => item.id)).toEqual([
+      'memory.source-backed'
+    ]);
+    expect(result.contextItems[0]?.sourceReferences).toEqual([
+      {
+        kind: 'memory',
+        id: 'source-backed'
+      }
+    ]);
+    expect(result.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pluginId: 'memory.recall-source-filter',
+          evidenceKind: 'before_role_model_call',
+          status: 'accepted',
+          summary: 'Provided 1 memory item(s).'
+        })
+      ])
+    );
+  });
+
+  it('classifies capture-only providers as memory writers', () => {
+    const provider: Project02MemoryProvider = {
+      id: 'memory.capture-only',
+      displayName: 'Capture Only Provider',
+      captureTurn() {
+        return Promise.resolve({
+          captured: true,
+          summary: 'Captured.'
+        });
+      }
+    };
+    const plugin = createMemoryProviderRuntimePlugin(provider);
+
+    expect(plugin.manifest.runtimePolicy.sideEffectLevel).toBe(
+      'local_memory_write'
+    );
+    expect(plugin.manifest.declaredPlugins).toContain('after_turn_committed');
+    expect(plugin.manifest.declaredPlugins).not.toContain('handle_tool_call');
+  });
+
   it('records after-turn capture evidence with the after-turn kind', async () => {
     const provider: Project02MemoryProvider = {
       id: 'memory.capture',

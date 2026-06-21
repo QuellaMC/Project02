@@ -520,7 +520,7 @@ function defaultMemoryProviderDecision(options: {
         ambiguous: false,
         diagnostics: [
           diagnostic(
-            'warning',
+            enabledMemoryProviders.length > 0 ? 'error' : 'warning',
             'default_memory_provider_unavailable',
             `Default memory provider "${options.configDefaultMemoryProvider}" is not active.`,
             'defaultMemoryProvider'
