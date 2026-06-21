@@ -1,5 +1,14 @@
 export const runtimeConfigVersion = 'project02.runtime_config.v1';
 export const runtimeConfigEnvVarName = 'PROJECT02_RUNTIME_CONFIG';
+export const roleModelProviderEnvVarName = 'PROJECT02_ROLE_MODEL_PROVIDER';
+export const runtimeControlEnvVarNames: readonly string[] = Object.freeze([
+  runtimeConfigEnvVarName,
+  roleModelProviderEnvVarName
+]);
+
+export function isRuntimeControlEnvVarName(name: string): boolean {
+  return runtimeControlEnvVarNames.includes(name);
+}
 
 export type RuntimeConfigSecretRef = {
   readonly $env: string;

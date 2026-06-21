@@ -51,9 +51,14 @@ import {
   type RuntimePluginHost
 } from '../plugins/index.ts';
 import {
+  runRuntimePluginSessionEndHooks,
+  type RuntimePluginSessionEndOptions
+} from '../plugins/host.ts';
+import {
   createConfiguredProject02PluginHost,
   diagnosticsHaveErrors,
   loadProject02RuntimeConfig,
+  roleModelProviderEnvVarName,
   resolveConfiguredProject02PluginActivation,
   resolveProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
@@ -158,7 +163,8 @@ const promptText = 'You: ';
 const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
 const startupFailurePluginCleanupMessage =
   'chat startup failed before opening a durable session';
-const roleModelProviderEnvName = 'PROJECT02_ROLE_MODEL_PROVIDER';
+const fatalFailurePluginCleanupMessage =
+  'chat turn failed before normal /exit cleanup';
 
 class ChatCliUsageError extends Error {
   constructor(message: string) {
@@ -323,32 +329,77 @@ async function runChatCliAfterConfiguredHost(options: {
     options.configuredHost !== undefined &&
     pluginHost !== undefined
   ) {
-    await endChatSession({
-      session: durableRuntime.session,
-      logStore: durableRuntime.logStore,
-      pluginHost
+    await cleanupConfiguredChatPluginHostAfterFatalExit({
+      configuredHost: options.configuredHost,
+      session: durableRuntime.session
     });
   }
 
   return exitCode;
 }
 
+async function cleanupConfiguredChatPluginHostAfterFatalExit(options: {
+  readonly configuredHost: ConfiguredChatPluginHost;
+  readonly session: ConversationSession;
+}): Promise<void> {
+  const decisionContext = buildUserTurnDecisionContext({
+    session: options.session
+  });
+
+  await runBestEffortConfiguredChatPluginSessionEndCleanup({
+    configuredHost: options.configuredHost,
+    sessionId: decisionContext.sessionId,
+    sessionIdentity: options.session,
+    currentUserMessage: fatalFailurePluginCleanupMessage,
+    character: decisionContext.characterSnapshot
+  });
+}
+
 async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
   readonly configuredHost: ConfiguredChatPluginHost;
   readonly args: ChatCliArgs;
 }): Promise<void> {
-  await options.configuredHost.host.onSessionEnd(
-    createRuntimePluginContext({
-      ...createRuntimeEventIdentity(),
-      sessionId: normalizeLocalRuntimeSessionId(
-        options.args.newSessionId ?? options.args.sessionId
-      ),
-      eventType: 'USER_MESSAGE',
-      currentUserMessage: startupFailurePluginCleanupMessage,
-      character: createConversationSession().character
-    }),
-    { allowFileStoreWrites: false }
-  );
+  await runBestEffortConfiguredChatPluginSessionEndCleanup({
+    configuredHost: options.configuredHost,
+    sessionId: normalizeLocalRuntimeSessionId(
+      options.args.newSessionId ?? options.args.sessionId
+    ),
+    currentUserMessage: startupFailurePluginCleanupMessage,
+    character: createConversationSession().character,
+    hookOptions: { allowFileStoreWrites: false }
+  });
+}
+
+async function runBestEffortConfiguredChatPluginSessionEndCleanup(options: {
+  readonly configuredHost: ConfiguredChatPluginHost;
+  readonly sessionId: string;
+  readonly currentUserMessage: string;
+  readonly character: ReturnType<typeof createConversationSession>['character'];
+  readonly sessionIdentity?: object;
+  readonly hookOptions?: RuntimePluginSessionEndOptions;
+}): Promise<void> {
+  try {
+    await runRuntimePluginSessionEndHooks({
+      plugins: options.configuredHost.plugins,
+      context: createRuntimePluginContext({
+        ...createRuntimeEventIdentity(),
+        sessionId: options.sessionId,
+        eventType: 'USER_MESSAGE',
+        currentUserMessage: options.currentUserMessage,
+        character: options.character
+      }),
+      storeRoot: options.configuredHost.resolvedConfig.storeRoot,
+      sessionId: options.sessionId,
+      ...(options.sessionIdentity === undefined
+        ? {}
+        : { sessionIdentity: options.sessionIdentity }),
+      ...(options.hookOptions === undefined
+        ? {}
+        : { hookOptions: options.hookOptions })
+    });
+  } catch {
+    // Cleanup must not mask the startup or fatal turn error that triggered it.
+  }
 }
 
 async function createConfiguredChatPluginHostBeforeSession(options: {
@@ -1005,7 +1056,7 @@ function parseProviderName(value: string): ChatProviderName {
 function providerFromEnvironment(
   env: NodeJS.ProcessEnv
 ): ChatProviderName | undefined {
-  const value = env[roleModelProviderEnvName];
+  const value = env[roleModelProviderEnvVarName];
 
   if (value === undefined || value.length === 0) {
     return undefined;
@@ -1015,7 +1066,7 @@ function providerFromEnvironment(
     return parseProviderName(value);
   } catch {
     throw new ChatCliUsageError(
-      `${roleModelProviderEnvName} must be either "local" or "nvidia".`
+      `${roleModelProviderEnvVarName} must be either "local" or "nvidia".`
     );
   }
 }

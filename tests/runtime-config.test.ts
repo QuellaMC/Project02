@@ -20,6 +20,8 @@ import {
   defaultRuntimeConfigPath,
   loadProject02RuntimeConfig,
   resolveProject02RuntimeConfig,
+  roleModelProviderEnvVarName,
+  runtimeControlEnvVarNames,
   runtimeConfigEnvVarName,
   runtimeConfigVersion
 } from '../src/runtime/config/index.ts';
@@ -1749,6 +1751,93 @@ describe('runtime config CLI', () => {
     expect(readFileSync(join(storeRoot, '.env'), 'utf8')).toContain(
       'MEM0_API_KEY="stored-secret"'
     );
+  });
+
+  it.each(runtimeControlEnvVarNames)(
+    'rejects reserved runtime control env var %s before creating secret files',
+    async (envVar) => {
+      const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-reserved-'));
+      let stdout = '';
+      let stderr = '';
+
+      expect(
+        await runRuntimeConfigCliFromArgs(
+          ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+          {
+            stdout: collect((chunk) => {
+              stdout += chunk;
+            }),
+            stderr: collect((chunk) => {
+              stderr += chunk;
+            }),
+            env: { [envVar]: 'stored-secret' }
+          }
+        )
+      ).toBe(1);
+
+      expect(stdout).toBe('');
+      expect(stderr).toContain(
+        `Secret env var ${envVar} is reserved for Project02 runtime control`
+      );
+      expect(existsSync(join(storeRoot, '.env'))).toBe(false);
+      expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+    }
+  );
+
+  it('rejects the role-model provider control env var without modifying existing secret files', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-secret-reserved-existing-')
+    );
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'mem0-local': {
+          config: {
+            cloudApiKey: { $env: 'PROJECT02_EXISTING_SECRET' }
+          }
+        }
+      }
+    });
+    const envPath = join(storeRoot, '.env');
+    const originalConfig = readFileSync(configPath, 'utf8');
+    const originalEnv = [
+      '# keep existing env material',
+      'PROJECT02_EXISTING_SECRET="keep-existing"',
+      ''
+    ].join('\n');
+    let stdout = '';
+    let stderr = '';
+
+    writeFileSync(envPath, originalEnv, 'utf8');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        [
+          '--store',
+          storeRoot,
+          'secret',
+          'set',
+          'mem0-local',
+          'cloudApiKey',
+          roleModelProviderEnvVarName
+        ],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          }),
+          env: { [roleModelProviderEnvVarName]: 'stored-secret' }
+        }
+      )
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toContain(
+      `Secret env var ${roleModelProviderEnvVarName} is reserved for Project02 runtime control`
+    );
+    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
+    expect(readFileSync(envPath, 'utf8')).toBe(originalEnv);
   });
 
   it.each([

@@ -12,6 +12,7 @@ import { basename, dirname, resolve } from 'node:path';
 
 import { createLocalRuntimeStorageLayout } from '../storage/layout.ts';
 import {
+  isRuntimeControlEnvVarName,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
@@ -525,6 +526,12 @@ function prepareEnvSecretWrite(
 ): PreparedEnvSecretWrite {
   if (!/^[A-Z_][A-Z0-9_]*$/u.test(envVar)) {
     throw new TypeError('Secret env var name must be uppercase snake case.');
+  }
+
+  if (isRuntimeControlEnvVarName(envVar)) {
+    throw new TypeError(
+      `Secret env var ${envVar} is reserved for Project02 runtime control and cannot be used for plugin secrets.`
+    );
   }
 
   const current = readExistingEnvSecretFile(envPath);

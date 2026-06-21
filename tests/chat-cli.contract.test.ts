@@ -467,6 +467,16 @@ describe('chat CLI plugin lifecycle', () => {
     expect(sessionEndContexts[0]).toMatchObject({
       sessionId
     });
+    expect(sessionEndContexts[0]?.currentUserMessage).not.toBe('/exit');
+
+    const storedRawEvents = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    }).rawEvents();
+
+    expect(
+      storedRawEvents.some((event) => event.payloadSummary?.rawInput === '/exit')
+    ).toBe(false);
   });
 
   it('closes configured pre-session plugins read-only when later session creation fails', async () => {
@@ -556,6 +566,61 @@ describe('chat CLI plugin lifecycle', () => {
         pluginId: configuredPlugin.manifest.id
       }).readJson('cleanup.json')
     ).toBeUndefined();
+  });
+
+  it('preserves formatted startup storage errors when cleanup file-store setup fails', async () => {
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-chat-invalid-store-cleanup-')
+    );
+    const invalidStoreRoot = join(configRoot, 'store-root-file');
+    const sessionId = 'invalid-store-cleanup';
+    const sessionEndContexts: RuntimePluginContext[] = [];
+    const configuredPlugin = createSessionEndPlugin(
+      (context) => {
+        sessionEndContexts.push(context);
+      },
+      {
+        sideEffectLevel: 'local_memory_write',
+        requestedApis: ['file_store']
+      }
+    );
+    let stdout = '';
+    let stderr = '';
+
+    writeFileSync(invalidStoreRoot, 'not a runtime store directory\n', 'utf8');
+    const configPath = writeRuntimeConfig(join(configRoot, 'config.json'), {
+      plugins: {
+        [configuredPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', invalidStoreRoot, '--config', configPath, '--new-session', sessionId],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [configuredPlugin.manifest.id]: {
+            manifest: configuredPlugin.manifest,
+            create() {
+              return configuredPlugin;
+            }
+          }
+        }
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toBe('Error: Local runtime store could not be read.\n');
+    expect(sessionEndContexts).toHaveLength(0);
   });
 
   it('aborts manifest-backed factory construction failures before creating a durable session', async () => {
