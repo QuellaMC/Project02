@@ -432,13 +432,40 @@ function effectiveFingerprintInput(options: {
   readonly storeRoot: string;
   readonly redactedPluginConfigs: Readonly<Record<string, RedactedPluginRuntimeConfig>>;
 }): RuntimeConfigValue {
+  const pluginActivation = pluginActivationFingerprintInput(options.config);
+
   return Object.freeze({
     version: options.config?.version ?? 'none',
     storeRoot: options.storeRoot,
     enabledPlugins: Object.freeze([...(options.config?.enabledPlugins ?? [])]),
     defaultMemoryProvider: options.config?.defaultMemoryProvider ?? null,
-    plugins: options.redactedPluginConfigs
+    plugins: options.redactedPluginConfigs,
+    ...(pluginActivation === undefined ? {} : { pluginActivation })
   });
+}
+
+function pluginActivationFingerprintInput(
+  config: Project02RuntimeConfig | undefined
+): RuntimeConfigValue | undefined {
+  const plugins = config?.plugins;
+
+  if (plugins === undefined) {
+    return undefined;
+  }
+
+  const activation: Record<string, RuntimeConfigValue> = {};
+
+  for (const [pluginId, pluginConfig] of Object.entries(plugins)) {
+    if (pluginConfig.enabled !== undefined) {
+      activation[pluginId] = Object.freeze({
+        enabled: pluginConfig.enabled
+      });
+    }
+  }
+
+  return Object.keys(activation).length === 0
+    ? undefined
+    : Object.freeze(activation);
 }
 
 function diagnostic(

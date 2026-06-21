@@ -18,6 +18,7 @@ export {
 } from './file-store.ts';
 export {
   createCharacterStatePlugin,
+  createCharacterStatePluginManifest,
   characterStatePluginId
 } from './builtin/character-state/index.ts';
 export * from './memory/index.ts';

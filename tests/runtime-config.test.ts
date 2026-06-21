@@ -14,6 +14,7 @@ import {
 } from '../src/runtime/config/index.ts';
 import {
   createCharacterStatePlugin,
+  createCharacterStatePluginManifest,
   createMemoryProviderRuntimePlugin,
   createRuntimePlugin,
   runtimePluginContractVersion
@@ -100,6 +101,173 @@ describe('runtime config loading and resolution', () => {
     });
     expect(JSON.stringify(first.redactedPluginConfigs)).not.toContain('first-secret');
     expect(first.effectiveConfigFingerprint).not.toContain('first-secret');
+    expect(first.effectiveConfigFingerprint).toBe(second.effectiveConfigFingerprint);
+  });
+
+  it('includes per-plugin enabled flags in effective fingerprints without leaking secrets', () => {
+    const plugin = requiredSecretPlugin();
+    const enabledPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-enabled-fingerprint-')), 'config.json'),
+      {
+        plugins: {
+          [plugin.manifest.id]: {
+            enabled: true,
+            config: {
+              apiKey: { $env: 'PROJECT02_ENABLED_FINGERPRINT_SECRET' }
+            }
+          }
+        }
+      }
+    );
+    const disabledPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-disabled-fingerprint-')), 'config.json'),
+      {
+        plugins: {
+          [plugin.manifest.id]: {
+            enabled: false,
+            config: {
+              apiKey: { $env: 'PROJECT02_ENABLED_FINGERPRINT_SECRET' }
+            }
+          }
+        }
+      }
+    );
+    const enabledFirst = resolveProject02RuntimeConfig({
+      loadedConfig: loadProject02RuntimeConfig({ configPath: enabledPath }),
+      pluginManifests: [plugin.manifest],
+      env: { PROJECT02_ENABLED_FINGERPRINT_SECRET: 'first-secret' }
+    });
+    const enabledSecond = resolveProject02RuntimeConfig({
+      loadedConfig: loadProject02RuntimeConfig({ configPath: enabledPath }),
+      pluginManifests: [plugin.manifest],
+      env: { PROJECT02_ENABLED_FINGERPRINT_SECRET: 'second-secret' }
+    });
+    const disabled = resolveProject02RuntimeConfig({
+      loadedConfig: loadProject02RuntimeConfig({ configPath: disabledPath }),
+      pluginManifests: [plugin.manifest],
+      env: { PROJECT02_ENABLED_FINGERPRINT_SECRET: 'first-secret' }
+    });
+
+    expect(enabledFirst.effectiveConfigFingerprint).toBe(
+      enabledSecond.effectiveConfigFingerprint
+    );
+    expect(enabledFirst.effectiveConfigFingerprint).not.toBe(
+      disabled.effectiveConfigFingerprint
+    );
+    expect(JSON.stringify(enabledFirst.redactedPluginConfigs)).not.toContain(
+      'first-secret'
+    );
+    expect(enabledFirst.effectiveConfigFingerprint).not.toContain('first-secret');
+  });
+
+  it('redacts credential-like non-secret config field names from inspectable config and fingerprints', () => {
+    const plugin = createCharacterStatePlugin();
+    const manifest = {
+      ...plugin.manifest,
+      config: {
+        fields: [
+          {
+            name: 'apiKey',
+            description: 'Compatibility API key field.',
+            required: false,
+            secret: false,
+            valueType: 'string' as const,
+            redactionLabels: []
+          },
+          {
+            name: 'token',
+            description: 'Compatibility token field.',
+            required: false,
+            secret: false,
+            valueType: 'string' as const,
+            redactionLabels: []
+          },
+          {
+            name: 'metadata',
+            description: 'Structured metadata.',
+            required: false,
+            secret: false,
+            valueType: 'object' as const,
+            redactionLabels: []
+          }
+        ]
+      }
+    };
+    const first = resolveProject02RuntimeConfig({
+      loadedConfig: loadProject02RuntimeConfig({
+        configPath: writeRuntimeConfig(
+          join(
+            mkdtempSync(join(tmpdir(), 'project02-config-credential-fields-a-')),
+            'config.json'
+          ),
+          {
+            plugins: {
+              [plugin.manifest.id]: {
+                config: {
+                  apiKey: 'first-api-key',
+                  token: 'first-token',
+                  metadata: {
+                    access_token: 'first-nested-token',
+                    label: 'visible-label'
+                  }
+                }
+              }
+            }
+          }
+        )
+      }),
+      pluginManifests: [manifest]
+    });
+    const second = resolveProject02RuntimeConfig({
+      loadedConfig: loadProject02RuntimeConfig({
+        configPath: writeRuntimeConfig(
+          join(
+            mkdtempSync(join(tmpdir(), 'project02-config-credential-fields-b-')),
+            'config.json'
+          ),
+          {
+            plugins: {
+              [plugin.manifest.id]: {
+                config: {
+                  apiKey: 'second-api-key',
+                  token: 'second-token',
+                  metadata: {
+                    access_token: 'second-nested-token',
+                    label: 'visible-label'
+                  }
+                }
+              }
+            }
+          }
+        )
+      }),
+      pluginManifests: [manifest]
+    });
+
+    expect(first.pluginConfigs['character-state']?.['apiKey']?.value).toBe(
+      'first-api-key'
+    );
+    expect(first.redactedPluginConfigs['character-state']).toMatchObject({
+      apiKey: {
+        secret: false,
+        value: '[redacted]'
+      },
+      token: {
+        secret: false,
+        value: '[redacted]'
+      },
+      metadata: {
+        value: {
+          access_token: '[redacted]',
+          label: 'visible-label'
+        }
+      }
+    });
+    expect(JSON.stringify(first.redactedPluginConfigs)).not.toContain('first-api-key');
+    expect(JSON.stringify(first.redactedPluginConfigs)).not.toContain('first-token');
+    expect(JSON.stringify(first.redactedPluginConfigs)).not.toContain(
+      'first-nested-token'
+    );
     expect(first.effectiveConfigFingerprint).toBe(second.effectiveConfigFingerprint);
   });
 
@@ -244,6 +412,26 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
+  it('calls legacy function plugin factories once when creating a configured host', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-legacy-factory-'));
+    let factoryCalls = 0;
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {
+        'memory.required': () => {
+          factoryCalls += 1;
+
+          return requiredSecretPlugin();
+        }
+      }
+    });
+
+    expect(factoryCalls).toBe(1);
+    expect(configured.plugins.map((plugin) => plugin.manifest.id)).toEqual([
+      'memory.required'
+    ]);
+  });
+
   it('uses supplied env maps when creating configured plugin hosts', async () => {
     const envVar = 'PROJECT02_SUPPLIED_ONLY_SECRET_3447588016';
     const previousEnvValue = process.env[envVar];
@@ -289,6 +477,74 @@ describe('runtime config loading and resolution', () => {
         process.env[envVar] = previousEnvValue;
       }
     }
+  });
+
+  it('creates manifest-backed configured plugin factories once with resolved config', async () => {
+    const envVar = 'PROJECT02_FACTORY_SECRET_3447631396';
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-factory-'));
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      storeRoot,
+      plugins: {
+        'memory.required': {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+    let characterFactoryCalls = 0;
+    let memoryFactoryCalls = 0;
+    const memoryFactoryInputs: Array<{
+      readonly pluginId: string;
+      readonly storeRoot: string;
+      readonly apiKeyValue: unknown;
+      readonly redactedApiKeyValue: unknown;
+    }> = [];
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      factories: {
+        'character-state': {
+          manifest: createCharacterStatePluginManifest(),
+          create() {
+            characterFactoryCalls += 1;
+
+            return createCharacterStatePlugin();
+          }
+        },
+        'memory.required': {
+          manifest: requiredSecretPlugin().manifest,
+          create(input) {
+            memoryFactoryCalls += 1;
+            memoryFactoryInputs.push({
+              pluginId: input.pluginId,
+              storeRoot: input.storeRoot,
+              apiKeyValue: input.resolvedConfig['apiKey']?.value,
+              redactedApiKeyValue: input.redactedConfig['apiKey']?.value
+            });
+
+            return requiredSecretPlugin();
+          }
+        }
+      },
+      env: { [envVar]: 'from-manifest-backed-factory' }
+    });
+
+    expect(characterFactoryCalls).toBe(1);
+    expect(memoryFactoryCalls).toBe(1);
+    expect(memoryFactoryInputs).toEqual([
+      {
+        pluginId: 'memory.required',
+        storeRoot,
+        apiKeyValue: 'from-manifest-backed-factory',
+        redactedApiKeyValue: '[redacted]'
+      }
+    ]);
+    expect(configured.activation.enabledPluginIds).toEqual([
+      'character-state',
+      'memory.required'
+    ]);
   });
 
   it('blocks automatic memory activation when multiple providers are enabled without a default', async () => {

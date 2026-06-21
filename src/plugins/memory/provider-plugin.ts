@@ -198,7 +198,9 @@ export function createMemoryProviderRuntimePlugin(
                   query,
                   maxItems: memoryProviderMaxItems
                 });
-                const items = boundedMemoryItems(result.items);
+                const items = sourceBackedMemoryItems(
+                  boundedMemoryItems(result.items)
+                );
 
                 return acceptedToolResult({
                   context,
@@ -207,7 +209,10 @@ export function createMemoryProviderRuntimePlugin(
                     items: items.map(memoryItemOutput)
                   },
                   summary: `Returned ${String(items.length)} memory search result(s).`,
-                  sourceReferences: items.flatMap((item) => item.sourceReferences)
+                  sourceReferences: searchSourceReferences({
+                    context,
+                    items
+                  })
                 });
               }
 
@@ -335,6 +340,35 @@ function memoryItemOutput(item: MemoryRecallItem): RuntimePluginJsonObject {
     })),
     ...(item.confidence === undefined ? {} : { confidence: item.confidence })
   };
+}
+
+function sourceBackedMemoryItems(
+  items: readonly MemoryRecallItem[]
+): readonly MemoryRecallItem[] {
+  return Object.freeze(
+    items.filter((item) => item.sourceReferences.length > 0)
+  );
+}
+
+function searchSourceReferences(options: {
+  readonly context: RuntimePluginContext;
+  readonly items: readonly MemoryRecallItem[];
+}): readonly RuntimePluginSourceReference[] {
+  const itemSourceReferences = options.items.flatMap(
+    (item) => item.sourceReferences
+  );
+
+  if (itemSourceReferences.length > 0) {
+    return itemSourceReferences;
+  }
+
+  return Object.freeze([
+    {
+      kind: 'runtime',
+      id: `${options.context.eventId}:memory.search.no_results`,
+      title: 'Memory search completed with no results'
+    }
+  ] satisfies RuntimePluginSourceReference[]);
 }
 
 function memoryEvidence(options: {

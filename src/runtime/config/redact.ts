@@ -64,7 +64,12 @@ export function redactResolvedRuntimeConfigField(
     resolved: field.resolved,
     ...(field.value === undefined
       ? {}
-      : { value: redactRuntimeConfigValue(field.value, { secret: field.secret }) })
+      : {
+          value: redactRuntimeConfigValue(field.value, {
+            secret: field.secret,
+            key: field.name
+          })
+        })
   } satisfies RedactedRuntimeConfigField);
 }
 

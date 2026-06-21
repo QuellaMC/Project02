@@ -279,6 +279,106 @@ describe('memory provider runtime plugin helper', () => {
       ]
     });
   });
+
+  it('accepts no-hit memory.search results with empty items', async () => {
+    const provider: Project02MemoryProvider = {
+      id: 'memory.search-empty',
+      displayName: 'Empty Search Provider',
+      search() {
+        return Promise.resolve({
+          items: []
+        });
+      }
+    };
+    const plugin = createMemoryProviderRuntimePlugin(provider);
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [plugin.manifest.id]
+    });
+
+    const search = await host.handleToolCall(
+      {
+        eventId: 'evt_memory',
+        traceId: 'trace_memory',
+        createdAt: '2026-06-21T00:00:00.000Z',
+        pluginId: 'memory.search-empty',
+        toolName: 'memory.search',
+        input: { query: 'missing memory' }
+      },
+      testContext()
+    );
+
+    expect(search.status).toBe('accepted');
+    if (search.status !== 'accepted') {
+      throw new Error('Expected empty memory.search to be accepted.');
+    }
+    expect(search.output).toEqual({
+      items: []
+    });
+    expect(search.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      sourceReferences: [
+        {
+          kind: 'runtime',
+          id: 'evt_memory:memory.search.no_results'
+        }
+      ]
+    });
+  });
+
+  it('omits memory.search items without source references before accepting', async () => {
+    const provider: Project02MemoryProvider = {
+      id: 'memory.search-source-filter',
+      displayName: 'Source Filter Search Provider',
+      search() {
+        return Promise.resolve({
+          items: [
+            {
+              id: 'source-less',
+              text: 'This item lacks evidence.',
+              sourceReferences: []
+            }
+          ]
+        });
+      }
+    };
+    const plugin = createMemoryProviderRuntimePlugin(provider);
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [plugin.manifest.id]
+    });
+
+    const search = await host.handleToolCall(
+      {
+        eventId: 'evt_memory',
+        traceId: 'trace_memory',
+        createdAt: '2026-06-21T00:00:00.000Z',
+        pluginId: 'memory.search-source-filter',
+        toolName: 'memory.search',
+        input: { query: 'source-less memory' }
+      },
+      testContext()
+    );
+
+    expect(search.status).toBe('accepted');
+    if (search.status !== 'accepted') {
+      throw new Error('Expected source-filtered memory.search to be accepted.');
+    }
+    expect(search.output).toEqual({
+      items: []
+    });
+    expect(search.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      sourceReferences: [
+        {
+          kind: 'runtime',
+          id: 'evt_memory:memory.search.no_results'
+        }
+      ]
+    });
+  });
 });
 
 function testContext() {

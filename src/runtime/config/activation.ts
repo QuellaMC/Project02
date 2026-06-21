@@ -1,5 +1,7 @@
 import {
-  createCharacterStatePlugin
+  characterStatePluginId,
+  createCharacterStatePlugin,
+  createCharacterStatePluginManifest
 } from '../../plugins/builtin/character-state/index.ts';
 import {
   createRuntimePluginHost,
@@ -7,7 +9,8 @@ import {
 } from '../../plugins/host.ts';
 import type {
   RuntimePlugin,
-  RuntimePluginKind
+  RuntimePluginKind,
+  RuntimePluginManifest
 } from '../../plugins/types.ts';
 import type {
   LoadedProject02RuntimeConfig,
@@ -22,12 +25,25 @@ import {
   resolveProject02RuntimeConfig
 } from './resolve.ts';
 
-export type RuntimePluginFactory = (input: {
+export type RuntimePluginFactoryInput = {
   readonly pluginId: string;
   readonly storeRoot: string;
   readonly resolvedConfig: ResolvedPluginRuntimeConfig;
   readonly redactedConfig: RedactedPluginRuntimeConfig;
-}) => Promise<RuntimePlugin> | RuntimePlugin;
+};
+
+export type RuntimePluginFactoryFunction = (
+  input: RuntimePluginFactoryInput
+) => Promise<RuntimePlugin> | RuntimePlugin;
+
+export type RuntimePluginFactoryDefinition = {
+  readonly manifest: RuntimePluginManifest;
+  readonly create: RuntimePluginFactoryFunction;
+};
+
+export type RuntimePluginFactory =
+  | RuntimePluginFactoryFunction
+  | RuntimePluginFactoryDefinition;
 
 export type RuntimePluginActivationStatus =
   | 'active'
@@ -62,7 +78,10 @@ export function defaultRuntimePluginFactories(): Readonly<
   Record<string, RuntimePluginFactory>
 > {
   return Object.freeze({
-    'character-state': () => createCharacterStatePlugin()
+    [characterStatePluginId]: Object.freeze({
+      manifest: createCharacterStatePluginManifest(),
+      create: () => createCharacterStatePlugin()
+    } satisfies RuntimePluginFactoryDefinition)
   });
 }
 
@@ -76,19 +95,18 @@ export async function createConfiguredProject02PluginHost(options: {
   readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
 }): Promise<Project02ConfiguredPluginHost> {
   const factories = options.factories ?? defaultRuntimePluginFactories();
-  const initialPlugins = await instantiatePlugins({
+  const preparedFactories = await prepareRuntimePluginFactories({
     factories,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
   });
   const resolvedConfig = resolveProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-    pluginManifests: initialPlugins.map((plugin) => plugin.manifest),
+    pluginManifests: preparedFactories.map((factory) => factory.manifest),
     ...(options.env === undefined ? {} : { env: options.env })
   });
-  const plugins = await instantiatePlugins({
-    factories,
-    storeRoot: resolvedConfig.storeRoot,
+  const plugins = await instantiatePreparedPlugins({
+    preparedFactories,
     resolvedConfig
   });
   const activation = resolveRuntimePluginActivation({
@@ -220,25 +238,96 @@ export function resolveRuntimePluginActivation(options: {
   } satisfies RuntimePluginActivationResult);
 }
 
-async function instantiatePlugins(options: {
+type PreparedRuntimePluginFactory =
+  | {
+      readonly kind: 'manifest_backed_factory';
+      readonly pluginId: string;
+      readonly manifest: RuntimePluginManifest;
+      readonly create: RuntimePluginFactoryFunction;
+    }
+  | {
+      readonly kind: 'legacy_prepared_plugin';
+      readonly pluginId: string;
+      readonly manifest: RuntimePluginManifest;
+      readonly plugin: RuntimePlugin;
+    };
+
+async function prepareRuntimePluginFactories(options: {
   readonly factories: Readonly<Record<string, RuntimePluginFactory>>;
   readonly storeRoot?: string;
-  readonly resolvedConfig?: ResolvedProject02RuntimeConfig;
+}): Promise<readonly PreparedRuntimePluginFactory[]> {
+  const preparedFactories: PreparedRuntimePluginFactory[] = [];
+
+  for (const [pluginId, factory] of Object.entries(options.factories)) {
+    if (isRuntimePluginFactoryDefinition(factory)) {
+      preparedFactories.push(
+        Object.freeze({
+          kind: 'manifest_backed_factory',
+          pluginId,
+          manifest: factory.manifest,
+          create: factory.create
+        } satisfies PreparedRuntimePluginFactory)
+      );
+      continue;
+    }
+
+    const plugin = await factory({
+      pluginId,
+      storeRoot: options.storeRoot ?? '',
+      resolvedConfig: {},
+      redactedConfig: {}
+    });
+
+    preparedFactories.push(
+      Object.freeze({
+        kind: 'legacy_prepared_plugin',
+        pluginId,
+        manifest: plugin.manifest,
+        plugin
+      } satisfies PreparedRuntimePluginFactory)
+    );
+  }
+
+  return Object.freeze(preparedFactories);
+}
+
+async function instantiatePreparedPlugins(options: {
+  readonly preparedFactories: readonly PreparedRuntimePluginFactory[];
+  readonly resolvedConfig: ResolvedProject02RuntimeConfig;
 }): Promise<readonly RuntimePlugin[]> {
   const plugins: RuntimePlugin[] = [];
 
-  for (const [pluginId, factory] of Object.entries(options.factories)) {
-    const plugin = await factory({
-      pluginId,
-      storeRoot: options.storeRoot ?? options.resolvedConfig?.storeRoot ?? '',
-      resolvedConfig: options.resolvedConfig?.pluginConfigs[pluginId] ?? {},
-      redactedConfig: options.resolvedConfig?.redactedPluginConfigs[pluginId] ?? {}
+  for (const preparedFactory of options.preparedFactories) {
+    if (preparedFactory.kind === 'legacy_prepared_plugin') {
+      plugins.push(preparedFactory.plugin);
+      continue;
+    }
+
+    const plugin = await preparedFactory.create({
+      pluginId: preparedFactory.manifest.id,
+      storeRoot: options.resolvedConfig.storeRoot,
+      resolvedConfig:
+        options.resolvedConfig.pluginConfigs[preparedFactory.manifest.id] ?? {},
+      redactedConfig:
+        options.resolvedConfig.redactedPluginConfigs[preparedFactory.manifest.id] ?? {}
     });
+
+    if (plugin.manifest.id !== preparedFactory.manifest.id) {
+      throw new TypeError(
+        `Plugin factory "${preparedFactory.pluginId}" returned plugin "${plugin.manifest.id}" after declaring manifest "${preparedFactory.manifest.id}".`
+      );
+    }
 
     plugins.push(plugin);
   }
 
   return Object.freeze(plugins);
+}
+
+function isRuntimePluginFactoryDefinition(
+  factory: RuntimePluginFactory
+): factory is RuntimePluginFactoryDefinition {
+  return typeof factory !== 'function';
 }
 
 function activationDecision(options: {
