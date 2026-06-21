@@ -202,7 +202,7 @@ function redactionKeyForRuntimeConfigPath(
   const pluginPath = tryParsePluginMutationPath(parts, path, config);
 
   if (pluginPath?.kind === 'config_field') {
-    return redactionKeyForPluginConfigField(pluginPath.fieldName);
+    return pluginPath.fieldName;
   }
 
   return pluginPath?.kind === 'enabled' ? 'enabled' : undefined;
@@ -639,10 +639,6 @@ function dotenvQuotedValueContinuationEndIndex(
   }
 
   return lines.length - 1;
-}
-
-function redactionKeyForPluginConfigField(fieldName: string): string {
-  return fieldName.split('.').filter((part) => part.length > 0).join('_');
 }
 
 function formatDotenvSecretValue(value: string): string {

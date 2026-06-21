@@ -104,6 +104,7 @@ function runRuntimeConfigCliFromArgsSync(
           ? {}
           : { storeRoot: parsed.location.storeRoot }),
         env: effectiveEnv,
+        diagnoseUncheckedLegacyFactories: true,
         ...(options.factories === undefined ? {} : { factories: options.factories })
       });
 

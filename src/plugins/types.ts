@@ -2390,7 +2390,7 @@ export function redactRuntimePluginText(value: string): string {
 }
 
 const runtimePluginCredentialKeySource =
-  String.raw`\b[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|credential)[A-Za-z0-9_.-]*\b`;
+  String.raw`\b[A-Za-z0-9_.-]*(?:api[_.-]?key|token|secret|password|credential)[A-Za-z0-9_.-]*\b`;
 const runtimePluginCredentialKeyPattern = new RegExp(
   runtimePluginCredentialKeySource,
   'iu'

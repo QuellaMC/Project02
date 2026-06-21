@@ -23,6 +23,12 @@ const project02RuntimeConfigFields = Object.freeze([
   'plugins'
 ]);
 const project02RuntimePluginConfigFields = Object.freeze(['enabled', 'config']);
+const runtimeConfigSecretRefFields = Object.freeze(['$env', 'description']);
+const runtimeConfigPlaintextSecretOverrideFields = Object.freeze([
+  '$plaintextSecret',
+  'allowPlaintextSecret',
+  'justification'
+]);
 
 export type LoadProject02RuntimeConfigOptions = {
   readonly configPath?: string;
@@ -404,6 +410,7 @@ function isRuntimeConfigValue(value: unknown): value is RuntimeConfigValue {
 
   if ('$env' in value) {
     return (
+      hasOnlyFields(value, runtimeConfigSecretRefFields) &&
       typeof value['$env'] === 'string' &&
       value['$env'].trim().length > 0 &&
       (value['description'] === undefined ||
@@ -413,6 +420,7 @@ function isRuntimeConfigValue(value: unknown): value is RuntimeConfigValue {
 
   if ('$plaintextSecret' in value) {
     return (
+      hasOnlyFields(value, runtimeConfigPlaintextSecretOverrideFields) &&
       typeof value['$plaintextSecret'] === 'string' &&
       value['allowPlaintextSecret'] === true &&
       typeof value['justification'] === 'string' &&
@@ -421,6 +429,13 @@ function isRuntimeConfigValue(value: unknown): value is RuntimeConfigValue {
   }
 
   return Object.values(value).every(isRuntimeConfigValue);
+}
+
+function hasOnlyFields(
+  value: Readonly<Record<string, unknown>>,
+  allowedFields: readonly string[]
+): boolean {
+  return Object.keys(value).every((field) => allowedFields.includes(field));
 }
 
 function optionalString(

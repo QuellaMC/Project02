@@ -94,6 +94,7 @@ export function resolveConfiguredProject02PluginActivation(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly storeRoot?: string;
   readonly strictUnknownPlugins?: boolean;
+  readonly diagnoseUncheckedLegacyFactories?: boolean;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
 }): Project02ConfiguredPluginActivation {
@@ -109,6 +110,8 @@ export function resolveConfiguredProject02PluginActivation(options: {
   const activation = resolveRuntimePluginActivation({
     pluginManifests,
     additionalKnownPluginIds: legacyFactoryIds,
+    uncheckedLegacyFactoryIds:
+      options.diagnoseUncheckedLegacyFactories === true ? legacyFactoryIds : [],
     resolvedConfig,
     loadedConfig: options.loadedConfig,
     strictUnknownPlugins: options.strictUnknownPlugins === true
@@ -208,6 +211,7 @@ export function resolveRuntimePluginActivation(options: {
   readonly plugins?: readonly RuntimePlugin[];
   readonly pluginManifests?: readonly RuntimePluginManifest[];
   readonly additionalKnownPluginIds?: readonly string[];
+  readonly uncheckedLegacyFactoryIds?: readonly string[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly strictUnknownPlugins?: boolean;
@@ -225,6 +229,10 @@ export function resolveRuntimePluginActivation(options: {
       loadedPluginIds: Object.keys(config?.plugins ?? {}),
       legacyEnabledPluginIds: config?.enabledPlugins ?? [],
       strict: options.strictUnknownPlugins === true
+    }),
+    ...uncheckedLegacyFactoryDiagnostics({
+      loadedConfig: options.loadedConfig,
+      legacyFactoryIds: options.uncheckedLegacyFactoryIds ?? []
     }),
     ...options.resolvedConfig.diagnostics
   ];
@@ -527,6 +535,47 @@ function explicitlyDisabledLegacyFactoryIds(options: {
   return disabledPluginIds;
 }
 
+function uncheckedLegacyFactoryDiagnostics(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly legacyFactoryIds: readonly string[];
+}): readonly RuntimeConfigDiagnostic[] {
+  const config = options.loadedConfig.config;
+
+  if (config === undefined || options.legacyFactoryIds.length === 0) {
+    return Object.freeze([]);
+  }
+
+  const diagnostics: RuntimeConfigDiagnostic[] = [];
+  const legacyEnabledPluginIds = new Set(config.enabledPlugins ?? []);
+
+  for (const pluginId of options.legacyFactoryIds) {
+    const configuredPlugin = config.plugins?.[pluginId];
+
+    if (configuredPlugin?.enabled === false) {
+      continue;
+    }
+
+    const enabledByPluginConfig = configuredPlugin?.enabled === true;
+    const enabledByLegacyList = legacyEnabledPluginIds.has(pluginId);
+
+    if (!enabledByPluginConfig && !enabledByLegacyList) {
+      continue;
+    }
+
+    diagnostics.push(
+      diagnostic(
+        'error',
+        'runtime_config_legacy_factory_unchecked',
+        `Runtime config enables legacy function plugin factory "${pluginId}", but activation checks require a manifest-backed factory to validate plugin config.`,
+        enabledByPluginConfig ? `plugins.${pluginId}.enabled` : 'enabledPlugins',
+        { pluginId }
+      )
+    );
+  }
+
+  return Object.freeze(diagnostics);
+}
+
 function activationDecision(options: {
   readonly configuredEnabled: boolean | undefined;
   readonly legacyEnabled: boolean;
@@ -742,12 +791,20 @@ function diagnostic(
   severity: RuntimeConfigDiagnostic['severity'],
   code: string,
   message: string,
-  path: string
+  path: string,
+  metadata: {
+    readonly pluginId?: string;
+    readonly pluginConfigField?: string;
+  } = {}
 ): RuntimeConfigDiagnostic {
   return Object.freeze({
     severity,
     code,
     message,
-    path
+    path,
+    ...(metadata.pluginId === undefined ? {} : { pluginId: metadata.pluginId }),
+    ...(metadata.pluginConfigField === undefined
+      ? {}
+      : { pluginConfigField: metadata.pluginConfigField })
   } satisfies RuntimeConfigDiagnostic);
 }
