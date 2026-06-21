@@ -22,6 +22,9 @@ import {
   loadProject02RuntimeConfig,
   validateProject02RuntimeConfig
 } from './load.ts';
+import {
+  redactRuntimeConfigValue
+} from './redact.ts';
 
 export type ApplyRuntimeConfigMutationOptions = {
   readonly configPath?: string;
@@ -121,9 +124,35 @@ export function applyRuntimeConfigMutation(
 export function getRuntimeConfigValueAtPath(
   config: Project02RuntimeConfig | undefined,
   path: string
-): unknown {
+): RuntimeConfigValue | undefined {
   const parts = parseConfigPath(path);
 
+  return getRuntimeConfigValueForParts(config, path, parts);
+}
+
+export function getRedactedRuntimeConfigValueAtPath(
+  config: Project02RuntimeConfig | undefined,
+  path: string
+): RuntimeConfigValue | undefined {
+  const parts = parseConfigPath(path);
+  const value = getRuntimeConfigValueForParts(config, path, parts);
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const key = redactionKeyForRuntimeConfigPath(config, path, parts);
+
+  return key === undefined
+    ? redactRuntimeConfigValue(value)
+    : redactRuntimeConfigValue(value, { key });
+}
+
+function getRuntimeConfigValueForParts(
+  config: Project02RuntimeConfig | undefined,
+  path: string,
+  parts: readonly string[]
+): RuntimeConfigValue | undefined {
   if (config === undefined) {
     return undefined;
   }
@@ -157,10 +186,32 @@ export function getRuntimeConfigValueAtPath(
   return config.plugins?.[parts.slice(1).join('.')];
 }
 
+function redactionKeyForRuntimeConfigPath(
+  config: Project02RuntimeConfig | undefined,
+  path: string,
+  parts: readonly string[]
+): string | undefined {
+  if (parts.length === 1) {
+    return parts[0];
+  }
+
+  if (parts[0] !== 'plugins' || parts.length === 1) {
+    return undefined;
+  }
+
+  const pluginPath = tryParsePluginMutationPath(parts, path, config);
+
+  if (pluginPath?.kind === 'config_field') {
+    return pluginPath.fieldName;
+  }
+
+  return pluginPath?.kind === 'enabled' ? 'enabled' : undefined;
+}
+
 function rootConfigValue(
   config: Project02RuntimeConfig,
   field: string | undefined
-): unknown {
+): RuntimeConfigValue | undefined {
   switch (field) {
     case 'version':
       return config.version;
@@ -561,19 +612,27 @@ function skipDotenvQuotedValueContinuation(
 }
 
 function formatDotenvSecretValue(value: string): string {
-  for (const delimiter of ['"', "'", '`'] as const) {
+  const delimiters = value.includes('\\')
+    ? (["'", '`'] as const)
+    : (['"', "'", '`'] as const);
+
+  for (const delimiter of delimiters) {
     if (!value.includes(delimiter)) {
       return `${delimiter}${value}${delimiter}`;
     }
   }
 
-  if (/^[^\s#]+$/u.test(value)) {
+  if (isSafeUnquotedDotenvValue(value)) {
     return value;
   }
 
   throw new TypeError(
-    'Secret value cannot be written to the runtime config env file because it contains every supported dotenv quote delimiter and cannot be safely written as an unquoted value.'
+    'Secret value cannot be written to the runtime config env file because it has no non-escaping dotenv quote delimiter and cannot be safely written as an unquoted value.'
   );
+}
+
+function isSafeUnquotedDotenvValue(value: string): boolean {
+  return /^[^\s#]+$/u.test(value);
 }
 
 function writeJsonAtomic(

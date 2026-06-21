@@ -6,7 +6,7 @@ import {
   createRuntimeConfigInspectShape,
   defaultRuntimeConfigPath,
   diagnosticsHaveErrors,
-  getRuntimeConfigValueAtPath,
+  getRedactedRuntimeConfigValueAtPath,
   loadProject02RuntimeConfig,
   type LoadedProject02RuntimeConfig,
   type RuntimePluginFactory,
@@ -116,7 +116,10 @@ export async function runRuntimeConfigCliFromArgs(
         env
       });
       assertRuntimeConfigLoaded(loaded);
-      const value = getRuntimeConfigValueAtPath(loaded.config, parsed.command.path);
+      const value = getRedactedRuntimeConfigValueAtPath(
+        loaded.config,
+        parsed.command.path
+      );
 
       writeJson(options.stdout, value ?? null);
       return 0;

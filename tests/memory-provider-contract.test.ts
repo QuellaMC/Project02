@@ -227,11 +227,16 @@ describe('memory provider runtime plugin helper', () => {
     expect(plugin.manifest.declaredPlugins).not.toContain('handle_tool_call');
   });
 
-  it('records after-turn capture evidence with the after-turn kind', async () => {
+  it('degrades source-less after-turn capture evidence before accepting it', async () => {
+    let captureSourceReferences:
+      | readonly { readonly kind: string; readonly id: string; readonly title?: string }[]
+      | undefined;
     const provider: Project02MemoryProvider = {
       id: 'memory.capture',
       displayName: 'Capture Provider',
-      captureTurn() {
+      captureTurn(turn) {
+        captureSourceReferences = turn.sourceReferences;
+
         return Promise.resolve({
           captured: true,
           summary: 'Captured.'
@@ -239,35 +244,33 @@ describe('memory provider runtime plugin helper', () => {
       }
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
-    const result = await plugin.lifecycleHooks.afterTurnCommitted?.(
-      createRuntimePluginAfterTurnCommittedContext({
-        eventId: 'evt_memory',
-        traceId: 'trace_memory',
-        createdAt: '2026-06-21T00:00:00.000Z',
-        sessionId: 'session-memory',
-        eventType: 'USER_MESSAGE',
-        currentUserMessage: 'remember this',
-        character: {
-          id: 'mira',
-          displayName: 'Mira'
-        },
-        committedAt: '2026-06-21T00:00:01.000Z',
-        visibleMessages: [
-          {
-            id: 'visible-character',
-            role: 'character',
-            speakerId: 'mira',
-            speakerName: 'Mira',
-            text: 'done'
-          }
-        ]
-      })
-    );
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [plugin.manifest.id]
+    });
+    const result = await host.afterTurnCommitted(afterTurnContext());
 
-    expect(result?.evidence[0]).toMatchObject({
+    expect(captureSourceReferences).toEqual([
+      {
+        kind: 'conversation',
+        id: 'evt_memory',
+        title: 'Current conversation turn'
+      }
+    ]);
+    expect(result.status).toBe('completed');
+
+    expect(result.evidence[0]).toMatchObject({
       pluginId: 'memory.capture',
       evidenceKind: 'after_turn_committed',
-      status: 'accepted'
+      status: 'degraded',
+      summary: 'Captured. Missing provider source references.',
+      sourceReferences: [
+        {
+          kind: 'conversation',
+          id: 'evt_memory',
+          title: 'Current conversation turn'
+        }
+      ]
     });
   });
 
@@ -291,27 +294,10 @@ describe('memory provider runtime plugin helper', () => {
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
     const result = await plugin.lifecycleHooks.afterTurnCommitted?.(
-      createRuntimePluginAfterTurnCommittedContext({
+      afterTurnContext({
         eventId: 'evt_memory_capture_sources',
         traceId: 'trace_memory_capture_sources',
-        createdAt: '2026-06-21T00:00:00.000Z',
-        sessionId: 'session-memory',
-        eventType: 'USER_MESSAGE',
-        currentUserMessage: 'remember this with a source',
-        character: {
-          id: 'mira',
-          displayName: 'Mira'
-        },
-        committedAt: '2026-06-21T00:00:01.000Z',
-        visibleMessages: [
-          {
-            id: 'visible-character',
-            role: 'character',
-            speakerId: 'mira',
-            speakerName: 'Mira',
-            text: 'done'
-          }
-        ]
+        currentUserMessage: 'remember this with a source'
       })
     );
 
@@ -653,5 +639,36 @@ function testContext() {
       id: 'mira',
       displayName: 'Mira'
     }
+  });
+}
+
+function afterTurnContext(
+  options: {
+    readonly eventId?: string;
+    readonly traceId?: string;
+    readonly currentUserMessage?: string;
+  } = {}
+) {
+  return createRuntimePluginAfterTurnCommittedContext({
+    eventId: options.eventId ?? 'evt_memory',
+    traceId: options.traceId ?? 'trace_memory',
+    createdAt: '2026-06-21T00:00:00.000Z',
+    sessionId: 'session-memory',
+    eventType: 'USER_MESSAGE',
+    currentUserMessage: options.currentUserMessage ?? 'remember this',
+    character: {
+      id: 'mira',
+      displayName: 'Mira'
+    },
+    committedAt: '2026-06-21T00:00:01.000Z',
+    visibleMessages: [
+      {
+        id: 'visible-character',
+        role: 'character',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'done'
+      }
+    ]
   });
 }

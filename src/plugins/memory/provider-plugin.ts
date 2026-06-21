@@ -168,13 +168,20 @@ export function createMemoryProviderRuntimePlugin(
                 context.committedTurn.visibleMessages
                   .filter((message) => message.role === 'character')
                   .at(-1)?.text;
+              const inputSourceReferences = currentTurnSourceReferences(context);
               const result = await provider.captureTurn?.({
                 sessionId: context.sessionId,
                 userMessage: context.currentUserMessage,
+                sourceReferences: inputSourceReferences,
                 ...(lastCharacterMessage === undefined
                   ? {}
                   : { characterMessage: lastCharacterMessage })
               });
+              const providerSourceReferences = nonEmptySourceReferences(
+                result?.sourceReferences
+              );
+              const missingAcceptedCaptureSources =
+                result?.captured !== false && providerSourceReferences === undefined;
 
               return {
                 status: 'completed',
@@ -183,11 +190,17 @@ export function createMemoryProviderRuntimePlugin(
                     context,
                     pluginId,
                     evidenceKind: 'after_turn_committed',
-                    status: result?.captured === false ? 'degraded' : 'accepted',
-                    summary: boundedText(result?.summary ?? 'Captured memory turn.', 160),
-                    ...(result?.sourceReferences === undefined
-                      ? {}
-                      : { sourceReferences: result.sourceReferences })
+                    status:
+                      result?.captured === false ||
+                      missingAcceptedCaptureSources
+                        ? 'degraded'
+                        : 'accepted',
+                    summary: captureTurnEvidenceSummary({
+                      resultSummary: result?.summary,
+                      missingAcceptedCaptureSources
+                    }),
+                    sourceReferences:
+                      providerSourceReferences ?? inputSourceReferences
                   })
                 ]
               };
@@ -224,13 +237,7 @@ export function createMemoryProviderRuntimePlugin(
 
               if (call.toolName === addToolName && provider.add !== undefined) {
                 const text = boundedText(stringInput(call.input, 'text'), 600);
-                const inputSourceReferences = [
-                  {
-                    kind: 'conversation',
-                    id: context.eventId,
-                    title: 'Current conversation turn'
-                  }
-                ] as const satisfies readonly RuntimePluginSourceReference[];
+                const inputSourceReferences = currentTurnSourceReferences(context);
                 const result = await provider.add({
                   sessionId: context.sessionId,
                   text,
@@ -410,6 +417,44 @@ function addResultSourceReferences(options: {
       title: 'Persisted memory item'
     }
   ] satisfies RuntimePluginSourceReference[]);
+}
+
+function currentTurnSourceReferences(
+  context: RuntimePluginContext
+): readonly RuntimePluginSourceReference[] {
+  return Object.freeze([
+    {
+      kind: 'conversation',
+      id: context.eventId,
+      title: 'Current conversation turn'
+    }
+  ] satisfies RuntimePluginSourceReference[]);
+}
+
+function nonEmptySourceReferences(
+  sourceReferences: readonly RuntimePluginSourceReference[] | undefined
+): readonly RuntimePluginSourceReference[] | undefined {
+  return sourceReferences === undefined || sourceReferences.length === 0
+    ? undefined
+    : sourceReferences;
+}
+
+function captureTurnEvidenceSummary(options: {
+  readonly resultSummary: string | undefined;
+  readonly missingAcceptedCaptureSources: boolean;
+}): string {
+  const summary = options.resultSummary ?? 'Captured memory turn.';
+
+  if (!options.missingAcceptedCaptureSources) {
+    return boundedText(summary, 160);
+  }
+
+  const suffix = ' Missing provider source references.';
+
+  return boundedText(
+    `${boundedText(summary, 160 - suffix.length)}${suffix}`,
+    160
+  );
 }
 
 function memoryEvidence(options: {

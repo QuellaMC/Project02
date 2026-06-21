@@ -23,6 +23,7 @@ export type MemoryCaptureTurn = {
   readonly sessionId: string;
   readonly userMessage: string;
   readonly characterMessage?: string;
+  readonly sourceReferences: readonly RuntimePluginSourceReference[];
 };
 
 export type MemoryCaptureResult = {

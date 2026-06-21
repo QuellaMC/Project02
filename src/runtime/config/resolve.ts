@@ -243,14 +243,16 @@ function resolvePluginConfigField(options: {
     });
   }
 
-  if (isSecretRef(options.rawValue) || isPlaintextSecretOverride(options.rawValue)) {
+  const secretValuePath = nestedSecretValuePath(options.rawValue, path);
+
+  if (secretValuePath !== undefined) {
     if (options.validateConfig) {
       options.diagnostics.push(
         diagnostic(
           'error',
           'runtime_config_secret_ref_for_non_secret',
-          `Non-secret config field "${options.field.name}" cannot use a secret value.`,
-          path,
+          `Non-secret config field "${options.field.name}" cannot contain a secret value.`,
+          secretValuePath,
           pluginConfigDiagnosticMetadata(options)
         )
       );
@@ -525,6 +527,47 @@ function isPlaintextSecretOverride(value: RuntimeConfigValue | undefined): value
     !Array.isArray(value) &&
     '$plaintextSecret' in value
   );
+}
+
+function nestedSecretValuePath(
+  value: RuntimeConfigValue | undefined,
+  path: string
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (isSecretRef(value) || isPlaintextSecretOverride(value)) {
+    return path;
+  }
+
+  if (Array.isArray(value)) {
+    const items: readonly RuntimeConfigValue[] = value;
+
+    for (const [index, item] of items.entries()) {
+      const nestedPath = nestedSecretValuePath(item, `${path}.${String(index)}`);
+
+      if (nestedPath !== undefined) {
+        return nestedPath;
+      }
+    }
+
+    return undefined;
+  }
+
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    const nestedPath = nestedSecretValuePath(item, `${path}.${key}`);
+
+    if (nestedPath !== undefined) {
+      return nestedPath;
+    }
+  }
+
+  return undefined;
 }
 
 function effectiveFingerprintInput(options: {

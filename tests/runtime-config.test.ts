@@ -531,6 +531,88 @@ describe('runtime config loading and resolution', () => {
     expect(first.effectiveConfigFingerprint).toBe(second.effectiveConfigFingerprint);
   });
 
+  it('rejects nested secret refs in non-secret object and array config fields', async () => {
+    const plugin = structuredConfigPlugin('memory.structured');
+    const configPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-nested-secret-ref-')), 'config.json'),
+      {
+        plugins: {
+          'memory.structured': {
+            enabled: true,
+            config: {
+              settings: {
+                apiKey: { $env: 'PROJECT02_NESTED_OBJECT_SECRET' }
+              },
+              endpoints: [
+                {
+                  token: { $env: 'PROJECT02_NESTED_ARRAY_SECRET' }
+                }
+              ]
+            }
+          }
+        }
+      }
+    );
+    let factoryCalls = 0;
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      factories: {
+        'memory.structured': {
+          manifest: plugin.manifest,
+          create() {
+            factoryCalls += 1;
+            throw new Error('factory should not receive nested secret refs');
+          }
+        }
+      },
+      env: {
+        PROJECT02_NESTED_OBJECT_SECRET: 'object-secret',
+        PROJECT02_NESTED_ARRAY_SECRET: 'array-secret'
+      }
+    });
+
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.resolvedConfig.pluginConfigs['memory.structured']).toMatchObject({
+      settings: {
+        source: 'config',
+        resolved: false
+      },
+      endpoints: {
+        source: 'config',
+        resolved: false
+      }
+    });
+    expect(
+      configured.resolvedConfig.pluginConfigs['memory.structured']?.['settings']
+    ).not.toHaveProperty('value');
+    expect(
+      configured.resolvedConfig.pluginConfigs['memory.structured']?.['endpoints']
+    ).not.toHaveProperty('value');
+    expect(configured.activation.enabledPluginIds).not.toContain('memory.structured');
+    expect(configured.activation.plugins[0]).toMatchObject({
+      pluginId: 'memory.structured',
+      activationStatus: 'blocked'
+    });
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_secret_ref_for_non_secret',
+          path: 'plugins.memory.structured.config.settings.apiKey',
+          pluginId: 'memory.structured',
+          pluginConfigField: 'settings'
+        }),
+        expect.objectContaining({
+          code: 'runtime_config_secret_ref_for_non_secret',
+          path: 'plugins.memory.structured.config.endpoints.0.token',
+          pluginId: 'memory.structured',
+          pluginConfigField: 'endpoints'
+        })
+      ])
+    );
+  });
+
   it('rejects plaintext secret values by default', () => {
     const plugin = createCharacterStatePlugin();
     const loaded = loadProject02RuntimeConfig({
@@ -2000,6 +2082,35 @@ describe('runtime config CLI', () => {
     }
   });
 
+  it('writes backslash-only dotenv secrets with a non-escaping delimiter', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-slashes-'));
+    const envVar = 'PROJECT02_SECRET_ROUNDTRIP_SLASHES';
+    const secretValue = String.raw`token\npart C:\Users\mira\AppData\Local\project02`;
+
+    Reflect.deleteProperty(process.env, envVar);
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {}),
+          env: { [envVar]: secretValue }
+        }
+      )
+    ).toBe(0);
+
+    const envPath = join(storeRoot, '.env');
+
+    expect(readFileSync(envPath, 'utf8')).toBe(`${envVar}='${secretValue}'\n`);
+
+    try {
+      loadEnvFile(envPath);
+      expect(process.env[envVar]).toBe(secretValue);
+    } finally {
+      Reflect.deleteProperty(process.env, envVar);
+    }
+  });
+
   it('rotates multi-line dotenv secrets without leaving stale continuation lines', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-rotate-'));
     const envVar = 'PROJECT02_SECRET_ROTATION_MULTILINE';
@@ -2380,6 +2491,76 @@ describe('runtime config CLI', () => {
       Reflect.deleteProperty(process.env, envVar);
     }
   });
+
+  it('redacts get secrets while preserving non-secret values', async () => {
+    const rawSecret = 'runtime-config-get-plaintext-secret';
+    const rawLegacySecret = 'runtime-config-get-legacy-secret';
+    const configPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-get-secret-')), 'config.json'),
+      {
+        plugins: {
+          foo: {
+            config: {
+              apiKey: {
+                $plaintextSecret: rawSecret,
+                allowPlaintextSecret: true,
+                justification: 'test-only plaintext override'
+              },
+              legacyApiKey: rawLegacySecret,
+              backend: 'local'
+            }
+          }
+        }
+      }
+    );
+    let secretStdout = '';
+    let legacySecretStdout = '';
+    let backendStdout = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'get', 'plugins.foo.config.apiKey'],
+        {
+          stdout: collect((chunk) => {
+            secretStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(secretStdout) as unknown).toBe('[redacted]');
+    expect(secretStdout).not.toContain(rawSecret);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'get', 'plugins.foo.config.legacyApiKey'],
+        {
+          stdout: collect((chunk) => {
+            legacySecretStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(legacySecretStdout) as unknown).toBe('[redacted]');
+    expect(legacySecretStdout).not.toContain(rawLegacySecret);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'get', 'plugins.foo.config.backend'],
+        {
+          stdout: collect((chunk) => {
+            backendStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(backendStdout) as unknown).toBe('local');
+  });
 });
 
 function requiredSecretPlugin(id = 'memory.required') {
@@ -2454,6 +2635,41 @@ function requiredDottedConfigPlugin(id = 'memory') {
       activation: {
         defaultEnabled: true,
         reasons: ['test_required_dotted_config']
+      }
+    }
+  });
+}
+
+function structuredConfigPlugin(id: string) {
+  const plugin = requiredSecretPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      description: 'Test plugin with structured non-secret config.',
+      config: {
+        fields: [
+          {
+            name: 'settings',
+            description: 'Structured settings.',
+            required: true,
+            secret: false,
+            valueType: 'object',
+            redactionLabels: []
+          },
+          {
+            name: 'endpoints',
+            description: 'Endpoint list.',
+            required: true,
+            secret: false,
+            valueType: 'array',
+            redactionLabels: []
+          }
+        ]
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test_structured_config']
       }
     }
   });
