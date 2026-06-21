@@ -158,6 +158,41 @@ describe('chat CLI plugin lifecycle', () => {
     });
   });
 
+  it('aborts startup when configured plugin activation reports errors', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-activation-error-'));
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'character-state': {
+          config: {
+            typoo: true
+          }
+        }
+      }
+    });
+    let stdout = '';
+    let stderr = '';
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--config', configPath, '--new-session', 'activation-error'],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Runtime config activation failed');
+    expect(stderr).toContain('runtime_config_unknown_plugin_config_field');
+    expect(stderr).toContain('plugins.character-state.config.typoo');
+    expect(stderr).toContain('Unknown config field "typoo" for plugin "character-state".');
+  });
+
   it('persists session-end hook failures when stdin closes normally', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-session-end-'));
     const sessionId = 'session-end-failure';
@@ -394,6 +429,18 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
       }
     }
   });
+}
+
+function writeRuntimeConfig(
+  path: string,
+  config: Readonly<Record<string, unknown>>
+): string {
+  writeFileSync(
+    path,
+    `${JSON.stringify({ version: runtimeConfigVersion, ...config }, null, 2)}\n`,
+    'utf8'
+  );
+  return path;
 }
 
 function collect(write: (chunk: string) => void): Writable {

@@ -9,6 +9,7 @@ import {
   getRuntimeConfigValueAtPath,
   loadProject02RuntimeConfig,
   type LoadedProject02RuntimeConfig,
+  type RuntimePluginFactory,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue
 } from '../runtime/config/index.ts';
@@ -27,6 +28,7 @@ type RuntimeConfigCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
   readonly env?: NodeJS.ProcessEnv;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
 };
 
 class RuntimeConfigCliUsageError extends Error {
@@ -78,18 +80,20 @@ export async function runRuntimeConfigCliFromArgs(
         ...parsed.location,
         env
       });
-      loadRuntimeConfigEnvFile({
+      const effectiveEnv = loadRuntimeConfigEnvFile({
         loadedConfig: loaded,
         ...(parsed.location.storeRoot === undefined
           ? {}
-          : { storeRoot: parsed.location.storeRoot })
+          : { storeRoot: parsed.location.storeRoot }),
+        env
       });
       const configured = await createConfiguredProject02PluginHost({
         loadedConfig: loaded,
         ...(parsed.location.storeRoot === undefined
           ? {}
           : { storeRoot: parsed.location.storeRoot }),
-        env
+        env: effectiveEnv,
+        ...(options.factories === undefined ? {} : { factories: options.factories })
       });
 
       writeJson(options.stdout, {

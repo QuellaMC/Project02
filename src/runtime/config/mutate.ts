@@ -55,14 +55,14 @@ export function applyRuntimeConfigMutation(
   }
 
   const currentConfig = loaded.config ?? { version: runtimeConfigVersion };
-  const effectiveStoreRoot = currentConfig.storeRoot ?? options.storeRoot;
-  const effectiveLayout = createLocalRuntimeStorageLayout(
-    effectiveStoreRoot === undefined ? {} : { storeRoot: effectiveStoreRoot }
-  );
-  const envPath = effectiveLayout.envPath;
   const nextConfig = validateMutatedRuntimeConfig(
     mutateConfig(currentConfig, options.operation)
   );
+  const nextEffectiveStoreRoot = nextConfig.storeRoot ?? options.storeRoot;
+  const nextEffectiveLayout = createLocalRuntimeStorageLayout(
+    nextEffectiveStoreRoot === undefined ? {} : { storeRoot: nextEffectiveStoreRoot }
+  );
+  const envPath = nextEffectiveLayout.envPath;
 
   if (options.operation.kind === 'secret_set') {
     writeEnvSecret(envPath, options.operation.envVar, options.operation.secretValue);
@@ -486,8 +486,11 @@ function parsePluginMutationPath(
 }
 
 function pluginConfigSegmentIndex(parts: readonly string[]): number | undefined {
-  for (let index = parts.length - 2; index > 1; index -= 1) {
-    if (parts[index] === 'config') {
+  for (let index = 2; index < parts.length - 1; index += 1) {
+    if (
+      parts[index] === 'config' &&
+      (parts[index + 1] !== 'config' || index === parts.length - 2)
+    ) {
       return index;
     }
   }

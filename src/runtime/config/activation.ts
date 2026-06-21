@@ -23,7 +23,6 @@ import type {
   RuntimeConfigDiagnostic
 } from './types.ts';
 import {
-  pluginHasConfigErrors,
   runtimeConfigDiagnosticMatchesPlugin,
   resolveProject02RuntimeConfig
 } from './resolve.ts';
@@ -160,6 +159,7 @@ export function resolveRuntimePluginActivation(options: {
     }),
     ...options.resolvedConfig.diagnostics
   ];
+  const globalConfigErrors = hasGlobalRuntimeConfigErrors(diagnostics);
   const enabledPluginIds: string[] = [];
   const disabledPluginIds: string[] = [];
   const snapshots: RuntimePluginActivationSnapshot[] = [];
@@ -172,7 +172,7 @@ export function resolveRuntimePluginActivation(options: {
     const configured = config?.plugins?.[manifest.id];
     const legacyEnabled =
       config?.enabledPlugins?.includes(manifest.id) === true;
-    const configErrors = pluginHasConfigErrors({
+    const configErrors = globalConfigErrors || pluginHasRuntimeConfigErrors({
       diagnostics,
       pluginId: manifest.id
     });
@@ -262,6 +262,39 @@ type PreparedRuntimePluginFactory =
       readonly manifest: RuntimePluginManifest;
       readonly plugin: RuntimePlugin;
     };
+
+function hasGlobalRuntimeConfigErrors(
+  diagnostics: readonly RuntimeConfigDiagnostic[]
+): boolean {
+  return diagnostics.some(
+    (diagnostic) =>
+      diagnostic.severity === 'error' &&
+      !isPluginScopedRuntimeConfigDiagnostic(diagnostic)
+  );
+}
+
+function pluginHasRuntimeConfigErrors(options: {
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+  readonly pluginId: string;
+}): boolean {
+  return options.diagnostics.some(
+    (diagnostic) =>
+      diagnostic.severity === 'error' &&
+      runtimeConfigDiagnosticMatchesPlugin({
+        diagnostic,
+        pluginId: options.pluginId
+      })
+  );
+}
+
+function isPluginScopedRuntimeConfigDiagnostic(
+  diagnostic: RuntimeConfigDiagnostic
+): boolean {
+  return (
+    diagnostic.pluginId !== undefined ||
+    diagnostic.path?.startsWith('plugins.') === true
+  );
+}
 
 function resolveRuntimeConfigStoreRoot(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;

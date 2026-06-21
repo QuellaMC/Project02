@@ -53,7 +53,8 @@ import {
 import {
   createConfiguredProject02PluginHost,
   diagnosticsHaveErrors,
-  loadProject02RuntimeConfig
+  loadProject02RuntimeConfig,
+  type RuntimeConfigDiagnostic
 } from '../runtime/config/index.ts';
 import type { RoleModelAdapter } from '../role-model/loop.ts';
 import {
@@ -167,14 +168,16 @@ export async function runChatCliFromArgs(
       ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot })
     });
 
-    if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
-      throw new ChatCliUsageError(loadedConfig.diagnostics[0]?.message ?? 'Runtime config is invalid.');
-    }
+    assertNoRuntimeConfigErrors(loadedConfig.diagnostics, 'Runtime config is invalid');
 
     const initialConfiguredHost = await createConfiguredProject02PluginHost({
       loadedConfig,
       ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot })
     });
+    assertNoRuntimeConfigErrors(
+      initialConfiguredHost.activation.diagnostics,
+      'Runtime config activation failed'
+    );
     const runtimeArgs = {
       ...parsedArgs,
       storeRoot: initialConfiguredHost.resolvedConfig.storeRoot
@@ -188,6 +191,10 @@ export async function runChatCliFromArgs(
       sessionId: durableRuntime.session.id,
       sessionIdentity: durableRuntime.session
     });
+    assertNoRuntimeConfigErrors(
+      configuredHost.activation.diagnostics,
+      'Runtime config activation failed'
+    );
     const roleModelAdapter = createSelectedRoleModelAdapter(parsedArgs);
     return await runChatCli({
       ...options,
@@ -209,6 +216,34 @@ export async function runChatCliFromArgs(
 
     throw error;
   }
+}
+
+function assertNoRuntimeConfigErrors(
+  diagnostics: readonly RuntimeConfigDiagnostic[],
+  messagePrefix: string
+): void {
+  if (!diagnosticsHaveErrors(diagnostics)) {
+    return;
+  }
+
+  const diagnostic = diagnostics.find((item) => item.severity === 'error');
+  throw new ChatCliUsageError(
+    diagnostic === undefined
+      ? messagePrefix
+      : formatRuntimeConfigDiagnosticError(messagePrefix, diagnostic)
+  );
+}
+
+function formatRuntimeConfigDiagnosticError(
+  messagePrefix: string,
+  diagnostic: RuntimeConfigDiagnostic
+): string {
+  const diagnosticLocation =
+    diagnostic.path === undefined
+      ? diagnostic.code
+      : `${diagnostic.code} at ${diagnostic.path}`;
+
+  return `${messagePrefix}: ${diagnostic.message} (${diagnosticLocation})`;
 }
 
 export async function runChatCli(options: ChatCliOptions): Promise<number> {

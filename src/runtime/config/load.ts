@@ -15,6 +15,15 @@ import {
   type RuntimeConfigValue
 } from './types.ts';
 
+const project02RuntimeConfigFields = Object.freeze([
+  'version',
+  'storeRoot',
+  'enabledPlugins',
+  'defaultMemoryProvider',
+  'plugins'
+]);
+const project02RuntimePluginConfigFields = Object.freeze(['enabled', 'config']);
+
 export type LoadProject02RuntimeConfigOptions = {
   readonly configPath?: string;
   readonly storeRoot?: string;
@@ -157,6 +166,8 @@ function parseProject02RuntimeConfig(value: unknown): {
     };
   }
 
+  pushUnknownRuntimeConfigFieldDiagnostics(value, diagnostics);
+
   if (value['version'] !== runtimeConfigVersion) {
     diagnostics.push(
       diagnostic(
@@ -234,6 +245,12 @@ function optionalPluginConfigs(
           return [];
         }
 
+        pushUnknownRuntimePluginConfigFieldDiagnostics({
+          pluginId,
+          value: pluginValue,
+          diagnostics
+        });
+
         const enabled = optionalBoolean(
           pluginValue['enabled'],
           `plugins.${pluginId}.enabled`,
@@ -299,6 +316,69 @@ function optionalConfigRecord(
       })
     )
   );
+}
+
+function pushUnknownRuntimeConfigFieldDiagnostics(
+  value: Readonly<Record<string, unknown>>,
+  diagnostics: RuntimeConfigDiagnostic[]
+): void {
+  pushUnknownFieldDiagnostics({
+    value,
+    allowedFields: project02RuntimeConfigFields,
+    diagnostics,
+    code: 'runtime_config_unknown_top_level_field',
+    messageForField: (field) => `Unknown runtime config field "${field}".`,
+    pathForField: (field) => field
+  });
+}
+
+function pushUnknownRuntimePluginConfigFieldDiagnostics(options: {
+  readonly pluginId: string;
+  readonly value: Readonly<Record<string, unknown>>;
+  readonly diagnostics: RuntimeConfigDiagnostic[];
+}): void {
+  pushUnknownFieldDiagnostics({
+    value: options.value,
+    allowedFields: project02RuntimePluginConfigFields,
+    diagnostics: options.diagnostics,
+    code: 'runtime_config_unknown_plugin_wrapper_field',
+    messageForField: (field) =>
+      `Unknown plugin wrapper field "${field}" for plugin "${options.pluginId}".`,
+    pathForField: (field) => `plugins.${options.pluginId}.${field}`,
+    metadataForField: () => ({ pluginId: options.pluginId })
+  });
+}
+
+function pushUnknownFieldDiagnostics(options: {
+  readonly value: Readonly<Record<string, unknown>>;
+  readonly allowedFields: readonly string[];
+  readonly diagnostics: RuntimeConfigDiagnostic[];
+  readonly code: string;
+  readonly messageForField: (field: string) => string;
+  readonly pathForField: (field: string) => string;
+  readonly metadataForField?: (
+    field: string
+  ) => Pick<RuntimeConfigDiagnostic, 'pluginId' | 'pluginConfigField'>;
+}): void {
+  const allowedFields = new Set(options.allowedFields);
+
+  for (const field of Object.keys(options.value).sort((a, b) =>
+    a.localeCompare(b)
+  )) {
+    if (allowedFields.has(field)) {
+      continue;
+    }
+
+    options.diagnostics.push(
+      diagnostic(
+        'error',
+        options.code,
+        options.messageForField(field),
+        options.pathForField(field),
+        options.metadataForField?.(field)
+      )
+    );
+  }
 }
 
 function isRuntimeConfigValue(value: unknown): value is RuntimeConfigValue {
@@ -435,13 +515,18 @@ function diagnostic(
   severity: RuntimeConfigDiagnostic['severity'],
   code: string,
   message: string,
-  path?: string
+  path?: string,
+  metadata?: Pick<RuntimeConfigDiagnostic, 'pluginId' | 'pluginConfigField'>
 ): RuntimeConfigDiagnostic {
   return Object.freeze({
     severity,
     code,
     message,
-    ...(path === undefined ? {} : { path })
+    ...(path === undefined ? {} : { path }),
+    ...(metadata?.pluginId === undefined ? {} : { pluginId: metadata.pluginId }),
+    ...(metadata?.pluginConfigField === undefined
+      ? {}
+      : { pluginConfigField: metadata.pluginConfigField })
   } satisfies RuntimeConfigDiagnostic);
 }
 

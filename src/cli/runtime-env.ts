@@ -1,5 +1,6 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { loadEnvFile } from 'node:process';
+import { parseEnv } from 'node:util';
 
 import {
   defaultRuntimeConfigEnvPath,
@@ -25,15 +26,21 @@ export function runtimeConfigEnvPathForLocation(options: {
 export function loadRuntimeConfigEnvFile(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly storeRoot?: string;
-}): void {
+  readonly env?: NodeJS.ProcessEnv;
+}): NodeJS.ProcessEnv {
   const envPath = runtimeConfigEnvPathForLocation(options);
 
   if (!existsSync(envPath)) {
-    return;
+    return options.env ?? process.env;
   }
 
   try {
+    const envFileValues =
+      options.env === undefined ? undefined : parseEnv(readFileSync(envPath, 'utf8'));
     loadEnvFile(envPath);
+    return options.env === undefined
+      ? process.env
+      : { ...envFileValues, ...options.env };
   } catch (error: unknown) {
     throw new RuntimeEnvFileError(
       `Could not load runtime config env file "${envPath}": ${
