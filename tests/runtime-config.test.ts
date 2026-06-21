@@ -2485,6 +2485,39 @@ describe('runtime config CLI', () => {
     }
   });
 
+  it('rejects unquoted dotenv fallback secrets that start with a quote delimiter', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-secret-quote-start-')
+    );
+    const envVar = 'PROJECT02_SECRET_QUOTE_START';
+    const secretValue = `"starts-and-ends"with'single-and\`backtick`;
+    let stdout = '';
+    let stderr = '';
+
+    Reflect.deleteProperty(process.env, envVar);
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          }),
+          env: { [envVar]: secretValue }
+        }
+      )
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toContain(
+      'no non-escaping dotenv quote delimiter and cannot be safely written as an unquoted value'
+    );
+    expect(existsSync(join(storeRoot, '.env'))).toBe(false);
+    expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+  });
+
   it('rotates multi-line dotenv secrets without leaving stale continuation lines', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-rotate-'));
     const envVar = 'PROJECT02_SECRET_ROTATION_MULTILINE';

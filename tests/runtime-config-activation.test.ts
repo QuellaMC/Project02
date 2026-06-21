@@ -12,6 +12,7 @@ import {
   runtimeConfigVersion
 } from '../src/runtime/config/index.ts';
 import {
+  characterStatePluginId,
   createRuntimePlugin,
   runtimePluginDiscoveryPluginId,
   runtimePluginContractVersion
@@ -147,6 +148,81 @@ describe('runtime config activation diagnostics', () => {
     );
     expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_unknown_plugin'
+    );
+  });
+
+  it('fails strict activation for an unknown default memory provider', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-memory-default-strict-')
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: 'memory.typo'
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      strictUnknownPlugins: true
+    });
+
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_unknown_plugin',
+          path: 'defaultMemoryProvider'
+        }),
+        expect.objectContaining({
+          severity: 'warning',
+          code: 'default_memory_provider_unavailable',
+          path: 'defaultMemoryProvider'
+        })
+      ])
+    );
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        enabled: false,
+        activationStatus: 'blocked'
+      })
+    );
+  });
+
+  it('keeps non-strict unknown default memory providers warning-only when no provider is active', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-memory-default-warning-')
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: 'memory.typo'
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+    });
+
+    expect(
+      configured.activation.diagnostics.filter(
+        (diagnostic) => diagnostic.severity === 'error'
+      )
+    ).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'warning',
+          code: 'default_memory_provider_unavailable',
+          path: 'defaultMemoryProvider'
+        })
+      ])
+    );
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        enabled: true,
+        activationStatus: 'active'
+      })
     );
   });
 

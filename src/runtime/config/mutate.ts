@@ -704,7 +704,7 @@ function formatDotenvSecretValue(value: string): string {
 }
 
 function isSafeUnquotedDotenvValue(value: string): boolean {
-  return /^[^\s#]+$/u.test(value);
+  return !isDotenvQuoteDelimiter(value[0]) && /^[^\s#]+$/u.test(value);
 }
 
 function writeJsonAtomic(

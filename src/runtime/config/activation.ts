@@ -237,6 +237,9 @@ export function resolveRuntimePluginActivation(options: {
       knownPluginIds: pluginIds,
       loadedPluginIds: Object.keys(config?.plugins ?? {}),
       legacyEnabledPluginIds: config?.enabledPlugins ?? [],
+      ...(config?.defaultMemoryProvider === undefined
+        ? {}
+        : { defaultMemoryProviderId: config.defaultMemoryProvider }),
       strict: options.strictUnknownPlugins === true
     }),
     ...uncheckedLegacyFactoryDiagnostics({
@@ -697,29 +700,35 @@ function unknownPluginDiagnostics(options: {
   readonly knownPluginIds: ReadonlySet<string>;
   readonly loadedPluginIds: readonly string[];
   readonly legacyEnabledPluginIds: readonly string[];
+  readonly defaultMemoryProviderId?: string;
   readonly strict: boolean;
 }): readonly RuntimeConfigDiagnostic[] {
-  const unknown = new Set<string>();
+  const unknown = new Map<string, string>();
+  const addUnknown = (pluginId: string, path: string): void => {
+    if (!options.knownPluginIds.has(pluginId) && !unknown.has(pluginId)) {
+      unknown.set(pluginId, path);
+    }
+  };
 
   for (const pluginId of options.loadedPluginIds) {
-    if (!options.knownPluginIds.has(pluginId)) {
-      unknown.add(pluginId);
-    }
+    addUnknown(pluginId, `plugins.${pluginId}`);
   }
 
   for (const pluginId of options.legacyEnabledPluginIds) {
-    if (!options.knownPluginIds.has(pluginId)) {
-      unknown.add(pluginId);
-    }
+    addUnknown(pluginId, `plugins.${pluginId}`);
+  }
+
+  if (options.defaultMemoryProviderId !== undefined) {
+    addUnknown(options.defaultMemoryProviderId, 'defaultMemoryProvider');
   }
 
   return Object.freeze(
-    [...unknown].map((pluginId) =>
+    [...unknown].map(([pluginId, path]) =>
       diagnostic(
         options.strict ? 'error' : 'warning',
         'runtime_config_unknown_plugin',
         `Runtime config references unknown plugin "${pluginId}".`,
-        `plugins.${pluginId}`
+        path
       )
     )
   );
