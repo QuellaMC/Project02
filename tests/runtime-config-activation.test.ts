@@ -6,6 +6,7 @@ import { Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
+import { roleModelPluginListToolName } from '../src/role-model/contracts.ts';
 import {
   createConfiguredProject02PluginHost,
   loadProject02RuntimeConfig,
@@ -868,6 +869,49 @@ describe('runtime config activation diagnostics', () => {
     expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
   });
 
+  it('runs cleanup for partial plugins that collide with host plugin.list', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-plugin-list-cleanup-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const cleanupContexts: RuntimePluginContext[] = [];
+    const collisionPlugin = modelFacingPluginListCollisionPlugin(
+      'plugin-list.cleanup-collision',
+      (context) => {
+        cleanupContexts.push(context);
+        throw new Error('cleanup hook failure must not mask host construction');
+      }
+    );
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        [collisionPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    await expect(
+      createConfiguredProject02PluginHost({
+        loadedConfig: loadProject02RuntimeConfig({ configPath }),
+        storeRoot,
+        factories: {
+          [collisionPlugin.manifest.id]: {
+            manifest: collisionPlugin.manifest,
+            create: () => collisionPlugin
+          }
+        }
+      })
+    ).rejects.toThrow('Plugin tool "plugin.list" is declared more than once.');
+
+    expect(cleanupContexts).toHaveLength(1);
+    expect(cleanupContexts[0]).toMatchObject({
+      sessionId: 'configured-plugin-construction-cleanup',
+      currentUserMessage: 'configured plugin construction failed before host creation',
+      pluginId: collisionPlugin.manifest.id
+    });
+  });
+
   it('accepts manifest-backed factories that return their declared manifest', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-manifest-match-')
@@ -1097,6 +1141,43 @@ function modelFacingMemorySearchPlugin(id: string) {
         return {
           status: 'accepted',
           output: {},
+          evidence: []
+        };
+      }
+    }
+  });
+}
+
+function modelFacingPluginListCollisionPlugin(
+  id: string,
+  onSessionEnd: (context: RuntimePluginContext) => void
+) {
+  const plugin = firstPartyPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      declaredPlugins: [
+        'plugin_discovery',
+        'tool_provider',
+        'handle_tool_call',
+        'on_session_end'
+      ]
+    },
+    providedTools: [memorySearchTool(roleModelPluginListToolName)],
+    lifecycleHooks: {
+      handleToolCall() {
+        return {
+          status: 'accepted',
+          output: {},
+          evidence: []
+        };
+      },
+      onSessionEnd(context) {
+        onSessionEnd(context);
+
+        return {
+          status: 'completed',
           evidence: []
         };
       }

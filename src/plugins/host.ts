@@ -90,6 +90,15 @@ export type RuntimePluginSessionEndOptions = {
   readonly allowFileStoreWrites?: boolean;
 };
 
+export type RunRuntimePluginSessionEndHooksOptions = {
+  readonly plugins: readonly RuntimePlugin[];
+  readonly context: RuntimePluginContext;
+  readonly storeRoot?: string | undefined;
+  readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
+  readonly hookOptions?: RuntimePluginSessionEndOptions;
+};
+
 export type RuntimePluginHealthHostResult = {
   readonly snapshots: readonly RuntimePluginHealthSnapshot[];
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
@@ -271,18 +280,13 @@ export function createRuntimePluginHost(
       } satisfies RuntimePluginHookHostResult);
     },
     async onSessionEnd(context, hookOptions) {
-      return await runHookPhase({
+      return await runRuntimePluginSessionEndHooks({
         plugins: enabledPlugins,
         context,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity,
-        ...(hookOptions?.allowFileStoreWrites === undefined
-          ? {}
-          : { allowFileStoreWrites: hookOptions.allowFileStoreWrites }),
-        hookName: 'onSessionEnd',
-        evidenceKind: 'session_end',
-        hookForPlugin: (plugin) => plugin.lifecycleHooks.onSessionEnd
+        ...(hookOptions === undefined ? {} : { hookOptions })
       });
     },
     async health(context) {
@@ -295,6 +299,24 @@ export function createRuntimePluginHost(
       });
     }
   } satisfies RuntimePluginHost);
+}
+
+export async function runRuntimePluginSessionEndHooks(
+  options: RunRuntimePluginSessionEndHooksOptions
+): Promise<RuntimePluginHookHostResult> {
+  return await runHookPhase({
+    plugins: options.plugins,
+    context: options.context,
+    storeRoot: options.storeRoot,
+    sessionId: options.sessionId,
+    sessionIdentity: options.sessionIdentity,
+    ...(options.hookOptions?.allowFileStoreWrites === undefined
+      ? {}
+      : { allowFileStoreWrites: options.hookOptions.allowFileStoreWrites }),
+    hookName: 'onSessionEnd',
+    evidenceKind: 'session_end',
+    hookForPlugin: (plugin) => plugin.lifecycleHooks.onSessionEnd
+  });
 }
 
 export function createDefaultProject02PluginHost(

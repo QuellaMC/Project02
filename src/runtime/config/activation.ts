@@ -5,6 +5,7 @@ import {
 } from '../../plugins/builtin/character-state/index.ts';
 import {
   createRuntimePluginHost,
+  runRuntimePluginSessionEndHooks,
   runtimePluginDiscoveryPluginId,
   type RuntimePluginHost,
   type RuntimePluginSessionEndOptions
@@ -601,22 +602,19 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
     character: configuredPluginConstructionCleanupCharacter
   });
 
-  for (const plugin of options.plugins) {
-    const cleanupHost = createRuntimePluginHost({
-      plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id],
-      storeRoot: options.resolvedConfig.storeRoot,
-      sessionId,
-      ...(options.sessionIdentity === undefined
-        ? {}
-        : { sessionIdentity: options.sessionIdentity })
-    });
-
-    await cleanupHost.onSessionEnd(context, {
+  await runRuntimePluginSessionEndHooks({
+    plugins: options.plugins,
+    context,
+    storeRoot: options.resolvedConfig.storeRoot,
+    sessionId,
+    ...(options.sessionIdentity === undefined
+      ? {}
+      : { sessionIdentity: options.sessionIdentity }),
+    hookOptions: {
       ...options.constructionCleanup,
       ...configuredPluginConstructionCleanupOptions
-    });
-  }
+    }
+  });
 }
 
 function runtimePluginManifestsMatch(
