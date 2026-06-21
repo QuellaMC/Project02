@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { loadEnvFile } from 'node:process';
 import { parseEnv } from 'node:util';
 
 import {
@@ -33,26 +32,15 @@ export function loadRuntimeConfigEnvFile(options: {
   const env = options.env ?? process.env;
 
   if (!existsSync(envPath)) {
-    return options.envDefaults === undefined
-      ? env
-      : { ...options.envDefaults, ...env };
+    return { ...(options.envDefaults ?? {}), ...env };
   }
 
   try {
-    if (options.envDefaults !== undefined) {
-      return {
-        ...options.envDefaults,
-        ...parseEnv(readFileSync(envPath, 'utf8')),
-        ...env
-      };
-    }
-
-    if (options.env === undefined || options.env === process.env) {
-      loadEnvFile(envPath);
-      return process.env;
-    }
-
-    return { ...parseEnv(readFileSync(envPath, 'utf8')), ...options.env };
+    return {
+      ...(options.envDefaults ?? {}),
+      ...parseEnv(readFileSync(envPath, 'utf8')),
+      ...env
+    };
   } catch (error: unknown) {
     throw new RuntimeEnvFileError(
       `Could not load runtime config env file "${envPath}": ${

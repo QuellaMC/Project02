@@ -40,7 +40,7 @@ export function redactRuntimeConfigValue(
     const items: readonly RuntimeConfigValue[] = value;
 
     return Object.freeze(
-      items.map((item) => redactRuntimeConfigValue(item))
+      items.map((item) => redactRuntimeConfigValue(item, options))
     );
   }
 
@@ -48,7 +48,9 @@ export function redactRuntimeConfigValue(
     Object.fromEntries(
       Object.entries(value).map(([key, item]: readonly [string, RuntimeConfigValue]) => [
         key,
-        redactRuntimeConfigValue(item, { key })
+        redactRuntimeConfigValue(item, {
+          key: runtimeConfigRedactionPath(options.key, key)
+        })
       ])
     ) as Readonly<Record<string, RuntimeConfigValue>>
   );
@@ -80,4 +82,11 @@ function isSecretValue(value: RuntimeConfigValue): boolean {
     !Array.isArray(value) &&
     ('$env' in value || '$plaintextSecret' in value)
   );
+}
+
+function runtimeConfigRedactionPath(
+  parent: string | undefined,
+  key: string
+): string {
+  return parent === undefined ? key : `${parent}.${key}`;
 }

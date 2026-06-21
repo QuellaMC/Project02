@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -338,6 +338,51 @@ describe('chat CLI plugin lifecycle', () => {
       sessionId,
       currentUserMessage: '/exit'
     });
+  });
+
+  it('aborts config-enabled legacy function factories before creating a durable session', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-legacy-preflight-'));
+    const sessionId = 'legacy-unchecked-session';
+    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'legacy.required': {
+          enabled: true
+        }
+      }
+    });
+    let factoryCalls = 0;
+    let stdout = '';
+    let stderr = '';
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--config', configPath, '--new-session', sessionId],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          'legacy.required': () => {
+            factoryCalls += 1;
+            throw new Error('legacy factory must not be constructed during preflight');
+          }
+        }
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(factoryCalls).toBe(0);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Runtime config activation failed');
+    expect(stderr).toContain('runtime_config_legacy_factory_unchecked');
+    expect(stderr).toContain('plugins.legacy.required.enabled');
+    expect(existsSync(layout.schemaPath)).toBe(false);
+    expect(existsSync(layout.sessionCatalogPath)).toBe(false);
+    expect(existsSync(layout.sessionsRoot)).toBe(false);
   });
 
   it('aborts startup when configured plugin activation reports errors', async () => {

@@ -59,6 +59,70 @@ describe('runtime config redaction', () => {
     expect(JSON.stringify(redacted)).not.toContain('nested-api-key-secret');
   });
 
+  it('redacts nested credential object paths in resolved config', () => {
+    const configPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-nested-redact-')), 'config.json'),
+      {
+        plugins: {
+          'memory.dotted-redaction': {
+            enabled: true,
+            config: {
+              metadata: {
+                api: {
+                  key: 'nested-api-key-secret',
+                  url: 'visible-api-url'
+                },
+                ordinary: {
+                  key: 'visible ordinary key'
+                },
+                providers: [
+                  {
+                    api: {
+                      key: 'array-api-key-secret',
+                      url: 'visible-array-api-url'
+                    },
+                    ordinary: {
+                      key: 'visible array ordinary key'
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    );
+
+    const resolved = resolveProject02RuntimeConfig({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      pluginManifests: [dottedConfigManifest()]
+    });
+    const redacted = resolved.redactedPluginConfigs['memory.dotted-redaction'];
+
+    expect(redacted?.['metadata']?.value).toEqual({
+      api: {
+        key: '[redacted]',
+        url: 'visible-api-url'
+      },
+      ordinary: {
+        key: 'visible ordinary key'
+      },
+      providers: [
+        {
+          api: {
+            key: '[redacted]',
+            url: 'visible-array-api-url'
+          },
+          ordinary: {
+            key: 'visible array ordinary key'
+          }
+        }
+      ]
+    });
+    expect(JSON.stringify(redacted)).not.toContain('nested-api-key-secret');
+    expect(JSON.stringify(redacted)).not.toContain('array-api-key-secret');
+  });
+
   it('redacts dotted credential keys from aggregate runtime-config get output', async () => {
     const configPath = writeRuntimeConfig(
       join(mkdtempSync(join(tmpdir(), 'project02-config-dotted-get-redact-')), 'config.json'),
@@ -102,6 +166,82 @@ describe('runtime config redaction', () => {
     });
     expect(stdout).not.toContain('aggregate-api-key-secret');
     expect(stdout).not.toContain('nested-aggregate-api-key-secret');
+  });
+
+  it('redacts nested credential object paths from aggregate runtime-config get output', async () => {
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-nested-get-redact-')),
+        'config.json'
+      ),
+      {
+        plugins: {
+          foo: {
+            enabled: true,
+            config: {
+              settings: {
+                api: {
+                  key: 'aggregate-nested-api-key-secret',
+                  url: 'visible aggregate api url'
+                },
+                ordinary: {
+                  key: 'visible aggregate ordinary key'
+                },
+                providers: [
+                  {
+                    api: {
+                      key: 'aggregate-array-api-key-secret',
+                      url: 'visible aggregate array api url'
+                    },
+                    ordinary: {
+                      key: 'visible aggregate array ordinary key'
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    );
+    let stdout = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--config', configPath, 'get', 'plugins.foo'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+
+    expect(JSON.parse(stdout) as unknown).toEqual({
+      enabled: true,
+      config: {
+        settings: {
+          api: {
+            key: '[redacted]',
+            url: 'visible aggregate api url'
+          },
+          ordinary: {
+            key: 'visible aggregate ordinary key'
+          },
+          providers: [
+            {
+              api: {
+                key: '[redacted]',
+                url: 'visible aggregate array api url'
+              },
+              ordinary: {
+                key: 'visible aggregate array ordinary key'
+              }
+            }
+          ]
+        }
+      }
+    });
+    expect(stdout).not.toContain('aggregate-nested-api-key-secret');
+    expect(stdout).not.toContain('aggregate-array-api-key-secret');
   });
 });
 

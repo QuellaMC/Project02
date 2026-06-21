@@ -2500,7 +2500,7 @@ describe('runtime config CLI', () => {
     expect(stdout).toContain('"runtime_config_unknown_plugin"');
   });
 
-  it('resolves supplied-env check secrets from the runtime env file without leaking to later no-env checks', async () => {
+  it('resolves check secrets from each runtime env file without leaking to later stores', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-check-env-'));
     const laterStoreRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-check-env-later-')
@@ -2543,7 +2543,6 @@ describe('runtime config CLI', () => {
             stdout += chunk;
           }),
           stderr: collect(() => {}),
-          env: {},
           factories: {
             [plugin.manifest.id]: {
               manifest: plugin.manifest,

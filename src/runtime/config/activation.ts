@@ -221,11 +221,14 @@ export function resolveRuntimePluginActivation(options: {
   const pluginManifests =
     options.pluginManifests ?? options.plugins?.map((plugin) => plugin.manifest) ?? [];
   const config = options.loadedConfig.config;
+  const duplicateManifestDiagnostics =
+    duplicatePluginManifestIdDiagnostics(pluginManifests);
   const pluginIds = new Set([
     ...pluginManifests.map((manifest) => manifest.id),
     ...(options.additionalKnownPluginIds ?? [])
   ]);
   const diagnostics: RuntimeConfigDiagnostic[] = [
+    ...duplicateManifestDiagnostics,
     ...unknownPluginDiagnostics({
       knownPluginIds: pluginIds,
       loadedPluginIds: Object.keys(config?.plugins ?? {}),
@@ -693,6 +696,34 @@ function unknownPluginDiagnostics(options: {
         'runtime_config_unknown_plugin',
         `Runtime config references unknown plugin "${pluginId}".`,
         `plugins.${pluginId}`
+      )
+    )
+  );
+}
+
+function duplicatePluginManifestIdDiagnostics(
+  pluginManifests: readonly RuntimePluginManifest[]
+): readonly RuntimeConfigDiagnostic[] {
+  const seen = new Set<string>();
+  const duplicateIds = new Set<string>();
+
+  for (const manifest of pluginManifests) {
+    if (seen.has(manifest.id)) {
+      duplicateIds.add(manifest.id);
+      continue;
+    }
+
+    seen.add(manifest.id);
+  }
+
+  return Object.freeze(
+    [...duplicateIds].map((pluginId) =>
+      diagnostic(
+        'error',
+        'runtime_config_duplicate_plugin_manifest_id',
+        `Runtime plugin manifest id "${pluginId}" is declared more than once.`,
+        `plugins.${pluginId}`,
+        { pluginId }
       )
     )
   );

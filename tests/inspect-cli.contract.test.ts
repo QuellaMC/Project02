@@ -167,6 +167,52 @@ describe('inspect CLI plugin evidence', () => {
     expect(stdout).toContain('"runtime_config_unknown_plugin"');
     expect(stdout).toContain('"disabled_by_config"');
   });
+
+  it('loads the runtime env file for inspect without mutating process env', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-env-'));
+    const configPath = join(storeRoot, 'config.json');
+    const envVar = 'PROJECT02_INSPECT_ENV_FILE_SECRET_3448711012';
+    const previousEnvValue = process.env[envVar];
+
+    writeFileSync(
+      configPath,
+      `${JSON.stringify(
+        {
+          version: runtimeConfigVersion,
+          storeRoot
+        },
+        null,
+        2
+      )}\n`,
+      'utf8'
+    );
+    writeFileSync(join(storeRoot, '.env'), `${envVar}=inspect-secret\n`, 'utf8');
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'session-env',
+      createdAt: '2026-06-21T00:00:00.000Z'
+    });
+
+    try {
+      Reflect.deleteProperty(process.env, envVar);
+
+      const exitCode = await runInspectCliFromArgs(
+        ['--config', configPath, '--sessions'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      );
+
+      expect(exitCode).toBe(0);
+      expect(process.env[envVar]).toBeUndefined();
+    } finally {
+      if (previousEnvValue === undefined) {
+        Reflect.deleteProperty(process.env, envVar);
+      } else {
+        process.env[envVar] = previousEnvValue;
+      }
+    }
+  });
 });
 
 function createPatchThenReplyAdapter(): RoleModelAdapter {

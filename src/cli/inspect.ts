@@ -464,7 +464,7 @@ async function inspectRuntimeConfig(args: {
   readonly configPath?: string;
 }): Promise<Project02ConfiguredPluginHost> {
   const loadedConfig = loadProject02RuntimeConfig(args);
-  loadRuntimeConfigEnvFile({
+  const runtimeEnv = loadRuntimeConfigEnvFile({
     loadedConfig,
     ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot })
   });
@@ -477,7 +477,8 @@ async function inspectRuntimeConfig(args: {
 
   return await createConfiguredProject02PluginHost({
     loadedConfig,
-    ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot })
+    ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
+    env: runtimeEnv
   });
 }
 

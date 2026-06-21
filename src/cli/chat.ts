@@ -196,6 +196,7 @@ export async function runChatCliFromArgs(
               ? {}
               : { storeRoot: selectedArgs.storeRoot }),
             env: runtimeEnv,
+            diagnoseUncheckedLegacyFactories: true,
             ...(options.factories === undefined ? {} : { factories: options.factories })
           })
         : undefined;

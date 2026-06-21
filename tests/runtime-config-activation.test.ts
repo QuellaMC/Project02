@@ -164,6 +164,73 @@ describe('runtime config activation diagnostics', () => {
     expect(stdout).not.toContain('manifest-backed-secret');
   });
 
+  it('fails check for duplicate manifest ids without constructing factories', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-duplicate-manifest-check-')
+    );
+    const envVar = 'PROJECT02_DUPLICATE_MANIFEST_CHECK_SECRET_3448711003';
+    const firstPlugin = requiredSecretPlugin('memory.duplicate');
+    const secondPlugin = requiredSecretPlugin('memory.duplicate');
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'memory.duplicate': {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        env: {
+          [envVar]: 'duplicate-manifest-secret'
+        },
+        factories: {
+          'memory.duplicate.primary': {
+            manifest: firstPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error('duplicate manifest check must not construct factories');
+            }
+          },
+          'memory.duplicate.secondary': {
+            manifest: secondPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error('duplicate manifest check must not construct factories');
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(1);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_duplicate_plugin_manifest_id',
+          path: 'plugins.memory.duplicate',
+          pluginId: 'memory.duplicate'
+        })
+      ])
+    );
+    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
+    expect(stdout).not.toContain('duplicate-manifest-secret');
+  });
+
   it('rejects manifest-backed factories that return a different same-id manifest', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-manifest-mismatch-')
