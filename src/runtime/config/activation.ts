@@ -24,6 +24,7 @@ import {
   runtimeConfigDiagnosticMatchesPlugin,
   resolveProject02RuntimeConfig
 } from './resolve.ts';
+import { stableStringify } from './fingerprint.ts';
 
 export type RuntimePluginFactoryInput = {
   readonly pluginId: string;
@@ -137,6 +138,7 @@ export async function createConfiguredProject02PluginHost(options: {
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
     strictUnknownPlugins: options.strictUnknownPlugins === true,
+    diagnoseUncheckedLegacyFactories: true,
     ...(options.env === undefined ? {} : { env: options.env }),
     factories
   });
@@ -480,10 +482,23 @@ async function instantiatePreparedPlugins(options: {
       );
     }
 
+    if (!runtimePluginManifestsMatch(plugin.manifest, preparedFactory.manifest)) {
+      throw new TypeError(
+        `Plugin factory "${preparedFactory.pluginId}" returned a manifest that differs from its declared manifest "${preparedFactory.manifest.id}".`
+      );
+    }
+
     plugins.push(plugin);
   }
 
   return Object.freeze(plugins);
+}
+
+function runtimePluginManifestsMatch(
+  actual: RuntimePluginManifest,
+  expected: RuntimePluginManifest
+): boolean {
+  return stableStringify(actual) === stableStringify(expected);
 }
 
 function isRuntimePluginFactoryDefinition(

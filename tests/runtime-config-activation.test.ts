@@ -6,7 +6,11 @@ import { Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
-import { runtimeConfigVersion } from '../src/runtime/config/index.ts';
+import {
+  createConfiguredProject02PluginHost,
+  loadProject02RuntimeConfig,
+  runtimeConfigVersion
+} from '../src/runtime/config/index.ts';
 import {
   createRuntimePlugin,
   runtimePluginContractVersion
@@ -159,6 +163,90 @@ describe('runtime config activation diagnostics', () => {
     );
     expect(stdout).not.toContain('manifest-backed-secret');
   });
+
+  it('rejects manifest-backed factories that return a different same-id manifest', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-manifest-mismatch-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const envVar = 'PROJECT02_MANIFEST_MISMATCH_SECRET_3448659339';
+    const declaredPlugin = requiredSecretPlugin('memory.contract');
+    const returnedPlugin = pluginWithAdditionalConfigField('memory.contract');
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        'memory.contract': {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+
+    const loadedConfig = loadProject02RuntimeConfig({ configPath });
+
+    await expect(
+      createConfiguredProject02PluginHost({
+        loadedConfig,
+        env: {
+          [envVar]: 'same-id-different-manifest-secret'
+        },
+        factories: {
+          'memory.contract': {
+            manifest: declaredPlugin.manifest,
+            create: () => returnedPlugin
+          }
+        }
+      })
+    ).rejects.toThrow(
+      'Plugin factory "memory.contract" returned a manifest that differs from its declared manifest "memory.contract".'
+    );
+  });
+
+  it('accepts manifest-backed factories that return their declared manifest', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-manifest-match-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const envVar = 'PROJECT02_MANIFEST_MATCH_SECRET_3448659339';
+    const plugin = requiredSecretPlugin('memory.contract');
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        'memory.contract': {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+
+    const loadedConfig = loadProject02RuntimeConfig({ configPath });
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig,
+      env: {
+        [envVar]: 'same-id-matching-manifest-secret'
+      },
+      factories: {
+        'memory.contract': {
+          manifest: plugin.manifest,
+          create: () => {
+            factoryCalls += 1;
+
+            return plugin;
+          }
+        }
+      }
+    });
+
+    expect(factoryCalls).toBe(1);
+    expect(configured.plugins.map((item) => item.manifest.id)).toEqual([
+      'memory.contract'
+    ]);
+  });
 });
 
 function requiredSecretPlugin(id: string) {
@@ -207,6 +295,30 @@ function requiredSecretPlugin(id: string) {
         reasons: ['test_required_secret']
       },
       requestedApis: []
+    }
+  });
+}
+
+function pluginWithAdditionalConfigField(id: string) {
+  const plugin = requiredSecretPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      config: {
+        ...plugin.manifest.config,
+        fields: [
+          ...plugin.manifest.config.fields,
+          {
+            name: 'region',
+            description: 'Region.',
+            required: false,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: []
+          }
+        ]
+      }
     }
   });
 }

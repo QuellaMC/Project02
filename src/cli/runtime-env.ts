@@ -27,14 +27,26 @@ export function loadRuntimeConfigEnvFile(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly storeRoot?: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly envDefaults?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
   const envPath = runtimeConfigEnvPathForLocation(options);
+  const env = options.env ?? process.env;
 
   if (!existsSync(envPath)) {
-    return options.env ?? process.env;
+    return options.envDefaults === undefined
+      ? env
+      : { ...options.envDefaults, ...env };
   }
 
   try {
+    if (options.envDefaults !== undefined) {
+      return {
+        ...options.envDefaults,
+        ...parseEnv(readFileSync(envPath, 'utf8')),
+        ...env
+      };
+    }
+
     if (options.env === undefined || options.env === process.env) {
       loadEnvFile(envPath);
       return process.env;
@@ -44,6 +56,24 @@ export function loadRuntimeConfigEnvFile(options: {
   } catch (error: unknown) {
     throw new RuntimeEnvFileError(
       `Could not load runtime config env file "${envPath}": ${
+        error instanceof Error ? error.message : 'unknown error'
+      }.`
+    );
+  }
+}
+
+export function readDefaultDotEnvFile(): NodeJS.ProcessEnv {
+  const envPath = '.env';
+
+  if (!existsSync(envPath)) {
+    return {};
+  }
+
+  try {
+    return parseEnv(readFileSync(envPath, 'utf8'));
+  } catch (error: unknown) {
+    throw new RuntimeEnvFileError(
+      `Could not load .env file: ${
         error instanceof Error ? error.message : 'unknown error'
       }.`
     );

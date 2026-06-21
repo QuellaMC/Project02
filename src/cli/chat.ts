@@ -1,5 +1,4 @@
 import { createInterface } from 'node:readline';
-import { loadEnvFile } from 'node:process';
 import { pathToFileURL } from 'node:url';
 
 import {
@@ -72,6 +71,7 @@ import {
 } from './runtime-location.ts';
 import {
   loadRuntimeConfigEnvFile,
+  readDefaultDotEnvFile,
   RuntimeEnvFileError
 } from './runtime-env.ts';
 
@@ -164,10 +164,14 @@ export async function runChatCliFromArgs(
   options: ChatCliOptions
 ): Promise<number> {
   try {
-    if (options.env === undefined || options.env === process.env) {
-      loadDefaultDotEnvFile();
-    }
-    const baseEnv = options.env ?? process.env;
+    const explicitEnv =
+      options.env === undefined || options.env === process.env
+        ? undefined
+        : options.env;
+    const defaultEnv =
+      explicitEnv === undefined ? readDefaultDotEnvFile() : undefined;
+    const baseEnv =
+      explicitEnv ?? { ...(defaultEnv ?? {}), ...process.env };
     const parsedArgs = parseChatCliArgs(args);
     const loadedConfig = loadProject02RuntimeConfig({
       ...parsedArgs,
@@ -177,7 +181,8 @@ export async function runChatCliFromArgs(
     const runtimeEnv = loadRuntimeConfigEnvFile({
       loadedConfig,
       ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot }),
-      env: baseEnv
+      env: explicitEnv ?? process.env,
+      ...(defaultEnv === undefined ? {} : { envDefaults: defaultEnv })
     });
     const selectedArgs = selectChatProvider(parsedArgs, runtimeEnv);
 
@@ -1049,29 +1054,6 @@ function isFormattedTerminalError(
     error instanceof RuntimeLocationCliUsageError ||
     error instanceof RuntimeEnvFileError ||
     isLocalRuntimeTerminalError(error)
-  );
-}
-
-function loadDefaultDotEnvFile(): void {
-  try {
-    loadEnvFile();
-  } catch (error: unknown) {
-    if (isMissingDotEnvFile(error)) {
-      return;
-    }
-
-    throw new ChatCliUsageError(
-      `Could not load .env file: ${error instanceof Error ? error.message : 'unknown error'}.`
-    );
-  }
-}
-
-function isMissingDotEnvFile(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === 'ENOENT'
   );
 }
 

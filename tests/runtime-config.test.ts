@@ -1004,6 +1004,48 @@ describe('runtime config loading and resolution', () => {
     expect(configured.activation.diagnostics).toEqual([]);
   });
 
+  it('blocks configured legacy function factories before missing config can trigger construction', async () => {
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-enabled-legacy-factory-')),
+        'config.json'
+      ),
+      {
+        plugins: {
+          'memory.required': {
+            enabled: true
+          }
+        }
+      }
+    );
+    let legacyFactoryCalls = 0;
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      factories: {
+        'memory.required': () => {
+          legacyFactoryCalls += 1;
+
+          return requiredSecretPlugin();
+        }
+      }
+    });
+
+    expect(legacyFactoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_legacy_factory_unchecked',
+          path: 'plugins.memory.required.enabled',
+          pluginId: 'memory.required'
+        })
+      ])
+    );
+  });
+
   it('uses supplied env maps when creating configured plugin hosts', async () => {
     const envVar = 'PROJECT02_SUPPLIED_ONLY_SECRET_3447588016';
     const previousEnvValue = process.env[envVar];
@@ -1026,7 +1068,10 @@ describe('runtime config loading and resolution', () => {
       const configured = await createConfiguredProject02PluginHost({
         loadedConfig: loadProject02RuntimeConfig({ configPath }),
         factories: {
-          'memory.required': () => requiredSecretPlugin()
+          'memory.required': {
+            manifest: requiredSecretPlugin().manifest,
+            create: () => requiredSecretPlugin()
+          }
         },
         env: { [envVar]: 'from-supplied-env' }
       });

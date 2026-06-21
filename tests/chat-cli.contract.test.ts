@@ -22,6 +22,7 @@ import {
   createRuntimeLogStore
 } from '../src/runtime/log.ts';
 import {
+  runtimeConfigEnvVarName,
   runtimeConfigVersion
 } from '../src/runtime/config/index.ts';
 import {
@@ -62,6 +63,52 @@ describe('chat CLI folded top-level model text', () => {
 });
 
 describe('chat CLI provider selection', () => {
+  it('lets the selected store env override the cwd dotenv defaults', async () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-chat-cwd-env-'));
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-store-env-'));
+    const previousCwd = process.cwd();
+    const previousProvider = process.env[roleModelProviderEnvName];
+    const previousApiKey = process.env[nvidiaApiKeyEnvName];
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let stderr = '';
+
+    writeFileSync(
+      join(cwdRoot, '.env'),
+      `${roleModelProviderEnvName}=local\n${nvidiaApiKeyEnvName}=cwd-secret\n`,
+      'utf8'
+    );
+    writeRuntimeEnv(
+      storeRoot,
+      `${roleModelProviderEnvName}=nvidia\n${nvidiaApiKeyEnvName}=\n`
+    );
+
+    try {
+      Reflect.deleteProperty(process.env, roleModelProviderEnvName);
+      Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
+      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
+      process.chdir(cwdRoot);
+
+      const exitCode = await runChatCliFromArgs(
+        ['--store', storeRoot, '--new-session', 'selected-store-env'],
+        {
+          stdin: Readable.from(['hello\n']),
+          stdout: collect(() => {}),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        }
+      );
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(`NVIDIA provider requires ${nvidiaApiKeyEnvName}.`);
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(roleModelProviderEnvName, previousProvider);
+      restoreProcessEnvValue(nvidiaApiKeyEnvName, previousApiKey);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
   it('loads the runtime store env before selecting the default chat provider', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-provider-env-'));
     const sessionId = 'runtime-env-provider';
@@ -85,6 +132,33 @@ describe('chat CLI provider selection', () => {
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain(`NVIDIA provider requires ${nvidiaApiKeyEnvName}.`);
+  });
+
+  it('keeps injected env values ahead of the runtime store env', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-injected-env-'));
+    let stderr = '';
+
+    writeRuntimeEnv(
+      storeRoot,
+      `${roleModelProviderEnvName}=nvidia\n${nvidiaApiKeyEnvName}=\n`
+    );
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'injected-env-provider'],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        env: {
+          [roleModelProviderEnvName]: 'local'
+        }
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
   });
 
   it('lets --provider take precedence over the runtime store env', async () => {
@@ -557,6 +631,15 @@ function writeRuntimeEnv(storeRoot: string, content: string): void {
     content,
     'utf8'
   );
+}
+
+function restoreProcessEnvValue(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    Reflect.deleteProperty(process.env, name);
+    return;
+  }
+
+  process.env[name] = value;
 }
 
 function collect(write: (chunk: string) => void): Writable {
