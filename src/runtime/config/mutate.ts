@@ -3,11 +3,12 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 import { createLocalRuntimeStorageLayout } from '../storage/layout.ts';
 import {
@@ -38,6 +39,13 @@ export type RuntimeConfigMutationResult = {
   readonly envPath: string;
   readonly config: Project02RuntimeConfig;
 };
+
+export class RuntimeConfigMutationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'RuntimeConfigMutationError';
+  }
+}
 
 export function applyRuntimeConfigMutation(
   options: ApplyRuntimeConfigMutationOptions
@@ -75,6 +83,15 @@ export function applyRuntimeConfigMutation(
     nextEffectiveStoreRoot === undefined ? {} : { storeRoot: nextEffectiveStoreRoot }
   );
   const envPath = nextEffectiveLayout.envPath;
+
+  if (
+    options.operation.kind === 'secret_set' &&
+    pathsAlias(selectedConfigPath, envPath)
+  ) {
+    throw new TypeError(
+      'Cannot write runtime config secret because the selected config path and runtime env path resolve to the same file.'
+    );
+  }
 
   const secretWrite =
     options.operation.kind === 'secret_set'
@@ -504,7 +521,14 @@ function prepareEnvSecretWrite(
 }
 
 function writePreparedEnvSecret(secretWrite: PreparedEnvSecretWrite): void {
-  writeTextAtomic(secretWrite.envPath, secretWrite.value, secretWrite.mode);
+  try {
+    writeTextAtomic(secretWrite.envPath, secretWrite.value, secretWrite.mode);
+  } catch (error: unknown) {
+    throw mutationFileWriteError(
+      `Could not write runtime config env file at ${secretWrite.envPath}.`,
+      error
+    );
+  }
 }
 
 function restorePreviousConfigState(
@@ -522,9 +546,10 @@ function restorePreviousConfigState(
     writeTextAtomic(path, previousConfigText, 0o600);
     return undefined;
   } catch (error: unknown) {
-    return error instanceof Error
-      ? error
-      : new Error('Could not restore runtime config state.', { cause: error });
+    return mutationFileWriteError(
+      `Could not restore runtime config file at ${path}.`,
+      error
+    );
   }
 }
 
@@ -687,7 +712,14 @@ function writeJsonAtomic(
   value: Project02RuntimeConfig,
   mode: number
 ): void {
-  writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`, mode);
+  try {
+    writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`, mode);
+  } catch (error: unknown) {
+    throw mutationFileWriteError(
+      `Could not write runtime config file at ${path}.`,
+      error
+    );
+  }
 }
 
 function writeTextAtomic(path: string, value: string, mode: number): void {
@@ -706,6 +738,27 @@ function chmodIfSupported(path: string, mode: number): void {
   } catch {
     // Some filesystems do not support chmod; config redaction remains enforced.
   }
+}
+
+function pathsAlias(left: string, right: string): boolean {
+  return canonicalMutationPath(left) === canonicalMutationPath(right);
+}
+
+function canonicalMutationPath(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+function mutationFileWriteError(
+  message: string,
+  cause: unknown
+): RuntimeConfigMutationError {
+  return cause instanceof RuntimeConfigMutationError
+    ? cause
+    : new RuntimeConfigMutationError(message, { cause });
 }
 
 function parseConfigPath(path: string): readonly string[] {

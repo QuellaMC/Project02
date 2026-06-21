@@ -8,6 +8,7 @@ import {
   getRedactedRuntimeConfigValueAtPath,
   loadProject02RuntimeConfig,
   resolveConfiguredProject02PluginActivation,
+  RuntimeConfigMutationError,
   type LoadedProject02RuntimeConfig,
   type RuntimePluginFactory,
   type RuntimeConfigMutationOperation,
@@ -150,6 +151,7 @@ function runRuntimeConfigCliFromArgsSync(
       error instanceof RuntimeConfigCliUsageError ||
       error instanceof RuntimeLocationCliUsageError ||
       error instanceof RuntimeEnvFileError ||
+      error instanceof RuntimeConfigMutationError ||
       error instanceof TypeError ||
       isLocalRuntimeTerminalError(error)
     ) {
@@ -347,6 +349,7 @@ function formatTerminalErrorMessage(
     | RuntimeConfigCliUsageError
     | RuntimeLocationCliUsageError
     | RuntimeEnvFileError
+    | RuntimeConfigMutationError
     | TypeError
     | Parameters<typeof formatLocalRuntimeTerminalError>[0]
 ): string {
@@ -354,6 +357,7 @@ function formatTerminalErrorMessage(
     error instanceof RuntimeConfigCliUsageError ||
     error instanceof RuntimeLocationCliUsageError ||
     error instanceof RuntimeEnvFileError ||
+    error instanceof RuntimeConfigMutationError ||
     error instanceof TypeError
   ) {
     return error.message;

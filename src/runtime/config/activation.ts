@@ -5,6 +5,7 @@ import {
 } from '../../plugins/builtin/character-state/index.ts';
 import {
   createRuntimePluginHost,
+  runtimePluginDiscoveryPluginId,
   type RuntimePluginHost
 } from '../../plugins/host.ts';
 import type {
@@ -222,7 +223,10 @@ export function resolveRuntimePluginActivation(options: {
     options.pluginManifests ?? options.plugins?.map((plugin) => plugin.manifest) ?? [];
   const config = options.loadedConfig.config;
   const duplicateManifestDiagnostics =
-    duplicatePluginManifestIdDiagnostics(pluginManifests);
+    duplicatePluginManifestIdDiagnostics({
+      pluginManifests,
+      reservedPluginIds: [runtimePluginDiscoveryPluginId]
+    });
   const pluginIds = new Set([
     ...pluginManifests.map((manifest) => manifest.id),
     ...(options.additionalKnownPluginIds ?? [])
@@ -279,6 +283,7 @@ export function resolveRuntimePluginActivation(options: {
     ...(config?.defaultMemoryProvider === undefined
       ? {}
       : { configDefaultMemoryProvider: config.defaultMemoryProvider }),
+    pluginManifests,
     memoryProviderManifests: pluginManifests.filter(
       (manifest) => manifest.kind === 'memory_provider'
     ),
@@ -720,13 +725,14 @@ function unknownPluginDiagnostics(options: {
   );
 }
 
-function duplicatePluginManifestIdDiagnostics(
-  pluginManifests: readonly RuntimePluginManifest[]
-): readonly RuntimeConfigDiagnostic[] {
-  const seen = new Set<string>();
+function duplicatePluginManifestIdDiagnostics(options: {
+  readonly pluginManifests: readonly RuntimePluginManifest[];
+  readonly reservedPluginIds: readonly string[];
+}): readonly RuntimeConfigDiagnostic[] {
+  const seen = new Set<string>(options.reservedPluginIds);
   const duplicateIds = new Set<string>();
 
-  for (const manifest of pluginManifests) {
+  for (const manifest of options.pluginManifests) {
     if (seen.has(manifest.id)) {
       duplicateIds.add(manifest.id);
       continue;
@@ -750,6 +756,7 @@ function duplicatePluginManifestIdDiagnostics(
 
 function defaultMemoryProviderDecision(options: {
   readonly configDefaultMemoryProvider?: string;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly memoryProviderManifests: readonly RuntimePluginManifest[];
   readonly enabledPluginManifests: readonly RuntimePluginManifest[];
 }): {
@@ -763,6 +770,9 @@ function defaultMemoryProviderDecision(options: {
   );
 
   if (options.configDefaultMemoryProvider !== undefined) {
+    const knownPlugin = options.pluginManifests.find(
+      (manifest) => manifest.id === options.configDefaultMemoryProvider
+    );
     const knownMemoryProvider = options.memoryProviderManifests.find(
       (manifest) => manifest.id === options.configDefaultMemoryProvider
     );
@@ -771,6 +781,22 @@ function defaultMemoryProviderDecision(options: {
     );
 
     if (selected === undefined) {
+      if (knownPlugin !== undefined && knownPlugin.kind !== 'memory_provider') {
+        return {
+          activeMemoryProviderIds: [],
+          ambiguous: false,
+          diagnostics: [
+            diagnostic(
+              'error',
+              'default_memory_provider_not_memory_provider',
+              `Default memory provider "${options.configDefaultMemoryProvider}" is a "${knownPlugin.kind}" plugin, not a memory_provider plugin.`,
+              'defaultMemoryProvider',
+              { pluginId: knownPlugin.id }
+            )
+          ]
+        };
+      }
+
       return {
         activeMemoryProviderIds: [],
         ambiguous: false,

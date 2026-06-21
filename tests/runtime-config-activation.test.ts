@@ -13,6 +13,7 @@ import {
 } from '../src/runtime/config/index.ts';
 import {
   createRuntimePlugin,
+  runtimePluginDiscoveryPluginId,
   runtimePluginContractVersion
 } from '../src/plugins/index.ts';
 
@@ -274,6 +275,57 @@ describe('runtime config activation diagnostics', () => {
     expect(stdout).not.toContain('duplicate-manifest-secret');
   });
 
+  it('fails check for manifest ids reserved by the host discovery plugin', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-reserved-discovery-id-')
+    );
+    const plugin = firstPartyPlugin(runtimePluginDiscoveryPluginId);
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          'fixture.discovery-collision': {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error('reserved id check must not construct factories');
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(1);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_duplicate_plugin_manifest_id',
+          path: `plugins.${runtimePluginDiscoveryPluginId}`,
+          pluginId: runtimePluginDiscoveryPluginId
+        })
+      ])
+    );
+    expect(output.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: runtimePluginDiscoveryPluginId,
+        activationStatus: 'blocked',
+        enabled: false
+      })
+    );
+  });
+
   it('rejects manifest-backed factories that return a different same-id manifest', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-manifest-mismatch-')
@@ -429,6 +481,47 @@ function pluginWithAdditionalConfigField(id: string) {
           }
         ]
       }
+    }
+  });
+}
+
+function firstPartyPlugin(id: string) {
+  return createRuntimePlugin({
+    manifest: {
+      id,
+      displayName: 'First Party',
+      version: '1.0.0',
+      kind: 'first_party',
+      description: 'Test first-party plugin.',
+      contractVersion: runtimePluginContractVersion,
+      compatibility: {
+        hostContractVersions: [runtimePluginContractVersion],
+        sourceSystem: 'project02'
+      },
+      declaredPlugins: ['plugin_discovery'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'first_party',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'degrade',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test_first_party']
+      },
+      requestedApis: []
     }
   });
 }

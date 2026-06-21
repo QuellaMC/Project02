@@ -1432,6 +1432,50 @@ describe('runtime config loading and resolution', () => {
     expect(stdout).toContain('"severity": "error"');
   });
 
+  it('treats a known non-memory default memory provider as an activation error', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-memory-default-non-memory-')
+    );
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: 'character-state'
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+    });
+
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_not_memory_provider',
+          path: 'defaultMemoryProvider',
+          pluginId: 'character-state'
+        })
+      ])
+    );
+    expect(configured.activation.plugins[0]).toMatchObject({
+      pluginId: 'character-state',
+      enabled: false,
+      activationStatus: 'blocked'
+    });
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {})
+      })
+    ).toBe(1);
+    expect(stdout).toContain('"default_memory_provider_not_memory_provider"');
+    expect(stdout).toContain('"severity": "error"');
+  });
+
   it('treats an inactive explicit default memory provider as an activation error when another provider is enabled', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-memory-default-inactive-'));
     const enabledPlugin = memoryProviderPlugin('memory.enabled');
@@ -1673,6 +1717,141 @@ describe('runtime config CLI', () => {
     expect(readFileSync(join(storeRoot, '.env'), 'utf8')).toContain(
       'MEM0_API_KEY="stored-secret"'
     );
+  });
+
+  it.each([
+    {
+      label: 'explicit --config',
+      args(configPath: string) {
+        return [
+          '--config',
+          configPath,
+          'secret',
+          'set',
+          'mem0-local',
+          'cloudApiKey',
+          'MEM0_API_KEY'
+        ] as const;
+      },
+      env(configPath: string) {
+        void configPath;
+        return { MEM0_API_KEY: 'stored-secret' };
+      }
+    },
+    {
+      label: 'PROJECT02_RUNTIME_CONFIG',
+      args() {
+        return [
+          'secret',
+          'set',
+          'mem0-local',
+          'cloudApiKey',
+          'MEM0_API_KEY'
+        ] as const;
+      },
+      env(configPath: string) {
+        return {
+          PROJECT02_RUNTIME_CONFIG: configPath,
+          MEM0_API_KEY: 'stored-secret'
+        };
+      }
+    }
+  ])('rejects secret writes when $label aliases the runtime env path', async (example) => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-alias-'));
+    const configPath = writeRuntimeConfig(join(storeRoot, '.env'), { storeRoot });
+    const originalConfig = readFileSync(configPath, 'utf8');
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(example.args(configPath), {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        env: example.env(configPath)
+      })
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toContain(
+      'selected config path and runtime env path resolve to the same file'
+    );
+    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
+    expect(readFileSync(configPath, 'utf8')).not.toContain('stored-secret');
+  });
+
+  it('reports config write failures without leaking raw filesystem exceptions', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'project02-config-write-blocked-'));
+    const blockedParent = join(root, 'not-a-directory');
+    const configPath = join(blockedParent, 'runtime.json');
+    let stdout = '';
+    let stderr = '';
+
+    writeFileSync(blockedParent, 'blocks recursive mkdir', 'utf8');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'set', 'storeRoot', 'next-store'],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        }
+      )
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toBe(`Error: Could not write runtime config file at ${configPath}.\n`);
+    expect(stderr).not.toContain('EEXIST');
+  });
+
+  it('reports env secret write failures and rolls back the config update', async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-env-blocked-'));
+    const blockedStoreRoot = join(configRoot, 'not-a-directory');
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      storeRoot: blockedStoreRoot
+    });
+    const originalConfig = readFileSync(configPath, 'utf8');
+    let stdout = '';
+    let stderr = '';
+
+    writeFileSync(blockedStoreRoot, 'blocks recursive mkdir', 'utf8');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        [
+          '--config',
+          configPath,
+          'secret',
+          'set',
+          'mem0-local',
+          'cloudApiKey',
+          'MEM0_API_KEY'
+        ],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          }),
+          env: { MEM0_API_KEY: 'stored-secret' }
+        }
+      )
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toBe(
+      `Error: Could not write runtime config env file at ${join(blockedStoreRoot, '.env')}.\n`
+    );
+    expect(stderr).not.toContain('EEXIST');
+    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
   });
 
   it('does not persist a new env secret when an explicit config write fails', () => {
