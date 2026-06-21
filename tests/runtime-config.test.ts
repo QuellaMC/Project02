@@ -2514,6 +2514,53 @@ describe('runtime config CLI', () => {
     }
   });
 
+  it('rejects carriage-return dotenv secrets without changing config or env files', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-crlf-'));
+    const envVar = 'PROJECT02_SECRET_CRLF_PRIVATE_KEY';
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'mem0-local': {
+          config: {
+            cloudApiKey: { $env: 'PROJECT02_EXISTING_SECRET' }
+          }
+        }
+      }
+    });
+    const envPath = join(storeRoot, '.env');
+    const originalConfig = readFileSync(configPath, 'utf8');
+    const originalEnv = [
+      '# keep existing env material',
+      'PROJECT02_EXISTING_SECRET="keep-existing"',
+      ''
+    ].join('\n');
+    const secretValue = '-----BEGIN PRIVATE KEY-----\r\nsecret-line\r\n-----END PRIVATE KEY-----';
+    let stdout = '';
+    let stderr = '';
+
+    writeFileSync(envPath, originalEnv, 'utf8');
+    Reflect.deleteProperty(process.env, envVar);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          }),
+          env: { [envVar]: secretValue }
+        }
+      )
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toContain('does not preserve carriage returns');
+    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
+    expect(readFileSync(envPath, 'utf8')).toBe(originalEnv);
+  });
+
   it('rejects unquoted dotenv fallback secrets that start with a quote delimiter', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-secret-quote-start-')

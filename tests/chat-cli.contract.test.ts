@@ -407,6 +407,56 @@ describe('chat CLI plugin lifecycle', () => {
     });
   });
 
+  it('aborts manifest-backed factory construction failures before creating a durable session', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-factory-failure-'));
+    const sessionId = 'manifest-factory-failure';
+    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const configuredPlugin = createSessionEndPlugin(() => {});
+    let factoryCalls = 0;
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [configuredPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', sessionId],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [configuredPlugin.manifest.id]: {
+            manifest: configuredPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error('manifest-backed factory failed during construction');
+            }
+          }
+        }
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(factoryCalls).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toContain(
+      'Configured plugin construction failed before creating a durable session.'
+    );
+    expect(existsSync(layout.schemaPath)).toBe(false);
+    expect(existsSync(layout.sessionCatalogPath)).toBe(false);
+    expect(existsSync(layout.sessionsRoot)).toBe(false);
+  });
+
   it('aborts config-enabled legacy function factories before creating a durable session', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-legacy-preflight-'));
     const sessionId = 'legacy-unchecked-session';

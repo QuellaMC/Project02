@@ -45,6 +45,7 @@ import {
 } from '../runtime/storage/session-store.ts';
 import {
   createDefaultProject02PluginHost,
+  createRuntimePluginHost,
   createRuntimePluginContext,
   type RuntimePluginHookHostResult,
   type RuntimePluginHost
@@ -145,6 +146,10 @@ type DurableChatRuntime = {
   readonly logStore: RuntimeLogStore;
 };
 
+type ConfiguredChatPluginHost = Awaited<
+  ReturnType<typeof createConfiguredProject02PluginHost>
+>;
+
 const exitCommand = '/exit';
 const modelTextToggleCommand = '/model-text';
 const showModelTextCommand = '/show-model-text';
@@ -157,6 +162,13 @@ class ChatCliUsageError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ChatCliUsageError';
+  }
+}
+
+class ChatCliStartupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ChatCliStartupError';
   }
 }
 
@@ -224,14 +236,11 @@ export async function runChatCliFromArgs(
     } satisfies ChatCliArgs;
 
     validateDurableSessionArgs(runtimeArgs);
-    const durableRuntime = await createDurableChatRuntime(runtimeArgs);
     const configuredHost =
       options.pluginHost === undefined
-        ? await createConfiguredProject02PluginHost({
+        ? await createConfiguredChatPluginHostBeforeSession({
             loadedConfig,
             storeRoot: resolvedRuntimeConfig.storeRoot,
-            sessionId: durableRuntime.session.id,
-            sessionIdentity: durableRuntime.session,
             env: runtimeEnv,
             ...(options.factories === undefined ? {} : { factories: options.factories })
           })
@@ -242,7 +251,12 @@ export async function runChatCliFromArgs(
         'Runtime config activation failed'
       );
     }
-    const pluginHost = options.pluginHost ?? configuredHost?.host;
+    const durableRuntime = await createDurableChatRuntime(runtimeArgs);
+    const configuredSessionHost = configuredPluginHostForSession(
+      configuredHost,
+      durableRuntime.session
+    );
+    const pluginHost = options.pluginHost ?? configuredSessionHost;
     const roleModelAdapter = createSelectedRoleModelAdapter(runtimeArgs, runtimeEnv);
     return await runChatCli({
       ...options,
@@ -254,6 +268,7 @@ export async function runChatCliFromArgs(
   } catch (error: unknown) {
     if (
       error instanceof ChatCliUsageError ||
+      error instanceof ChatCliStartupError ||
       error instanceof RuntimeLocationCliUsageError ||
       error instanceof RuntimeEnvFileError ||
       isLocalRuntimeTerminalError(error)
@@ -264,6 +279,40 @@ export async function runChatCliFromArgs(
 
     throw error;
   }
+}
+
+async function createConfiguredChatPluginHostBeforeSession(options: {
+  readonly loadedConfig: Parameters<
+    typeof createConfiguredProject02PluginHost
+  >[0]['loadedConfig'];
+  readonly storeRoot: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
+}): Promise<ConfiguredChatPluginHost> {
+  try {
+    return await createConfiguredProject02PluginHost(options);
+  } catch {
+    throw new ChatCliStartupError(
+      'Configured plugin construction failed before creating a durable session.'
+    );
+  }
+}
+
+function configuredPluginHostForSession(
+  configuredHost: ConfiguredChatPluginHost | undefined,
+  session: ConversationSession
+): RuntimePluginHost | undefined {
+  if (configuredHost === undefined) {
+    return undefined;
+  }
+
+  return createRuntimePluginHost({
+    plugins: configuredHost.plugins,
+    enabledPluginIds: configuredHost.activation.enabledPluginIds,
+    storeRoot: configuredHost.resolvedConfig.storeRoot,
+    sessionId: session.id,
+    sessionIdentity: session
+  });
 }
 
 function defaultDotEnvForChatRuntimeLocation(
@@ -1049,12 +1098,14 @@ function isMissingDefaultSessionStore(error: unknown): boolean {
 function formatTerminalErrorMessage(
   error:
     | ChatCliUsageError
+    | ChatCliStartupError
     | RuntimeLocationCliUsageError
     | RuntimeEnvFileError
     | LocalRuntimeTerminalError
 ): string {
   if (
     error instanceof ChatCliUsageError ||
+    error instanceof ChatCliStartupError ||
     error instanceof RuntimeLocationCliUsageError ||
     error instanceof RuntimeEnvFileError
   ) {
@@ -1068,11 +1119,13 @@ function isFormattedTerminalError(
   error: unknown
 ): error is
   | ChatCliUsageError
+  | ChatCliStartupError
   | RuntimeLocationCliUsageError
   | RuntimeEnvFileError
   | LocalRuntimeTerminalError {
   return (
     error instanceof ChatCliUsageError ||
+    error instanceof ChatCliStartupError ||
     error instanceof RuntimeLocationCliUsageError ||
     error instanceof RuntimeEnvFileError ||
     isLocalRuntimeTerminalError(error)

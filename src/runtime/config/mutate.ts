@@ -695,6 +695,12 @@ function dotenvQuotedValueContinuationEndIndex(
 }
 
 function formatDotenvSecretValue(value: string): string {
+  if (value.includes('\r')) {
+    throw new TypeError(
+      'Secret value cannot be written to the runtime config env file because dotenv parsing does not preserve carriage returns.'
+    );
+  }
+
   const delimiters = value.includes('\\')
     ? (["'", '`'] as const)
     : (['"', "'", '`'] as const);
