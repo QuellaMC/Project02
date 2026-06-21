@@ -407,12 +407,74 @@ describe('chat CLI plugin lifecycle', () => {
     });
   });
 
+  it('closes configured pre-session plugins when later session creation fails', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-cleanup-'));
+    const sessionId = 'pre-session-cleanup';
+    const configuredPlugin = createSessionEndPlugin(() => {});
+    const sessionEndContexts: RuntimePluginContext[] = [];
+    let factoryCalls = 0;
+    let stdout = '';
+    let stderr = '';
+
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-22T00:00:00.000Z'
+    });
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [configuredPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', sessionId],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [configuredPlugin.manifest.id]: {
+            manifest: configuredPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+
+              return createSessionEndPlugin((context) => {
+                sessionEndContexts.push(context);
+              });
+            }
+          }
+        }
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(factoryCalls).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toContain(
+      `Local runtime session "${sessionId}" already exists.`
+    );
+    expect(sessionEndContexts).toHaveLength(1);
+    expect(sessionEndContexts[0]).toMatchObject({
+      sessionId
+    });
+    expect(sessionEndContexts[0]?.currentUserMessage).toContain(
+      'chat startup failed'
+    );
+  });
+
   it('aborts manifest-backed factory construction failures before creating a durable session', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-factory-failure-'));
     const sessionId = 'manifest-factory-failure';
     const layout = createLocalRuntimeStorageLayout({ storeRoot });
     const configuredPlugin = createSessionEndPlugin(() => {});
     let factoryCalls = 0;
+    let cleanupCalls = 0;
     let stdout = '';
     let stderr = '';
 
@@ -439,6 +501,9 @@ describe('chat CLI plugin lifecycle', () => {
             manifest: configuredPlugin.manifest,
             create() {
               factoryCalls += 1;
+              createSessionEndPlugin(() => {
+                cleanupCalls += 1;
+              });
               throw new Error('manifest-backed factory failed during construction');
             }
           }
@@ -448,6 +513,7 @@ describe('chat CLI plugin lifecycle', () => {
 
     expect(exitCode).toBe(1);
     expect(factoryCalls).toBe(1);
+    expect(cleanupCalls).toBe(0);
     expect(stdout).toBe('');
     expect(stderr).toContain(
       'Configured plugin construction failed before creating a durable session.'

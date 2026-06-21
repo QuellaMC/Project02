@@ -32,7 +32,8 @@ import {
   loadProject02RuntimeConfig,
   type Project02ConfiguredPluginHost,
   type RuntimeConfigDiagnostic,
-  type RuntimeConfigInspectShape
+  type RuntimeConfigInspectShape,
+  type RuntimePluginFactory
 } from '../runtime/config/index.ts';
 import {
   parseRuntimeLocationFlag,
@@ -40,13 +41,17 @@ import {
   type RuntimeLocationCliState
 } from './runtime-location.ts';
 import {
+  defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
+  readDefaultDotEnvFile,
   RuntimeEnvFileError
 } from './runtime-env.ts';
 
 type InspectCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
 };
 
 type InspectCliArgs =
@@ -90,6 +95,13 @@ type InspectConfiguredPlugin = {
   readonly activationReasons: readonly string[];
   readonly diagnostics: readonly unknown[];
   readonly config?: unknown;
+};
+
+type InspectRuntimeOptions = {
+  readonly configEnv: NodeJS.ProcessEnv;
+  readonly runtimeEnv: NodeJS.ProcessEnv;
+  readonly runtimeEnvDefaults?: NodeJS.ProcessEnv;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
 };
 
 type InspectTurnEvidence = {
@@ -285,16 +297,34 @@ export async function runInspectCliFromArgs(
   options: InspectCliOptions
 ): Promise<number> {
   try {
+    const explicitEnv =
+      options.env === undefined || options.env === process.env
+        ? undefined
+        : options.env;
+    const defaultEnv =
+      explicitEnv === undefined ? readDefaultDotEnvFile() : undefined;
     const parsedArgs = parseInspectCliArgs(args);
+    const defaultEnvForLocation = defaultDotEnvForRuntimeLocation(
+      defaultEnv ?? {},
+      parsedArgs
+    );
+    const runtimeOptions = {
+      configEnv: explicitEnv ?? { ...defaultEnvForLocation, ...process.env },
+      runtimeEnv: explicitEnv ?? process.env,
+      ...(defaultEnv === undefined
+        ? {}
+        : { runtimeEnvDefaults: defaultEnvForLocation }),
+      ...(options.factories === undefined ? {} : { factories: options.factories })
+    } satisfies InspectRuntimeOptions;
 
     validateInspectCliArgs(parsedArgs);
 
     if (parsedArgs.mode === 'sessions') {
-      await writeSessionList(parsedArgs, options.stdout);
+      await writeSessionList(parsedArgs, options.stdout, runtimeOptions);
       return 0;
     }
 
-    await writeSessionEvidence(parsedArgs, options.stdout);
+    await writeSessionEvidence(parsedArgs, options.stdout, runtimeOptions);
     return 0;
   } catch (error: unknown) {
     if (
@@ -407,9 +437,10 @@ function validateInspectCliArgs(args: InspectCliArgs): void {
 
 async function writeSessionList(
   args: InspectCliArgs & { readonly mode: 'sessions' },
-  stdout: NodeJS.WritableStream
+  stdout: NodeJS.WritableStream,
+  runtimeOptions: InspectRuntimeOptions
 ): Promise<void> {
-  const runtimeConfig = await inspectRuntimeConfig(args);
+  const runtimeConfig = await inspectRuntimeConfig(args, runtimeOptions);
   const sessionStore = createLocalRuntimeSessionStore({
     storeRoot: runtimeConfig.resolvedConfig.storeRoot
   });
@@ -425,9 +456,10 @@ async function writeSessionList(
 
 async function writeSessionEvidence(
   args: InspectCliArgs & { readonly mode: 'session' },
-  stdout: NodeJS.WritableStream
+  stdout: NodeJS.WritableStream,
+  runtimeOptions: InspectRuntimeOptions
 ): Promise<void> {
-  const runtimeConfig = await inspectRuntimeConfig(args);
+  const runtimeConfig = await inspectRuntimeConfig(args, runtimeOptions);
   const storage = {
     storeRoot: runtimeConfig.resolvedConfig.storeRoot
   };
@@ -462,11 +494,18 @@ async function writeSessionEvidence(
 async function inspectRuntimeConfig(args: {
   readonly storeRoot?: string;
   readonly configPath?: string;
-}): Promise<Project02ConfiguredPluginHost> {
-  const loadedConfig = loadProject02RuntimeConfig(args);
+}, options: InspectRuntimeOptions): Promise<Project02ConfiguredPluginHost> {
+  const loadedConfig = loadProject02RuntimeConfig({
+    ...args,
+    env: options.configEnv
+  });
   const runtimeEnv = loadRuntimeConfigEnvFile({
     loadedConfig,
-    ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot })
+    ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
+    env: options.runtimeEnv,
+    ...(options.runtimeEnvDefaults === undefined
+      ? {}
+      : { envDefaults: options.runtimeEnvDefaults })
   });
 
   if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
@@ -478,7 +517,8 @@ async function inspectRuntimeConfig(args: {
   return await createConfiguredProject02PluginHost({
     loadedConfig,
     ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
-    env: runtimeEnv
+    env: runtimeEnv,
+    ...(options.factories === undefined ? {} : { factories: options.factories })
   });
 }
 

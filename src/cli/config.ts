@@ -24,7 +24,9 @@ import {
   type RuntimeLocationCliState
 } from './runtime-location.ts';
 import {
+  defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
+  readDefaultDotEnvFile,
   runtimeConfigEnvPathForLocation,
   RuntimeEnvFileError
 } from './runtime-env.ts';
@@ -88,16 +90,22 @@ function runRuntimeConfigCliFromArgsSync(
     }
 
     if (parsed.command.kind === 'check') {
+      const defaultEnv =
+        options.env === undefined || options.env === process.env
+          ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), parsed.location)
+          : {};
+      const configEnv = { ...defaultEnv, ...env };
       const loaded = loadProject02RuntimeConfig({
         ...parsed.location,
-        env
+        env: configEnv
       });
       const effectiveEnv = loadRuntimeConfigEnvFile({
         loadedConfig: loaded,
         ...(parsed.location.storeRoot === undefined
           ? {}
           : { storeRoot: parsed.location.storeRoot }),
-        env
+        env,
+        envDefaults: defaultEnv
       });
       const configured = resolveConfiguredProject02PluginActivation({
         loadedConfig: loaded,

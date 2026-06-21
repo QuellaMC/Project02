@@ -56,7 +56,6 @@ import {
   loadProject02RuntimeConfig,
   resolveConfiguredProject02PluginActivation,
   resolveProject02RuntimeConfig,
-  runtimeConfigEnvVarName,
   type RuntimeConfigDiagnostic,
   type RuntimePluginFactory
 } from '../runtime/config/index.ts';
@@ -72,6 +71,7 @@ import {
   type RuntimeLocationCliState
 } from './runtime-location.ts';
 import {
+  defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
   RuntimeEnvFileError
@@ -156,6 +156,8 @@ const showModelTextCommand = '/show-model-text';
 const hideModelTextCommand = '/hide-model-text';
 const promptText = 'You: ';
 const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
+const startupFailurePluginCleanupMessage =
+  'chat startup failed before opening a durable session';
 const roleModelProviderEnvName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 
 class ChatCliUsageError extends Error {
@@ -184,7 +186,7 @@ export async function runChatCliFromArgs(
     const defaultEnv =
       explicitEnv === undefined ? readDefaultDotEnvFile() : undefined;
     const parsedArgs = parseChatCliArgs(args);
-    const defaultEnvForLocation = defaultDotEnvForChatRuntimeLocation(
+    const defaultEnvForLocation = defaultDotEnvForRuntimeLocation(
       defaultEnv ?? {},
       parsedArgs
     );
@@ -251,19 +253,13 @@ export async function runChatCliFromArgs(
         'Runtime config activation failed'
       );
     }
-    const durableRuntime = await createDurableChatRuntime(runtimeArgs);
-    const configuredSessionHost = configuredPluginHostForSession(
-      configuredHost,
-      durableRuntime.session
-    );
-    const pluginHost = options.pluginHost ?? configuredSessionHost;
-    const roleModelAdapter = createSelectedRoleModelAdapter(runtimeArgs, runtimeEnv);
-    return await runChatCli({
-      ...options,
-      ...durableRuntime,
-      ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
-      ...(pluginHost === undefined ? {} : { pluginHost }),
-      traceMode: options.traceMode === true || parsedArgs.traceMode
+
+    return await runChatCliAfterConfiguredHost({
+      options,
+      runtimeArgs,
+      runtimeEnv,
+      parsedTraceMode: parsedArgs.traceMode,
+      configuredHost
     });
   } catch (error: unknown) {
     if (
@@ -279,6 +275,65 @@ export async function runChatCliFromArgs(
 
     throw error;
   }
+}
+
+async function runChatCliAfterConfiguredHost(options: {
+  readonly options: ChatCliOptions;
+  readonly runtimeArgs: ChatCliArgs;
+  readonly runtimeEnv: NodeJS.ProcessEnv;
+  readonly parsedTraceMode: boolean;
+  readonly configuredHost: ConfiguredChatPluginHost | undefined;
+}): Promise<number> {
+  let durableRuntime: DurableChatRuntime;
+  let pluginHost: RuntimePluginHost | undefined;
+  let roleModelAdapter: RoleModelAdapter | undefined;
+
+  try {
+    durableRuntime = await createDurableChatRuntime(options.runtimeArgs);
+    const configuredSessionHost = configuredPluginHostForSession(
+      options.configuredHost,
+      durableRuntime.session
+    );
+    pluginHost = options.options.pluginHost ?? configuredSessionHost;
+    roleModelAdapter = createSelectedRoleModelAdapter(
+      options.runtimeArgs,
+      options.runtimeEnv
+    );
+  } catch (error: unknown) {
+    if (options.configuredHost !== undefined) {
+      await cleanupConfiguredChatPluginHostAfterStartupFailure({
+        configuredHost: options.configuredHost,
+        args: options.runtimeArgs
+      });
+    }
+
+    throw error;
+  }
+
+  return await runChatCli({
+    ...options.options,
+    ...durableRuntime,
+    ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
+    ...(pluginHost === undefined ? {} : { pluginHost }),
+    traceMode: options.options.traceMode === true || options.parsedTraceMode
+  });
+}
+
+async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
+  readonly configuredHost: ConfiguredChatPluginHost;
+  readonly args: ChatCliArgs;
+}): Promise<void> {
+  await options.configuredHost.host.onSessionEnd(
+    createRuntimePluginContext({
+      ...createRuntimeEventIdentity(),
+      sessionId: normalizeLocalRuntimeSessionId(
+        options.args.newSessionId ?? options.args.sessionId
+      ),
+      eventType: 'USER_MESSAGE',
+      currentUserMessage: startupFailurePluginCleanupMessage,
+      character: createConversationSession().character
+    })
+  );
 }
 
 async function createConfiguredChatPluginHostBeforeSession(options: {
@@ -313,22 +368,6 @@ function configuredPluginHostForSession(
     sessionId: session.id,
     sessionIdentity: session
   });
-}
-
-function defaultDotEnvForChatRuntimeLocation(
-  defaultEnv: NodeJS.ProcessEnv,
-  args: Pick<ChatCliArgs, 'configPath' | 'storeRoot'>
-): NodeJS.ProcessEnv {
-  if (
-    defaultEnv[runtimeConfigEnvVarName] === undefined ||
-    (args.configPath === undefined && args.storeRoot === undefined)
-  ) {
-    return defaultEnv;
-  }
-
-  const env = { ...defaultEnv };
-  Reflect.deleteProperty(env, runtimeConfigEnvVarName);
-  return env;
 }
 
 function assertNoRuntimeConfigErrors(

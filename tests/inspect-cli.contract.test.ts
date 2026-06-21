@@ -25,7 +25,15 @@ import type {
   RoleModelAdapter
 } from '../src/role-model/loop.ts';
 import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
-import { runtimeConfigVersion } from '../src/runtime/config/index.ts';
+import {
+  runtimeConfigEnvVarName,
+  runtimeConfigVersion
+} from '../src/runtime/config/index.ts';
+import {
+  createRuntimePlugin,
+  runtimePluginContractVersion,
+  type RuntimePlugin
+} from '../src/plugins/types.ts';
 
 describe('inspect CLI plugin evidence', () => {
   it('shows model rounds and per-tool plugin events', async () => {
@@ -112,26 +120,17 @@ describe('inspect CLI plugin evidence', () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-config-'));
     const configPath = join(storeRoot, 'config.json');
 
-    writeFileSync(
-      configPath,
-      `${JSON.stringify(
-        {
-          version: runtimeConfigVersion,
-          storeRoot,
-          plugins: {
-            'unknown-plugin': {
-              enabled: true
-            },
-            'character-state': {
-              enabled: false
-            }
-          }
+    writeRuntimeConfig(configPath, {
+      storeRoot,
+      plugins: {
+        'unknown-plugin': {
+          enabled: true
         },
-        null,
-        2
-      )}\n`,
-      'utf8'
-    );
+        'character-state': {
+          enabled: false
+        }
+      }
+    });
     await createLocalRuntimeSessionStore({ storeRoot }).createSession({
       sessionId: 'session-config',
       createdAt: '2026-06-21T00:00:00.000Z'
@@ -166,6 +165,190 @@ describe('inspect CLI plugin evidence', () => {
     expect(stdout).toContain('"activationDiagnostics"');
     expect(stdout).toContain('"runtime_config_unknown_plugin"');
     expect(stdout).toContain('"disabled_by_config"');
+  });
+
+  it('uses cwd dotenv runtime config selectors for unflagged inspect', async () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-cwd-env-'));
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-cwd-store-'));
+    const configPath = writeRuntimeConfig(join(cwdRoot, 'config.json'), {
+      storeRoot
+    });
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let stdout = '';
+
+    writeFileSync(
+      join(cwdRoot, '.env'),
+      `${runtimeConfigEnvVarName}=${configPath}\n`,
+      'utf8'
+    );
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'session-cwd-config',
+      createdAt: '2026-06-21T00:00:00.000Z'
+    });
+
+    try {
+      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
+      process.chdir(cwdRoot);
+
+      const exitCode = await runInspectCliFromArgs(['--sessions'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {})
+      });
+      const output = JSON.parse(stdout) as {
+        readonly runtimeConfig: {
+          readonly source: string;
+          readonly path: string;
+          readonly storeRoot: string;
+        };
+        readonly sessions: readonly { readonly sessionId: string }[];
+      };
+
+      expect(exitCode).toBe(0);
+      expect(output.runtimeConfig).toMatchObject({
+        source: 'env',
+        path: configPath,
+        storeRoot
+      });
+      expect(output.sessions).toContainEqual(
+        expect.objectContaining({
+          sessionId: 'session-cwd-config'
+        })
+      );
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
+  it('ignores cwd dotenv runtime config selectors when --store is explicit', async () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-cwd-store-'));
+    const defaultStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-inspect-default-store-')
+    );
+    const selectedStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-inspect-selected-store-')
+    );
+    const defaultConfigPath = writeRuntimeConfig(join(cwdRoot, 'config.json'), {
+      storeRoot: defaultStoreRoot
+    });
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let stdout = '';
+
+    writeFileSync(
+      join(cwdRoot, '.env'),
+      `${runtimeConfigEnvVarName}=${defaultConfigPath}\n`,
+      'utf8'
+    );
+    await createLocalRuntimeSessionStore({ storeRoot: selectedStoreRoot }).createSession({
+      sessionId: 'session-selected-store',
+      createdAt: '2026-06-21T00:00:00.000Z'
+    });
+
+    try {
+      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
+      process.chdir(cwdRoot);
+
+      const exitCode = await runInspectCliFromArgs(
+        ['--store', selectedStoreRoot, '--sessions'],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      );
+      const output = JSON.parse(stdout) as {
+        readonly runtimeConfig: {
+          readonly source: string;
+          readonly storeRoot: string;
+        };
+        readonly sessions: readonly { readonly sessionId: string }[];
+      };
+
+      expect(exitCode).toBe(0);
+      expect(output.runtimeConfig).toMatchObject({
+        source: 'none',
+        storeRoot: selectedStoreRoot
+      });
+      expect(output.sessions).toContainEqual(
+        expect.objectContaining({
+          sessionId: 'session-selected-store'
+        })
+      );
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
+  it('uses custom plugin factories for inspect activation output', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-factory-'));
+    const plugin = createInspectFixturePlugin();
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'session-custom-factory',
+      createdAt: '2026-06-21T00:00:00.000Z'
+    });
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+
+              return plugin;
+            }
+          }
+        }
+      }
+    );
+    const output = JSON.parse(stdout) as {
+      readonly activationDiagnostics: readonly { readonly code: string }[];
+      readonly plugins: readonly {
+        readonly pluginId: string;
+        readonly enabled: boolean;
+        readonly activationStatus: string;
+        readonly activationReasons: readonly string[];
+      }[];
+    };
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(1);
+    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_unknown_plugin'
+    );
+    const inspectedPlugin = output.plugins.find(
+      (item) => item.pluginId === plugin.manifest.id
+    );
+
+    expect(inspectedPlugin).toMatchObject({
+      pluginId: plugin.manifest.id,
+      enabled: true,
+      activationStatus: 'active'
+    });
+    expect(inspectedPlugin?.activationReasons).toEqual(
+      expect.arrayContaining(['test_inspect_fixture', 'enabled_by_config'])
+    );
   });
 
   it('loads the runtime env file for inspect without mutating process env', async () => {
@@ -251,6 +434,70 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
       };
     }
   };
+}
+
+function writeRuntimeConfig(
+  path: string,
+  config: Readonly<Record<string, unknown>>
+): string {
+  writeFileSync(
+    path,
+    `${JSON.stringify({ version: runtimeConfigVersion, ...config }, null, 2)}\n`,
+    'utf8'
+  );
+  return path;
+}
+
+function createInspectFixturePlugin(): RuntimePlugin {
+  const pluginId = 'inspect.custom';
+
+  return createRuntimePlugin({
+    manifest: {
+      id: pluginId,
+      displayName: 'Inspect Custom Factory Fixture',
+      version: '1.0.0',
+      kind: 'first_party',
+      description: 'Test plugin for inspect custom factory activation.',
+      contractVersion: runtimePluginContractVersion,
+      compatibility: {
+        hostContractVersions: [runtimePluginContractVersion],
+        sourceSystem: 'test'
+      },
+      declaredPlugins: ['plugin_discovery'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'degrade',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: false,
+        reasons: ['test_inspect_fixture']
+      },
+      requestedApis: []
+    }
+  });
+}
+
+function restoreProcessEnvValue(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    Reflect.deleteProperty(process.env, name);
+    return;
+  }
+
+  process.env[name] = value;
 }
 
 function collect(write: (chunk: string) => void): Writable {

@@ -2371,7 +2371,8 @@ describe('runtime config CLI', () => {
   it('sets, gets, and unsets plugin IDs that contain config segments', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-plugin-config-id-'));
     const path = 'plugins.memory.config.api.config.key';
-    let stdout = '';
+    let pluginStdout = '';
+    let fieldStdout = '';
 
     expect(
       await runRuntimeConfigCliFromArgs(
@@ -2407,14 +2408,32 @@ describe('runtime config CLI', () => {
     expect(JSON.stringify(afterSet)).not.toContain('"memory":{"config"');
 
     expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'get', 'plugins.memory.config.api'],
+        {
+          stdout: collect((chunk) => {
+            pluginStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+    expect(JSON.parse(pluginStdout) as unknown).toEqual({
+      enabled: true,
+      config: {
+        key: 'local-key'
+      }
+    });
+
+    expect(
       await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'get', path], {
         stdout: collect((chunk) => {
-          stdout += chunk;
+          fieldStdout += chunk;
         }),
         stderr: collect(() => {})
       })
     ).toBe(0);
-    expect(JSON.parse(stdout) as unknown).toBe('local-key');
+    expect(JSON.parse(fieldStdout) as unknown).toBe('local-key');
 
     expect(
       await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'unset', path], {
@@ -3163,6 +3182,215 @@ describe('runtime config CLI', () => {
     }
   });
 
+  it('uses cwd dotenv defaults for runtime config check secrets', async () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-config-check-cwd-env-'));
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-check-cwd-store-'));
+    const previousCwd = process.cwd();
+    const envVar = 'PROJECT02_CHECK_CWD_DOTENV_SECRET_3449004103';
+    const previousEnvValue = process.env[envVar];
+    const secretValue = 'from-cwd-dotenv';
+    const plugin = requiredSecretPlugin();
+    let stdout = '';
+    let factoryCalls = 0;
+
+    Reflect.deleteProperty(process.env, envVar);
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+    writeFileSync(join(cwdRoot, '.env'), `${envVar}="${secretValue}"\n`, 'utf8');
+
+    try {
+      process.chdir(cwdRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {}),
+          factories: {
+            [plugin.manifest.id]: {
+              manifest: plugin.manifest,
+              create() {
+                factoryCalls += 1;
+                throw new Error('runtime-config check should not construct plugins');
+              }
+            }
+          }
+        })
+      ).toBe(0);
+
+      const output = JSON.parse(stdout) as {
+        readonly activationDiagnostics: readonly { readonly code: string }[];
+        readonly plugins: readonly {
+          readonly pluginId: string;
+          readonly activationStatus: string;
+          readonly enabled: boolean;
+        }[];
+      };
+
+      expect(factoryCalls).toBe(0);
+      expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+        'runtime_config_required_secret_missing'
+      );
+      expect(output.plugins).toContainEqual(
+        expect.objectContaining({
+          pluginId: plugin.manifest.id,
+          activationStatus: 'active',
+          enabled: true
+        })
+      );
+      expect(stdout).not.toContain(secretValue);
+      expect(process.env[envVar]).toBeUndefined();
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(envVar, previousEnvValue);
+    }
+  });
+
+  it('keeps runtime env file values ahead of cwd dotenv defaults during check', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-cwd-env-override-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-store-env-override-')
+    );
+    const previousCwd = process.cwd();
+    const envVar = 'PROJECT02_CHECK_STORE_OVER_CWD_SECRET_3449004103';
+    const previousEnvValue = process.env[envVar];
+    const secretValue = 'from-cwd-dotenv';
+    const plugin = requiredSecretPlugin();
+    let stdout = '';
+    let factoryCalls = 0;
+
+    Reflect.deleteProperty(process.env, envVar);
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+    writeFileSync(join(cwdRoot, '.env'), `${envVar}="${secretValue}"\n`, 'utf8');
+    writeFileSync(join(storeRoot, '.env'), `${envVar}=\n`, 'utf8');
+
+    try {
+      process.chdir(cwdRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {}),
+          factories: {
+            [plugin.manifest.id]: {
+              manifest: plugin.manifest,
+              create() {
+                factoryCalls += 1;
+                throw new Error('runtime-config check should not construct plugins');
+              }
+            }
+          }
+        })
+      ).toBe(1);
+
+      expect(factoryCalls).toBe(0);
+      expect(stdout).toContain('runtime_config_required_secret_missing');
+      expect(stdout).not.toContain(secretValue);
+      expect(process.env[envVar]).toBeUndefined();
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(envVar, previousEnvValue);
+    }
+  });
+
+  it('keeps process env values ahead of cwd dotenv defaults during check', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-process-env-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-process-store-')
+    );
+    const previousCwd = process.cwd();
+    const envVar = 'PROJECT02_CHECK_PROCESS_OVER_CWD_SECRET_3449004103';
+    const previousEnvValue = process.env[envVar];
+    const secretValue = 'from-process-env';
+    const plugin = requiredSecretPlugin();
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+    writeFileSync(join(cwdRoot, '.env'), `${envVar}=\n`, 'utf8');
+
+    try {
+      process.env[envVar] = secretValue;
+      process.chdir(cwdRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {}),
+          factories: {
+            [plugin.manifest.id]: {
+              manifest: plugin.manifest,
+              create() {
+                factoryCalls += 1;
+                throw new Error('runtime-config check should not construct plugins');
+              }
+            }
+          }
+        })
+      ).toBe(0);
+
+      const output = JSON.parse(stdout) as {
+        readonly activationDiagnostics: readonly { readonly code: string }[];
+        readonly plugins: readonly {
+          readonly pluginId: string;
+          readonly activationStatus: string;
+          readonly enabled: boolean;
+        }[];
+      };
+
+      expect(factoryCalls).toBe(0);
+      expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+        'runtime_config_required_secret_missing'
+      );
+      expect(output.plugins).toContainEqual(
+        expect.objectContaining({
+          pluginId: plugin.manifest.id,
+          activationStatus: 'active',
+          enabled: true
+        })
+      );
+      expect(stdout).not.toContain(secretValue);
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(envVar, previousEnvValue);
+    }
+  });
+
   it('keeps supplied check env values ahead of runtime env file values', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-check-env-precedence-'));
     const envVar = 'PROJECT02_CHECK_SUPPLIED_ENV_SECRET_3447850555';
@@ -3233,6 +3461,7 @@ describe('runtime config CLI', () => {
   it('redacts get secrets while preserving non-secret values', async () => {
     const rawSecret = 'runtime-config-get-plaintext-secret';
     const rawLegacySecret = 'runtime-config-get-legacy-secret';
+    const rawExactPluginSecret = 'runtime-config-get-exact-plugin-secret';
     const configPath = writeRuntimeConfig(
       join(mkdtempSync(join(tmpdir(), 'project02-config-get-secret-')), 'config.json'),
       {
@@ -3247,6 +3476,13 @@ describe('runtime config CLI', () => {
               legacyApiKey: rawLegacySecret,
               backend: 'local'
             }
+          },
+          'memory.config.api': {
+            enabled: true,
+            config: {
+              apiKey: rawExactPluginSecret,
+              backend: 'remote'
+            }
           }
         }
       }
@@ -3255,6 +3491,7 @@ describe('runtime config CLI', () => {
     let legacySecretStdout = '';
     let backendStdout = '';
     let configStdout = '';
+    let exactPluginStdout = '';
 
     expect(
       await runRuntimeConfigCliFromArgs(
@@ -3319,6 +3556,27 @@ describe('runtime config CLI', () => {
     });
     expect(configStdout).not.toContain(rawSecret);
     expect(configStdout).not.toContain(rawLegacySecret);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'get', 'plugins.memory.config.api'],
+        {
+          stdout: collect((chunk) => {
+            exactPluginStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(exactPluginStdout) as unknown).toEqual({
+      enabled: true,
+      config: {
+        apiKey: '[redacted]',
+        backend: 'remote'
+      }
+    });
+    expect(exactPluginStdout).not.toContain(rawExactPluginSecret);
   });
 });
 
@@ -3454,6 +3712,15 @@ function writeRuntimeConfig(
     'utf8'
   );
   return path;
+}
+
+function restoreProcessEnvValue(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    Reflect.deleteProperty(process.env, name);
+    return;
+  }
+
+  process.env[name] = value;
 }
 
 function collect(write: (chunk: string) => void): Writable {

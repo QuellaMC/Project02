@@ -3,6 +3,7 @@ import { parseEnv } from 'node:util';
 
 import {
   defaultRuntimeConfigEnvPath,
+  runtimeConfigEnvVarName,
   type LoadedProject02RuntimeConfig
 } from '../runtime/config/index.ts';
 
@@ -66,4 +67,20 @@ export function readDefaultDotEnvFile(): NodeJS.ProcessEnv {
       }.`
     );
   }
+}
+
+export function defaultDotEnvForRuntimeLocation(
+  defaultEnv: NodeJS.ProcessEnv,
+  location: { readonly configPath?: string; readonly storeRoot?: string }
+): NodeJS.ProcessEnv {
+  if (
+    defaultEnv[runtimeConfigEnvVarName] === undefined ||
+    (location.configPath === undefined && location.storeRoot === undefined)
+  ) {
+    return defaultEnv;
+  }
+
+  const env = { ...defaultEnv };
+  Reflect.deleteProperty(env, runtimeConfigEnvVarName);
+  return env;
 }

@@ -188,6 +188,12 @@ function getRuntimeConfigValueForParts(
     return config.plugins;
   }
 
+  const exactPluginConfig = exactPluginConfigForParts(config, parts);
+
+  if (exactPluginConfig !== undefined) {
+    return exactPluginConfig;
+  }
+
   const pluginPath = tryParsePluginMutationPath(parts, path, config);
 
   if (pluginPath !== undefined) {
@@ -217,6 +223,12 @@ function redactionKeyForRuntimeConfigPath(
   }
 
   if (parts[0] !== 'plugins' || parts.length === 1) {
+    return undefined;
+  }
+
+  const exactPluginConfig = exactPluginConfigForParts(config, parts);
+
+  if (exactPluginConfig !== undefined) {
     return undefined;
   }
 
@@ -251,6 +263,13 @@ function rootConfigValue(
     default:
       return undefined;
   }
+}
+
+function exactPluginConfigForParts(
+  config: Project02RuntimeConfig | undefined,
+  parts: readonly string[]
+): Project02RuntimePluginConfig | undefined {
+  return config?.plugins?.[parts.slice(1).join('.')];
 }
 
 function runtimeConfigPathFromEnv(env: NodeJS.ProcessEnv): string | undefined {
