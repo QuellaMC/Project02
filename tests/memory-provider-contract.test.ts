@@ -480,6 +480,66 @@ describe('memory provider runtime plugin helper', () => {
     });
   });
 
+  it('synthesizes persisted memory source references for memory.add results without one', async () => {
+    const provider: Project02MemoryProvider = {
+      id: 'memory.add-source-synthesis',
+      displayName: 'Add Source Synthesis Provider',
+      add() {
+        return Promise.resolve({
+          id: 'persisted-memory-1',
+          sourceReferences: []
+        });
+      }
+    };
+    const plugin = createMemoryProviderRuntimePlugin(provider);
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [plugin.manifest.id]
+    });
+
+    const add = await host.handleToolCall(
+      {
+        eventId: 'evt_memory',
+        traceId: 'trace_memory',
+        createdAt: '2026-06-21T00:00:00.000Z',
+        pluginId: 'memory.add-source-synthesis',
+        toolName: 'memory.add',
+        input: { text: 'New durable memory.' }
+      },
+      testContext()
+    );
+
+    expect(add.status).toBe('accepted');
+    if (add.status !== 'accepted') {
+      throw new Error('Expected memory.add to be accepted.');
+    }
+    expect(add.output).toEqual({
+      id: 'persisted-memory-1',
+      sourceReferences: [
+        {
+          kind: 'memory',
+          id: 'persisted-memory-1',
+          title: 'Persisted memory item'
+        }
+      ]
+    });
+    expect(add.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      sourceReferences: [
+        {
+          kind: 'conversation',
+          id: 'evt_memory'
+        },
+        {
+          kind: 'memory',
+          id: 'persisted-memory-1',
+          title: 'Persisted memory item'
+        }
+      ]
+    });
+  });
+
   it('accepts no-hit memory.search results with empty items', async () => {
     const provider: Project02MemoryProvider = {
       id: 'memory.search-empty',

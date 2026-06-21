@@ -475,12 +475,13 @@ function envFileLinesWithoutAssignment(
       continue;
     }
 
-    if (!line.startsWith(`${envVar}=`)) {
+    const assignmentValue = dotenvAssignmentValueForEnvVar(line, envVar);
+
+    if (assignmentValue === undefined) {
       kept.push(line);
       continue;
     }
 
-    const assignmentValue = line.slice(envVar.length + 1);
     const delimiter = dotenvQuoteDelimiter(assignmentValue);
 
     if (delimiter !== undefined && !assignmentValue.slice(1).includes(delimiter)) {
@@ -489,6 +490,48 @@ function envFileLinesWithoutAssignment(
   }
 
   return Object.freeze(kept);
+}
+
+function dotenvAssignmentValueForEnvVar(
+  line: string,
+  envVar: string
+): string | undefined {
+  let index = 0;
+
+  while (isDotenvWhitespace(line[index])) {
+    index += 1;
+  }
+
+  if (
+    line.startsWith('export', index) &&
+    isDotenvWhitespace(line[index + 'export'.length])
+  ) {
+    index += 'export'.length;
+
+    while (isDotenvWhitespace(line[index])) {
+      index += 1;
+    }
+  }
+
+  if (!line.startsWith(envVar, index)) {
+    return undefined;
+  }
+
+  index += envVar.length;
+
+  while (isDotenvWhitespace(line[index])) {
+    index += 1;
+  }
+
+  if (line[index] !== '=') {
+    return undefined;
+  }
+
+  return line.slice(index + 1).trimStart();
+}
+
+function isDotenvWhitespace(value: string | undefined): boolean {
+  return value === ' ' || value === '\t';
 }
 
 function dotenvQuoteDelimiter(value: string): DotenvQuoteDelimiter | undefined {

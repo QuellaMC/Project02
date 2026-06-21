@@ -708,6 +708,97 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
+  it('blocks all plugin factory creation when activation diagnostics contain plugin errors', async () => {
+    const characterPlugin = createCharacterStatePlugin();
+    const memoryPlugin = requiredSecretPlugin();
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-plugin-error-blocks-all-')),
+        'config.json'
+      ),
+      {
+        plugins: {
+          'memory.required': {
+            enabled: true
+          }
+        }
+      }
+    );
+    let characterFactoryCalls = 0;
+    let memoryFactoryCalls = 0;
+    let legacyFactoryCalls = 0;
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      factories: {
+        'character-state': {
+          manifest: characterPlugin.manifest,
+          create() {
+            characterFactoryCalls += 1;
+
+            return characterPlugin;
+          }
+        },
+        'memory.required': {
+          manifest: memoryPlugin.manifest,
+          create() {
+            memoryFactoryCalls += 1;
+
+            return memoryPlugin;
+          }
+        },
+        'legacy.side-effect': () => {
+          legacyFactoryCalls += 1;
+          throw new Error('legacy factory should not be constructed');
+        }
+      }
+    });
+    const characterActivation = configured.activation.plugins.find(
+      (plugin) => plugin.pluginId === 'character-state'
+    );
+    const memoryActivation = configured.activation.plugins.find(
+      (plugin) => plugin.pluginId === 'memory.required'
+    );
+
+    expect(characterFactoryCalls).toBe(0);
+    expect(memoryFactoryCalls).toBe(0);
+    expect(legacyFactoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_required_secret_missing',
+          path: 'plugins.memory.required.config.apiKey',
+          pluginId: 'memory.required',
+          pluginConfigField: 'apiKey'
+        })
+      ])
+    );
+    expect(characterActivation).toMatchObject({
+      pluginId: 'character-state',
+      enabled: false,
+      activationStatus: 'blocked'
+    });
+    expect(characterActivation?.activationReasons).toContain(
+      'blocked_by_config_errors'
+    );
+    expect(memoryActivation).toMatchObject({
+      pluginId: 'memory.required',
+      enabled: false,
+      activationStatus: 'blocked'
+    });
+    expect(memoryActivation?.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_required_secret_missing',
+          path: 'plugins.memory.required.config.apiKey'
+        })
+      ])
+    );
+  });
+
   it('lets explicit per-plugin disable win over legacy enabledPlugins', async () => {
     const configPath = writeRuntimeConfig(
       join(mkdtempSync(join(tmpdir(), 'project02-config-disable-')), 'config.json'),
@@ -734,6 +825,7 @@ describe('runtime config loading and resolution', () => {
   });
 
   it('keeps explicitly disabled plugins disabled even when their config is incomplete', async () => {
+    const plugin = requiredSecretPlugin();
     const configPath = writeRuntimeConfig(
       join(mkdtempSync(join(tmpdir(), 'project02-config-disable-invalid-')), 'config.json'),
       {
@@ -747,13 +839,22 @@ describe('runtime config loading and resolution', () => {
         }
       }
     );
+    let factoryCalls = 0;
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({ configPath }),
       factories: {
-        'memory.required': () => requiredSecretPlugin()
+        'memory.required': {
+          manifest: plugin.manifest,
+          create() {
+            factoryCalls += 1;
+            throw new Error('disabled plugin should not be constructed');
+          }
+        }
       }
     });
 
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
     expect(configured.activation.plugins[0]).toMatchObject({
       pluginId: 'memory.required',
       enabled: false,
@@ -774,18 +875,51 @@ describe('runtime config loading and resolution', () => {
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
       factories: {
-        'memory.required': () => {
+        'character-state': () => {
           factoryCalls += 1;
 
-          return requiredSecretPlugin();
+          return createCharacterStatePlugin();
         }
       }
     });
 
     expect(factoryCalls).toBe(1);
     expect(configured.plugins.map((plugin) => plugin.manifest.id)).toEqual([
-      'memory.required'
+      'character-state'
     ]);
+  });
+
+  it('skips explicitly disabled legacy function plugin factories before creation', async () => {
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-disabled-legacy-factory-')),
+        'config.json'
+      ),
+      {
+        enabledPlugins: ['memory.required'],
+        plugins: {
+          'memory.required': {
+            enabled: false
+          }
+        }
+      }
+    );
+    let legacyFactoryCalls = 0;
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      factories: {
+        'memory.required': () => {
+          legacyFactoryCalls += 1;
+          throw new Error('disabled legacy plugin should not be constructed');
+        }
+      }
+    });
+
+    expect(legacyFactoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual([]);
   });
 
   it('uses supplied env maps when creating configured plugin hosts', async () => {
@@ -1906,6 +2040,60 @@ describe('runtime config CLI', () => {
       loadEnvFile(envPath);
       expect(process.env[envVar]).toBe(newSecret);
       expect(process.env[otherEnvVar]).toBe('other-value');
+    } finally {
+      Reflect.deleteProperty(process.env, envVar);
+      Reflect.deleteProperty(process.env, otherEnvVar);
+    }
+  });
+
+  it('rotates exported dotenv secrets without preserving stale assignment blocks', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-export-'));
+    const envVar = 'PROJECT02_SECRET_ROTATION_EXPORTED';
+    const otherEnvVar = 'PROJECT02_SECRET_ROTATION_EXPORTED_OTHER';
+    const oldSecret = 'old exported first line\nold exported second line';
+    const newSecret = 'new exported first line\nnew exported second line';
+    const envPath = join(storeRoot, '.env');
+
+    Reflect.deleteProperty(process.env, envVar);
+    Reflect.deleteProperty(process.env, otherEnvVar);
+    writeFileSync(
+      envPath,
+      [
+        '# keep exported comment',
+        `export ${envVar}=old-unquoted-exported`,
+        `${otherEnvVar}="other-exported-value"`,
+        `  export ${envVar}="${oldSecret}"`,
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {}),
+          env: { [envVar]: newSecret }
+        }
+      )
+    ).toBe(0);
+
+    const envFile = readFileSync(envPath, 'utf8');
+
+    expect(envFile).toContain('# keep exported comment');
+    expect(envFile).toContain(`${otherEnvVar}="other-exported-value"`);
+    expect(envFile).toContain(`${envVar}="${newSecret}"`);
+    expect(envFile).not.toContain(`export ${envVar}=`);
+    expect(envFile).not.toContain(`export ${envVar}="`);
+    expect(envFile).not.toContain('old-unquoted-exported');
+    expect(envFile).not.toContain('old exported first line');
+    expect(envFile).not.toContain('old exported second line');
+
+    try {
+      loadEnvFile(envPath);
+      expect(process.env[envVar]).toBe(newSecret);
+      expect(process.env[otherEnvVar]).toBe('other-exported-value');
     } finally {
       Reflect.deleteProperty(process.env, envVar);
       Reflect.deleteProperty(process.env, otherEnvVar);

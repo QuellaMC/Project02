@@ -221,6 +221,51 @@ describe('chat CLI plugin lifecycle', () => {
     });
   });
 
+  it('constructs configured manifest-backed plugins once during chat startup', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-configured-host-'));
+    const sessionId = 'configured-host-session';
+    const configuredPlugin = createSessionEndPlugin(() => {});
+    const sessionEndContexts: RuntimePluginContext[] = [];
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [configuredPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', sessionId],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(() => {}),
+        factories: {
+          [configuredPlugin.manifest.id]: {
+            manifest: configuredPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+
+              return createSessionEndPlugin((context) => {
+                sessionEndContexts.push(context);
+              });
+            }
+          }
+        }
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(1);
+    expect(sessionEndContexts).toHaveLength(1);
+    expect(sessionEndContexts[0]).toMatchObject({
+      sessionId,
+      currentUserMessage: '/exit'
+    });
+  });
+
   it('aborts startup when configured plugin activation reports errors', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-activation-error-'));
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {

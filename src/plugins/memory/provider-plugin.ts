@@ -236,18 +236,22 @@ export function createMemoryProviderRuntimePlugin(
                   text,
                   sourceReferences: inputSourceReferences
                 });
+                const persistedSourceReferences = addResultSourceReferences({
+                  id: result.id,
+                  sourceReferences: result.sourceReferences
+                });
 
                 return acceptedToolResult({
                   context,
                   pluginId,
                   output: {
                     id: result.id,
-                    sourceReferences: result.sourceReferences
+                    sourceReferences: persistedSourceReferences
                   },
                   summary: 'Added one memory item.',
                   sourceReferences: [
                     ...inputSourceReferences,
-                    ...result.sourceReferences
+                    ...persistedSourceReferences
                   ]
                 });
               }
@@ -382,6 +386,28 @@ function searchSourceReferences(options: {
       kind: 'runtime',
       id: `${options.context.eventId}:memory.search.no_results`,
       title: 'Memory search completed with no results'
+    }
+  ] satisfies RuntimePluginSourceReference[]);
+}
+
+function addResultSourceReferences(options: {
+  readonly id: string;
+  readonly sourceReferences: readonly RuntimePluginSourceReference[];
+}): readonly RuntimePluginSourceReference[] {
+  if (
+    options.sourceReferences.some(
+      (reference) => reference.kind === 'memory' && reference.id === options.id
+    )
+  ) {
+    return options.sourceReferences;
+  }
+
+  return Object.freeze([
+    ...options.sourceReferences,
+    {
+      kind: 'memory',
+      id: options.id,
+      title: 'Persisted memory item'
     }
   ] satisfies RuntimePluginSourceReference[]);
 }

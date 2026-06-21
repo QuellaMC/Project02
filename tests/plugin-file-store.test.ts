@@ -263,7 +263,7 @@ describe('runtime plugin file store', () => {
     expect(legacyDurable.revision()).toBe(1);
   });
 
-  it('rejects JSON reads on paths that already store JSONL', () => {
+  it('rejects JSON reads and writes on paths that already store JSONL', () => {
     const stores = [
       createRuntimePluginFileStore({
         sessionId: 'session-mixed-jsonl-json-memory',
@@ -281,6 +281,9 @@ describe('runtime plugin file store', () => {
 
       expect(() => {
         store.readJson('events.jsonl');
+      }).toThrow(/stores JSONL/iu);
+      expect(() => {
+        store.writeJsonAtomic('events.jsonl', { value: 'json' });
       }).toThrow(/stores JSONL/iu);
       expect(store.readJsonl('events.jsonl')).toEqual([
         { value: 'jsonl' }
@@ -305,6 +308,9 @@ describe('runtime plugin file store', () => {
 
     expect(() => {
       secondDurable.readJson('events.jsonl');
+    }).toThrow(/stores JSONL/iu);
+    expect(() => {
+      secondDurable.writeJsonAtomic('events.jsonl', { value: 'json' });
     }).toThrow(/stores JSONL/iu);
     expect(secondDurable.readJsonl('events.jsonl')).toEqual([
       { value: 'jsonl' }

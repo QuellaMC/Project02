@@ -103,6 +103,8 @@ export function createRuntimePluginFileStore(
       const filePath = join(root, safePath);
       const tmpPath = `${filePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
 
+      assertJsonPathMode(pathModes.get(safePath));
+
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(
         tmpPath,
@@ -177,6 +179,8 @@ function createInMemoryRuntimePluginFileStore(
     },
     writeJsonAtomic(path, value) {
       const safePath = normalizeRuntimePluginFileStorePath(path);
+
+      assertJsonPathMode(state.pathModes.get(safePath));
 
       state.files.set(safePath, freezeRuntimePluginFileStoreJsonValue(value));
       state.pathModes.set(safePath, 'json');

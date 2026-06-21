@@ -54,8 +54,10 @@ import {
   createConfiguredProject02PluginHost,
   diagnosticsHaveErrors,
   loadProject02RuntimeConfig,
+  resolveConfiguredProject02PluginActivation,
   resolveProject02RuntimeConfig,
-  type RuntimeConfigDiagnostic
+  type RuntimeConfigDiagnostic,
+  type RuntimePluginFactory
 } from '../runtime/config/index.ts';
 import type { RoleModelAdapter } from '../role-model/loop.ts';
 import {
@@ -84,6 +86,7 @@ type ChatCliOptions = {
   readonly pluginHost?: RuntimePluginHost;
   readonly session?: ConversationSession;
   readonly logStore?: RuntimeLogStore;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
 };
 
 type ChatProviderName = 'local' | 'nvidia';
@@ -180,19 +183,27 @@ export async function runChatCliFromArgs(
 
     assertNoRuntimeConfigErrors(loadedConfig.diagnostics, 'Runtime config is invalid');
 
-    const resolvedRuntimeConfig = resolveProject02RuntimeConfig({
-      loadedConfig,
-      ...(selectedArgs.storeRoot === undefined ? {} : { storeRoot: selectedArgs.storeRoot }),
-      env: runtimeEnv
-    });
-    if (options.pluginHost === undefined) {
-      const initialConfiguredHost = await createConfiguredProject02PluginHost({
+    const configuredActivation =
+      options.pluginHost === undefined
+        ? resolveConfiguredProject02PluginActivation({
+            loadedConfig,
+            ...(selectedArgs.storeRoot === undefined
+              ? {}
+              : { storeRoot: selectedArgs.storeRoot }),
+            env: runtimeEnv,
+            ...(options.factories === undefined ? {} : { factories: options.factories })
+          })
+        : undefined;
+    const resolvedRuntimeConfig =
+      configuredActivation?.resolvedConfig ??
+      resolveProject02RuntimeConfig({
         loadedConfig,
         ...(selectedArgs.storeRoot === undefined ? {} : { storeRoot: selectedArgs.storeRoot }),
         env: runtimeEnv
       });
+    if (configuredActivation !== undefined) {
       assertNoRuntimeConfigErrors(
-        initialConfiguredHost.activation.diagnostics,
+        configuredActivation.activation.diagnostics,
         'Runtime config activation failed'
       );
     }
@@ -210,7 +221,8 @@ export async function runChatCliFromArgs(
             storeRoot: resolvedRuntimeConfig.storeRoot,
             sessionId: durableRuntime.session.id,
             sessionIdentity: durableRuntime.session,
-            env: runtimeEnv
+            env: runtimeEnv,
+            ...(options.factories === undefined ? {} : { factories: options.factories })
           })
         : undefined;
     if (configuredHost !== undefined) {
