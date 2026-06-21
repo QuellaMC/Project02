@@ -63,6 +63,49 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
+  it('fails check for default-enabled legacy function factories without constructing them', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-legacy-default-unchecked-')
+    );
+    const plugin = requiredSecretPlugin('legacy.required');
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          'legacy.required': () => {
+            factoryCalls += 1;
+
+            return plugin;
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(1);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_legacy_factory_unchecked',
+          path: 'plugins.legacy.required.enabled',
+          pluginId: 'legacy.required'
+        })
+      ])
+    );
+    expect(output.plugins).toEqual([]);
+  });
+
   it('keeps explicitly disabled legacy function factories passing check', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-legacy-disabled-')

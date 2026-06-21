@@ -698,6 +698,7 @@ describe('runtime config loading and resolution', () => {
 
   it('rejects unknown config fields for enabled or default-enabled plugins', async () => {
     const envVar = 'PROJECT02_UNKNOWN_FIELD_SECRET_3447705094';
+    const plugin = requiredSecretPlugin();
     const configPath = writeRuntimeConfig(
       join(mkdtempSync(join(tmpdir(), 'project02-config-unknown-field-')), 'config.json'),
       {
@@ -715,7 +716,10 @@ describe('runtime config loading and resolution', () => {
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({ configPath }),
       factories: {
-        'memory.required': () => requiredSecretPlugin()
+        'memory.required': {
+          manifest: plugin.manifest,
+          create: () => plugin
+        }
       },
       env: { [envVar]: 'configured-secret' }
     });
@@ -951,24 +955,40 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('calls legacy function plugin factories once when creating a configured host', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-legacy-factory-'));
-    let factoryCalls = 0;
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
-      factories: {
-        'character-state': () => {
-          factoryCalls += 1;
+  it('blocks default-enabled legacy function factories before creation', async () => {
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-default-legacy-factory-')),
+        'config.json'
+      ),
+      {}
+    );
+    let legacyFactoryCalls = 0;
 
-          return createCharacterStatePlugin();
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      factories: {
+        'memory.required': () => {
+          legacyFactoryCalls += 1;
+
+          return requiredSecretPlugin();
         }
       }
     });
 
-    expect(factoryCalls).toBe(1);
-    expect(configured.plugins.map((plugin) => plugin.manifest.id)).toEqual([
-      'character-state'
-    ]);
+    expect(legacyFactoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_legacy_factory_unchecked',
+          path: 'plugins.memory.required.enabled',
+          pluginId: 'memory.required'
+        })
+      ])
+    );
   });
 
   it('skips explicitly disabled legacy function plugin factories before creation', async () => {
@@ -1223,30 +1243,43 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('passes config-resolved store roots to legacy function plugin factories', async () => {
+  it('passes config-resolved store roots to manifest-backed plugin factories', async () => {
     const cliStoreRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-root-'));
     const configuredStoreRoot = mkdtempSync(join(tmpdir(), 'project02-config-file-root-'));
+    const envVar = 'PROJECT02_CONFIG_ROOT_FACTORY_SECRET_3448745052';
     const configPath = writeRuntimeConfig(
       join(mkdtempSync(join(tmpdir(), 'project02-config-legacy-root-')), 'config.json'),
       {
-        storeRoot: configuredStoreRoot
+        storeRoot: configuredStoreRoot,
+        plugins: {
+          'memory.required': {
+            enabled: true,
+            config: {
+              apiKey: { $env: envVar }
+            }
+          }
+        }
       }
     );
-    let legacyFactoryStoreRoot: string | undefined;
+    let factoryStoreRoot: string | undefined;
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({ configPath }),
       storeRoot: cliStoreRoot,
       factories: {
-        'memory.required': (input) => {
-          legacyFactoryStoreRoot = input.storeRoot;
+        'memory.required': {
+          manifest: requiredSecretPlugin().manifest,
+          create(input) {
+            factoryStoreRoot = input.storeRoot;
 
-          return requiredSecretPlugin();
+            return requiredSecretPlugin();
+          }
         }
-      }
+      },
+      env: { [envVar]: 'from-configured-store-root' }
     });
 
-    expect(legacyFactoryStoreRoot).toBe(configuredStoreRoot);
+    expect(factoryStoreRoot).toBe(configuredStoreRoot);
     expect(configured.resolvedConfig.storeRoot).toBe(configuredStoreRoot);
   });
 
@@ -1467,6 +1500,72 @@ describe('runtime config loading and resolution', () => {
         factories
       })
     ).toBe(1);
+    expect(stdout).toContain('"default_memory_provider_unavailable"');
+    expect(stdout).toContain('"severity": "error"');
+  });
+
+  it('treats a disabled explicit default memory provider as an activation error without another provider enabled', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-memory-default-disabled-'));
+    const disabledPlugin = memoryProviderPlugin('memory.disabled');
+    let factoryCalls = 0;
+    const factories = {
+      'memory.disabled': {
+        manifest: disabledPlugin.manifest,
+        create() {
+          factoryCalls += 1;
+          throw new Error('disabled memory provider should not be constructed');
+        }
+      }
+    };
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: 'memory.disabled',
+      plugins: {
+        'memory.disabled': {
+          enabled: false
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories
+    });
+
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
+          path: 'defaultMemoryProvider'
+        })
+      ])
+    );
+    expect(configured.activation.plugins).toEqual([
+      expect.objectContaining({
+        pluginId: 'memory.disabled',
+        enabled: false,
+        activationStatus: 'disabled'
+      })
+    ]);
+    expect(configured.activation.plugins[0]?.activationReasons).toContain(
+      'disabled_by_config'
+    );
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories
+      })
+    ).toBe(1);
+    expect(factoryCalls).toBe(0);
     expect(stdout).toContain('"default_memory_provider_unavailable"');
     expect(stdout).toContain('"severity": "error"');
   });
@@ -2425,6 +2524,90 @@ describe('runtime config CLI', () => {
     expect(JSON.parse(stdout) as unknown).toBe('local');
   });
 
+  it('gets terminal plugin config objects for plain and dotted plugin IDs', async () => {
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-object-get-')),
+        'config.json'
+      ),
+      {
+        plugins: {
+          foo: {
+            config: {
+              backend: 'local',
+              options: {
+                mode: 'sync'
+              }
+            }
+          },
+          'memory.recall': {
+            config: {
+              backend: 'vector',
+              topK: 5
+            }
+          }
+        }
+      }
+    );
+    let plainStdout = '';
+    let dottedStdout = '';
+    let pluginStdout = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'get', 'plugins.foo.config'],
+        {
+          stdout: collect((chunk) => {
+            plainStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(plainStdout) as unknown).toEqual({
+      backend: 'local',
+      options: {
+        mode: 'sync'
+      }
+    });
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'get', 'plugins.memory.recall.config'],
+        {
+          stdout: collect((chunk) => {
+            dottedStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(dottedStdout) as unknown).toEqual({
+      backend: 'vector',
+      topK: 5
+    });
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--config', configPath, 'get', 'plugins.foo'], {
+        stdout: collect((chunk) => {
+          pluginStdout += chunk;
+        }),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+
+    expect(JSON.parse(pluginStdout) as unknown).toEqual({
+      config: {
+        backend: 'local',
+        options: {
+          mode: 'sync'
+        }
+      }
+    });
+  });
+
   it('sets and unsets plugin config fields named enabled literally', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-enabled-field-'));
 
@@ -2694,6 +2877,7 @@ describe('runtime config CLI', () => {
     let secretStdout = '';
     let legacySecretStdout = '';
     let backendStdout = '';
+    let configStdout = '';
 
     expect(
       await runRuntimeConfigCliFromArgs(
@@ -2738,6 +2922,26 @@ describe('runtime config CLI', () => {
     ).toBe(0);
 
     expect(JSON.parse(backendStdout) as unknown).toBe('local');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'get', 'plugins.foo.config'],
+        {
+          stdout: collect((chunk) => {
+            configStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(configStdout) as unknown).toEqual({
+      apiKey: '[redacted]',
+      legacyApiKey: '[redacted]',
+      backend: 'local'
+    });
+    expect(configStdout).not.toContain(rawSecret);
+    expect(configStdout).not.toContain(rawLegacySecret);
   });
 });
 

@@ -180,6 +180,10 @@ function getRuntimeConfigValueForParts(
       return pluginConfig?.enabled;
     }
 
+    if (pluginPath.kind === 'config_object') {
+      return pluginConfig?.config;
+    }
+
     return pluginConfig?.config?.[pluginPath.fieldName];
   }
 
@@ -203,6 +207,10 @@ function redactionKeyForRuntimeConfigPath(
 
   if (pluginPath?.kind === 'config_field') {
     return pluginPath.fieldName;
+  }
+
+  if (pluginPath?.kind === 'config_object') {
+    return 'config';
   }
 
   return pluginPath?.kind === 'enabled' ? 'enabled' : undefined;
@@ -354,6 +362,11 @@ function setConfigPath(
   }
 
   const pluginPath = parsePluginMutationPath(parts, path, config);
+
+  if (pluginPath.kind === 'config_object') {
+    throw new TypeError('Plugin config path must include a field name.');
+  }
+
   const currentPlugin = config.plugins?.[pluginPath.pluginId] ?? {};
   const plugins = { ...(config.plugins ?? {}) };
 
@@ -425,6 +438,10 @@ function unsetConfigPath(
   }
 
   const pluginPath = parsePluginMutationPath(parts, path, config);
+
+  if (pluginPath.kind === 'config_object') {
+    throw new TypeError('Plugin config path must include a field name.');
+  }
 
   const currentPlugin = config.plugins?.[pluginPath.pluginId];
 
@@ -707,6 +724,10 @@ type ParsedPluginMutationPath =
       readonly pluginId: string;
     }
   | {
+      readonly kind: 'config_object';
+      readonly pluginId: string;
+    }
+  | {
       readonly kind: 'config_field';
       readonly pluginId: string;
       readonly fieldName: string;
@@ -754,6 +775,19 @@ function pluginPathCandidates(parts: readonly string[]): readonly ParsedPluginMu
           })
         );
       }
+    }
+  }
+
+  if (parts.at(-1) === 'config') {
+    const pluginId = parts.slice(1, -1).join('.');
+
+    if (pluginId.length > 0) {
+      candidates.push(
+        Object.freeze({
+          kind: 'config_object',
+          pluginId
+        })
+      );
     }
   }
 

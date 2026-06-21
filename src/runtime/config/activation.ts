@@ -279,6 +279,9 @@ export function resolveRuntimePluginActivation(options: {
     ...(config?.defaultMemoryProvider === undefined
       ? {}
       : { configDefaultMemoryProvider: config.defaultMemoryProvider }),
+    memoryProviderManifests: pluginManifests.filter(
+      (manifest) => manifest.kind === 'memory_provider'
+    ),
     enabledPluginManifests: pluginManifests.filter(
       (manifest) => preliminaryDecisions.get(manifest.id)?.enabled === true
     )
@@ -559,15 +562,15 @@ function uncheckedLegacyFactoryDiagnostics(options: {
 }): readonly RuntimeConfigDiagnostic[] {
   const config = options.loadedConfig.config;
 
-  if (config === undefined || options.legacyFactoryIds.length === 0) {
+  if (options.legacyFactoryIds.length === 0) {
     return Object.freeze([]);
   }
 
   const diagnostics: RuntimeConfigDiagnostic[] = [];
-  const legacyEnabledPluginIds = new Set(config.enabledPlugins ?? []);
+  const legacyEnabledPluginIds = new Set(config?.enabledPlugins ?? []);
 
   for (const pluginId of options.legacyFactoryIds) {
-    const configuredPlugin = config.plugins?.[pluginId];
+    const configuredPlugin = config?.plugins?.[pluginId];
 
     if (configuredPlugin?.enabled === false) {
       continue;
@@ -576,22 +579,38 @@ function uncheckedLegacyFactoryDiagnostics(options: {
     const enabledByPluginConfig = configuredPlugin?.enabled === true;
     const enabledByLegacyList = legacyEnabledPluginIds.has(pluginId);
 
-    if (!enabledByPluginConfig && !enabledByLegacyList) {
-      continue;
-    }
-
     diagnostics.push(
       diagnostic(
         'error',
         'runtime_config_legacy_factory_unchecked',
         `Runtime config enables legacy function plugin factory "${pluginId}", but activation checks require a manifest-backed factory to validate plugin config.`,
-        enabledByPluginConfig ? `plugins.${pluginId}.enabled` : 'enabledPlugins',
+        legacyFactoryDiagnosticPath({
+          pluginId,
+          enabledByPluginConfig,
+          enabledByLegacyList
+        }),
         { pluginId }
       )
     );
   }
 
   return Object.freeze(diagnostics);
+}
+
+function legacyFactoryDiagnosticPath(options: {
+  readonly pluginId: string;
+  readonly enabledByPluginConfig: boolean;
+  readonly enabledByLegacyList: boolean;
+}): string {
+  if (options.enabledByPluginConfig) {
+    return `plugins.${options.pluginId}.enabled`;
+  }
+
+  if (options.enabledByLegacyList) {
+    return 'enabledPlugins';
+  }
+
+  return `plugins.${options.pluginId}.enabled`;
 }
 
 function activationDecision(options: {
@@ -731,6 +750,7 @@ function duplicatePluginManifestIdDiagnostics(
 
 function defaultMemoryProviderDecision(options: {
   readonly configDefaultMemoryProvider?: string;
+  readonly memoryProviderManifests: readonly RuntimePluginManifest[];
   readonly enabledPluginManifests: readonly RuntimePluginManifest[];
 }): {
   readonly activeMemoryProviderIds: readonly string[];
@@ -743,6 +763,9 @@ function defaultMemoryProviderDecision(options: {
   );
 
   if (options.configDefaultMemoryProvider !== undefined) {
+    const knownMemoryProvider = options.memoryProviderManifests.find(
+      (manifest) => manifest.id === options.configDefaultMemoryProvider
+    );
     const selected = enabledMemoryProviders.find(
       (manifest) => manifest.id === options.configDefaultMemoryProvider
     );
@@ -753,7 +776,9 @@ function defaultMemoryProviderDecision(options: {
         ambiguous: false,
         diagnostics: [
           diagnostic(
-            enabledMemoryProviders.length > 0 ? 'error' : 'warning',
+            enabledMemoryProviders.length > 0 || knownMemoryProvider !== undefined
+              ? 'error'
+              : 'warning',
             'default_memory_provider_unavailable',
             `Default memory provider "${options.configDefaultMemoryProvider}" is not active.`,
             'defaultMemoryProvider'
