@@ -45,7 +45,14 @@ export async function runRuntimeConfigCliFromArgs(
     const parsed = parseRuntimeConfigCliArgs(args, env);
 
     if (parsed.command.kind === 'path') {
-      options.stdout.write(`${defaultRuntimeConfigPath(parsed.location.storeRoot)}\n`);
+      const loaded = loadProject02RuntimeConfig({
+        ...parsed.location,
+        env
+      });
+
+      options.stdout.write(
+        `${loaded.path ?? defaultRuntimeConfigPath(parsed.location.storeRoot)}\n`
+      );
       return 0;
     }
 

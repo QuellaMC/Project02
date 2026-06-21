@@ -399,6 +399,55 @@ describe('runtime config loading and resolution', () => {
     ]);
   });
 
+  it('blocks plugins when missing required dotted fields contain config', async () => {
+    const plugin = requiredDottedConfigPlugin('memory');
+    const missingPath = 'plugins.memory.config.api.config.key';
+    const configPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-dotted-field-')), 'config.json'),
+      {}
+    );
+    let factoryCalls = 0;
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      factories: {
+        memory: {
+          manifest: plugin.manifest,
+          create() {
+            factoryCalls += 1;
+
+            return plugin;
+          }
+        }
+      }
+    });
+
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).not.toContain('memory');
+    expect(configured.activation.plugins[0]).toMatchObject({
+      pluginId: 'memory',
+      enabled: false,
+      activationStatus: 'blocked'
+    });
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_required_value_missing',
+          path: missingPath
+        })
+      ])
+    );
+    expect(configured.activation.plugins[0]?.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_required_value_missing',
+          path: missingPath
+        })
+      ])
+    );
+  });
+
   it('lets explicit per-plugin disable win over legacy enabledPlugins', async () => {
     const configPath = writeRuntimeConfig(
       join(mkdtempSync(join(tmpdir(), 'project02-config-disable-')), 'config.json'),
@@ -820,6 +869,51 @@ describe('runtime config CLI', () => {
     expect(readFileSync(join(storeRoot, '.env'), 'utf8')).toContain(
       'MEM0_API_KEY="stored-secret"'
     );
+  });
+
+  it('prints the explicit config path selected by --config', async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-path-'));
+    const configPath = join(configRoot, 'runtime.json');
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--config', configPath, 'path'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      })
+    ).toBe(0);
+
+    expect(stdout).toBe(`${configPath}\n`);
+    expect(stderr).toBe('');
+  });
+
+  it('prints the env-selected config path from PROJECT02_RUNTIME_CONFIG', async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-path-env-'));
+    const configPath = join(configRoot, 'runtime.json');
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['path'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        env: {
+          PROJECT02_RUNTIME_CONFIG: configPath
+        }
+      })
+    ).toBe(0);
+
+    expect(stdout).toBe(`${configPath}\n`);
+    expect(stderr).toBe('');
   });
 
   it('prints env-path from the effective configured store root', async () => {
@@ -1262,6 +1356,33 @@ function requiredSecretPlugin(id = 'memory.required') {
         reasons: ['test_required_secret']
       },
       requestedApis: []
+    }
+  });
+}
+
+function requiredDottedConfigPlugin(id = 'memory') {
+  const plugin = requiredSecretPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      description: 'Test plugin with required dotted config.',
+      config: {
+        fields: [
+          {
+            name: 'api.config.key',
+            description: 'Nested compatibility API key.',
+            required: true,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: []
+          }
+        ]
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test_required_dotted_config']
+      }
     }
   });
 }

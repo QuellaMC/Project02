@@ -34,13 +34,47 @@ describe('runtime config diagnostic plugin matching', () => {
     ).toBe(true);
     expect(
       pluginHasConfigErrors({
-        diagnostics: [diagnostic('error', 'plugins.memory.config.config.backend')],
+        diagnostics: [diagnostic('error', 'plugins.memory.config.api.config.key')],
+        pluginId: 'memory'
+      })
+    ).toBe(true);
+  });
+
+  it('uses diagnostic metadata to disambiguate plugin ids and dotted config fields', () => {
+    const dottedFieldDiagnostic = diagnostic(
+      'error',
+      'plugins.memory.config.api.config.key',
+      'memory',
+      'api.config.key'
+    );
+    const dottedPluginDiagnostic = diagnostic(
+      'error',
+      'plugins.memory.config.config.backend',
+      'memory.config',
+      'backend'
+    );
+
+    expect(
+      pluginHasConfigErrors({
+        diagnostics: [dottedFieldDiagnostic],
+        pluginId: 'memory'
+      })
+    ).toBe(true);
+    expect(
+      pluginHasConfigErrors({
+        diagnostics: [dottedFieldDiagnostic],
+        pluginId: 'memory.config.api'
+      })
+    ).toBe(false);
+    expect(
+      pluginHasConfigErrors({
+        diagnostics: [dottedPluginDiagnostic],
         pluginId: 'memory'
       })
     ).toBe(false);
     expect(
       pluginHasConfigErrors({
-        diagnostics: [diagnostic('error', 'plugins.memory.config.config.backend')],
+        diagnostics: [dottedPluginDiagnostic],
         pluginId: 'memory.config'
       })
     ).toBe(true);
@@ -100,12 +134,16 @@ describe('runtime config diagnostic plugin matching', () => {
 
 function diagnostic(
   severity: RuntimeConfigDiagnostic['severity'],
-  path: string
+  path: string,
+  pluginId?: string,
+  pluginConfigField?: string
 ): RuntimeConfigDiagnostic {
   return Object.freeze({
     severity,
     code: 'test_diagnostic',
     message: 'test diagnostic',
-    path
+    path,
+    ...(pluginId === undefined ? {} : { pluginId }),
+    ...(pluginConfigField === undefined ? {} : { pluginConfigField })
   } satisfies RuntimeConfigDiagnostic);
 }

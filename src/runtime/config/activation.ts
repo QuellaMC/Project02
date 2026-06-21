@@ -24,7 +24,7 @@ import type {
 } from './types.ts';
 import {
   pluginHasConfigErrors,
-  runtimeConfigDiagnosticPathMatchesPlugin,
+  runtimeConfigDiagnosticMatchesPlugin,
   resolveProject02RuntimeConfig
 } from './resolve.ts';
 
@@ -228,8 +228,8 @@ export function resolveRuntimePluginActivation(options: {
         ]),
         diagnostics: Object.freeze(
           diagnostics.filter((diagnostic) =>
-            runtimeConfigDiagnosticPathMatchesPlugin({
-              path: diagnostic.path,
+            runtimeConfigDiagnosticMatchesPlugin({
+              diagnostic,
               pluginId: manifest.id
             })
           )

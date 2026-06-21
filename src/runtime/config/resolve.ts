@@ -101,11 +101,42 @@ export function pluginHasConfigErrors(options: {
   return options.diagnostics.some(
     (diagnostic) =>
       diagnostic.severity === 'error' &&
-      runtimeConfigDiagnosticPathMatchesPluginConfig({
-        path: diagnostic.path,
+      runtimeConfigDiagnosticMatchesPluginConfig({
+        diagnostic,
         pluginId: options.pluginId
       })
   );
+}
+
+export function runtimeConfigDiagnosticMatchesPlugin(options: {
+  readonly diagnostic: RuntimeConfigDiagnostic;
+  readonly pluginId: string;
+}): boolean {
+  if (options.diagnostic.pluginId !== undefined) {
+    return options.diagnostic.pluginId === options.pluginId;
+  }
+
+  return runtimeConfigDiagnosticPathMatchesPlugin({
+    path: options.diagnostic.path,
+    pluginId: options.pluginId
+  });
+}
+
+export function runtimeConfigDiagnosticMatchesPluginConfig(options: {
+  readonly diagnostic: RuntimeConfigDiagnostic;
+  readonly pluginId: string;
+}): boolean {
+  if (options.diagnostic.pluginId !== undefined) {
+    return (
+      options.diagnostic.pluginId === options.pluginId &&
+      options.diagnostic.pluginConfigField !== undefined
+    );
+  }
+
+  return runtimeConfigDiagnosticPathMatchesPluginConfig({
+    path: options.diagnostic.path,
+    pluginId: options.pluginId
+  });
 }
 
 export function runtimeConfigDiagnosticPathMatchesPlugin(options: {
@@ -116,7 +147,7 @@ export function runtimeConfigDiagnosticPathMatchesPlugin(options: {
 
   return (
     options.path === pluginPath ||
-    pluginIdFromEnabledDiagnosticPath(options.path) === options.pluginId ||
+    runtimeConfigDiagnosticPathMatchesPluginEnabled(options) ||
     runtimeConfigDiagnosticPathMatchesPluginConfig(options)
   );
 }
@@ -125,41 +156,19 @@ export function runtimeConfigDiagnosticPathMatchesPluginConfig(options: {
   readonly path: string | undefined;
   readonly pluginId: string;
 }): boolean {
-  return pluginIdFromConfigDiagnosticPath(options.path) === options.pluginId;
+  const configPath = `plugins.${options.pluginId}.config`;
+
+  return (
+    options.path === configPath ||
+    options.path?.startsWith(`${configPath}.`) === true
+  );
 }
 
-function pluginIdFromConfigDiagnosticPath(path: string | undefined): string | undefined {
-  return pluginIdFromTrailingSegmentPath(path, 'config');
-}
-
-function pluginIdFromEnabledDiagnosticPath(path: string | undefined): string | undefined {
-  return pluginIdFromTrailingSegmentPath(path, 'enabled');
-}
-
-function pluginIdFromTrailingSegmentPath(
-  path: string | undefined,
-  segment: string
-): string | undefined {
-  const prefix = 'plugins.';
-
-  if (path === undefined || !path.startsWith(prefix)) {
-    return undefined;
-  }
-
-  const segmentMarker = `.${segment}`;
-  const segmentIndex = path.lastIndexOf(segmentMarker);
-
-  if (segmentIndex < prefix.length) {
-    return undefined;
-  }
-
-  const suffix = path.slice(segmentIndex + segmentMarker.length);
-
-  if (suffix.length > 0 && !suffix.startsWith('.')) {
-    return undefined;
-  }
-
-  return path.slice(prefix.length, segmentIndex);
+function runtimeConfigDiagnosticPathMatchesPluginEnabled(options: {
+  readonly path: string | undefined;
+  readonly pluginId: string;
+}): boolean {
+  return options.path === `plugins.${options.pluginId}.enabled`;
 }
 
 function resolvePluginConfig(options: {
@@ -221,7 +230,8 @@ function resolvePluginConfigField(options: {
           'error',
           'runtime_config_required_value_missing',
           `Required config field "${options.field.name}" is missing for plugin "${options.manifest.id}".`,
-          path
+          path,
+          pluginConfigDiagnosticMetadata(options)
         )
       );
     }
@@ -240,7 +250,8 @@ function resolvePluginConfigField(options: {
           'error',
           'runtime_config_secret_ref_for_non_secret',
           `Non-secret config field "${options.field.name}" cannot use a secret value.`,
-          path
+          path,
+          pluginConfigDiagnosticMetadata(options)
         )
       );
     }
@@ -258,7 +269,8 @@ function resolvePluginConfigField(options: {
           'error',
           'runtime_config_value_type_invalid',
           `Config field "${options.field.name}" does not match its declared metadata.`,
-          path
+          path,
+          pluginConfigDiagnosticMetadata(options)
         )
       );
     }
@@ -305,7 +317,8 @@ function resolveSecretField(options: {
           'error',
           'runtime_config_required_secret_missing',
           `Required secret "${options.field.name}" for plugin "${options.manifest.id}" is missing from env:${envRef.$env}.`,
-          options.path
+          options.path,
+          pluginConfigDiagnosticMetadata(options)
         )
       );
     }
@@ -325,7 +338,8 @@ function resolveSecretField(options: {
           'error',
           'runtime_config_plaintext_secret_rejected',
           `Plaintext secret override for "${options.field.name}" is not allowed.`,
-          options.path
+          options.path,
+          pluginConfigDiagnosticMetadata(options)
         )
       );
     }
@@ -347,7 +361,8 @@ function resolveSecretField(options: {
           'error',
           'runtime_config_plaintext_secret_rejected',
           `Secret config field "${options.field.name}" must use an env ref.`,
-          options.path
+          options.path,
+          pluginConfigDiagnosticMetadata(options)
         )
       );
     }
@@ -364,7 +379,8 @@ function resolveSecretField(options: {
         'error',
         'runtime_config_required_secret_missing',
         `Required secret "${options.field.name}" is missing for plugin "${options.manifest.id}".`,
-        options.path
+        options.path,
+        pluginConfigDiagnosticMetadata(options)
       )
     );
   }
@@ -418,10 +434,24 @@ function pushUnknownPluginConfigFieldDiagnostics(options: {
         'error',
         'runtime_config_unknown_plugin_config_field',
         `Unknown config field "${fieldName}" for plugin "${options.manifest.id}".`,
-        `plugins.${options.manifest.id}.config.${fieldName}`
+        `plugins.${options.manifest.id}.config.${fieldName}`,
+        {
+          pluginId: options.manifest.id,
+          pluginConfigField: fieldName
+        }
       )
     );
   }
+}
+
+function pluginConfigDiagnosticMetadata(options: {
+  readonly manifest: RuntimePluginManifest;
+  readonly field: RuntimePluginConfigField;
+}): Pick<RuntimeConfigDiagnostic, 'pluginId' | 'pluginConfigField'> {
+  return {
+    pluginId: options.manifest.id,
+    pluginConfigField: options.field.name
+  };
 }
 
 function valueMatchesField(
@@ -542,12 +572,17 @@ function diagnostic(
   severity: RuntimeConfigDiagnostic['severity'],
   code: string,
   message: string,
-  path: string
+  path: string,
+  metadata?: Pick<RuntimeConfigDiagnostic, 'pluginId' | 'pluginConfigField'>
 ): RuntimeConfigDiagnostic {
   return Object.freeze({
     severity,
     code,
     message,
-    path
+    path,
+    ...(metadata?.pluginId === undefined ? {} : { pluginId: metadata.pluginId }),
+    ...(metadata?.pluginConfigField === undefined
+      ? {}
+      : { pluginConfigField: metadata.pluginConfigField })
   } satisfies RuntimeConfigDiagnostic);
 }

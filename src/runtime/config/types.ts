@@ -47,6 +47,8 @@ export type RuntimeConfigDiagnostic = {
   readonly code: string;
   readonly message: string;
   readonly path?: string;
+  readonly pluginId?: string;
+  readonly pluginConfigField?: string;
 };
 
 export type LoadedProject02RuntimeConfig = {
