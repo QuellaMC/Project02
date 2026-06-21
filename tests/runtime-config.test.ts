@@ -887,31 +887,46 @@ describe('runtime config loading and resolution', () => {
     expect(configured.resolvedConfig.storeRoot).toBe(configuredStoreRoot);
   });
 
-  it('blocks automatic memory activation when multiple providers are enabled without a default', async () => {
-    const configPath = writeRuntimeConfig(
-      join(mkdtempSync(join(tmpdir(), 'project02-config-memory-ambiguous-')), 'config.json'),
-      {
-        plugins: {
-          'memory.one': {
-            enabled: true
-          },
-          'memory.two': {
-            enabled: true
-          }
+  it('fails activation checks when multiple explicitly enabled memory providers are ambiguous', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-memory-ambiguous-'));
+    const memoryOne = memoryProviderPlugin('memory.one');
+    const memoryTwo = memoryProviderPlugin('memory.two');
+    const factories = {
+      'memory.one': {
+        manifest: memoryOne.manifest,
+        create: () => memoryOne
+      },
+      'memory.two': {
+        manifest: memoryTwo.manifest,
+        create: () => memoryTwo
+      }
+    };
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'memory.one': {
+          enabled: true
+        },
+        'memory.two': {
+          enabled: true
         }
       }
-    );
+    });
     const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ configPath }),
-      factories: {
-        'memory.one': () => memoryProviderPlugin('memory.one'),
-        'memory.two': () => memoryProviderPlugin('memory.two')
-      }
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories
     });
 
     expect(configured.activation.enabledPluginIds).toEqual([]);
-    expect(configured.activation.diagnostics.map((item) => item.code)).toContain(
-      'ambiguous_memory_provider_selection'
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'ambiguous_memory_provider_selection',
+          path: 'defaultMemoryProvider'
+        })
+      ])
     );
     expect(
       configured.activation.plugins.map((plugin) => [
@@ -922,15 +937,38 @@ describe('runtime config loading and resolution', () => {
       ['memory.one', 'blocked'],
       ['memory.two', 'blocked']
     ]);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories
+      })
+    ).toBe(1);
+    expect(stdout).toContain('"ambiguous_memory_provider_selection"');
+    expect(stdout).toContain('"severity": "error"');
   });
 
-  it('treats a typoed explicit default memory provider as an activation error when another provider is enabled', async () => {
+  it('treats a typoed explicit default memory provider as an activation-wide error when another provider is enabled', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-memory-default-typo-'));
     const enabledPlugin = memoryProviderPlugin('memory.enabled');
+    let factoryCalls = 0;
     const factories = {
+      'character-state': {
+        manifest: createCharacterStatePluginManifest(),
+        create() {
+          factoryCalls += 1;
+          throw new Error('default plugin should not be constructed');
+        }
+      },
       'memory.enabled': {
         manifest: enabledPlugin.manifest,
-        create: () => enabledPlugin
+        create() {
+          factoryCalls += 1;
+          throw new Error('unselected memory plugin should not be constructed');
+        }
       }
     };
     let stdout = '';
@@ -948,7 +986,15 @@ describe('runtime config loading and resolution', () => {
       loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
       factories
     });
+    const characterActivation = configured.activation.plugins.find(
+      (plugin) => plugin.pluginId === 'character-state'
+    );
+    const memoryActivation = configured.activation.plugins.find(
+      (plugin) => plugin.pluginId === 'memory.enabled'
+    );
 
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
     expect(configured.activation.enabledPluginIds).toEqual([]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
@@ -959,12 +1005,20 @@ describe('runtime config loading and resolution', () => {
         })
       ])
     );
-    expect(configured.activation.plugins[0]).toMatchObject({
+    expect(characterActivation).toMatchObject({
+      pluginId: 'character-state',
+      enabled: false,
+      activationStatus: 'blocked'
+    });
+    expect(characterActivation?.activationReasons).toContain(
+      'blocked_by_config_errors'
+    );
+    expect(memoryActivation).toMatchObject({
       pluginId: 'memory.enabled',
       enabled: false,
       activationStatus: 'disabled'
     });
-    expect(configured.activation.plugins[0]?.activationReasons).toContain(
+    expect(memoryActivation?.activationReasons).toContain(
       'not_selected_as_default_memory_provider'
     );
 
@@ -977,6 +1031,7 @@ describe('runtime config loading and resolution', () => {
         factories
       })
     ).toBe(1);
+    expect(factoryCalls).toBe(0);
     expect(stdout).toContain('"default_memory_provider_unavailable"');
     expect(stdout).toContain('"severity": "error"');
   });
@@ -1644,6 +1699,52 @@ describe('runtime config CLI', () => {
       expect(process.env[envVar]).toBe(secretValue);
     } finally {
       Reflect.deleteProperty(process.env, envVar);
+    }
+  });
+
+  it('rotates multi-line dotenv secrets without leaving stale continuation lines', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-rotate-'));
+    const envVar = 'PROJECT02_SECRET_ROTATION_MULTILINE';
+    const otherEnvVar = 'PROJECT02_SECRET_ROTATION_OTHER';
+    const oldSecret = 'old first line\nold second line\nold third line';
+    const newSecret = 'new first line\nnew second line';
+    const envPath = join(storeRoot, '.env');
+
+    Reflect.deleteProperty(process.env, envVar);
+    Reflect.deleteProperty(process.env, otherEnvVar);
+    writeFileSync(
+      envPath,
+      `# keep comment\n${otherEnvVar}="other-value"\n${envVar}="${oldSecret}"\n`,
+      'utf8'
+    );
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {}),
+          env: { [envVar]: newSecret }
+        }
+      )
+    ).toBe(0);
+
+    const envFile = readFileSync(envPath, 'utf8');
+
+    expect(envFile).toContain('# keep comment');
+    expect(envFile).toContain(`${otherEnvVar}="other-value"`);
+    expect(envFile).toContain(`${envVar}="${newSecret}"`);
+    expect(envFile).not.toContain('old first line');
+    expect(envFile).not.toContain('old second line');
+    expect(envFile).not.toContain('old third line');
+
+    try {
+      loadEnvFile(envPath);
+      expect(process.env[envVar]).toBe(newSecret);
+      expect(process.env[otherEnvVar]).toBe('other-value');
+    } finally {
+      Reflect.deleteProperty(process.env, envVar);
+      Reflect.deleteProperty(process.env, otherEnvVar);
     }
   });
 

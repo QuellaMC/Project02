@@ -370,15 +370,71 @@ function writeEnvSecret(envPath: string, envVar: string, secretValue: string): v
   }
 
   const current = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
-  const lines = current
-    .split('\n')
-    .filter((line) => line.trim().length > 0 && !line.startsWith(`${envVar}=`));
+  const lines = envFileLinesWithoutAssignment(current, envVar);
   const next = `${[
     ...lines,
     `${envVar}=${formatDotenvSecretValue(secretValue)}`
   ].join('\n')}\n`;
 
   writeTextAtomic(envPath, next, 0o600);
+}
+
+type DotenvQuoteDelimiter = '"' | "'" | '`';
+
+function envFileLinesWithoutAssignment(
+  value: string,
+  envVar: string
+): readonly string[] {
+  const lines = value.split('\n');
+  const kept: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+
+    if (line.trim().length === 0) {
+      continue;
+    }
+
+    if (!line.startsWith(`${envVar}=`)) {
+      kept.push(line);
+      continue;
+    }
+
+    const assignmentValue = line.slice(envVar.length + 1);
+    const delimiter = dotenvQuoteDelimiter(assignmentValue);
+
+    if (delimiter !== undefined && !assignmentValue.slice(1).includes(delimiter)) {
+      index = skipDotenvQuotedValueContinuation(lines, index + 1, delimiter);
+    }
+  }
+
+  return Object.freeze(kept);
+}
+
+function dotenvQuoteDelimiter(value: string): DotenvQuoteDelimiter | undefined {
+  const first = value[0];
+
+  return isDotenvQuoteDelimiter(first) ? first : undefined;
+}
+
+function isDotenvQuoteDelimiter(
+  value: string | undefined
+): value is DotenvQuoteDelimiter {
+  return value === '"' || value === "'" || value === '`';
+}
+
+function skipDotenvQuotedValueContinuation(
+  lines: readonly string[],
+  startIndex: number,
+  delimiter: DotenvQuoteDelimiter
+): number {
+  for (let index = startIndex; index < lines.length; index += 1) {
+    if ((lines[index] ?? '').includes(delimiter)) {
+      return index;
+    }
+  }
+
+  return lines.length - 1;
 }
 
 function formatDotenvSecretValue(value: string): string {

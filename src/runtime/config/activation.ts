@@ -199,10 +199,14 @@ export function resolveRuntimePluginActivation(options: {
   });
 
   diagnostics.push(...memoryProviderDecision.diagnostics);
+  const activationConfigErrors = hasGlobalRuntimeConfigErrors({
+    diagnostics,
+    knownPluginIds: pluginIds
+  });
 
   for (const manifest of pluginManifests) {
     const preliminaryDecision = preliminaryDecisions.get(manifest.id);
-    const decision = finalizeMemoryProviderActivation({
+    const memoryDecision = finalizeMemoryProviderActivation({
       manifest,
       decision: preliminaryDecision ?? activationDecision({
         configuredEnabled: undefined,
@@ -211,6 +215,10 @@ export function resolveRuntimePluginActivation(options: {
         configErrors: true
       }),
       memoryProviderDecision
+    });
+    const decision = blockActivationAfterRuntimeConfigErrors({
+      decision: memoryDecision,
+      configErrors: activationConfigErrors
     });
 
     if (decision.enabled) {
@@ -464,6 +472,24 @@ function activationDecision(options: {
   };
 }
 
+function blockActivationAfterRuntimeConfigErrors(options: {
+  readonly decision: ReturnType<typeof activationDecision>;
+  readonly configErrors: boolean;
+}): ReturnType<typeof activationDecision> {
+  if (!options.configErrors || !options.decision.enabled) {
+    return options.decision;
+  }
+
+  return {
+    enabled: false,
+    status: 'blocked',
+    reasons: Object.freeze([
+      ...options.decision.reasons,
+      'blocked_by_config_errors'
+    ])
+  };
+}
+
 function unknownPluginDiagnostics(options: {
   readonly knownPluginIds: ReadonlySet<string>;
   readonly loadedPluginIds: readonly string[];
@@ -543,7 +569,7 @@ function defaultMemoryProviderDecision(options: {
       ambiguous: true,
       diagnostics: [
         diagnostic(
-          'warning',
+          'error',
           'ambiguous_memory_provider_selection',
           'Multiple memory providers are active without defaultMemoryProvider.',
           'defaultMemoryProvider'
