@@ -151,6 +151,60 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
+  it('fails check when the default memory provider targets a disabled legacy function factory', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-legacy-disabled-default-')
+    );
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      enabledPlugins: ['legacy.required'],
+      defaultMemoryProvider: 'legacy.required',
+      plugins: {
+        'legacy.required': {
+          enabled: false
+        }
+      }
+    });
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          'legacy.required': () => {
+            factoryCalls += 1;
+            throw new Error('disabled legacy plugins must not be constructed');
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(1);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
+          path: 'defaultMemoryProvider',
+          pluginId: 'legacy.required'
+        })
+      ])
+    );
+    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_legacy_factory_unchecked'
+    );
+    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_unknown_plugin'
+    );
+  });
+
   it('fails strict activation for an unknown default memory provider', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-memory-default-strict-')

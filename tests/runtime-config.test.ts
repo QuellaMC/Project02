@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   statSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1781,6 +1782,56 @@ describe('runtime config CLI', () => {
     );
     expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
     expect(readFileSync(configPath, 'utf8')).not.toContain('stored-secret');
+  });
+
+  it('rejects secret writes when a missing config path aliases the env path through a symlink parent', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-link-store-'));
+    const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-link-config-'));
+    const configParent = join(configRoot, 'linked-store');
+    const configPath = join(configParent, '.env');
+    const envPath = join(storeRoot, '.env');
+    const existingPath = join(storeRoot, 'existing.txt');
+    let stdout = '';
+    let stderr = '';
+
+    writeFileSync(existingPath, 'preserve existing file\n', 'utf8');
+    symlinkSync(storeRoot, configParent, 'dir');
+
+    expect(existsSync(configPath)).toBe(false);
+    expect(existsSync(envPath)).toBe(false);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        [
+          '--store',
+          storeRoot,
+          '--config',
+          configPath,
+          'secret',
+          'set',
+          'mem0-local',
+          'cloudApiKey',
+          'MEM0_API_KEY'
+        ],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          }),
+          env: { MEM0_API_KEY: 'stored-secret' }
+        }
+      )
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toContain(
+      'selected config path and runtime env path resolve to the same file'
+    );
+    expect(existsSync(configPath)).toBe(false);
+    expect(existsSync(envPath)).toBe(false);
+    expect(readFileSync(existingPath, 'utf8')).toBe('preserve existing file\n');
   });
 
   it('reports config write failures without leaking raw filesystem exceptions', async () => {

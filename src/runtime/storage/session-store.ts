@@ -326,9 +326,11 @@ async function localRuntimeStoreHasExistingContent(
     const entries = await readdir(layout.storeRoot, { withFileTypes: true });
 
     for (const entry of entries) {
+      const entryPath = join(layout.storeRoot, entry.name);
+
       if (
         entry.isDirectory() &&
-        join(layout.storeRoot, entry.name) === layout.sessionsRoot
+        entryPath === layout.sessionsRoot
       ) {
         if (await localRuntimeSessionsRootHasDurableEvidence(layout)) {
           return true;
@@ -338,8 +340,8 @@ async function localRuntimeStoreHasExistingContent(
       }
 
       if (
-        entry.isFile() &&
-        isRuntimeHomeControlFile(layout, join(layout.storeRoot, entry.name))
+        isRuntimeHomeControlFile(layout, entryPath) &&
+        (entry.isFile() || entry.isSymbolicLink())
       ) {
         continue;
       }

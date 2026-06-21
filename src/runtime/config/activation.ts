@@ -102,6 +102,10 @@ export function resolveConfiguredProject02PluginActivation(options: {
 }): Project02ConfiguredPluginActivation {
   const factories = options.factories ?? defaultRuntimePluginFactories();
   const legacyFactoryIds = legacyFunctionFactoryIds(factories);
+  const disabledLegacyFactoryIds = explicitlyDisabledLegacyFactoryIds({
+    factories,
+    loadedConfig: options.loadedConfig
+  });
   const pluginManifests = manifestBackedPluginManifests(factories);
   const resolvedConfig = resolveProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
@@ -112,6 +116,7 @@ export function resolveConfiguredProject02PluginActivation(options: {
   const activation = resolveRuntimePluginActivation({
     pluginManifests,
     additionalKnownPluginIds: legacyFactoryIds,
+    disabledKnownPluginIds: [...disabledLegacyFactoryIds],
     uncheckedLegacyFactoryIds:
       options.diagnoseUncheckedLegacyFactories === true ? legacyFactoryIds : [],
     resolvedConfig,
@@ -184,6 +189,7 @@ export async function createConfiguredProject02PluginHost(options: {
   const activation = resolveRuntimePluginActivation({
     pluginManifests: preparedFactories.map((factory) => factory.manifest),
     additionalKnownPluginIds: [...disabledLegacyFactoryIds],
+    disabledKnownPluginIds: [...disabledLegacyFactoryIds],
     resolvedConfig,
     loadedConfig: options.loadedConfig,
     strictUnknownPlugins: options.strictUnknownPlugins === true
@@ -214,6 +220,7 @@ export function resolveRuntimePluginActivation(options: {
   readonly plugins?: readonly RuntimePlugin[];
   readonly pluginManifests?: readonly RuntimePluginManifest[];
   readonly additionalKnownPluginIds?: readonly string[];
+  readonly disabledKnownPluginIds?: readonly string[];
   readonly uncheckedLegacyFactoryIds?: readonly string[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -229,7 +236,8 @@ export function resolveRuntimePluginActivation(options: {
     });
   const pluginIds = new Set([
     ...pluginManifests.map((manifest) => manifest.id),
-    ...(options.additionalKnownPluginIds ?? [])
+    ...(options.additionalKnownPluginIds ?? []),
+    ...(options.disabledKnownPluginIds ?? [])
   ]);
   const diagnostics: RuntimeConfigDiagnostic[] = [
     ...duplicateManifestDiagnostics,
@@ -292,7 +300,8 @@ export function resolveRuntimePluginActivation(options: {
     ),
     enabledPluginManifests: pluginManifests.filter(
       (manifest) => preliminaryDecisions.get(manifest.id)?.enabled === true
-    )
+    ),
+    disabledKnownPluginIds: options.disabledKnownPluginIds ?? []
   });
 
   diagnostics.push(...memoryProviderDecision.diagnostics);
@@ -768,6 +777,7 @@ function defaultMemoryProviderDecision(options: {
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly memoryProviderManifests: readonly RuntimePluginManifest[];
   readonly enabledPluginManifests: readonly RuntimePluginManifest[];
+  readonly disabledKnownPluginIds: readonly string[];
 }): {
   readonly activeMemoryProviderIds: readonly string[];
   readonly ambiguous: boolean;
@@ -777,6 +787,7 @@ function defaultMemoryProviderDecision(options: {
   const enabledMemoryProviders = options.enabledPluginManifests.filter(
     (manifest) => manifest.kind === 'memory_provider'
   );
+  const disabledKnownPluginIds = new Set(options.disabledKnownPluginIds);
 
   if (options.configDefaultMemoryProvider !== undefined) {
     const knownPlugin = options.pluginManifests.find(
@@ -787,6 +798,9 @@ function defaultMemoryProviderDecision(options: {
     );
     const selected = enabledMemoryProviders.find(
       (manifest) => manifest.id === options.configDefaultMemoryProvider
+    );
+    const disabledKnownPlugin = disabledKnownPluginIds.has(
+      options.configDefaultMemoryProvider
     );
 
     if (selected === undefined) {
@@ -811,12 +825,17 @@ function defaultMemoryProviderDecision(options: {
         ambiguous: false,
         diagnostics: [
           diagnostic(
-            enabledMemoryProviders.length > 0 || knownMemoryProvider !== undefined
+            enabledMemoryProviders.length > 0 ||
+              knownMemoryProvider !== undefined ||
+              disabledKnownPlugin
               ? 'error'
               : 'warning',
             'default_memory_provider_unavailable',
             `Default memory provider "${options.configDefaultMemoryProvider}" is not active.`,
-            'defaultMemoryProvider'
+            'defaultMemoryProvider',
+            disabledKnownPlugin
+              ? { pluginId: options.configDefaultMemoryProvider }
+              : {}
           )
         ]
       };

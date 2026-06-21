@@ -8,7 +8,7 @@ import {
   unlinkSync,
   writeFileSync
 } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 
 import { createLocalRuntimeStorageLayout } from '../storage/layout.ts';
 import {
@@ -762,11 +762,23 @@ function pathsAlias(left: string, right: string): boolean {
 }
 
 function canonicalMutationPath(path: string): string {
+  const absolutePath = resolve(path);
+
   try {
-    return realpathSync.native(path);
+    return realpathSync.native(absolutePath);
   } catch {
-    return resolve(path);
+    return canonicalMissingMutationPath(absolutePath);
   }
+}
+
+function canonicalMissingMutationPath(path: string): string {
+  const parent = dirname(path);
+
+  if (parent === path) {
+    return path;
+  }
+
+  return resolve(canonicalMutationPath(parent), basename(path));
 }
 
 function mutationFileAccessError(
