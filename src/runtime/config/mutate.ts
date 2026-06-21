@@ -989,10 +989,7 @@ function fallbackPluginPathCandidate(
 
 function fallbackPluginConfigSegmentIndex(parts: readonly string[]): number | undefined {
   for (let index = 2; index < parts.length - 1; index += 1) {
-    if (
-      parts[index] === 'config' &&
-      (parts[index + 1] !== 'config' || index === parts.length - 2)
-    ) {
+    if (parts[index] === 'config') {
       return index;
     }
   }

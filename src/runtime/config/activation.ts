@@ -91,6 +91,9 @@ const configuredPluginConstructionCleanupCharacter = Object.freeze({
   id: 'project02-runtime-config',
   displayName: 'Project02 Runtime Config'
 });
+const configuredPluginConstructionCleanupOptions = Object.freeze({
+  allowFileStoreWrites: false
+} satisfies RuntimePluginSessionEndOptions);
 
 export function defaultRuntimePluginFactories(): Readonly<
   Record<string, RuntimePluginFactory>
@@ -591,7 +594,10 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
         : { sessionIdentity: options.sessionIdentity })
     });
 
-    await cleanupHost.onSessionEnd(context, options.constructionCleanup);
+    await cleanupHost.onSessionEnd(context, {
+      ...options.constructionCleanup,
+      ...configuredPluginConstructionCleanupOptions
+    });
   }
 }
 

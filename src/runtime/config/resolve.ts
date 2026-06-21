@@ -404,11 +404,36 @@ function shouldValidatePluginConfig(options: {
     return false;
   }
 
-  return (
-    configured?.enabled === true ||
-    options.config?.enabledPlugins?.includes(options.manifest.id) === true ||
-    options.manifest.activation.defaultEnabled
-  );
+  if (configured?.enabled === true) {
+    return true;
+  }
+
+  if (options.config?.enabledPlugins?.includes(options.manifest.id) === true) {
+    return true;
+  }
+
+  if (!options.manifest.activation.defaultEnabled) {
+    return false;
+  }
+
+  return defaultEnabledPluginNeedsConfigValidation({
+    config: options.config,
+    manifest: options.manifest
+  });
+}
+
+function defaultEnabledPluginNeedsConfigValidation(options: {
+  readonly config: Project02RuntimeConfig | undefined;
+  readonly manifest: RuntimePluginManifest;
+}): boolean {
+  if (
+    options.manifest.kind === 'memory_provider' &&
+    options.config?.defaultMemoryProvider !== undefined
+  ) {
+    return options.config.defaultMemoryProvider === options.manifest.id;
+  }
+
+  return true;
 }
 
 function pushUnknownPluginConfigFieldDiagnostics(options: {

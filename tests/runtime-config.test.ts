@@ -2463,6 +2463,16 @@ describe('runtime config CLI', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'plugin', 'enable', 'memory.config'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
         ['--store', storeRoot, 'set', 'plugins.memory.config.config.backend', 'local'],
         {
           stdout: collect(() => {}),
@@ -2478,6 +2488,7 @@ describe('runtime config CLI', () => {
     expect(afterConfigSegmentSet).toMatchObject({
       plugins: {
         'memory.config': {
+          enabled: true,
           config: {
             backend: 'local'
           }
@@ -2658,6 +2669,131 @@ describe('runtime config CLI', () => {
         }
       }
     });
+  });
+
+  it('sets, gets, unsets, and checks plugin config fields starting with config', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-leading-config-field-')
+    );
+    const path = 'plugins.memory.config.config.key';
+    const plugin = requiredDottedConfigPlugin('memory', 'config.key');
+    const factories = {
+      memory: {
+        manifest: plugin.manifest,
+        create() {
+          throw new Error('runtime-config check should not construct plugins');
+        }
+      }
+    };
+    let missingStdout = '';
+    let getStdout = '';
+    let passStdout = '';
+    let afterUnsetStdout = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        stdout: collect((chunk) => {
+          missingStdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories
+      })
+    ).toBe(1);
+    expect(missingStdout).toContain('runtime_config_required_value_missing');
+    expect(missingStdout).toContain(path);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'set', path, 'local-key'], {
+        stdout: collect(() => {}),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+
+    const afterSet: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(afterSet).toMatchObject({
+      plugins: {
+        memory: {
+          config: {
+            'config.key': 'local-key'
+          }
+        }
+      }
+    });
+    expect(JSON.stringify(afterSet)).not.toContain('"memory.config"');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        stdout: collect((chunk) => {
+          passStdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories
+      })
+    ).toBe(0);
+
+    const passOutput = JSON.parse(passStdout) as {
+      readonly activationDiagnostics: readonly { readonly code: string }[];
+      readonly plugins: readonly {
+        readonly pluginId: string;
+        readonly activationStatus: string;
+        readonly enabled: boolean;
+      }[];
+    };
+
+    expect(passOutput.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_required_value_missing'
+    );
+    expect(passOutput.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: 'memory',
+        activationStatus: 'active',
+        enabled: true
+      })
+    );
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'get', path], {
+        stdout: collect((chunk) => {
+          getStdout += chunk;
+        }),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+    expect(JSON.parse(getStdout) as unknown).toBe('local-key');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'unset', path], {
+        stdout: collect(() => {}),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+
+    const afterUnset: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(afterUnset).toMatchObject({
+      plugins: {
+        memory: {
+          config: {}
+        }
+      }
+    });
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        stdout: collect((chunk) => {
+          afterUnsetStdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories
+      })
+    ).toBe(1);
+    expect(afterUnsetStdout).toContain('runtime_config_required_value_missing');
+    expect(afterUnsetStdout).toContain(path);
   });
 
   it('sets, gets, and unsets plugin IDs that contain config segments', async () => {
@@ -3922,7 +4058,7 @@ function requiredSecretPlugin(id = 'memory.required') {
   });
 }
 
-function requiredDottedConfigPlugin(id = 'memory') {
+function requiredDottedConfigPlugin(id = 'memory', fieldName = 'api.config.key') {
   const plugin = requiredSecretPlugin(id);
 
   return createRuntimePlugin({
@@ -3932,7 +4068,7 @@ function requiredDottedConfigPlugin(id = 'memory') {
       config: {
         fields: [
           {
-            name: 'api.config.key',
+            name: fieldName,
             description: 'Nested compatibility API key.',
             required: true,
             secret: false,

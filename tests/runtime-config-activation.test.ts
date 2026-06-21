@@ -13,6 +13,7 @@ import {
 } from '../src/runtime/config/index.ts';
 import {
   characterStatePluginId,
+  createRuntimePluginFileStore,
   createRuntimePlugin,
   runtimePluginDiscoveryPluginId,
   runtimePluginContractVersion,
@@ -277,6 +278,72 @@ describe('runtime config activation diagnostics', () => {
         pluginId: characterStatePluginId,
         enabled: true,
         activationStatus: 'active'
+      })
+    );
+  });
+
+  it('skips required config validation for unselected default-enabled memory providers', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-memory-default-selected-')
+    );
+    const selectedPlugin = requiredSecretPlugin('memory.selected');
+    const unselectedPlugin = requiredSecretPlugin('memory.unselected');
+    const envVar = 'PROJECT02_SELECTED_MEMORY_SECRET_3449142730';
+    let selectedFactoryCalls = 0;
+    let unselectedFactoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: selectedPlugin.manifest.id,
+      plugins: {
+        [selectedPlugin.manifest.id]: {
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      env: {
+        [envVar]: 'selected-memory-secret'
+      },
+      factories: {
+        [selectedPlugin.manifest.id]: {
+          manifest: selectedPlugin.manifest,
+          create() {
+            selectedFactoryCalls += 1;
+
+            return selectedPlugin;
+          }
+        },
+        [unselectedPlugin.manifest.id]: {
+          manifest: unselectedPlugin.manifest,
+          create() {
+            unselectedFactoryCalls += 1;
+
+            return unselectedPlugin;
+          }
+        }
+      }
+    });
+
+    expect(configured.activation.enabledPluginIds).toEqual([
+      selectedPlugin.manifest.id
+    ]);
+    expect(configured.activation.defaultMemoryProvider).toBe(
+      selectedPlugin.manifest.id
+    );
+    expect(selectedFactoryCalls).toBe(1);
+    expect(unselectedFactoryCalls).toBe(0);
+    expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_required_secret_missing'
+    );
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: unselectedPlugin.manifest.id,
+        enabled: false,
+        activationStatus: 'disabled'
       })
     );
   });
@@ -567,6 +634,81 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
+  it('keeps construction-failure cleanup read-only by default', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-factory-readonly-cleanup-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const cleanupContexts: RuntimePluginContext[] = [];
+    const cleanupWriteBlocked: boolean[] = [];
+    const cleanupPlugin = fileStoreSessionEndPlugin('first.cleanup', (context) => {
+      cleanupContexts.push(context);
+
+      if (context.fileStore === undefined) {
+        throw new Error('Expected construction cleanup context to include fileStore.');
+      }
+
+      try {
+        context.fileStore.writeJsonAtomic('cleanup.json', {
+          value: 'should-not-write'
+        });
+        cleanupWriteBlocked.push(false);
+      } catch {
+        cleanupWriteBlocked.push(true);
+      }
+    });
+    const failingPlugin = firstPartyPlugin('later.failure');
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        [cleanupPlugin.manifest.id]: {
+          enabled: true
+        },
+        [failingPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    await expect(
+      createConfiguredProject02PluginHost({
+        loadedConfig: loadProject02RuntimeConfig({ configPath }),
+        storeRoot,
+        factories: {
+          [cleanupPlugin.manifest.id]: {
+            manifest: cleanupPlugin.manifest,
+            create: () => cleanupPlugin
+          },
+          [failingPlugin.manifest.id]: {
+            manifest: failingPlugin.manifest,
+            create: () => {
+              throw new Error('later manifest-backed factory failed');
+            }
+          }
+        }
+      })
+    ).rejects.toThrow('later manifest-backed factory failed');
+
+    const cleanupContext = cleanupContexts[0];
+
+    if (cleanupContext === undefined) {
+      throw new Error('Expected construction cleanup to run.');
+    }
+
+    const cleanupStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: cleanupContext.sessionId,
+      pluginId: cleanupPlugin.manifest.id
+    });
+
+    expect(cleanupContext).toMatchObject({
+      sessionId: 'configured-plugin-construction-cleanup',
+      currentUserMessage: 'configured plugin construction failed before host creation'
+    });
+    expect(cleanupWriteBlocked).toEqual([true]);
+    expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
+  });
+
   it('accepts manifest-backed factories that return their declared manifest', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-manifest-match-')
@@ -737,6 +879,34 @@ function sessionEndPlugin(
     manifest: {
       ...plugin.manifest,
       declaredPlugins: ['plugin_discovery', 'on_session_end']
+    },
+    lifecycleHooks: {
+      onSessionEnd(context) {
+        onSessionEnd(context);
+        return {
+          status: 'completed',
+          evidence: []
+        };
+      }
+    }
+  });
+}
+
+function fileStoreSessionEndPlugin(
+  id: string,
+  onSessionEnd: (context: RuntimePluginContext) => void
+) {
+  const plugin = firstPartyPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      declaredPlugins: ['plugin_discovery', 'on_session_end'],
+      runtimePolicy: {
+        ...plugin.manifest.runtimePolicy,
+        sideEffectLevel: 'local_memory_write'
+      },
+      requestedApis: ['file_store']
     },
     lifecycleHooks: {
       onSessionEnd(context) {
