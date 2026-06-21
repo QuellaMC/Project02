@@ -1,10 +1,17 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { Writable } from 'node:stream';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   applyRuntimeConfigMutation,
@@ -205,6 +212,101 @@ describe('runtime config loading and resolution', () => {
           code: 'runtime_config_unknown_plugin_wrapper_field',
           path: 'plugins.unknown.enable',
           pluginId: 'unknown'
+        })
+      ])
+    );
+  });
+
+  it('treats known plugin wrapper load errors as global activation blockers', async () => {
+    const badPlugin = requiredSecretPlugin('bad');
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-known-plugin-global-')),
+        'config.json'
+      ),
+      {
+        plugins: {
+          bad: {
+            enable: true
+          }
+        }
+      }
+    );
+    const loaded = loadProject02RuntimeConfig({ configPath });
+    let manifestBackedFactoryCalls = 0;
+    let legacyFactoryCalls = 0;
+
+    expect(loaded.config).toBeUndefined();
+    expect(loaded.diagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        code: 'runtime_config_unknown_plugin_wrapper_field',
+        path: 'plugins.bad.enable',
+        pluginId: 'bad'
+      })
+    ]);
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loaded,
+      factories: {
+        'character-state': {
+          manifest: createCharacterStatePluginManifest(),
+          create() {
+            manifestBackedFactoryCalls += 1;
+            throw new Error('unrelated factory should not be constructed');
+          }
+        },
+        bad: {
+          manifest: badPlugin.manifest,
+          create() {
+            manifestBackedFactoryCalls += 1;
+            throw new Error('invalid plugin factory should not be constructed');
+          }
+        },
+        legacy() {
+          legacyFactoryCalls += 1;
+
+          return requiredSecretPlugin('legacy');
+        }
+      }
+    });
+    const badActivation = configured.activation.plugins.find(
+      (plugin) => plugin.pluginId === 'bad'
+    );
+    const characterActivation = configured.activation.plugins.find(
+      (plugin) => plugin.pluginId === 'character-state'
+    );
+
+    expect(manifestBackedFactoryCalls).toBe(0);
+    expect(legacyFactoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(characterActivation).toMatchObject({
+      pluginId: 'character-state',
+      enabled: false,
+      activationStatus: 'blocked'
+    });
+    expect(characterActivation?.diagnostics).toEqual([]);
+    expect(badActivation).toMatchObject({
+      pluginId: 'bad',
+      enabled: false,
+      activationStatus: 'blocked'
+    });
+    expect(badActivation?.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_unknown_plugin_wrapper_field',
+          path: 'plugins.bad.enable',
+          pluginId: 'bad'
+        })
+      ])
+    );
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_unknown_plugin_wrapper_field',
+          path: 'plugins.bad.enable',
+          pluginId: 'bad'
         })
       ])
     );
@@ -1213,6 +1315,40 @@ describe('runtime config CLI', () => {
     );
   });
 
+  it('does not persist a new env secret when an explicit config write fails', () => {
+    const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-write-fail-'));
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-orphan-secret-'));
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      storeRoot
+    });
+    const timestamp = 3448006099;
+    const configTempPath = `${configPath}.${String(process.pid)}.${String(timestamp)}.tmp`;
+    const originalConfig = readFileSync(configPath, 'utf8');
+    const now = vi.spyOn(Date, 'now').mockReturnValue(timestamp);
+
+    mkdirSync(configTempPath);
+
+    try {
+      expect(() =>
+        applyRuntimeConfigMutation({
+          configPath,
+          operation: {
+            kind: 'secret_set',
+            pluginId: 'mem0-local',
+            fieldName: 'cloudApiKey',
+            envVar: 'MEM0_API_KEY',
+            secretValue: 'stored-secret'
+          }
+        })
+      ).toThrow();
+    } finally {
+      now.mockRestore();
+    }
+
+    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
+    expect(existsSync(join(storeRoot, '.env'))).toBe(false);
+  });
+
   it('reports env paths from the post-mutation store root', () => {
     const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-env-output-'));
     const initialStoreRoot = mkdtempSync(
@@ -1311,6 +1447,34 @@ describe('runtime config CLI', () => {
 
     expect(stdout).toBe(`${configPath}\n`);
     expect(stderr).toBe('');
+  });
+
+  it.each([
+    {
+      args: ['--config', '   ', 'path'] as const,
+      message: 'Local runtime store is missing required files.'
+    },
+    {
+      args: ['--store', '   ', 'path'] as const,
+      message: 'Local runtime store root must be non-empty.'
+    }
+  ])('reports invalid runtime location for %j without throwing', async (example) => {
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(example.args, {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      })
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toBe(`Error: ${example.message}\n`);
   });
 
   it('prints env-path from the effective configured store root', async () => {

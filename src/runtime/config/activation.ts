@@ -23,6 +23,7 @@ import type {
   RuntimeConfigDiagnostic
 } from './types.ts';
 import {
+  diagnosticsHaveErrors,
   runtimeConfigDiagnosticMatchesPlugin,
   resolveProject02RuntimeConfig
 } from './resolve.ts';
@@ -101,9 +102,11 @@ export async function createConfiguredProject02PluginHost(options: {
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
   });
+  const loadedConfigHasErrors = diagnosticsHaveErrors(options.loadedConfig.diagnostics);
   const preparedFactories = await prepareRuntimePluginFactories({
     factories,
-    storeRoot: initialStoreRoot
+    storeRoot: initialStoreRoot,
+    skipLegacyFactoryCreation: loadedConfigHasErrors
   });
   const resolvedConfig = resolveProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
@@ -159,6 +162,7 @@ export function resolveRuntimePluginActivation(options: {
     }),
     ...options.resolvedConfig.diagnostics
   ];
+  const loadedConfigHasErrors = diagnosticsHaveErrors(options.loadedConfig.diagnostics);
   const globalConfigErrors = hasGlobalRuntimeConfigErrors({
     diagnostics,
     knownPluginIds: pluginIds
@@ -175,10 +179,13 @@ export function resolveRuntimePluginActivation(options: {
     const configured = config?.plugins?.[manifest.id];
     const legacyEnabled =
       config?.enabledPlugins?.includes(manifest.id) === true;
-    const configErrors = globalConfigErrors || pluginHasRuntimeConfigErrors({
-      diagnostics,
-      pluginId: manifest.id
-    });
+    const configErrors =
+      loadedConfigHasErrors ||
+      globalConfigErrors ||
+      pluginHasRuntimeConfigErrors({
+        diagnostics,
+        pluginId: manifest.id
+      });
     const decision = activationDecision({
       configuredEnabled: configured?.enabled,
       legacyEnabled,
@@ -199,10 +206,12 @@ export function resolveRuntimePluginActivation(options: {
   });
 
   diagnostics.push(...memoryProviderDecision.diagnostics);
-  const activationConfigErrors = hasGlobalRuntimeConfigErrors({
-    diagnostics,
-    knownPluginIds: pluginIds
-  });
+  const activationConfigErrors =
+    loadedConfigHasErrors ||
+    hasGlobalRuntimeConfigErrors({
+      diagnostics,
+      knownPluginIds: pluginIds
+    });
 
   for (const manifest of pluginManifests) {
     const preliminaryDecision = preliminaryDecisions.get(manifest.id);
@@ -334,6 +343,7 @@ function resolveRuntimeConfigStoreRoot(options: {
 async function prepareRuntimePluginFactories(options: {
   readonly factories: Readonly<Record<string, RuntimePluginFactory>>;
   readonly storeRoot: string;
+  readonly skipLegacyFactoryCreation: boolean;
 }): Promise<readonly PreparedRuntimePluginFactory[]> {
   const preparedFactories: PreparedRuntimePluginFactory[] = [];
 
@@ -347,6 +357,10 @@ async function prepareRuntimePluginFactories(options: {
           create: factory.create
         } satisfies PreparedRuntimePluginFactory)
       );
+      continue;
+    }
+
+    if (options.skipLegacyFactoryCreation) {
       continue;
     }
 

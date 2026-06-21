@@ -77,6 +77,7 @@ type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
+  readonly env?: NodeJS.ProcessEnv;
   readonly traceMode?: boolean;
   readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
@@ -160,25 +161,35 @@ export async function runChatCliFromArgs(
   options: ChatCliOptions
 ): Promise<number> {
   try {
-    loadDefaultDotEnvFile();
+    if (options.env === undefined || options.env === process.env) {
+      loadDefaultDotEnvFile();
+    }
+    const baseEnv = options.env ?? process.env;
     const parsedArgs = parseChatCliArgs(args);
-    const loadedConfig = loadProject02RuntimeConfig(parsedArgs);
-
-    loadRuntimeConfigEnvFile({
-      loadedConfig,
-      ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot })
+    const loadedConfig = loadProject02RuntimeConfig({
+      ...parsedArgs,
+      env: baseEnv
     });
+
+    const runtimeEnv = loadRuntimeConfigEnvFile({
+      loadedConfig,
+      ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot }),
+      env: baseEnv
+    });
+    const selectedArgs = selectChatProvider(parsedArgs, runtimeEnv);
 
     assertNoRuntimeConfigErrors(loadedConfig.diagnostics, 'Runtime config is invalid');
 
     const resolvedRuntimeConfig = resolveProject02RuntimeConfig({
       loadedConfig,
-      ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot })
+      ...(selectedArgs.storeRoot === undefined ? {} : { storeRoot: selectedArgs.storeRoot }),
+      env: runtimeEnv
     });
     if (options.pluginHost === undefined) {
       const initialConfiguredHost = await createConfiguredProject02PluginHost({
         loadedConfig,
-        ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot })
+        ...(selectedArgs.storeRoot === undefined ? {} : { storeRoot: selectedArgs.storeRoot }),
+        env: runtimeEnv
       });
       assertNoRuntimeConfigErrors(
         initialConfiguredHost.activation.diagnostics,
@@ -186,7 +197,7 @@ export async function runChatCliFromArgs(
       );
     }
     const runtimeArgs = {
-      ...parsedArgs,
+      ...selectedArgs,
       storeRoot: resolvedRuntimeConfig.storeRoot
     } satisfies ChatCliArgs;
 
@@ -198,7 +209,8 @@ export async function runChatCliFromArgs(
             loadedConfig,
             storeRoot: resolvedRuntimeConfig.storeRoot,
             sessionId: durableRuntime.session.id,
-            sessionIdentity: durableRuntime.session
+            sessionIdentity: durableRuntime.session,
+            env: runtimeEnv
           })
         : undefined;
     if (configuredHost !== undefined) {
@@ -208,7 +220,7 @@ export async function runChatCliFromArgs(
       );
     }
     const pluginHost = options.pluginHost ?? configuredHost?.host;
-    const roleModelAdapter = createSelectedRoleModelAdapter(parsedArgs);
+    const roleModelAdapter = createSelectedRoleModelAdapter(runtimeArgs, runtimeEnv);
     return await runChatCli({
       ...options,
       ...durableRuntime,
@@ -830,7 +842,7 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
 
   return {
     traceMode,
-    ...providerOption(provider ?? providerFromEnvironment(process.env)),
+    ...providerOption(provider),
     ...(location.storeRoot === undefined ? {} : { storeRoot: location.storeRoot }),
     ...(location.configPath === undefined ? {} : { configPath: location.configPath }),
     ...(sessionId === undefined ? {} : { sessionId }),
@@ -872,15 +884,26 @@ function providerOption(provider: ChatProviderName | undefined): {
   return provider === undefined ? {} : { provider };
 }
 
+function selectChatProvider(
+  args: ChatCliArgs,
+  env: NodeJS.ProcessEnv
+): ChatCliArgs {
+  return {
+    ...args,
+    ...providerOption(args.provider ?? providerFromEnvironment(env))
+  } satisfies ChatCliArgs;
+}
+
 function createSelectedRoleModelAdapter(
-  args: ChatCliArgs
+  args: ChatCliArgs,
+  env: NodeJS.ProcessEnv = process.env
 ): RoleModelAdapter | undefined {
   if (args.provider !== 'nvidia') {
     return undefined;
   }
 
   return createNvidiaRoleModelProviderAdapter(
-    createNvidiaRoleModelProviderConfigFromEnv()
+    createNvidiaRoleModelProviderConfigFromEnv(env)
   );
 }
 

@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs';
 import { dirname } from 'node:path';
 
 import { createLocalRuntimeStorageLayout } from '../storage/layout.ts';
@@ -65,10 +73,43 @@ export function applyRuntimeConfigMutation(
   );
   const envPath = nextEffectiveLayout.envPath;
 
-  if (options.operation.kind === 'secret_set') {
-    writeEnvSecret(envPath, options.operation.envVar, options.operation.secretValue);
-  }
+  const secretWrite =
+    options.operation.kind === 'secret_set'
+      ? prepareEnvSecretWrite(
+          envPath,
+          options.operation.envVar,
+          options.operation.secretValue
+        )
+      : undefined;
+  const previousConfigText =
+    secretWrite === undefined
+      ? undefined
+      : existsSync(selectedConfigPath)
+        ? readFileSync(selectedConfigPath, 'utf8')
+        : undefined;
+
   writeJsonAtomic(selectedConfigPath, nextConfig, 0o600);
+
+  if (secretWrite !== undefined) {
+    try {
+      writePreparedEnvSecret(secretWrite);
+    } catch (error: unknown) {
+      const rollbackError = restorePreviousConfigState(
+        selectedConfigPath,
+        previousConfigText
+      );
+
+      if (rollbackError !== undefined) {
+        throw new AggregateError(
+          [error, rollbackError],
+          'Could not write runtime config secret and failed to roll back the config update.',
+          { cause: error }
+        );
+      }
+
+      throw error;
+    }
+  }
 
   return Object.freeze({
     configPath: selectedConfigPath,
@@ -364,7 +405,17 @@ function unsetConfigPath(
   return freezeConfig({ ...config, plugins });
 }
 
-function writeEnvSecret(envPath: string, envVar: string, secretValue: string): void {
+type PreparedEnvSecretWrite = {
+  readonly envPath: string;
+  readonly value: string;
+  readonly mode: number;
+};
+
+function prepareEnvSecretWrite(
+  envPath: string,
+  envVar: string,
+  secretValue: string
+): PreparedEnvSecretWrite {
   if (!/^[A-Z_][A-Z0-9_]*$/u.test(envVar)) {
     throw new TypeError('Secret env var name must be uppercase snake case.');
   }
@@ -376,7 +427,36 @@ function writeEnvSecret(envPath: string, envVar: string, secretValue: string): v
     `${envVar}=${formatDotenvSecretValue(secretValue)}`
   ].join('\n')}\n`;
 
-  writeTextAtomic(envPath, next, 0o600);
+  return Object.freeze({
+    envPath,
+    value: next,
+    mode: 0o600
+  } satisfies PreparedEnvSecretWrite);
+}
+
+function writePreparedEnvSecret(secretWrite: PreparedEnvSecretWrite): void {
+  writeTextAtomic(secretWrite.envPath, secretWrite.value, secretWrite.mode);
+}
+
+function restorePreviousConfigState(
+  path: string,
+  previousConfigText: string | undefined
+): Error | undefined {
+  try {
+    if (previousConfigText === undefined) {
+      if (existsSync(path)) {
+        unlinkSync(path);
+      }
+      return undefined;
+    }
+
+    writeTextAtomic(path, previousConfigText, 0o600);
+    return undefined;
+  } catch (error: unknown) {
+    return error instanceof Error
+      ? error
+      : new Error('Could not restore runtime config state.', { cause: error });
+  }
 }
 
 type DotenvQuoteDelimiter = '"' | "'" | '`';

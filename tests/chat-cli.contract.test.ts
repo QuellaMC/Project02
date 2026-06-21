@@ -28,13 +28,21 @@ import {
   createFileRuntimeLogStore
 } from '../src/runtime/storage/file-runtime-log-store.ts';
 import {
+  createLocalRuntimeStorageLayout
+} from '../src/runtime/storage/layout.ts';
+import {
   createLocalRuntimeSessionStore
 } from '../src/runtime/storage/session-store.ts';
 import type {
   RoleModelAdapter
 } from '../src/role-model/loop.ts';
+import {
+  nvidiaApiKeyEnvName
+} from '../src/role-model/providers/nvidia.ts';
 import { runChatCli, runChatCliFromArgs } from '../src/cli/chat.ts';
 import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
+
+const roleModelProviderEnvName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 
 describe('chat CLI folded top-level model text', () => {
   it('hides top-level model text by default', async () => {
@@ -50,6 +58,55 @@ describe('chat CLI folded top-level model text', () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).not.toContain('folded model note');
+  });
+});
+
+describe('chat CLI provider selection', () => {
+  it('loads the runtime store env before selecting the default chat provider', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-provider-env-'));
+    const sessionId = 'runtime-env-provider';
+    let stderr = '';
+
+    writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=nvidia\n`);
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', sessionId],
+      {
+        stdin: Readable.from(['hello\n']),
+        stdout: collect(() => {}),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        env: {
+          [nvidiaApiKeyEnvName]: ''
+        }
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`NVIDIA provider requires ${nvidiaApiKeyEnvName}.`);
+  });
+
+  it('lets --provider take precedence over the runtime store env', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-provider-cli-'));
+    let stderr = '';
+
+    writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=not-a-provider\n`);
+
+    const exitCode = await runChatCliFromArgs(
+      ['--provider', 'local', '--store', storeRoot, '--new-session', 'cli-provider'],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        env: {}
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
   });
 });
 
@@ -447,6 +504,14 @@ function writeRuntimeConfig(
     'utf8'
   );
   return path;
+}
+
+function writeRuntimeEnv(storeRoot: string, content: string): void {
+  writeFileSync(
+    createLocalRuntimeStorageLayout({ storeRoot }).envPath,
+    content,
+    'utf8'
+  );
 }
 
 function collect(write: (chunk: string) => void): Writable {

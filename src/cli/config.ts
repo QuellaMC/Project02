@@ -14,6 +14,10 @@ import {
   type RuntimeConfigValue
 } from '../runtime/config/index.ts';
 import {
+  formatLocalRuntimeTerminalError,
+  isLocalRuntimeTerminalError
+} from '../runtime/terminal-errors.ts';
+import {
   parseRuntimeLocationFlag,
   RuntimeLocationCliUsageError,
   type RuntimeLocationCliState
@@ -135,11 +139,10 @@ export async function runRuntimeConfigCliFromArgs(
       error instanceof RuntimeConfigCliUsageError ||
       error instanceof RuntimeLocationCliUsageError ||
       error instanceof RuntimeEnvFileError ||
-      error instanceof TypeError
+      error instanceof TypeError ||
+      isLocalRuntimeTerminalError(error)
     ) {
-      options.stderr.write(
-        `Error: ${error instanceof Error ? error.message : 'runtime config failed'}\n`
-      );
+      options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
       return 1;
     }
 
@@ -326,6 +329,26 @@ function assertRuntimeConfigLoaded(loaded: LoadedProject02RuntimeConfig): void {
 
 function writeJson(stdout: NodeJS.WritableStream, value: unknown): void {
   stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function formatTerminalErrorMessage(
+  error:
+    | RuntimeConfigCliUsageError
+    | RuntimeLocationCliUsageError
+    | RuntimeEnvFileError
+    | TypeError
+    | Parameters<typeof formatLocalRuntimeTerminalError>[0]
+): string {
+  if (
+    error instanceof RuntimeConfigCliUsageError ||
+    error instanceof RuntimeLocationCliUsageError ||
+    error instanceof RuntimeEnvFileError ||
+    error instanceof TypeError
+  ) {
+    return error.message;
+  }
+
+  return formatLocalRuntimeTerminalError(error);
 }
 
 function isMainModule(): boolean {
