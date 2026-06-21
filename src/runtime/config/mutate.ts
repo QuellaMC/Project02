@@ -202,7 +202,7 @@ function redactionKeyForRuntimeConfigPath(
   const pluginPath = tryParsePluginMutationPath(parts, path, config);
 
   if (pluginPath?.kind === 'config_field') {
-    return pluginPath.fieldName;
+    return redactionKeyForPluginConfigField(pluginPath.fieldName);
   }
 
   return pluginPath?.kind === 'enabled' ? 'enabled' : undefined;
@@ -472,11 +472,12 @@ function prepareEnvSecretWrite(
   }
 
   const current = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
-  const lines = envFileLinesWithoutAssignment(current, envVar);
-  const next = `${[
-    ...lines,
-    `${envVar}=${formatDotenvSecretValue(secretValue)}`
-  ].join('\n')}\n`;
+  const existing = envFileTextWithoutAssignment(current, envVar);
+  const assignment = `${envVar}=${formatDotenvSecretValue(secretValue)}`;
+  const next =
+    existing.length === 0
+      ? `${assignment}\n`
+      : `${existing}${existing.endsWith('\n') ? '' : '\n'}${assignment}\n`;
 
   return Object.freeze({
     envPath,
@@ -512,41 +513,39 @@ function restorePreviousConfigState(
 
 type DotenvQuoteDelimiter = '"' | "'" | '`';
 
-function envFileLinesWithoutAssignment(
+function envFileTextWithoutAssignment(
   value: string,
   envVar: string
-): readonly string[] {
+): string {
   const lines = value.split('\n');
   const kept: string[] = [];
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
+    const assignment = dotenvAssignmentForLine(line);
+    const blockEndIndex =
+      assignment === undefined
+        ? index
+        : dotenvAssignmentBlockEndIndex(lines, index, assignment.value);
 
-    if (line.trim().length === 0) {
+    if (assignment?.name === envVar) {
+      index = blockEndIndex;
       continue;
     }
 
-    const assignmentValue = dotenvAssignmentValueForEnvVar(line, envVar);
-
-    if (assignmentValue === undefined) {
-      kept.push(line);
-      continue;
-    }
-
-    const delimiter = dotenvQuoteDelimiter(assignmentValue);
-
-    if (delimiter !== undefined && !assignmentValue.slice(1).includes(delimiter)) {
-      index = skipDotenvQuotedValueContinuation(lines, index + 1, delimiter);
-    }
+    kept.push(...lines.slice(index, blockEndIndex + 1));
+    index = blockEndIndex;
   }
 
-  return Object.freeze(kept);
+  return kept.join('\n');
 }
 
-function dotenvAssignmentValueForEnvVar(
-  line: string,
-  envVar: string
-): string | undefined {
+type DotenvAssignment = {
+  readonly name: string;
+  readonly value: string;
+};
+
+function dotenvAssignmentForLine(line: string): DotenvAssignment | undefined {
   let index = 0;
 
   while (isDotenvWhitespace(line[index])) {
@@ -564,11 +563,17 @@ function dotenvAssignmentValueForEnvVar(
     }
   }
 
-  if (!line.startsWith(envVar, index)) {
-    return undefined;
+  const nameStart = index;
+
+  while (isDotenvNameCharacter(line[index])) {
+    index += 1;
   }
 
-  index += envVar.length;
+  const name = line.slice(nameStart, index);
+
+  if (name.length === 0 || !isDotenvNameStart(name[0])) {
+    return undefined;
+  }
 
   while (isDotenvWhitespace(line[index])) {
     index += 1;
@@ -578,11 +583,22 @@ function dotenvAssignmentValueForEnvVar(
     return undefined;
   }
 
-  return line.slice(index + 1).trimStart();
+  return Object.freeze({
+    name,
+    value: line.slice(index + 1).trimStart()
+  } satisfies DotenvAssignment);
 }
 
 function isDotenvWhitespace(value: string | undefined): boolean {
   return value === ' ' || value === '\t';
+}
+
+function isDotenvNameStart(value: string | undefined): boolean {
+  return value !== undefined && /^[A-Za-z_]$/u.test(value);
+}
+
+function isDotenvNameCharacter(value: string | undefined): boolean {
+  return value !== undefined && /^[A-Za-z0-9_]$/u.test(value);
 }
 
 function dotenvQuoteDelimiter(value: string): DotenvQuoteDelimiter | undefined {
@@ -597,7 +613,21 @@ function isDotenvQuoteDelimiter(
   return value === '"' || value === "'" || value === '`';
 }
 
-function skipDotenvQuotedValueContinuation(
+function dotenvAssignmentBlockEndIndex(
+  lines: readonly string[],
+  startIndex: number,
+  assignmentValue: string
+): number {
+  const delimiter = dotenvQuoteDelimiter(assignmentValue);
+
+  if (delimiter === undefined || assignmentValue.slice(1).includes(delimiter)) {
+    return startIndex;
+  }
+
+  return dotenvQuotedValueContinuationEndIndex(lines, startIndex + 1, delimiter);
+}
+
+function dotenvQuotedValueContinuationEndIndex(
   lines: readonly string[],
   startIndex: number,
   delimiter: DotenvQuoteDelimiter
@@ -609,6 +639,10 @@ function skipDotenvQuotedValueContinuation(
   }
 
   return lines.length - 1;
+}
+
+function redactionKeyForPluginConfigField(fieldName: string): string {
+  return fieldName.split('.').filter((part) => part.length > 0).join('_');
 }
 
 function formatDotenvSecretValue(value: string): string {

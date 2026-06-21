@@ -2,12 +2,12 @@ import { pathToFileURL } from 'node:url';
 
 import {
   applyRuntimeConfigControlOperation,
-  createConfiguredProject02PluginHost,
   createRuntimeConfigInspectShape,
   defaultRuntimeConfigPath,
   diagnosticsHaveErrors,
   getRedactedRuntimeConfigValueAtPath,
   loadProject02RuntimeConfig,
+  resolveConfiguredProject02PluginActivation,
   type LoadedProject02RuntimeConfig,
   type RuntimePluginFactory,
   type RuntimeConfigMutationOperation,
@@ -42,10 +42,17 @@ class RuntimeConfigCliUsageError extends Error {
   }
 }
 
-export async function runRuntimeConfigCliFromArgs(
+export function runRuntimeConfigCliFromArgs(
   args: readonly string[],
   options: RuntimeConfigCliOptions
 ): Promise<number> {
+  return Promise.resolve().then(() => runRuntimeConfigCliFromArgsSync(args, options));
+}
+
+function runRuntimeConfigCliFromArgsSync(
+  args: readonly string[],
+  options: RuntimeConfigCliOptions
+): number {
   try {
     const env = options.env ?? process.env;
     const parsed = parseRuntimeConfigCliArgs(args, env);
@@ -91,7 +98,7 @@ export async function runRuntimeConfigCliFromArgs(
           : { storeRoot: parsed.location.storeRoot }),
         env
       });
-      const configured = await createConfiguredProject02PluginHost({
+      const configured = resolveConfiguredProject02PluginActivation({
         loadedConfig: loaded,
         ...(parsed.location.storeRoot === undefined
           ? {}

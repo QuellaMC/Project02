@@ -1798,6 +1798,79 @@ describe('runtime config CLI', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
+        [
+          '--store',
+          storeRoot,
+          'set',
+          'plugins.memory.config.api.endpoint',
+          'local-endpoint'
+        ],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    const afterSet: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(afterSet).toMatchObject({
+      plugins: {
+        memory: {
+          config: {
+            'api.endpoint': 'local-endpoint'
+          }
+        }
+      }
+    });
+    expect(JSON.stringify(afterSet)).not.toContain('"memory.config.api"');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'get', 'plugins.memory.config.api.endpoint'],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+    expect(JSON.parse(stdout) as unknown).toBe('local-endpoint');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'unset', 'plugins.memory.config.api.endpoint'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    const afterUnset: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(afterUnset).toMatchObject({
+      plugins: {
+        memory: {
+          config: {}
+        }
+      }
+    });
+  });
+
+  it('redacts dotted credential plugin config field names on get', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-dotted-credential-field-')
+    );
+    let stdout = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
         ['--store', storeRoot, 'set', 'plugins.memory.config.api.key', 'local-key'],
         {
           stdout: collect(() => {}),
@@ -1819,7 +1892,6 @@ describe('runtime config CLI', () => {
         }
       }
     });
-    expect(JSON.stringify(afterSet)).not.toContain('"memory.config.api"');
 
     expect(
       await runRuntimeConfigCliFromArgs(
@@ -1832,29 +1904,8 @@ describe('runtime config CLI', () => {
         }
       )
     ).toBe(0);
-    expect(JSON.parse(stdout) as unknown).toBe('local-key');
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'unset', 'plugins.memory.config.api.key'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    const afterUnset: unknown = JSON.parse(
-      readFileSync(join(storeRoot, 'config.json'), 'utf8')
-    );
-
-    expect(afterUnset).toMatchObject({
-      plugins: {
-        memory: {
-          config: {}
-        }
-      }
-    });
+    expect(JSON.parse(stdout) as unknown).toBe('[redacted]');
+    expect(stdout).not.toContain('local-key');
   });
 
   it('sets, gets, and unsets plugin config fields containing config', async () => {
@@ -2157,6 +2208,69 @@ describe('runtime config CLI', () => {
     }
   });
 
+  it('preserves unrelated multiline dotenv blocks when rotating another secret', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-secret-rotate-unrelated-block-')
+    );
+    const envVar = 'PROJECT02_SECRET_ROTATION_API_KEY';
+    const otherEnvVar = 'PROJECT02_SECRET_ROTATION_OTHER_BLOCK';
+    const tailEnvVar = 'PROJECT02_SECRET_ROTATION_TAIL';
+    const oldSecret = 'old top-level secret';
+    const newSecret = 'new top-level secret';
+    const preservedBlock = `${otherEnvVar}='first\n\n${envVar}=inside\nlast'`;
+    const envPath = join(storeRoot, '.env');
+
+    Reflect.deleteProperty(process.env, envVar);
+    Reflect.deleteProperty(process.env, otherEnvVar);
+    Reflect.deleteProperty(process.env, tailEnvVar);
+    writeFileSync(
+      envPath,
+      [
+        '# keep unrelated multiline block',
+        preservedBlock,
+        `${tailEnvVar}=visible-tail`,
+        `${envVar}="${oldSecret}"`,
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {}),
+          env: { [envVar]: newSecret }
+        }
+      )
+    ).toBe(0);
+
+    const envFile = readFileSync(envPath, 'utf8');
+
+    expect(envFile).toBe(
+      [
+        '# keep unrelated multiline block',
+        preservedBlock,
+        `${tailEnvVar}=visible-tail`,
+        `${envVar}="${newSecret}"`,
+        ''
+      ].join('\n')
+    );
+    expect(envFile).not.toContain(oldSecret);
+
+    try {
+      loadEnvFile(envPath);
+      expect(process.env[envVar]).toBe(newSecret);
+      expect(process.env[otherEnvVar]).toBe(`first\n\n${envVar}=inside\nlast`);
+      expect(process.env[tailEnvVar]).toBe('visible-tail');
+    } finally {
+      Reflect.deleteProperty(process.env, envVar);
+      Reflect.deleteProperty(process.env, otherEnvVar);
+      Reflect.deleteProperty(process.env, tailEnvVar);
+    }
+  });
+
   it('rotates exported dotenv secrets without preserving stale assignment blocks', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-export-'));
     const envVar = 'PROJECT02_SECRET_ROTATION_EXPORTED';
@@ -2351,7 +2465,8 @@ describe('runtime config CLI', () => {
     const plugin = requiredSecretPlugin();
     let stdout = '';
     let laterStdout = '';
-    let resolvedSecretValue: unknown;
+    let factoryCalls = 0;
+    let laterFactoryCalls = 0;
 
     Reflect.deleteProperty(process.env, envVar);
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -2387,10 +2502,9 @@ describe('runtime config CLI', () => {
           factories: {
             [plugin.manifest.id]: {
               manifest: plugin.manifest,
-              create(input) {
-                resolvedSecretValue = input.resolvedConfig['apiKey']?.value;
-
-                return plugin;
+              create() {
+                factoryCalls += 1;
+                throw new Error('runtime-config check should not construct plugins');
               }
             }
           }
@@ -2406,7 +2520,7 @@ describe('runtime config CLI', () => {
         }[];
       };
 
-      expect(resolvedSecretValue).toBe(secretValue);
+      expect(factoryCalls).toBe(0);
       expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
         'runtime_config_required_secret_missing'
       );
@@ -2429,11 +2543,15 @@ describe('runtime config CLI', () => {
           factories: {
             [plugin.manifest.id]: {
               manifest: plugin.manifest,
-              create: () => plugin
+              create() {
+                laterFactoryCalls += 1;
+                throw new Error('missing-secret check should not construct plugins');
+              }
             }
           }
         })
       ).toBe(1);
+      expect(laterFactoryCalls).toBe(0);
       expect(laterStdout).toContain('runtime_config_required_secret_missing');
       expect(laterStdout).not.toContain(secretValue);
     } finally {
@@ -2444,11 +2562,10 @@ describe('runtime config CLI', () => {
   it('keeps supplied check env values ahead of runtime env file values', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-check-env-precedence-'));
     const envVar = 'PROJECT02_CHECK_SUPPLIED_ENV_SECRET_3447850555';
-    const fileSecretValue = 'from-runtime-env-file';
     const suppliedSecretValue = 'from-supplied-env';
     const plugin = requiredSecretPlugin();
     let stdout = '';
-    let resolvedSecretValue: unknown;
+    let factoryCalls = 0;
 
     Reflect.deleteProperty(process.env, envVar);
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -2461,7 +2578,7 @@ describe('runtime config CLI', () => {
         }
       }
     });
-    writeFileSync(join(storeRoot, '.env'), `${envVar}="${fileSecretValue}"\n`, 'utf8');
+    writeFileSync(join(storeRoot, '.env'), `${envVar}=\n`, 'utf8');
 
     try {
       expect(
@@ -2474,18 +2591,35 @@ describe('runtime config CLI', () => {
           factories: {
             [plugin.manifest.id]: {
               manifest: plugin.manifest,
-              create(input) {
-                resolvedSecretValue = input.resolvedConfig['apiKey']?.value;
-
-                return plugin;
+              create() {
+                factoryCalls += 1;
+                throw new Error('runtime-config check should not construct plugins');
               }
             }
           }
         })
       ).toBe(0);
 
-      expect(resolvedSecretValue).toBe(suppliedSecretValue);
-      expect(stdout).not.toContain(fileSecretValue);
+      const output = JSON.parse(stdout) as {
+        readonly activationDiagnostics: readonly { readonly code: string }[];
+        readonly plugins: readonly {
+          readonly pluginId: string;
+          readonly activationStatus: string;
+          readonly enabled: boolean;
+        }[];
+      };
+
+      expect(factoryCalls).toBe(0);
+      expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+        'runtime_config_required_secret_missing'
+      );
+      expect(output.plugins).toContainEqual(
+        expect.objectContaining({
+          pluginId: plugin.manifest.id,
+          activationStatus: 'active',
+          enabled: true
+        })
+      );
       expect(stdout).not.toContain(suppliedSecretValue);
     } finally {
       Reflect.deleteProperty(process.env, envVar);
