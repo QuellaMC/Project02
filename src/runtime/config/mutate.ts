@@ -100,7 +100,7 @@ export function getRuntimeConfigValueAtPath(
     return config.plugins;
   }
 
-  const pluginPath = tryParsePluginMutationPath(parts, path);
+  const pluginPath = tryParsePluginMutationPath(parts, path, config);
 
   if (pluginPath !== undefined) {
     const pluginConfig = config.plugins?.[pluginPath.pluginId];
@@ -260,7 +260,7 @@ function setConfigPath(
     throw new TypeError(`Unsupported runtime config path: ${path}.`);
   }
 
-  const pluginPath = parsePluginMutationPath(parts, path);
+  const pluginPath = parsePluginMutationPath(parts, path, config);
   const currentPlugin = config.plugins?.[pluginPath.pluginId] ?? {};
   const plugins = { ...(config.plugins ?? {}) };
 
@@ -331,7 +331,7 @@ function unsetConfigPath(
     throw new TypeError(`Unsupported runtime config path: ${path}.`);
   }
 
-  const pluginPath = parsePluginMutationPath(parts, path);
+  const pluginPath = parsePluginMutationPath(parts, path, config);
 
   const currentPlugin = config.plugins?.[pluginPath.pluginId];
 
@@ -445,10 +445,107 @@ type ParsedPluginMutationPath =
 
 function parsePluginMutationPath(
   parts: readonly string[],
-  path: string
+  path: string,
+  config?: Project02RuntimeConfig
 ): ParsedPluginMutationPath {
-  const lastPart = parts.at(-1);
-  const configSegmentIndex = pluginConfigSegmentIndex(parts);
+  // Paths can contain `config` in both plugin IDs and field names; prefer known
+  // plugin IDs before falling back to the legacy delimiter heuristic.
+  const contextCandidate = knownPluginPathCandidate(
+    pluginPathCandidates(parts),
+    config
+  );
+
+  if (contextCandidate !== undefined) {
+    return contextCandidate;
+  }
+
+  const fallbackCandidate = fallbackPluginPathCandidate(parts);
+
+  if (fallbackCandidate !== undefined) {
+    return fallbackCandidate;
+  }
+
+  throw new TypeError(`Unsupported runtime config path: ${path}.`);
+}
+
+function pluginPathCandidates(parts: readonly string[]): readonly ParsedPluginMutationPath[] {
+  const candidates: ParsedPluginMutationPath[] = [];
+
+  for (let index = 2; index < parts.length - 1; index += 1) {
+    if (parts[index] === 'config') {
+      const pluginId = parts.slice(1, index).join('.');
+      const fieldName = parts.slice(index + 1).join('.');
+
+      if (pluginId.length > 0 && fieldName.length > 0) {
+        candidates.push(
+          Object.freeze({
+            kind: 'config_field',
+            pluginId,
+            fieldName
+          })
+        );
+      }
+    }
+  }
+
+  if (parts.at(-1) === 'enabled') {
+    const pluginId = parts.slice(1, -1).join('.');
+
+    if (pluginId.length > 0) {
+      candidates.push(
+        Object.freeze({
+          kind: 'enabled',
+          pluginId
+        })
+      );
+    }
+  }
+
+  return Object.freeze(candidates);
+}
+
+function knownPluginPathCandidate(
+  candidates: readonly ParsedPluginMutationPath[],
+  config: Project02RuntimeConfig | undefined
+): ParsedPluginMutationPath | undefined {
+  if (config === undefined) {
+    return undefined;
+  }
+
+  let selected: ParsedPluginMutationPath | undefined;
+
+  for (const candidate of candidates) {
+    if (!isKnownPluginId(config, candidate.pluginId)) {
+      continue;
+    }
+
+    if (
+      selected === undefined ||
+      pluginIdSpecificity(candidate.pluginId) > pluginIdSpecificity(selected.pluginId)
+    ) {
+      selected = candidate;
+    }
+  }
+
+  return selected;
+}
+
+function isKnownPluginId(config: Project02RuntimeConfig, pluginId: string): boolean {
+  return (
+    Object.hasOwn(config.plugins ?? {}, pluginId) ||
+    config.enabledPlugins?.includes(pluginId) === true ||
+    config.defaultMemoryProvider === pluginId
+  );
+}
+
+function pluginIdSpecificity(pluginId: string): number {
+  return pluginId.split('.').length;
+}
+
+function fallbackPluginPathCandidate(
+  parts: readonly string[]
+): ParsedPluginMutationPath | undefined {
+  const configSegmentIndex = fallbackPluginConfigSegmentIndex(parts);
 
   if (configSegmentIndex !== undefined) {
     const pluginId = parts.slice(1, configSegmentIndex).join('.');
@@ -469,7 +566,7 @@ function parsePluginMutationPath(
     });
   }
 
-  if (lastPart === 'enabled') {
+  if (parts.at(-1) === 'enabled') {
     const pluginId = parts.slice(1, -1).join('.');
 
     if (pluginId.length === 0) {
@@ -482,10 +579,10 @@ function parsePluginMutationPath(
     });
   }
 
-  throw new TypeError(`Unsupported runtime config path: ${path}.`);
+  return undefined;
 }
 
-function pluginConfigSegmentIndex(parts: readonly string[]): number | undefined {
+function fallbackPluginConfigSegmentIndex(parts: readonly string[]): number | undefined {
   for (let index = 2; index < parts.length - 1; index += 1) {
     if (
       parts[index] === 'config' &&
@@ -500,10 +597,11 @@ function pluginConfigSegmentIndex(parts: readonly string[]): number | undefined 
 
 function tryParsePluginMutationPath(
   parts: readonly string[],
-  path: string
+  path: string,
+  config?: Project02RuntimeConfig
 ): ParsedPluginMutationPath | undefined {
   try {
-    return parsePluginMutationPath(parts, path);
+    return parsePluginMutationPath(parts, path, config);
   } catch {
     return undefined;
   }

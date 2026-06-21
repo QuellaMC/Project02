@@ -149,6 +149,67 @@ describe('runtime config loading and resolution', () => {
     expect(stdout).toContain('"activationStatus": "blocked"');
   });
 
+  it('treats unknown plugin wrapper load errors as global activation blockers', async () => {
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-unknown-plugin-global-')),
+        'config.json'
+      ),
+      {
+        plugins: {
+          unknown: {
+            enable: true
+          }
+        }
+      }
+    );
+    const loaded = loadProject02RuntimeConfig({ configPath });
+    let factoryCalls = 0;
+
+    expect(loaded.config).toBeUndefined();
+    expect(loaded.diagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        code: 'runtime_config_unknown_plugin_wrapper_field',
+        path: 'plugins.unknown.enable',
+        pluginId: 'unknown'
+      })
+    ]);
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loaded,
+      factories: {
+        'character-state': {
+          manifest: createCharacterStatePluginManifest(),
+          create() {
+            factoryCalls += 1;
+
+            return createCharacterStatePlugin();
+          }
+        }
+      }
+    });
+
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.plugins[0]).toMatchObject({
+      pluginId: 'character-state',
+      enabled: false,
+      activationStatus: 'blocked'
+    });
+    expect(configured.activation.plugins[0]?.diagnostics).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_unknown_plugin_wrapper_field',
+          path: 'plugins.unknown.enable',
+          pluginId: 'unknown'
+        })
+      ])
+    );
+  });
+
   it('redacts secret env refs and keeps fingerprints independent of env secret values', () => {
     const plugin = createCharacterStatePlugin();
     const loaded = loadProject02RuntimeConfig({
@@ -1264,6 +1325,75 @@ describe('runtime config CLI', () => {
     });
   });
 
+  it('sets, gets, and unsets plugin IDs that contain config segments', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-plugin-config-id-'));
+    const path = 'plugins.memory.config.api.config.key';
+    let stdout = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'plugin', 'enable', 'memory.config.api'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'set', path, 'local-key'], {
+        stdout: collect(() => {}),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+
+    const afterSet: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(afterSet).toMatchObject({
+      plugins: {
+        'memory.config.api': {
+          enabled: true,
+          config: {
+            key: 'local-key'
+          }
+        }
+      }
+    });
+    expect(JSON.stringify(afterSet)).not.toContain('"memory":{"config"');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'get', path], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+    expect(JSON.parse(stdout) as unknown).toBe('local-key');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'unset', path], {
+        stdout: collect(() => {}),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+
+    const afterUnset: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(afterUnset).toMatchObject({
+      plugins: {
+        'memory.config.api': {
+          enabled: true,
+          config: {}
+        }
+      }
+    });
+  });
+
   it('refuses to mutate malformed existing config files', async () => {
     const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-malformed-'));
     const configPath = join(configRoot, 'config.json');
@@ -1493,12 +1623,16 @@ describe('runtime config CLI', () => {
     expect(stdout).toContain('"runtime_config_unknown_plugin"');
   });
 
-  it('resolves check secrets from the runtime env file when a supplied env map is empty', async () => {
+  it('resolves supplied-env check secrets from the runtime env file without leaking to later no-env checks', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-check-env-'));
+    const laterStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-env-later-')
+    );
     const envVar = 'PROJECT02_CHECK_ENV_FILE_SECRET_3447850555';
     const secretValue = 'from-runtime-env-file';
     const plugin = requiredSecretPlugin();
     let stdout = '';
+    let laterStdout = '';
     let resolvedSecretValue: unknown;
 
     Reflect.deleteProperty(process.env, envVar);
@@ -1513,6 +1647,16 @@ describe('runtime config CLI', () => {
       }
     });
     writeFileSync(join(storeRoot, '.env'), `${envVar}="${secretValue}"\n`, 'utf8');
+    writeRuntimeConfig(join(laterStoreRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
 
     try {
       expect(
@@ -1556,6 +1700,24 @@ describe('runtime config CLI', () => {
         })
       );
       expect(stdout).not.toContain(secretValue);
+      expect(process.env[envVar]).toBeUndefined();
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['--store', laterStoreRoot, 'check'], {
+          stdout: collect((chunk) => {
+            laterStdout += chunk;
+          }),
+          stderr: collect(() => {}),
+          factories: {
+            [plugin.manifest.id]: {
+              manifest: plugin.manifest,
+              create: () => plugin
+            }
+          }
+        })
+      ).toBe(1);
+      expect(laterStdout).toContain('runtime_config_required_secret_missing');
+      expect(laterStdout).not.toContain(secretValue);
     } finally {
       Reflect.deleteProperty(process.env, envVar);
     }

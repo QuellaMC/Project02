@@ -159,7 +159,10 @@ export function resolveRuntimePluginActivation(options: {
     }),
     ...options.resolvedConfig.diagnostics
   ];
-  const globalConfigErrors = hasGlobalRuntimeConfigErrors(diagnostics);
+  const globalConfigErrors = hasGlobalRuntimeConfigErrors({
+    diagnostics,
+    knownPluginIds: pluginIds
+  });
   const enabledPluginIds: string[] = [];
   const disabledPluginIds: string[] = [];
   const snapshots: RuntimePluginActivationSnapshot[] = [];
@@ -263,13 +266,17 @@ type PreparedRuntimePluginFactory =
       readonly plugin: RuntimePlugin;
     };
 
-function hasGlobalRuntimeConfigErrors(
-  diagnostics: readonly RuntimeConfigDiagnostic[]
-): boolean {
-  return diagnostics.some(
+function hasGlobalRuntimeConfigErrors(options: {
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+  readonly knownPluginIds: ReadonlySet<string>;
+}): boolean {
+  return options.diagnostics.some(
     (diagnostic) =>
       diagnostic.severity === 'error' &&
-      !isPluginScopedRuntimeConfigDiagnostic(diagnostic)
+      !isKnownPluginRuntimeConfigDiagnostic({
+        diagnostic,
+        knownPluginIds: options.knownPluginIds
+      })
   );
 }
 
@@ -287,13 +294,22 @@ function pluginHasRuntimeConfigErrors(options: {
   );
 }
 
-function isPluginScopedRuntimeConfigDiagnostic(
-  diagnostic: RuntimeConfigDiagnostic
-): boolean {
-  return (
-    diagnostic.pluginId !== undefined ||
-    diagnostic.path?.startsWith('plugins.') === true
-  );
+function isKnownPluginRuntimeConfigDiagnostic(options: {
+  readonly diagnostic: RuntimeConfigDiagnostic;
+  readonly knownPluginIds: ReadonlySet<string>;
+}): boolean {
+  for (const pluginId of options.knownPluginIds) {
+    if (
+      runtimeConfigDiagnosticMatchesPlugin({
+        diagnostic: options.diagnostic,
+        pluginId
+      })
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function resolveRuntimeConfigStoreRoot(options: {

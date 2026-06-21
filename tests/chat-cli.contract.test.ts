@@ -107,9 +107,17 @@ describe('chat CLI plugin lifecycle', () => {
     });
   });
 
-  it('preserves an injected plugin host when running from parsed args', async () => {
+  it('preserves an injected plugin host when configured plugin activation would fail', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-injected-host-'));
-    const configPath = join(storeRoot, 'config.json');
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'character-state': {
+          config: {
+            typoo: true
+          }
+        }
+      }
+    });
     const sessionId = 'injected-host-session';
     const sessionEndContexts: RuntimePluginContext[] = [];
     const pluginHost = createRuntimePluginHost({
@@ -119,24 +127,22 @@ describe('chat CLI plugin lifecycle', () => {
         })
       ]
     });
-
-    writeFileSync(
-      configPath,
-      `${JSON.stringify({ version: runtimeConfigVersion }, null, 2)}\n`,
-      'utf8'
-    );
+    let stderr = '';
 
     const exitCode = await runChatCliFromArgs(
       ['--store', storeRoot, '--config', configPath, '--new-session', sessionId],
       {
         stdin: Readable.from(['/exit\n']),
         stdout: collect(() => {}),
-        stderr: collect(() => {}),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
         pluginHost
       }
     );
 
     expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
     expect(sessionEndContexts).toHaveLength(1);
 
     const storedRawEvents = createFileRuntimeLogStore({

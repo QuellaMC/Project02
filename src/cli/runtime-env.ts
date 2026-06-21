@@ -35,12 +35,12 @@ export function loadRuntimeConfigEnvFile(options: {
   }
 
   try {
-    const envFileValues =
-      options.env === undefined ? undefined : parseEnv(readFileSync(envPath, 'utf8'));
-    loadEnvFile(envPath);
-    return options.env === undefined
-      ? process.env
-      : { ...envFileValues, ...options.env };
+    if (options.env === undefined || options.env === process.env) {
+      loadEnvFile(envPath);
+      return process.env;
+    }
+
+    return { ...parseEnv(readFileSync(envPath, 'utf8')), ...options.env };
   } catch (error: unknown) {
     throw new RuntimeEnvFileError(
       `Could not load runtime config env file "${envPath}": ${

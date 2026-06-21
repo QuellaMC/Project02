@@ -54,6 +54,7 @@ import {
   createConfiguredProject02PluginHost,
   diagnosticsHaveErrors,
   loadProject02RuntimeConfig,
+  resolveProject02RuntimeConfig,
   type RuntimeConfigDiagnostic
 } from '../runtime/config/index.ts';
 import type { RoleModelAdapter } from '../role-model/loop.ts';
@@ -170,37 +171,49 @@ export async function runChatCliFromArgs(
 
     assertNoRuntimeConfigErrors(loadedConfig.diagnostics, 'Runtime config is invalid');
 
-    const initialConfiguredHost = await createConfiguredProject02PluginHost({
+    const resolvedRuntimeConfig = resolveProject02RuntimeConfig({
       loadedConfig,
       ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot })
     });
-    assertNoRuntimeConfigErrors(
-      initialConfiguredHost.activation.diagnostics,
-      'Runtime config activation failed'
-    );
+    if (options.pluginHost === undefined) {
+      const initialConfiguredHost = await createConfiguredProject02PluginHost({
+        loadedConfig,
+        ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot })
+      });
+      assertNoRuntimeConfigErrors(
+        initialConfiguredHost.activation.diagnostics,
+        'Runtime config activation failed'
+      );
+    }
     const runtimeArgs = {
       ...parsedArgs,
-      storeRoot: initialConfiguredHost.resolvedConfig.storeRoot
+      storeRoot: resolvedRuntimeConfig.storeRoot
     } satisfies ChatCliArgs;
 
     validateDurableSessionArgs(runtimeArgs);
     const durableRuntime = await createDurableChatRuntime(runtimeArgs);
-    const configuredHost = await createConfiguredProject02PluginHost({
-      loadedConfig,
-      storeRoot: initialConfiguredHost.resolvedConfig.storeRoot,
-      sessionId: durableRuntime.session.id,
-      sessionIdentity: durableRuntime.session
-    });
-    assertNoRuntimeConfigErrors(
-      configuredHost.activation.diagnostics,
-      'Runtime config activation failed'
-    );
+    const configuredHost =
+      options.pluginHost === undefined
+        ? await createConfiguredProject02PluginHost({
+            loadedConfig,
+            storeRoot: resolvedRuntimeConfig.storeRoot,
+            sessionId: durableRuntime.session.id,
+            sessionIdentity: durableRuntime.session
+          })
+        : undefined;
+    if (configuredHost !== undefined) {
+      assertNoRuntimeConfigErrors(
+        configuredHost.activation.diagnostics,
+        'Runtime config activation failed'
+      );
+    }
+    const pluginHost = options.pluginHost ?? configuredHost?.host;
     const roleModelAdapter = createSelectedRoleModelAdapter(parsedArgs);
     return await runChatCli({
       ...options,
       ...durableRuntime,
       ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
-      pluginHost: options.pluginHost ?? configuredHost.host,
+      ...(pluginHost === undefined ? {} : { pluginHost }),
       traceMode: options.traceMode === true || parsedArgs.traceMode
     });
   } catch (error: unknown) {
