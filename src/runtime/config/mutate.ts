@@ -448,23 +448,24 @@ function parsePluginMutationPath(
   path: string
 ): ParsedPluginMutationPath {
   const lastPart = parts.at(-1);
-  const penultimatePart = parts.at(-2);
+  const configSegmentIndex = pluginConfigSegmentIndex(parts);
 
-  if (penultimatePart === 'config' && lastPart !== undefined) {
-    const pluginId = parts.slice(1, -2).join('.');
+  if (configSegmentIndex !== undefined) {
+    const pluginId = parts.slice(1, configSegmentIndex).join('.');
+    const fieldName = parts.slice(configSegmentIndex + 1).join('.');
 
     if (pluginId.length === 0) {
       throw new TypeError('Runtime config plugin path must include a plugin id.');
     }
 
-    if (lastPart.length === 0) {
+    if (fieldName.length === 0) {
       throw new TypeError('Plugin config path must include a field name.');
     }
 
     return Object.freeze({
       kind: 'config_field',
       pluginId,
-      fieldName: lastPart
+      fieldName
     });
   }
 
@@ -482,6 +483,16 @@ function parsePluginMutationPath(
   }
 
   throw new TypeError(`Unsupported runtime config path: ${path}.`);
+}
+
+function pluginConfigSegmentIndex(parts: readonly string[]): number | undefined {
+  for (let index = parts.length - 2; index > 1; index -= 1) {
+    if (parts[index] === 'config') {
+      return index;
+    }
+  }
+
+  return undefined;
 }
 
 function tryParsePluginMutationPath(

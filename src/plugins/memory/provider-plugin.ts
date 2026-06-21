@@ -181,7 +181,9 @@ export function createMemoryProviderRuntimePlugin(
                     evidenceKind: 'after_turn_committed',
                     status: result?.captured === false ? 'degraded' : 'accepted',
                     summary: boundedText(result?.summary ?? 'Captured memory turn.', 160),
-                    sourceItems: []
+                    ...(result?.sourceReferences === undefined
+                      ? {}
+                      : { sourceReferences: result.sourceReferences })
                   })
                 ]
               };

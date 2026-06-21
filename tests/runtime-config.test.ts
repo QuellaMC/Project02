@@ -354,6 +354,51 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
+  it('rejects unknown config fields for enabled or default-enabled plugins', async () => {
+    const envVar = 'PROJECT02_UNKNOWN_FIELD_SECRET_3447705094';
+    const configPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-unknown-field-')), 'config.json'),
+      {
+        plugins: {
+          'memory.required': {
+            config: {
+              apiKey: { $env: envVar },
+              zetaTypo: 'ignored',
+              alphaTypo: 'ignored'
+            }
+          }
+        }
+      }
+    );
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      factories: {
+        'memory.required': () => requiredSecretPlugin()
+      },
+      env: { [envVar]: 'configured-secret' }
+    });
+
+    expect(configured.resolvedConfig.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'runtime_config_unknown_plugin_config_field',
+        path: 'plugins.memory.required.config.alphaTypo'
+      }),
+      expect.objectContaining({
+        code: 'runtime_config_unknown_plugin_config_field',
+        path: 'plugins.memory.required.config.zetaTypo'
+      })
+    ]);
+    expect(configured.activation.enabledPluginIds).not.toContain('memory.required');
+    expect(configured.activation.plugins[0]).toMatchObject({
+      pluginId: 'memory.required',
+      activationStatus: 'blocked'
+    });
+    expect(configured.activation.plugins[0]?.diagnostics.map((item) => item.code)).toEqual([
+      'runtime_config_unknown_plugin_config_field',
+      'runtime_config_unknown_plugin_config_field'
+    ]);
+  });
+
   it('lets explicit per-plugin disable win over legacy enabledPlugins', async () => {
     const configPath = writeRuntimeConfig(
       join(mkdtempSync(join(tmpdir(), 'project02-config-disable-')), 'config.json'),
@@ -385,7 +430,10 @@ describe('runtime config loading and resolution', () => {
       {
         plugins: {
           'memory.required': {
-            enabled: false
+            enabled: false,
+            config: {
+              misspelledApiKey: 'ignored'
+            }
           }
         }
       }
@@ -403,12 +451,11 @@ describe('runtime config loading and resolution', () => {
       activationStatus: 'disabled'
     });
     expect(configured.activation.plugins[0]?.activationReasons).toContain('disabled_by_config');
-    expect(configured.activation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          code: 'runtime_config_required_secret_missing'
-        })
-      ])
+    expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_required_secret_missing'
+    );
+    expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_unknown_plugin_config_field'
     );
   });
 
@@ -545,6 +592,92 @@ describe('runtime config loading and resolution', () => {
       'character-state',
       'memory.required'
     ]);
+  });
+
+  it('plans inactive manifest-backed plugin factories without constructing them', async () => {
+    const disabledPlugin = requiredSecretPlugin('memory.disabled');
+    const blockedPlugin = requiredSecretPlugin('memory.blocked');
+    const configPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-inactive-factory-')), 'config.json'),
+      {
+        plugins: {
+          'memory.disabled': {
+            enabled: false
+          },
+          'memory.blocked': {
+            enabled: true
+          }
+        }
+      }
+    );
+    let factoryCalls = 0;
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      factories: {
+        'memory.disabled': {
+          manifest: disabledPlugin.manifest,
+          create() {
+            factoryCalls += 1;
+            throw new Error('disabled plugin should not be constructed');
+          }
+        },
+        'memory.blocked': {
+          manifest: blockedPlugin.manifest,
+          create() {
+            factoryCalls += 1;
+            throw new Error('blocked plugin should not be constructed');
+          }
+        }
+      }
+    });
+
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(
+      configured.activation.plugins.map((plugin) => [
+        plugin.pluginId,
+        plugin.activationStatus
+      ])
+    ).toEqual([
+      ['memory.disabled', 'disabled'],
+      ['memory.blocked', 'blocked']
+    ]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_required_secret_missing',
+          path: 'plugins.memory.blocked.config.apiKey'
+        })
+      ])
+    );
+  });
+
+  it('passes config-resolved store roots to legacy function plugin factories', async () => {
+    const cliStoreRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-root-'));
+    const configuredStoreRoot = mkdtempSync(join(tmpdir(), 'project02-config-file-root-'));
+    const configPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-legacy-root-')), 'config.json'),
+      {
+        storeRoot: configuredStoreRoot
+      }
+    );
+    let legacyFactoryStoreRoot: string | undefined;
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      storeRoot: cliStoreRoot,
+      factories: {
+        'memory.required': (input) => {
+          legacyFactoryStoreRoot = input.storeRoot;
+
+          return requiredSecretPlugin();
+        }
+      }
+    });
+
+    expect(legacyFactoryStoreRoot).toBe(configuredStoreRoot);
+    expect(configured.resolvedConfig.storeRoot).toBe(configuredStoreRoot);
   });
 
   it('blocks automatic memory activation when multiple providers are enabled without a default', async () => {
@@ -689,6 +822,46 @@ describe('runtime config CLI', () => {
     );
   });
 
+  it('prints env-path from the effective configured store root', async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-env-path-'));
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-env-store-'));
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      storeRoot
+    });
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--config', configPath, 'env-path'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      })
+    ).toBe(0);
+
+    expect(stdout).toBe(`${join(storeRoot, '.env')}\n`);
+    expect(stderr).toBe('');
+  });
+
+  it('keeps env-path explicit store behavior when no config exists', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-env-store-only-'));
+    let stdout = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'env-path'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+
+    expect(stdout).toBe(`${join(storeRoot, '.env')}\n`);
+  });
+
   it('sets and unsets dotted plugin IDs through generic config paths', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-dotted-set-'));
 
@@ -721,6 +894,96 @@ describe('runtime config CLI', () => {
 
     expect(afterUnset).toContain('"memory.recall"');
     expect(afterUnset).not.toContain('"backend"');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'set', 'plugins.memory.config.config.backend', 'local'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    const afterConfigSegmentSet: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(afterConfigSegmentSet).toMatchObject({
+      plugins: {
+        'memory.config': {
+          config: {
+            backend: 'local'
+          }
+        }
+      }
+    });
+    expect(JSON.stringify(afterConfigSegmentSet)).not.toContain('"config.backend"');
+  });
+
+  it('sets, gets, and unsets dotted plugin config field names', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-dotted-field-'));
+    let stdout = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'set', 'plugins.memory.config.api.key', 'local-key'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    const afterSet: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(afterSet).toMatchObject({
+      plugins: {
+        memory: {
+          config: {
+            'api.key': 'local-key'
+          }
+        }
+      }
+    });
+    expect(JSON.stringify(afterSet)).not.toContain('"memory.config.api"');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'get', 'plugins.memory.config.api.key'],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+    expect(JSON.parse(stdout) as unknown).toBe('local-key');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'unset', 'plugins.memory.config.api.key'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    const afterUnset: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(afterUnset).toMatchObject({
+      plugins: {
+        memory: {
+          config: {}
+        }
+      }
+    });
   });
 
   it('refuses to mutate malformed existing config files', async () => {
@@ -953,10 +1216,10 @@ describe('runtime config CLI', () => {
   });
 });
 
-function requiredSecretPlugin() {
+function requiredSecretPlugin(id = 'memory.required') {
   return createRuntimePlugin({
     manifest: {
-      id: 'memory.required',
+      id,
       displayName: 'Required Memory',
       version: '1.0.0',
       kind: 'memory_provider',

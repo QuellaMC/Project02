@@ -12,6 +12,9 @@ import type {
   RuntimePluginKind,
   RuntimePluginManifest
 } from '../../plugins/types.ts';
+import {
+  createLocalRuntimeStorageLayout
+} from '../storage/layout.ts';
 import type {
   LoadedProject02RuntimeConfig,
   RedactedPluginRuntimeConfig,
@@ -95,9 +98,13 @@ export async function createConfiguredProject02PluginHost(options: {
   readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
 }): Promise<Project02ConfiguredPluginHost> {
   const factories = options.factories ?? defaultRuntimePluginFactories();
+  const initialStoreRoot = resolveRuntimeConfigStoreRoot({
+    loadedConfig: options.loadedConfig,
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+  });
   const preparedFactories = await prepareRuntimePluginFactories({
     factories,
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    storeRoot: initialStoreRoot
   });
   const resolvedConfig = resolveProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
@@ -105,15 +112,16 @@ export async function createConfiguredProject02PluginHost(options: {
     pluginManifests: preparedFactories.map((factory) => factory.manifest),
     ...(options.env === undefined ? {} : { env: options.env })
   });
-  const plugins = await instantiatePreparedPlugins({
-    preparedFactories,
-    resolvedConfig
-  });
   const activation = resolveRuntimePluginActivation({
-    plugins,
+    pluginManifests: preparedFactories.map((factory) => factory.manifest),
     resolvedConfig,
     loadedConfig: options.loadedConfig,
     strictUnknownPlugins: options.strictUnknownPlugins === true
+  });
+  const plugins = await instantiatePreparedPlugins({
+    preparedFactories,
+    resolvedConfig,
+    enabledPluginIds: activation.enabledPluginIds
   });
 
   return Object.freeze({
@@ -133,13 +141,16 @@ export async function createConfiguredProject02PluginHost(options: {
 }
 
 export function resolveRuntimePluginActivation(options: {
-  readonly plugins: readonly RuntimePlugin[];
+  readonly plugins?: readonly RuntimePlugin[];
+  readonly pluginManifests?: readonly RuntimePluginManifest[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly strictUnknownPlugins?: boolean;
 }): RuntimePluginActivationResult {
+  const pluginManifests =
+    options.pluginManifests ?? options.plugins?.map((plugin) => plugin.manifest) ?? [];
   const config = options.loadedConfig.config;
-  const pluginIds = new Set(options.plugins.map((plugin) => plugin.manifest.id));
+  const pluginIds = new Set(pluginManifests.map((manifest) => manifest.id));
   const diagnostics: RuntimeConfigDiagnostic[] = [
     ...unknownPluginDiagnostics({
       knownPluginIds: pluginIds,
@@ -157,39 +168,39 @@ export function resolveRuntimePluginActivation(options: {
     ReturnType<typeof activationDecision>
   >();
 
-  for (const plugin of options.plugins) {
-    const configured = config?.plugins?.[plugin.manifest.id];
+  for (const manifest of pluginManifests) {
+    const configured = config?.plugins?.[manifest.id];
     const legacyEnabled =
-      config?.enabledPlugins?.includes(plugin.manifest.id) === true;
+      config?.enabledPlugins?.includes(manifest.id) === true;
     const configErrors = pluginHasConfigErrors({
       diagnostics,
-      pluginId: plugin.manifest.id
+      pluginId: manifest.id
     });
     const decision = activationDecision({
       configuredEnabled: configured?.enabled,
       legacyEnabled,
-      defaultEnabled: plugin.manifest.activation.defaultEnabled,
+      defaultEnabled: manifest.activation.defaultEnabled,
       configErrors
     });
 
-    preliminaryDecisions.set(plugin.manifest.id, decision);
+    preliminaryDecisions.set(manifest.id, decision);
   }
 
   const memoryProviderDecision = defaultMemoryProviderDecision({
     ...(config?.defaultMemoryProvider === undefined
       ? {}
       : { configDefaultMemoryProvider: config.defaultMemoryProvider }),
-    enabledPlugins: options.plugins.filter(
-      (plugin) => preliminaryDecisions.get(plugin.manifest.id)?.enabled === true
+    enabledPluginManifests: pluginManifests.filter(
+      (manifest) => preliminaryDecisions.get(manifest.id)?.enabled === true
     )
   });
 
   diagnostics.push(...memoryProviderDecision.diagnostics);
 
-  for (const plugin of options.plugins) {
-    const preliminaryDecision = preliminaryDecisions.get(plugin.manifest.id);
+  for (const manifest of pluginManifests) {
+    const preliminaryDecision = preliminaryDecisions.get(manifest.id);
     const decision = finalizeMemoryProviderActivation({
-      plugin,
+      manifest,
       decision: preliminaryDecision ?? activationDecision({
         configuredEnabled: undefined,
         legacyEnabled: false,
@@ -200,26 +211,26 @@ export function resolveRuntimePluginActivation(options: {
     });
 
     if (decision.enabled) {
-      enabledPluginIds.push(plugin.manifest.id);
+      enabledPluginIds.push(manifest.id);
     } else {
-      disabledPluginIds.push(plugin.manifest.id);
+      disabledPluginIds.push(manifest.id);
     }
 
     snapshots.push(
       Object.freeze({
-        pluginId: plugin.manifest.id,
-        kind: plugin.manifest.kind,
+        pluginId: manifest.id,
+        kind: manifest.kind,
         enabled: decision.enabled,
         activationStatus: decision.status,
         activationReasons: Object.freeze([
-          ...plugin.manifest.activation.reasons,
+          ...manifest.activation.reasons,
           ...decision.reasons
         ]),
         diagnostics: Object.freeze(
           diagnostics.filter((diagnostic) =>
             runtimeConfigDiagnosticPathMatchesPlugin({
               path: diagnostic.path,
-              pluginId: plugin.manifest.id
+              pluginId: manifest.id
             })
           )
         )
@@ -252,9 +263,20 @@ type PreparedRuntimePluginFactory =
       readonly plugin: RuntimePlugin;
     };
 
+function resolveRuntimeConfigStoreRoot(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly storeRoot?: string;
+}): string {
+  const configuredStoreRoot = options.loadedConfig.config?.storeRoot ?? options.storeRoot;
+
+  return createLocalRuntimeStorageLayout(
+    configuredStoreRoot === undefined ? {} : { storeRoot: configuredStoreRoot }
+  ).storeRoot;
+}
+
 async function prepareRuntimePluginFactories(options: {
   readonly factories: Readonly<Record<string, RuntimePluginFactory>>;
-  readonly storeRoot?: string;
+  readonly storeRoot: string;
 }): Promise<readonly PreparedRuntimePluginFactory[]> {
   const preparedFactories: PreparedRuntimePluginFactory[] = [];
 
@@ -273,7 +295,7 @@ async function prepareRuntimePluginFactories(options: {
 
     const plugin = await factory({
       pluginId,
-      storeRoot: options.storeRoot ?? '',
+      storeRoot: options.storeRoot,
       resolvedConfig: {},
       redactedConfig: {}
     });
@@ -294,12 +316,18 @@ async function prepareRuntimePluginFactories(options: {
 async function instantiatePreparedPlugins(options: {
   readonly preparedFactories: readonly PreparedRuntimePluginFactory[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
+  readonly enabledPluginIds: readonly string[];
 }): Promise<readonly RuntimePlugin[]> {
   const plugins: RuntimePlugin[] = [];
+  const enabledPluginIds = new Set(options.enabledPluginIds);
 
   for (const preparedFactory of options.preparedFactories) {
     if (preparedFactory.kind === 'legacy_prepared_plugin') {
       plugins.push(preparedFactory.plugin);
+      continue;
+    }
+
+    if (!enabledPluginIds.has(preparedFactory.manifest.id)) {
       continue;
     }
 
@@ -421,20 +449,20 @@ function unknownPluginDiagnostics(options: {
 
 function defaultMemoryProviderDecision(options: {
   readonly configDefaultMemoryProvider?: string;
-  readonly enabledPlugins: readonly RuntimePlugin[];
+  readonly enabledPluginManifests: readonly RuntimePluginManifest[];
 }): {
   readonly activeMemoryProviderIds: readonly string[];
   readonly ambiguous: boolean;
   readonly defaultMemoryProvider?: string;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 } {
-  const enabledMemoryProviders = options.enabledPlugins.filter(
-    (plugin) => plugin.manifest.kind === 'memory_provider'
+  const enabledMemoryProviders = options.enabledPluginManifests.filter(
+    (manifest) => manifest.kind === 'memory_provider'
   );
 
   if (options.configDefaultMemoryProvider !== undefined) {
     const selected = enabledMemoryProviders.find(
-      (plugin) => plugin.manifest.id === options.configDefaultMemoryProvider
+      (manifest) => manifest.id === options.configDefaultMemoryProvider
     );
 
     if (selected === undefined) {
@@ -453,9 +481,9 @@ function defaultMemoryProviderDecision(options: {
     }
 
     return {
-      activeMemoryProviderIds: [selected.manifest.id],
+      activeMemoryProviderIds: [selected.id],
       ambiguous: false,
-      defaultMemoryProvider: selected.manifest.id,
+      defaultMemoryProvider: selected.id,
       diagnostics: []
     };
   }
@@ -479,24 +507,24 @@ function defaultMemoryProviderDecision(options: {
     activeMemoryProviderIds:
       enabledMemoryProviders[0] === undefined
         ? []
-        : [enabledMemoryProviders[0].manifest.id],
+        : [enabledMemoryProviders[0].id],
     ambiguous: false,
     diagnostics: []
   };
 }
 
 function finalizeMemoryProviderActivation(options: {
-  readonly plugin: RuntimePlugin;
+  readonly manifest: RuntimePluginManifest;
   readonly decision: ReturnType<typeof activationDecision>;
   readonly memoryProviderDecision: ReturnType<typeof defaultMemoryProviderDecision>;
 }): ReturnType<typeof activationDecision> {
-  if (!options.decision.enabled || options.plugin.manifest.kind !== 'memory_provider') {
+  if (!options.decision.enabled || options.manifest.kind !== 'memory_provider') {
     return options.decision;
   }
 
   if (
     options.memoryProviderDecision.activeMemoryProviderIds.includes(
-      options.plugin.manifest.id
+      options.manifest.id
     )
   ) {
     return {
@@ -504,7 +532,7 @@ function finalizeMemoryProviderActivation(options: {
       reasons: Object.freeze([
         ...options.decision.reasons,
         ...(options.memoryProviderDecision.defaultMemoryProvider ===
-        options.plugin.manifest.id
+        options.manifest.id
           ? ['selected_as_default_memory_provider']
           : [])
       ])

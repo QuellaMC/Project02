@@ -169,15 +169,29 @@ function resolvePluginConfig(options: {
   readonly allowPlaintextSecrets: boolean;
   readonly diagnostics: RuntimeConfigDiagnostic[];
 }): ResolvedPluginRuntimeConfig {
+  const configuredPlugin = options.config?.plugins?.[options.manifest.id];
+  const validateConfig = shouldValidatePluginConfig({
+    config: options.config,
+    manifest: options.manifest
+  });
+
+  if (validateConfig) {
+    pushUnknownPluginConfigFieldDiagnostics({
+      manifest: options.manifest,
+      rawConfig: configuredPlugin?.config,
+      diagnostics: options.diagnostics
+    });
+  }
+
   return Object.freeze(
     Object.fromEntries(
       options.manifest.config.fields.map((field) => [
         field.name,
         resolvePluginConfigField({
           ...options,
+          validateConfig,
           field,
-          rawValue:
-            options.config?.plugins?.[options.manifest.id]?.config?.[field.name]
+          rawValue: configuredPlugin?.config?.[field.name]
         })
       ])
     )
@@ -192,6 +206,7 @@ function resolvePluginConfigField(options: {
   readonly env: NodeJS.ProcessEnv;
   readonly allowPlaintextSecrets: boolean;
   readonly diagnostics: RuntimeConfigDiagnostic[];
+  readonly validateConfig: boolean;
 }): ResolvedRuntimeConfigField {
   const path = `plugins.${options.manifest.id}.config.${options.field.name}`;
 
@@ -200,7 +215,7 @@ function resolvePluginConfigField(options: {
   }
 
   if (options.rawValue === undefined) {
-    if (options.field.required) {
+    if (options.field.required && options.validateConfig) {
       options.diagnostics.push(
         diagnostic(
           'error',
@@ -219,14 +234,16 @@ function resolvePluginConfigField(options: {
   }
 
   if (isSecretRef(options.rawValue) || isPlaintextSecretOverride(options.rawValue)) {
-    options.diagnostics.push(
-      diagnostic(
-        'error',
-        'runtime_config_secret_ref_for_non_secret',
-        `Non-secret config field "${options.field.name}" cannot use a secret value.`,
-        path
-      )
-    );
+    if (options.validateConfig) {
+      options.diagnostics.push(
+        diagnostic(
+          'error',
+          'runtime_config_secret_ref_for_non_secret',
+          `Non-secret config field "${options.field.name}" cannot use a secret value.`,
+          path
+        )
+      );
+    }
     return fieldResult({
       field: options.field,
       source: 'config',
@@ -235,14 +252,16 @@ function resolvePluginConfigField(options: {
   }
 
   if (!valueMatchesField(options.rawValue, options.field)) {
-    options.diagnostics.push(
-      diagnostic(
-        'error',
-        'runtime_config_value_type_invalid',
-        `Config field "${options.field.name}" does not match its declared metadata.`,
-        path
-      )
-    );
+    if (options.validateConfig) {
+      options.diagnostics.push(
+        diagnostic(
+          'error',
+          'runtime_config_value_type_invalid',
+          `Config field "${options.field.name}" does not match its declared metadata.`,
+          path
+        )
+      );
+    }
     return fieldResult({
       field: options.field,
       source: 'config',
@@ -267,6 +286,7 @@ function resolveSecretField(options: {
   readonly allowPlaintextSecrets: boolean;
   readonly diagnostics: RuntimeConfigDiagnostic[];
   readonly path: string;
+  readonly validateConfig: boolean;
 }): ResolvedRuntimeConfigField {
   const envRef =
     options.rawValue === undefined && options.field.envVar !== undefined
@@ -279,7 +299,7 @@ function resolveSecretField(options: {
     const secretValue = options.env[envRef.$env];
     const resolved = secretValue !== undefined && secretValue.length > 0;
 
-    if (!resolved && options.field.required) {
+    if (!resolved && options.field.required && options.validateConfig) {
       options.diagnostics.push(
         diagnostic(
           'error',
@@ -299,7 +319,7 @@ function resolveSecretField(options: {
   }
 
   if (isPlaintextSecretOverride(options.rawValue)) {
-    if (!options.allowPlaintextSecrets) {
+    if (!options.allowPlaintextSecrets && options.validateConfig) {
       options.diagnostics.push(
         diagnostic(
           'error',
@@ -321,14 +341,16 @@ function resolveSecretField(options: {
   }
 
   if (options.rawValue !== undefined) {
-    options.diagnostics.push(
-      diagnostic(
-        'error',
-        'runtime_config_plaintext_secret_rejected',
-        `Secret config field "${options.field.name}" must use an env ref.`,
-        options.path
-      )
-    );
+    if (options.validateConfig) {
+      options.diagnostics.push(
+        diagnostic(
+          'error',
+          'runtime_config_plaintext_secret_rejected',
+          `Secret config field "${options.field.name}" must use an env ref.`,
+          options.path
+        )
+      );
+    }
     return fieldResult({
       field: options.field,
       source: 'config',
@@ -336,7 +358,7 @@ function resolveSecretField(options: {
     });
   }
 
-  if (options.field.required) {
+  if (options.field.required && options.validateConfig) {
     options.diagnostics.push(
       diagnostic(
         'error',
@@ -352,6 +374,54 @@ function resolveSecretField(options: {
     source: 'missing',
     resolved: !options.field.required
   });
+}
+
+function shouldValidatePluginConfig(options: {
+  readonly config: Project02RuntimeConfig | undefined;
+  readonly manifest: RuntimePluginManifest;
+}): boolean {
+  const configured = options.config?.plugins?.[options.manifest.id];
+
+  if (configured?.enabled === false) {
+    return false;
+  }
+
+  return (
+    configured?.enabled === true ||
+    options.config?.enabledPlugins?.includes(options.manifest.id) === true ||
+    options.manifest.activation.defaultEnabled
+  );
+}
+
+function pushUnknownPluginConfigFieldDiagnostics(options: {
+  readonly manifest: RuntimePluginManifest;
+  readonly rawConfig: Readonly<Record<string, RuntimeConfigValue>> | undefined;
+  readonly diagnostics: RuntimeConfigDiagnostic[];
+}): void {
+  if (options.rawConfig === undefined) {
+    return;
+  }
+
+  const declaredFields = new Set(
+    options.manifest.config.fields.map((field) => field.name)
+  );
+
+  for (const fieldName of Object.keys(options.rawConfig).sort((a, b) =>
+    a.localeCompare(b)
+  )) {
+    if (declaredFields.has(fieldName)) {
+      continue;
+    }
+
+    options.diagnostics.push(
+      diagnostic(
+        'error',
+        'runtime_config_unknown_plugin_config_field',
+        `Unknown config field "${fieldName}" for plugin "${options.manifest.id}".`,
+        `plugins.${options.manifest.id}.config.${fieldName}`
+      )
+    );
+  }
 }
 
 function valueMatchesField(

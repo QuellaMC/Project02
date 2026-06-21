@@ -4,7 +4,6 @@ import {
   applyRuntimeConfigControlOperation,
   createConfiguredProject02PluginHost,
   createRuntimeConfigInspectShape,
-  defaultRuntimeConfigEnvPath,
   defaultRuntimeConfigPath,
   diagnosticsHaveErrors,
   getRuntimeConfigValueAtPath,
@@ -20,6 +19,7 @@ import {
 } from './runtime-location.ts';
 import {
   loadRuntimeConfigEnvFile,
+  runtimeConfigEnvPathForLocation,
   RuntimeEnvFileError
 } from './runtime-env.ts';
 
@@ -50,7 +50,19 @@ export async function runRuntimeConfigCliFromArgs(
     }
 
     if (parsed.command.kind === 'env_path') {
-      options.stdout.write(`${defaultRuntimeConfigEnvPath(parsed.location.storeRoot)}\n`);
+      const loaded = loadProject02RuntimeConfig({
+        ...parsed.location,
+        env
+      });
+      assertRuntimeConfigLoaded(loaded);
+      options.stdout.write(
+        `${runtimeConfigEnvPathForLocation({
+          loadedConfig: loaded,
+          ...(parsed.location.storeRoot === undefined
+            ? {}
+            : { storeRoot: parsed.location.storeRoot })
+        })}\n`
+      );
       return 0;
     }
 

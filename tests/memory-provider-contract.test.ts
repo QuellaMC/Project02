@@ -129,6 +129,64 @@ describe('memory provider runtime plugin helper', () => {
     });
   });
 
+  it('preserves after-turn capture source references', async () => {
+    const provider: Project02MemoryProvider = {
+      id: 'memory.capture-sources',
+      displayName: 'Capture Source Provider',
+      captureTurn() {
+        return Promise.resolve({
+          captured: true,
+          summary: 'Captured from provider row.',
+          sourceReferences: [
+            {
+              kind: 'memory',
+              id: 'memory-capture-1',
+              title: 'Captured memory row'
+            }
+          ]
+        });
+      }
+    };
+    const plugin = createMemoryProviderRuntimePlugin(provider);
+    const result = await plugin.lifecycleHooks.afterTurnCommitted?.(
+      createRuntimePluginAfterTurnCommittedContext({
+        eventId: 'evt_memory_capture_sources',
+        traceId: 'trace_memory_capture_sources',
+        createdAt: '2026-06-21T00:00:00.000Z',
+        sessionId: 'session-memory',
+        eventType: 'USER_MESSAGE',
+        currentUserMessage: 'remember this with a source',
+        character: {
+          id: 'mira',
+          displayName: 'Mira'
+        },
+        committedAt: '2026-06-21T00:00:01.000Z',
+        visibleMessages: [
+          {
+            id: 'visible-character',
+            role: 'character',
+            speakerId: 'mira',
+            speakerName: 'Mira',
+            text: 'done'
+          }
+        ]
+      })
+    );
+
+    expect(result?.evidence[0]).toMatchObject({
+      pluginId: 'memory.capture-sources',
+      evidenceKind: 'after_turn_committed',
+      status: 'accepted',
+      sourceReferences: [
+        {
+          kind: 'memory',
+          id: 'memory-capture-1',
+          title: 'Captured memory row'
+        }
+      ]
+    });
+  });
+
   it('runs provider close on the session-end lifecycle', async () => {
     const closedSessions: string[] = [];
     const provider: Project02MemoryProvider = {
