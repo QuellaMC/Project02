@@ -15,7 +15,8 @@ import {
   characterStatePluginId,
   createRuntimePlugin,
   runtimePluginDiscoveryPluginId,
-  runtimePluginContractVersion
+  runtimePluginContractVersion,
+  type RuntimePluginContext
 } from '../src/plugins/index.ts';
 
 describe('runtime config activation diagnostics', () => {
@@ -462,11 +463,18 @@ describe('runtime config activation diagnostics', () => {
     );
     const configPath = join(storeRoot, 'config.json');
     const envVar = 'PROJECT02_MANIFEST_MISMATCH_SECRET_3448659339';
+    let cleanupCalls = 0;
+    const cleanupPlugin = sessionEndPlugin('first.cleanup', () => {
+      cleanupCalls += 1;
+    });
     const declaredPlugin = requiredSecretPlugin('memory.contract');
     const returnedPlugin = pluginWithAdditionalConfigField('memory.contract');
 
     writeRuntimeConfig(configPath, {
       plugins: {
+        [cleanupPlugin.manifest.id]: {
+          enabled: true
+        },
         'memory.contract': {
           enabled: true,
           config: {
@@ -485,6 +493,10 @@ describe('runtime config activation diagnostics', () => {
           [envVar]: 'same-id-different-manifest-secret'
         },
         factories: {
+          [cleanupPlugin.manifest.id]: {
+            manifest: cleanupPlugin.manifest,
+            create: () => cleanupPlugin
+          },
           'memory.contract': {
             manifest: declaredPlugin.manifest,
             create: () => returnedPlugin
@@ -493,6 +505,65 @@ describe('runtime config activation diagnostics', () => {
       })
     ).rejects.toThrow(
       'Plugin factory "memory.contract" returned a manifest that differs from its declared manifest "memory.contract".'
+    );
+    expect(cleanupCalls).toBe(1);
+  });
+
+  it('closes already-created plugins when a later manifest-backed factory throws', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-factory-throw-cleanup-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const cleanupContexts: RuntimePluginContext[] = [];
+    const cleanupPlugin = sessionEndPlugin('first.cleanup', (context) => {
+      cleanupContexts.push(context);
+    });
+    const failingPlugin = firstPartyPlugin('later.failure');
+    const sessionId = 'factory-throw-cleanup-session';
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        [cleanupPlugin.manifest.id]: {
+          enabled: true
+        },
+        [failingPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    const loadedConfig = loadProject02RuntimeConfig({ configPath });
+
+    await expect(
+      createConfiguredProject02PluginHost({
+        loadedConfig,
+        storeRoot,
+        sessionId,
+        factories: {
+          [cleanupPlugin.manifest.id]: {
+            manifest: cleanupPlugin.manifest,
+            create: () => cleanupPlugin
+          },
+          [failingPlugin.manifest.id]: {
+            manifest: failingPlugin.manifest,
+            create: () => {
+              throw new Error('later manifest-backed factory failed');
+            }
+          }
+        }
+      })
+    ).rejects.toThrow('later manifest-backed factory failed');
+
+    expect(cleanupContexts).toHaveLength(1);
+    expect(cleanupContexts[0]).toMatchObject({
+      sessionId,
+      currentUserMessage: 'configured plugin construction failed before host creation',
+      privacy: {
+        exposePrivateConfig: false
+      }
+    });
+    expect(cleanupContexts[0]?.currentUserMessage).not.toContain(
+      'later manifest-backed factory failed'
     );
   });
 
@@ -652,6 +723,29 @@ function firstPartyPlugin(id: string) {
         reasons: ['test_first_party']
       },
       requestedApis: []
+    }
+  });
+}
+
+function sessionEndPlugin(
+  id: string,
+  onSessionEnd: (context: RuntimePluginContext) => void
+) {
+  const plugin = firstPartyPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      declaredPlugins: ['plugin_discovery', 'on_session_end']
+    },
+    lifecycleHooks: {
+      onSessionEnd(context) {
+        onSessionEnd(context);
+        return {
+          status: 'completed',
+          evidence: []
+        };
+      }
     }
   });
 }

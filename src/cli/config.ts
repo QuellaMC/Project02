@@ -57,13 +57,20 @@ function runRuntimeConfigCliFromArgsSync(
   options: RuntimeConfigCliOptions
 ): number {
   try {
-    const env = options.env ?? process.env;
-    const parsed = parseRuntimeConfigCliArgs(args, env);
+    const parsedArgs = parseRuntimeConfigCliArgs(args);
+    const cliEnv = runtimeConfigCliEnvForLocation({
+      location: parsedArgs.location,
+      ...(options.env === undefined ? {} : { env: options.env })
+    });
+    const parsed: RuntimeConfigCliArgs = {
+      location: parsedArgs.location,
+      command: parseRuntimeConfigCommand(parsedArgs.commandArgs, cliEnv.configEnv)
+    };
 
     if (parsed.command.kind === 'path') {
       const loaded = loadProject02RuntimeConfig({
         ...parsed.location,
-        env
+        env: cliEnv.configEnv
       });
 
       options.stdout.write(
@@ -75,7 +82,7 @@ function runRuntimeConfigCliFromArgsSync(
     if (parsed.command.kind === 'env_path') {
       const loaded = loadProject02RuntimeConfig({
         ...parsed.location,
-        env
+        env: cliEnv.configEnv
       });
       assertRuntimeConfigLoaded(loaded);
       options.stdout.write(
@@ -90,22 +97,17 @@ function runRuntimeConfigCliFromArgsSync(
     }
 
     if (parsed.command.kind === 'check') {
-      const defaultEnv =
-        options.env === undefined || options.env === process.env
-          ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), parsed.location)
-          : {};
-      const configEnv = { ...defaultEnv, ...env };
       const loaded = loadProject02RuntimeConfig({
         ...parsed.location,
-        env: configEnv
+        env: cliEnv.configEnv
       });
       const effectiveEnv = loadRuntimeConfigEnvFile({
         loadedConfig: loaded,
         ...(parsed.location.storeRoot === undefined
           ? {}
           : { storeRoot: parsed.location.storeRoot }),
-        env,
-        envDefaults: defaultEnv
+        env: cliEnv.suppliedEnv,
+        envDefaults: cliEnv.defaultEnv
       });
       const configured = resolveConfiguredProject02PluginActivation({
         loadedConfig: loaded,
@@ -130,7 +132,7 @@ function runRuntimeConfigCliFromArgsSync(
     if (parsed.command.kind === 'get') {
       const loaded = loadProject02RuntimeConfig({
         ...parsed.location,
-        env
+        env: cliEnv.configEnv
       });
       assertRuntimeConfigLoaded(loaded);
       const value = getRedactedRuntimeConfigValueAtPath(
@@ -144,7 +146,7 @@ function runRuntimeConfigCliFromArgsSync(
 
     const result = applyRuntimeConfigControlOperation({
       ...parsed.location,
-      env,
+      env: cliEnv.configEnv,
       operation: parsed.command.operation
     });
 
@@ -181,10 +183,12 @@ type RuntimeConfigCliArgs = {
     | { readonly kind: 'mutate'; readonly operation: RuntimeConfigMutationOperation };
 };
 
-function parseRuntimeConfigCliArgs(
-  args: readonly string[],
-  env: NodeJS.ProcessEnv
-): RuntimeConfigCliArgs {
+type RuntimeConfigCliParsedArgs = {
+  readonly location: RuntimeLocationCliState;
+  readonly commandArgs: readonly string[];
+};
+
+function parseRuntimeConfigCliArgs(args: readonly string[]): RuntimeConfigCliParsedArgs {
   let location: RuntimeLocationCliState = {};
   const commandArgs: string[] = [];
 
@@ -208,7 +212,28 @@ function parseRuntimeConfigCliArgs(
 
   return {
     location,
-    command: parseRuntimeConfigCommand(commandArgs, env)
+    commandArgs
+  };
+}
+
+function runtimeConfigCliEnvForLocation(options: {
+  readonly location: RuntimeLocationCliState;
+  readonly env?: NodeJS.ProcessEnv;
+}): {
+  readonly suppliedEnv: NodeJS.ProcessEnv;
+  readonly defaultEnv: NodeJS.ProcessEnv;
+  readonly configEnv: NodeJS.ProcessEnv;
+} {
+  const suppliedEnv = options.env ?? process.env;
+  const defaultEnv =
+    options.env === undefined || options.env === process.env
+      ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), options.location)
+      : {};
+
+  return {
+    suppliedEnv,
+    defaultEnv,
+    configEnv: { ...defaultEnv, ...suppliedEnv }
   };
 }
 

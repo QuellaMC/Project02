@@ -8,10 +8,11 @@ import {
   runtimePluginDiscoveryPluginId,
   type RuntimePluginHost
 } from '../../plugins/host.ts';
-import type {
-  RuntimePlugin,
-  RuntimePluginKind,
-  RuntimePluginManifest
+import {
+  createRuntimePluginContext,
+  type RuntimePlugin,
+  type RuntimePluginKind,
+  type RuntimePluginManifest
 } from '../../plugins/types.ts';
 import type {
   LoadedProject02RuntimeConfig,
@@ -80,6 +81,15 @@ export type Project02ConfiguredPluginActivation = {
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly activation: RuntimePluginActivationResult;
 };
+
+const configuredPluginConstructionCleanupSessionId =
+  'configured-plugin-construction-cleanup';
+const configuredPluginConstructionCleanupMessage =
+  'configured plugin construction failed before host creation';
+const configuredPluginConstructionCleanupCharacter = Object.freeze({
+  id: 'project02-runtime-config',
+  displayName: 'Project02 Runtime Config'
+});
 
 export function defaultRuntimePluginFactories(): Readonly<
   Record<string, RuntimePluginFactory>
@@ -197,7 +207,11 @@ export async function createConfiguredProject02PluginHost(options: {
   const plugins = await instantiatePreparedPlugins({
     preparedFactories,
     resolvedConfig,
-    enabledPluginIds: activation.enabledPluginIds
+    enabledPluginIds: activation.enabledPluginIds,
+    ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
+    ...(options.sessionIdentity === undefined
+      ? {}
+      : { sessionIdentity: options.sessionIdentity })
   });
 
   return Object.freeze({
@@ -476,45 +490,99 @@ async function instantiatePreparedPlugins(options: {
   readonly preparedFactories: readonly PreparedRuntimePluginFactory[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly enabledPluginIds: readonly string[];
+  readonly sessionId?: string;
+  readonly sessionIdentity?: object;
 }): Promise<readonly RuntimePlugin[]> {
   const plugins: RuntimePlugin[] = [];
+  const createdPlugins: RuntimePlugin[] = [];
   const enabledPluginIds = new Set(options.enabledPluginIds);
 
-  for (const preparedFactory of options.preparedFactories) {
-    if (!enabledPluginIds.has(preparedFactory.manifest.id)) {
-      continue;
-    }
+  try {
+    for (const preparedFactory of options.preparedFactories) {
+      if (!enabledPluginIds.has(preparedFactory.manifest.id)) {
+        continue;
+      }
 
-    if (preparedFactory.kind === 'legacy_prepared_plugin') {
-      plugins.push(preparedFactory.plugin);
-      continue;
-    }
+      if (preparedFactory.kind === 'legacy_prepared_plugin') {
+        createdPlugins.push(preparedFactory.plugin);
+        plugins.push(preparedFactory.plugin);
+        continue;
+      }
 
-    const plugin = await preparedFactory.create({
-      pluginId: preparedFactory.manifest.id,
-      storeRoot: options.resolvedConfig.storeRoot,
-      resolvedConfig:
-        options.resolvedConfig.pluginConfigs[preparedFactory.manifest.id] ?? {},
-      redactedConfig:
-        options.resolvedConfig.redactedPluginConfigs[preparedFactory.manifest.id] ?? {}
+      const plugin = await preparedFactory.create({
+        pluginId: preparedFactory.manifest.id,
+        storeRoot: options.resolvedConfig.storeRoot,
+        resolvedConfig:
+          options.resolvedConfig.pluginConfigs[preparedFactory.manifest.id] ?? {},
+        redactedConfig:
+          options.resolvedConfig.redactedPluginConfigs[preparedFactory.manifest.id] ?? {}
+      });
+      createdPlugins.push(plugin);
+
+      if (plugin.manifest.id !== preparedFactory.manifest.id) {
+        throw new TypeError(
+          `Plugin factory "${preparedFactory.pluginId}" returned plugin "${plugin.manifest.id}" after declaring manifest "${preparedFactory.manifest.id}".`
+        );
+      }
+
+      if (!runtimePluginManifestsMatch(plugin.manifest, preparedFactory.manifest)) {
+        throw new TypeError(
+          `Plugin factory "${preparedFactory.pluginId}" returned a manifest that differs from its declared manifest "${preparedFactory.manifest.id}".`
+        );
+      }
+
+      plugins.push(plugin);
+    }
+  } catch (error: unknown) {
+    await cleanupPartiallyInstantiatedPlugins({
+      plugins: createdPlugins,
+      resolvedConfig: options.resolvedConfig,
+      ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
+      ...(options.sessionIdentity === undefined
+        ? {}
+        : { sessionIdentity: options.sessionIdentity })
     });
-
-    if (plugin.manifest.id !== preparedFactory.manifest.id) {
-      throw new TypeError(
-        `Plugin factory "${preparedFactory.pluginId}" returned plugin "${plugin.manifest.id}" after declaring manifest "${preparedFactory.manifest.id}".`
-      );
-    }
-
-    if (!runtimePluginManifestsMatch(plugin.manifest, preparedFactory.manifest)) {
-      throw new TypeError(
-        `Plugin factory "${preparedFactory.pluginId}" returned a manifest that differs from its declared manifest "${preparedFactory.manifest.id}".`
-      );
-    }
-
-    plugins.push(plugin);
+    throw error;
   }
 
   return Object.freeze(plugins);
+}
+
+async function cleanupPartiallyInstantiatedPlugins(options: {
+  readonly plugins: readonly RuntimePlugin[];
+  readonly resolvedConfig: ResolvedProject02RuntimeConfig;
+  readonly sessionId?: string;
+  readonly sessionIdentity?: object;
+}): Promise<void> {
+  if (options.plugins.length === 0) {
+    return;
+  }
+
+  const sessionId =
+    options.sessionId ?? configuredPluginConstructionCleanupSessionId;
+  const context = createRuntimePluginContext({
+    eventId: 'evt_configured_plugin_construction_cleanup',
+    traceId: 'trace_configured_plugin_construction_cleanup',
+    createdAt: '1970-01-01T00:00:00.000Z',
+    sessionId,
+    eventType: 'USER_MESSAGE',
+    currentUserMessage: configuredPluginConstructionCleanupMessage,
+    character: configuredPluginConstructionCleanupCharacter
+  });
+
+  for (const plugin of options.plugins) {
+    const cleanupHost = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [plugin.manifest.id],
+      storeRoot: options.resolvedConfig.storeRoot,
+      sessionId,
+      ...(options.sessionIdentity === undefined
+        ? {}
+        : { sessionIdentity: options.sessionIdentity })
+    });
+
+    await cleanupHost.onSessionEnd(context);
+  }
 }
 
 function runtimePluginManifestsMatch(

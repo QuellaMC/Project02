@@ -32,7 +32,8 @@ import {
 import {
   createRuntimePlugin,
   runtimePluginContractVersion,
-  type RuntimePlugin
+  type RuntimePlugin,
+  type RuntimePluginContext
 } from '../src/plugins/types.ts';
 
 describe('inspect CLI plugin evidence', () => {
@@ -351,6 +352,120 @@ describe('inspect CLI plugin evidence', () => {
     );
   });
 
+  it('closes configured plugins after sessions inspect activation output', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-close-'));
+    const sessionEndContexts: RuntimePluginContext[] = [];
+    const plugin = createInspectSessionEndFixturePlugin((context) => {
+      sessionEndContexts.push(context);
+    });
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'session-close',
+      createdAt: '2026-06-22T00:00:00.000Z'
+    });
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              return plugin;
+            }
+          }
+        }
+      }
+    );
+    const output = JSON.parse(stdout) as {
+      readonly plugins: readonly {
+        readonly pluginId: string;
+        readonly activationStatus: string;
+      }[];
+      readonly sessions: readonly { readonly sessionId: string }[];
+    };
+
+    expect(exitCode).toBe(0);
+    expect(output.sessions).toContainEqual(
+      expect.objectContaining({ sessionId: 'session-close' })
+    );
+    expect(output.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: plugin.manifest.id,
+        activationStatus: 'active'
+      })
+    );
+    expect(sessionEndContexts).toHaveLength(1);
+    expect(sessionEndContexts[0]).toMatchObject({
+      sessionId: 'inspect',
+      currentUserMessage: 'inspect plugin activation cleanup'
+    });
+  });
+
+  it('closes configured plugins after session inspect activation failures', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-close-failure-'));
+    const missingSessionId = 'missing-session';
+    const sessionEndContexts: RuntimePluginContext[] = [];
+    const plugin = createInspectSessionEndFixturePlugin((context) => {
+      sessionEndContexts.push(context);
+    });
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'existing-session',
+      createdAt: '2026-06-22T00:00:00.000Z'
+    });
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--session', missingSessionId],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              return plugin;
+            }
+          }
+        }
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toContain(`Local runtime session "${missingSessionId}"`);
+    expect(sessionEndContexts).toHaveLength(1);
+    expect(sessionEndContexts[0]).toMatchObject({
+      sessionId: missingSessionId,
+      currentUserMessage: 'inspect plugin activation cleanup'
+    });
+  });
+
   it('loads the runtime env file for inspect without mutating process env', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-env-'));
     const configPath = join(storeRoot, 'config.json');
@@ -487,6 +602,61 @@ function createInspectFixturePlugin(): RuntimePlugin {
         reasons: ['test_inspect_fixture']
       },
       requestedApis: []
+    }
+  });
+}
+
+function createInspectSessionEndFixturePlugin(
+  onSessionEnd: (context: RuntimePluginContext) => void
+): RuntimePlugin {
+  const pluginId = 'inspect.session-end.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      id: pluginId,
+      displayName: 'Inspect Session End Fixture',
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'Test plugin for inspect session end lifecycle cleanup.',
+      contractVersion: runtimePluginContractVersion,
+      compatibility: {
+        hostContractVersions: [runtimePluginContractVersion],
+        sourceSystem: 'test'
+      },
+      declaredPlugins: ['on_session_end'],
+      config: {
+        fields: []
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'reject_tool_call',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: false,
+        reasons: ['test_inspect_cleanup']
+      },
+      requestedApis: []
+    },
+    lifecycleHooks: {
+      onSessionEnd(context) {
+        onSessionEnd(context);
+
+        return {
+          status: 'completed',
+          evidence: []
+        };
+      }
     }
   });
 }

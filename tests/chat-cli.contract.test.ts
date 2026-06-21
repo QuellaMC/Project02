@@ -407,6 +407,65 @@ describe('chat CLI plugin lifecycle', () => {
     });
   });
 
+  it('closes configured plugins when a fatal chat turn exits before /exit', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-fatal-cleanup-'));
+    const sessionId = 'fatal-cleanup-session';
+    const configuredPlugin = createSessionEndPlugin(() => {}, {
+      pluginId: 'chat.session-end.fatal-cleanup.fixture',
+      requiredForTurn: true,
+      beforeRoleModelCall() {
+        throw new Error('configured before-role-model hook failed');
+      }
+    });
+    const sessionEndContexts: RuntimePluginContext[] = [];
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [configuredPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    const exitCode = await runChatCliFromArgs(
+      ['--provider', 'local', '--store', storeRoot, '--new-session', sessionId],
+      {
+        stdin: Readable.from(['hello\n']),
+        stdout: collect(() => {}),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [configuredPlugin.manifest.id]: {
+            manifest: configuredPlugin.manifest,
+            create() {
+              return createSessionEndPlugin(
+                (context) => {
+                  sessionEndContexts.push(context);
+                },
+                {
+                  pluginId: configuredPlugin.manifest.id,
+                  requiredForTurn: true,
+                  beforeRoleModelCall() {
+                    throw new Error('configured before-role-model hook failed');
+                  }
+                }
+              );
+            }
+          }
+        }
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('configured before-role-model hook failed');
+    expect(sessionEndContexts).toHaveLength(1);
+    expect(sessionEndContexts[0]).toMatchObject({
+      sessionId
+    });
+  });
+
   it('closes configured pre-session plugins when later session creation fails', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-cleanup-'));
     const sessionId = 'pre-session-cleanup';
@@ -710,9 +769,20 @@ function createTextOnlyAdapter(): RoleModelAdapter {
 }
 
 function createSessionEndPlugin(
-  onSessionEnd: (context: RuntimePluginContext) => void
+  onSessionEnd: (context: RuntimePluginContext) => void,
+  options: {
+    readonly pluginId?: string;
+    readonly beforeRoleModelCall?: NonNullable<
+      RuntimePlugin['lifecycleHooks']['beforeRoleModelCall']
+    >;
+    readonly requiredForTurn?: boolean;
+  } = {}
 ): RuntimePlugin {
-  const pluginId = 'chat.session-end.fixture';
+  const pluginId = options.pluginId ?? 'chat.session-end.fixture';
+  const declaredPlugins: RuntimePlugin['manifest']['declaredPlugins'] =
+    options.beforeRoleModelCall === undefined
+      ? ['on_session_end']
+      : ['before_role_model_call', 'on_session_end'];
 
   return createRuntimePlugin({
     manifest: {
@@ -726,20 +796,21 @@ function createSessionEndPlugin(
         hostContractVersions: [runtimePluginContractVersion],
         sourceSystem: 'test'
       },
-      declaredPlugins: ['on_session_end'],
+      declaredPlugins,
       config: {
         fields: []
       },
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
-        requiredForTurn: false,
+        requiredForTurn: options.requiredForTurn === true,
         sideEffectLevel: 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
-          beforeRoleModelCall: 'degrade',
+          beforeRoleModelCall:
+            options.requiredForTurn === true ? 'reject_turn' : 'degrade',
           handleToolCall: 'reject_tool_call',
           afterTurnCommitted: 'log_failure',
           health: 'degrade'
@@ -753,6 +824,9 @@ function createSessionEndPlugin(
     },
     providedTools: [],
     lifecycleHooks: {
+      ...(options.beforeRoleModelCall === undefined
+        ? {}
+        : { beforeRoleModelCall: options.beforeRoleModelCall }),
       onSessionEnd(context) {
         onSessionEnd(context);
 

@@ -1,6 +1,8 @@
 import { pathToFileURL } from 'node:url';
 
+import { createConversationSession } from '../core/conversation.ts';
 import type { RoleModelDecisionResult } from '../role-model/contracts.ts';
+import { createRuntimeEventIdentity } from '../runtime/event.ts';
 import {
   isTerminalRawEventLogRecord,
   type ConversationLogRecord,
@@ -21,6 +23,7 @@ import type {
   RuntimePluginEvidenceSnapshot,
   RuntimePluginTurnEvidenceSnapshot
 } from '../plugins/types.ts';
+import { createRuntimePluginContext } from '../plugins/types.ts';
 import {
   formatLocalRuntimeTerminalError,
   isLocalRuntimeTerminalError
@@ -285,6 +288,9 @@ type InspectPluginSourceReference = {
   readonly uri?: string;
 };
 
+const inspectLifecycleCleanupSessionId = 'inspect';
+const inspectPluginCleanupMessage = 'inspect plugin activation cleanup';
+
 class InspectCliUsageError extends Error {
   constructor(message: string) {
     super(message);
@@ -441,17 +447,27 @@ async function writeSessionList(
   runtimeOptions: InspectRuntimeOptions
 ): Promise<void> {
   const runtimeConfig = await inspectRuntimeConfig(args, runtimeOptions);
-  const sessionStore = createLocalRuntimeSessionStore({
-    storeRoot: runtimeConfig.resolvedConfig.storeRoot
-  });
-  const sessions = await sessionStore.listSessions();
 
-  writeJson(stdout, {
-    runtimeConfig: createRuntimeConfigInspectShape(runtimeConfig.resolvedConfig),
-    activationDiagnostics: Object.freeze([...runtimeConfig.activation.diagnostics]),
-    plugins: inspectConfiguredPlugins(runtimeConfig),
-    sessions
-  } satisfies InspectSessionListOutput);
+  try {
+    const sessionStore = createLocalRuntimeSessionStore({
+      storeRoot: runtimeConfig.resolvedConfig.storeRoot
+    });
+    const sessions = await sessionStore.listSessions();
+
+    writeJson(stdout, {
+      runtimeConfig: createRuntimeConfigInspectShape(runtimeConfig.resolvedConfig),
+      activationDiagnostics: Object.freeze([
+        ...runtimeConfig.activation.diagnostics
+      ]),
+      plugins: inspectConfiguredPlugins(runtimeConfig),
+      sessions
+    } satisfies InspectSessionListOutput);
+  } finally {
+    await closeInspectConfiguredPluginHost({
+      runtimeConfig,
+      sessionId: inspectLifecycleCleanupSessionId
+    });
+  }
 }
 
 async function writeSessionEvidence(
@@ -460,35 +476,45 @@ async function writeSessionEvidence(
   runtimeOptions: InspectRuntimeOptions
 ): Promise<void> {
   const runtimeConfig = await inspectRuntimeConfig(args, runtimeOptions);
-  const storage = {
-    storeRoot: runtimeConfig.resolvedConfig.storeRoot
-  };
-  const sessionStore = createLocalRuntimeSessionStore(storage);
-  const session = await sessionStore.readSession(args.sessionId);
-  const logStore = createFileRuntimeLogStore({
-    ...storage,
-    sessionId: session.sessionId
-  });
-  const traceEntries = logStore.traceEntries();
-  const rawEvents = logStore.rawEvents();
-  const conversationMessages = logStore.conversationMessages();
 
-  writeJson(stdout, {
-    runtimeConfig: createRuntimeConfigInspectShape(runtimeConfig.resolvedConfig),
-    activationDiagnostics: Object.freeze([...runtimeConfig.activation.diagnostics]),
-    plugins: inspectConfiguredPlugins(runtimeConfig),
-    session,
-    counts: {
-      traceEntries: traceEntries.length,
-      rawEvents: rawEvents.length,
-      conversationMessages: conversationMessages.length
-    },
-    turns: createTurnEvidence({
-      conversationMessages,
-      rawEvents,
-      traceEntries
-    })
-  } satisfies InspectSessionOutput);
+  try {
+    const storage = {
+      storeRoot: runtimeConfig.resolvedConfig.storeRoot
+    };
+    const sessionStore = createLocalRuntimeSessionStore(storage);
+    const session = await sessionStore.readSession(args.sessionId);
+    const logStore = createFileRuntimeLogStore({
+      ...storage,
+      sessionId: session.sessionId
+    });
+    const traceEntries = logStore.traceEntries();
+    const rawEvents = logStore.rawEvents();
+    const conversationMessages = logStore.conversationMessages();
+
+    writeJson(stdout, {
+      runtimeConfig: createRuntimeConfigInspectShape(runtimeConfig.resolvedConfig),
+      activationDiagnostics: Object.freeze([
+        ...runtimeConfig.activation.diagnostics
+      ]),
+      plugins: inspectConfiguredPlugins(runtimeConfig),
+      session,
+      counts: {
+        traceEntries: traceEntries.length,
+        rawEvents: rawEvents.length,
+        conversationMessages: conversationMessages.length
+      },
+      turns: createTurnEvidence({
+        conversationMessages,
+        rawEvents,
+        traceEntries
+      })
+    } satisfies InspectSessionOutput);
+  } finally {
+    await closeInspectConfiguredPluginHost({
+      runtimeConfig,
+      sessionId: args.sessionId
+    });
+  }
 }
 
 async function inspectRuntimeConfig(args: {
@@ -520,6 +546,21 @@ async function inspectRuntimeConfig(args: {
     env: runtimeEnv,
     ...(options.factories === undefined ? {} : { factories: options.factories })
   });
+}
+
+async function closeInspectConfiguredPluginHost(options: {
+  readonly runtimeConfig: Project02ConfiguredPluginHost;
+  readonly sessionId: string;
+}): Promise<void> {
+  await options.runtimeConfig.host.onSessionEnd(
+    createRuntimePluginContext({
+      ...createRuntimeEventIdentity(),
+      sessionId: normalizeLocalRuntimeSessionId(options.sessionId),
+      eventType: 'USER_MESSAGE',
+      currentUserMessage: inspectPluginCleanupMessage,
+      character: createConversationSession().character
+    })
+  );
 }
 
 function inspectConfiguredPlugins(

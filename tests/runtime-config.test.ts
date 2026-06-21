@@ -19,6 +19,7 @@ import {
   createConfiguredProject02PluginHost,
   loadProject02RuntimeConfig,
   resolveProject02RuntimeConfig,
+  runtimeConfigEnvVarName,
   runtimeConfigVersion
 } from '../src/runtime/config/index.ts';
 import {
@@ -2066,6 +2067,256 @@ describe('runtime config CLI', () => {
 
     expect(stdout).toBe(`${configPath}\n`);
     expect(stderr).toBe('');
+  });
+
+  it('uses cwd dotenv runtime config selectors for unflagged config reads and mutations', async () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-cwd-env-'));
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-cwd-store-'));
+    const configPath = writeRuntimeConfig(join(cwdRoot, 'runtime.json'), {
+      storeRoot,
+      plugins: {
+        foo: {
+          config: {
+            backend: 'local'
+          }
+        }
+      }
+    });
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let pathStdout = '';
+    let envPathStdout = '';
+    let getStdout = '';
+    let setStdout = '';
+
+    writeFileSync(
+      join(cwdRoot, '.env'),
+      `${runtimeConfigEnvVarName}=${configPath}\n`,
+      'utf8'
+    );
+
+    try {
+      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
+      process.chdir(cwdRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['path'], {
+          stdout: collect((chunk) => {
+            pathStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        })
+      ).toBe(0);
+      expect(pathStdout).toBe(`${configPath}\n`);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['env-path'], {
+          stdout: collect((chunk) => {
+            envPathStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        })
+      ).toBe(0);
+      expect(envPathStdout).toBe(`${join(storeRoot, '.env')}\n`);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['get', 'plugins.foo.config.backend'], {
+          stdout: collect((chunk) => {
+            getStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        })
+      ).toBe(0);
+      expect(JSON.parse(getStdout) as unknown).toBe('local');
+
+      expect(
+        await runRuntimeConfigCliFromArgs(
+          ['set', 'plugins.foo.config.backend', 'remote'],
+          {
+            stdout: collect((chunk) => {
+              setStdout += chunk;
+            }),
+            stderr: collect(() => {})
+          }
+        )
+      ).toBe(0);
+
+      const setOutput = JSON.parse(setStdout) as {
+        readonly configPath: string;
+        readonly envPath: string;
+      };
+      const afterSet: unknown = JSON.parse(readFileSync(configPath, 'utf8'));
+
+      expect(setOutput).toMatchObject({
+        configPath,
+        envPath: join(storeRoot, '.env')
+      });
+      expect(afterSet).toMatchObject({
+        plugins: {
+          foo: {
+            config: {
+              backend: 'remote'
+            }
+          }
+        }
+      });
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
+  it('keeps explicit config and store locations ahead of cwd dotenv runtime config selectors', async () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-explicit-'));
+    const dotenvStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-dotenv-store-')
+    );
+    const explicitStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-explicit-store-')
+    );
+    const selectedStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-selected-store-')
+    );
+    const explicitNextStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-explicit-next-')
+    );
+    const selectedNextStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-selected-next-')
+    );
+    const dotenvConfigPath = writeRuntimeConfig(join(cwdRoot, 'dotenv.json'), {
+      storeRoot: dotenvStoreRoot
+    });
+    const explicitConfigPath = writeRuntimeConfig(join(cwdRoot, 'explicit.json'), {
+      storeRoot: explicitStoreRoot
+    });
+    const selectedConfigPath = join(selectedStoreRoot, 'config.json');
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let explicitGetStdout = '';
+    let storePathStdout = '';
+    let explicitSetStdout = '';
+    let storeSetStdout = '';
+
+    writeFileSync(
+      join(cwdRoot, '.env'),
+      `${runtimeConfigEnvVarName}=${dotenvConfigPath}\n`,
+      'utf8'
+    );
+
+    try {
+      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
+      process.chdir(cwdRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(
+          ['--config', explicitConfigPath, 'get', 'storeRoot'],
+          {
+            stdout: collect((chunk) => {
+              explicitGetStdout += chunk;
+            }),
+            stderr: collect(() => {})
+          }
+        )
+      ).toBe(0);
+      expect(JSON.parse(explicitGetStdout) as unknown).toBe(explicitStoreRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['--store', selectedStoreRoot, 'path'], {
+          stdout: collect((chunk) => {
+            storePathStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        })
+      ).toBe(0);
+      expect(storePathStdout).toBe(`${selectedConfigPath}\n`);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(
+          ['--config', explicitConfigPath, 'set', 'storeRoot', explicitNextStoreRoot],
+          {
+            stdout: collect((chunk) => {
+              explicitSetStdout += chunk;
+            }),
+            stderr: collect(() => {})
+          }
+        )
+      ).toBe(0);
+      expect(JSON.parse(explicitSetStdout) as { readonly configPath: string }).toMatchObject({
+        configPath: explicitConfigPath
+      });
+
+      expect(
+        await runRuntimeConfigCliFromArgs(
+          ['--store', selectedStoreRoot, 'set', 'storeRoot', selectedNextStoreRoot],
+          {
+            stdout: collect((chunk) => {
+              storeSetStdout += chunk;
+            }),
+            stderr: collect(() => {})
+          }
+        )
+      ).toBe(0);
+      expect(JSON.parse(storeSetStdout) as { readonly configPath: string }).toMatchObject({
+        configPath: selectedConfigPath
+      });
+
+      expect(JSON.parse(readFileSync(explicitConfigPath, 'utf8')) as unknown).toMatchObject(
+        {
+          storeRoot: explicitNextStoreRoot
+        }
+      );
+      expect(JSON.parse(readFileSync(selectedConfigPath, 'utf8')) as unknown).toMatchObject(
+        {
+          storeRoot: selectedNextStoreRoot
+        }
+      );
+      expect(JSON.parse(readFileSync(dotenvConfigPath, 'utf8')) as unknown).toMatchObject(
+        {
+          storeRoot: dotenvStoreRoot
+        }
+      );
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
+  it('keeps process env runtime config selectors ahead of cwd dotenv defaults', async () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-process-env-'));
+    const dotenvConfigPath = writeRuntimeConfig(join(cwdRoot, 'dotenv.json'), {
+      storeRoot: 'dotenv-store'
+    });
+    const processConfigPath = writeRuntimeConfig(join(cwdRoot, 'process.json'), {
+      storeRoot: 'process-store'
+    });
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let stdout = '';
+
+    writeFileSync(
+      join(cwdRoot, '.env'),
+      `${runtimeConfigEnvVarName}=${dotenvConfigPath}\n`,
+      'utf8'
+    );
+
+    try {
+      process.env[runtimeConfigEnvVarName] = processConfigPath;
+      process.chdir(cwdRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['path'], {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {})
+        })
+      ).toBe(0);
+
+      expect(stdout).toBe(`${processConfigPath}\n`);
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
   });
 
   it.each([

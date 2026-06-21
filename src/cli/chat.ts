@@ -310,13 +310,27 @@ async function runChatCliAfterConfiguredHost(options: {
     throw error;
   }
 
-  return await runChatCli({
+  const exitCode = await runChatCli({
     ...options.options,
     ...durableRuntime,
     ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
     ...(pluginHost === undefined ? {} : { pluginHost }),
     traceMode: options.options.traceMode === true || options.parsedTraceMode
   });
+
+  if (
+    exitCode !== 0 &&
+    options.configuredHost !== undefined &&
+    pluginHost !== undefined
+  ) {
+    await endChatSession({
+      session: durableRuntime.session,
+      logStore: durableRuntime.logStore,
+      pluginHost
+    });
+  }
+
+  return exitCode;
 }
 
 async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
