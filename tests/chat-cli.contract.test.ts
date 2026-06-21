@@ -109,6 +109,73 @@ describe('chat CLI provider selection', () => {
     }
   });
 
+  it('ignores cwd dotenv runtime config selectors when --store is explicit', async () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-chat-cwd-config-'));
+    const defaultStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-chat-default-config-store-')
+    );
+    const selectedStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-chat-selected-config-store-')
+    );
+    const sessionId = 'selected-store-config';
+    const previousCwd = process.cwd();
+    const previousProvider = process.env[roleModelProviderEnvName];
+    const previousApiKey = process.env[nvidiaApiKeyEnvName];
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    const defaultConfigPath = writeRuntimeConfig(
+      join(defaultStoreRoot, 'config.json'),
+      {
+        storeRoot: defaultStoreRoot
+      }
+    );
+    let stderr = '';
+
+    writeFileSync(
+      join(cwdRoot, '.env'),
+      `${runtimeConfigEnvVarName}=${defaultConfigPath}\n${roleModelProviderEnvName}=local\n`,
+      'utf8'
+    );
+
+    try {
+      Reflect.deleteProperty(process.env, roleModelProviderEnvName);
+      Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
+      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
+      process.chdir(cwdRoot);
+
+      const exitCode = await runChatCliFromArgs(
+        ['--store', selectedStoreRoot, '--new-session', sessionId],
+        {
+          stdin: Readable.from(['/exit\n']),
+          stdout: collect(() => {}),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        }
+      );
+
+      expect(exitCode).toBe(0);
+      expect(stderr).toBe('');
+      await expect(
+        createLocalRuntimeSessionStore({
+          storeRoot: selectedStoreRoot
+        }).readSession(sessionId)
+      ).resolves.toMatchObject({
+        sessionId
+      });
+      expect(
+        existsSync(
+          createLocalRuntimeStorageLayout({ storeRoot: defaultStoreRoot })
+            .sessionCatalogPath
+        )
+      ).toBe(false);
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(roleModelProviderEnvName, previousProvider);
+      restoreProcessEnvValue(nvidiaApiKeyEnvName, previousApiKey);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
   it('loads the runtime store env before selecting the default chat provider', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-provider-env-'));
     const sessionId = 'runtime-env-provider';

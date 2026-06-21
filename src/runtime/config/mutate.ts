@@ -505,7 +505,7 @@ function prepareEnvSecretWrite(
     throw new TypeError('Secret env var name must be uppercase snake case.');
   }
 
-  const current = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
+  const current = readExistingEnvSecretFile(envPath);
   const existing = envFileTextWithoutAssignment(current, envVar);
   const assignment = `${envVar}=${formatDotenvSecretValue(secretValue)}`;
   const next =
@@ -524,8 +524,19 @@ function writePreparedEnvSecret(secretWrite: PreparedEnvSecretWrite): void {
   try {
     writeTextAtomic(secretWrite.envPath, secretWrite.value, secretWrite.mode);
   } catch (error: unknown) {
-    throw mutationFileWriteError(
+    throw mutationFileAccessError(
       `Could not write runtime config env file at ${secretWrite.envPath}.`,
+      error
+    );
+  }
+}
+
+function readExistingEnvSecretFile(envPath: string): string {
+  try {
+    return existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
+  } catch (error: unknown) {
+    throw mutationFileAccessError(
+      `Could not read runtime config env file at ${envPath}.`,
       error
     );
   }
@@ -546,7 +557,7 @@ function restorePreviousConfigState(
     writeTextAtomic(path, previousConfigText, 0o600);
     return undefined;
   } catch (error: unknown) {
-    return mutationFileWriteError(
+    return mutationFileAccessError(
       `Could not restore runtime config file at ${path}.`,
       error
     );
@@ -680,7 +691,7 @@ function dotenvQuotedValueContinuationEndIndex(
     }
   }
 
-  return lines.length - 1;
+  return startIndex - 1;
 }
 
 function formatDotenvSecretValue(value: string): string {
@@ -715,7 +726,7 @@ function writeJsonAtomic(
   try {
     writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`, mode);
   } catch (error: unknown) {
-    throw mutationFileWriteError(
+    throw mutationFileAccessError(
       `Could not write runtime config file at ${path}.`,
       error
     );
@@ -752,7 +763,7 @@ function canonicalMutationPath(path: string): string {
   }
 }
 
-function mutationFileWriteError(
+function mutationFileAccessError(
   message: string,
   cause: unknown
 ): RuntimeConfigMutationError {

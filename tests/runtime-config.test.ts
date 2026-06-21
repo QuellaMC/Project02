@@ -1854,6 +1854,35 @@ describe('runtime config CLI', () => {
     expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
   });
 
+  it('reports env secret read failures before writing config updates', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-env-read-blocked-'));
+    const envPath = join(storeRoot, '.env');
+    let stdout = '';
+    let stderr = '';
+
+    mkdirSync(envPath);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', 'MEM0_API_KEY'],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          }),
+          env: { MEM0_API_KEY: 'stored-secret' }
+        }
+      )
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toBe(`Error: Could not read runtime config env file at ${envPath}.\n`);
+    expect(stderr).not.toContain('EISDIR');
+    expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+  });
+
   it('does not persist a new env secret when an explicit config write fails', () => {
     const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-write-fail-'));
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-orphan-secret-'));
@@ -2558,6 +2587,44 @@ describe('runtime config CLI', () => {
       loadEnvFile(envPath);
       expect(process.env[envVar]).toBe(newSecret);
       expect(process.env[otherEnvVar]).toBe('other-value');
+    } finally {
+      Reflect.deleteProperty(process.env, envVar);
+      Reflect.deleteProperty(process.env, otherEnvVar);
+    }
+  });
+
+  it('preserves later dotenv entries when rotating an unclosed quoted secret', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-secret-unclosed-'));
+    const envVar = 'PROJECT02_SECRET_ROTATION_UNCLOSED';
+    const otherEnvVar = 'PROJECT02_SECRET_ROTATION_UNCLOSED_OTHER';
+    const newSecret = 'new top-level secret';
+    const envPath = join(storeRoot, '.env');
+
+    Reflect.deleteProperty(process.env, envVar);
+    Reflect.deleteProperty(process.env, otherEnvVar);
+    writeFileSync(envPath, [`${envVar}='old`, `${otherEnvVar}=keep`, ''].join('\n'), 'utf8');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {}),
+          env: { [envVar]: newSecret }
+        }
+      )
+    ).toBe(0);
+
+    const envFile = readFileSync(envPath, 'utf8');
+
+    expect(envFile).toBe(
+      [`${otherEnvVar}=keep`, `${envVar}="${newSecret}"`, ''].join('\n')
+    );
+
+    try {
+      loadEnvFile(envPath);
+      expect(process.env[envVar]).toBe(newSecret);
+      expect(process.env[otherEnvVar]).toBe('keep');
     } finally {
       Reflect.deleteProperty(process.env, envVar);
       Reflect.deleteProperty(process.env, otherEnvVar);

@@ -55,6 +55,7 @@ import {
   loadProject02RuntimeConfig,
   resolveConfiguredProject02PluginActivation,
   resolveProject02RuntimeConfig,
+  runtimeConfigEnvVarName,
   type RuntimeConfigDiagnostic,
   type RuntimePluginFactory
 } from '../runtime/config/index.ts';
@@ -170,9 +171,13 @@ export async function runChatCliFromArgs(
         : options.env;
     const defaultEnv =
       explicitEnv === undefined ? readDefaultDotEnvFile() : undefined;
-    const baseEnv =
-      explicitEnv ?? { ...(defaultEnv ?? {}), ...process.env };
     const parsedArgs = parseChatCliArgs(args);
+    const defaultEnvForLocation = defaultDotEnvForChatRuntimeLocation(
+      defaultEnv ?? {},
+      parsedArgs
+    );
+    const baseEnv =
+      explicitEnv ?? { ...defaultEnvForLocation, ...process.env };
     const loadedConfig = loadProject02RuntimeConfig({
       ...parsedArgs,
       env: baseEnv
@@ -182,7 +187,7 @@ export async function runChatCliFromArgs(
       loadedConfig,
       ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot }),
       env: explicitEnv ?? process.env,
-      ...(defaultEnv === undefined ? {} : { envDefaults: defaultEnv })
+      ...(defaultEnv === undefined ? {} : { envDefaults: defaultEnvForLocation })
     });
     const selectedArgs = selectChatProvider(parsedArgs, runtimeEnv);
 
@@ -259,6 +264,22 @@ export async function runChatCliFromArgs(
 
     throw error;
   }
+}
+
+function defaultDotEnvForChatRuntimeLocation(
+  defaultEnv: NodeJS.ProcessEnv,
+  args: Pick<ChatCliArgs, 'configPath' | 'storeRoot'>
+): NodeJS.ProcessEnv {
+  if (
+    defaultEnv[runtimeConfigEnvVarName] === undefined ||
+    (args.configPath === undefined && args.storeRoot === undefined)
+  ) {
+    return defaultEnv;
+  }
+
+  const env = { ...defaultEnv };
+  Reflect.deleteProperty(env, runtimeConfigEnvVarName);
+  return env;
 }
 
 function assertNoRuntimeConfigErrors(
