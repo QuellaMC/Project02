@@ -6,7 +6,8 @@ import {
 import {
   createRuntimePluginHost,
   runtimePluginDiscoveryPluginId,
-  type RuntimePluginHost
+  type RuntimePluginHost,
+  type RuntimePluginSessionEndOptions
 } from '../../plugins/host.ts';
 import {
   createRuntimePluginContext,
@@ -148,6 +149,7 @@ export async function createConfiguredProject02PluginHost(options: {
   readonly strictUnknownPlugins?: boolean;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
+  readonly constructionCleanup?: RuntimePluginSessionEndOptions;
 }): Promise<Project02ConfiguredPluginHost> {
   const factories = options.factories ?? defaultRuntimePluginFactories();
   const activationPlan = resolveConfiguredProject02PluginActivation({
@@ -211,7 +213,10 @@ export async function createConfiguredProject02PluginHost(options: {
     ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
     ...(options.sessionIdentity === undefined
       ? {}
-      : { sessionIdentity: options.sessionIdentity })
+      : { sessionIdentity: options.sessionIdentity }),
+    ...(options.constructionCleanup === undefined
+      ? {}
+      : { constructionCleanup: options.constructionCleanup })
   });
 
   return Object.freeze({
@@ -492,6 +497,7 @@ async function instantiatePreparedPlugins(options: {
   readonly enabledPluginIds: readonly string[];
   readonly sessionId?: string;
   readonly sessionIdentity?: object;
+  readonly constructionCleanup?: RuntimePluginSessionEndOptions;
 }): Promise<readonly RuntimePlugin[]> {
   const plugins: RuntimePlugin[] = [];
   const createdPlugins: RuntimePlugin[] = [];
@@ -540,7 +546,10 @@ async function instantiatePreparedPlugins(options: {
       ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
       ...(options.sessionIdentity === undefined
         ? {}
-        : { sessionIdentity: options.sessionIdentity })
+        : { sessionIdentity: options.sessionIdentity }),
+      ...(options.constructionCleanup === undefined
+        ? {}
+        : { constructionCleanup: options.constructionCleanup })
     });
     throw error;
   }
@@ -553,6 +562,7 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly sessionId?: string;
   readonly sessionIdentity?: object;
+  readonly constructionCleanup?: RuntimePluginSessionEndOptions;
 }): Promise<void> {
   if (options.plugins.length === 0) {
     return;
@@ -581,7 +591,7 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
         : { sessionIdentity: options.sessionIdentity })
     });
 
-    await cleanupHost.onSessionEnd(context);
+    await cleanupHost.onSessionEnd(context, options.constructionCleanup);
   }
 }
 

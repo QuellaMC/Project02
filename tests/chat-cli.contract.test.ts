@@ -109,7 +109,7 @@ describe('chat CLI provider selection', () => {
     }
   });
 
-  it('ignores cwd dotenv runtime config selectors when --store is explicit', async () => {
+  it('ignores process and cwd dotenv runtime config selectors when --store is explicit', async () => {
     const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-chat-cwd-config-'));
     const defaultStoreRoot = mkdtempSync(
       join(tmpdir(), 'project02-chat-default-config-store-')
@@ -139,7 +139,7 @@ describe('chat CLI provider selection', () => {
     try {
       Reflect.deleteProperty(process.env, roleModelProviderEnvName);
       Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
-      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
+      process.env[runtimeConfigEnvVarName] = defaultConfigPath;
       process.chdir(cwdRoot);
 
       const exitCode = await runChatCliFromArgs(

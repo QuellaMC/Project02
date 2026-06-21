@@ -17,6 +17,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   applyRuntimeConfigMutation,
   createConfiguredProject02PluginHost,
+  defaultRuntimeConfigPath,
   loadProject02RuntimeConfig,
   resolveProject02RuntimeConfig,
   runtimeConfigEnvVarName,
@@ -60,6 +61,35 @@ describe('runtime config loading and resolution', () => {
 
     expect(loaded.source).toBe('path');
     expect(resolved.storeRoot).toBe('explicit-store');
+  });
+
+  it('loads explicit store default config before env config', () => {
+    const selectedStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-store-precedence-')
+    );
+    const envStoreRoot = mkdtempSync(join(tmpdir(), 'project02-config-env-store-'));
+    const selectedPath = defaultRuntimeConfigPath(selectedStoreRoot);
+    const envPath = join(envStoreRoot, 'env.json');
+
+    writeRuntimeConfig(selectedPath, { storeRoot: selectedStoreRoot });
+    writeRuntimeConfig(envPath, { storeRoot: envStoreRoot });
+
+    const loaded = loadProject02RuntimeConfig({
+      storeRoot: selectedStoreRoot,
+      env: {
+        [runtimeConfigEnvVarName]: envPath
+      }
+    });
+    const resolved = resolveProject02RuntimeConfig({
+      loadedConfig: loaded,
+      storeRoot: selectedStoreRoot
+    });
+
+    expect(loaded).toMatchObject({
+      source: 'default',
+      path: selectedPath
+    });
+    expect(resolved.storeRoot).toBe(selectedStoreRoot);
   });
 
   it('rejects unknown top-level config fields and blocks default activation', async () => {
@@ -2166,10 +2196,13 @@ describe('runtime config CLI', () => {
     }
   });
 
-  it('keeps explicit config and store locations ahead of cwd dotenv runtime config selectors', async () => {
+  it('keeps explicit config and store locations ahead of env runtime config selectors', async () => {
     const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-explicit-'));
     const dotenvStoreRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-cli-dotenv-store-')
+    );
+    const processStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-process-store-')
     );
     const explicitStoreRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-cli-explicit-store-')
@@ -2185,6 +2218,9 @@ describe('runtime config CLI', () => {
     );
     const dotenvConfigPath = writeRuntimeConfig(join(cwdRoot, 'dotenv.json'), {
       storeRoot: dotenvStoreRoot
+    });
+    const processConfigPath = writeRuntimeConfig(join(cwdRoot, 'process.json'), {
+      storeRoot: processStoreRoot
     });
     const explicitConfigPath = writeRuntimeConfig(join(cwdRoot, 'explicit.json'), {
       storeRoot: explicitStoreRoot
@@ -2204,7 +2240,7 @@ describe('runtime config CLI', () => {
     );
 
     try {
-      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
+      process.env[runtimeConfigEnvVarName] = processConfigPath;
       process.chdir(cwdRoot);
 
       expect(
@@ -2273,6 +2309,11 @@ describe('runtime config CLI', () => {
       expect(JSON.parse(readFileSync(dotenvConfigPath, 'utf8')) as unknown).toMatchObject(
         {
           storeRoot: dotenvStoreRoot
+        }
+      );
+      expect(JSON.parse(readFileSync(processConfigPath, 'utf8')) as unknown).toMatchObject(
+        {
+          storeRoot: processStoreRoot
         }
       );
     } finally {

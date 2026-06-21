@@ -86,6 +86,10 @@ export type RuntimePluginHookHostResult = {
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
 };
 
+export type RuntimePluginSessionEndOptions = {
+  readonly allowFileStoreWrites?: boolean;
+};
+
 export type RuntimePluginHealthHostResult = {
   readonly snapshots: readonly RuntimePluginHealthSnapshot[];
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
@@ -110,7 +114,8 @@ export type RuntimePluginHost = {
     context: RuntimePluginAfterTurnCommittedContext
   ): Promise<RuntimePluginHookHostResult>;
   onSessionEnd(
-    context: RuntimePluginContext
+    context: RuntimePluginContext,
+    options?: RuntimePluginSessionEndOptions
   ): Promise<RuntimePluginHookHostResult>;
   health(context: RuntimePluginContext): Promise<RuntimePluginHealthHostResult>;
 };
@@ -265,13 +270,16 @@ export function createRuntimePluginHost(
         evidence: hookResult.evidence
       } satisfies RuntimePluginHookHostResult);
     },
-    async onSessionEnd(context) {
+    async onSessionEnd(context, hookOptions) {
       return await runHookPhase({
         plugins: enabledPlugins,
         context,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity,
+        ...(hookOptions?.allowFileStoreWrites === undefined
+          ? {}
+          : { allowFileStoreWrites: hookOptions.allowFileStoreWrites }),
         hookName: 'onSessionEnd',
         evidenceKind: 'session_end',
         hookForPlugin: (plugin) => plugin.lifecycleHooks.onSessionEnd
@@ -802,6 +810,7 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
   readonly sessionIdentity?: object | undefined;
   readonly hookName: 'afterTurnCommitted' | 'onSessionEnd';
   readonly evidenceKind: Extract<RuntimePluginEvidenceKind, 'after_turn_committed' | 'session_end'>;
+  readonly allowFileStoreWrites?: boolean | undefined;
   readonly hookForPlugin: (
     plugin: RuntimePlugin
   ) => ((context: TContext) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>) | undefined;
@@ -821,7 +830,10 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
       plugin,
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
-      sessionIdentity: options.sessionIdentity
+      sessionIdentity: options.sessionIdentity,
+      ...(options.allowFileStoreWrites === undefined
+        ? {}
+        : { allowFileStoreWrites: options.allowFileStoreWrites })
     });
     const result = await invokeHook({
       plugin,

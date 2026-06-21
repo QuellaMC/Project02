@@ -53,9 +53,10 @@ export function applyRuntimeConfigMutation(
   const locationLayout = createLocalRuntimeStorageLayout(
     options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }
   );
+  const env = options.env ?? process.env;
   const configPath =
     options.configPath ??
-    runtimeConfigPathFromEnv(options.env ?? process.env) ??
+    (options.storeRoot === undefined ? runtimeConfigPathFromEnv(env) : undefined) ??
     locationLayout.configPath;
   const loaded = loadProject02RuntimeConfig({
     configPath,

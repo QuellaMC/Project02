@@ -298,6 +298,13 @@ class InspectCliUsageError extends Error {
   }
 }
 
+class InspectCliStartupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InspectCliStartupError';
+  }
+}
+
 export async function runInspectCliFromArgs(
   args: readonly string[],
   options: InspectCliOptions
@@ -335,6 +342,7 @@ export async function runInspectCliFromArgs(
   } catch (error: unknown) {
     if (
       error instanceof InspectCliUsageError ||
+      error instanceof InspectCliStartupError ||
       error instanceof RuntimeLocationCliUsageError ||
       error instanceof RuntimeEnvFileError ||
       isLocalRuntimeTerminalError(error)
@@ -540,12 +548,17 @@ async function inspectRuntimeConfig(args: {
     );
   }
 
-  return await createConfiguredProject02PluginHost({
-    loadedConfig,
-    ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
-    env: runtimeEnv,
-    ...(options.factories === undefined ? {} : { factories: options.factories })
-  });
+  try {
+    return await createConfiguredProject02PluginHost({
+      loadedConfig,
+      ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
+      env: runtimeEnv,
+      constructionCleanup: { allowFileStoreWrites: false },
+      ...(options.factories === undefined ? {} : { factories: options.factories })
+    });
+  } catch (error: unknown) {
+    throw new InspectCliStartupError(formatRuntimeConfigActivationError(error));
+  }
 }
 
 async function closeInspectConfiguredPluginHost(options: {
@@ -559,7 +572,8 @@ async function closeInspectConfiguredPluginHost(options: {
       eventType: 'USER_MESSAGE',
       currentUserMessage: inspectPluginCleanupMessage,
       character: createConversationSession().character
-    })
+    }),
+    { allowFileStoreWrites: false }
   );
 }
 
@@ -1183,12 +1197,14 @@ function writeJson(stdout: NodeJS.WritableStream, value: unknown): void {
 function formatTerminalErrorMessage(
   error:
     | InspectCliUsageError
+    | InspectCliStartupError
     | RuntimeLocationCliUsageError
     | RuntimeEnvFileError
     | Parameters<typeof formatLocalRuntimeTerminalError>[0]
 ): string {
   if (
     error instanceof InspectCliUsageError ||
+    error instanceof InspectCliStartupError ||
     error instanceof RuntimeLocationCliUsageError ||
     error instanceof RuntimeEnvFileError
   ) {
@@ -1196,6 +1212,14 @@ function formatTerminalErrorMessage(
   }
 
   return formatLocalRuntimeTerminalError(error);
+}
+
+function formatRuntimeConfigActivationError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return `Runtime config activation failed: ${error.message}`;
+  }
+
+  return 'Runtime config activation failed.';
 }
 
 function isMainModule(moduleUrl: string): boolean {

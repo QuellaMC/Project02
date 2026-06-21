@@ -139,6 +139,13 @@ function resolveRuntimeConfigLocation(options: {
     };
   }
 
+  if (options.storeRoot !== undefined) {
+    return {
+      source: 'default',
+      path: defaultRuntimeConfigPath(options.storeRoot)
+    };
+  }
+
   const envPath = options.env[runtimeConfigEnvVarName];
 
   if (envPath !== undefined && envPath.trim().length > 0) {
