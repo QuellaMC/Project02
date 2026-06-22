@@ -788,6 +788,63 @@ describe('runtime config activation diagnostics', () => {
     expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
   });
 
+  it('preserves factory errors when construction cleanup file-store setup fails', async () => {
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-factory-invalid-store-cleanup-')
+    );
+    const invalidStoreRoot = join(configRoot, 'store-root-file');
+    const configPath = join(configRoot, 'config.json');
+    const cleanupContexts: RuntimePluginContext[] = [];
+    const cleanupFileStoreAvailable: boolean[] = [];
+    const cleanupPlugin = fileStoreSessionEndPlugin('first.cleanup', (context) => {
+      cleanupContexts.push(context);
+      cleanupFileStoreAvailable.push(context.fileStore !== undefined);
+    });
+    const failingPlugin = firstPartyPlugin('later.failure');
+
+    writeFileSync(invalidStoreRoot, 'not a runtime store directory\n', 'utf8');
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        [cleanupPlugin.manifest.id]: {
+          enabled: true
+        },
+        [failingPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    await expect(
+      createConfiguredProject02PluginHost({
+        loadedConfig: loadProject02RuntimeConfig({ configPath }),
+        storeRoot: invalidStoreRoot,
+        factories: {
+          [cleanupPlugin.manifest.id]: {
+            manifest: cleanupPlugin.manifest,
+            create: () => cleanupPlugin
+          },
+          [failingPlugin.manifest.id]: {
+            manifest: failingPlugin.manifest,
+            create: () => {
+              throw new Error(
+                'later manifest-backed factory failed with unusable store'
+              );
+            }
+          }
+        }
+      })
+    ).rejects.toThrow(
+      'later manifest-backed factory failed with unusable store'
+    );
+
+    expect(cleanupContexts).toHaveLength(1);
+    expect(cleanupContexts[0]).toMatchObject({
+      sessionId: 'configured-plugin-construction-cleanup',
+      currentUserMessage: 'configured plugin construction failed before host creation'
+    });
+    expect(cleanupFileStoreAvailable).toEqual([true]);
+  });
+
   it('cleans up created plugins when host construction fails after factories succeed', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-host-throw-cleanup-')

@@ -602,19 +602,22 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
     character: configuredPluginConstructionCleanupCharacter
   });
 
-  await runRuntimePluginSessionEndHooks({
-    plugins: options.plugins,
-    context,
-    storeRoot: options.resolvedConfig.storeRoot,
-    sessionId,
-    ...(options.sessionIdentity === undefined
-      ? {}
-      : { sessionIdentity: options.sessionIdentity }),
-    hookOptions: {
-      ...options.constructionCleanup,
-      ...configuredPluginConstructionCleanupOptions
-    }
-  });
+  try {
+    await runRuntimePluginSessionEndHooks({
+      plugins: options.plugins,
+      context,
+      sessionId,
+      ...(options.sessionIdentity === undefined
+        ? {}
+        : { sessionIdentity: options.sessionIdentity }),
+      hookOptions: {
+        ...options.constructionCleanup,
+        ...configuredPluginConstructionCleanupOptions
+      }
+    });
+  } catch {
+    // Construction cleanup is best-effort and must not mask the factory or host error.
+  }
 }
 
 function runtimePluginManifestsMatch(

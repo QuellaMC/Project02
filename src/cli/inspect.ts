@@ -565,16 +565,20 @@ async function closeInspectConfiguredPluginHost(options: {
   readonly runtimeConfig: Project02ConfiguredPluginHost;
   readonly sessionId: string;
 }): Promise<void> {
-  await options.runtimeConfig.host.onSessionEnd(
-    createRuntimePluginContext({
-      ...createRuntimeEventIdentity(),
-      sessionId: normalizeLocalRuntimeSessionId(options.sessionId),
-      eventType: 'USER_MESSAGE',
-      currentUserMessage: inspectPluginCleanupMessage,
-      character: createConversationSession().character
-    }),
-    { allowFileStoreWrites: false }
-  );
+  try {
+    await options.runtimeConfig.host.onSessionEnd(
+      createRuntimePluginContext({
+        ...createRuntimeEventIdentity(),
+        sessionId: normalizeLocalRuntimeSessionId(options.sessionId),
+        eventType: 'USER_MESSAGE',
+        currentUserMessage: inspectPluginCleanupMessage,
+        character: createConversationSession().character
+      }),
+      { allowFileStoreWrites: false }
+    );
+  } catch {
+    // Cleanup must not mask the inspect read or startup error that triggered it.
+  }
 }
 
 function inspectConfiguredPlugins(

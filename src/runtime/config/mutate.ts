@@ -76,7 +76,11 @@ export function applyRuntimeConfigMutation(
     );
   }
 
-  const currentConfig = loaded.config ?? { version: runtimeConfigVersion };
+  const currentConfig =
+    loaded.config ??
+    (options.storeRoot === undefined
+      ? { version: runtimeConfigVersion }
+      : { version: runtimeConfigVersion, storeRoot: locationLayout.storeRoot });
   const nextConfig = validateMutatedRuntimeConfig(
     mutateConfig(currentConfig, options.operation)
   );
@@ -769,13 +773,14 @@ function writeJsonAtomic(
 }
 
 function writeTextAtomic(path: string, value: string, mode: number): void {
-  const tmpPath = `${path}.${String(process.pid)}.${String(Date.now())}.tmp`;
+  const targetPath = canonicalMutationPath(path);
+  const tmpPath = `${targetPath}.${String(process.pid)}.${String(Date.now())}.tmp`;
 
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname(targetPath), { recursive: true });
   writeFileSync(tmpPath, value, { encoding: 'utf8', mode });
   chmodIfSupported(tmpPath, mode);
-  renameSync(tmpPath, path);
-  chmodIfSupported(path, mode);
+  renameSync(tmpPath, targetPath);
+  chmodIfSupported(targetPath, mode);
 }
 
 function chmodIfSupported(path: string, mode: number): void {

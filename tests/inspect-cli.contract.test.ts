@@ -702,6 +702,51 @@ describe('inspect CLI plugin evidence', () => {
     });
   });
 
+  it('preserves formatted store read errors when cleanup file-store setup fails', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'project02-inspect-invalid-store-'));
+    const storeRoot = join(root, 'store-root-file');
+    const configPath = join(root, 'config.json');
+    const plugin = createInspectFileStoreCleanupFixturePlugin(() => {
+      throw new Error('cleanup hook should not run when file-store setup fails.');
+    });
+    let stdout = '';
+    let stderr = '';
+
+    writeFileSync(storeRoot, 'not a directory\n', 'utf8');
+    writeRuntimeConfig(configPath, {
+      storeRoot,
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--config', configPath, '--sessions'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              return plugin;
+            }
+          }
+        }
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toBe('Error: Local runtime store could not be read.\n');
+  });
+
   it('loads the runtime env file for inspect without mutating process env', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-env-'));
     const configPath = join(storeRoot, 'config.json');
