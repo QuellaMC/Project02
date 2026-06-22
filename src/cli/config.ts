@@ -305,22 +305,16 @@ function shouldReadDefaultDotEnvForSecretSetCommand(
   parsedArgs: RuntimeConfigCliParsedArgs,
   suppliedEnv: NodeJS.ProcessEnv
 ): boolean {
-  if (hasExplicitRuntimeLocation(parsedArgs.location)) {
-    return true;
-  }
-
   const envVar = secretSetEnvVarNameFromArgs(parsedArgs.commandArgs);
 
-  if (envVar === undefined) {
+  if (envVar === undefined || !envHasNonEmptyValue(suppliedEnv, envVar)) {
     return true;
   }
 
-  return (
-    shouldReadDefaultDotEnvForRuntimeLocation({
-      location: parsedArgs.location,
-      env: suppliedEnv
-    }) || !envHasNonEmptyValue(suppliedEnv, envVar)
-  );
+  return shouldReadDefaultDotEnvForRuntimeLocation({
+    location: parsedArgs.location,
+    env: suppliedEnv
+  });
 }
 
 function secretSetEnvVarNameFromArgs(args: readonly string[]): string | undefined {

@@ -3363,6 +3363,167 @@ describe('runtime config CLI', () => {
     }
   });
 
+  it('uses explicit runtime locations for secret set before reading unreadable cwd dotenv when the secret is present', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-explicit-cwd-dotenv-secret-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-explicit-secret-store-')
+    );
+    const configStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-explicit-secret-config-store-')
+    );
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-explicit-secret-config-')),
+        'runtime.json'
+      ),
+      { storeRoot: configStoreRoot }
+    );
+    const storeConfigPath = writeRuntimeConfig(defaultRuntimeConfigPath(storeRoot), {
+      storeRoot
+    });
+    const previousCwd = process.cwd();
+    const envVar = 'PROJECT02_SECRET_EXPLICIT_PRESENT_3451970615';
+    const previousEnvValue = process.env[envVar];
+    const secretValue = 'from-process-env';
+
+    mkdirSync(join(cwdRoot, '.env'));
+
+    try {
+      process.env[envVar] = secretValue;
+      process.chdir(cwdRoot);
+
+      for (const example of [
+        {
+          args: ['--store', storeRoot] as const,
+          configPath: storeConfigPath,
+          envPath: join(storeRoot, '.env')
+        },
+        {
+          args: ['--config', configPath] as const,
+          configPath,
+          envPath: join(configStoreRoot, '.env')
+        }
+      ]) {
+        let stdout = '';
+        let stderr = '';
+
+        expect(
+          await runRuntimeConfigCliFromArgs(
+            [...example.args, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+            {
+              stdout: collect((chunk) => {
+                stdout += chunk;
+              }),
+              stderr: collect((chunk) => {
+                stderr += chunk;
+              })
+            }
+          )
+        ).toBe(0);
+
+        expect(stderr).toBe('');
+        expect(JSON.parse(stdout) as { readonly configPath: string }).toMatchObject({
+          configPath: example.configPath,
+          envPath: example.envPath
+        });
+        expect(JSON.parse(readFileSync(example.configPath, 'utf8')) as unknown).toMatchObject({
+          plugins: {
+            'mem0-local': {
+              config: {
+                cloudApiKey: { $env: envVar }
+              }
+            }
+          }
+        });
+        expect(readFileSync(example.envPath, 'utf8')).toBe(
+          `${envVar}="${secretValue}"\n`
+        );
+      }
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(envVar, previousEnvValue);
+    }
+  });
+
+  it('uses cwd dotenv secret fallback for explicit runtime locations when the secret is absent from process env', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-explicit-secret-cwd-fallback-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-explicit-secret-fallback-store-')
+    );
+    const configStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-explicit-secret-fallback-config-store-')
+    );
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-explicit-secret-fallback-config-')),
+        'runtime.json'
+      ),
+      { storeRoot: configStoreRoot }
+    );
+    const storeConfigPath = writeRuntimeConfig(defaultRuntimeConfigPath(storeRoot), {
+      storeRoot
+    });
+    const previousCwd = process.cwd();
+    const envVar = 'PROJECT02_SECRET_EXPLICIT_CWD_FALLBACK_3451970615';
+    const previousEnvValue = process.env[envVar];
+    const secretValue = 'from-cwd-dotenv';
+
+    writeFileSync(join(cwdRoot, '.env'), `${envVar}="${secretValue}"\n`, 'utf8');
+
+    try {
+      Reflect.deleteProperty(process.env, envVar);
+      process.chdir(cwdRoot);
+
+      for (const example of [
+        {
+          args: ['--store', storeRoot] as const,
+          configPath: storeConfigPath,
+          envPath: join(storeRoot, '.env')
+        },
+        {
+          args: ['--config', configPath] as const,
+          configPath,
+          envPath: join(configStoreRoot, '.env')
+        }
+      ]) {
+        let stdout = '';
+        let stderr = '';
+
+        expect(
+          await runRuntimeConfigCliFromArgs(
+            [...example.args, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+            {
+              stdout: collect((chunk) => {
+                stdout += chunk;
+              }),
+              stderr: collect((chunk) => {
+                stderr += chunk;
+              })
+            }
+          )
+        ).toBe(0);
+
+        expect(stderr).toBe('');
+        expect(JSON.parse(stdout) as { readonly configPath: string }).toMatchObject({
+          configPath: example.configPath,
+          envPath: example.envPath
+        });
+        expect(readFileSync(example.envPath, 'utf8')).toBe(
+          `${envVar}="${secretValue}"\n`
+        );
+      }
+
+      expect(process.env[envVar]).toBeUndefined();
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(envVar, previousEnvValue);
+    }
+  });
+
   it('uses cwd dotenv runtime config selectors for unflagged config reads and mutations', async () => {
     const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-cwd-env-'));
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-cwd-store-'));
