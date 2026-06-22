@@ -1,7 +1,9 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  readlinkSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -828,23 +830,64 @@ function pathsAlias(left: string, right: string): boolean {
 }
 
 function canonicalMutationPath(path: string): string {
-  const absolutePath = resolve(path);
+  return canonicalAbsoluteMutationPath(resolve(path), new Set<string>());
+}
 
+function canonicalAbsoluteMutationPath(
+  path: string,
+  followedSymlinks: Set<string>
+): string {
   try {
-    return realpathSync.native(absolutePath);
+    return realpathSync.native(path);
   } catch {
-    return canonicalMissingMutationPath(absolutePath);
+    const symlinkTargetPath = danglingSymlinkTargetPath(path, followedSymlinks);
+
+    return symlinkTargetPath === undefined
+      ? canonicalMissingMutationPath(path, followedSymlinks)
+      : canonicalAbsoluteMutationPath(symlinkTargetPath, followedSymlinks);
   }
 }
 
-function canonicalMissingMutationPath(path: string): string {
+function danglingSymlinkTargetPath(
+  path: string,
+  followedSymlinks: Set<string>
+): string | undefined {
+  try {
+    if (!lstatSync(path).isSymbolicLink()) {
+      return undefined;
+    }
+
+    if (followedSymlinks.has(path)) {
+      throw new RuntimeConfigMutationError(
+        `Could not resolve runtime config path because ${path} is part of a symlink cycle.`
+      );
+    }
+
+    followedSymlinks.add(path);
+    return resolve(dirname(path), readlinkSync(path));
+  } catch (error: unknown) {
+    if (error instanceof RuntimeConfigMutationError) {
+      throw error;
+    }
+
+    return undefined;
+  }
+}
+
+function canonicalMissingMutationPath(
+  path: string,
+  followedSymlinks: Set<string>
+): string {
   const parent = dirname(path);
 
   if (parent === path) {
     return path;
   }
 
-  return resolve(canonicalMutationPath(parent), basename(path));
+  return resolve(
+    canonicalAbsoluteMutationPath(parent, followedSymlinks),
+    basename(path)
+  );
 }
 
 function mutationFileAccessError(

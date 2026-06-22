@@ -1923,6 +1923,80 @@ describe('runtime config CLI', () => {
     });
   });
 
+  it('treats operands after -- as config values instead of location flags', async () => {
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-delimiter-value-')
+    );
+    const configPath = join(configRoot, 'runtime.json');
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['set', 'plugins.foo.config.arg', '--', '--store'],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          }),
+          env: {
+            [runtimeConfigEnvVarName]: configPath
+          }
+        }
+      )
+    ).toBe(0);
+
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout) as unknown).toMatchObject({ configPath });
+    expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
+      plugins: {
+        foo: {
+          config: {
+            arg: '--store'
+          }
+        }
+      }
+    });
+  });
+
+  it('keeps location flags before -- while escaping later operands', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-delimiter-store-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'set', 'plugins.foo.config.arg', '--', '--config'],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        }
+      )
+    ).toBe(0);
+
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout) as unknown).toMatchObject({ configPath });
+    expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
+      storeRoot,
+      plugins: {
+        foo: {
+          config: {
+            arg: '--config'
+          }
+        }
+      }
+    });
+  });
+
   it.each([
     {
       label: 'explicit --config',
@@ -1994,6 +2068,79 @@ describe('runtime config CLI', () => {
       }
     });
   });
+
+  it.each([
+    {
+      label: 'explicit --config',
+      args(configPath: string) {
+        return [
+          '--config',
+          configPath,
+          'set',
+          'plugins.foo.config.backend',
+          'remote'
+        ] as const;
+      },
+      env(configPath: string) {
+        void configPath;
+        return {};
+      }
+    },
+    {
+      label: 'PROJECT02_RUNTIME_CONFIG',
+      args() {
+        return ['set', 'plugins.foo.config.backend', 'remote'] as const;
+      },
+      env(configPath: string) {
+        return {
+          [runtimeConfigEnvVarName]: configPath
+        };
+      }
+    }
+  ])(
+    'bootstraps missing config through dangling symlink files for $label mutations',
+    async (example) => {
+      const configRoot = mkdtempSync(
+        join(tmpdir(), 'project02-config-dangling-link-')
+      );
+      const targetName = 'target.json';
+      const targetPath = join(configRoot, targetName);
+      const linkPath = join(configRoot, 'linked.json');
+      let stdout = '';
+
+      symlinkSync(targetName, linkPath);
+
+      expect(existsSync(linkPath)).toBe(false);
+      expect(existsSync(targetPath)).toBe(false);
+      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(example.args(linkPath), {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {}),
+          env: example.env(linkPath)
+        })
+      ).toBe(0);
+
+      expect(JSON.parse(stdout) as unknown).toMatchObject({
+        configPath: linkPath
+      });
+      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(linkPath)).toBe(targetName);
+      expect(JSON.parse(readFileSync(targetPath, 'utf8')) as unknown).toEqual({
+        version: runtimeConfigVersion,
+        plugins: {
+          foo: {
+            config: {
+              backend: 'remote'
+            }
+          }
+        }
+      });
+    }
+  );
 
   it('writes secret env files under the configured store root', async () => {
     const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-file-'));
@@ -2232,6 +2379,58 @@ describe('runtime config CLI', () => {
     expect(existsSync(configPath)).toBe(false);
     expect(existsSync(envPath)).toBe(false);
     expect(readFileSync(existingPath, 'utf8')).toBe('preserve existing file\n');
+  });
+
+  it('rejects secret writes when a dangling config symlink targets the runtime env path', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-secret-dangling-link-store-')
+    );
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-secret-dangling-link-config-')
+    );
+    const envPath = join(storeRoot, '.env');
+    const configPath = join(configRoot, 'linked-env.json');
+    let stdout = '';
+    let stderr = '';
+
+    symlinkSync(envPath, configPath);
+
+    expect(existsSync(configPath)).toBe(false);
+    expect(existsSync(envPath)).toBe(false);
+    expect(lstatSync(configPath).isSymbolicLink()).toBe(true);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        [
+          '--store',
+          storeRoot,
+          '--config',
+          configPath,
+          'secret',
+          'set',
+          'mem0-local',
+          'cloudApiKey',
+          'MEM0_API_KEY'
+        ],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          }),
+          env: { MEM0_API_KEY: 'stored-secret' }
+        }
+      )
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toContain(
+      'selected config path and runtime env path resolve to the same file'
+    );
+    expect(existsSync(envPath)).toBe(false);
+    expect(lstatSync(configPath).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(configPath)).toBe(envPath);
   });
 
   it('reports config write failures without leaking raw filesystem exceptions', async () => {

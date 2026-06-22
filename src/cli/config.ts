@@ -195,8 +195,13 @@ function parseRuntimeConfigCliArgs(args: readonly string[]): RuntimeConfigCliPar
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
 
-    if (arg === undefined || arg === '--') {
+    if (arg === undefined) {
       continue;
+    }
+
+    if (arg === '--') {
+      commandArgs.push(...args.slice(index + 1));
+      break;
     }
 
     const locationResult = parseRuntimeLocationFlag({ args, index, state: location });
