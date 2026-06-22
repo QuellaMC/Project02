@@ -11,16 +11,17 @@ import {
 import {
   redactResolvedRuntimeConfigField
 } from './redact.ts';
-import type {
-  LoadedProject02RuntimeConfig,
-  Project02RuntimeConfig,
-  RedactedPluginRuntimeConfig,
-  ResolvedPluginRuntimeConfig,
-  ResolvedProject02RuntimeConfig,
-  ResolvedRuntimeConfigField,
-  RuntimeConfigDiagnostic,
-  RuntimeConfigSecretRef,
-  RuntimeConfigValue
+import {
+  isRuntimeControlEnvVarName,
+  type LoadedProject02RuntimeConfig,
+  type Project02RuntimeConfig,
+  type RedactedPluginRuntimeConfig,
+  type ResolvedPluginRuntimeConfig,
+  type ResolvedProject02RuntimeConfig,
+  type ResolvedRuntimeConfigField,
+  type RuntimeConfigDiagnostic,
+  type RuntimeConfigSecretRef,
+  type RuntimeConfigValue
 } from './types.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
@@ -310,6 +311,26 @@ function resolveSecretField(options: {
         : undefined;
 
   if (envRef !== undefined) {
+    if (isRuntimeControlEnvVarName(envRef.$env)) {
+      if (options.validateConfig) {
+        options.diagnostics.push(
+          diagnostic(
+            'error',
+            'runtime_config_reserved_control_env_var',
+            `Secret config field "${options.field.name}" for plugin "${options.manifest.id}" cannot use reserved Project02 runtime control env var "${envRef.$env}".`,
+            options.path,
+            pluginConfigDiagnosticMetadata(options)
+          )
+        );
+      }
+
+      return fieldResult({
+        field: options.field,
+        source: `env:${envRef.$env}`,
+        resolved: false
+      });
+    }
+
     const secretValue = options.env[envRef.$env];
     const resolved = secretValue !== undefined && secretValue.length > 0;
 

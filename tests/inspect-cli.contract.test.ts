@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Writable } from 'node:stream';
@@ -353,6 +353,33 @@ describe('inspect CLI plugin evidence', () => {
     expect(inspectedPlugin?.activationReasons).toEqual(
       expect.arrayContaining(['test_inspect_fixture', 'enabled_by_config'])
     );
+  });
+
+  it('reports config load errors before runtime env file errors', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-inspect-load-error-before-env-')
+    );
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      storeRoot: 42
+    });
+    mkdirSync(join(storeRoot, '.env'));
+
+    const exitCode = await runInspectCliFromArgs(['--store', storeRoot, '--sessions'], {
+      stdout: collect((chunk) => {
+        stdout += chunk;
+      }),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      })
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Runtime config field must be a non-empty string.');
+    expect(stderr).not.toContain('Could not load runtime config env file');
   });
 
   it('formats configured plugin factory failures for inspect', async () => {

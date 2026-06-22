@@ -533,6 +533,13 @@ async function inspectRuntimeConfig(args: {
     ...args,
     env: options.configEnv
   });
+
+  if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
+    throw new InspectCliUsageError(
+      loadedConfig.diagnostics[0]?.message ?? 'Runtime config is invalid.'
+    );
+  }
+
   const runtimeEnv = loadRuntimeConfigEnvFile({
     loadedConfig,
     ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
@@ -541,12 +548,6 @@ async function inspectRuntimeConfig(args: {
       ? {}
       : { envDefaults: options.runtimeEnvDefaults })
   });
-
-  if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
-    throw new InspectCliUsageError(
-      loadedConfig.diagnostics[0]?.message ?? 'Runtime config is invalid.'
-    );
-  }
 
   try {
     return await createConfiguredProject02PluginHost({

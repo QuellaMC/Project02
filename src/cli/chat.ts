@@ -203,6 +203,8 @@ export async function runChatCliFromArgs(
       env: baseEnv
     });
 
+    assertNoRuntimeConfigErrors(loadedConfig.diagnostics, 'Runtime config is invalid');
+
     const runtimeEnv = loadRuntimeConfigEnvFile({
       loadedConfig,
       ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot }),
@@ -210,8 +212,6 @@ export async function runChatCliFromArgs(
       ...(defaultEnv === undefined ? {} : { envDefaults: defaultEnvForLocation })
     });
     const selectedArgs = selectChatProvider(parsedArgs, runtimeEnv);
-
-    assertNoRuntimeConfigErrors(loadedConfig.diagnostics, 'Runtime config is invalid');
 
     const configuredActivation =
       options.pluginHost === undefined

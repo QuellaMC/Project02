@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -251,6 +251,40 @@ describe('chat CLI provider selection', () => {
 
     expect(exitCode).toBe(0);
     expect(stderr).toBe('');
+  });
+
+  it('reports config load errors before runtime env file errors', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-chat-load-error-before-env-')
+    );
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      storeRoot: 42
+    });
+    mkdirSync(join(storeRoot, '.env'));
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'load-error-before-env'],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Runtime config is invalid');
+    expect(stderr).toContain('runtime_config_string_invalid');
+    expect(stderr).toContain('storeRoot');
+    expect(stderr).toContain('Runtime config field must be a non-empty string.');
+    expect(stderr).not.toContain('Could not load runtime config env file');
   });
 });
 
@@ -723,6 +757,51 @@ describe('chat CLI plugin lifecycle', () => {
     expect(existsSync(layout.sessionsRoot)).toBe(false);
   });
 
+  it('allows unreferenced default-disabled legacy function factories during chat startup', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-chat-legacy-unreferenced-')
+    );
+    const sessionId = 'legacy-unreferenced-session';
+    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const optionalPlugin = createSessionEndPlugin(() => {
+      throw new Error('unreferenced legacy plugin must not be active');
+    }, {
+      pluginId: 'legacy.optional',
+      defaultEnabled: false
+    });
+    let factoryCalls = 0;
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', sessionId],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          'legacy.optional': () => {
+            factoryCalls += 1;
+
+            return optionalPlugin;
+          }
+        }
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(1);
+    expect(stderr).toBe('');
+    expect(stdout).toContain('Mira is ready.');
+    expect(existsSync(layout.sessionCatalogPath)).toBe(true);
+  });
+
   it('aborts startup when configured plugin activation reports errors', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-activation-error-'));
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -874,6 +953,7 @@ function createSessionEndPlugin(
     readonly requiredForTurn?: boolean;
     readonly requestedApis?: RuntimePlugin['manifest']['requestedApis'];
     readonly sideEffectLevel?: RuntimePlugin['manifest']['runtimePolicy']['sideEffectLevel'];
+    readonly defaultEnabled?: boolean;
   } = {}
 ): RuntimePlugin {
   const pluginId = options.pluginId ?? 'chat.session-end.fixture';
@@ -915,7 +995,7 @@ function createSessionEndPlugin(
         }
       },
       activation: {
-        defaultEnabled: true,
+        defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test']
       },
       requestedApis: options.requestedApis ?? []

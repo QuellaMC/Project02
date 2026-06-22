@@ -699,6 +699,10 @@ function uncheckedLegacyFactoryDiagnostics(options: {
     const enabledByPluginConfig = configuredPlugin?.enabled === true;
     const enabledByLegacyList = legacyEnabledPluginIds.has(pluginId);
 
+    if (!enabledByPluginConfig && !enabledByLegacyList) {
+      continue;
+    }
+
     diagnostics.push(
       diagnostic(
         'error',

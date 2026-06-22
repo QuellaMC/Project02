@@ -733,6 +733,121 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
+  it('resolves manifest secret env var defaults without raw config', async () => {
+    const envVar = 'PROJECT02_MANIFEST_DEFAULT_SECRET_3449527784';
+    const plugin = requiredSecretPluginWithManifestEnvVar(
+      'memory.manifest-default-secret',
+      envVar
+    );
+    const configPath = writeRuntimeConfig(
+      join(mkdtempSync(join(tmpdir(), 'project02-config-manifest-env-default-')), 'config.json'),
+      {
+        plugins: {
+          [plugin.manifest.id]: {
+            enabled: true
+          }
+        }
+      }
+    );
+    const factoryInputs: unknown[] = [];
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      env: { [envVar]: 'manifest-default-secret' },
+      factories: {
+        [plugin.manifest.id]: {
+          manifest: plugin.manifest,
+          create(input) {
+            factoryInputs.push(input.resolvedConfig['apiKey']?.value);
+
+            return plugin;
+          }
+        }
+      }
+    });
+
+    expect(configured.activation.enabledPluginIds).toContain(plugin.manifest.id);
+    expect(factoryInputs).toEqual(['manifest-default-secret']);
+    expect(configured.resolvedConfig.pluginConfigs[plugin.manifest.id]?.['apiKey']).toMatchObject({
+      source: `env:${envVar}`,
+      resolved: true,
+      value: 'manifest-default-secret'
+    });
+    expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_reserved_control_env_var'
+    );
+  });
+
+  it.each(runtimeControlEnvVarNames)(
+    'rejects reserved runtime control env var %s in manifest secret defaults',
+    async (envVar) => {
+      const plugin = requiredSecretPluginWithManifestEnvVar(
+        'memory.reserved-manifest-secret',
+        envVar
+      );
+      const configPath = writeRuntimeConfig(
+        join(
+          mkdtempSync(join(tmpdir(), 'project02-config-manifest-reserved-env-')),
+          'config.json'
+        ),
+        {
+          plugins: {
+            [plugin.manifest.id]: {
+              enabled: true
+            }
+          }
+        }
+      );
+      let factoryCalls = 0;
+      const configured = await createConfiguredProject02PluginHost({
+        loadedConfig: loadProject02RuntimeConfig({ configPath }),
+        env: { [envVar]: 'runtime-control-value' },
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error('reserved control env var must block activation');
+            }
+          }
+        }
+      });
+      const resolvedField =
+        configured.resolvedConfig.pluginConfigs[plugin.manifest.id]?.['apiKey'];
+      const activation = configured.activation.plugins.find(
+        (item) => item.pluginId === plugin.manifest.id
+      );
+
+      expect(factoryCalls).toBe(0);
+      expect(configured.activation.enabledPluginIds).not.toContain(plugin.manifest.id);
+      expect(resolvedField).toMatchObject({
+        source: `env:${envVar}`,
+        resolved: false
+      });
+      expect(resolvedField).not.toHaveProperty('value');
+      expect(configured.activation.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            severity: 'error',
+            code: 'runtime_config_reserved_control_env_var',
+            path: `plugins.${plugin.manifest.id}.config.apiKey`,
+            pluginId: plugin.manifest.id,
+            pluginConfigField: 'apiKey'
+          })
+        ])
+      );
+      expect(activation).toMatchObject({
+        pluginId: plugin.manifest.id,
+        enabled: false,
+        activationStatus: 'blocked'
+      });
+      expect(activation?.activationReasons).toContain('blocked_by_config_errors');
+      expect(JSON.stringify(configured.resolvedConfig)).not.toContain(
+        'runtime-control-value'
+      );
+    }
+  );
+
   it('rejects unknown config fields for enabled or default-enabled plugins', async () => {
     const envVar = 'PROJECT02_UNKNOWN_FIELD_SECRET_3447705094';
     const plugin = requiredSecretPlugin();
@@ -992,7 +1107,7 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('blocks default-enabled legacy function factories before creation', async () => {
+  it('prepares unreferenced default-enabled legacy factories before blocking activation', async () => {
     const configPath = writeRuntimeConfig(
       join(
         mkdtempSync(join(tmpdir(), 'project02-config-default-legacy-factory-')),
@@ -1013,15 +1128,15 @@ describe('runtime config loading and resolution', () => {
       }
     });
 
-    expect(legacyFactoryCalls).toBe(0);
+    expect(legacyFactoryCalls).toBe(1);
     expect(configured.plugins).toEqual([]);
     expect(configured.activation.enabledPluginIds).toEqual([]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
-          code: 'runtime_config_legacy_factory_unchecked',
-          path: 'plugins.memory.required.enabled',
+          code: 'runtime_config_required_secret_missing',
+          path: 'plugins.memory.required.config.apiKey',
           pluginId: 'memory.required'
         })
       ])
@@ -4961,6 +5076,21 @@ function requiredSecretPlugin(id = 'memory.required') {
         reasons: ['test_required_secret']
       },
       requestedApis: []
+    }
+  });
+}
+
+function requiredSecretPluginWithManifestEnvVar(id: string, envVar: string) {
+  const plugin = requiredSecretPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      config: {
+        fields: plugin.manifest.config.fields.map((field) =>
+          field.name === 'apiKey' ? { ...field, envVar } : field
+        )
+      }
     }
   });
 }

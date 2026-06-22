@@ -69,11 +69,11 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
-  it('fails check for default-enabled legacy function factories without constructing them', async () => {
+  it('keeps unreferenced default-disabled legacy function factories passing check', async () => {
     const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-legacy-default-unchecked-')
+      join(tmpdir(), 'project02-config-legacy-unreferenced-')
     );
-    const plugin = requiredSecretPlugin('legacy.required');
+    const plugin = firstPartyPlugin('legacy.optional', { defaultEnabled: false });
     let stdout = '';
     let factoryCalls = 0;
 
@@ -87,7 +87,7 @@ describe('runtime config activation diagnostics', () => {
         }),
         stderr: collect(() => {}),
         factories: {
-          'legacy.required': () => {
+          'legacy.optional': () => {
             factoryCalls += 1;
 
             return plugin;
@@ -97,17 +97,10 @@ describe('runtime config activation diagnostics', () => {
     );
     const output = parseActivationOutput(stdout);
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_legacy_factory_unchecked',
-          path: 'plugins.legacy.required.enabled',
-          pluginId: 'legacy.required'
-        })
-      ])
+    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_legacy_factory_unchecked'
     );
     expect(output.plugins).toEqual([]);
   });
@@ -1088,7 +1081,12 @@ function pluginWithAdditionalConfigField(id: string) {
   });
 }
 
-function firstPartyPlugin(id: string) {
+function firstPartyPlugin(
+  id: string,
+  options: {
+    readonly defaultEnabled?: boolean;
+  } = {}
+) {
   return createRuntimePlugin({
     manifest: {
       id,
@@ -1121,7 +1119,7 @@ function firstPartyPlugin(id: string) {
         }
       },
       activation: {
-        defaultEnabled: true,
+        defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test_first_party']
       },
       requestedApis: []
