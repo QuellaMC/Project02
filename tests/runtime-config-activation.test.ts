@@ -235,6 +235,45 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
+  it('keeps unselected registered legacy plugin config wrappers known during strict activation', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-unselected-legacy-wrapper-strict-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        legacy: {
+          config: {
+            mode: 'inactive'
+          }
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      storeRoot,
+      strictUnknownPlugins: true,
+      factories: {
+        legacy: () => {
+          factoryCalls += 1;
+          throw new Error('unselected legacy factory must not be constructed');
+        }
+      }
+    });
+
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_unknown_plugin'
+    );
+    expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_legacy_factory_unchecked'
+    );
+  });
+
   it('keeps disabled unknown plugin wrappers strict when selected by enabledPlugins', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-disabled-unknown-enabled-list-')

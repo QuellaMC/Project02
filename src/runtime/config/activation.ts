@@ -158,6 +158,7 @@ export async function createConfiguredProject02PluginHost(options: {
   readonly constructionCleanup?: RuntimePluginSessionEndOptions;
 }): Promise<Project02ConfiguredPluginHost> {
   const factories = options.factories ?? defaultRuntimePluginFactories();
+  const legacyFactoryIds = legacyFunctionFactoryIds(factories);
   const activationPlan = resolveConfiguredProject02PluginActivation({
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
@@ -219,7 +220,7 @@ export async function createConfiguredProject02PluginHost(options: {
   });
   const activation = resolveRuntimePluginActivation({
     pluginManifests: preparedFactories.map((factory) => factory.manifest),
-    additionalKnownPluginIds: [...disabledLegacyFactoryIds],
+    additionalKnownPluginIds: legacyFactoryIds,
     disabledKnownPluginIds: [...disabledLegacyFactoryIds],
     resolvedConfig,
     loadedConfig: options.loadedConfig,

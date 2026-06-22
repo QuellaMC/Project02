@@ -3242,6 +3242,127 @@ describe('runtime config CLI', () => {
     }
   });
 
+  it('uses process-env-selected config for secret set before reading unreadable cwd dotenv when the secret is present', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-process-env-cwd-dotenv-secret-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-process-env-secret-store-')
+    );
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-process-env-secret-config-')
+    );
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      storeRoot
+    });
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    const envVar = 'PROJECT02_SECRET_PROCESS_ENV_SELECTED_3451627428';
+    const previousEnvValue = process.env[envVar];
+    const secretValue = 'from-process-env';
+    let stdout = '';
+    let stderr = '';
+
+    mkdirSync(join(cwdRoot, '.env'));
+
+    try {
+      process.env[runtimeConfigEnvVarName] = configPath;
+      process.env[envVar] = secretValue;
+      process.chdir(cwdRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(
+          ['secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+          {
+            stdout: collect((chunk) => {
+              stdout += chunk;
+            }),
+            stderr: collect((chunk) => {
+              stderr += chunk;
+            })
+          }
+        )
+      ).toBe(0);
+
+      expect(stderr).toBe('');
+      expect(JSON.parse(stdout) as { readonly configPath: string }).toMatchObject({
+        configPath,
+        envPath: join(storeRoot, '.env')
+      });
+      expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
+        plugins: {
+          'mem0-local': {
+            config: {
+              cloudApiKey: { $env: envVar }
+            }
+          }
+        }
+      });
+      expect(readFileSync(join(storeRoot, '.env'), 'utf8')).toBe(
+        `${envVar}="${secretValue}"\n`
+      );
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+      restoreProcessEnvValue(envVar, previousEnvValue);
+    }
+  });
+
+  it('uses cwd dotenv secret fallback for process-env-selected secret set when the secret is absent from process env', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-process-env-secret-cwd-fallback-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-process-env-secret-fallback-store-')
+    );
+    const configPath = writeRuntimeConfig(join(cwdRoot, 'runtime.json'), {
+      storeRoot
+    });
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    const envVar = 'PROJECT02_SECRET_CWD_FALLBACK_3451627428';
+    const previousEnvValue = process.env[envVar];
+    const secretValue = 'from-cwd-dotenv';
+    let stdout = '';
+    let stderr = '';
+
+    writeFileSync(join(cwdRoot, '.env'), `${envVar}="${secretValue}"\n`, 'utf8');
+
+    try {
+      process.env[runtimeConfigEnvVarName] = configPath;
+      Reflect.deleteProperty(process.env, envVar);
+      process.chdir(cwdRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(
+          ['secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+          {
+            stdout: collect((chunk) => {
+              stdout += chunk;
+            }),
+            stderr: collect((chunk) => {
+              stderr += chunk;
+            })
+          }
+        )
+      ).toBe(0);
+
+      expect(stderr).toBe('');
+      expect(JSON.parse(stdout) as { readonly configPath: string }).toMatchObject({
+        configPath,
+        envPath: join(storeRoot, '.env')
+      });
+      expect(readFileSync(join(storeRoot, '.env'), 'utf8')).toBe(
+        `${envVar}="${secretValue}"\n`
+      );
+      expect(process.env[envVar]).toBeUndefined();
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+      restoreProcessEnvValue(envVar, previousEnvValue);
+    }
+  });
+
   it('uses cwd dotenv runtime config selectors for unflagged config reads and mutations', async () => {
     const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-cwd-env-'));
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-cwd-store-'));

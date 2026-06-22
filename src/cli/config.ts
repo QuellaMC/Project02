@@ -287,11 +287,11 @@ function shouldReadDefaultDotEnvForCommand(
 ): boolean {
   const command = parsedArgs.commandArgs[0];
 
-  if (!hasExplicitRuntimeLocation(parsedArgs.location)) {
-    if (command === 'secret') {
-      return true;
-    }
+  if (command === 'secret' && parsedArgs.commandArgs[1] === 'set') {
+    return shouldReadDefaultDotEnvForSecretSetCommand(parsedArgs, suppliedEnv);
+  }
 
+  if (!hasExplicitRuntimeLocation(parsedArgs.location)) {
     return shouldReadDefaultDotEnvForRuntimeLocation({
       location: parsedArgs.location,
       env: suppliedEnv
@@ -299,6 +299,42 @@ function shouldReadDefaultDotEnvForCommand(
   }
 
   return command === 'secret';
+}
+
+function shouldReadDefaultDotEnvForSecretSetCommand(
+  parsedArgs: RuntimeConfigCliParsedArgs,
+  suppliedEnv: NodeJS.ProcessEnv
+): boolean {
+  if (hasExplicitRuntimeLocation(parsedArgs.location)) {
+    return true;
+  }
+
+  const envVar = secretSetEnvVarNameFromArgs(parsedArgs.commandArgs);
+
+  if (envVar === undefined) {
+    return true;
+  }
+
+  return (
+    shouldReadDefaultDotEnvForRuntimeLocation({
+      location: parsedArgs.location,
+      env: suppliedEnv
+    }) || !envHasNonEmptyValue(suppliedEnv, envVar)
+  );
+}
+
+function secretSetEnvVarNameFromArgs(args: readonly string[]): string | undefined {
+  const value = args[4];
+
+  if (value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+
+  return value;
+}
+
+function envHasNonEmptyValue(env: NodeJS.ProcessEnv, name: string): boolean {
+  return (env[name]?.length ?? 0) > 0;
 }
 
 function checkDefaultEnvForLocation(options: {
