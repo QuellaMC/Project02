@@ -194,7 +194,15 @@ export async function createConfiguredProject02PluginHost(options: {
     factories,
     storeRoot: initialStoreRoot,
     skipLegacyFactoryCreation: loadedConfigHasErrors,
-    disabledLegacyFactoryIds
+    disabledLegacyFactoryIds,
+    resolvedConfig: activationPlan.resolvedConfig,
+    ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
+    ...(options.sessionIdentity === undefined
+      ? {}
+      : { sessionIdentity: options.sessionIdentity }),
+    ...(options.constructionCleanup === undefined
+      ? {}
+      : { constructionCleanup: options.constructionCleanup })
   });
   const resolvedConfig = resolveProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
@@ -469,45 +477,64 @@ async function prepareRuntimePluginFactories(options: {
   readonly storeRoot: string;
   readonly skipLegacyFactoryCreation: boolean;
   readonly disabledLegacyFactoryIds: ReadonlySet<string>;
+  readonly resolvedConfig: ResolvedProject02RuntimeConfig;
+  readonly sessionId?: string;
+  readonly sessionIdentity?: object;
+  readonly constructionCleanup?: RuntimePluginSessionEndOptions;
 }): Promise<readonly PreparedRuntimePluginFactory[]> {
   const preparedFactories: PreparedRuntimePluginFactory[] = [];
 
-  for (const [pluginId, factory] of Object.entries(options.factories)) {
-    if (isRuntimePluginFactoryDefinition(factory)) {
+  try {
+    for (const [pluginId, factory] of Object.entries(options.factories)) {
+      if (isRuntimePluginFactoryDefinition(factory)) {
+        preparedFactories.push(
+          Object.freeze({
+            kind: 'manifest_backed_factory',
+            pluginId,
+            manifest: factory.manifest,
+            create: factory.create
+          } satisfies PreparedRuntimePluginFactory)
+        );
+        continue;
+      }
+
+      if (options.skipLegacyFactoryCreation) {
+        continue;
+      }
+
+      if (options.disabledLegacyFactoryIds.has(pluginId)) {
+        continue;
+      }
+
+      const plugin = await factory({
+        pluginId,
+        storeRoot: options.storeRoot,
+        resolvedConfig: {},
+        redactedConfig: {}
+      });
+
       preparedFactories.push(
         Object.freeze({
-          kind: 'manifest_backed_factory',
+          kind: 'legacy_prepared_plugin',
           pluginId,
-          manifest: factory.manifest,
-          create: factory.create
+          manifest: plugin.manifest,
+          plugin
         } satisfies PreparedRuntimePluginFactory)
       );
-      continue;
     }
-
-    if (options.skipLegacyFactoryCreation) {
-      continue;
-    }
-
-    if (options.disabledLegacyFactoryIds.has(pluginId)) {
-      continue;
-    }
-
-    const plugin = await factory({
-      pluginId,
-      storeRoot: options.storeRoot,
-      resolvedConfig: {},
-      redactedConfig: {}
+  } catch (error: unknown) {
+    await cleanupPreparedLegacyPlugins({
+      preparedFactories,
+      resolvedConfig: options.resolvedConfig,
+      ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
+      ...(options.sessionIdentity === undefined
+        ? {}
+        : { sessionIdentity: options.sessionIdentity }),
+      ...(options.constructionCleanup === undefined
+        ? {}
+        : { constructionCleanup: options.constructionCleanup })
     });
-
-    preparedFactories.push(
-      Object.freeze({
-        kind: 'legacy_prepared_plugin',
-        pluginId,
-        manifest: plugin.manifest,
-        plugin
-      } satisfies PreparedRuntimePluginFactory)
-    );
+    throw error;
   }
 
   return Object.freeze(preparedFactories);
@@ -523,11 +550,16 @@ async function instantiatePreparedPlugins(options: {
 }): Promise<readonly RuntimePlugin[]> {
   const plugins: RuntimePlugin[] = [];
   const createdPlugins: RuntimePlugin[] = [];
+  const inactivePreparedLegacyPlugins: RuntimePlugin[] = [];
   const enabledPluginIds = new Set(options.enabledPluginIds);
 
   try {
     for (const preparedFactory of options.preparedFactories) {
       if (!enabledPluginIds.has(preparedFactory.manifest.id)) {
+        if (preparedFactory.kind === 'legacy_prepared_plugin') {
+          inactivePreparedLegacyPlugins.push(preparedFactory.plugin);
+        }
+
         continue;
       }
 
@@ -563,7 +595,7 @@ async function instantiatePreparedPlugins(options: {
     }
   } catch (error: unknown) {
     await cleanupPartiallyInstantiatedPlugins({
-      plugins: createdPlugins,
+      plugins: [...inactivePreparedLegacyPlugins, ...createdPlugins],
       resolvedConfig: options.resolvedConfig,
       ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
       ...(options.sessionIdentity === undefined
@@ -576,7 +608,41 @@ async function instantiatePreparedPlugins(options: {
     throw error;
   }
 
+  await cleanupPartiallyInstantiatedPlugins({
+    plugins: inactivePreparedLegacyPlugins,
+    resolvedConfig: options.resolvedConfig,
+    ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
+    ...(options.sessionIdentity === undefined
+      ? {}
+      : { sessionIdentity: options.sessionIdentity }),
+    ...(options.constructionCleanup === undefined
+      ? {}
+      : { constructionCleanup: options.constructionCleanup })
+  });
+
   return Object.freeze(plugins);
+}
+
+async function cleanupPreparedLegacyPlugins(options: {
+  readonly preparedFactories: readonly PreparedRuntimePluginFactory[];
+  readonly resolvedConfig: ResolvedProject02RuntimeConfig;
+  readonly sessionId?: string;
+  readonly sessionIdentity?: object;
+  readonly constructionCleanup?: RuntimePluginSessionEndOptions;
+}): Promise<void> {
+  await cleanupPartiallyInstantiatedPlugins({
+    plugins: options.preparedFactories
+      .filter(isPreparedLegacyPlugin)
+      .map((preparedFactory) => preparedFactory.plugin),
+    resolvedConfig: options.resolvedConfig,
+    ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
+    ...(options.sessionIdentity === undefined
+      ? {}
+      : { sessionIdentity: options.sessionIdentity }),
+    ...(options.constructionCleanup === undefined
+      ? {}
+      : { constructionCleanup: options.constructionCleanup })
+  });
 }
 
 async function cleanupPartiallyInstantiatedPlugins(options: {
@@ -653,6 +719,15 @@ function legacyFunctionFactoryIds(
   );
 }
 
+function isPreparedLegacyPlugin(
+  preparedFactory: PreparedRuntimePluginFactory
+): preparedFactory is Extract<
+  PreparedRuntimePluginFactory,
+  { readonly kind: 'legacy_prepared_plugin' }
+> {
+  return preparedFactory.kind === 'legacy_prepared_plugin';
+}
+
 function explicitlyDisabledLegacyFactoryIds(options: {
   readonly factories: Readonly<Record<string, RuntimePluginFactory>>;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -698,8 +773,14 @@ function uncheckedLegacyFactoryDiagnostics(options: {
 
     const enabledByPluginConfig = configuredPlugin?.enabled === true;
     const enabledByLegacyList = legacyEnabledPluginIds.has(pluginId);
+    const selectedAsDefaultMemoryProvider =
+      config?.defaultMemoryProvider === pluginId;
 
-    if (!enabledByPluginConfig && !enabledByLegacyList) {
+    if (
+      !enabledByPluginConfig &&
+      !enabledByLegacyList &&
+      !selectedAsDefaultMemoryProvider
+    ) {
       continue;
     }
 
@@ -711,7 +792,8 @@ function uncheckedLegacyFactoryDiagnostics(options: {
         legacyFactoryDiagnosticPath({
           pluginId,
           enabledByPluginConfig,
-          enabledByLegacyList
+          enabledByLegacyList,
+          selectedAsDefaultMemoryProvider
         }),
         { pluginId }
       )
@@ -725,6 +807,7 @@ function legacyFactoryDiagnosticPath(options: {
   readonly pluginId: string;
   readonly enabledByPluginConfig: boolean;
   readonly enabledByLegacyList: boolean;
+  readonly selectedAsDefaultMemoryProvider: boolean;
 }): string {
   if (options.enabledByPluginConfig) {
     return `plugins.${options.pluginId}.enabled`;
@@ -732,6 +815,10 @@ function legacyFactoryDiagnosticPath(options: {
 
   if (options.enabledByLegacyList) {
     return 'enabledPlugins';
+  }
+
+  if (options.selectedAsDefaultMemoryProvider) {
+    return 'defaultMemoryProvider';
   }
 
   return `plugins.${options.pluginId}.enabled`;

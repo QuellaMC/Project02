@@ -105,6 +105,48 @@ describe('runtime config activation diagnostics', () => {
     expect(output.plugins).toEqual([]);
   });
 
+  it('fails check for default-memory legacy function factories without constructing them', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-legacy-default-memory-unchecked-')
+    );
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: 'legacy.memory'
+    });
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          'legacy.memory': () => {
+            factoryCalls += 1;
+            throw new Error('runtime-config check must not construct legacy plugins');
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(1);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_legacy_factory_unchecked',
+          path: 'defaultMemoryProvider',
+          pluginId: 'legacy.memory'
+        })
+      ])
+    );
+  });
+
   it('keeps explicitly disabled legacy function factories passing check', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-legacy-disabled-')
@@ -543,6 +585,91 @@ describe('runtime config activation diagnostics', () => {
     );
     expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
     expect(stdout).not.toContain('duplicate-manifest-secret');
+  });
+
+  it('cleans up inactive legacy plugins prepared before activation filtering', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-inactive-legacy-cleanup-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const cleanupContexts: RuntimePluginContext[] = [];
+    const inactivePlugin = sessionEndPlugin(
+      'legacy.inactive-cleanup',
+      (context) => {
+        cleanupContexts.push(context);
+      },
+      { defaultEnabled: false }
+    );
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(configPath, {});
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      storeRoot,
+      sessionId: 'inactive-legacy-cleanup-session',
+      factories: {
+        [inactivePlugin.manifest.id]: () => {
+          factoryCalls += 1;
+
+          return inactivePlugin;
+        }
+      }
+    });
+
+    expect(factoryCalls).toBe(1);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: inactivePlugin.manifest.id,
+        enabled: false,
+        activationStatus: 'disabled'
+      })
+    );
+    expect(cleanupContexts).toHaveLength(1);
+    expect(cleanupContexts[0]).toMatchObject({
+      sessionId: 'inactive-legacy-cleanup-session',
+      currentUserMessage: 'configured plugin construction failed before host creation',
+      privacy: {
+        exposePrivateConfig: false
+      }
+    });
+  });
+
+  it('cleans up prepared legacy plugins when a later legacy factory throws', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-legacy-prepare-cleanup-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const cleanupContexts: RuntimePluginContext[] = [];
+    const cleanupPlugin = sessionEndPlugin('legacy.prepare-cleanup', (context) => {
+      cleanupContexts.push(context);
+    });
+
+    writeRuntimeConfig(configPath, {});
+
+    await expect(
+      createConfiguredProject02PluginHost({
+        loadedConfig: loadProject02RuntimeConfig({ configPath }),
+        storeRoot,
+        sessionId: 'legacy-prepare-cleanup-session',
+        factories: {
+          [cleanupPlugin.manifest.id]: () => cleanupPlugin,
+          'legacy.prepare-failure': () => {
+            throw new Error('later legacy factory failed during preparation');
+          }
+        }
+      })
+    ).rejects.toThrow('later legacy factory failed during preparation');
+
+    expect(cleanupContexts).toHaveLength(1);
+    expect(cleanupContexts[0]).toMatchObject({
+      sessionId: 'legacy-prepare-cleanup-session',
+      currentUserMessage: 'configured plugin construction failed before host creation',
+      privacy: {
+        exposePrivateConfig: false
+      }
+    });
   });
 
   it('fails check for manifest ids reserved by the host discovery plugin', async () => {
@@ -1129,9 +1256,12 @@ function firstPartyPlugin(
 
 function sessionEndPlugin(
   id: string,
-  onSessionEnd: (context: RuntimePluginContext) => void
+  onSessionEnd: (context: RuntimePluginContext) => void,
+  options: {
+    readonly defaultEnabled?: boolean;
+  } = {}
 ) {
-  const plugin = firstPartyPlugin(id);
+  const plugin = firstPartyPlugin(id, options);
 
   return createRuntimePlugin({
     manifest: {
