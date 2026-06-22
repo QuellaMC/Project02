@@ -757,18 +757,12 @@ describe('chat CLI plugin lifecycle', () => {
     expect(existsSync(layout.sessionsRoot)).toBe(false);
   });
 
-  it('allows unreferenced default-disabled legacy function factories during chat startup', async () => {
+  it('skips unselected legacy function factories during chat startup', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-chat-legacy-unreferenced-')
     );
     const sessionId = 'legacy-unreferenced-session';
     const layout = createLocalRuntimeStorageLayout({ storeRoot });
-    const optionalPlugin = createSessionEndPlugin(() => {
-      throw new Error('unreferenced legacy plugin must not be active');
-    }, {
-      pluginId: 'legacy.optional',
-      defaultEnabled: false
-    });
     let factoryCalls = 0;
     let stdout = '';
     let stderr = '';
@@ -788,15 +782,14 @@ describe('chat CLI plugin lifecycle', () => {
         factories: {
           'legacy.optional': () => {
             factoryCalls += 1;
-
-            return optionalPlugin;
+            throw new Error('unselected legacy plugin must not be constructed');
           }
         }
       }
     );
 
     expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(1);
+    expect(factoryCalls).toBe(0);
     expect(stderr).toBe('');
     expect(stdout).toContain('Mira is ready.');
     expect(existsSync(layout.sessionCatalogPath)).toBe(true);

@@ -9,6 +9,9 @@ import {
   createRuntimeConfigFingerprint
 } from './fingerprint.ts';
 import {
+  storeRootForSelectedDefaultConfigPath
+} from './mutate.ts';
+import {
   redactResolvedRuntimeConfigField
 } from './redact.ts';
 import {
@@ -37,7 +40,10 @@ export function resolveProject02RuntimeConfig(
 ): ResolvedProject02RuntimeConfig {
   const env = options.env ?? process.env;
   const config = options.loadedConfig.config;
-  const configuredStoreRoot = config?.storeRoot ?? options.storeRoot;
+  const configuredStoreRoot =
+    config?.storeRoot ??
+    options.storeRoot ??
+    storeRootForLoadedDefaultConfigPath(options.loadedConfig);
   const storeRoot = createLocalRuntimeStorageLayout(
     configuredStoreRoot === undefined ? {} : { storeRoot: configuredStoreRoot }
   ).storeRoot;
@@ -87,6 +93,14 @@ export function resolveProject02RuntimeConfig(
       })
     )
   } satisfies ResolvedProject02RuntimeConfig);
+}
+
+export function storeRootForLoadedDefaultConfigPath(
+  loadedConfig: LoadedProject02RuntimeConfig
+): string | undefined {
+  return loadedConfig.path === undefined
+    ? undefined
+    : storeRootForSelectedDefaultConfigPath(loadedConfig.path);
 }
 
 export function diagnosticsHaveErrors(

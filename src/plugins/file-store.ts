@@ -415,11 +415,7 @@ function assertDurableJsonlPathMode(options: {
   }
 
   try {
-    const parsed = JSON.parse(readFileSync(options.filePath, 'utf8')) as unknown;
-
-    if (!Array.isArray(parsed)) {
-      throw new TypeError('Plugin JSONL path already stores non-array JSON.');
-    }
+    JSON.parse(readFileSync(options.filePath, 'utf8'));
   } catch (error: unknown) {
     if (isMissingFileError(error) || error instanceof SyntaxError) {
       return;
@@ -427,6 +423,8 @@ function assertDurableJsonlPathMode(options: {
 
     throw error;
   }
+
+  throw new TypeError('Plugin JSONL path already stores JSON.');
 }
 
 function assertDurableJsonPathMode(options: {

@@ -68,6 +68,12 @@ export function applyRuntimeConfigMutation(
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
   });
   const selectedConfigPath = loaded.path ?? configPath;
+  const selectedStoreRoot =
+    options.storeRoot ?? storeRootForSelectedDefaultConfigPath(selectedConfigPath);
+  const bootstrapStoreRoot =
+    options.storeRoot === undefined
+      ? selectedStoreRoot
+      : canonicalMutationPath(locationLayout.storeRoot);
   const blockingDiagnostic = loaded.diagnostics.find(
     (diagnostic) =>
       diagnostic.severity === 'error' && diagnostic.code !== 'runtime_config_missing'
@@ -83,14 +89,12 @@ export function applyRuntimeConfigMutation(
     loaded.config ??
     bootstrapRuntimeConfig({
       selectedConfigPath,
-      ...(options.storeRoot === undefined
-        ? {}
-        : { storeRoot: canonicalMutationPath(locationLayout.storeRoot) })
+      ...(bootstrapStoreRoot === undefined ? {} : { storeRoot: bootstrapStoreRoot })
     });
   const nextConfig = validateMutatedRuntimeConfig(
     mutateConfig(currentConfig, options.operation)
   );
-  const nextEffectiveStoreRoot = nextConfig.storeRoot ?? options.storeRoot;
+  const nextEffectiveStoreRoot = nextConfig.storeRoot ?? selectedStoreRoot;
   const nextEffectiveLayout = createLocalRuntimeStorageLayout(
     nextEffectiveStoreRoot === undefined ? {} : { storeRoot: nextEffectiveStoreRoot }
   );
@@ -161,7 +165,7 @@ function bootstrapRuntimeConfig(options: {
     : { version: runtimeConfigVersion, storeRoot: selectedStoreRoot };
 }
 
-function storeRootForSelectedDefaultConfigPath(
+export function storeRootForSelectedDefaultConfigPath(
   selectedConfigPath: string
 ): string | undefined {
   const candidateStoreRoot = dirname(selectedConfigPath);

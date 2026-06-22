@@ -60,6 +60,7 @@ function runRuntimeConfigCliFromArgsSync(
     const parsedArgs = parseRuntimeConfigCliArgs(args);
     const cliEnv = runtimeConfigCliEnvForLocation({
       location: parsedArgs.location,
+      readDefaultDotEnv: shouldReadDefaultDotEnvForCommand(parsedArgs),
       ...(options.env === undefined ? {} : { env: options.env })
     });
     const parsed: RuntimeConfigCliArgs = {
@@ -225,6 +226,7 @@ function parseRuntimeConfigCliArgs(args: readonly string[]): RuntimeConfigCliPar
 
 function runtimeConfigCliEnvForLocation(options: {
   readonly location: RuntimeLocationCliState;
+  readonly readDefaultDotEnv: boolean;
   readonly env?: NodeJS.ProcessEnv;
 }): {
   readonly suppliedEnv: NodeJS.ProcessEnv;
@@ -233,7 +235,8 @@ function runtimeConfigCliEnvForLocation(options: {
 } {
   const suppliedEnv = options.env ?? process.env;
   const defaultEnv =
-    options.env === undefined || options.env === process.env
+    options.readDefaultDotEnv &&
+    (options.env === undefined || options.env === process.env)
       ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), options.location)
       : {};
 
@@ -242,6 +245,22 @@ function runtimeConfigCliEnvForLocation(options: {
     defaultEnv,
     configEnv: { ...defaultEnv, ...suppliedEnv }
   };
+}
+
+function shouldReadDefaultDotEnvForCommand(
+  parsedArgs: RuntimeConfigCliParsedArgs
+): boolean {
+  if (!hasExplicitRuntimeLocation(parsedArgs.location)) {
+    return true;
+  }
+
+  const command = parsedArgs.commandArgs[0];
+
+  return command === 'check' || command === 'secret';
+}
+
+function hasExplicitRuntimeLocation(location: RuntimeLocationCliState): boolean {
+  return location.configPath !== undefined || location.storeRoot !== undefined;
 }
 
 function parseRuntimeConfigCommand(

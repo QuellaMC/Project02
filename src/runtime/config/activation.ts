@@ -190,11 +190,16 @@ export async function createConfiguredProject02PluginHost(options: {
     factories,
     loadedConfig: options.loadedConfig
   });
+  const selectedLegacyFactoryIdsSet = selectedLegacyFactoryIds({
+    factories,
+    loadedConfig: options.loadedConfig
+  });
   const preparedFactories = await prepareRuntimePluginFactories({
     factories,
     storeRoot: initialStoreRoot,
     skipLegacyFactoryCreation: loadedConfigHasErrors,
     disabledLegacyFactoryIds,
+    selectedLegacyFactoryIds: selectedLegacyFactoryIdsSet,
     resolvedConfig: activationPlan.resolvedConfig,
     ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
     ...(options.sessionIdentity === undefined
@@ -477,6 +482,7 @@ async function prepareRuntimePluginFactories(options: {
   readonly storeRoot: string;
   readonly skipLegacyFactoryCreation: boolean;
   readonly disabledLegacyFactoryIds: ReadonlySet<string>;
+  readonly selectedLegacyFactoryIds: ReadonlySet<string>;
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly sessionId?: string;
   readonly sessionIdentity?: object;
@@ -503,6 +509,10 @@ async function prepareRuntimePluginFactories(options: {
       }
 
       if (options.disabledLegacyFactoryIds.has(pluginId)) {
+        continue;
+      }
+
+      if (!options.selectedLegacyFactoryIds.has(pluginId)) {
         continue;
       }
 
@@ -733,16 +743,13 @@ function explicitlyDisabledLegacyFactoryIds(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
 }): ReadonlySet<string> {
   const disabledPluginIds = new Set<string>();
-  const configuredPlugins = options.loadedConfig.config?.plugins;
 
-  if (configuredPlugins === undefined) {
-    return disabledPluginIds;
-  }
-
-  for (const [pluginId, factory] of Object.entries(options.factories)) {
+  for (const pluginId of legacyFunctionFactoryIds(options.factories)) {
     if (
-      !isRuntimePluginFactoryDefinition(factory) &&
-      configuredPlugins[pluginId]?.enabled === false
+      legacyFactorySelection({
+        loadedConfig: options.loadedConfig,
+        pluginId
+      }).disabledByConfig
     ) {
       disabledPluginIds.add(pluginId);
     }
@@ -751,36 +758,47 @@ function explicitlyDisabledLegacyFactoryIds(options: {
   return disabledPluginIds;
 }
 
+function selectedLegacyFactoryIds(options: {
+  readonly factories: Readonly<Record<string, RuntimePluginFactory>>;
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+}): ReadonlySet<string> {
+  const selectedPluginIds = new Set<string>();
+
+  for (const pluginId of legacyFunctionFactoryIds(options.factories)) {
+    const selection = legacyFactorySelection({
+      loadedConfig: options.loadedConfig,
+      pluginId
+    });
+
+    if (!selection.disabledByConfig && selection.selected) {
+      selectedPluginIds.add(pluginId);
+    }
+  }
+
+  return selectedPluginIds;
+}
+
 function uncheckedLegacyFactoryDiagnostics(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly legacyFactoryIds: readonly string[];
 }): readonly RuntimeConfigDiagnostic[] {
-  const config = options.loadedConfig.config;
-
   if (options.legacyFactoryIds.length === 0) {
     return Object.freeze([]);
   }
 
   const diagnostics: RuntimeConfigDiagnostic[] = [];
-  const legacyEnabledPluginIds = new Set(config?.enabledPlugins ?? []);
 
   for (const pluginId of options.legacyFactoryIds) {
-    const configuredPlugin = config?.plugins?.[pluginId];
+    const selection = legacyFactorySelection({
+      loadedConfig: options.loadedConfig,
+      pluginId
+    });
 
-    if (configuredPlugin?.enabled === false) {
+    if (selection.disabledByConfig) {
       continue;
     }
 
-    const enabledByPluginConfig = configuredPlugin?.enabled === true;
-    const enabledByLegacyList = legacyEnabledPluginIds.has(pluginId);
-    const selectedAsDefaultMemoryProvider =
-      config?.defaultMemoryProvider === pluginId;
-
-    if (
-      !enabledByPluginConfig &&
-      !enabledByLegacyList &&
-      !selectedAsDefaultMemoryProvider
-    ) {
+    if (!selection.selected) {
       continue;
     }
 
@@ -791,9 +809,10 @@ function uncheckedLegacyFactoryDiagnostics(options: {
         `Runtime config enables legacy function plugin factory "${pluginId}", but activation checks require a manifest-backed factory to validate plugin config.`,
         legacyFactoryDiagnosticPath({
           pluginId,
-          enabledByPluginConfig,
-          enabledByLegacyList,
-          selectedAsDefaultMemoryProvider
+          enabledByPluginConfig: selection.enabledByPluginConfig,
+          enabledByLegacyList: selection.enabledByLegacyList,
+          selectedAsDefaultMemoryProvider:
+            selection.selectedAsDefaultMemoryProvider
         }),
         { pluginId }
       )
@@ -801,6 +820,36 @@ function uncheckedLegacyFactoryDiagnostics(options: {
   }
 
   return Object.freeze(diagnostics);
+}
+
+function legacyFactorySelection(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly pluginId: string;
+}): {
+  readonly disabledByConfig: boolean;
+  readonly enabledByPluginConfig: boolean;
+  readonly enabledByLegacyList: boolean;
+  readonly selectedAsDefaultMemoryProvider: boolean;
+  readonly selected: boolean;
+} {
+  const config = options.loadedConfig.config;
+  const configuredPlugin = config?.plugins?.[options.pluginId];
+  const enabledByPluginConfig = configuredPlugin?.enabled === true;
+  const enabledByLegacyList =
+    config?.enabledPlugins?.includes(options.pluginId) === true;
+  const selectedAsDefaultMemoryProvider =
+    config?.defaultMemoryProvider === options.pluginId;
+
+  return Object.freeze({
+    disabledByConfig: configuredPlugin?.enabled === false,
+    enabledByPluginConfig,
+    enabledByLegacyList,
+    selectedAsDefaultMemoryProvider,
+    selected:
+      enabledByPluginConfig ||
+      enabledByLegacyList ||
+      selectedAsDefaultMemoryProvider
+  });
 }
 
 function legacyFactoryDiagnosticPath(options: {

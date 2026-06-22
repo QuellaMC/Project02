@@ -4,6 +4,7 @@ import { parseEnv } from 'node:util';
 import {
   defaultRuntimeConfigEnvPath,
   runtimeConfigEnvVarName,
+  storeRootForLoadedDefaultConfigPath,
   type LoadedProject02RuntimeConfig
 } from '../runtime/config/index.ts';
 
@@ -19,7 +20,9 @@ export function runtimeConfigEnvPathForLocation(options: {
   readonly storeRoot?: string;
 }): string {
   return defaultRuntimeConfigEnvPath(
-    options.loadedConfig.config?.storeRoot ?? options.storeRoot
+    options.loadedConfig.config?.storeRoot ??
+      options.storeRoot ??
+      storeRootForLoadedDefaultConfigPath(options.loadedConfig)
   );
 }
 

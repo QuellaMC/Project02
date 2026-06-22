@@ -259,14 +259,45 @@ describe('runtime plugin file store', () => {
 
     expect(() => {
       legacyDurable.readJsonl('mixed.json');
-    }).toThrow(/non-array JSON/iu);
+    }).toThrow(/already stores JSON/iu);
     expect(() => {
       legacyDurable.appendJsonl('mixed.json', { value: 'jsonl' });
-    }).toThrow(/non-array JSON/iu);
+    }).toThrow(/already stores JSON/iu);
     expect(legacyDurable.readJson('mixed.json')).toEqual({
       value: 'legacy-json'
     });
     expect(legacyDurable.revision()).toBe(1);
+  });
+
+  it('rejects JSONL reads and appends on untracked durable paths that store JSON arrays', () => {
+    const storeRoot = createTempRoot();
+    const root = pluginRoot(
+      storeRoot,
+      'session-mixed-json-array-jsonl-legacy',
+      'plugin.mixed-mode-array-legacy'
+    );
+    const mixedJsonPath = join(root, 'mixed.json');
+    const mixedJsonContent = '[{"value":"legacy-array-json"}]\n';
+    mkdirSync(root, { recursive: true });
+    writeFileSync(mixedJsonPath, mixedJsonContent, 'utf8');
+
+    const store = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: 'session-mixed-json-array-jsonl-legacy',
+      pluginId: 'plugin.mixed-mode-array-legacy'
+    });
+
+    expect(() => {
+      store.readJsonl('mixed.json');
+    }).toThrow(/already stores JSON/iu);
+    expect(() => {
+      store.appendJsonl('mixed.json', { value: 'jsonl' });
+    }).toThrow(/already stores JSON/iu);
+    expect(readFileSync(mixedJsonPath, 'utf8')).toBe(mixedJsonContent);
+    expect(store.readJson('mixed.json')).toEqual([
+      { value: 'legacy-array-json' }
+    ]);
+    expect(store.revision()).toBe(1);
   });
 
   it('rejects JSON reads and writes on paths that already store JSONL', () => {

@@ -97,6 +97,32 @@ describe('runtime config loading and resolution', () => {
     expect(resolved.storeRoot).toBe(selectedStoreRoot);
   });
 
+  it('infers store root from existing store-default config selected by path or env', () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-store-default-infer-')
+    );
+    const seededStoreRoot = realpathSync.native(storeRoot);
+    const configPath = defaultRuntimeConfigPath(storeRoot);
+
+    writeRuntimeConfig(configPath, {});
+
+    const explicitLoaded = loadProject02RuntimeConfig({ configPath });
+    const envLoaded = loadProject02RuntimeConfig({
+      env: {
+        [runtimeConfigEnvVarName]: configPath
+      }
+    });
+
+    expect(explicitLoaded.config?.storeRoot).toBeUndefined();
+    expect(envLoaded.config?.storeRoot).toBeUndefined();
+    expect(
+      resolveProject02RuntimeConfig({ loadedConfig: explicitLoaded }).storeRoot
+    ).toBe(seededStoreRoot);
+    expect(resolveProject02RuntimeConfig({ loadedConfig: envLoaded }).storeRoot).toBe(
+      seededStoreRoot
+    );
+  });
+
   it('rejects unknown top-level config fields and blocks default activation', async () => {
     const configPath = writeRuntimeConfig(
       join(mkdtempSync(join(tmpdir(), 'project02-config-unknown-root-')), 'config.json'),
@@ -495,7 +521,7 @@ describe('runtime config loading and resolution', () => {
         configPath: writeRuntimeConfig(
           join(
             mkdtempSync(join(tmpdir(), 'project02-config-credential-fields-a-')),
-            'config.json'
+            'runtime.json'
           ),
           {
             plugins: {
@@ -520,7 +546,7 @@ describe('runtime config loading and resolution', () => {
         configPath: writeRuntimeConfig(
           join(
             mkdtempSync(join(tmpdir(), 'project02-config-credential-fields-b-')),
-            'config.json'
+            'runtime.json'
           ),
           {
             plugins: {
@@ -1107,7 +1133,7 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('prepares unreferenced default-enabled legacy factories before blocking activation', async () => {
+  it('skips unreferenced legacy factories instead of discovering default activation', async () => {
     const configPath = writeRuntimeConfig(
       join(
         mkdtempSync(join(tmpdir(), 'project02-config-default-legacy-factory-')),
@@ -1122,25 +1148,15 @@ describe('runtime config loading and resolution', () => {
       factories: {
         'memory.required': () => {
           legacyFactoryCalls += 1;
-
-          return requiredSecretPlugin();
+          throw new Error('unreferenced legacy factory should not be constructed');
         }
       }
     });
 
-    expect(legacyFactoryCalls).toBe(1);
+    expect(legacyFactoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
     expect(configured.activation.enabledPluginIds).toEqual([]);
-    expect(configured.activation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_required_secret_missing',
-          path: 'plugins.memory.required.config.apiKey',
-          pluginId: 'memory.required'
-        })
-      ])
-    );
+    expect(configured.activation.diagnostics).toEqual([]);
   });
 
   it('skips explicitly disabled legacy function plugin factories before creation', async () => {
@@ -2881,6 +2897,54 @@ describe('runtime config CLI', () => {
     expect(stderr).toBe('');
   });
 
+  it('prints explicit location paths without reading unrelated cwd dotenv', async () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-config-path-cwd-env-'));
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-path-explicit-store-')
+    );
+    const configPath = join(
+      mkdtempSync(join(tmpdir(), 'project02-config-path-explicit-config-')),
+      'runtime.json'
+    );
+    const previousCwd = process.cwd();
+
+    mkdirSync(join(cwdRoot, '.env'));
+
+    try {
+      process.chdir(cwdRoot);
+
+      for (const example of [
+        {
+          args: ['--store', storeRoot, 'path'] as const,
+          expected: defaultRuntimeConfigPath(storeRoot)
+        },
+        {
+          args: ['--config', configPath, 'path'] as const,
+          expected: configPath
+        }
+      ]) {
+        let stdout = '';
+        let stderr = '';
+
+        expect(
+          await runRuntimeConfigCliFromArgs(example.args, {
+            stdout: collect((chunk) => {
+              stdout += chunk;
+            }),
+            stderr: collect((chunk) => {
+              stderr += chunk;
+            })
+          })
+        ).toBe(0);
+
+        expect(stdout).toBe(`${example.expected}\n`);
+        expect(stderr).toBe('');
+      }
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
   it('prints the env-selected config path from PROJECT02_RUNTIME_CONFIG', async () => {
     const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-path-env-'));
     const configPath = join(configRoot, 'runtime.json');
@@ -3318,6 +3382,30 @@ describe('runtime config CLI', () => {
     ).toBe(0);
 
     expect(stdout).toBe(`${join(storeRoot, '.env')}\n`);
+    expect(stderr).toBe('');
+  });
+
+  it('prints env-path from an inferred store-default config root', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-env-path-inferred-')
+    );
+    const seededStoreRoot = realpathSync.native(storeRoot);
+    const configPath = writeRuntimeConfig(defaultRuntimeConfigPath(storeRoot), {});
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--config', configPath, 'env-path'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      })
+    ).toBe(0);
+
+    expect(stdout).toBe(`${join(seededStoreRoot, '.env')}\n`);
     expect(stderr).toBe('');
   });
 

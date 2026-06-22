@@ -587,19 +587,11 @@ describe('runtime config activation diagnostics', () => {
     expect(stdout).not.toContain('duplicate-manifest-secret');
   });
 
-  it('cleans up inactive legacy plugins prepared before activation filtering', async () => {
+  it('skips unselected legacy function factories during host preparation', async () => {
     const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-inactive-legacy-cleanup-')
+      join(tmpdir(), 'project02-config-unselected-legacy-host-')
     );
     const configPath = join(storeRoot, 'config.json');
-    const cleanupContexts: RuntimePluginContext[] = [];
-    const inactivePlugin = sessionEndPlugin(
-      'legacy.inactive-cleanup',
-      (context) => {
-        cleanupContexts.push(context);
-      },
-      { defaultEnabled: false }
-    );
     let factoryCalls = 0;
 
     writeRuntimeConfig(configPath, {});
@@ -607,69 +599,49 @@ describe('runtime config activation diagnostics', () => {
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({ configPath }),
       storeRoot,
-      sessionId: 'inactive-legacy-cleanup-session',
+      sessionId: 'unselected-legacy-host-session',
       factories: {
-        [inactivePlugin.manifest.id]: () => {
+        'legacy.optional': () => {
           factoryCalls += 1;
-
-          return inactivePlugin;
+          throw new Error('unselected legacy factory must not be constructed');
         }
       }
     });
 
-    expect(factoryCalls).toBe(1);
+    expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.plugins).toContainEqual(
-      expect.objectContaining({
-        pluginId: inactivePlugin.manifest.id,
-        enabled: false,
-        activationStatus: 'disabled'
-      })
-    );
-    expect(cleanupContexts).toHaveLength(1);
-    expect(cleanupContexts[0]).toMatchObject({
-      sessionId: 'inactive-legacy-cleanup-session',
-      currentUserMessage: 'configured plugin construction failed before host creation',
-      privacy: {
-        exposePrivateConfig: false
-      }
-    });
+    expect(configured.activation.diagnostics).toEqual([]);
+    expect(configured.activation.plugins).toEqual([]);
   });
 
-  it('cleans up prepared legacy plugins when a later legacy factory throws', async () => {
+  it('skips later unselected legacy factory failures during host preparation', async () => {
     const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-legacy-prepare-cleanup-')
+      join(tmpdir(), 'project02-config-legacy-prepare-skip-')
     );
     const configPath = join(storeRoot, 'config.json');
-    const cleanupContexts: RuntimePluginContext[] = [];
-    const cleanupPlugin = sessionEndPlugin('legacy.prepare-cleanup', (context) => {
-      cleanupContexts.push(context);
-    });
+    let factoryCalls = 0;
 
     writeRuntimeConfig(configPath, {});
 
-    await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({ configPath }),
-        storeRoot,
-        sessionId: 'legacy-prepare-cleanup-session',
-        factories: {
-          [cleanupPlugin.manifest.id]: () => cleanupPlugin,
-          'legacy.prepare-failure': () => {
-            throw new Error('later legacy factory failed during preparation');
-          }
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ configPath }),
+      storeRoot,
+      sessionId: 'legacy-prepare-skip-session',
+      factories: {
+        'legacy.prepare-cleanup': () => {
+          factoryCalls += 1;
+          return sessionEndPlugin('legacy.prepare-cleanup', () => {});
+        },
+        'legacy.prepare-failure': () => {
+          factoryCalls += 1;
+          throw new Error('later legacy factory failed during preparation');
         }
-      })
-    ).rejects.toThrow('later legacy factory failed during preparation');
-
-    expect(cleanupContexts).toHaveLength(1);
-    expect(cleanupContexts[0]).toMatchObject({
-      sessionId: 'legacy-prepare-cleanup-session',
-      currentUserMessage: 'configured plugin construction failed before host creation',
-      privacy: {
-        exposePrivateConfig: false
       }
     });
+
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual([]);
   });
 
   it('fails check for manifest ids reserved by the host discovery plugin', async () => {
