@@ -101,14 +101,16 @@ function runRuntimeConfigCliFromArgsSync(
         ...parsed.location,
         env: cliEnv.configEnv
       });
-      const effectiveEnv = loadRuntimeConfigEnvFile({
-        loadedConfig: loaded,
-        ...(parsed.location.storeRoot === undefined
-          ? {}
-          : { storeRoot: parsed.location.storeRoot }),
-        env: cliEnv.suppliedEnv,
-        envDefaults: cliEnv.defaultEnv
-      });
+      const effectiveEnv = diagnosticsHaveErrors(loaded.diagnostics)
+        ? cliEnv.configEnv
+        : loadRuntimeConfigEnvFile({
+            loadedConfig: loaded,
+            ...(parsed.location.storeRoot === undefined
+              ? {}
+              : { storeRoot: parsed.location.storeRoot }),
+            env: cliEnv.suppliedEnv,
+            envDefaults: cliEnv.defaultEnv
+          });
       const configured = resolveConfiguredProject02PluginActivation({
         loadedConfig: loaded,
         ...(parsed.location.storeRoot === undefined

@@ -4,6 +4,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  statSync,
   writeFileSync
 } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
@@ -57,7 +58,11 @@ export function createRuntimePluginFileStore(
       const safePath = normalizeRuntimePluginFileStorePath(path);
       const filePath = join(root, safePath);
 
-      assertJsonPathMode(pathModes.get(safePath));
+      assertDurableJsonPathMode({
+        filePath,
+        mode: pathModes.get(safePath),
+        path: safePath
+      });
 
       try {
         return freezeRuntimePluginFileStoreJsonValue(
@@ -103,7 +108,11 @@ export function createRuntimePluginFileStore(
       const filePath = join(root, safePath);
       const tmpPath = `${filePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
 
-      assertJsonPathMode(pathModes.get(safePath));
+      assertDurableJsonPathMode({
+        filePath,
+        mode: pathModes.get(safePath),
+        path: safePath
+      });
 
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(
@@ -418,6 +427,30 @@ function assertDurableJsonlPathMode(options: {
 
     throw error;
   }
+}
+
+function assertDurableJsonPathMode(options: {
+  readonly filePath: string;
+  readonly mode: RuntimePluginFileStorePathMode | undefined;
+  readonly path: string;
+}): void {
+  assertJsonPathMode(options.mode);
+
+  if (options.mode !== undefined || !options.path.endsWith('.jsonl')) {
+    return;
+  }
+
+  try {
+    statSync(options.filePath);
+  } catch (error: unknown) {
+    if (isMissingFileError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+
+  throw new TypeError('Plugin JSON path already stores JSONL.');
 }
 
 function assertJsonlPathMode(

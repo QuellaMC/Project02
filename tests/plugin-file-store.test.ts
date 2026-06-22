@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -316,6 +322,35 @@ describe('runtime plugin file store', () => {
       { value: 'jsonl' }
     ]);
     expect(secondDurable.revision()).toBe(1);
+
+    const legacyStoreRoot = createTempRoot();
+    const legacyRoot = pluginRoot(
+      legacyStoreRoot,
+      'session-mixed-jsonl-json-legacy',
+      'plugin.mixed-mode-legacy'
+    );
+    const legacyEventsPath = join(legacyRoot, 'events.jsonl');
+    const legacyEventsContent = '{"value":"legacy-jsonl"}\n';
+    mkdirSync(legacyRoot, { recursive: true });
+    writeFileSync(legacyEventsPath, legacyEventsContent, 'utf8');
+
+    const legacyDurable = createRuntimePluginFileStore({
+      storeRoot: legacyStoreRoot,
+      sessionId: 'session-mixed-jsonl-json-legacy',
+      pluginId: 'plugin.mixed-mode-legacy'
+    });
+
+    expect(() => {
+      legacyDurable.readJson('events.jsonl');
+    }).toThrow(/stores JSONL/iu);
+    expect(() => {
+      legacyDurable.writeJsonAtomic('events.jsonl', { value: 'json' });
+    }).toThrow(/stores JSONL/iu);
+    expect(readFileSync(legacyEventsPath, 'utf8')).toBe(legacyEventsContent);
+    expect(legacyDurable.readJsonl('events.jsonl')).toEqual([
+      { value: 'legacy-jsonl' }
+    ]);
+    expect(legacyDurable.revision()).toBe(1);
   });
 
   it('keeps durable JSONL paths appendable across store instances', () => {

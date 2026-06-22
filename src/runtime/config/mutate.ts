@@ -85,7 +85,7 @@ export function applyRuntimeConfigMutation(
       selectedConfigPath,
       ...(options.storeRoot === undefined
         ? {}
-        : { storeRoot: locationLayout.storeRoot })
+        : { storeRoot: canonicalMutationPath(locationLayout.storeRoot) })
     });
   const nextConfig = validateMutatedRuntimeConfig(
     mutateConfig(currentConfig, options.operation)
@@ -113,23 +113,17 @@ export function applyRuntimeConfigMutation(
           options.operation.secretValue
         )
       : undefined;
-  const previousConfigText =
-    secretWrite === undefined
-      ? undefined
-      : existsSync(selectedConfigPath)
-        ? readFileSync(selectedConfigPath, 'utf8')
-        : undefined;
+  if (secretWrite === undefined) {
+    writeJsonAtomic(selectedConfigPath, nextConfig, 0o600);
+  } else {
+    const previousConfigState = snapshotPreviousConfigState(selectedConfigPath);
 
-  writeJsonAtomic(selectedConfigPath, nextConfig, 0o600);
+    writeJsonAtomic(selectedConfigPath, nextConfig, 0o600);
 
-  if (secretWrite !== undefined) {
     try {
       writePreparedEnvSecret(secretWrite);
     } catch (error: unknown) {
-      const rollbackError = restorePreviousConfigState(
-        selectedConfigPath,
-        previousConfigText
-      );
+      const rollbackError = restorePreviousConfigState(previousConfigState);
 
       if (rollbackError !== undefined) {
         throw new AggregateError(
@@ -174,7 +168,7 @@ function storeRootForSelectedDefaultConfigPath(
   const defaultConfigPath = defaultRuntimeConfigPath(candidateStoreRoot);
 
   return pathsAlias(selectedConfigPath, defaultConfigPath)
-    ? createLocalRuntimeStorageLayout({ storeRoot: candidateStoreRoot }).storeRoot
+    ? canonicalMutationPath(candidateStoreRoot)
     : undefined;
 }
 
@@ -557,6 +551,26 @@ type PreparedEnvSecretWrite = {
   readonly mode: number;
 };
 
+type PreviousConfigState = {
+  readonly path: string;
+  readonly text?: string;
+};
+
+function snapshotPreviousConfigState(path: string): PreviousConfigState {
+  const mutationPath = canonicalMutationPath(path);
+
+  if (!existsSync(mutationPath)) {
+    return Object.freeze({
+      path: mutationPath
+    } satisfies PreviousConfigState);
+  }
+
+  return Object.freeze({
+    path: mutationPath,
+    text: readFileSync(mutationPath, 'utf8')
+  } satisfies PreviousConfigState);
+}
+
 function prepareEnvSecretWrite(
   envPath: string,
   envVar: string,
@@ -610,22 +624,21 @@ function readExistingEnvSecretFile(envPath: string): string {
 }
 
 function restorePreviousConfigState(
-  path: string,
-  previousConfigText: string | undefined
+  previousConfigState: PreviousConfigState
 ): Error | undefined {
   try {
-    if (previousConfigText === undefined) {
-      if (existsSync(path)) {
-        unlinkSync(path);
+    if (previousConfigState.text === undefined) {
+      if (existsSync(previousConfigState.path)) {
+        unlinkSync(previousConfigState.path);
       }
       return undefined;
     }
 
-    writeTextAtomic(path, previousConfigText, 0o600);
+    writeTextAtomic(previousConfigState.path, previousConfigState.text, 0o600);
     return undefined;
   } catch (error: unknown) {
     return mutationFileAccessError(
-      `Could not restore runtime config file at ${path}.`,
+      `Could not restore runtime config file at ${previousConfigState.path}.`,
       error
     );
   }
