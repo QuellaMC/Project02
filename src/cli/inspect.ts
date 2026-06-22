@@ -555,8 +555,8 @@ async function inspectRuntimeConfig(args: {
       constructionCleanup: { allowFileStoreWrites: false },
       ...(options.factories === undefined ? {} : { factories: options.factories })
     });
-  } catch (error: unknown) {
-    throw new InspectCliStartupError(formatRuntimeConfigActivationError(error));
+  } catch {
+    throw new InspectCliStartupError(formatRuntimeConfigActivationError());
   }
 }
 
@@ -1217,12 +1217,8 @@ function formatTerminalErrorMessage(
   return formatLocalRuntimeTerminalError(error);
 }
 
-function formatRuntimeConfigActivationError(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return `Runtime config activation failed: ${error.message}`;
-  }
-
-  return 'Runtime config activation failed.';
+function formatRuntimeConfigActivationError(): string {
+  return 'Runtime config activation failed during plugin construction.';
 }
 
 function isMainModule(moduleUrl: string): boolean {

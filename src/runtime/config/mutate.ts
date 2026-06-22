@@ -949,16 +949,14 @@ function parsePluginMutationPath(
 ): ParsedPluginMutationPath {
   // Paths can contain `config` in both plugin IDs and field names; prefer known
   // plugin IDs before falling back to the legacy delimiter heuristic.
-  const contextCandidate = knownPluginPathCandidate(
-    pluginPathCandidates(parts),
-    config
-  );
+  const candidates = pluginPathCandidates(parts);
+  const contextCandidate = knownPluginPathCandidate(candidates, config);
 
   if (contextCandidate !== undefined) {
     return contextCandidate;
   }
 
-  const fallbackCandidate = fallbackPluginPathCandidate(parts);
+  const fallbackCandidate = fallbackPluginPathCandidate(path, candidates);
 
   if (fallbackCandidate !== undefined) {
     return fallbackCandidate;
@@ -1055,53 +1053,22 @@ function pluginIdSpecificity(pluginId: string): number {
 }
 
 function fallbackPluginPathCandidate(
-  parts: readonly string[]
+  path: string,
+  candidates: readonly ParsedPluginMutationPath[]
 ): ParsedPluginMutationPath | undefined {
-  const configSegmentIndex = fallbackPluginConfigSegmentIndex(parts);
-
-  if (configSegmentIndex !== undefined) {
-    const pluginId = parts.slice(1, configSegmentIndex).join('.');
-    const fieldName = parts.slice(configSegmentIndex + 1).join('.');
-
-    if (pluginId.length === 0) {
-      throw new TypeError('Runtime config plugin path must include a plugin id.');
-    }
-
-    if (fieldName.length === 0) {
-      throw new TypeError('Plugin config path must include a field name.');
-    }
-
-    return Object.freeze({
-      kind: 'config_field',
-      pluginId,
-      fieldName
-    });
+  if (candidates.length > 1) {
+    throw new TypeError(
+      `Ambiguous runtime config plugin path: ${path}. Create the plugin wrapper first to disambiguate the plugin id.`
+    );
   }
 
-  if (parts.at(-1) === 'enabled') {
-    const pluginId = parts.slice(1, -1).join('.');
+  const candidate = candidates[0];
 
-    if (pluginId.length === 0) {
-      throw new TypeError('Runtime config plugin path must include a plugin id.');
-    }
-
-    return Object.freeze({
-      kind: 'enabled',
-      pluginId
-    });
+  if (candidate?.kind === 'config_object') {
+    return undefined;
   }
 
-  return undefined;
-}
-
-function fallbackPluginConfigSegmentIndex(parts: readonly string[]): number | undefined {
-  for (let index = 2; index < parts.length - 1; index += 1) {
-    if (parts[index] === 'config') {
-      return index;
-    }
-  }
-
-  return undefined;
+  return candidate;
 }
 
 function tryParsePluginMutationPath(

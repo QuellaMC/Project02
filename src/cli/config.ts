@@ -9,6 +9,7 @@ import {
   loadProject02RuntimeConfig,
   resolveConfiguredProject02PluginActivation,
   RuntimeConfigMutationError,
+  runtimeConfigEnvVarName,
   type LoadedProject02RuntimeConfig,
   type RuntimePluginFactory,
   type RuntimeConfigMutationOperation,
@@ -61,7 +62,10 @@ function runRuntimeConfigCliFromArgsSync(
     const parsedArgs = parseRuntimeConfigCliArgs(args);
     const cliEnv = runtimeConfigCliEnvForLocation({
       location: parsedArgs.location,
-      readDefaultDotEnv: shouldReadDefaultDotEnvForCommand(parsedArgs),
+      readDefaultDotEnv: shouldReadDefaultDotEnvForCommand(
+        parsedArgs,
+        options.env ?? process.env
+      ),
       ...(options.env === undefined ? {} : { env: options.env })
     });
     const parsed: RuntimeConfigCliArgs = {
@@ -278,13 +282,24 @@ function runtimeConfigCliEnvForLocation(options: {
 }
 
 function shouldReadDefaultDotEnvForCommand(
-  parsedArgs: RuntimeConfigCliParsedArgs
+  parsedArgs: RuntimeConfigCliParsedArgs,
+  suppliedEnv: NodeJS.ProcessEnv
 ): boolean {
+  const command = parsedArgs.commandArgs[0];
+
   if (!hasExplicitRuntimeLocation(parsedArgs.location)) {
+    const suppliedRuntimeConfigPath = suppliedEnv[runtimeConfigEnvVarName];
+
+    if (
+      (command === 'path' || command === 'env-path') &&
+      suppliedRuntimeConfigPath !== undefined &&
+      suppliedRuntimeConfigPath.trim().length > 0
+    ) {
+      return false;
+    }
+
     return true;
   }
-
-  const command = parsedArgs.commandArgs[0];
 
   return command === 'secret';
 }

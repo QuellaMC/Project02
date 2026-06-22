@@ -3106,6 +3106,59 @@ describe('runtime config CLI', () => {
     expect(stderr).toBe('');
   });
 
+  it('prints process-env-selected location paths without reading unreadable cwd dotenv', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-process-env-cwd-dotenv-error-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-process-env-selected-store-')
+    );
+    const configPath = writeRuntimeConfig(join(cwdRoot, 'runtime.json'), {
+      storeRoot
+    });
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+
+    mkdirSync(join(cwdRoot, '.env'));
+
+    try {
+      process.env[runtimeConfigEnvVarName] = configPath;
+      process.chdir(cwdRoot);
+
+      for (const example of [
+        {
+          args: ['path'] as const,
+          expected: configPath
+        },
+        {
+          args: ['env-path'] as const,
+          expected: join(storeRoot, '.env')
+        }
+      ]) {
+        let stdout = '';
+        let stderr = '';
+
+        expect(
+          await runRuntimeConfigCliFromArgs(example.args, {
+            stdout: collect((chunk) => {
+              stdout += chunk;
+            }),
+            stderr: collect((chunk) => {
+              stderr += chunk;
+            }),
+            env: process.env
+          })
+        ).toBe(0);
+
+        expect(stdout).toBe(`${example.expected}\n`);
+        expect(stderr).toBe('');
+      }
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
   it('uses cwd dotenv runtime config selectors for unflagged config reads and mutations', async () => {
     const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-cwd-env-'));
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-cwd-store-'));
@@ -3753,6 +3806,13 @@ describe('runtime config CLI', () => {
     let stdout = '';
 
     expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'plugin', 'enable', 'memory'], {
+        stdout: collect(() => {}),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+
+    expect(
       await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'set', path, 'local-key'], {
         stdout: collect(() => {}),
         stderr: collect(() => {})
@@ -3766,6 +3826,7 @@ describe('runtime config CLI', () => {
     expect(afterSet).toMatchObject({
       plugins: {
         memory: {
+          enabled: true,
           config: {
             'api.config.key': 'local-key'
           }
@@ -3795,10 +3856,41 @@ describe('runtime config CLI', () => {
       readFileSync(join(storeRoot, 'config.json'), 'utf8')
     );
 
-    expect(afterUnset).toEqual({
+    expect(afterUnset).toMatchObject({
       version: runtimeConfigVersion,
-      storeRoot: seededStoreRoot
+      storeRoot: seededStoreRoot,
+      plugins: {
+        memory: {
+          enabled: true
+        }
+      }
     });
+  });
+
+  it('rejects ambiguous first-time plugin config paths containing config segments', async () => {
+    for (const path of [
+      'plugins.memory.config.api.config.key',
+      'plugins.memory.config.config.key',
+      'plugins.memory.config.enabled'
+    ]) {
+      const storeRoot = mkdtempSync(
+        join(tmpdir(), 'project02-config-ambiguous-config-')
+      );
+      let stderr = '';
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'set', path, 'local-key'], {
+          stdout: collect(() => {}),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        })
+      ).toBe(1);
+
+      expect(stderr).toContain('Ambiguous runtime config plugin path');
+      expect(stderr).toContain(path);
+      expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+    }
   });
 
   it('sets, gets, unsets, and checks plugin config fields starting with config', async () => {
@@ -3834,6 +3926,13 @@ describe('runtime config CLI', () => {
     expect(missingStdout).toContain(path);
 
     expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'plugin', 'enable', 'memory'], {
+        stdout: collect(() => {}),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+
+    expect(
       await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'set', path, 'local-key'], {
         stdout: collect(() => {}),
         stderr: collect(() => {})
@@ -3847,6 +3946,7 @@ describe('runtime config CLI', () => {
     expect(afterSet).toMatchObject({
       plugins: {
         memory: {
+          enabled: true,
           config: {
             'config.key': 'local-key'
           }
@@ -3908,7 +4008,12 @@ describe('runtime config CLI', () => {
 
     expect(afterUnset).toEqual({
       version: runtimeConfigVersion,
-      storeRoot: seededStoreRoot
+      storeRoot: seededStoreRoot,
+      plugins: {
+        memory: {
+          enabled: true
+        }
+      }
     });
 
     expect(
@@ -4564,6 +4669,13 @@ describe('runtime config CLI', () => {
     const seededStoreRoot = realpathSync.native(storeRoot);
 
     expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'plugin', 'enable', 'memory'], {
+        stdout: collect(() => {}),
+        stderr: collect(() => {})
+      })
+    ).toBe(0);
+
+    expect(
       await runRuntimeConfigCliFromArgs(
         ['--store', storeRoot, 'set', 'plugins.memory.config.enabled', 'true'],
         {
@@ -4580,6 +4692,7 @@ describe('runtime config CLI', () => {
     expect(afterSet).toMatchObject({
       plugins: {
         memory: {
+          enabled: true,
           config: {
             enabled: true
           }
@@ -4604,7 +4717,12 @@ describe('runtime config CLI', () => {
 
     expect(afterUnset).toEqual({
       version: runtimeConfigVersion,
-      storeRoot: seededStoreRoot
+      storeRoot: seededStoreRoot,
+      plugins: {
+        memory: {
+          enabled: true
+        }
+      }
     });
   });
 

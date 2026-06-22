@@ -438,7 +438,7 @@ describe('inspect CLI plugin evidence', () => {
     expect(stderr).not.toContain('Could not load runtime config env file');
   });
 
-  it('formats configured plugin factory failures for inspect', async () => {
+  it('uses a generic configured plugin factory failure for inspect', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-factory-fail-'));
     const plugin = createInspectFixturePlugin('inspect.factory.failure');
     let stdout = '';
@@ -475,8 +475,72 @@ describe('inspect CLI plugin evidence', () => {
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
     expect(stderr).toBe(
-      'Error: Runtime config activation failed: inspect fixture factory failed\n'
+      'Error: Runtime config activation failed during plugin construction.\n'
     );
+  });
+
+  it('does not leak resolved secret config values in inspect factory failures', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-inspect-factory-secret-fail-')
+    );
+    const envVar = 'PROJECT02_INSPECT_FACTORY_SECRET_3450445715';
+    const secret = 'inspect-factory-raw-secret-3450445715';
+    const plugin = createInspectSecretFixturePlugin(
+      'inspect.factory.secret.failure'
+    );
+    let stdout = '';
+    let stderr = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        env: {
+          [envVar]: secret
+        },
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create(input) {
+              factoryCalls += 1;
+              const apiKeyValue = input.resolvedConfig['apiKey']?.value;
+
+              if (typeof apiKeyValue !== 'string') {
+                throw new Error('factory expected resolved api key');
+              }
+
+              throw new Error(`factory read ${apiKeyValue}`);
+            }
+          }
+        }
+      }
+    );
+
+    expect(factoryCalls).toBe(1);
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toBe(
+      'Error: Runtime config activation failed during plugin construction.\n'
+    );
+    expect(stderr).not.toContain(secret);
+    expect(stderr).not.toContain('factory read');
   });
 
   it('keeps inspect construction-failure cleanup read-only', async () => {
@@ -558,7 +622,7 @@ describe('inspect CLI plugin evidence', () => {
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
     expect(stderr).toBe(
-      'Error: Runtime config activation failed: inspect fixture factory failed after cleanup\n'
+      'Error: Runtime config activation failed during plugin construction.\n'
     );
     expect(cleanupContext).toMatchObject({
       sessionId: 'configured-plugin-construction-cleanup',
@@ -568,7 +632,7 @@ describe('inspect CLI plugin evidence', () => {
     expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
   });
 
-  it('formats configured plugin manifest mismatches for inspect', async () => {
+  it('uses a generic configured plugin manifest mismatch failure for inspect', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-manifest-fail-'));
     const declaredPlugin = createInspectFixturePlugin('inspect.manifest.declared');
     const returnedPlugin = createInspectFixturePlugin('inspect.manifest.returned');
@@ -605,9 +669,8 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
-    expect(stderr).toContain('Error: Runtime config activation failed: ');
-    expect(stderr).toContain(
-      'Plugin factory "inspect.manifest.declared" returned plugin "inspect.manifest.returned"'
+    expect(stderr).toBe(
+      'Error: Runtime config activation failed during plugin construction.\n'
     );
   });
 
@@ -964,6 +1027,28 @@ function createInspectFixturePlugin(pluginId = 'inspect.custom'): RuntimePlugin 
         reasons: ['test_inspect_fixture']
       },
       requestedApis: []
+    }
+  });
+}
+
+function createInspectSecretFixturePlugin(pluginId: string): RuntimePlugin {
+  const plugin = createInspectFixturePlugin(pluginId);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      config: {
+        fields: [
+          {
+            name: 'apiKey',
+            description: 'API key.',
+            required: true,
+            secret: true,
+            valueType: 'secret',
+            redactionLabels: ['secret']
+          }
+        ]
+      }
     }
   });
 }
