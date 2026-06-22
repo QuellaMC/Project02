@@ -95,6 +95,8 @@ const configuredPluginConstructionCleanupCharacter = Object.freeze({
 const configuredPluginConstructionCleanupOptions = Object.freeze({
   allowFileStoreWrites: false
 } satisfies RuntimePluginSessionEndOptions);
+const selectedAsDefaultMemoryProviderReason =
+  'selected_as_default_memory_provider';
 
 export function defaultRuntimePluginFactories(): Readonly<
   Record<string, RuntimePluginFactory>
@@ -316,6 +318,9 @@ export function resolveRuntimePluginActivation(options: {
     const configured = config?.plugins?.[manifest.id];
     const legacyEnabled =
       config?.enabledPlugins?.includes(manifest.id) === true;
+    const selectedAsDefaultMemoryProvider =
+      manifest.kind === 'memory_provider' &&
+      config?.defaultMemoryProvider === manifest.id;
     const configErrors =
       loadedConfigHasErrors ||
       globalConfigErrors ||
@@ -329,12 +334,14 @@ export function resolveRuntimePluginActivation(options: {
       duplicateCandidateDecision: activationDecision({
         configuredEnabled: configured?.enabled,
         legacyEnabled,
+        selectedAsDefaultMemoryProvider,
         defaultEnabled: manifest.activation.defaultEnabled,
         configErrors: false
       }),
       decision: activationDecision({
         configuredEnabled: configured?.enabled,
         legacyEnabled,
+        selectedAsDefaultMemoryProvider,
         defaultEnabled: manifest.activation.defaultEnabled,
         configErrors
       })
@@ -893,6 +900,7 @@ function legacyFactoryDiagnosticPath(options: {
 function activationDecision(options: {
   readonly configuredEnabled: boolean | undefined;
   readonly legacyEnabled: boolean;
+  readonly selectedAsDefaultMemoryProvider: boolean;
   readonly defaultEnabled: boolean;
   readonly configErrors: boolean;
 }): {
@@ -929,6 +937,14 @@ function activationDecision(options: {
       enabled: true,
       status: 'active',
       reasons: ['enabled_by_legacy_config']
+    };
+  }
+
+  if (options.selectedAsDefaultMemoryProvider) {
+    return {
+      enabled: true,
+      status: 'active',
+      reasons: [selectedAsDefaultMemoryProviderReason]
     };
   }
 
@@ -1103,6 +1119,9 @@ function defaultMemoryProviderDecision(options: {
     const disabledKnownPlugin = disabledKnownPluginIds.has(
       options.configDefaultMemoryProvider
     );
+    const unavailablePluginId = disabledKnownPlugin
+      ? options.configDefaultMemoryProvider
+      : knownMemoryProvider?.id;
 
     if (selected === undefined) {
       if (knownPlugin !== undefined && knownPlugin.kind !== 'memory_provider') {
@@ -1134,9 +1153,7 @@ function defaultMemoryProviderDecision(options: {
             'default_memory_provider_unavailable',
             `Default memory provider "${options.configDefaultMemoryProvider}" is not active.`,
             'defaultMemoryProvider',
-            disabledKnownPlugin
-              ? { pluginId: options.configDefaultMemoryProvider }
-              : {}
+            unavailablePluginId === undefined ? {} : { pluginId: unavailablePluginId }
           )
         ]
       };
@@ -1194,8 +1211,9 @@ function finalizeMemoryProviderActivation(options: {
       reasons: Object.freeze([
         ...options.decision.reasons,
         ...(options.memoryProviderDecision.defaultMemoryProvider ===
-        options.manifest.id
-          ? ['selected_as_default_memory_provider']
+          options.manifest.id &&
+        !options.decision.reasons.includes(selectedAsDefaultMemoryProviderReason)
+          ? [selectedAsDefaultMemoryProviderReason]
           : [])
       ])
     };

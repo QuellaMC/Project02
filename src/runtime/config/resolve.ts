@@ -456,6 +456,10 @@ function shouldValidatePluginConfig(options: {
     return true;
   }
 
+  if (isSelectedDefaultMemoryProvider(options)) {
+    return true;
+  }
+
   if (!options.manifest.activation.defaultEnabled) {
     return false;
   }
@@ -474,7 +478,17 @@ function pluginCanRequireConfigValidation(options: {
     return true;
   }
 
-  return options.config.defaultMemoryProvider === options.manifest.id;
+  return isSelectedDefaultMemoryProvider(options);
+}
+
+function isSelectedDefaultMemoryProvider(options: {
+  readonly config: Project02RuntimeConfig | undefined;
+  readonly manifest: RuntimePluginManifest;
+}): boolean {
+  return (
+    options.manifest.kind === 'memory_provider' &&
+    options.config?.defaultMemoryProvider === options.manifest.id
+  );
 }
 
 function pushUnknownPluginConfigFieldDiagnostics(options: {

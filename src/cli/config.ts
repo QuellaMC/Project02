@@ -288,14 +288,14 @@ function shouldReadDefaultDotEnvForCommand(
   const command = parsedArgs.commandArgs[0];
 
   if (!hasExplicitRuntimeLocation(parsedArgs.location)) {
-    if (command === 'path' || command === 'env-path' || command === 'check') {
-      return shouldReadDefaultDotEnvForRuntimeLocation({
-        location: parsedArgs.location,
-        env: suppliedEnv
-      });
+    if (command === 'secret') {
+      return true;
     }
 
-    return true;
+    return shouldReadDefaultDotEnvForRuntimeLocation({
+      location: parsedArgs.location,
+      env: suppliedEnv
+    });
   }
 
   return command === 'secret';

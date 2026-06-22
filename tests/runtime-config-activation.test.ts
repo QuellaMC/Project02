@@ -15,6 +15,7 @@ import {
 import {
   characterStatePluginId,
   createRuntimePluginFileStore,
+  createMemoryProviderRuntimePlugin,
   createRuntimePlugin,
   memorySearchTool,
   runtimePluginDiscoveryPluginId,
@@ -417,6 +418,175 @@ describe('runtime config activation diagnostics', () => {
         pluginId: characterStatePluginId,
         enabled: true,
         activationStatus: 'active'
+      })
+    );
+  });
+
+  it('activates helper memory providers selected only by defaultMemoryProvider', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-helper-default-memory-')
+    );
+    const plugin = createMemoryProviderRuntimePlugin({
+      id: 'memory.local',
+      displayName: 'Local Memory',
+      recall() {
+        return Promise.resolve({ items: [] });
+      }
+    });
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: plugin.manifest.id
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {
+        [plugin.manifest.id]: {
+          manifest: plugin.manifest,
+          create() {
+            factoryCalls += 1;
+
+            return plugin;
+          }
+        }
+      }
+    });
+    const activation = configured.activation.plugins.find(
+      (item) => item.pluginId === plugin.manifest.id
+    );
+
+    expect(factoryCalls).toBe(1);
+    expect(configured.plugins.map((item) => item.manifest.id)).toEqual([
+      plugin.manifest.id
+    ]);
+    expect(configured.activation.enabledPluginIds).toEqual([plugin.manifest.id]);
+    expect(configured.activation.defaultMemoryProvider).toBe(plugin.manifest.id);
+    expect(configured.activation.diagnostics).toEqual([]);
+    expect(activation).toMatchObject({
+      pluginId: plugin.manifest.id,
+      kind: 'memory_provider',
+      enabled: true,
+      activationStatus: 'active'
+    });
+    expect(activation?.activationReasons).toEqual(
+      expect.arrayContaining([
+        'memory_provider_factory',
+        'selected_as_default_memory_provider'
+      ])
+    );
+  });
+
+  it('keeps helper memory providers disabled when selected but explicitly disabled', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-helper-default-memory-disabled-')
+    );
+    const plugin = createMemoryProviderRuntimePlugin({
+      id: 'memory.local',
+      displayName: 'Local Memory',
+      recall() {
+        return Promise.resolve({ items: [] });
+      }
+    });
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: plugin.manifest.id,
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: false
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {
+        [plugin.manifest.id]: {
+          manifest: plugin.manifest,
+          create() {
+            factoryCalls += 1;
+            throw new Error('explicitly disabled memory provider was constructed');
+          }
+        }
+      }
+    });
+    const activation = configured.activation.plugins.find(
+      (item) => item.pluginId === plugin.manifest.id
+    );
+
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.defaultMemoryProvider).toBeUndefined();
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
+          path: 'defaultMemoryProvider'
+        })
+      ])
+    );
+    expect(activation).toMatchObject({
+      pluginId: plugin.manifest.id,
+      kind: 'memory_provider',
+      enabled: false,
+      activationStatus: 'disabled'
+    });
+    expect(activation?.activationReasons).toEqual(
+      expect.arrayContaining(['memory_provider_factory', 'disabled_by_config'])
+    );
+    expect(activation?.activationReasons).not.toContain(
+      'selected_as_default_memory_provider'
+    );
+  });
+
+  it('validates required config for default-disabled memory providers selected by defaultMemoryProvider', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-default-memory-required-')
+    );
+    const plugin = requiredSecretPlugin('memory.default-required', {
+      defaultEnabled: false
+    });
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: plugin.manifest.id
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {
+        [plugin.manifest.id]: {
+          manifest: plugin.manifest,
+          create() {
+            factoryCalls += 1;
+            throw new Error('invalid memory provider config reached the factory');
+          }
+        }
+      }
+    });
+
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_required_secret_missing',
+          path: `plugins.${plugin.manifest.id}.config.apiKey`,
+          pluginId: plugin.manifest.id,
+          pluginConfigField: 'apiKey'
+        })
+      ])
+    );
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: plugin.manifest.id,
+        enabled: false,
+        activationStatus: 'blocked'
       })
     );
   });
@@ -1532,7 +1702,12 @@ describe('runtime config activation diagnostics', () => {
   });
 });
 
-function requiredSecretPlugin(id: string) {
+function requiredSecretPlugin(
+  id: string,
+  options: {
+    readonly defaultEnabled?: boolean;
+  } = {}
+) {
   return createRuntimePlugin({
     manifest: {
       id,
@@ -1574,7 +1749,7 @@ function requiredSecretPlugin(id: string) {
         }
       },
       activation: {
-        defaultEnabled: true,
+        defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test_required_secret']
       },
       requestedApis: []

@@ -3159,6 +3159,89 @@ describe('runtime config CLI', () => {
     }
   });
 
+  it('uses process-env-selected config for get and non-secret mutations before reading unreadable cwd dotenv', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-process-env-cwd-dotenv-get-set-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-process-env-get-set-store-')
+    );
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-process-env-get-set-')
+    );
+    const configPath = writeRuntimeConfig(
+      join(configRoot, 'runtime.json'),
+      {
+        storeRoot,
+        plugins: {
+          foo: {
+            config: {
+              backend: 'selected'
+            }
+          }
+        }
+      }
+    );
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let getStdout = '';
+    let getStderr = '';
+    let setStdout = '';
+    let setStderr = '';
+
+    mkdirSync(join(cwdRoot, '.env'));
+
+    try {
+      process.env[runtimeConfigEnvVarName] = configPath;
+      process.chdir(cwdRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['get', 'plugins.foo.config.backend'], {
+          stdout: collect((chunk) => {
+            getStdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            getStderr += chunk;
+          })
+        })
+      ).toBe(0);
+      expect(JSON.parse(getStdout) as unknown).toBe('selected');
+      expect(getStderr).toBe('');
+
+      expect(
+        await runRuntimeConfigCliFromArgs(
+          ['set', 'plugins.foo.config.backend', 'remote'],
+          {
+            stdout: collect((chunk) => {
+              setStdout += chunk;
+            }),
+            stderr: collect((chunk) => {
+              setStderr += chunk;
+            })
+          }
+        )
+      ).toBe(0);
+
+      expect(JSON.parse(setStdout) as { readonly configPath: string }).toMatchObject({
+        configPath,
+        envPath: join(storeRoot, '.env')
+      });
+      expect(setStderr).toBe('');
+      expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
+        plugins: {
+          foo: {
+            config: {
+              backend: 'remote'
+            }
+          }
+        }
+      });
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
   it('uses cwd dotenv runtime config selectors for unflagged config reads and mutations', async () => {
     const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-cwd-env-'));
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-cli-cwd-store-'));
