@@ -229,6 +229,69 @@ describe('chat CLI provider selection', () => {
     }
   });
 
+  it('uses a process-env selected runtime config before reading an unrelated cwd dotenv', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-chat-env-cwd-dotenv-error-')
+    );
+    const selectedStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-chat-env-selected-store-')
+    );
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-chat-env-selected-config-')
+    );
+    const configPath = writeRuntimeConfig(
+      join(configRoot, 'runtime-config.json'),
+      {
+        storeRoot: selectedStoreRoot
+      }
+    );
+    const sessionId = 'env-selected-store-before-cwd-dotenv';
+    const previousCwd = process.cwd();
+    const previousProvider = process.env[roleModelProviderEnvName];
+    const previousApiKey = process.env[nvidiaApiKeyEnvName];
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let stdout = '';
+    let stderr = '';
+
+    mkdirSync(join(cwdRoot, '.env'));
+
+    try {
+      Reflect.deleteProperty(process.env, roleModelProviderEnvName);
+      Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
+      process.env[runtimeConfigEnvVarName] = configPath;
+      process.chdir(cwdRoot);
+
+      const exitCode = await runChatCliFromArgs(
+        ['--new-session', sessionId],
+        {
+          stdin: Readable.from(['/exit\n']),
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        }
+      );
+
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('Mira is ready.');
+      expect(stderr).toBe('');
+      await expect(
+        createLocalRuntimeSessionStore({
+          storeRoot: selectedStoreRoot
+        }).readSession(sessionId)
+      ).resolves.toMatchObject({
+        sessionId
+      });
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(roleModelProviderEnvName, previousProvider);
+      restoreProcessEnvValue(nvidiaApiKeyEnvName, previousApiKey);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
   it('loads the runtime store env before selecting the default chat provider', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-provider-env-'));
     const sessionId = 'runtime-env-provider';

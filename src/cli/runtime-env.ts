@@ -72,6 +72,19 @@ export function readDefaultDotEnvFile(): NodeJS.ProcessEnv {
   }
 }
 
+export function shouldReadDefaultDotEnvForRuntimeLocation(options: {
+  readonly location: { readonly configPath?: string; readonly storeRoot?: string };
+  readonly env?: NodeJS.ProcessEnv;
+}): boolean {
+  const env = options.env ?? process.env;
+
+  return (
+    options.location.configPath === undefined &&
+    options.location.storeRoot === undefined &&
+    !runtimeConfigEnvSelectsConfig(env)
+  );
+}
+
 export function defaultDotEnvForRuntimeLocation(
   defaultEnv: NodeJS.ProcessEnv,
   location: { readonly configPath?: string; readonly storeRoot?: string }
@@ -86,4 +99,8 @@ export function defaultDotEnvForRuntimeLocation(
   const env = { ...defaultEnv };
   Reflect.deleteProperty(env, runtimeConfigEnvVarName);
   return env;
+}
+
+function runtimeConfigEnvSelectsConfig(env: NodeJS.ProcessEnv): boolean {
+  return (env[runtimeConfigEnvVarName]?.trim().length ?? 0) > 0;
 }

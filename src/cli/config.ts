@@ -9,7 +9,6 @@ import {
   loadProject02RuntimeConfig,
   resolveConfiguredProject02PluginActivation,
   RuntimeConfigMutationError,
-  runtimeConfigEnvVarName,
   type LoadedProject02RuntimeConfig,
   type RuntimePluginFactory,
   type RuntimeConfigMutationOperation,
@@ -30,7 +29,8 @@ import {
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
   runtimeConfigEnvPathForLocation,
-  RuntimeEnvFileError
+  RuntimeEnvFileError,
+  shouldReadDefaultDotEnvForRuntimeLocation
 } from './runtime-env.ts';
 
 type RuntimeConfigCliOptions = {
@@ -288,14 +288,11 @@ function shouldReadDefaultDotEnvForCommand(
   const command = parsedArgs.commandArgs[0];
 
   if (!hasExplicitRuntimeLocation(parsedArgs.location)) {
-    const suppliedRuntimeConfigPath = suppliedEnv[runtimeConfigEnvVarName];
-
-    if (
-      (command === 'path' || command === 'env-path') &&
-      suppliedRuntimeConfigPath !== undefined &&
-      suppliedRuntimeConfigPath.trim().length > 0
-    ) {
-      return false;
+    if (command === 'path' || command === 'env-path' || command === 'check') {
+      return shouldReadDefaultDotEnvForRuntimeLocation({
+        location: parsedArgs.location,
+        env: suppliedEnv
+      });
     }
 
     return true;

@@ -39,7 +39,6 @@ import {
   type RuntimePluginFactory
 } from '../runtime/config/index.ts';
 import {
-  hasExplicitRuntimeLocation,
   parseRuntimeLocationFlag,
   RuntimeLocationCliUsageError,
   type RuntimeLocationCliState
@@ -48,7 +47,8 @@ import {
   defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
-  RuntimeEnvFileError
+  RuntimeEnvFileError,
+  shouldReadDefaultDotEnvForRuntimeLocation
 } from './runtime-env.ts';
 
 type InspectCliOptions = {
@@ -318,7 +318,11 @@ export async function runInspectCliFromArgs(
     const parsedArgs = parseInspectCliArgs(args);
     validateInspectCliArgs(parsedArgs);
     const defaultEnv =
-      explicitEnv === undefined && !hasExplicitRuntimeLocation(parsedArgs)
+      explicitEnv === undefined &&
+      shouldReadDefaultDotEnvForRuntimeLocation({
+        location: parsedArgs,
+        env: process.env
+      })
         ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), parsedArgs)
         : undefined;
     const runtimeOptions = {

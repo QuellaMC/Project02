@@ -345,6 +345,74 @@ describe('inspect CLI plugin evidence', () => {
     }
   });
 
+  it('uses a process-env selected runtime config before reading an unrelated cwd dotenv', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-inspect-env-cwd-dotenv-error-')
+    );
+    const selectedStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-inspect-env-selected-store-')
+    );
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-inspect-env-selected-config-')
+    );
+    const configPath = writeRuntimeConfig(
+      join(configRoot, 'runtime-config.json'),
+      {
+        storeRoot: selectedStoreRoot
+      }
+    );
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let stdout = '';
+    let stderr = '';
+
+    mkdirSync(join(cwdRoot, '.env'));
+    await createLocalRuntimeSessionStore({
+      storeRoot: selectedStoreRoot
+    }).createSession({
+      sessionId: 'session-env-selected-before-cwd-dotenv',
+      createdAt: '2026-06-22T00:00:00.000Z'
+    });
+
+    try {
+      process.env[runtimeConfigEnvVarName] = configPath;
+      process.chdir(cwdRoot);
+
+      const exitCode = await runInspectCliFromArgs(['--sessions'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      });
+      const output = JSON.parse(stdout) as {
+        readonly runtimeConfig: {
+          readonly source: string;
+          readonly path: string;
+          readonly storeRoot: string;
+        };
+        readonly sessions: readonly { readonly sessionId: string }[];
+      };
+
+      expect(exitCode).toBe(0);
+      expect(stderr).toBe('');
+      expect(output.runtimeConfig).toMatchObject({
+        source: 'env',
+        path: configPath,
+        storeRoot: selectedStoreRoot
+      });
+      expect(output.sessions).toContainEqual(
+        expect.objectContaining({
+          sessionId: 'session-env-selected-before-cwd-dotenv'
+        })
+      );
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
   it('uses custom plugin factories for inspect activation output', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-factory-'));
     const plugin = createInspectFixturePlugin();

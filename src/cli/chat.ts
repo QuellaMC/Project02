@@ -71,7 +71,6 @@ import {
   type LocalRuntimeTerminalError
 } from '../runtime/terminal-errors.ts';
 import {
-  hasExplicitRuntimeLocation,
   parseRuntimeLocationFlag,
   RuntimeLocationCliUsageError,
   type RuntimeLocationCliState
@@ -80,7 +79,8 @@ import {
   defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
-  RuntimeEnvFileError
+  RuntimeEnvFileError,
+  shouldReadDefaultDotEnvForRuntimeLocation
 } from './runtime-env.ts';
 
 type ChatCliOptions = {
@@ -192,7 +192,11 @@ export async function runChatCliFromArgs(
         : options.env;
     const parsedArgs = parseChatCliArgs(args);
     const defaultEnv =
-      explicitEnv === undefined && !hasExplicitRuntimeLocation(parsedArgs)
+      explicitEnv === undefined &&
+      shouldReadDefaultDotEnvForRuntimeLocation({
+        location: parsedArgs,
+        env: process.env
+      })
         ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), parsedArgs)
         : undefined;
     const baseEnv = explicitEnv ?? { ...(defaultEnv ?? {}), ...process.env };

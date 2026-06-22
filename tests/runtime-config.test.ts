@@ -4944,6 +4944,69 @@ describe('runtime config CLI', () => {
     }
   });
 
+  it('reports env-selected check config load errors before unrelated cwd dotenv errors', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-env-cwd-dotenv-error-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-env-selected-store-error-')
+    );
+    const configPath = defaultRuntimeConfigPath(storeRoot);
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(configPath, {
+      storeRoot: 42
+    });
+    mkdirSync(join(cwdRoot, '.env'));
+
+    try {
+      process.env[runtimeConfigEnvVarName] = configPath;
+      process.chdir(cwdRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['check'], {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        })
+      ).toBe(1);
+
+      const output = JSON.parse(stdout) as {
+        readonly runtimeConfig: {
+          readonly diagnostics: readonly {
+            readonly code: string;
+            readonly path?: string;
+          }[];
+        };
+        readonly activationDiagnostics: readonly {
+          readonly code: string;
+          readonly path?: string;
+        }[];
+      };
+
+      expect(stderr).toBe('');
+      expect(output.runtimeConfig.diagnostics[0]).toMatchObject({
+        code: 'runtime_config_string_invalid',
+        path: 'storeRoot'
+      });
+      expect(output.activationDiagnostics[0]).toMatchObject({
+        code: 'runtime_config_string_invalid',
+        path: 'storeRoot'
+      });
+      expect(stdout).not.toContain('Could not load .env file');
+      expect(stderr).not.toContain('Could not load .env file');
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
   it('resolves check secrets from each runtime env file without leaking to later stores', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-check-env-'));
     const laterStoreRoot = mkdtempSync(
