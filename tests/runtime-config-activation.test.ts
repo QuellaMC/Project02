@@ -587,6 +587,271 @@ describe('runtime config activation diagnostics', () => {
     expect(stdout).not.toContain('duplicate-manifest-secret');
   });
 
+  it('keeps unreferenced default-disabled duplicate manifest ids passing check', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-duplicate-default-disabled-')
+    );
+    const firstPlugin = firstPartyPlugin('optional.duplicate', {
+      defaultEnabled: false
+    });
+    const secondPlugin = firstPartyPlugin('optional.duplicate', {
+      defaultEnabled: false
+    });
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          'optional.duplicate.primary': {
+            manifest: firstPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'inactive duplicate manifest check must not construct factories'
+              );
+            }
+          },
+          'optional.duplicate.secondary': {
+            manifest: secondPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'inactive duplicate manifest check must not construct factories'
+              );
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_duplicate_plugin_manifest_id'
+    );
+    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
+    expect(output.plugins.map((plugin) => plugin.activationStatus)).toEqual([
+      'disabled',
+      'disabled'
+    ]);
+  });
+
+  it('keeps explicitly disabled duplicate manifest ids passing check', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-duplicate-disabled-')
+    );
+    const firstPlugin = firstPartyPlugin('disabled.duplicate');
+    const secondPlugin = firstPartyPlugin('disabled.duplicate');
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'disabled.duplicate': {
+          enabled: false
+        }
+      }
+    });
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          'disabled.duplicate.primary': {
+            manifest: firstPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'disabled duplicate manifest check must not construct factories'
+              );
+            }
+          },
+          'disabled.duplicate.secondary': {
+            manifest: secondPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'disabled duplicate manifest check must not construct factories'
+              );
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_duplicate_plugin_manifest_id'
+    );
+    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
+    expect(output.plugins.map((plugin) => plugin.activationStatus)).toEqual([
+      'disabled',
+      'disabled'
+    ]);
+  });
+
+  it('keeps unselected duplicate memory providers passing check', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-duplicate-memory-unselected-')
+    );
+    const envVar = 'PROJECT02_SELECTED_MEMORY_DUPLICATE_SECRET_3450063170';
+    const selectedPlugin = requiredSecretPlugin('memory.selected');
+    const firstUnselectedPlugin = requiredSecretPlugin('memory.unselected');
+    const secondUnselectedPlugin = requiredSecretPlugin('memory.unselected');
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: 'memory.selected',
+      plugins: {
+        'memory.selected': {
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        env: {
+          [envVar]: 'selected-memory-secret'
+        },
+        factories: {
+          'memory.selected': {
+            manifest: selectedPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error('runtime-config check must not construct factories');
+            }
+          },
+          'memory.unselected.primary': {
+            manifest: firstUnselectedPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'unselected duplicate manifest check must not construct factories'
+              );
+            }
+          },
+          'memory.unselected.secondary': {
+            manifest: secondUnselectedPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'unselected duplicate manifest check must not construct factories'
+              );
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_duplicate_plugin_manifest_id'
+    );
+    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([
+      expect.objectContaining({
+        pluginId: 'memory.selected'
+      })
+    ]);
+    expect(
+      output.plugins
+        .filter((plugin) => plugin.pluginId === 'memory.unselected')
+        .map((plugin) => plugin.activationStatus)
+    ).toEqual(['disabled', 'disabled']);
+  });
+
+  it('fails check for config-enabled default-disabled duplicate manifest ids', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-duplicate-enabled-')
+    );
+    const firstPlugin = firstPartyPlugin('selected.duplicate', {
+      defaultEnabled: false
+    });
+    const secondPlugin = firstPartyPlugin('selected.duplicate', {
+      defaultEnabled: false
+    });
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'selected.duplicate': {
+          enabled: true
+        }
+      }
+    });
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          'selected.duplicate.primary': {
+            manifest: firstPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'active duplicate manifest check must not construct factories'
+              );
+            }
+          },
+          'selected.duplicate.secondary': {
+            manifest: secondPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'active duplicate manifest check must not construct factories'
+              );
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(1);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_duplicate_plugin_manifest_id',
+          path: 'plugins.selected.duplicate',
+          pluginId: 'selected.duplicate'
+        })
+      ])
+    );
+    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
+  });
+
   it('skips unselected legacy function factories during host preparation', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-unselected-legacy-host-')

@@ -207,7 +207,7 @@ function parseRuntimeConfigCliArgs(args: readonly string[]): RuntimeConfigCliPar
     }
 
     if (arg === '--') {
-      commandArgs.push(...args.slice(index + 1));
+      commandArgs.push(...runtimeConfigCommandArgsFrom(args, index + 1));
       break;
     }
 
@@ -219,13 +219,39 @@ function parseRuntimeConfigCliArgs(args: readonly string[]): RuntimeConfigCliPar
       continue;
     }
 
-    commandArgs.push(arg);
+    commandArgs.push(...runtimeConfigCommandArgsFrom(args, index));
+    break;
   }
 
   return {
     location,
     commandArgs
   };
+}
+
+function runtimeConfigCommandArgsFrom(
+  args: readonly string[],
+  startIndex: number
+): string[] {
+  const commandArgs: string[] = [];
+  let delimiterConsumed = false;
+
+  for (let index = startIndex; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === undefined) {
+      continue;
+    }
+
+    if (!delimiterConsumed && arg === '--') {
+      delimiterConsumed = true;
+      continue;
+    }
+
+    commandArgs.push(arg);
+  }
+
+  return commandArgs;
 }
 
 function runtimeConfigCliEnvForLocation(options: {
@@ -271,11 +297,7 @@ function checkDefaultEnvForLocation(options: {
     return options.cliEnv.defaultEnv;
   }
 
-  if (options.cliEnv.suppliedEnv !== process.env) {
-    return {};
-  }
-
-  return defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), options.location);
+  return {};
 }
 
 function parseRuntimeConfigCommand(

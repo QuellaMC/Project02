@@ -2227,6 +2227,32 @@ describe('runtime config CLI', () => {
     });
   });
 
+  it('rejects location flags after runtime-config command operands have started', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-late-location-store-')
+    );
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['set', 'plugins.foo.config.prompt', 'hello', '--store', storeRoot],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        }
+      )
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toBe('Error: set does not accept extra arguments.\n');
+    expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+  });
+
   it.each([
     {
       label: 'explicit --config',
@@ -4903,10 +4929,11 @@ describe('runtime config CLI', () => {
     }
   });
 
-  it('uses cwd dotenv defaults for runtime config check secrets', async () => {
+  it('uses cwd dotenv defaults for unflagged runtime config check secrets', async () => {
     const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-config-check-cwd-env-'));
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-check-cwd-store-'));
     const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     const envVar = 'PROJECT02_CHECK_CWD_DOTENV_SECRET_3449004103';
     const previousEnvValue = process.env[envVar];
     const secretValue = 'from-cwd-dotenv';
@@ -4925,13 +4952,18 @@ describe('runtime config CLI', () => {
         }
       }
     });
-    writeFileSync(join(cwdRoot, '.env'), `${envVar}="${secretValue}"\n`, 'utf8');
+    writeFileSync(
+      join(cwdRoot, '.env'),
+      `${runtimeConfigEnvVarName}=${join(storeRoot, 'config.json')}\n${envVar}="${secretValue}"\n`,
+      'utf8'
+    );
 
     try {
+      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
       process.chdir(cwdRoot);
 
       expect(
-        await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        await runRuntimeConfigCliFromArgs(['check'], {
           stdout: collect((chunk) => {
             stdout += chunk;
           }),
@@ -4970,6 +5002,71 @@ describe('runtime config CLI', () => {
       );
       expect(stdout).not.toContain(secretValue);
       expect(process.env[envVar]).toBeUndefined();
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+      restoreProcessEnvValue(envVar, previousEnvValue);
+    }
+  });
+
+  it('does not use cwd dotenv secrets for explicit runtime config check locations', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-explicit-cwd-env-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-explicit-store-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const previousCwd = process.cwd();
+    const envVar = 'PROJECT02_CHECK_EXPLICIT_CWD_DOTENV_SECRET_3450049746';
+    const previousEnvValue = process.env[envVar];
+    const plugin = requiredSecretPlugin();
+
+    Reflect.deleteProperty(process.env, envVar);
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+    writeFileSync(join(cwdRoot, '.env'), `${envVar}="from-cwd-dotenv"\n`, 'utf8');
+
+    try {
+      process.chdir(cwdRoot);
+
+      for (const args of [
+        ['--store', storeRoot, 'check'],
+        ['--config', configPath, 'check']
+      ] as const) {
+        let stdout = '';
+        let factoryCalls = 0;
+
+        expect(
+          await runRuntimeConfigCliFromArgs(args, {
+            stdout: collect((chunk) => {
+              stdout += chunk;
+            }),
+            stderr: collect(() => {}),
+            factories: {
+              [plugin.manifest.id]: {
+                manifest: plugin.manifest,
+                create() {
+                  factoryCalls += 1;
+                  throw new Error('runtime-config check should not construct plugins');
+                }
+              }
+            }
+          })
+        ).toBe(1);
+
+        expect(factoryCalls).toBe(0);
+        expect(stdout).toContain('runtime_config_required_secret_missing');
+        expect(stdout).not.toContain('from-cwd-dotenv');
+      }
     } finally {
       process.chdir(previousCwd);
       restoreProcessEnvValue(envVar, previousEnvValue);

@@ -283,18 +283,12 @@ export function resolveRuntimePluginActivation(options: {
   const pluginManifests =
     options.pluginManifests ?? options.plugins?.map((plugin) => plugin.manifest) ?? [];
   const config = options.loadedConfig.config;
-  const duplicateManifestDiagnostics =
-    duplicatePluginManifestIdDiagnostics({
-      pluginManifests,
-      reservedPluginIds: [runtimePluginDiscoveryPluginId]
-    });
   const pluginIds = new Set([
     ...pluginManifests.map((manifest) => manifest.id),
     ...(options.additionalKnownPluginIds ?? []),
     ...(options.disabledKnownPluginIds ?? [])
   ]);
-  const diagnostics: RuntimeConfigDiagnostic[] = [
-    ...duplicateManifestDiagnostics,
+  const baseDiagnostics: readonly RuntimeConfigDiagnostic[] = Object.freeze([
     ...unknownPluginDiagnostics({
       knownPluginIds: pluginIds,
       loadedPluginIds: Object.keys(config?.plugins ?? {}),
@@ -309,21 +303,16 @@ export function resolveRuntimePluginActivation(options: {
       legacyFactoryIds: options.uncheckedLegacyFactoryIds ?? []
     }),
     ...options.resolvedConfig.diagnostics
-  ];
+  ]);
   const loadedConfigHasErrors = diagnosticsHaveErrors(options.loadedConfig.diagnostics);
   const globalConfigErrors = hasGlobalRuntimeConfigErrors({
-    diagnostics,
+    diagnostics: baseDiagnostics,
     knownPluginIds: pluginIds
   });
   const enabledPluginIds: string[] = [];
   const disabledPluginIds: string[] = [];
   const snapshots: RuntimePluginActivationSnapshot[] = [];
-  const preliminaryDecisions = new Map<
-    string,
-    ReturnType<typeof activationDecision>
-  >();
-
-  for (const manifest of pluginManifests) {
+  const preliminaryDecisions = pluginManifests.map((manifest) => {
     const configured = config?.plugins?.[manifest.id];
     const legacyEnabled =
       config?.enabledPlugins?.includes(manifest.id) === true;
@@ -331,18 +320,60 @@ export function resolveRuntimePluginActivation(options: {
       loadedConfigHasErrors ||
       globalConfigErrors ||
       pluginHasRuntimeConfigErrors({
-        diagnostics,
+        diagnostics: baseDiagnostics,
         pluginId: manifest.id
       });
-    const decision = activationDecision({
-      configuredEnabled: configured?.enabled,
-      legacyEnabled,
-      defaultEnabled: manifest.activation.defaultEnabled,
-      configErrors
-    });
 
-    preliminaryDecisions.set(manifest.id, decision);
-  }
+    return Object.freeze({
+      manifest,
+      duplicateCandidateDecision: activationDecision({
+        configuredEnabled: configured?.enabled,
+        legacyEnabled,
+        defaultEnabled: manifest.activation.defaultEnabled,
+        configErrors: false
+      }),
+      decision: activationDecision({
+        configuredEnabled: configured?.enabled,
+        legacyEnabled,
+        defaultEnabled: manifest.activation.defaultEnabled,
+        configErrors
+      })
+    });
+  });
+  const duplicateCandidateMemoryProviderDecision = defaultMemoryProviderDecision({
+    ...(config?.defaultMemoryProvider === undefined
+      ? {}
+      : { configDefaultMemoryProvider: config.defaultMemoryProvider }),
+    pluginManifests,
+    memoryProviderManifests: pluginManifests.filter(
+      (manifest) => manifest.kind === 'memory_provider'
+    ),
+    enabledPluginManifests: preliminaryDecisions
+      .filter((preliminary) => preliminary.duplicateCandidateDecision.enabled)
+      .map((preliminary) => preliminary.manifest),
+    disabledKnownPluginIds: options.disabledKnownPluginIds ?? []
+  });
+  const duplicateManifestDiagnostics =
+    duplicatePluginManifestIdDiagnostics({
+      pluginManifests: preliminaryDecisions
+        .filter((preliminary) => {
+          const decision = duplicateCandidateMemoryProviderDecision.ambiguous
+            ? preliminary.duplicateCandidateDecision
+            : finalizeMemoryProviderActivation({
+                manifest: preliminary.manifest,
+                decision: preliminary.duplicateCandidateDecision,
+                memoryProviderDecision: duplicateCandidateMemoryProviderDecision
+              });
+
+          return decision.enabled;
+        })
+        .map((preliminary) => preliminary.manifest),
+      reservedPluginIds: [runtimePluginDiscoveryPluginId]
+    });
+  const diagnostics: RuntimeConfigDiagnostic[] = [
+    ...duplicateManifestDiagnostics,
+    ...baseDiagnostics
+  ];
 
   const memoryProviderDecision = defaultMemoryProviderDecision({
     ...(config?.defaultMemoryProvider === undefined
@@ -352,25 +383,20 @@ export function resolveRuntimePluginActivation(options: {
     memoryProviderManifests: pluginManifests.filter(
       (manifest) => manifest.kind === 'memory_provider'
     ),
-    enabledPluginManifests: pluginManifests.filter(
-      (manifest) => preliminaryDecisions.get(manifest.id)?.enabled === true
-    ),
+    enabledPluginManifests: preliminaryDecisions
+      .filter((preliminary) => preliminary.decision.enabled)
+      .map((preliminary) => preliminary.manifest),
     disabledKnownPluginIds: options.disabledKnownPluginIds ?? []
   });
 
   diagnostics.push(...memoryProviderDecision.diagnostics);
   const activationConfigErrors = diagnosticsHaveErrors(diagnostics);
 
-  for (const manifest of pluginManifests) {
-    const preliminaryDecision = preliminaryDecisions.get(manifest.id);
+  for (const preliminaryDecision of preliminaryDecisions) {
+    const manifest = preliminaryDecision.manifest;
     const memoryDecision = finalizeMemoryProviderActivation({
       manifest,
-      decision: preliminaryDecision ?? activationDecision({
-        configuredEnabled: undefined,
-        legacyEnabled: false,
-        defaultEnabled: false,
-        configErrors: true
-      }),
+      decision: preliminaryDecision.decision,
       memoryProviderDecision
     });
     const decision = blockActivationAfterRuntimeConfigErrors({
