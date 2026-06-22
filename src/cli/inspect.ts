@@ -39,6 +39,7 @@ import {
   type RuntimePluginFactory
 } from '../runtime/config/index.ts';
 import {
+  hasExplicitRuntimeLocation,
   parseRuntimeLocationFlag,
   RuntimeLocationCliUsageError,
   type RuntimeLocationCliState
@@ -314,23 +315,20 @@ export async function runInspectCliFromArgs(
       options.env === undefined || options.env === process.env
         ? undefined
         : options.env;
-    const defaultEnv =
-      explicitEnv === undefined ? readDefaultDotEnvFile() : undefined;
     const parsedArgs = parseInspectCliArgs(args);
-    const defaultEnvForLocation = defaultDotEnvForRuntimeLocation(
-      defaultEnv ?? {},
-      parsedArgs
-    );
+    validateInspectCliArgs(parsedArgs);
+    const defaultEnv =
+      explicitEnv === undefined && !hasExplicitRuntimeLocation(parsedArgs)
+        ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), parsedArgs)
+        : undefined;
     const runtimeOptions = {
-      configEnv: explicitEnv ?? { ...defaultEnvForLocation, ...process.env },
+      configEnv: explicitEnv ?? { ...(defaultEnv ?? {}), ...process.env },
       runtimeEnv: explicitEnv ?? process.env,
       ...(defaultEnv === undefined
         ? {}
-        : { runtimeEnvDefaults: defaultEnvForLocation }),
+        : { runtimeEnvDefaults: defaultEnv }),
       ...(options.factories === undefined ? {} : { factories: options.factories })
     } satisfies InspectRuntimeOptions;
-
-    validateInspectCliArgs(parsedArgs);
 
     if (parsedArgs.mode === 'sessions') {
       await writeSessionList(parsedArgs, options.stdout, runtimeOptions);

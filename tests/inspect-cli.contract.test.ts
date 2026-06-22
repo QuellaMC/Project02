@@ -289,6 +289,62 @@ describe('inspect CLI plugin evidence', () => {
     }
   });
 
+  it('uses an explicit store before reading an unrelated cwd dotenv', async () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-cwd-dotenv-error-'));
+    const selectedStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-inspect-selected-dotenv-error-')
+    );
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let stdout = '';
+    let stderr = '';
+
+    mkdirSync(join(cwdRoot, '.env'));
+    await createLocalRuntimeSessionStore({ storeRoot: selectedStoreRoot }).createSession({
+      sessionId: 'session-selected-before-cwd-dotenv',
+      createdAt: '2026-06-21T00:00:00.000Z'
+    });
+
+    try {
+      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
+      process.chdir(cwdRoot);
+
+      const exitCode = await runInspectCliFromArgs(
+        ['--store', selectedStoreRoot, '--sessions'],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        }
+      );
+      const output = JSON.parse(stdout) as {
+        readonly runtimeConfig: {
+          readonly source: string;
+          readonly storeRoot: string;
+        };
+        readonly sessions: readonly { readonly sessionId: string }[];
+      };
+
+      expect(exitCode).toBe(0);
+      expect(stderr).toBe('');
+      expect(output.runtimeConfig).toMatchObject({
+        source: 'none',
+        storeRoot: selectedStoreRoot
+      });
+      expect(output.sessions).toContainEqual(
+        expect.objectContaining({
+          sessionId: 'session-selected-before-cwd-dotenv'
+        })
+      );
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
   it('uses custom plugin factories for inspect activation output', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-factory-'));
     const plugin = createInspectFixturePlugin();

@@ -20,6 +20,13 @@ export class RuntimeLocationCliUsageError extends Error {
   }
 }
 
+export function hasExplicitRuntimeLocation(location: {
+  readonly storeRoot?: string;
+  readonly configPath?: string;
+}): boolean {
+  return location.configPath !== undefined || location.storeRoot !== undefined;
+}
+
 export function parseRuntimeLocationFlag(options: {
   readonly args: readonly string[];
   readonly index: number;

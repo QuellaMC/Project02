@@ -19,6 +19,7 @@ import {
   isLocalRuntimeTerminalError
 } from '../runtime/terminal-errors.ts';
 import {
+  hasExplicitRuntimeLocation,
   parseRuntimeLocationFlag,
   RuntimeLocationCliUsageError,
   type RuntimeLocationCliState
@@ -110,7 +111,10 @@ function runRuntimeConfigCliFromArgsSync(
               ? {}
               : { storeRoot: parsed.location.storeRoot }),
             env: cliEnv.suppliedEnv,
-            envDefaults: cliEnv.defaultEnv
+            envDefaults: checkDefaultEnvForLocation({
+              cliEnv,
+              location: parsed.location
+            })
           });
       const configured = resolveConfiguredProject02PluginActivation({
         loadedConfig: loaded,
@@ -256,11 +260,22 @@ function shouldReadDefaultDotEnvForCommand(
 
   const command = parsedArgs.commandArgs[0];
 
-  return command === 'check' || command === 'secret';
+  return command === 'secret';
 }
 
-function hasExplicitRuntimeLocation(location: RuntimeLocationCliState): boolean {
-  return location.configPath !== undefined || location.storeRoot !== undefined;
+function checkDefaultEnvForLocation(options: {
+  readonly cliEnv: ReturnType<typeof runtimeConfigCliEnvForLocation>;
+  readonly location: RuntimeLocationCliState;
+}): NodeJS.ProcessEnv {
+  if (!hasExplicitRuntimeLocation(options.location)) {
+    return options.cliEnv.defaultEnv;
+  }
+
+  if (options.cliEnv.suppliedEnv !== process.env) {
+    return {};
+  }
+
+  return defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), options.location);
 }
 
 function parseRuntimeConfigCommand(

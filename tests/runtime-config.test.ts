@@ -123,6 +123,39 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
+  it('infers store root from canonical symlink targets for store-default configs selected by path or env', () => {
+    const targetStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-store-default-link-target-')
+    );
+    const linkStoreRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-store-default-link-selected-')
+    );
+    const seededStoreRoot = realpathSync.native(targetStoreRoot);
+    const targetConfigPath = defaultRuntimeConfigPath(targetStoreRoot);
+    const linkConfigPath = defaultRuntimeConfigPath(linkStoreRoot);
+
+    writeRuntimeConfig(targetConfigPath, {});
+    symlinkSync(targetConfigPath, linkConfigPath);
+
+    const explicitLoaded = loadProject02RuntimeConfig({
+      configPath: linkConfigPath
+    });
+    const envLoaded = loadProject02RuntimeConfig({
+      env: {
+        [runtimeConfigEnvVarName]: linkConfigPath
+      }
+    });
+
+    expect(explicitLoaded.config?.storeRoot).toBeUndefined();
+    expect(envLoaded.config?.storeRoot).toBeUndefined();
+    expect(
+      resolveProject02RuntimeConfig({ loadedConfig: explicitLoaded }).storeRoot
+    ).toBe(seededStoreRoot);
+    expect(resolveProject02RuntimeConfig({ loadedConfig: envLoaded }).storeRoot).toBe(
+      seededStoreRoot
+    );
+  });
+
   it('rejects unknown top-level config fields and blocks default activation', async () => {
     const configPath = writeRuntimeConfig(
       join(mkdtempSync(join(tmpdir(), 'project02-config-unknown-root-')), 'config.json'),
@@ -2328,6 +2361,84 @@ describe('runtime config CLI', () => {
       expect(readlinkSync(linkPath)).toBe(targetName);
       expect(JSON.parse(readFileSync(targetPath, 'utf8')) as unknown).toEqual({
         version: runtimeConfigVersion,
+        plugins: {
+          foo: {
+            config: {
+              backend: 'remote'
+            }
+          }
+        }
+      });
+    }
+  );
+
+  it.each([
+    {
+      label: 'explicit --config',
+      args(configPath: string) {
+        return [
+          '--config',
+          configPath,
+          'set',
+          'plugins.foo.config.backend',
+          'remote'
+        ] as const;
+      },
+      env(configPath: string) {
+        void configPath;
+        return {};
+      }
+    },
+    {
+      label: 'PROJECT02_RUNTIME_CONFIG',
+      args() {
+        return ['set', 'plugins.foo.config.backend', 'remote'] as const;
+      },
+      env(configPath: string) {
+        return {
+          [runtimeConfigEnvVarName]: configPath
+        };
+      }
+    }
+  ])(
+    'bootstraps symlinked store-default configs from canonical target store roots for $label mutations',
+    async (example) => {
+      const targetStoreRoot = mkdtempSync(
+        join(tmpdir(), 'project02-config-link-default-target-')
+      );
+      const linkStoreRoot = mkdtempSync(
+        join(tmpdir(), 'project02-config-link-default-selected-')
+      );
+      const seededStoreRoot = realpathSync.native(targetStoreRoot);
+      const targetConfigPath = defaultRuntimeConfigPath(targetStoreRoot);
+      const linkConfigPath = defaultRuntimeConfigPath(linkStoreRoot);
+      let stdout = '';
+
+      symlinkSync(targetConfigPath, linkConfigPath);
+
+      expect(existsSync(linkConfigPath)).toBe(false);
+      expect(existsSync(targetConfigPath)).toBe(false);
+      expect(lstatSync(linkConfigPath).isSymbolicLink()).toBe(true);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(example.args(linkConfigPath), {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {}),
+          env: example.env(linkConfigPath)
+        })
+      ).toBe(0);
+
+      expect(JSON.parse(stdout) as unknown).toMatchObject({
+        configPath: linkConfigPath,
+        envPath: join(seededStoreRoot, '.env')
+      });
+      expect(lstatSync(linkConfigPath).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(linkConfigPath)).toBe(targetConfigPath);
+      expect(JSON.parse(readFileSync(targetConfigPath, 'utf8')) as unknown).toEqual({
+        version: runtimeConfigVersion,
+        storeRoot: seededStoreRoot,
         plugins: {
           foo: {
             config: {
@@ -4615,6 +4726,78 @@ describe('runtime config CLI', () => {
     });
     expect(stdout).not.toContain('Could not load runtime config env file');
     expect(stderr).not.toContain('Could not load runtime config env file');
+  });
+
+  it('reports explicit check config load errors before unrelated cwd dotenv errors', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-cwd-dotenv-error-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-selected-store-error-')
+    );
+    const configPath = join(
+      mkdtempSync(join(tmpdir(), 'project02-config-check-selected-path-error-')),
+      'runtime.json'
+    );
+    const previousCwd = process.cwd();
+
+    writeRuntimeConfig(defaultRuntimeConfigPath(storeRoot), {
+      storeRoot: 42
+    });
+    writeRuntimeConfig(configPath, {
+      storeRoot: 42
+    });
+    mkdirSync(join(cwdRoot, '.env'));
+
+    try {
+      process.chdir(cwdRoot);
+
+      for (const example of [
+        ['--store', storeRoot, 'check'],
+        ['--config', configPath, 'check']
+      ] as const) {
+        let stdout = '';
+        let stderr = '';
+
+        expect(
+          await runRuntimeConfigCliFromArgs(example, {
+            stdout: collect((chunk) => {
+              stdout += chunk;
+            }),
+            stderr: collect((chunk) => {
+              stderr += chunk;
+            })
+          })
+        ).toBe(1);
+
+        const output = JSON.parse(stdout) as {
+          readonly runtimeConfig: {
+            readonly diagnostics: readonly {
+              readonly code: string;
+              readonly path?: string;
+            }[];
+          };
+          readonly activationDiagnostics: readonly {
+            readonly code: string;
+            readonly path?: string;
+          }[];
+        };
+
+        expect(stderr).toBe('');
+        expect(output.runtimeConfig.diagnostics[0]).toMatchObject({
+          code: 'runtime_config_string_invalid',
+          path: 'storeRoot'
+        });
+        expect(output.activationDiagnostics[0]).toMatchObject({
+          code: 'runtime_config_string_invalid',
+          path: 'storeRoot'
+        });
+        expect(stdout).not.toContain('Could not load .env file');
+        expect(stderr).not.toContain('Could not load .env file');
+      }
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 
   it('resolves check secrets from each runtime env file without leaking to later stores', async () => {

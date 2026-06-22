@@ -71,6 +71,7 @@ import {
   type LocalRuntimeTerminalError
 } from '../runtime/terminal-errors.ts';
 import {
+  hasExplicitRuntimeLocation,
   parseRuntimeLocationFlag,
   RuntimeLocationCliUsageError,
   type RuntimeLocationCliState
@@ -189,15 +190,12 @@ export async function runChatCliFromArgs(
       options.env === undefined || options.env === process.env
         ? undefined
         : options.env;
-    const defaultEnv =
-      explicitEnv === undefined ? readDefaultDotEnvFile() : undefined;
     const parsedArgs = parseChatCliArgs(args);
-    const defaultEnvForLocation = defaultDotEnvForRuntimeLocation(
-      defaultEnv ?? {},
-      parsedArgs
-    );
-    const baseEnv =
-      explicitEnv ?? { ...defaultEnvForLocation, ...process.env };
+    const defaultEnv =
+      explicitEnv === undefined && !hasExplicitRuntimeLocation(parsedArgs)
+        ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), parsedArgs)
+        : undefined;
+    const baseEnv = explicitEnv ?? { ...(defaultEnv ?? {}), ...process.env };
     const loadedConfig = loadProject02RuntimeConfig({
       ...parsedArgs,
       env: baseEnv
@@ -209,7 +207,7 @@ export async function runChatCliFromArgs(
       loadedConfig,
       ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot }),
       env: explicitEnv ?? process.env,
-      ...(defaultEnv === undefined ? {} : { envDefaults: defaultEnvForLocation })
+      ...(defaultEnv === undefined ? {} : { envDefaults: defaultEnv })
     });
     const selectedArgs = selectChatProvider(parsedArgs, runtimeEnv);
 

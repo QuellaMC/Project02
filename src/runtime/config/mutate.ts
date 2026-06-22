@@ -168,10 +168,11 @@ function bootstrapRuntimeConfig(options: {
 export function storeRootForSelectedDefaultConfigPath(
   selectedConfigPath: string
 ): string | undefined {
-  const candidateStoreRoot = dirname(selectedConfigPath);
+  const canonicalConfigPath = canonicalMutationPath(selectedConfigPath);
+  const candidateStoreRoot = dirname(canonicalConfigPath);
   const defaultConfigPath = defaultRuntimeConfigPath(candidateStoreRoot);
 
-  return pathsAlias(selectedConfigPath, defaultConfigPath)
+  return pathsAlias(canonicalConfigPath, defaultConfigPath)
     ? canonicalMutationPath(candidateStoreRoot)
     : undefined;
 }
