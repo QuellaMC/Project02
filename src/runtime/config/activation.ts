@@ -355,19 +355,10 @@ export function resolveRuntimePluginActivation(options: {
   });
   const duplicateManifestDiagnostics =
     duplicatePluginManifestIdDiagnostics({
-      pluginManifests: preliminaryDecisions
-        .filter((preliminary) => {
-          const decision = duplicateCandidateMemoryProviderDecision.ambiguous
-            ? preliminary.duplicateCandidateDecision
-            : finalizeMemoryProviderActivation({
-                manifest: preliminary.manifest,
-                decision: preliminary.duplicateCandidateDecision,
-                memoryProviderDecision: duplicateCandidateMemoryProviderDecision
-              });
-
-          return decision.enabled;
-        })
-        .map((preliminary) => preliminary.manifest),
+      pluginManifests: duplicateDiagnosticPluginManifests({
+        preliminaryDecisions,
+        memoryProviderDecision: duplicateCandidateMemoryProviderDecision
+      }),
       reservedPluginIds: [runtimePluginDiscoveryPluginId]
     });
   const diagnostics: RuntimeConfigDiagnostic[] = [
@@ -954,6 +945,36 @@ function activationDecision(options: {
     status: 'disabled',
     reasons: ['not_enabled']
   };
+}
+
+function duplicateDiagnosticPluginManifests(options: {
+  readonly preliminaryDecisions: readonly {
+    readonly manifest: RuntimePluginManifest;
+    readonly duplicateCandidateDecision: ReturnType<typeof activationDecision>;
+  }[];
+  readonly memoryProviderDecision: ReturnType<typeof defaultMemoryProviderDecision>;
+}): readonly RuntimePluginManifest[] {
+  const activePluginIds = new Set<string>();
+
+  for (const preliminary of options.preliminaryDecisions) {
+    const decision = options.memoryProviderDecision.ambiguous
+      ? preliminary.duplicateCandidateDecision
+      : finalizeMemoryProviderActivation({
+          manifest: preliminary.manifest,
+          decision: preliminary.duplicateCandidateDecision,
+          memoryProviderDecision: options.memoryProviderDecision
+        });
+
+    if (decision.enabled) {
+      activePluginIds.add(preliminary.manifest.id);
+    }
+  }
+
+  return Object.freeze(
+    options.preliminaryDecisions
+      .filter((preliminary) => activePluginIds.has(preliminary.manifest.id))
+      .map((preliminary) => preliminary.manifest)
+  );
 }
 
 function blockActivationAfterRuntimeConfigErrors(options: {

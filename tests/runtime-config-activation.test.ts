@@ -645,6 +645,65 @@ describe('runtime config activation diagnostics', () => {
     ]);
   });
 
+  it('fails check for mixed default-enabled duplicate manifest ids', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-duplicate-mixed-default-')
+    );
+    const firstPlugin = firstPartyPlugin('mixed.duplicate');
+    const secondPlugin = firstPartyPlugin('mixed.duplicate', {
+      defaultEnabled: false
+    });
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          'mixed.duplicate.primary': {
+            manifest: firstPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'mixed default duplicate manifest check must not construct factories'
+              );
+            }
+          },
+          'mixed.duplicate.secondary': {
+            manifest: secondPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'mixed default duplicate manifest check must not construct factories'
+              );
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(1);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_duplicate_plugin_manifest_id',
+          path: 'plugins.mixed.duplicate',
+          pluginId: 'mixed.duplicate'
+        })
+      ])
+    );
+    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
+  });
+
   it('keeps explicitly disabled duplicate manifest ids passing check', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-duplicate-disabled-')
