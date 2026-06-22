@@ -130,10 +130,15 @@ export function applyRuntimeConfigMutation(
       const rollbackError = restorePreviousConfigState(previousConfigState);
 
       if (rollbackError !== undefined) {
-        throw new AggregateError(
-          [error, rollbackError],
+        throw new RuntimeConfigMutationError(
           'Could not write runtime config secret and failed to roll back the config update.',
-          { cause: error }
+          {
+            cause: new AggregateError(
+              [error, rollbackError],
+              'Runtime config secret write failed and config rollback failed.',
+              { cause: error }
+            )
+          }
         );
       }
 
@@ -950,7 +955,7 @@ function parsePluginMutationPath(
   // Paths can contain `config` in both plugin IDs and field names; prefer known
   // plugin IDs before falling back to the legacy delimiter heuristic.
   const candidates = pluginPathCandidates(parts);
-  const contextCandidate = knownPluginPathCandidate(candidates, config);
+  const contextCandidate = knownPluginPathCandidate(candidates, path, config);
 
   if (contextCandidate !== undefined) {
     return contextCandidate;
@@ -1016,6 +1021,7 @@ function pluginPathCandidates(parts: readonly string[]): readonly ParsedPluginMu
 
 function knownPluginPathCandidate(
   candidates: readonly ParsedPluginMutationPath[],
+  path: string,
   config: Project02RuntimeConfig | undefined
 ): ParsedPluginMutationPath | undefined {
   if (config === undefined) {
@@ -1035,6 +1041,16 @@ function knownPluginPathCandidate(
     ) {
       selected = candidate;
     }
+  }
+
+  const knownCandidates = candidates.filter((candidate) =>
+    isKnownPluginId(config, candidate.pluginId)
+  );
+
+  if (knownCandidates.length > 1) {
+    throw new TypeError(
+      `Ambiguous runtime config plugin path: ${path}. Known plugin ids match multiple interpretations: ${knownCandidates.map((candidate) => candidate.pluginId).join(', ')}. Use plugin enable or secret set with an explicit plugin id to disambiguate.`
+    );
   }
 
   return selected;

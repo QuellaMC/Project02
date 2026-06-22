@@ -399,6 +399,55 @@ describe('chat CLI provider selection', () => {
     expect(stderr).toContain('Runtime config field must be a non-empty string.');
     expect(stderr).not.toContain('Could not load runtime config env file');
   });
+
+  it('reports activation config errors before runtime env file errors', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-chat-activation-before-env-')
+    );
+    const plugin = createRequiredConfigPlugin('chat.required-config');
+    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+    mkdirSync(layout.envPath);
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'activation-before-env'],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              throw new Error('chat startup should not construct invalid plugins');
+            }
+          }
+        }
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Runtime config activation failed');
+    expect(stderr).toContain('runtime_config_required_value_missing');
+    expect(stderr).toContain(`plugins.${plugin.manifest.id}.config.endpoint`);
+    expect(stderr).not.toContain('Could not load runtime config env file');
+    expect(existsSync(layout.sessionCatalogPath)).toBe(false);
+    expect(existsSync(layout.sessionsRoot)).toBe(false);
+  });
 });
 
 describe('chat CLI plugin lifecycle', () => {
@@ -1193,6 +1242,65 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
               redactionLabels: []
             })
           ]
+        };
+      }
+    }
+  });
+}
+
+function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
+  return createRuntimePlugin({
+    manifest: {
+      id: pluginId,
+      displayName: 'Required Config Fixture',
+      version: '1.0.0',
+      kind: 'memory_provider',
+      description: 'Test plugin with required non-secret config.',
+      contractVersion: runtimePluginContractVersion,
+      compatibility: {
+        hostContractVersions: [runtimePluginContractVersion],
+        sourceSystem: 'test'
+      },
+      declaredPlugins: ['on_session_end'],
+      config: {
+        fields: [
+          {
+            name: 'endpoint',
+            description: 'Required endpoint.',
+            required: true,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: []
+          }
+        ]
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'reject_tool_call',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: false,
+        reasons: ['test']
+      },
+      requestedApis: []
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      onSessionEnd() {
+        return {
+          status: 'completed',
+          evidence: []
         };
       }
     }

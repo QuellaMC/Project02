@@ -79,6 +79,7 @@ import {
   defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
+  resolveRuntimeConfigActivationBeforeEnvFile,
   RuntimeEnvFileError,
   shouldReadDefaultDotEnvForRuntimeLocation
 } from './runtime-env.ts';
@@ -206,6 +207,26 @@ export async function runChatCliFromArgs(
     });
 
     assertNoRuntimeConfigErrors(loadedConfig.diagnostics, 'Runtime config is invalid');
+
+    const activationBeforeEnv =
+      options.pluginHost === undefined
+        ? resolveRuntimeConfigActivationBeforeEnvFile({
+            loadedConfig,
+            ...(parsedArgs.storeRoot === undefined
+              ? {}
+              : { storeRoot: parsedArgs.storeRoot }),
+            env: baseEnv,
+            diagnoseUncheckedLegacyFactories: true,
+            ...(options.factories === undefined ? {} : { factories: options.factories })
+          })
+        : undefined;
+
+    if (activationBeforeEnv !== undefined) {
+      assertNoRuntimeConfigErrors(
+        activationBeforeEnv.activation.diagnostics,
+        'Runtime config activation failed'
+      );
+    }
 
     const runtimeEnv = loadRuntimeConfigEnvFile({
       loadedConfig,

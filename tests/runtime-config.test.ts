@@ -4258,6 +4258,63 @@ describe('runtime config CLI', () => {
     }
   });
 
+  it('rejects ambiguous known plugin config paths instead of preferring dotted plugin ids', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-known-ambiguous-config-')
+    );
+    const path = 'plugins.memory.config.enabled';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'plugin', 'enable', 'memory'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'plugin', 'enable', 'memory.config'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'set', path, 'true'], {
+        stdout: collect(() => {}),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      })
+    ).toBe(1);
+
+    expect(stderr).toContain('Ambiguous runtime config plugin path');
+    expect(stderr).toContain(path);
+    expect(stderr).toContain('memory');
+    expect(stderr).toContain('memory.config');
+
+    const config: unknown = JSON.parse(
+      readFileSync(join(storeRoot, 'config.json'), 'utf8')
+    );
+
+    expect(config).toMatchObject({
+      plugins: {
+        memory: {
+          enabled: true
+        },
+        'memory.config': {
+          enabled: true
+        }
+      }
+    });
+    expect(JSON.stringify(config)).not.toContain('"config":{"enabled"');
+  });
+
   it('sets, gets, unsets, and checks plugin config fields starting with config', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-leading-config-field-')
@@ -5235,6 +5292,61 @@ describe('runtime config CLI', () => {
     });
     expect(stdout).not.toContain('Could not load runtime config env file');
     expect(stderr).not.toContain('Could not load runtime config env file');
+  });
+
+  it('reports check activation config errors before runtime env file errors', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-activation-before-env-')
+    );
+    const plugin = requiredDottedConfigPlugin('memory.required-config', 'endpoint');
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+    mkdirSync(join(storeRoot, '.env'));
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              throw new Error('runtime-config check should not construct plugins');
+            }
+          }
+        }
+      })
+    ).toBe(1);
+
+    const output = JSON.parse(stdout) as {
+      readonly activationDiagnostics: readonly {
+        readonly code: string;
+        readonly path?: string;
+      }[];
+    };
+
+    expect(stderr).toBe('');
+    expect(output.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_required_value_missing',
+          path: `plugins.${plugin.manifest.id}.config.endpoint`
+        })
+      ])
+    );
+    expect(stdout).not.toContain('Could not load runtime config env file');
   });
 
   it('reports explicit check config load errors before unrelated cwd dotenv errors', async () => {

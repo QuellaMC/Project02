@@ -28,6 +28,7 @@ import {
   defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
+  resolveRuntimeConfigActivationBeforeEnvFile,
   runtimeConfigEnvPathForLocation,
   RuntimeEnvFileError,
   shouldReadDefaultDotEnvForRuntimeLocation
@@ -107,28 +108,37 @@ function runRuntimeConfigCliFromArgsSync(
         ...parsed.location,
         env: cliEnv.configEnv
       });
-      const effectiveEnv = diagnosticsHaveErrors(loaded.diagnostics)
-        ? cliEnv.configEnv
-        : loadRuntimeConfigEnvFile({
-            loadedConfig: loaded,
-            ...(parsed.location.storeRoot === undefined
-              ? {}
-              : { storeRoot: parsed.location.storeRoot }),
-            env: cliEnv.suppliedEnv,
-            envDefaults: checkDefaultEnvForLocation({
-              cliEnv,
-              location: parsed.location
-            })
-          });
-      const configured = resolveConfiguredProject02PluginActivation({
-        loadedConfig: loaded,
-        ...(parsed.location.storeRoot === undefined
-          ? {}
-          : { storeRoot: parsed.location.storeRoot }),
-        env: effectiveEnv,
-        diagnoseUncheckedLegacyFactories: true,
-        ...(options.factories === undefined ? {} : { factories: options.factories })
-      });
+      const configured =
+        resolveRuntimeConfigActivationBeforeEnvFile({
+          loadedConfig: loaded,
+          ...(parsed.location.storeRoot === undefined
+            ? {}
+            : { storeRoot: parsed.location.storeRoot }),
+          env: cliEnv.configEnv,
+          diagnoseUncheckedLegacyFactories: true,
+          ...(options.factories === undefined ? {} : { factories: options.factories })
+        }) ??
+        resolveConfiguredProject02PluginActivation({
+          loadedConfig: loaded,
+          ...(parsed.location.storeRoot === undefined
+            ? {}
+            : { storeRoot: parsed.location.storeRoot }),
+          env: diagnosticsHaveErrors(loaded.diagnostics)
+            ? cliEnv.configEnv
+            : loadRuntimeConfigEnvFile({
+                loadedConfig: loaded,
+                ...(parsed.location.storeRoot === undefined
+                  ? {}
+                  : { storeRoot: parsed.location.storeRoot }),
+                env: cliEnv.suppliedEnv,
+                envDefaults: checkDefaultEnvForLocation({
+                  cliEnv,
+                  location: parsed.location
+                })
+              }),
+          diagnoseUncheckedLegacyFactories: true,
+          ...(options.factories === undefined ? {} : { factories: options.factories })
+        });
 
       writeJson(options.stdout, {
         runtimeConfig: createRuntimeConfigInspectShape(configured.resolvedConfig),
@@ -173,6 +183,7 @@ function runRuntimeConfigCliFromArgsSync(
       error instanceof RuntimeLocationCliUsageError ||
       error instanceof RuntimeEnvFileError ||
       error instanceof RuntimeConfigMutationError ||
+      error instanceof AggregateError ||
       error instanceof TypeError ||
       isLocalRuntimeTerminalError(error)
     ) {
@@ -515,6 +526,7 @@ function formatTerminalErrorMessage(
     | RuntimeLocationCliUsageError
     | RuntimeEnvFileError
     | RuntimeConfigMutationError
+    | AggregateError
     | TypeError
     | Parameters<typeof formatLocalRuntimeTerminalError>[0]
 ): string {
@@ -523,6 +535,7 @@ function formatTerminalErrorMessage(
     error instanceof RuntimeLocationCliUsageError ||
     error instanceof RuntimeEnvFileError ||
     error instanceof RuntimeConfigMutationError ||
+    error instanceof AggregateError ||
     error instanceof TypeError
   ) {
     return error.message;

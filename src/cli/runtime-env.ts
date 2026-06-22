@@ -3,9 +3,14 @@ import { parseEnv } from 'node:util';
 
 import {
   defaultRuntimeConfigEnvPath,
+  diagnosticsHaveErrors,
+  resolveConfiguredProject02PluginActivation,
   runtimeConfigEnvVarName,
   storeRootForLoadedDefaultConfigPath,
-  type LoadedProject02RuntimeConfig
+  type LoadedProject02RuntimeConfig,
+  type Project02ConfiguredPluginActivation,
+  type RuntimeConfigDiagnostic,
+  type RuntimePluginFactory
 } from '../runtime/config/index.ts';
 
 export class RuntimeEnvFileError extends Error {
@@ -52,6 +57,46 @@ export function loadRuntimeConfigEnvFile(options: {
       }.`
     );
   }
+}
+
+export function resolveRuntimeConfigActivationBeforeEnvFile(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly storeRoot?: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly diagnoseUncheckedLegacyFactories?: boolean;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
+}): Project02ConfiguredPluginActivation | undefined {
+  const configured = resolveConfiguredProject02PluginActivation({
+    loadedConfig: options.loadedConfig,
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+    env: options.env,
+    diagnoseUncheckedLegacyFactories:
+      options.diagnoseUncheckedLegacyFactories === true,
+    ...(options.factories === undefined ? {} : { factories: options.factories })
+  });
+
+  return diagnosticsCanBypassRuntimeEnvFile(configured.activation.diagnostics)
+    ? configured
+    : undefined;
+}
+
+function diagnosticsCanBypassRuntimeEnvFile(
+  diagnostics: readonly RuntimeConfigDiagnostic[]
+): boolean {
+  return (
+    diagnosticsHaveErrors(diagnostics) &&
+    diagnostics.some(
+      (diagnostic) =>
+        diagnostic.severity === 'error' &&
+        !runtimeConfigDiagnosticRequiresEnvFile(diagnostic)
+    )
+  );
+}
+
+function runtimeConfigDiagnosticRequiresEnvFile(
+  diagnostic: RuntimeConfigDiagnostic
+): boolean {
+  return diagnostic.code === 'runtime_config_required_secret_missing';
 }
 
 export function readDefaultDotEnvFile(): NodeJS.ProcessEnv {
