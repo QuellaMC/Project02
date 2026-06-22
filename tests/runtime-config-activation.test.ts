@@ -190,6 +190,108 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
+  it('ignores explicitly disabled unknown plugin wrappers during strict activation', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-disabled-unknown-strict-')
+    );
+    const plugin = firstPartyPlugin('valid.runtime');
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        old: {
+          enabled: false
+        },
+        [plugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      strictUnknownPlugins: true,
+      factories: {
+        [plugin.manifest.id]: {
+          manifest: plugin.manifest,
+          create: () => plugin
+        }
+      }
+    });
+
+    expect(configured.activation.enabledPluginIds).toEqual([plugin.manifest.id]);
+    expect(configured.plugins.map((item) => item.manifest.id)).toEqual([
+      plugin.manifest.id
+    ]);
+    expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_unknown_plugin'
+    );
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: plugin.manifest.id,
+        enabled: true,
+        activationStatus: 'active'
+      })
+    );
+  });
+
+  it('keeps disabled unknown plugin wrappers strict when selected by enabledPlugins', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-disabled-unknown-enabled-list-')
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      enabledPlugins: ['old'],
+      plugins: {
+        old: {
+          enabled: false
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      strictUnknownPlugins: true
+    });
+
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_unknown_plugin'
+        })
+      ])
+    );
+  });
+
+  it('keeps disabled unknown plugin wrappers strict when selected by defaultMemoryProvider', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-disabled-unknown-default-memory-')
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      defaultMemoryProvider: 'old',
+      plugins: {
+        old: {
+          enabled: false
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      strictUnknownPlugins: true
+    });
+
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_unknown_plugin'
+        })
+      ])
+    );
+  });
+
   it('fails check when the default memory provider targets a disabled legacy function factory', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-legacy-disabled-default-')
