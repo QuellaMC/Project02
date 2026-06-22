@@ -21,6 +21,7 @@ import {
   type RuntimeConfigValue
 } from './types.ts';
 import {
+  defaultRuntimeConfigPath,
   loadProject02RuntimeConfig,
   validateProject02RuntimeConfig
 } from './load.ts';
@@ -78,9 +79,12 @@ export function applyRuntimeConfigMutation(
 
   const currentConfig =
     loaded.config ??
-    (options.storeRoot === undefined
-      ? { version: runtimeConfigVersion }
-      : { version: runtimeConfigVersion, storeRoot: locationLayout.storeRoot });
+    bootstrapRuntimeConfig({
+      selectedConfigPath,
+      ...(options.storeRoot === undefined
+        ? {}
+        : { storeRoot: locationLayout.storeRoot })
+    });
   const nextConfig = validateMutatedRuntimeConfig(
     mutateConfig(currentConfig, options.operation)
   );
@@ -142,6 +146,34 @@ export function applyRuntimeConfigMutation(
     envPath,
     config: nextConfig
   } satisfies RuntimeConfigMutationResult);
+}
+
+function bootstrapRuntimeConfig(options: {
+  readonly selectedConfigPath: string;
+  readonly storeRoot?: string;
+}): Project02RuntimeConfig {
+  if (options.storeRoot !== undefined) {
+    return { version: runtimeConfigVersion, storeRoot: options.storeRoot };
+  }
+
+  const selectedStoreRoot = storeRootForSelectedDefaultConfigPath(
+    options.selectedConfigPath
+  );
+
+  return selectedStoreRoot === undefined
+    ? { version: runtimeConfigVersion }
+    : { version: runtimeConfigVersion, storeRoot: selectedStoreRoot };
+}
+
+function storeRootForSelectedDefaultConfigPath(
+  selectedConfigPath: string
+): string | undefined {
+  const candidateStoreRoot = dirname(selectedConfigPath);
+  const defaultConfigPath = defaultRuntimeConfigPath(candidateStoreRoot);
+
+  return pathsAlias(selectedConfigPath, defaultConfigPath)
+    ? createLocalRuntimeStorageLayout({ storeRoot: candidateStoreRoot }).storeRoot
+    : undefined;
 }
 
 export function getRuntimeConfigValueAtPath(

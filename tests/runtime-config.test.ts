@@ -1765,6 +1765,164 @@ describe('runtime config CLI', () => {
     expect(envPathStdout).toBe(`${join(storeRoot, '.env')}\n`);
   });
 
+  it('seeds env-selected missing store-default configs with their store root', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-env-store-seed-')
+    );
+    const configPath = defaultRuntimeConfigPath(storeRoot);
+    let setStdout = '';
+    let envPathStdout = '';
+
+    expect(existsSync(configPath)).toBe(false);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['set', 'plugins.foo.config.backend', 'local'],
+        {
+          stdout: collect((chunk) => {
+            setStdout += chunk;
+          }),
+          stderr: collect(() => {}),
+          env: {
+            [runtimeConfigEnvVarName]: configPath
+          }
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(setStdout) as unknown).toMatchObject({
+      configPath,
+      envPath: join(storeRoot, '.env')
+    });
+    expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
+      storeRoot,
+      plugins: {
+        foo: {
+          config: {
+            backend: 'local'
+          }
+        }
+      }
+    });
+
+    const loaded = loadProject02RuntimeConfig({
+      env: {
+        [runtimeConfigEnvVarName]: configPath
+      }
+    });
+    const resolved = resolveProject02RuntimeConfig({ loadedConfig: loaded });
+
+    expect(resolved.storeRoot).toBe(storeRoot);
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['env-path'], {
+        stdout: collect((chunk) => {
+          envPathStdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        env: {
+          [runtimeConfigEnvVarName]: configPath
+        }
+      })
+    ).toBe(0);
+
+    expect(envPathStdout).toBe(`${join(storeRoot, '.env')}\n`);
+  });
+
+  it('seeds cwd dotenv-selected missing store-default configs with their store root', async () => {
+    const cwdRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-dotenv-store-seed-')
+    );
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-dotenv-selected-store-')
+    );
+    const configPath = defaultRuntimeConfigPath(storeRoot);
+    const previousCwd = process.cwd();
+    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
+    let setStdout = '';
+    let envPathStdout = '';
+
+    writeFileSync(
+      join(cwdRoot, '.env'),
+      `${runtimeConfigEnvVarName}=${configPath}\n`,
+      'utf8'
+    );
+
+    try {
+      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
+      process.chdir(cwdRoot);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(
+          ['set', 'plugins.foo.config.backend', 'local'],
+          {
+            stdout: collect((chunk) => {
+              setStdout += chunk;
+            }),
+            stderr: collect(() => {})
+          }
+        )
+      ).toBe(0);
+
+      expect(JSON.parse(setStdout) as unknown).toMatchObject({
+        configPath,
+        envPath: join(storeRoot, '.env')
+      });
+      expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
+        storeRoot,
+        plugins: {
+          foo: {
+            config: {
+              backend: 'local'
+            }
+          }
+        }
+      });
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['env-path'], {
+          stdout: collect((chunk) => {
+            envPathStdout += chunk;
+          }),
+          stderr: collect(() => {})
+        })
+      ).toBe(0);
+
+      expect(envPathStdout).toBe(`${join(storeRoot, '.env')}\n`);
+    } finally {
+      process.chdir(previousCwd);
+      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
+    }
+  });
+
+  it('keeps missing explicit non-default config bootstraps store-neutral', async () => {
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-cli-explicit-neutral-')
+    );
+    const configPath = join(configRoot, 'runtime.json');
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--config', configPath, 'set', 'plugins.foo.config.backend', 'local'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect(() => {})
+        }
+      )
+    ).toBe(0);
+
+    expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toEqual({
+      version: runtimeConfigVersion,
+      plugins: {
+        foo: {
+          config: {
+            backend: 'local'
+          }
+        }
+      }
+    });
+  });
+
   it.each([
     {
       label: 'explicit --config',
@@ -2586,6 +2744,109 @@ describe('runtime config CLI', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(example.args, {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      })
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toBe(`Error: ${example.message}\n`);
+  });
+
+  it('rejects extra set operands instead of truncating the configured value', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-set-extra-'));
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        [
+          '--store',
+          storeRoot,
+          'set',
+          'plugins.foo.config.prompt',
+          'hello',
+          'world'
+        ],
+        {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        }
+      )
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toBe('Error: set does not accept extra arguments.\n');
+    expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+  });
+
+  it.each([
+    {
+      label: 'path',
+      args: ['path', 'extra'] as const,
+      message: 'path does not accept extra arguments.'
+    },
+    {
+      label: 'env-path',
+      args: ['env-path', 'extra'] as const,
+      message: 'env-path does not accept extra arguments.'
+    },
+    {
+      label: 'check',
+      args: ['check', 'extra'] as const,
+      message: 'check does not accept extra arguments.'
+    },
+    {
+      label: 'get',
+      args: ['get', 'storeRoot', 'extra'] as const,
+      message: 'get does not accept extra arguments.'
+    },
+    {
+      label: 'unset',
+      args: ['unset', 'storeRoot', 'extra'] as const,
+      message: 'unset does not accept extra arguments.'
+    },
+    {
+      label: 'plugin enable',
+      args: ['plugin', 'enable', 'foo', 'extra'] as const,
+      message: 'plugin enable does not accept extra arguments.'
+    },
+    {
+      label: 'plugin disable',
+      args: ['plugin', 'disable', 'foo', 'extra'] as const,
+      message: 'plugin disable does not accept extra arguments.'
+    },
+    {
+      label: 'default-memory-provider',
+      args: ['default-memory-provider', 'foo', 'extra'] as const,
+      message: 'default-memory-provider does not accept extra arguments.'
+    },
+    {
+      label: 'default-memory-provider unset',
+      args: ['default-memory-provider', '--unset', 'extra'] as const,
+      message: 'default-memory-provider does not accept extra arguments.'
+    },
+    {
+      label: 'secret set',
+      args: ['secret', 'set', 'foo', 'apiKey', 'PROJECT02_SECRET', 'extra'] as const,
+      message:
+        'secret set reads the secret from the named env var; do not pass the secret value as an argument.'
+    }
+  ])('rejects extra operands for $label', async (example) => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-extra-args-'));
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--store', storeRoot, ...example.args], {
         stdout: collect((chunk) => {
           stdout += chunk;
         }),

@@ -244,38 +244,50 @@ function parseRuntimeConfigCommand(
   const command = args[0];
 
   if (command === 'path') {
+    assertNoExtraArgs(args, 0, 'path');
     return { kind: 'path' };
   }
 
   if (command === 'env-path') {
+    assertNoExtraArgs(args, 0, 'env-path');
     return { kind: 'env_path' };
   }
 
   if (command === 'check') {
+    assertNoExtraArgs(args, 0, 'check');
     return { kind: 'check' };
   }
 
   if (command === 'get') {
-    return { kind: 'get', path: requiredArg(args, 1, 'get requires a path.') };
+    const path = requiredArg(args, 1, 'get requires a path.');
+    assertNoExtraArgs(args, 1, 'get');
+    return { kind: 'get', path };
   }
 
   if (command === 'set') {
+    const path = requiredArg(args, 1, 'set requires a path.');
+    const value = requiredArg(args, 2, 'set requires a value.');
+    assertNoExtraArgs(args, 2, 'set');
+
     return {
       kind: 'mutate',
       operation: {
         kind: 'set',
-        path: requiredArg(args, 1, 'set requires a path.'),
-        value: parseConfigValue(requiredArg(args, 2, 'set requires a value.'))
+        path,
+        value: parseConfigValue(value)
       }
     };
   }
 
   if (command === 'unset') {
+    const path = requiredArg(args, 1, 'unset requires a path.');
+    assertNoExtraArgs(args, 1, 'unset');
+
     return {
       kind: 'mutate',
       operation: {
         kind: 'unset',
-        path: requiredArg(args, 1, 'unset requires a path.')
+        path
       }
     };
   }
@@ -285,6 +297,7 @@ function parseRuntimeConfigCommand(
     const pluginId = requiredArg(args, 2, 'plugin command requires a plugin id.');
 
     if (action === 'enable') {
+      assertNoExtraArgs(args, 2, 'plugin enable');
       return {
         kind: 'mutate',
         operation: { kind: 'plugin_enable', pluginId }
@@ -292,6 +305,7 @@ function parseRuntimeConfigCommand(
     }
 
     if (action === 'disable') {
+      assertNoExtraArgs(args, 2, 'plugin disable');
       return {
         kind: 'mutate',
         operation: { kind: 'plugin_disable', pluginId }
@@ -300,6 +314,7 @@ function parseRuntimeConfigCommand(
   }
 
   if (command === 'default-memory-provider') {
+    assertNoExtraArgs(args, 1, 'default-memory-provider');
     return {
       kind: 'mutate',
       operation: {
@@ -315,11 +330,12 @@ function parseRuntimeConfigCommand(
     const envVar = requiredArg(args, 4, 'secret set requires an env var.');
     const secretValue = env[envVar];
 
-    if (args[5] !== undefined) {
-      throw new RuntimeConfigCliUsageError(
-        'secret set reads the secret from the named env var; do not pass the secret value as an argument.'
-      );
-    }
+    assertNoExtraArgs(
+      args,
+      4,
+      'secret set',
+      'secret set reads the secret from the named env var; do not pass the secret value as an argument.'
+    );
 
     if (secretValue === undefined || secretValue.length === 0) {
       throw new RuntimeConfigCliUsageError(
@@ -342,6 +358,17 @@ function parseRuntimeConfigCommand(
   throw new RuntimeConfigCliUsageError(
     'Use path, env-path, check, get, set, unset, plugin enable, plugin disable, default-memory-provider, or secret set.'
   );
+}
+
+function assertNoExtraArgs(
+  args: readonly string[],
+  lastAcceptedIndex: number,
+  commandName: string,
+  message = `${commandName} does not accept extra arguments.`
+): void {
+  if (args[lastAcceptedIndex + 1] !== undefined) {
+    throw new RuntimeConfigCliUsageError(message);
+  }
 }
 
 function parseConfigValue(value: string): RuntimeConfigValue {
