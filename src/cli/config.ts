@@ -9,6 +9,7 @@ import {
   loadProject02RuntimeConfig,
   resolveConfiguredProject02PluginActivation,
   RuntimeConfigMutationError,
+  storeRootForLoadedDefaultConfigPath,
   type LoadedProject02RuntimeConfig,
   type RuntimePluginFactory,
   type RuntimeConfigMutationOperation,
@@ -91,7 +92,7 @@ function runRuntimeConfigCliFromArgsSync(
         ...parsed.location,
         env: cliEnv.configEnv
       });
-      assertRuntimeConfigLoaded(loaded);
+      assertRuntimeConfigLoadedForEnvPath(loaded);
       options.stdout.write(
         `${runtimeConfigEnvPathForLocation({
           loadedConfig: loaded,
@@ -513,6 +514,29 @@ function assertRuntimeConfigLoaded(loaded: LoadedProject02RuntimeConfig): void {
   throw new RuntimeConfigCliUsageError(
     loaded.diagnostics.find((diagnostic) => diagnostic.severity === 'error')
       ?.message ?? 'Runtime config is invalid.'
+  );
+}
+
+function assertRuntimeConfigLoadedForEnvPath(
+  loaded: LoadedProject02RuntimeConfig
+): void {
+  if (!diagnosticsHaveErrors(loaded.diagnostics)) {
+    return;
+  }
+
+  const errorDiagnostic = loaded.diagnostics.find(
+    (diagnostic) => diagnostic.severity === 'error'
+  );
+
+  if (
+    errorDiagnostic?.code === 'runtime_config_missing' &&
+    storeRootForLoadedDefaultConfigPath(loaded) !== undefined
+  ) {
+    return;
+  }
+
+  throw new RuntimeConfigCliUsageError(
+    errorDiagnostic?.message ?? 'Runtime config is invalid.'
   );
 }
 

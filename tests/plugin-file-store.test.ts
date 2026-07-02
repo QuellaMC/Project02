@@ -300,6 +300,50 @@ describe('runtime plugin file store', () => {
     expect(store.revision()).toBe(1);
   });
 
+  it('preserves untracked .jsonl paths that contain one JSONL record', () => {
+    const storeRoot = createTempRoot();
+    const root = pluginRoot(
+      storeRoot,
+      'session-one-record-jsonl-legacy',
+      'plugin.one-record-jsonl-legacy'
+    );
+    const eventsPath = join(root, 'events.jsonl');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(eventsPath, '{"value":"legacy-jsonl"}\n', 'utf8');
+
+    const firstStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: 'session-one-record-jsonl-legacy',
+      pluginId: 'plugin.one-record-jsonl-legacy'
+    });
+
+    expect(firstStore.readJsonl('events.jsonl')).toEqual([
+      { value: 'legacy-jsonl' }
+    ]);
+    expect(() => {
+      firstStore.readJson('events.jsonl');
+    }).toThrow(/stores JSONL/iu);
+
+    firstStore.appendJsonl('events.jsonl', { value: 'new-jsonl' });
+
+    expect(readFileSync(eventsPath, 'utf8')).toBe(
+      '{"value":"legacy-jsonl"}\n{"value":"new-jsonl"}\n'
+    );
+    expect(firstStore.revision()).toBe(2);
+
+    const secondStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: 'session-one-record-jsonl-legacy',
+      pluginId: 'plugin.one-record-jsonl-legacy'
+    });
+
+    expect(secondStore.readJsonl('events.jsonl')).toEqual([
+      { value: 'legacy-jsonl' },
+      { value: 'new-jsonl' }
+    ]);
+    expect(secondStore.revision()).toBe(2);
+  });
+
   it('rejects JSONL reads and appends on untracked .jsonl paths that store single JSON documents', () => {
     const cases = [
       {
@@ -308,7 +352,7 @@ describe('runtime plugin file store', () => {
       },
       {
         name: 'object',
-        content: '{"value":"legacy-object-json"}\n'
+        content: '{\n"value":"legacy-object-json"\n}\n'
       }
     ];
 
@@ -336,7 +380,9 @@ describe('runtime plugin file store', () => {
         store.appendJsonl('events.jsonl', { value: 'jsonl' });
       }).toThrow(/already stores JSON/iu);
       expect(readFileSync(eventsPath, 'utf8')).toBe(content);
-      expect(store.revision()).toBe(1);
+      expect(store.revision()).toBe(
+        content.split('\n').filter((line) => line.trim().length > 0).length
+      );
     }
   });
 

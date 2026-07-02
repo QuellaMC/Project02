@@ -87,14 +87,7 @@ export function createRuntimePluginFileStore(
       });
 
       try {
-        return Object.freeze(
-          readFileSync(filePath, 'utf8')
-            .split('\n')
-            .filter((line) => line.trim().length > 0)
-            .map((line) =>
-              freezeRuntimePluginFileStoreJsonValue(JSON.parse(line) as unknown)
-            )
-        );
+        return parseRuntimePluginJsonlContent(readFileSync(filePath, 'utf8'));
       } catch (error: unknown) {
         if (isMissingFileError(error)) {
           return Object.freeze([]);
@@ -434,6 +427,26 @@ function assertDurableJsonlPathMode(options: {
     return;
   }
 
+  if (options.path.endsWith('.jsonl')) {
+    try {
+      const records = parseRuntimePluginJsonlContent(
+        readFileSync(options.filePath, 'utf8')
+      );
+
+      if (records.length !== 1 || !Array.isArray(records[0])) {
+        return;
+      }
+    } catch (error: unknown) {
+      if (isMissingFileError(error)) {
+        return;
+      }
+
+      if (!(error instanceof SyntaxError)) {
+        throw error;
+      }
+    }
+  }
+
   try {
     JSON.parse(readFileSync(options.filePath, 'utf8'));
   } catch (error: unknown) {
@@ -491,6 +504,19 @@ function isRuntimePluginFileStorePathMode(
   value: unknown
 ): value is RuntimePluginFileStorePathMode {
   return value === 'json' || value === 'jsonl';
+}
+
+function parseRuntimePluginJsonlContent(
+  content: string
+): readonly RuntimePluginJsonValue[] {
+  return Object.freeze(
+    content
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) =>
+        freezeRuntimePluginFileStoreJsonValue(JSON.parse(line) as unknown)
+      )
+  );
 }
 
 function isPlainObject(value: unknown): value is Readonly<Record<string, unknown>> {

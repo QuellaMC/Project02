@@ -2057,6 +2057,59 @@ describe('runtime config CLI', () => {
     expect(envPathStdout).toBe(`${join(seededStoreRoot, '.env')}\n`);
   });
 
+  it.each([
+    {
+      label: 'explicit --config',
+      args(configPath: string) {
+        return ['--config', configPath, 'env-path'] as const;
+      },
+      env(configPath: string) {
+        void configPath;
+        return {};
+      }
+    },
+    {
+      label: 'PROJECT02_RUNTIME_CONFIG',
+      args() {
+        return ['env-path'] as const;
+      },
+      env(configPath: string) {
+        return {
+          [runtimeConfigEnvVarName]: configPath
+        };
+      }
+    }
+  ])(
+    'infers env-path from a missing store-default config selected by $label',
+    async (example) => {
+      const storeRoot = mkdtempSync(
+        join(tmpdir(), 'project02-config-cli-missing-env-path-store-')
+      );
+      const seededStoreRoot = realpathSync.native(storeRoot);
+      const configPath = defaultRuntimeConfigPath(storeRoot);
+      let stdout = '';
+      let stderr = '';
+
+      expect(existsSync(configPath)).toBe(false);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(example.args(configPath), {
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          }),
+          env: example.env(configPath)
+        })
+      ).toBe(0);
+
+      expect(stdout).toBe(`${join(seededStoreRoot, '.env')}\n`);
+      expect(stderr).toBe('');
+      expect(existsSync(configPath)).toBe(false);
+    }
+  );
+
   it('seeds cwd dotenv-selected missing store-default configs with their store root', async () => {
     const cwdRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-cli-dotenv-store-seed-')
