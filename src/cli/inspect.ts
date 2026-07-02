@@ -23,6 +23,7 @@ import type {
   RuntimePluginEvidenceSnapshot,
   RuntimePluginTurnEvidenceSnapshot
 } from '../plugins/types.ts';
+import { createRuntimePluginHost } from '../plugins/host.ts';
 import { createRuntimePluginContext } from '../plugins/types.ts';
 import {
   formatLocalRuntimeTerminalError,
@@ -33,6 +34,7 @@ import {
   createRuntimeConfigInspectShape,
   diagnosticsHaveErrors,
   loadProject02RuntimeConfig,
+  type Project02ConfiguredPluginActivation,
   type Project02ConfiguredPluginHost,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigInspectShape,
@@ -47,6 +49,7 @@ import {
   defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
+  resolveRuntimeConfigActivationBeforeEnvFile,
   RuntimeEnvFileError,
   shouldReadDefaultDotEnvForRuntimeLocation
 } from './runtime-env.ts';
@@ -542,6 +545,18 @@ async function inspectRuntimeConfig(args: {
     );
   }
 
+  const activationBeforeEnv = resolveRuntimeConfigActivationBeforeEnvFile({
+    loadedConfig,
+    ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
+    env: options.configEnv,
+    diagnoseUncheckedLegacyFactories: true,
+    ...(options.factories === undefined ? {} : { factories: options.factories })
+  });
+
+  if (activationBeforeEnv !== undefined) {
+    return inspectConfiguredPluginHostFromActivation(activationBeforeEnv);
+  }
+
   const runtimeEnv = loadRuntimeConfigEnvFile({
     loadedConfig,
     ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
@@ -562,6 +577,23 @@ async function inspectRuntimeConfig(args: {
   } catch {
     throw new InspectCliStartupError(formatRuntimeConfigActivationError());
   }
+}
+
+function inspectConfiguredPluginHostFromActivation(
+  activation: Project02ConfiguredPluginActivation
+): Project02ConfiguredPluginHost {
+  const plugins = Object.freeze([]);
+
+  return Object.freeze({
+    host: createRuntimePluginHost({
+      plugins,
+      enabledPluginIds: activation.activation.enabledPluginIds,
+      storeRoot: activation.resolvedConfig.storeRoot
+    }),
+    plugins,
+    resolvedConfig: activation.resolvedConfig,
+    activation: activation.activation
+  } satisfies Project02ConfiguredPluginHost);
 }
 
 async function closeInspectConfiguredPluginHost(options: {

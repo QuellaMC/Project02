@@ -707,6 +707,7 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
     await runRuntimePluginSessionEndHooks({
       plugins: options.plugins,
       context,
+      storeRoot: options.resolvedConfig.storeRoot,
       sessionId,
       ...(options.sessionIdentity === undefined
         ? {}

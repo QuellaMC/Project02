@@ -148,6 +148,61 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
+  it('loads runtime env before reporting mixed check activation diagnostics', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-mixed-env-')
+    );
+    const plugin = requiredSecretAndEndpointPlugin('memory.mixed-check');
+    const envVar = 'PROJECT02_CHECK_MIXED_SECRET_3452532128';
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+    writeFileSync(join(storeRoot, '.env'), `${envVar}=check-secret\n`, 'utf8');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              throw new Error('runtime-config check must not construct invalid plugins');
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(1);
+    expect(output.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_required_value_missing',
+          path: `plugins.${plugin.manifest.id}.config.endpoint`,
+          pluginId: plugin.manifest.id
+        })
+      ])
+    );
+    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_required_secret_missing'
+    );
+  });
+
   it('keeps explicitly disabled legacy function factories passing check', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-legacy-disabled-')
@@ -1515,7 +1570,71 @@ describe('runtime config activation diagnostics', () => {
     expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
   });
 
-  it('preserves factory errors when construction cleanup file-store setup fails', async () => {
+  it('uses the configured store root for construction-failure cleanup file-store reads', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-factory-durable-cleanup-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const sessionId = 'configured-plugin-durable-construction-cleanup';
+    const cleanupReads: unknown[] = [];
+    const cleanupPlugin = fileStoreSessionEndPlugin('first.cleanup', (context) => {
+      if (context.fileStore === undefined) {
+        throw new Error('Expected construction cleanup context to include fileStore.');
+      }
+
+      cleanupReads.push(context.fileStore.readJson('state.json'));
+    });
+    const failingPlugin = firstPartyPlugin('later.failure');
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        [cleanupPlugin.manifest.id]: {
+          enabled: true
+        },
+        [failingPlugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    await expect(
+      createConfiguredProject02PluginHost({
+        loadedConfig: loadProject02RuntimeConfig({ configPath }),
+        storeRoot,
+        sessionId,
+        factories: {
+          [cleanupPlugin.manifest.id]: {
+            manifest: cleanupPlugin.manifest,
+            create: (input) => {
+              createRuntimePluginFileStore({
+                storeRoot: input.storeRoot,
+                sessionId,
+                pluginId: cleanupPlugin.manifest.id
+              }).writeJsonAtomic('state.json', {
+                value: 'durable construction state'
+              });
+
+              return cleanupPlugin;
+            }
+          },
+          [failingPlugin.manifest.id]: {
+            manifest: failingPlugin.manifest,
+            create: () => {
+              throw new Error('later manifest-backed factory failed');
+            }
+          }
+        }
+      })
+    ).rejects.toThrow('later manifest-backed factory failed');
+
+    expect(cleanupReads).toEqual([
+      {
+        value: 'durable construction state'
+      }
+    ]);
+  });
+
+  it('preserves factory errors when the configured construction cleanup store is unusable', async () => {
     const configRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-factory-invalid-store-cleanup-')
     );
@@ -1564,12 +1683,8 @@ describe('runtime config activation diagnostics', () => {
       'later manifest-backed factory failed with unusable store'
     );
 
-    expect(cleanupContexts).toHaveLength(1);
-    expect(cleanupContexts[0]).toMatchObject({
-      sessionId: 'configured-plugin-construction-cleanup',
-      currentUserMessage: 'configured plugin construction failed before host creation'
-    });
-    expect(cleanupFileStoreAvailable).toEqual([true]);
+    expect(cleanupContexts).toHaveLength(0);
+    expect(cleanupFileStoreAvailable).toEqual([]);
   });
 
   it('cleans up created plugins when host construction fails after factories succeed', async () => {
@@ -1792,6 +1907,31 @@ function requiredSecretPlugin(
         reasons: ['test_required_secret']
       },
       requestedApis: []
+    }
+  });
+}
+
+function requiredSecretAndEndpointPlugin(id: string): ReturnType<
+  typeof requiredSecretPlugin
+> {
+  const plugin = requiredSecretPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      config: {
+        fields: [
+          ...plugin.manifest.config.fields,
+          {
+            name: 'endpoint',
+            description: 'Endpoint.',
+            required: true,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: []
+          }
+        ]
+      }
     }
   });
 }

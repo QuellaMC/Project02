@@ -506,6 +506,137 @@ describe('inspect CLI plugin evidence', () => {
     expect(stderr).not.toContain('Could not load runtime config env file');
   });
 
+  it('reports env-independent activation errors before runtime env file errors', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-inspect-activation-before-env-')
+    );
+    const plugin = createInspectRequiredConfigFixturePlugin(
+      'inspect.required-config'
+    );
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'session-activation-before-env',
+      createdAt: '2026-06-21T00:00:00.000Z'
+    });
+    mkdirSync(join(storeRoot, '.env'));
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              throw new Error('inspect should not construct invalid plugins');
+            }
+          }
+        }
+      }
+    );
+    const output = JSON.parse(stdout) as {
+      readonly activationDiagnostics: readonly {
+        readonly code: string;
+        readonly path?: string;
+      }[];
+    };
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(output.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_required_value_missing',
+          path: `plugins.${plugin.manifest.id}.config.endpoint`
+        })
+      ])
+    );
+    expect(stdout).not.toContain('Could not load runtime config env file');
+  });
+
+  it('loads runtime env before reporting mixed inspect activation diagnostics', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-inspect-mixed-activation-env-')
+    );
+    const plugin = createInspectRequiredSecretAndConfigFixturePlugin(
+      'inspect.mixed-config'
+    );
+    const envVar = 'PROJECT02_INSPECT_MIXED_SECRET_3452532128';
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'session-mixed-activation-env',
+      createdAt: '2026-06-21T00:00:00.000Z'
+    });
+    writeFileSync(join(storeRoot, '.env'), `${envVar}=inspect-secret\n`, 'utf8');
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              throw new Error('inspect should not construct invalid plugins');
+            }
+          }
+        }
+      }
+    );
+    const output = JSON.parse(stdout) as {
+      readonly activationDiagnostics: readonly {
+        readonly code: string;
+        readonly path?: string;
+      }[];
+    };
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(output.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_required_value_missing',
+          path: `plugins.${plugin.manifest.id}.config.endpoint`
+        })
+      ])
+    );
+    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_required_secret_missing'
+    );
+    expect(stdout).not.toContain(`plugins.${plugin.manifest.id}.config.apiKey`);
+  });
+
   it('uses a generic configured plugin factory failure for inspect', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-factory-fail-'));
     const plugin = createInspectFixturePlugin('inspect.factory.failure');
@@ -1107,6 +1238,53 @@ function createInspectSecretFixturePlugin(pluginId: string): RuntimePlugin {
       ...plugin.manifest,
       config: {
         fields: [
+          {
+            name: 'apiKey',
+            description: 'API key.',
+            required: true,
+            secret: true,
+            valueType: 'secret',
+            redactionLabels: ['secret']
+          }
+        ]
+      }
+    }
+  });
+}
+
+function createInspectRequiredConfigFixturePlugin(pluginId: string): RuntimePlugin {
+  const plugin = createInspectFixturePlugin(pluginId);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      config: {
+        fields: [
+          {
+            name: 'endpoint',
+            description: 'Required endpoint.',
+            required: true,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: []
+          }
+        ]
+      }
+    }
+  });
+}
+
+function createInspectRequiredSecretAndConfigFixturePlugin(
+  pluginId: string
+): RuntimePlugin {
+  const plugin = createInspectRequiredConfigFixturePlugin(pluginId);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      config: {
+        fields: [
+          ...plugin.manifest.config.fields,
           {
             name: 'apiKey',
             description: 'API key.',

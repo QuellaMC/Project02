@@ -3,7 +3,6 @@ import { parseEnv } from 'node:util';
 
 import {
   defaultRuntimeConfigEnvPath,
-  diagnosticsHaveErrors,
   resolveConfiguredProject02PluginActivation,
   runtimeConfigEnvVarName,
   storeRootForLoadedDefaultConfigPath,
@@ -83,12 +82,14 @@ export function resolveRuntimeConfigActivationBeforeEnvFile(options: {
 function diagnosticsCanBypassRuntimeEnvFile(
   diagnostics: readonly RuntimeConfigDiagnostic[]
 ): boolean {
+  const errors = diagnostics.filter(
+    (diagnostic) => diagnostic.severity === 'error'
+  );
+
   return (
-    diagnosticsHaveErrors(diagnostics) &&
-    diagnostics.some(
-      (diagnostic) =>
-        diagnostic.severity === 'error' &&
-        !runtimeConfigDiagnosticRequiresEnvFile(diagnostic)
+    errors.length > 0 &&
+    errors.every(
+      (diagnostic) => !runtimeConfigDiagnosticRequiresEnvFile(diagnostic)
     )
   );
 }

@@ -448,6 +448,62 @@ describe('chat CLI provider selection', () => {
     expect(existsSync(layout.sessionCatalogPath)).toBe(false);
     expect(existsSync(layout.sessionsRoot)).toBe(false);
   });
+
+  it('loads runtime env before reporting mixed activation diagnostics', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-chat-mixed-activation-env-')
+    );
+    const plugin = createRequiredSecretAndConfigPlugin('chat.mixed-config');
+    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const envVar = 'PROJECT02_CHAT_MIXED_SECRET_3452532128';
+    let stdout = '';
+    let stderr = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+    writeFileSync(layout.envPath, `${envVar}=chat-secret\n`, 'utf8');
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'mixed-activation-env'],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+
+              return plugin;
+            }
+          }
+        }
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(factoryCalls).toBe(0);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Runtime config activation failed');
+    expect(stderr).toContain('runtime_config_required_value_missing');
+    expect(stderr).toContain(`plugins.${plugin.manifest.id}.config.endpoint`);
+    expect(stderr).not.toContain('runtime_config_required_secret_missing');
+    expect(stderr).not.toContain(`plugins.${plugin.manifest.id}.config.apiKey`);
+  });
 });
 
 describe('chat CLI plugin lifecycle', () => {
@@ -1304,6 +1360,31 @@ function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
         };
       }
     }
+  });
+}
+
+function createRequiredSecretAndConfigPlugin(pluginId: string): RuntimePlugin {
+  const plugin = createRequiredConfigPlugin(pluginId);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      config: {
+        fields: [
+          ...plugin.manifest.config.fields,
+          {
+            name: 'apiKey',
+            description: 'Required API key.',
+            required: true,
+            secret: true,
+            valueType: 'secret',
+            redactionLabels: ['secret']
+          }
+        ]
+      }
+    },
+    providedTools: plugin.providedTools,
+    lifecycleHooks: plugin.lifecycleHooks
   });
 }
 
