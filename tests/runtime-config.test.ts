@@ -4357,6 +4357,50 @@ describe('runtime config CLI', () => {
     expect(stderr).toContain('memory.config');
   });
 
+  it('rejects exact-wrapper get paths that conflict with known plugin config fields', async () => {
+    const path = 'plugins.memory.config.api';
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-exact-wrapper-ambiguous-get-')),
+        'config.json'
+      ),
+      {
+        plugins: {
+          memory: {
+            config: {
+              api: 'field-api'
+            }
+          },
+          'memory.config.api': {
+            enabled: true,
+            config: {
+              backend: 'wrapper-backend'
+            }
+          }
+        }
+      }
+    );
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--config', configPath, 'get', path], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      })
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Ambiguous runtime config plugin path');
+    expect(stderr).toContain(path);
+    expect(stderr).toContain('memory');
+    expect(stderr).toContain('memory.config.api');
+  });
+
   it('sets, gets, unsets, and checks plugin config fields starting with config', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-leading-config-field-')

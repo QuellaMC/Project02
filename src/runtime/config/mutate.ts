@@ -228,7 +228,7 @@ function getRuntimeConfigValueForParts(
     return undefined;
   }
 
-  const exactPluginConfig = exactPluginConfigForParts(config, parts);
+  const exactPluginConfig = exactPluginConfigForParts(config, path, parts);
 
   if (exactPluginConfig !== undefined) {
     return exactPluginConfig;
@@ -266,7 +266,7 @@ function redactionKeyForRuntimeConfigPath(
     return undefined;
   }
 
-  const exactPluginConfig = exactPluginConfigForParts(config, parts);
+  const exactPluginConfig = exactPluginConfigForParts(config, path, parts);
 
   if (exactPluginConfig !== undefined) {
     return undefined;
@@ -307,9 +307,27 @@ function rootConfigValue(
 
 function exactPluginConfigForParts(
   config: Project02RuntimeConfig | undefined,
+  path: string,
   parts: readonly string[]
 ): Project02RuntimePluginConfig | undefined {
-  return config?.plugins?.[parts.slice(1).join('.')];
+  const pluginId = parts.slice(1).join('.');
+  const pluginConfig = config?.plugins?.[pluginId];
+
+  if (config === undefined || pluginConfig === undefined) {
+    return undefined;
+  }
+
+  const parsedPath = knownPluginPathCandidate(
+    pluginPathCandidates(parts),
+    path,
+    config
+  );
+
+  if (parsedPath !== undefined && parsedPath.pluginId !== pluginId) {
+    throw ambiguousKnownPluginPathError(path, [parsedPath.pluginId, pluginId]);
+  }
+
+  return pluginConfig;
 }
 
 function runtimeConfigPathFromEnv(env: NodeJS.ProcessEnv): string | undefined {
@@ -1044,12 +1062,22 @@ function knownPluginPathCandidate(
   );
 
   if (knownCandidates.length > 1) {
-    throw new TypeError(
-      `Ambiguous runtime config plugin path: ${path}. Known plugin ids match multiple interpretations: ${knownCandidates.map((candidate) => candidate.pluginId).join(', ')}. Use plugin enable or secret set with an explicit plugin id to disambiguate.`
+    throw ambiguousKnownPluginPathError(
+      path,
+      knownCandidates.map((candidate) => candidate.pluginId)
     );
   }
 
   return selected;
+}
+
+function ambiguousKnownPluginPathError(
+  path: string,
+  pluginIds: readonly string[]
+): TypeError {
+  return new TypeError(
+    `Ambiguous runtime config plugin path: ${path}. Known plugin ids match multiple interpretations: ${pluginIds.join(', ')}. Use plugin enable or secret set with an explicit plugin id to disambiguate.`
+  );
 }
 
 function isKnownPluginId(config: Project02RuntimeConfig, pluginId: string): boolean {
