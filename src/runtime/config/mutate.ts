@@ -228,10 +228,6 @@ function getRuntimeConfigValueForParts(
     return undefined;
   }
 
-  if (parts.length === 1) {
-    return config.plugins;
-  }
-
   const exactPluginConfig = exactPluginConfigForParts(config, parts);
 
   if (exactPluginConfig !== undefined) {
@@ -1094,9 +1090,20 @@ function tryParsePluginMutationPath(
 ): ParsedPluginMutationPath | undefined {
   try {
     return parsePluginMutationPath(parts, path, config);
-  } catch {
+  } catch (error: unknown) {
+    if (isAmbiguousPluginPathError(error)) {
+      throw error;
+    }
+
     return undefined;
   }
+}
+
+function isAmbiguousPluginPathError(error: unknown): boolean {
+  return (
+    error instanceof TypeError &&
+    error.message.startsWith('Ambiguous runtime config plugin path:')
+  );
 }
 
 function freezeConfig(config: Project02RuntimeConfig): Project02RuntimeConfig {

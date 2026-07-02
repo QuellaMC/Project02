@@ -4315,6 +4315,48 @@ describe('runtime config CLI', () => {
     expect(JSON.stringify(config)).not.toContain('"config":{"enabled"');
   });
 
+  it('rejects ambiguous known plugin config paths on get', async () => {
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-known-ambiguous-get-')),
+        'config.json'
+      ),
+      {
+        plugins: {
+          memory: {
+            enabled: true,
+            config: {
+              enabled: true
+            }
+          },
+          'memory.config': {
+            enabled: false
+          }
+        }
+      }
+    );
+    const path = 'plugins.memory.config.enabled';
+    let stdout = '';
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(['--config', configPath, 'get', path], {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        })
+      })
+    ).toBe(1);
+
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Ambiguous runtime config plugin path');
+    expect(stderr).toContain(path);
+    expect(stderr).toContain('memory');
+    expect(stderr).toContain('memory.config');
+  });
+
   it('sets, gets, unsets, and checks plugin config fields starting with config', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-leading-config-field-')

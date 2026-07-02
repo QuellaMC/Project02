@@ -2396,7 +2396,11 @@ const runtimePluginCredentialKeyPattern = new RegExp(
   'iu'
 );
 const runtimePluginSecretKeyValuePattern = new RegExp(
-  String.raw`(["']?)(${runtimePluginCredentialKeySource})\1(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}]+)`,
+  String.raw`(["']?)(${runtimePluginCredentialKeySource})\1(\s*[:=]\s*)("[^"]*"|'[^']*'|[^&#\s,;}]+)`,
+  'giu'
+);
+const runtimePluginSecretQueryValuePattern = new RegExp(
+  String.raw`([?&]${runtimePluginCredentialKeySource}=)[^&#\s]+`,
   'giu'
 );
 
@@ -2432,7 +2436,7 @@ function redactUriCredentials(value: string): string {
 
 function redactUriSecretQueryValues(value: string): string {
   return value.replace(
-    /([?&][A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|credential)[A-Za-z0-9_.-]*=)[^&#\s]+/giu,
+    runtimePluginSecretQueryValuePattern,
     '$1[redacted]'
   );
 }
