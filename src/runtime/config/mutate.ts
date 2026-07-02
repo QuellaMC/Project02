@@ -310,7 +310,7 @@ function exactPluginConfigForParts(
   path: string,
   parts: readonly string[]
 ): Project02RuntimePluginConfig | undefined {
-  const pluginId = parts.slice(1).join('.');
+  const pluginId = exactPluginIdForParts(parts);
   const pluginConfig = config?.plugins?.[pluginId];
 
   if (config === undefined || pluginConfig === undefined) {
@@ -970,6 +970,18 @@ function parsePluginMutationPath(
   // plugin IDs before falling back to the legacy delimiter heuristic.
   const candidates = pluginPathCandidates(parts);
   const contextCandidate = knownPluginPathCandidate(candidates, path, config);
+  const exactPluginId = exactKnownPluginIdForParts(config, parts);
+
+  if (exactPluginId !== undefined) {
+    if (contextCandidate !== undefined) {
+      throw ambiguousKnownPluginPathError(path, [
+        contextCandidate.pluginId,
+        exactPluginId
+      ]);
+    }
+
+    throw exactKnownPluginMutationPathError(path, exactPluginId);
+  }
 
   if (contextCandidate !== undefined) {
     return contextCandidate;
@@ -982,6 +994,23 @@ function parsePluginMutationPath(
   }
 
   throw new TypeError(`Unsupported runtime config path: ${path}.`);
+}
+
+function exactPluginIdForParts(parts: readonly string[]): string {
+  return parts.slice(1).join('.');
+}
+
+function exactKnownPluginIdForParts(
+  config: Project02RuntimeConfig | undefined,
+  parts: readonly string[]
+): string | undefined {
+  if (config === undefined) {
+    return undefined;
+  }
+
+  const pluginId = exactPluginIdForParts(parts);
+
+  return isKnownPluginId(config, pluginId) ? pluginId : undefined;
 }
 
 function pluginPathCandidates(parts: readonly string[]): readonly ParsedPluginMutationPath[] {
@@ -1077,6 +1106,15 @@ function ambiguousKnownPluginPathError(
 ): TypeError {
   return new TypeError(
     `Ambiguous runtime config plugin path: ${path}. Known plugin ids match multiple interpretations: ${pluginIds.join(', ')}. Use plugin enable or secret set with an explicit plugin id to disambiguate.`
+  );
+}
+
+function exactKnownPluginMutationPathError(
+  path: string,
+  pluginId: string
+): TypeError {
+  return new TypeError(
+    `Ambiguous runtime config plugin path: ${path}. It exactly matches known plugin id "${pluginId}". Use plugin enable, plugin disable, or secret set with an explicit plugin id to disambiguate.`
   );
 }
 

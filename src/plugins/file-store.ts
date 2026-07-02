@@ -60,7 +60,7 @@ export function createRuntimePluginFileStore(
 
       assertDurableJsonPathMode({
         filePath,
-        mode: pathModes.get(safePath),
+        mode: durablePathModeForPath(root, pathModes, safePath),
         path: safePath
       });
 
@@ -82,7 +82,7 @@ export function createRuntimePluginFileStore(
 
       assertDurableJsonlPathMode({
         filePath,
-        mode: pathModes.get(safePath),
+        mode: durablePathModeForPath(root, pathModes, safePath),
         path: safePath
       });
 
@@ -110,7 +110,7 @@ export function createRuntimePluginFileStore(
 
       assertDurableJsonPathMode({
         filePath,
-        mode: pathModes.get(safePath),
+        mode: durablePathModeForPath(root, pathModes, safePath),
         path: safePath
       });
 
@@ -133,7 +133,7 @@ export function createRuntimePluginFileStore(
 
       assertDurableJsonlPathMode({
         filePath,
-        mode: pathModes.get(safePath),
+        mode: durablePathModeForPath(root, pathModes, safePath),
         path: safePath
       });
 
@@ -356,6 +356,26 @@ function writeDurablePathModes(
   renameSync(tmpPath, modesPath);
 }
 
+function durablePathModeForPath(
+  root: string,
+  pathModes: Map<string, RuntimePluginFileStorePathMode>,
+  path: string
+): RuntimePluginFileStorePathMode | undefined {
+  const cachedMode = pathModes.get(path);
+
+  if (cachedMode !== undefined) {
+    return cachedMode;
+  }
+
+  const persistedMode = readDurablePathModes(root).get(path);
+
+  if (persistedMode !== undefined) {
+    pathModes.set(path, persistedMode);
+  }
+
+  return persistedMode;
+}
+
 function initialDurableRevision(root: string): number {
   try {
     return countDurableStoreEntries(root);
@@ -410,7 +430,7 @@ function assertDurableJsonlPathMode(options: {
 }): void {
   assertJsonlPathMode(options.mode);
 
-  if (options.mode !== undefined || options.path.endsWith('.jsonl')) {
+  if (options.mode !== undefined) {
     return;
   }
 

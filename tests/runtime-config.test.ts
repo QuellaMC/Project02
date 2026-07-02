@@ -4050,6 +4050,98 @@ describe('runtime config CLI', () => {
     expect(JSON.stringify(afterConfigSegmentSet)).not.toContain('"config.backend"');
   });
 
+  it('rejects exact wrapper mutation paths before fallback parsing', async () => {
+    for (const example of [
+      {
+        exactPluginId: 'memory.enabled',
+        args: ['set', 'plugins.memory.enabled', 'false']
+      },
+      {
+        exactPluginId: 'memory.enabled',
+        args: ['unset', 'plugins.memory.enabled']
+      },
+      {
+        exactPluginId: 'memory.config.api',
+        args: ['set', 'plugins.memory.config.api', 'remote']
+      }
+    ] as const) {
+      const storeRoot = mkdtempSync(
+        join(tmpdir(), 'project02-config-exact-wrapper-mutation-')
+      );
+      let stderr = '';
+
+      expect(
+        await runRuntimeConfigCliFromArgs(
+          ['--store', storeRoot, 'plugin', 'enable', example.exactPluginId],
+          {
+            stdout: collect(() => {}),
+            stderr: collect(() => {})
+          }
+        )
+      ).toBe(0);
+
+      expect(
+        await runRuntimeConfigCliFromArgs(['--store', storeRoot, ...example.args], {
+          stdout: collect(() => {}),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        })
+      ).toBe(1);
+
+      expect(stderr).toContain('Ambiguous runtime config plugin path');
+      expect(stderr).toContain(example.args[1]);
+      expect(stderr).toContain(example.exactPluginId);
+
+      const configText = readFileSync(join(storeRoot, 'config.json'), 'utf8');
+      const config: unknown = JSON.parse(configText);
+
+      expect(config).toMatchObject({
+        plugins: {
+          [example.exactPluginId]: {
+            enabled: true
+          }
+        }
+      });
+      expect(configText).not.toContain('"memory":');
+    }
+  });
+
+  it('rejects exact legacy enabled plugin mutation paths before fallback parsing', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-exact-legacy-enabled-mutation-')
+    );
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      storeRoot: realpathSync.native(storeRoot),
+      enabledPlugins: ['memory.enabled']
+    });
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'set', 'plugins.memory.enabled', 'false'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        }
+      )
+    ).toBe(1);
+
+    expect(stderr).toContain('Ambiguous runtime config plugin path');
+    expect(stderr).toContain('plugins.memory.enabled');
+    expect(stderr).toContain('memory.enabled');
+
+    const configText = readFileSync(configPath, 'utf8');
+    const config: unknown = JSON.parse(configText);
+
+    expect(config).toMatchObject({
+      enabledPlugins: ['memory.enabled']
+    });
+    expect(configText).not.toContain('"memory":');
+  });
+
   it('sets, gets, and unsets dotted plugin config field names', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-dotted-field-'));
     const seededStoreRoot = realpathSync.native(storeRoot);
