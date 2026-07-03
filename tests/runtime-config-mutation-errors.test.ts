@@ -1,0 +1,90 @@
+import {
+  mkdtempSync,
+  realpathSync,
+  readFileSync,
+  writeFileSync
+} from 'node:fs';
+import type * as NodeFs from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+describe('runtime config mutation error handling', () => {
+  afterEach(() => {
+    vi.doUnmock('node:fs');
+    vi.resetModules();
+  });
+
+  it('wraps failed secret writes and failed config rollback in a mutation error', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-rollback-error-')
+    );
+    const configPath = join(storeRoot, 'config.json');
+
+    writeFileSync(
+      configPath,
+      `${JSON.stringify({ version: 'project02.runtime_config.v1', storeRoot }, null, 2)}\n`,
+      'utf8'
+    );
+
+    const canonicalStoreRoot = realpathSync.native(storeRoot);
+    const canonicalConfigPath = realpathSync.native(configPath);
+    const canonicalEnvPath = join(canonicalStoreRoot, '.env');
+    let configRenameCount = 0;
+
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof NodeFs>('node:fs');
+
+      return {
+        ...actual,
+        renameSync(from: string, to: string): void {
+          if (to === canonicalConfigPath) {
+            configRenameCount += 1;
+
+            if (configRenameCount === 2) {
+              throw new Error('rollback denied');
+            }
+          }
+
+          if (to === canonicalEnvPath) {
+            throw new Error('env write denied');
+          }
+
+          actual.renameSync(from, to);
+        }
+      };
+    });
+
+    const { applyRuntimeConfigMutation, RuntimeConfigMutationError } = await import(
+      '../src/runtime/config/mutate.ts'
+    );
+
+    let thrown: unknown;
+
+    try {
+      applyRuntimeConfigMutation({
+        storeRoot,
+        operation: {
+          kind: 'secret_set',
+          pluginId: 'memory',
+          fieldName: 'apiKey',
+          envVar: 'PROJECT02_MEMORY_API_KEY',
+          secretValue: 'secret-value'
+        }
+      });
+    } catch (error: unknown) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(RuntimeConfigMutationError);
+    expect((thrown as Error).message).toBe(
+      'Could not write runtime config secret and failed to roll back the config update.'
+    );
+    expect((thrown as Error).cause).toBeInstanceOf(AggregateError);
+    expect(((thrown as Error).cause as AggregateError).errors).toHaveLength(2);
+    expect(readFileSync(configPath, 'utf8')).toContain(
+      '"$env": "PROJECT02_MEMORY_API_KEY"'
+    );
+  });
+});

@@ -99,6 +99,7 @@ export const localRuntimeReadableStorageSchemaVersions: readonly LocalRuntimeRea
 
 export type LocalRuntimeStorageContractErrorCode =
   | 'invalid_session_id'
+  | 'invalid_plugin_id'
   | 'malformed_record'
   | 'malformed_schema_marker'
   | 'missing_file'
@@ -119,6 +120,8 @@ export class LocalRuntimeStorageContractError extends Error {
 
 export type LocalRuntimeStorageLayout = {
   readonly storeRoot: string;
+  readonly configPath: string;
+  readonly envPath: string;
   readonly schemaPath: string;
   readonly sessionCatalogPath: string;
   readonly sessionsRoot: string;
@@ -128,9 +131,19 @@ export type LocalRuntimeSessionPaths = {
   readonly storeRoot: string;
   readonly sessionId: string;
   readonly sessionRoot: string;
+  readonly pluginsRoot: string;
   readonly tracePath: string;
   readonly rawEventsPath: string;
   readonly conversationPath: string;
+};
+
+export type LocalRuntimePluginPaths = {
+  readonly storeRoot: string;
+  readonly sessionId: string;
+  readonly pluginId: string;
+  readonly sessionRoot: string;
+  readonly pluginsRoot: string;
+  readonly pluginRoot: string;
 };
 
 export type LocalRuntimeStorageLayoutOptions = {
@@ -139,6 +152,10 @@ export type LocalRuntimeStorageLayoutOptions = {
 
 export type LocalRuntimeSessionPathsOptions = LocalRuntimeStorageLayoutOptions & {
   readonly sessionId?: string;
+};
+
+export type LocalRuntimePluginPathsOptions = LocalRuntimeSessionPathsOptions & {
+  readonly pluginId: string;
 };
 
 export type LocalRuntimeStorageSchemaMarker = {
@@ -162,9 +179,12 @@ export type CreateLocalRuntimeSessionMetadataOptions = {
   readonly updatedAt?: string;
 };
 
+const configFileName = 'config.json';
+const envFileName = '.env';
 const schemaFileName = 'schema.json';
 const sessionCatalogFileName = 'sessions.jsonl';
 const sessionsDirectoryName = 'sessions';
+const pluginsDirectoryName = 'plugins';
 const traceFileName = 'trace.jsonl';
 const rawEventsFileName = 'raw-events.jsonl';
 const conversationFileName = 'conversation.jsonl';
@@ -242,6 +262,7 @@ const runtimePluginSourceKinds = [
 const visibleMessageRoles = ['user', 'character'] as const satisfies readonly VisibleMessageRole[];
 const runtimeEventTypes = ['USER_MESSAGE'] as const satisfies readonly RuntimeEventType[];
 const sessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const pluginIdPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
 const commitOwnedRoleModelRejectionReasons = [
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelPluginToolRejectedRejectionReason,
@@ -273,6 +294,8 @@ export function createLocalRuntimeStorageLayout(
 
   return Object.freeze({
     storeRoot,
+    configPath: join(storeRoot, configFileName),
+    envPath: join(storeRoot, envFileName),
     schemaPath: join(storeRoot, schemaFileName),
     sessionCatalogPath: join(storeRoot, sessionCatalogFileName),
     sessionsRoot
@@ -285,15 +308,33 @@ export function createLocalRuntimeSessionPaths(
   const layout = createLocalRuntimeStorageLayout(options);
   const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);
   const sessionRoot = join(layout.sessionsRoot, sessionId);
+  const pluginsRoot = join(sessionRoot, pluginsDirectoryName);
 
   return Object.freeze({
     storeRoot: layout.storeRoot,
     sessionId,
     sessionRoot,
+    pluginsRoot,
     tracePath: join(sessionRoot, traceFileName),
     rawEventsPath: join(sessionRoot, rawEventsFileName),
     conversationPath: join(sessionRoot, conversationFileName)
   } satisfies LocalRuntimeSessionPaths);
+}
+
+export function createLocalRuntimePluginPaths(
+  options: LocalRuntimePluginPathsOptions
+): LocalRuntimePluginPaths {
+  const sessionPaths = createLocalRuntimeSessionPaths(options);
+  const pluginId = normalizeLocalRuntimePluginId(options.pluginId);
+
+  return Object.freeze({
+    storeRoot: sessionPaths.storeRoot,
+    sessionId: sessionPaths.sessionId,
+    pluginId,
+    sessionRoot: sessionPaths.sessionRoot,
+    pluginsRoot: sessionPaths.pluginsRoot,
+    pluginRoot: join(sessionPaths.pluginsRoot, pluginId)
+  } satisfies LocalRuntimePluginPaths);
 }
 
 export function normalizeLocalRuntimeSessionId(sessionId: string | undefined): string {
@@ -318,6 +359,19 @@ export function normalizeLocalRuntimeSessionId(sessionId: string | undefined): s
   }
 
   return normalizedSessionId;
+}
+
+export function normalizeLocalRuntimePluginId(pluginId: string): string {
+  const normalizedPluginId = pluginId.trim();
+
+  if (!pluginIdPattern.test(normalizedPluginId)) {
+    throw new LocalRuntimeStorageContractError(
+      'invalid_plugin_id',
+      'Local runtime plugin ID must start with a letter and use only letters, numbers, dots, underscores, or hyphens.'
+    );
+  }
+
+  return normalizedPluginId;
 }
 
 export function createLocalRuntimeSessionMetadata(

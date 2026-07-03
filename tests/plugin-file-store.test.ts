@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,6 +13,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createRuntimePluginFileStore
 } from '../src/plugins/file-store.ts';
+import {
+  createLocalRuntimePluginPaths,
+  LocalRuntimeStorageContractError
+} from '../src/runtime/storage/layout.ts';
 import type {
   RuntimePluginJsonObject
 } from '../src/plugins/types.ts';
@@ -38,6 +48,23 @@ describe('runtime plugin file store', () => {
         pluginId: '../outside-plugin'
       })
     ).toThrow(/plugin ID/iu);
+
+    let pluginIdError: unknown;
+
+    try {
+      createRuntimePluginFileStore({
+        storeRoot,
+        sessionId: 'session-safe',
+        pluginId: '../outside-plugin'
+      });
+    } catch (error: unknown) {
+      pluginIdError = error;
+    }
+
+    expect(pluginIdError).toBeInstanceOf(LocalRuntimeStorageContractError);
+    expect(pluginIdError).toMatchObject({
+      code: 'invalid_plugin_id'
+    });
   });
 
   it('seeds and persists durable revisions from existing plugin files', () => {
@@ -232,17 +259,134 @@ describe('runtime plugin file store', () => {
 
     expect(() => {
       legacyDurable.readJsonl('mixed.json');
-    }).toThrow(/non-array JSON/iu);
+    }).toThrow(/already stores JSON/iu);
     expect(() => {
       legacyDurable.appendJsonl('mixed.json', { value: 'jsonl' });
-    }).toThrow(/non-array JSON/iu);
+    }).toThrow(/already stores JSON/iu);
     expect(legacyDurable.readJson('mixed.json')).toEqual({
       value: 'legacy-json'
     });
     expect(legacyDurable.revision()).toBe(1);
   });
 
-  it('rejects JSON reads on paths that already store JSONL', () => {
+  it('rejects JSONL reads and appends on untracked durable paths that store JSON arrays', () => {
+    const storeRoot = createTempRoot();
+    const root = pluginRoot(
+      storeRoot,
+      'session-mixed-json-array-jsonl-legacy',
+      'plugin.mixed-mode-array-legacy'
+    );
+    const mixedJsonPath = join(root, 'mixed.json');
+    const mixedJsonContent = '[{"value":"legacy-array-json"}]\n';
+    mkdirSync(root, { recursive: true });
+    writeFileSync(mixedJsonPath, mixedJsonContent, 'utf8');
+
+    const store = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: 'session-mixed-json-array-jsonl-legacy',
+      pluginId: 'plugin.mixed-mode-array-legacy'
+    });
+
+    expect(() => {
+      store.readJsonl('mixed.json');
+    }).toThrow(/already stores JSON/iu);
+    expect(() => {
+      store.appendJsonl('mixed.json', { value: 'jsonl' });
+    }).toThrow(/already stores JSON/iu);
+    expect(readFileSync(mixedJsonPath, 'utf8')).toBe(mixedJsonContent);
+    expect(store.readJson('mixed.json')).toEqual([
+      { value: 'legacy-array-json' }
+    ]);
+    expect(store.revision()).toBe(1);
+  });
+
+  it('preserves untracked .jsonl paths that contain one JSONL record', () => {
+    const storeRoot = createTempRoot();
+    const root = pluginRoot(
+      storeRoot,
+      'session-one-record-jsonl-legacy',
+      'plugin.one-record-jsonl-legacy'
+    );
+    const eventsPath = join(root, 'events.jsonl');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(eventsPath, '{"value":"legacy-jsonl"}\n', 'utf8');
+
+    const firstStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: 'session-one-record-jsonl-legacy',
+      pluginId: 'plugin.one-record-jsonl-legacy'
+    });
+
+    expect(firstStore.readJsonl('events.jsonl')).toEqual([
+      { value: 'legacy-jsonl' }
+    ]);
+    expect(() => {
+      firstStore.readJson('events.jsonl');
+    }).toThrow(/stores JSONL/iu);
+
+    firstStore.appendJsonl('events.jsonl', { value: 'new-jsonl' });
+
+    expect(readFileSync(eventsPath, 'utf8')).toBe(
+      '{"value":"legacy-jsonl"}\n{"value":"new-jsonl"}\n'
+    );
+    expect(firstStore.revision()).toBe(2);
+
+    const secondStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: 'session-one-record-jsonl-legacy',
+      pluginId: 'plugin.one-record-jsonl-legacy'
+    });
+
+    expect(secondStore.readJsonl('events.jsonl')).toEqual([
+      { value: 'legacy-jsonl' },
+      { value: 'new-jsonl' }
+    ]);
+    expect(secondStore.revision()).toBe(2);
+  });
+
+  it('rejects JSONL reads and appends on untracked .jsonl paths that store single JSON documents', () => {
+    const cases = [
+      {
+        name: 'array',
+        content: '[{"value":"legacy-array-json"}]\n'
+      },
+      {
+        name: 'object',
+        content: '{\n"value":"legacy-object-json"\n}\n'
+      }
+    ];
+
+    for (const { name, content } of cases) {
+      const storeRoot = createTempRoot();
+      const root = pluginRoot(
+        storeRoot,
+        `session-mixed-jsonl-${name}-legacy`,
+        'plugin.mixed-mode-jsonl-legacy'
+      );
+      const eventsPath = join(root, 'events.jsonl');
+      mkdirSync(root, { recursive: true });
+      writeFileSync(eventsPath, content, 'utf8');
+
+      const store = createRuntimePluginFileStore({
+        storeRoot,
+        sessionId: `session-mixed-jsonl-${name}-legacy`,
+        pluginId: 'plugin.mixed-mode-jsonl-legacy'
+      });
+
+      expect(() => {
+        store.readJsonl('events.jsonl');
+      }).toThrow(/already stores JSON/iu);
+      expect(() => {
+        store.appendJsonl('events.jsonl', { value: 'jsonl' });
+      }).toThrow(/already stores JSON/iu);
+      expect(readFileSync(eventsPath, 'utf8')).toBe(content);
+      expect(store.revision()).toBe(
+        content.split('\n').filter((line) => line.trim().length > 0).length
+      );
+    }
+  });
+
+  it('rejects JSON reads and writes on paths that already store JSONL', () => {
     const stores = [
       createRuntimePluginFileStore({
         sessionId: 'session-mixed-jsonl-json-memory',
@@ -260,6 +404,9 @@ describe('runtime plugin file store', () => {
 
       expect(() => {
         store.readJson('events.jsonl');
+      }).toThrow(/stores JSONL/iu);
+      expect(() => {
+        store.writeJsonAtomic('events.jsonl', { value: 'json' });
       }).toThrow(/stores JSONL/iu);
       expect(store.readJsonl('events.jsonl')).toEqual([
         { value: 'jsonl' }
@@ -285,10 +432,44 @@ describe('runtime plugin file store', () => {
     expect(() => {
       secondDurable.readJson('events.jsonl');
     }).toThrow(/stores JSONL/iu);
+    expect(() => {
+      secondDurable.writeJsonAtomic('events.jsonl', { value: 'json' });
+    }).toThrow(/stores JSONL/iu);
     expect(secondDurable.readJsonl('events.jsonl')).toEqual([
       { value: 'jsonl' }
     ]);
     expect(secondDurable.revision()).toBe(1);
+
+    const legacyStoreRoot = createTempRoot();
+    const legacyRoot = pluginRoot(
+      legacyStoreRoot,
+      'session-mixed-jsonl-json-legacy',
+      'plugin.mixed-mode-legacy'
+    );
+    const legacyEventsPath = join(legacyRoot, 'events.jsonl');
+    const legacyEventsContent =
+      '{"value":"legacy-jsonl-1"}\n{"value":"legacy-jsonl-2"}\n';
+    mkdirSync(legacyRoot, { recursive: true });
+    writeFileSync(legacyEventsPath, legacyEventsContent, 'utf8');
+
+    const legacyDurable = createRuntimePluginFileStore({
+      storeRoot: legacyStoreRoot,
+      sessionId: 'session-mixed-jsonl-json-legacy',
+      pluginId: 'plugin.mixed-mode-legacy'
+    });
+
+    expect(() => {
+      legacyDurable.readJson('events.jsonl');
+    }).toThrow(/stores JSONL/iu);
+    expect(() => {
+      legacyDurable.writeJsonAtomic('events.jsonl', { value: 'json' });
+    }).toThrow(/stores JSONL/iu);
+    expect(readFileSync(legacyEventsPath, 'utf8')).toBe(legacyEventsContent);
+    expect(legacyDurable.readJsonl('events.jsonl')).toEqual([
+      { value: 'legacy-jsonl-1' },
+      { value: 'legacy-jsonl-2' }
+    ]);
+    expect(legacyDurable.revision()).toBe(2);
   });
 
   it('keeps durable JSONL paths appendable across store instances', () => {
@@ -300,15 +481,16 @@ describe('runtime plugin file store', () => {
       sessionId,
       pluginId
     });
-
-    first.appendJsonl('events.jsonl', { value: 1 });
-    expect(first.readJsonl('events.jsonl')).toEqual([{ value: 1 }]);
-
     const second = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
       pluginId
     });
+
+    first.appendJsonl('events.jsonl', { value: 1 });
+
+    expect(first.readJsonl('events.jsonl')).toEqual([{ value: 1 }]);
+    expect(second.readJsonl('events.jsonl')).toEqual([{ value: 1 }]);
 
     second.appendJsonl('events.jsonl', { value: 2 });
 
@@ -331,7 +513,11 @@ function pluginRoot(
   sessionId: string,
   pluginId: string
 ): string {
-  return join(storeRoot, 'sessions', sessionId, 'plugins', pluginId);
+  return createLocalRuntimePluginPaths({
+    storeRoot,
+    sessionId,
+    pluginId
+  }).pluginRoot;
 }
 
 function createProtoKeyValue(): RuntimePluginJsonObject {

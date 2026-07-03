@@ -1,5 +1,6 @@
 import {
   createRuntimePlugin,
+  createRuntimePluginManifest,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginContextItem,
   runtimePluginContractVersion,
@@ -27,7 +28,8 @@ import { createPluginContextEvidence, createPluginToolEvidence } from '../../evi
 import type {
   RuntimePlugin,
   RuntimePluginBeforeRoleModelCallResult,
-  RuntimePluginFileStore
+  RuntimePluginFileStore,
+  RuntimePluginManifest
 } from '../../types.ts';
 
 export const characterStatePluginId = 'character-state';
@@ -72,49 +74,53 @@ const characterStatePatchInputContract = Object.freeze({
   additionalFields: false
 } satisfies ModelToolInputContract);
 
+export function createCharacterStatePluginManifest(): RuntimePluginManifest {
+  return createRuntimePluginManifest({
+    id: characterStatePluginId,
+    displayName: 'Character State',
+    version: '1.0.0',
+    kind: 'first_party',
+    description: 'First-party current Character State context and patch tool.',
+    contractVersion: runtimePluginContractVersion,
+    compatibility: {
+      hostContractVersions: [runtimePluginContractVersion],
+      sourceSystem: 'project02',
+      externalContract: 'character_state_plugin'
+    },
+    declaredPlugins: [
+      'tool_provider',
+      'before_role_model_call',
+      'handle_tool_call'
+    ],
+    config: {
+      fields: []
+    },
+    localTrustLevel: 'first_party',
+    runtimePolicy: {
+      requiredForTurn: true,
+      sideEffectLevel: 'local_memory_write',
+      confirmation: 'not_required',
+      timeoutMs: 1000,
+      sourceReferencesRequired: false,
+      redactionLabels: [],
+      failureBehavior: {
+        beforeRoleModelCall: 'reject_turn',
+        handleToolCall: 'reject_tool_call',
+        afterTurnCommitted: 'log_failure',
+        health: 'degrade'
+      }
+    },
+    activation: {
+      defaultEnabled: true,
+      reasons: ['built_in_character_state']
+    },
+    requestedApis: ['file_store']
+  });
+}
+
 export function createCharacterStatePlugin(): RuntimePlugin {
   return createRuntimePlugin({
-    manifest: {
-      id: characterStatePluginId,
-      displayName: 'Character State',
-      version: '1.0.0',
-      kind: 'first_party',
-      description: 'First-party current Character State context and patch tool.',
-      contractVersion: runtimePluginContractVersion,
-      compatibility: {
-        hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02',
-        externalContract: 'character_state_plugin'
-      },
-      declaredPlugins: [
-        'tool_provider',
-        'before_role_model_call',
-        'handle_tool_call'
-      ],
-      config: {
-        fields: []
-      },
-      localTrustLevel: 'first_party',
-      runtimePolicy: {
-        requiredForTurn: true,
-        sideEffectLevel: 'local_memory_write',
-        confirmation: 'not_required',
-        timeoutMs: 1000,
-        sourceReferencesRequired: false,
-        redactionLabels: [],
-        failureBehavior: {
-          beforeRoleModelCall: 'reject_turn',
-          handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
-      },
-      activation: {
-        defaultEnabled: true,
-        reasons: ['built_in_character_state']
-      },
-      requestedApis: ['file_store']
-    },
+    manifest: createCharacterStatePluginManifest(),
     providedTools: [
       Object.freeze({
         name: characterStatePatchModelToolName,

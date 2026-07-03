@@ -326,14 +326,23 @@ async function localRuntimeStoreHasExistingContent(
     const entries = await readdir(layout.storeRoot, { withFileTypes: true });
 
     for (const entry of entries) {
+      const entryPath = join(layout.storeRoot, entry.name);
+
       if (
         entry.isDirectory() &&
-        join(layout.storeRoot, entry.name) === layout.sessionsRoot
+        entryPath === layout.sessionsRoot
       ) {
         if (await localRuntimeSessionsRootHasDurableEvidence(layout)) {
           return true;
         }
 
+        continue;
+      }
+
+      if (
+        isRuntimeHomeControlFile(layout, entryPath) &&
+        (entry.isFile() || entry.isSymbolicLink())
+      ) {
         continue;
       }
 
@@ -351,6 +360,13 @@ async function localRuntimeStoreHasExistingContent(
       `Could not inspect local runtime store root: ${layout.storeRoot}.`
     );
   }
+}
+
+function isRuntimeHomeControlFile(
+  layout: LocalRuntimeStorageLayout,
+  entryPath: string
+): boolean {
+  return entryPath === layout.configPath || entryPath === layout.envPath;
 }
 
 async function readStorageSchemaMarker(
