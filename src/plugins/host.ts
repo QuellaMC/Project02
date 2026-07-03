@@ -86,6 +86,19 @@ export type RuntimePluginHookHostResult = {
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
 };
 
+export type RuntimePluginSessionEndOptions = {
+  readonly allowFileStoreWrites?: boolean;
+};
+
+export type RunRuntimePluginSessionEndHooksOptions = {
+  readonly plugins: readonly RuntimePlugin[];
+  readonly context: RuntimePluginContext;
+  readonly storeRoot?: string | undefined;
+  readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
+  readonly hookOptions?: RuntimePluginSessionEndOptions;
+};
+
 export type RuntimePluginHealthHostResult = {
   readonly snapshots: readonly RuntimePluginHealthSnapshot[];
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
@@ -110,7 +123,8 @@ export type RuntimePluginHost = {
     context: RuntimePluginAfterTurnCommittedContext
   ): Promise<RuntimePluginHookHostResult>;
   onSessionEnd(
-    context: RuntimePluginContext
+    context: RuntimePluginContext,
+    options?: RuntimePluginSessionEndOptions
   ): Promise<RuntimePluginHookHostResult>;
   health(context: RuntimePluginContext): Promise<RuntimePluginHealthHostResult>;
 };
@@ -265,16 +279,14 @@ export function createRuntimePluginHost(
         evidence: hookResult.evidence
       } satisfies RuntimePluginHookHostResult);
     },
-    async onSessionEnd(context) {
-      return await runHookPhase({
+    async onSessionEnd(context, hookOptions) {
+      return await runRuntimePluginSessionEndHooks({
         plugins: enabledPlugins,
         context,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity,
-        hookName: 'onSessionEnd',
-        evidenceKind: 'session_end',
-        hookForPlugin: (plugin) => plugin.lifecycleHooks.onSessionEnd
+        ...(hookOptions === undefined ? {} : { hookOptions })
       });
     },
     async health(context) {
@@ -287,6 +299,24 @@ export function createRuntimePluginHost(
       });
     }
   } satisfies RuntimePluginHost);
+}
+
+export async function runRuntimePluginSessionEndHooks(
+  options: RunRuntimePluginSessionEndHooksOptions
+): Promise<RuntimePluginHookHostResult> {
+  return await runHookPhase({
+    plugins: options.plugins,
+    context: options.context,
+    storeRoot: options.storeRoot,
+    sessionId: options.sessionId,
+    sessionIdentity: options.sessionIdentity,
+    ...(options.hookOptions?.allowFileStoreWrites === undefined
+      ? {}
+      : { allowFileStoreWrites: options.hookOptions.allowFileStoreWrites }),
+    hookName: 'onSessionEnd',
+    evidenceKind: 'session_end',
+    hookForPlugin: (plugin) => plugin.lifecycleHooks.onSessionEnd
+  });
 }
 
 export function createDefaultProject02PluginHost(
@@ -802,6 +832,7 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
   readonly sessionIdentity?: object | undefined;
   readonly hookName: 'afterTurnCommitted' | 'onSessionEnd';
   readonly evidenceKind: Extract<RuntimePluginEvidenceKind, 'after_turn_committed' | 'session_end'>;
+  readonly allowFileStoreWrites?: boolean | undefined;
   readonly hookForPlugin: (
     plugin: RuntimePlugin
   ) => ((context: TContext) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>) | undefined;
@@ -821,7 +852,10 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
       plugin,
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
-      sessionIdentity: options.sessionIdentity
+      sessionIdentity: options.sessionIdentity,
+      ...(options.allowFileStoreWrites === undefined
+        ? {}
+        : { allowFileStoreWrites: options.allowFileStoreWrites })
     });
     const result = await invokeHook({
       plugin,

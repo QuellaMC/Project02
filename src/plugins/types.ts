@@ -118,6 +118,16 @@ const runtimePluginHealthStatusValues = [
   'degraded',
   'unavailable'
 ] as const;
+const runtimePluginConfigValueTypeValues = [
+  'string',
+  'number',
+  'boolean',
+  'object',
+  'array',
+  'secret',
+  'path',
+  'enum'
+] as const;
 
 export type RuntimePluginKind =
   (typeof runtimePluginKindValues)[number];
@@ -151,6 +161,8 @@ export type RuntimePluginPolicyOutcome =
   (typeof runtimePluginPolicyOutcomeValues)[number];
 export type RuntimePluginHealthStatus =
   (typeof runtimePluginHealthStatusValues)[number];
+export type RuntimePluginConfigValueType =
+  (typeof runtimePluginConfigValueTypeValues)[number];
 
 export type RuntimePluginJsonValue =
   | string
@@ -187,7 +199,12 @@ export type RuntimePluginConfigField = {
   readonly description: string;
   readonly required: boolean;
   readonly secret: boolean;
+  readonly valueType?: RuntimePluginConfigValueType;
+  readonly defaultValueSummary?: string;
+  readonly envVar?: string;
+  readonly allowedValues?: readonly string[];
   readonly redactionLabels: readonly string[];
+  readonly configFingerprint?: string;
 };
 
 export type RuntimePluginConfigMetadata = {
@@ -1589,9 +1606,23 @@ function requiredConfigField(
   const description = requiredNonEmptyString(value['description'], 'description');
   const required = requiredBoolean(value['required'], 'required');
   const secret = requiredBoolean(value['secret'], 'secret');
+  const valueType = optionalRuntimePluginConfigValueType(value['valueType']);
+  const defaultValueSummary = optionalString(
+    value['defaultValueSummary'],
+    'defaultValueSummary'
+  );
+  const envVar = optionalString(value['envVar'], 'envVar');
+  const allowedValues =
+    value['allowedValues'] === undefined
+      ? accept(undefined)
+      : requiredStringArray(value['allowedValues'], 'allowedValues');
   const redactionLabels = requiredStringArray(
     value['redactionLabels'],
     'redactionLabels'
+  );
+  const configFingerprint = optionalString(
+    value['configFingerprint'],
+    'configFingerprint'
   );
 
   if (
@@ -1599,14 +1630,24 @@ function requiredConfigField(
     description.status === 'rejected' ||
     required.status === 'rejected' ||
     secret.status === 'rejected' ||
-    redactionLabels.status === 'rejected'
+    valueType.status === 'rejected' ||
+    defaultValueSummary.status === 'rejected' ||
+    envVar.status === 'rejected' ||
+    allowedValues.status === 'rejected' ||
+    redactionLabels.status === 'rejected' ||
+    configFingerprint.status === 'rejected'
   ) {
     return firstRejected([
       name,
       description,
       required,
       secret,
-      redactionLabels
+      valueType,
+      defaultValueSummary,
+      envVar,
+      allowedValues,
+      redactionLabels,
+      configFingerprint
     ]);
   }
 
@@ -1616,9 +1657,43 @@ function requiredConfigField(
       description: redactRuntimePluginText(description.value),
       required: required.value,
       secret: secret.value,
-      redactionLabels: redactionLabels.value
+      ...(valueType.value === undefined ? {} : { valueType: valueType.value }),
+      ...(defaultValueSummary.value === undefined
+        ? {}
+        : { defaultValueSummary: redactRuntimePluginText(defaultValueSummary.value) }),
+      ...(envVar.value === undefined
+        ? {}
+        : { envVar: redactRuntimePluginText(envVar.value) }),
+      ...(allowedValues.value === undefined
+        ? {}
+        : {
+            allowedValues: Object.freeze(
+              allowedValues.value.map(redactRuntimePluginText)
+            )
+          }),
+      redactionLabels: redactionLabels.value,
+      ...(configFingerprint.value === undefined
+        ? {}
+        : { configFingerprint: redactRuntimePluginText(configFingerprint.value) })
     } satisfies RuntimePluginConfigField)
   );
+}
+
+function optionalRuntimePluginConfigValueType(
+  value: unknown
+): RuntimePluginValidationResult<RuntimePluginConfigValueType | undefined> {
+  if (value === undefined) {
+    return accept(undefined);
+  }
+
+  if (!isOneOf(value, runtimePluginConfigValueTypeValues)) {
+    return reject(
+      'malformed_manifest',
+      'Plugin config field valueType is not supported.'
+    );
+  }
+
+  return accept(value);
 }
 
 function requiredRuntimePolicy(
@@ -2315,13 +2390,17 @@ export function redactRuntimePluginText(value: string): string {
 }
 
 const runtimePluginCredentialKeySource =
-  String.raw`\b[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|credential)[A-Za-z0-9_.-]*\b`;
+  String.raw`\b[A-Za-z0-9_.-]*(?:api[_.-]?key|token|secret|password|credential)[A-Za-z0-9_.-]*\b`;
 const runtimePluginCredentialKeyPattern = new RegExp(
   runtimePluginCredentialKeySource,
   'iu'
 );
 const runtimePluginSecretKeyValuePattern = new RegExp(
-  String.raw`(["']?)(${runtimePluginCredentialKeySource})\1(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}]+)`,
+  String.raw`(["']?)(${runtimePluginCredentialKeySource})\1(\s*[:=]\s*)("[^"]*"|'[^']*'|[^&#\s,;}]+)`,
+  'giu'
+);
+const runtimePluginSecretQueryValuePattern = new RegExp(
+  String.raw`([?&]${runtimePluginCredentialKeySource}=)[^&#\s]+`,
   'giu'
 );
 
@@ -2357,7 +2436,7 @@ function redactUriCredentials(value: string): string {
 
 function redactUriSecretQueryValues(value: string): string {
   return value.replace(
-    /([?&][A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|credential)[A-Za-z0-9_.-]*=)[^&#\s]+/giu,
+    runtimePluginSecretQueryValuePattern,
     '$1[redacted]'
   );
 }

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -41,6 +41,24 @@ import type {
 import { assertLocalRuntimeSessionReadable } from '../src/runtime/storage/session-store.ts';
 
 const tempRoots: string[] = [];
+type RuntimeControlLayoutPath = 'configPath' | 'envPath';
+const symlinkedRuntimeControlFileCases = Object.freeze([
+  {
+    description: 'config.json',
+    layoutPaths: ['configPath']
+  },
+  {
+    description: '.env',
+    layoutPaths: ['envPath']
+  },
+  {
+    description: 'config.json and .env',
+    layoutPaths: ['configPath', 'envPath']
+  }
+] as const satisfies readonly {
+  readonly description: string;
+  readonly layoutPaths: readonly RuntimeControlLayoutPath[];
+}[]);
 
 describe('local runtime session store', () => {
   afterEach(async () => {
@@ -609,10 +627,48 @@ describe('local runtime session store', () => {
       `${JSON.stringify(created)}\n`
     );
   });
+
+  for (const testCase of symlinkedRuntimeControlFileCases) {
+    it(`initializes a fresh store containing only symlinked ${testCase.description}`, async () => {
+      const storeRoot = await createTempStoreRoot();
+      const controlTargetRoot = await createTempRoot(
+        'project02-session-store-control-target-'
+      );
+      const layout = createLocalRuntimeStorageLayout({ storeRoot });
+
+      for (const layoutPath of testCase.layoutPaths) {
+        const targetPath = join(controlTargetRoot, `${layoutPath}.target`);
+
+        await writeFile(targetPath, '{}\n', 'utf8');
+        await symlink(targetPath, layout[layoutPath]);
+      }
+
+      const store = createLocalRuntimeSessionStore({
+        storeRoot,
+        now: fixedClock(['2026-06-04T00:02:00.000Z'])
+      });
+      const created = await store.createSession({
+        sessionId: 'fresh'
+      });
+
+      expect(created).toEqual({
+        sessionId: 'fresh',
+        createdAt: '2026-06-04T00:02:00.000Z',
+        updatedAt: '2026-06-04T00:02:00.000Z'
+      });
+      await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe(
+        `${JSON.stringify(created)}\n`
+      );
+    });
+  }
 });
 
 async function createTempStoreRoot(): Promise<string> {
-  const storeRoot = await mkdtemp(join(tmpdir(), 'project02-session-store-'));
+  return await createTempRoot('project02-session-store-');
+}
+
+async function createTempRoot(prefix: string): Promise<string> {
+  const storeRoot = await mkdtemp(join(tmpdir(), prefix));
 
   tempRoots.push(storeRoot);
   return storeRoot;

@@ -23,6 +23,20 @@ describe('runtime plugin text redaction', () => {
     }
   });
 
+  it('redacts URI query values with credential-shaped keys', () => {
+    const input =
+      'https://example.test/search?api.key=dotted-secret&api_key=underscore-secret&api-key=hyphen-secret&safe=kept#section';
+
+    const redacted = redactRuntimePluginText(input);
+
+    expect(redacted).toBe(
+      'https://example.test/search?api.key=[redacted]&api_key=[redacted]&api-key=[redacted]&safe=kept#section'
+    );
+    expect(redacted).not.toContain('dotted-secret');
+    expect(redacted).not.toContain('underscore-secret');
+    expect(redacted).not.toContain('hyphen-secret');
+  });
+
   it('redacts structured values under credential-shaped plugin result keys', () => {
     const snapshot = createRuntimePluginToolInvocationSnapshot({
       eventId: 'evt_plugin_structured_redaction',

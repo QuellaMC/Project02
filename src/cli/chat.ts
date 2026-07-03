@@ -1,5 +1,4 @@
 import { createInterface } from 'node:readline';
-import { loadEnvFile } from 'node:process';
 import { pathToFileURL } from 'node:url';
 
 import {
@@ -46,27 +45,57 @@ import {
 } from '../runtime/storage/session-store.ts';
 import {
   createDefaultProject02PluginHost,
+  createRuntimePluginHost,
   createRuntimePluginContext,
   type RuntimePluginHookHostResult,
   type RuntimePluginHost
 } from '../plugins/index.ts';
+import {
+  runRuntimePluginSessionEndHooks,
+  type RuntimePluginSessionEndOptions
+} from '../plugins/host.ts';
+import {
+  createConfiguredProject02PluginHost,
+  diagnosticsHaveErrors,
+  loadProject02RuntimeConfig,
+  roleModelProviderEnvVarName,
+  resolveConfiguredProject02PluginActivation,
+  resolveProject02RuntimeConfig,
+  type RuntimeConfigDiagnostic,
+  type RuntimePluginFactory
+} from '../runtime/config/index.ts';
 import type { RoleModelAdapter } from '../role-model/loop.ts';
 import {
   formatLocalRuntimeTerminalError,
   isLocalRuntimeTerminalError,
   type LocalRuntimeTerminalError
 } from '../runtime/terminal-errors.ts';
+import {
+  parseRuntimeLocationFlag,
+  RuntimeLocationCliUsageError,
+  type RuntimeLocationCliState
+} from './runtime-location.ts';
+import {
+  defaultDotEnvForRuntimeLocation,
+  loadRuntimeConfigEnvFile,
+  readDefaultDotEnvFile,
+  resolveRuntimeConfigActivationBeforeEnvFile,
+  RuntimeEnvFileError,
+  shouldReadDefaultDotEnvForRuntimeLocation
+} from './runtime-env.ts';
 
 type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
+  readonly env?: NodeJS.ProcessEnv;
   readonly traceMode?: boolean;
   readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly pluginHost?: RuntimePluginHost;
   readonly session?: ConversationSession;
   readonly logStore?: RuntimeLogStore;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
 };
 
 type ChatProviderName = 'local' | 'nvidia';
@@ -75,6 +104,7 @@ type ChatCliArgs = {
   readonly traceMode: boolean;
   readonly provider?: ChatProviderName;
   readonly storeRoot?: string;
+  readonly configPath?: string;
   readonly sessionId?: string;
   readonly newSessionId?: string;
 };
@@ -123,13 +153,20 @@ type DurableChatRuntime = {
   readonly logStore: RuntimeLogStore;
 };
 
+type ConfiguredChatPluginHost = Awaited<
+  ReturnType<typeof createConfiguredProject02PluginHost>
+>;
+
 const exitCommand = '/exit';
 const modelTextToggleCommand = '/model-text';
 const showModelTextCommand = '/show-model-text';
 const hideModelTextCommand = '/hide-model-text';
 const promptText = 'You: ';
 const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
-const roleModelProviderEnvName = 'PROJECT02_ROLE_MODEL_PROVIDER';
+const startupFailurePluginCleanupMessage =
+  'chat startup failed before opening a durable session';
+const fatalFailurePluginCleanupMessage =
+  'chat turn failed before normal /exit cleanup';
 
 class ChatCliUsageError extends Error {
   constructor(message: string) {
@@ -138,26 +175,127 @@ class ChatCliUsageError extends Error {
   }
 }
 
+class ChatCliStartupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ChatCliStartupError';
+  }
+}
+
 export async function runChatCliFromArgs(
   args: readonly string[],
   options: ChatCliOptions
 ): Promise<number> {
   try {
-    loadDefaultDotEnvFile();
+    const explicitEnv =
+      options.env === undefined || options.env === process.env
+        ? undefined
+        : options.env;
     const parsedArgs = parseChatCliArgs(args);
+    const defaultEnv =
+      explicitEnv === undefined &&
+      shouldReadDefaultDotEnvForRuntimeLocation({
+        location: parsedArgs,
+        env: process.env
+      })
+        ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), parsedArgs)
+        : undefined;
+    const baseEnv = explicitEnv ?? { ...(defaultEnv ?? {}), ...process.env };
+    const loadedConfig = loadProject02RuntimeConfig({
+      ...parsedArgs,
+      env: baseEnv
+    });
 
-    validateDurableSessionArgs(parsedArgs);
-    const durableRuntime = await createDurableChatRuntime(parsedArgs);
-    const roleModelAdapter = createSelectedRoleModelAdapter(parsedArgs);
-    return await runChatCli({
-      ...options,
-      ...durableRuntime,
-      ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
-      traceMode: options.traceMode === true || parsedArgs.traceMode
+    assertNoRuntimeConfigErrors(loadedConfig.diagnostics, 'Runtime config is invalid');
+
+    const activationBeforeEnv =
+      options.pluginHost === undefined
+        ? resolveRuntimeConfigActivationBeforeEnvFile({
+            loadedConfig,
+            ...(parsedArgs.storeRoot === undefined
+              ? {}
+              : { storeRoot: parsedArgs.storeRoot }),
+            env: baseEnv,
+            diagnoseUncheckedLegacyFactories: true,
+            ...(options.factories === undefined ? {} : { factories: options.factories })
+          })
+        : undefined;
+
+    if (activationBeforeEnv !== undefined) {
+      assertNoRuntimeConfigErrors(
+        activationBeforeEnv.activation.diagnostics,
+        'Runtime config activation failed'
+      );
+    }
+
+    const runtimeEnv = loadRuntimeConfigEnvFile({
+      loadedConfig,
+      ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot }),
+      env: explicitEnv ?? process.env,
+      ...(defaultEnv === undefined ? {} : { envDefaults: defaultEnv })
+    });
+    const selectedArgs = selectChatProvider(parsedArgs, runtimeEnv);
+
+    const configuredActivation =
+      options.pluginHost === undefined
+        ? resolveConfiguredProject02PluginActivation({
+            loadedConfig,
+            ...(selectedArgs.storeRoot === undefined
+              ? {}
+              : { storeRoot: selectedArgs.storeRoot }),
+            env: runtimeEnv,
+            diagnoseUncheckedLegacyFactories: true,
+            ...(options.factories === undefined ? {} : { factories: options.factories })
+          })
+        : undefined;
+    const resolvedRuntimeConfig =
+      configuredActivation?.resolvedConfig ??
+      resolveProject02RuntimeConfig({
+        loadedConfig,
+        ...(selectedArgs.storeRoot === undefined ? {} : { storeRoot: selectedArgs.storeRoot }),
+        env: runtimeEnv
+      });
+    if (configuredActivation !== undefined) {
+      assertNoRuntimeConfigErrors(
+        configuredActivation.activation.diagnostics,
+        'Runtime config activation failed'
+      );
+    }
+    const runtimeArgs = {
+      ...selectedArgs,
+      storeRoot: resolvedRuntimeConfig.storeRoot
+    } satisfies ChatCliArgs;
+
+    validateDurableSessionArgs(runtimeArgs);
+    const configuredHost =
+      options.pluginHost === undefined
+        ? await createConfiguredChatPluginHostBeforeSession({
+            loadedConfig,
+            storeRoot: resolvedRuntimeConfig.storeRoot,
+            env: runtimeEnv,
+            ...(options.factories === undefined ? {} : { factories: options.factories })
+          })
+        : undefined;
+    if (configuredHost !== undefined) {
+      assertNoRuntimeConfigErrors(
+        configuredHost.activation.diagnostics,
+        'Runtime config activation failed'
+      );
+    }
+
+    return await runChatCliAfterConfiguredHost({
+      options,
+      runtimeArgs,
+      runtimeEnv,
+      parsedTraceMode: parsedArgs.traceMode,
+      configuredHost
     });
   } catch (error: unknown) {
     if (
       error instanceof ChatCliUsageError ||
+      error instanceof ChatCliStartupError ||
+      error instanceof RuntimeLocationCliUsageError ||
+      error instanceof RuntimeEnvFileError ||
       isLocalRuntimeTerminalError(error)
     ) {
       options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
@@ -166,6 +304,187 @@ export async function runChatCliFromArgs(
 
     throw error;
   }
+}
+
+async function runChatCliAfterConfiguredHost(options: {
+  readonly options: ChatCliOptions;
+  readonly runtimeArgs: ChatCliArgs;
+  readonly runtimeEnv: NodeJS.ProcessEnv;
+  readonly parsedTraceMode: boolean;
+  readonly configuredHost: ConfiguredChatPluginHost | undefined;
+}): Promise<number> {
+  let durableRuntime: DurableChatRuntime;
+  let pluginHost: RuntimePluginHost | undefined;
+  let roleModelAdapter: RoleModelAdapter | undefined;
+
+  try {
+    durableRuntime = await createDurableChatRuntime(options.runtimeArgs);
+    const configuredSessionHost = configuredPluginHostForSession(
+      options.configuredHost,
+      durableRuntime.session
+    );
+    pluginHost = options.options.pluginHost ?? configuredSessionHost;
+    roleModelAdapter = createSelectedRoleModelAdapter(
+      options.runtimeArgs,
+      options.runtimeEnv
+    );
+  } catch (error: unknown) {
+    if (options.configuredHost !== undefined) {
+      await cleanupConfiguredChatPluginHostAfterStartupFailure({
+        configuredHost: options.configuredHost,
+        args: options.runtimeArgs
+      });
+    }
+
+    throw error;
+  }
+
+  const exitCode = await runChatCli({
+    ...options.options,
+    ...durableRuntime,
+    ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
+    ...(pluginHost === undefined ? {} : { pluginHost }),
+    traceMode: options.options.traceMode === true || options.parsedTraceMode
+  });
+
+  if (
+    exitCode !== 0 &&
+    options.configuredHost !== undefined &&
+    pluginHost !== undefined
+  ) {
+    await cleanupConfiguredChatPluginHostAfterFatalExit({
+      configuredHost: options.configuredHost,
+      session: durableRuntime.session
+    });
+  }
+
+  return exitCode;
+}
+
+async function cleanupConfiguredChatPluginHostAfterFatalExit(options: {
+  readonly configuredHost: ConfiguredChatPluginHost;
+  readonly session: ConversationSession;
+}): Promise<void> {
+  const decisionContext = buildUserTurnDecisionContext({
+    session: options.session
+  });
+
+  await runBestEffortConfiguredChatPluginSessionEndCleanup({
+    configuredHost: options.configuredHost,
+    sessionId: decisionContext.sessionId,
+    sessionIdentity: options.session,
+    currentUserMessage: fatalFailurePluginCleanupMessage,
+    character: decisionContext.characterSnapshot
+  });
+}
+
+async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
+  readonly configuredHost: ConfiguredChatPluginHost;
+  readonly args: ChatCliArgs;
+}): Promise<void> {
+  await runBestEffortConfiguredChatPluginSessionEndCleanup({
+    configuredHost: options.configuredHost,
+    sessionId: normalizeLocalRuntimeSessionId(
+      options.args.newSessionId ?? options.args.sessionId
+    ),
+    currentUserMessage: startupFailurePluginCleanupMessage,
+    character: createConversationSession().character,
+    hookOptions: { allowFileStoreWrites: false }
+  });
+}
+
+async function runBestEffortConfiguredChatPluginSessionEndCleanup(options: {
+  readonly configuredHost: ConfiguredChatPluginHost;
+  readonly sessionId: string;
+  readonly currentUserMessage: string;
+  readonly character: ReturnType<typeof createConversationSession>['character'];
+  readonly sessionIdentity?: object;
+  readonly hookOptions?: RuntimePluginSessionEndOptions;
+}): Promise<void> {
+  try {
+    await runRuntimePluginSessionEndHooks({
+      plugins: options.configuredHost.plugins,
+      context: createRuntimePluginContext({
+        ...createRuntimeEventIdentity(),
+        sessionId: options.sessionId,
+        eventType: 'USER_MESSAGE',
+        currentUserMessage: options.currentUserMessage,
+        character: options.character
+      }),
+      storeRoot: options.configuredHost.resolvedConfig.storeRoot,
+      sessionId: options.sessionId,
+      ...(options.sessionIdentity === undefined
+        ? {}
+        : { sessionIdentity: options.sessionIdentity }),
+      ...(options.hookOptions === undefined
+        ? {}
+        : { hookOptions: options.hookOptions })
+    });
+  } catch {
+    // Cleanup must not mask the startup or fatal turn error that triggered it.
+  }
+}
+
+async function createConfiguredChatPluginHostBeforeSession(options: {
+  readonly loadedConfig: Parameters<
+    typeof createConfiguredProject02PluginHost
+  >[0]['loadedConfig'];
+  readonly storeRoot: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
+}): Promise<ConfiguredChatPluginHost> {
+  try {
+    return await createConfiguredProject02PluginHost(options);
+  } catch {
+    throw new ChatCliStartupError(
+      'Configured plugin construction failed before creating a durable session.'
+    );
+  }
+}
+
+function configuredPluginHostForSession(
+  configuredHost: ConfiguredChatPluginHost | undefined,
+  session: ConversationSession
+): RuntimePluginHost | undefined {
+  if (configuredHost === undefined) {
+    return undefined;
+  }
+
+  return createRuntimePluginHost({
+    plugins: configuredHost.plugins,
+    enabledPluginIds: configuredHost.activation.enabledPluginIds,
+    storeRoot: configuredHost.resolvedConfig.storeRoot,
+    sessionId: session.id,
+    sessionIdentity: session
+  });
+}
+
+function assertNoRuntimeConfigErrors(
+  diagnostics: readonly RuntimeConfigDiagnostic[],
+  messagePrefix: string
+): void {
+  if (!diagnosticsHaveErrors(diagnostics)) {
+    return;
+  }
+
+  const diagnostic = diagnostics.find((item) => item.severity === 'error');
+  throw new ChatCliUsageError(
+    diagnostic === undefined
+      ? messagePrefix
+      : formatRuntimeConfigDiagnosticError(messagePrefix, diagnostic)
+  );
+}
+
+function formatRuntimeConfigDiagnosticError(
+  messagePrefix: string,
+  diagnostic: RuntimeConfigDiagnostic
+): string {
+  const diagnosticLocation =
+    diagnostic.path === undefined
+      ? diagnostic.code
+      : `${diagnostic.code} at ${diagnostic.path}`;
+
+  return `${messagePrefix}: ${diagnostic.message} (${diagnosticLocation})`;
 }
 
 export async function runChatCli(options: ChatCliOptions): Promise<number> {
@@ -668,7 +987,7 @@ function writeTraceSummary(
 function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
   let traceMode = false;
   let provider: ChatProviderName | undefined;
-  let storeRoot: string | undefined;
+  let location: RuntimeLocationCliState = {};
   let sessionId: string | undefined;
   let newSessionId: string | undefined;
 
@@ -698,13 +1017,15 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
       continue;
     }
 
-    if (arg === '--store') {
-      if (storeRoot !== undefined) {
-        throw new ChatCliUsageError('--store can only be provided once.');
-      }
+    const locationResult = parseRuntimeLocationFlag({
+      args,
+      index,
+      state: location
+    });
 
-      storeRoot = readFlagValue(args, index, '--store');
-      index += 1;
+    if (locationResult.status === 'matched') {
+      location = locationResult.state;
+      index = locationResult.nextIndex;
       continue;
     }
 
@@ -737,8 +1058,9 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
 
   return {
     traceMode,
-    ...providerOption(provider ?? providerFromEnvironment(process.env)),
-    ...(storeRoot === undefined ? {} : { storeRoot }),
+    ...providerOption(provider),
+    ...(location.storeRoot === undefined ? {} : { storeRoot: location.storeRoot }),
+    ...(location.configPath === undefined ? {} : { configPath: location.configPath }),
     ...(sessionId === undefined ? {} : { sessionId }),
     ...(newSessionId === undefined ? {} : { newSessionId })
   } satisfies ChatCliArgs;
@@ -757,7 +1079,7 @@ function parseProviderName(value: string): ChatProviderName {
 function providerFromEnvironment(
   env: NodeJS.ProcessEnv
 ): ChatProviderName | undefined {
-  const value = env[roleModelProviderEnvName];
+  const value = env[roleModelProviderEnvVarName];
 
   if (value === undefined || value.length === 0) {
     return undefined;
@@ -767,7 +1089,7 @@ function providerFromEnvironment(
     return parseProviderName(value);
   } catch {
     throw new ChatCliUsageError(
-      `${roleModelProviderEnvName} must be either "local" or "nvidia".`
+      `${roleModelProviderEnvVarName} must be either "local" or "nvidia".`
     );
   }
 }
@@ -778,15 +1100,26 @@ function providerOption(provider: ChatProviderName | undefined): {
   return provider === undefined ? {} : { provider };
 }
 
+function selectChatProvider(
+  args: ChatCliArgs,
+  env: NodeJS.ProcessEnv
+): ChatCliArgs {
+  return {
+    ...args,
+    ...providerOption(args.provider ?? providerFromEnvironment(env))
+  } satisfies ChatCliArgs;
+}
+
 function createSelectedRoleModelAdapter(
-  args: ChatCliArgs
+  args: ChatCliArgs,
+  env: NodeJS.ProcessEnv = process.env
 ): RoleModelAdapter | undefined {
   if (args.provider !== 'nvidia') {
     return undefined;
   }
 
   return createNvidiaRoleModelProviderAdapter(
-    createNvidiaRoleModelProviderConfigFromEnv()
+    createNvidiaRoleModelProviderConfigFromEnv(env)
   );
 }
 
@@ -891,9 +1224,19 @@ function isMissingDefaultSessionStore(error: unknown): boolean {
 }
 
 function formatTerminalErrorMessage(
-  error: ChatCliUsageError | LocalRuntimeTerminalError
+  error:
+    | ChatCliUsageError
+    | ChatCliStartupError
+    | RuntimeLocationCliUsageError
+    | RuntimeEnvFileError
+    | LocalRuntimeTerminalError
 ): string {
-  if (error instanceof ChatCliUsageError) {
+  if (
+    error instanceof ChatCliUsageError ||
+    error instanceof ChatCliStartupError ||
+    error instanceof RuntimeLocationCliUsageError ||
+    error instanceof RuntimeEnvFileError
+  ) {
     return error.message;
   }
 
@@ -902,33 +1245,18 @@ function formatTerminalErrorMessage(
 
 function isFormattedTerminalError(
   error: unknown
-): error is ChatCliUsageError | LocalRuntimeTerminalError {
+): error is
+  | ChatCliUsageError
+  | ChatCliStartupError
+  | RuntimeLocationCliUsageError
+  | RuntimeEnvFileError
+  | LocalRuntimeTerminalError {
   return (
     error instanceof ChatCliUsageError ||
+    error instanceof ChatCliStartupError ||
+    error instanceof RuntimeLocationCliUsageError ||
+    error instanceof RuntimeEnvFileError ||
     isLocalRuntimeTerminalError(error)
-  );
-}
-
-function loadDefaultDotEnvFile(): void {
-  try {
-    loadEnvFile();
-  } catch (error: unknown) {
-    if (isMissingDotEnvFile(error)) {
-      return;
-    }
-
-    throw new ChatCliUsageError(
-      `Could not load .env file: ${error instanceof Error ? error.message : 'unknown error'}.`
-    );
-  }
-}
-
-function isMissingDotEnvFile(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === 'ENOENT'
   );
 }
 
