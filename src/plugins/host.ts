@@ -1,4 +1,9 @@
 import {
+  firstPartyModelToolsPluginId,
+  minRuntimePluginApiAccess,
+  normalizeRuntimePluginApiPermissions,
+  requestedRuntimePluginApiAccess,
+  runtimePluginApiNames,
   runtimePluginContractVersion,
   createRuntimePlugin,
   createRuntimePluginContextItem,
@@ -6,10 +11,15 @@ import {
   createRuntimePluginHealthSnapshot,
   createRuntimePluginRegistrySnapshot,
   isRuntimePluginCredentialKey,
-  redactRuntimePluginText
+  redactRuntimePluginText,
+  runtimePluginApiAccessAllows
 } from './types.ts';
 import type {
   RuntimePlugin,
+  RuntimePluginApiAccess,
+  RuntimePluginApiName,
+  RuntimePluginApiPermissionSnapshot,
+  RuntimePluginApiPermissions,
   RuntimePluginBeforeRoleModelCallResult,
   RuntimePluginContextItem,
   RuntimePluginEvidenceKind,
@@ -39,7 +49,10 @@ import {
   roleModelPluginListToolName,
   type RoleModelPluginToolDefinition
 } from '../role-model/contracts.ts';
-import { createCharacterStatePlugin } from './builtin/character-state/index.ts';
+import {
+  characterStatePluginId,
+  createCharacterStatePlugin
+} from './builtin/character-state/index.ts';
 import { createRuntimePluginFileStore } from './file-store.ts';
 
 export const runtimePluginBeforeRoleModelCallRejectionReason =
@@ -57,6 +70,7 @@ export type RuntimePluginBeforeRoleModelCallRejectionReason =
 export type CreateRuntimePluginHostOptions = {
   readonly plugins?: readonly RuntimePlugin[];
   readonly enabledPluginIds?: readonly string[];
+  readonly allowedApisByPluginId?: Readonly<Record<string, RuntimePluginApiPermissions>>;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
@@ -93,6 +107,7 @@ export type RuntimePluginSessionEndOptions = {
 export type RunRuntimePluginSessionEndHooksOptions = {
   readonly plugins: readonly RuntimePlugin[];
   readonly context: RuntimePluginContext;
+  readonly allowedApisByPluginId?: Readonly<Record<string, RuntimePluginApiPermissions>>;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
@@ -199,6 +214,10 @@ type PluginHookContextScope<TContext extends RuntimePluginContext> = {
   readonly revokeFileStoreWrites: () => void;
 };
 
+type RuntimePluginApiPermissionsByPluginId = Readonly<
+  Record<string, RuntimePluginApiPermissionSnapshot>
+>;
+
 type RevocableRuntimePluginFileStore = {
   readonly fileStore: RuntimePluginFileStore;
   revokeWrites(): void;
@@ -208,12 +227,21 @@ export function createRuntimePluginHost(
   options: CreateRuntimePluginHostOptions = {}
 ): RuntimePluginHost {
   const configuredPlugins = Object.freeze([...(options.plugins ?? [])]);
+  const explicitAllowedApisByPluginId = normalizeAllowedApisByPluginId(
+    options.allowedApisByPluginId ?? {}
+  );
   let enabledPlugins: readonly RuntimePlugin[] = [];
   const plugins = Object.freeze([
     createRuntimePluginDiscoveryPlugin(() => enabledPlugins),
     ...configuredPlugins
   ]);
-  const registrySnapshot = createRuntimePluginRegistrySnapshot(plugins);
+  const apiPermissionsByPluginId = apiPermissionsForPlugins({
+    plugins,
+    explicitAllowedApisByPluginId
+  });
+  const registrySnapshot = createRuntimePluginRegistrySnapshot(plugins, {
+    apiPermissionsByPluginId
+  });
   const enabledIds = enabledPluginIdsForHost({
     plugins,
     enabledPluginIds: options.enabledPluginIds
@@ -246,6 +274,7 @@ export function createRuntimePluginHost(
       return await runBeforeRoleModelCall({
         plugins: enabledPlugins,
         context,
+        apiPermissionsByPluginId,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity
@@ -256,6 +285,7 @@ export function createRuntimePluginHost(
         plugins: enabledPlugins,
         call,
         context,
+        apiPermissionsByPluginId,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity
@@ -265,6 +295,7 @@ export function createRuntimePluginHost(
       const hookResult = await runHookPhase({
         plugins: enabledPlugins,
         context,
+        apiPermissionsByPluginId,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity,
@@ -283,6 +314,7 @@ export function createRuntimePluginHost(
       return await runRuntimePluginSessionEndHooks({
         plugins: enabledPlugins,
         context,
+        allowedApisByPluginId: explicitAllowedApisByPluginId,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity,
@@ -293,6 +325,7 @@ export function createRuntimePluginHost(
       return await runHealth({
         plugins: enabledPlugins,
         context,
+        apiPermissionsByPluginId,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity
@@ -304,9 +337,17 @@ export function createRuntimePluginHost(
 export async function runRuntimePluginSessionEndHooks(
   options: RunRuntimePluginSessionEndHooksOptions
 ): Promise<RuntimePluginHookHostResult> {
+  const explicitAllowedApisByPluginId = normalizeAllowedApisByPluginId(
+    options.allowedApisByPluginId ?? {}
+  );
+
   return await runHookPhase({
     plugins: options.plugins,
     context: options.context,
+    apiPermissionsByPluginId: apiPermissionsForPlugins({
+      plugins: options.plugins,
+      explicitAllowedApisByPluginId
+    }),
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
@@ -328,21 +369,139 @@ export function createDefaultProject02PluginHost(
   });
 }
 
+function normalizeAllowedApisByPluginId(
+  value: Readonly<Record<string, RuntimePluginApiPermissions>>
+): Readonly<Record<string, RuntimePluginApiPermissions>> {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([pluginId, permissions]) => [
+          pluginId,
+          normalizeRuntimePluginApiPermissions(
+            permissions,
+            `allowedApisByPluginId.${pluginId}`
+          )
+        ])
+    )
+  );
+}
+
+function apiPermissionsForPlugins(options: {
+  readonly plugins: readonly RuntimePlugin[];
+  readonly explicitAllowedApisByPluginId: Readonly<
+    Record<string, RuntimePluginApiPermissions>
+  >;
+}): RuntimePluginApiPermissionsByPluginId {
+  return Object.freeze(
+    Object.fromEntries(
+      options.plugins.map((plugin) => [
+        plugin.manifest.id,
+        resolveRuntimePluginApiPermissionsForManifest({
+          manifest: plugin.manifest,
+          explicitAllowedApisByPluginId: options.explicitAllowedApisByPluginId
+        })
+      ])
+    )
+  );
+}
+
+function apiPermissionsForPlugin(options: {
+  readonly plugin: RuntimePlugin;
+  readonly apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId;
+}): RuntimePluginApiPermissionSnapshot {
+  const apiPermissions =
+    options.apiPermissionsByPluginId[options.plugin.manifest.id];
+
+  if (apiPermissions === undefined) {
+    throw new TypeError(
+      `Plugin "${options.plugin.manifest.id}" is missing resolved API permissions.`
+    );
+  }
+
+  return apiPermissions;
+}
+
+export function resolveRuntimePluginApiPermissionsForManifest(options: {
+  readonly manifest: RuntimePlugin['manifest'];
+  readonly explicitAllowedApisByPluginId: Readonly<
+    Record<string, RuntimePluginApiPermissions>
+  >;
+}): RuntimePluginApiPermissionSnapshot {
+  const requestedApis = normalizeRuntimePluginApiPermissions(
+    options.manifest.requestedApis,
+    `${options.manifest.id}.requestedApis`
+  );
+  const explicitAllowedApis = Object.hasOwn(
+    options.explicitAllowedApisByPluginId,
+    options.manifest.id
+  )
+    ? options.explicitAllowedApisByPluginId[options.manifest.id]
+    : undefined;
+  const allowedApis = normalizeRuntimePluginApiPermissions(
+    explicitAllowedApis ?? defaultAllowedApisForPluginId(options.manifest.id),
+    `${options.manifest.id}.allowedApis`
+  );
+  const effectiveApis: Partial<Record<RuntimePluginApiName, RuntimePluginApiAccess>> = {};
+
+  for (const api of runtimePluginApiNames) {
+    const requested = requestedRuntimePluginApiAccess(requestedApis, api);
+    const allowed = requestedRuntimePluginApiAccess(allowedApis, api);
+    const effective = minRuntimePluginApiAccess(requested, allowed);
+
+    if (effective !== 'none') {
+      effectiveApis[api] = effective;
+    }
+  }
+
+  return Object.freeze({
+    requestedApis,
+    allowedApis,
+    effectiveApis: normalizeRuntimePluginApiPermissions(
+      effectiveApis,
+      `${options.manifest.id}.effectiveApis`
+    )
+  } satisfies RuntimePluginApiPermissionSnapshot);
+}
+
+function defaultAllowedApisForPluginId(
+  pluginId: string
+): RuntimePluginApiPermissions {
+  if (pluginId === characterStatePluginId) {
+    return Object.freeze({ file_store: 'write' });
+  }
+
+  if (
+    pluginId === runtimePluginDiscoveryPluginId ||
+    pluginId === firstPartyModelToolsPluginId
+  ) {
+    return Object.freeze({});
+  }
+
+  return Object.freeze({});
+}
+
 function createPluginHookContext<TContext extends RuntimePluginContext>(options: {
   readonly context: TContext;
   readonly plugin: RuntimePlugin;
+  readonly apiPermissions: RuntimePluginApiPermissionSnapshot;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
   readonly allowFileStoreWrites?: boolean;
 }): PluginHookContextScope<TContext> {
-  const grantsFileStore = options.plugin.manifest.requestedApis.includes('file_store');
+  const fileStoreAccess = requestedRuntimePluginApiAccess(
+    options.apiPermissions.effectiveApis,
+    'file_store'
+  );
+  const grantsFileStore = runtimePluginApiAccessAllows(fileStoreAccess, 'read');
   const sessionId = options.sessionId ?? options.context.sessionId;
   const allowWrites =
-    options.allowFileStoreWrites ??
-    sideEffectLevelAllowsFileStoreWrites(
-      options.plugin.manifest.runtimePolicy.sideEffectLevel
-    );
+    runtimePluginApiAccessAllows(fileStoreAccess, 'write') &&
+    (options.allowFileStoreWrites ??
+      sideEffectLevelAllowsFileStoreWrites(
+        options.plugin.manifest.runtimePolicy.sideEffectLevel
+      ));
   const baseFileStore = grantsFileStore
     ? createRuntimePluginFileStore({
         ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
@@ -465,7 +624,8 @@ function createRuntimePluginDiscoveryPlugin(
       activation: {
         defaultEnabled: true,
         reasons: ['host_provided_current_turn_discovery']
-      }
+      },
+      requestedApis: {}
     },
     providedTools: [
       {
@@ -577,6 +737,7 @@ function boundedPluginDiscoveryText(value: string): string {
 async function runBeforeRoleModelCall(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly context: RuntimePluginContext;
+  readonly apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
@@ -595,6 +756,10 @@ async function runBeforeRoleModelCall(options: {
     const hookContext = createPluginHookContext({
       context: options.context,
       plugin,
+      apiPermissions: apiPermissionsForPlugin({
+        plugin,
+        apiPermissionsByPluginId: options.apiPermissionsByPluginId
+      }),
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity
@@ -713,6 +878,7 @@ async function runHandleToolCall(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
+  readonly apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
@@ -751,6 +917,10 @@ async function runHandleToolCall(options: {
   const hookContext = createPluginHookContext({
     context: options.context,
     plugin,
+    apiPermissions: apiPermissionsForPlugin({
+      plugin,
+      apiPermissionsByPluginId: options.apiPermissionsByPluginId
+    }),
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
@@ -827,6 +997,7 @@ async function runHandleToolCall(options: {
 async function runHookPhase<TContext extends RuntimePluginContext>(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly context: TContext;
+  readonly apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
@@ -850,6 +1021,10 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
     const hookContext = createPluginHookContext({
       context: options.context,
       plugin,
+      apiPermissions: apiPermissionsForPlugin({
+        plugin,
+        apiPermissionsByPluginId: options.apiPermissionsByPluginId
+      }),
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
@@ -1242,6 +1417,7 @@ function normalizeJsonValue(value: unknown): RuntimePluginJsonValue {
 async function runHealth(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly context: RuntimePluginContext;
+  readonly apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
@@ -1259,6 +1435,10 @@ async function runHealth(options: {
     const hookContext = createPluginHookContext({
       context: options.context,
       plugin,
+      apiPermissions: apiPermissionsForPlugin({
+        plugin,
+        apiPermissionsByPluginId: options.apiPermissionsByPluginId
+      }),
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity

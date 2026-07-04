@@ -5,6 +5,7 @@ import {
 } from '../../plugins/builtin/character-state/index.ts';
 import {
   createRuntimePluginHost,
+  resolveRuntimePluginApiPermissionsForManifest,
   runRuntimePluginSessionEndHooks,
   runtimePluginDiscoveryPluginId,
   type RuntimePluginHost,
@@ -12,6 +13,7 @@ import {
 } from '../../plugins/host.ts';
 import {
   createRuntimePluginContext,
+  type RuntimePluginApiPermissions,
   type RuntimePlugin,
   type RuntimePluginKind,
   type RuntimePluginManifest
@@ -59,6 +61,9 @@ export type RuntimePluginActivationSnapshot = {
   readonly pluginId: string;
   readonly kind: RuntimePluginKind;
   readonly enabled: boolean;
+  readonly requestedApis: RuntimePluginApiPermissions;
+  readonly allowedApis: RuntimePluginApiPermissions;
+  readonly effectiveApis: RuntimePluginApiPermissions;
   readonly activationStatus: RuntimePluginActivationStatus;
   readonly activationReasons: readonly string[];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
@@ -175,6 +180,7 @@ export async function createConfiguredProject02PluginHost(options: {
       host: createRuntimePluginHost({
         plugins,
         enabledPluginIds: activationPlan.activation.enabledPluginIds,
+        allowedApisByPluginId: activationPlan.resolvedConfig.allowedApisByPluginId,
         storeRoot: activationPlan.resolvedConfig.storeRoot,
         ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
         ...(options.sessionIdentity === undefined
@@ -244,6 +250,7 @@ export async function createConfiguredProject02PluginHost(options: {
     host = createRuntimePluginHost({
       plugins,
       enabledPluginIds: activation.enabledPluginIds,
+      allowedApisByPluginId: resolvedConfig.allowedApisByPluginId,
       storeRoot: resolvedConfig.storeRoot,
       ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
       ...(options.sessionIdentity === undefined
@@ -393,6 +400,10 @@ export function resolveRuntimePluginActivation(options: {
 
   for (const preliminaryDecision of preliminaryDecisions) {
     const manifest = preliminaryDecision.manifest;
+    const apiPermissions = resolveRuntimePluginApiPermissionsForManifest({
+      manifest,
+      explicitAllowedApisByPluginId: options.resolvedConfig.allowedApisByPluginId
+    });
     const memoryDecision = finalizeMemoryProviderActivation({
       manifest,
       decision: preliminaryDecision.decision,
@@ -414,6 +425,9 @@ export function resolveRuntimePluginActivation(options: {
         pluginId: manifest.id,
         kind: manifest.kind,
         enabled: decision.enabled,
+        requestedApis: apiPermissions.requestedApis,
+        allowedApis: apiPermissions.allowedApis,
+        effectiveApis: apiPermissions.effectiveApis,
         activationStatus: decision.status,
         activationReasons: Object.freeze([
           ...manifest.activation.reasons,
@@ -707,6 +721,7 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
     await runRuntimePluginSessionEndHooks({
       plugins: options.plugins,
       context,
+      allowedApisByPluginId: options.resolvedConfig.allowedApisByPluginId,
       storeRoot: options.resolvedConfig.storeRoot,
       sessionId,
       ...(options.sessionIdentity === undefined

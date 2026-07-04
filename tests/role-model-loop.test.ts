@@ -1114,7 +1114,7 @@ function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
         defaultEnabled: true,
         reasons: ['test']
       },
-      requestedApis: []
+      requestedApis: {}
     },
     providedTools: [
       {

@@ -412,6 +412,8 @@ async function runBestEffortConfiguredChatPluginSessionEndCleanup(options: {
         character: options.character
       }),
       storeRoot: options.configuredHost.resolvedConfig.storeRoot,
+      allowedApisByPluginId:
+        options.configuredHost.resolvedConfig.allowedApisByPluginId,
       sessionId: options.sessionId,
       ...(options.sessionIdentity === undefined
         ? {}
@@ -453,6 +455,7 @@ function configuredPluginHostForSession(
   return createRuntimePluginHost({
     plugins: configuredHost.plugins,
     enabledPluginIds: configuredHost.activation.enabledPluginIds,
+    allowedApisByPluginId: configuredHost.resolvedConfig.allowedApisByPluginId,
     storeRoot: configuredHost.resolvedConfig.storeRoot,
     sessionId: session.id,
     sessionIdentity: session

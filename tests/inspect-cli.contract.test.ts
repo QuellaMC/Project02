@@ -422,7 +422,8 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         }
       }
     });
@@ -519,7 +520,8 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         }
       }
     });
@@ -646,7 +648,8 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         }
       }
     });
@@ -773,7 +776,8 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         },
         [failingPlugin.manifest.id]: {
           enabled: true
@@ -884,7 +888,8 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         }
       }
     });
@@ -913,6 +918,9 @@ describe('inspect CLI plugin evidence', () => {
     const output = JSON.parse(stdout) as {
       readonly plugins: readonly {
         readonly pluginId: string;
+        readonly requestedApis: unknown;
+        readonly allowedApis: unknown;
+        readonly effectiveApis: unknown;
         readonly activationStatus: string;
       }[];
       readonly sessions: readonly { readonly sessionId: string }[];
@@ -925,6 +933,9 @@ describe('inspect CLI plugin evidence', () => {
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: plugin.manifest.id,
+        requestedApis: {},
+        allowedApis: { file_store: 'write' },
+        effectiveApis: {},
         activationStatus: 'active'
       })
     );
@@ -959,7 +970,8 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         }
       }
     });
@@ -1225,7 +1237,7 @@ function createInspectFixturePlugin(pluginId = 'inspect.custom'): RuntimePlugin 
         defaultEnabled: false,
         reasons: ['test_inspect_fixture']
       },
-      requestedApis: []
+      requestedApis: {}
     }
   });
 }
@@ -1339,7 +1351,7 @@ function createInspectFileStoreCleanupFixturePlugin(
         defaultEnabled: false,
         reasons: ['test_inspect_cleanup']
       },
-      requestedApis: ['file_store']
+      requestedApis: { file_store: 'write' }
     },
     lifecycleHooks: {
       onSessionEnd(context) {
@@ -1394,7 +1406,7 @@ function createInspectSessionEndFixturePlugin(
         defaultEnabled: false,
         reasons: ['test_inspect_cleanup']
       },
-      requestedApis: []
+      requestedApis: {}
     },
     lifecycleHooks: {
       onSessionEnd(context) {

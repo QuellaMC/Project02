@@ -199,7 +199,7 @@ function credentialDescriptionManifest() {
       defaultEnabled: true,
       reasons: ['test']
     },
-    requestedApis: []
+    requestedApis: {}
   };
 }
 

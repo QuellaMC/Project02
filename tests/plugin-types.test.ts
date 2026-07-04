@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createRuntimePlugin,
+  createRuntimePluginManifest,
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
+  minRuntimePluginApiAccess,
+  requestedRuntimePluginApiAccess,
+  runtimePluginApiAccessAllows,
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
 
@@ -111,6 +115,74 @@ describe('runtime plugin source references', () => {
   });
 });
 
+describe('runtime plugin API permissions', () => {
+  it('defaults absent requestedApis to an empty permission object', () => {
+    const manifest = createRuntimePluginManifest(runtimePluginManifestFixture());
+
+    expect(manifest.requestedApis).toEqual({});
+    expect(requestedRuntimePluginApiAccess(manifest.requestedApis, 'file_store')).toBe(
+      'none'
+    );
+  });
+
+  it('accepts requestedApis permission objects', () => {
+    expect(
+      createRuntimePluginManifest(
+        runtimePluginManifestFixture({
+          requestedApis: {}
+        })
+      ).requestedApis
+    ).toEqual({});
+    expect(
+      createRuntimePluginManifest(
+        runtimePluginManifestFixture({
+          requestedApis: { file_store: 'read' }
+        })
+      ).requestedApis
+    ).toEqual({ file_store: 'read' });
+    expect(
+      createRuntimePluginManifest(
+        runtimePluginManifestFixture({
+          requestedApis: {
+            file_store: 'write',
+            conversation_history: 'read'
+          }
+        })
+      ).requestedApis
+    ).toEqual({ file_store: 'write', conversation_history: 'read' });
+  });
+
+  it('rejects legacy arrays and malformed requestedApis values', () => {
+    for (const requestedApis of [
+      [],
+      ['file_store'],
+      { unknown_api: 'read' },
+      { file_store: 'admin' },
+      null,
+      'file_store',
+      true,
+      1
+    ]) {
+      expect(() =>
+        createRuntimePluginManifest(
+          runtimePluginManifestFixture({
+            requestedApis
+          })
+        )
+      ).toThrow(/requestedApis/u);
+    }
+  });
+
+  it('orders access levels for min and allow checks', () => {
+    expect(runtimePluginApiAccessAllows('write', 'read')).toBe(true);
+    expect(runtimePluginApiAccessAllows('read', 'write')).toBe(false);
+    expect(runtimePluginApiAccessAllows('read', 'none')).toBe(true);
+    expect(minRuntimePluginApiAccess('write', 'read')).toBe('read');
+    expect(minRuntimePluginApiAccess('write', 'none')).toBe('none');
+    expect(minRuntimePluginApiAccess('read', 'write')).toBe('read');
+  });
+});
+
 describe('runtime plugin config metadata', () => {
   it('accepts optional config metadata fields without resolved config values', () => {
     const plugin = createRuntimePlugin({
@@ -170,7 +242,7 @@ describe('runtime plugin config metadata', () => {
           defaultEnabled: false,
           reasons: ['test']
         },
-        requestedApis: []
+        requestedApis: {}
       }
     });
 
@@ -184,3 +256,44 @@ describe('runtime plugin config metadata', () => {
     expect(JSON.stringify(plugin.manifest)).not.toContain('MEMORY_API_KEY=');
   });
 });
+
+function runtimePluginManifestFixture(
+  overrides: Readonly<Record<string, unknown>> = {}
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    id: 'api-permissions.fixture',
+    displayName: 'API Permissions Fixture',
+    version: '1.0.0',
+    kind: 'tool_provider',
+    description: 'API permissions fixture.',
+    contractVersion: runtimePluginContractVersion,
+    compatibility: {
+      hostContractVersions: [runtimePluginContractVersion],
+      sourceSystem: 'test'
+    },
+    declaredPlugins: ['plugin_discovery'],
+    config: {
+      fields: []
+    },
+    localTrustLevel: 'test_fixture',
+    runtimePolicy: {
+      requiredForTurn: false,
+      sideEffectLevel: 'runtime_read',
+      confirmation: 'not_required',
+      timeoutMs: 1000,
+      sourceReferencesRequired: false,
+      redactionLabels: [],
+      failureBehavior: {
+        beforeRoleModelCall: 'degrade',
+        handleToolCall: 'degrade',
+        afterTurnCommitted: 'log_failure',
+        health: 'degrade'
+      }
+    },
+    activation: {
+      defaultEnabled: false,
+      reasons: ['test']
+    },
+    ...overrides
+  });
+}

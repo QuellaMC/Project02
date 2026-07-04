@@ -627,7 +627,8 @@ describe('chat CLI plugin lifecycle', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [configuredPlugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         }
       }
     });
@@ -678,7 +679,8 @@ describe('chat CLI plugin lifecycle', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [configuredPlugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         }
       }
     });
@@ -755,7 +757,7 @@ describe('chat CLI plugin lifecycle', () => {
       },
       {
         sideEffectLevel: 'local_memory_write',
-        requestedApis: ['file_store']
+        requestedApis: { file_store: 'write' }
       }
     );
     let factoryCalls = 0;
@@ -769,7 +771,8 @@ describe('chat CLI plugin lifecycle', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [configuredPlugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         }
       }
     });
@@ -833,7 +836,7 @@ describe('chat CLI plugin lifecycle', () => {
       },
       {
         sideEffectLevel: 'local_memory_write',
-        requestedApis: ['file_store']
+        requestedApis: { file_store: 'write' }
       }
     );
     let stdout = '';
@@ -843,7 +846,8 @@ describe('chat CLI plugin lifecycle', () => {
     const configPath = writeRuntimeConfig(join(configRoot, 'config.json'), {
       plugins: {
         [configuredPlugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         }
       }
     });
@@ -1209,7 +1213,7 @@ function createSessionEndPlugin(
         defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test']
       },
-      requestedApis: options.requestedApis ?? []
+      requestedApis: options.requestedApis ?? {}
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1278,7 +1282,7 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
         defaultEnabled: true,
         reasons: ['test']
       },
-      requestedApis: []
+      requestedApis: {}
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1349,7 +1353,7 @@ function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
         defaultEnabled: false,
         reasons: ['test']
       },
-      requestedApis: []
+      requestedApis: {}
     },
     providedTools: [],
     lifecycleHooks: {

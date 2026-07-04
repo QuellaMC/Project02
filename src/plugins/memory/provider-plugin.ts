@@ -112,7 +112,7 @@ export function createMemoryProviderRuntimePlugin(
         defaultEnabled: false,
         reasons: ['memory_provider_factory']
       },
-      requestedApis: []
+      requestedApis: {}
     },
     providedTools,
     lifecycleHooks: {

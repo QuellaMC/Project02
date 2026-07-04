@@ -848,7 +848,7 @@ function createRuntimePluginManifestForAdapter(options: {
       defaultEnabled: false,
       reasons: options.activationReasons
     },
-    requestedApis: []
+    requestedApis: {}
   };
 }
 

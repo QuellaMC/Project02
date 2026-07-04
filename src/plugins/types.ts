@@ -12,7 +12,7 @@ import type {
 } from '../runtime/event.ts';
 
 export const runtimePluginContractVersion =
-  'mvp-007.runtime_plugin.v1';
+  'mvp-008.runtime_plugin.v2';
 export const firstPartyModelToolsPluginId = 'first_party.model_tools';
 
 const runtimePluginKindValues = [
@@ -39,6 +39,17 @@ const runtimePluginTrustLevelValues = [
   'trusted_adapter',
   'test_fixture'
 ] as const;
+
+const runtimePluginApiNameValues = [
+  'file_store',
+  'conversation_history'
+] as const;
+
+const runtimePluginApiAccessValues = ['none', 'read', 'write'] as const;
+
+export const runtimePluginApiNames = Object.freeze([
+  ...runtimePluginApiNameValues
+]);
 
 const runtimePluginSideEffectLevelValues = [
   'none',
@@ -135,6 +146,10 @@ export type RuntimePluginDeclaration =
   (typeof runtimePluginDeclarationValues)[number];
 export type RuntimePluginTrustLevel =
   (typeof runtimePluginTrustLevelValues)[number];
+export type RuntimePluginApiName =
+  (typeof runtimePluginApiNameValues)[number];
+export type RuntimePluginApiAccess =
+  (typeof runtimePluginApiAccessValues)[number];
 export type RuntimePluginSideEffectLevel =
   (typeof runtimePluginSideEffectLevelValues)[number];
 export type RuntimePluginBeforeRoleModelFailureBehavior =
@@ -176,7 +191,15 @@ export type RuntimePluginJsonObject = {
   readonly [key: string]: RuntimePluginJsonValue;
 };
 
-export type RuntimePluginApiGrant = 'file_store';
+export type RuntimePluginApiPermissions = Partial<
+  Record<RuntimePluginApiName, RuntimePluginApiAccess>
+>;
+
+export type RuntimePluginApiPermissionSnapshot = {
+  readonly requestedApis: RuntimePluginApiPermissions;
+  readonly allowedApis: RuntimePluginApiPermissions;
+  readonly effectiveApis: RuntimePluginApiPermissions;
+};
 
 export type RuntimePluginFileStore = {
   readJson(path: string): RuntimePluginJsonValue | undefined;
@@ -245,7 +268,7 @@ export type RuntimePluginManifest = {
   readonly localTrustLevel: RuntimePluginTrustLevel;
   readonly runtimePolicy: RuntimePluginRuntimePolicy;
   readonly activation: RuntimePluginActivationMetadata;
-  readonly requestedApis: readonly RuntimePluginApiGrant[];
+  readonly requestedApis: RuntimePluginApiPermissions;
 };
 
 export type RuntimePluginProvidedTool = {
@@ -303,7 +326,7 @@ export type RuntimePluginHealthSnapshot = {
   readonly redactionLabels: readonly string[];
 };
 
-export type RuntimePluginListingSnapshot = {
+export type RuntimePluginListingSnapshot = RuntimePluginApiPermissionSnapshot & {
   readonly pluginId: string;
   readonly manifest: RuntimePluginManifest;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
@@ -434,7 +457,8 @@ export type RuntimePlugin = {
   readonly lifecycleHooks: RuntimePluginLifecycleHooks;
 };
 
-export type RuntimePluginRegistrationSnapshot = {
+export type RuntimePluginRegistrationSnapshot =
+  RuntimePluginApiPermissionSnapshot & {
   readonly manifest: RuntimePluginManifest;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
   readonly registeredLifecycleHooks: readonly RuntimePluginDeclaration[];
@@ -444,6 +468,90 @@ export type RuntimePluginRegistrySnapshot = {
   readonly contractVersion: typeof runtimePluginContractVersion;
   readonly plugins: readonly RuntimePluginRegistrationSnapshot[];
 };
+
+export function runtimePluginApiAccessRank(
+  access: RuntimePluginApiAccess
+): number {
+  switch (access) {
+    case 'none':
+      return 0;
+    case 'read':
+      return 1;
+    case 'write':
+      return 2;
+  }
+}
+
+export function normalizeRuntimePluginApiAccess(
+  value: unknown,
+  field = 'api access'
+): RuntimePluginApiAccess {
+  if (!isOneOf(value, runtimePluginApiAccessValues)) {
+    throw new TypeError(`${field} must be "none", "read", or "write".`);
+  }
+
+  return value;
+}
+
+export function requestedRuntimePluginApiAccess(
+  permissions: RuntimePluginApiPermissions,
+  api: RuntimePluginApiName
+): RuntimePluginApiAccess {
+  return permissions[api] ?? 'none';
+}
+
+export function minRuntimePluginApiAccess(
+  left: RuntimePluginApiAccess,
+  right: RuntimePluginApiAccess
+): RuntimePluginApiAccess {
+  return runtimePluginApiAccessRank(left) <= runtimePluginApiAccessRank(right)
+    ? left
+    : right;
+}
+
+export function runtimePluginApiAccessAllows(
+  access: RuntimePluginApiAccess,
+  required: RuntimePluginApiAccess
+): boolean {
+  return runtimePluginApiAccessRank(access) >= runtimePluginApiAccessRank(required);
+}
+
+export function normalizeRuntimePluginApiPermissions(
+  value: unknown,
+  field = 'api permissions'
+): RuntimePluginApiPermissions {
+  if (value === undefined) {
+    return Object.freeze({});
+  }
+
+  if (!isRecord(value)) {
+    throw new TypeError(`${field} must be an object.`);
+  }
+
+  const knownNames = new Set<string>(runtimePluginApiNameValues);
+  const permissions: Partial<Record<RuntimePluginApiName, RuntimePluginApiAccess>> = {};
+
+  for (const key of Object.keys(value)) {
+    if (!knownNames.has(key)) {
+      throw new TypeError(`${field} contains unknown API "${key}".`);
+    }
+  }
+
+  for (const api of runtimePluginApiNameValues) {
+    const access = value[api];
+
+    if (access === undefined) {
+      continue;
+    }
+
+    permissions[api] = normalizeRuntimePluginApiAccess(
+      access,
+      `${field}.${api}`
+    );
+  }
+
+  return Object.freeze(permissions);
+}
 
 export type RuntimePluginValidationFailureReason =
   | 'malformed_manifest'
@@ -538,7 +646,10 @@ export function validateRuntimePluginManifest(
     return activation;
   }
 
-  const requestedApis = requiredApiGrantArray(value['requestedApis'] ?? []);
+  const requestedApis = requiredApiPermissions(
+    value['requestedApis'],
+    'Plugin manifest requestedApis'
+  );
 
   if (requestedApis.status === 'rejected') {
     return requestedApis;
@@ -830,7 +941,18 @@ export function createRuntimePlugin(
 }
 
 export function createRuntimePluginRegistrySnapshot(
-  plugins: readonly RuntimePlugin[]
+  plugins: readonly RuntimePlugin[],
+  options: {
+    readonly apiPermissionsByPluginId?: Readonly<
+      Record<
+        string,
+        {
+          readonly allowedApis?: RuntimePluginApiPermissions;
+          readonly effectiveApis?: RuntimePluginApiPermissions;
+        }
+      >
+    >;
+  } = {}
 ): RuntimePluginRegistrySnapshot {
   const seenIds = new Set<string>();
   const registrations: RuntimePluginRegistrationSnapshot[] = [];
@@ -843,11 +965,25 @@ export function createRuntimePluginRegistrySnapshot(
     }
 
     seenIds.add(plugin.manifest.id);
+    const resolvedApiPermissions =
+      options.apiPermissionsByPluginId?.[plugin.manifest.id];
+    const apiPermissions = pluginApiPermissionSnapshot({
+      manifest: plugin.manifest,
+      ...(resolvedApiPermissions?.allowedApis === undefined
+        ? {}
+        : { allowedApis: resolvedApiPermissions.allowedApis }),
+      ...(resolvedApiPermissions?.effectiveApis === undefined
+        ? {}
+        : { effectiveApis: resolvedApiPermissions.effectiveApis })
+    });
     registrations.push(
       Object.freeze({
         manifest: plugin.manifest,
         providedTools: plugin.providedTools,
-        registeredLifecycleHooks: registeredLifecycleHooks(plugin)
+        registeredLifecycleHooks: registeredLifecycleHooks(plugin),
+        requestedApis: apiPermissions.requestedApis,
+        allowedApis: apiPermissions.allowedApis,
+        effectiveApis: apiPermissions.effectiveApis
       } satisfies RuntimePluginRegistrationSnapshot)
     );
   }
@@ -856,6 +992,28 @@ export function createRuntimePluginRegistrySnapshot(
     contractVersion: runtimePluginContractVersion,
     plugins: Object.freeze(registrations)
   } satisfies RuntimePluginRegistrySnapshot);
+}
+
+function pluginApiPermissionSnapshot(options: {
+  readonly manifest: RuntimePluginManifest;
+  readonly requestedApis?: RuntimePluginApiPermissions;
+  readonly allowedApis?: RuntimePluginApiPermissions;
+  readonly effectiveApis?: RuntimePluginApiPermissions;
+}): RuntimePluginApiPermissionSnapshot {
+  return Object.freeze({
+    requestedApis: normalizeRuntimePluginApiPermissions(
+      options.requestedApis ?? options.manifest.requestedApis,
+      'requestedApis'
+    ),
+    allowedApis: normalizeRuntimePluginApiPermissions(
+      options.allowedApis,
+      'allowedApis'
+    ),
+    effectiveApis: normalizeRuntimePluginApiPermissions(
+      options.effectiveApis,
+      'effectiveApis'
+    )
+  } satisfies RuntimePluginApiPermissionSnapshot);
 }
 
 export function createFirstPartyModelToolsPlugin(): RuntimePlugin {
@@ -896,7 +1054,7 @@ export function createFirstPartyModelToolsPlugin(): RuntimePlugin {
         defaultEnabled: true,
         reasons: ['built_in_user_turn_tools']
       },
-      requestedApis: []
+      requestedApis: {}
     },
     providedTools: builtInModelToolDefinitionsForUserTurn().map((definition) =>
       Object.freeze({
@@ -1168,6 +1326,21 @@ export function createRuntimePluginListingSnapshot(
     runtimePluginHealthStatusValues,
     'healthStatus'
   );
+  const apiPermissions = pluginApiPermissionSnapshot({
+    manifest,
+    requestedApis: normalizeRuntimePluginApiPermissions(
+      options['requestedApis'] ?? manifest.requestedApis,
+      'requestedApis'
+    ),
+    allowedApis: normalizeRuntimePluginApiPermissions(
+      options['allowedApis'],
+      'allowedApis'
+    ),
+    effectiveApis: normalizeRuntimePluginApiPermissions(
+      options['effectiveApis'],
+      'effectiveApis'
+    )
+  });
 
   if (pluginId !== manifest.id) {
     throw new TypeError(
@@ -1189,6 +1362,9 @@ export function createRuntimePluginListingSnapshot(
     enabled: requireBooleanRecordField(options, 'enabled'),
     availableForTurn: requireBooleanRecordField(options, 'availableForTurn'),
     redactionLabels: Object.freeze([...redactionLabels]),
+    requestedApis: apiPermissions.requestedApis,
+    allowedApis: apiPermissions.allowedApis,
+    effectiveApis: apiPermissions.effectiveApis,
     ...(configFingerprint === undefined
       ? {}
       : { configFingerprint: redactRuntimePluginText(configFingerprint) }),
@@ -1382,43 +1558,18 @@ function requiredDeclarationArray(
   });
 }
 
-function requiredApiGrantArray(
-  value: unknown
-): RuntimePluginValidationResult<readonly RuntimePluginApiGrant[]> {
-  if (!Array.isArray(value)) {
+function requiredApiPermissions(
+  value: unknown,
+  field: string
+): RuntimePluginValidationResult<RuntimePluginApiPermissions> {
+  try {
+    return accept(normalizeRuntimePluginApiPermissions(value, field));
+  } catch (error: unknown) {
     return reject(
       'malformed_manifest',
-      'Plugin manifest requestedApis must be an array.'
+      error instanceof Error ? error.message : `${field} is malformed.`
     );
   }
-
-  const grants: RuntimePluginApiGrant[] = [];
-  const seen = new Set<RuntimePluginApiGrant>();
-
-  const requestedApis: readonly unknown[] = value;
-
-  for (const item of requestedApis) {
-    if (item !== 'file_store') {
-      return reject(
-        'malformed_manifest',
-        'Plugin manifest requestedApis contains an unsupported API grant.'
-      );
-    }
-
-    const grant: RuntimePluginApiGrant = item;
-
-    if (seen.has(grant)) {
-      return reject(
-        'duplicate_declaration',
-        `Plugin manifest requestedApis contains duplicate "${grant}".`
-      );
-    }
-
-    seen.add(grant);
-    grants.push(grant);
-  }
-
-  return accept(Object.freeze(grants));
 }
 
 function requiredRegisteredLifecycleHooks(

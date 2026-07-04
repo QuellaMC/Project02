@@ -68,6 +68,48 @@ describe('runtime config loading and resolution', () => {
     expect(resolved.storeRoot).toBe('explicit-store');
   });
 
+  it('includes allowedApis policy in the effective config fingerprint', () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-api-fingerprint-'));
+    const withoutPolicy = resolveProject02RuntimeConfig({
+      loadedConfig: {
+        source: 'path',
+        path: join(storeRoot, 'without.json'),
+        config: {
+          version: runtimeConfigVersion
+        },
+        diagnostics: []
+      },
+      storeRoot
+    });
+    const withPolicy = resolveProject02RuntimeConfig({
+      loadedConfig: {
+        source: 'path',
+        path: join(storeRoot, 'with.json'),
+        config: {
+          version: runtimeConfigVersion,
+          plugins: {
+            memory: {
+              allowedApis: {
+                conversation_history: 'read'
+              }
+            }
+          }
+        },
+        diagnostics: []
+      },
+      storeRoot
+    });
+
+    expect(withPolicy.allowedApisByPluginId).toEqual({
+      memory: {
+        conversation_history: 'read'
+      }
+    });
+    expect(withPolicy.effectiveConfigFingerprint).not.toBe(
+      withoutPolicy.effectiveConfigFingerprint
+    );
+  });
+
   it('loads explicit store default config before env config', () => {
     const selectedStoreRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-store-precedence-')
@@ -3039,6 +3081,34 @@ describe('runtime config CLI', () => {
 
     expect(unsetResult.config.storeRoot).toBeUndefined();
     expect(unsetResult.envPath).toBe(join(initialStoreRoot, '.env'));
+  });
+
+  it('sets and unsets plugin allowedApis fields', () => {
+    const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-allowed-apis-'));
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {});
+
+    const setResult = applyRuntimeConfigMutation({
+      configPath,
+      operation: {
+        kind: 'set',
+        path: 'plugins.memory.allowedApis.file_store',
+        value: 'read'
+      }
+    });
+
+    expect(setResult.config.plugins?.['memory']?.allowedApis).toEqual({
+      file_store: 'read'
+    });
+
+    const unsetResult = applyRuntimeConfigMutation({
+      configPath,
+      operation: {
+        kind: 'unset',
+        path: 'plugins.memory.allowedApis.file_store'
+      }
+    });
+
+    expect(unsetResult.config.plugins?.['memory']).toBeUndefined();
   });
 
   it('writes mutations to the normalized selected config path', () => {
@@ -6332,7 +6402,7 @@ function requiredSecretPlugin(id = 'memory.required') {
         defaultEnabled: true,
         reasons: ['test_required_secret']
       },
-      requestedApis: []
+      requestedApis: {}
     }
   });
 }

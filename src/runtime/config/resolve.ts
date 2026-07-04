@@ -2,6 +2,7 @@ import {
   createLocalRuntimeStorageLayout
 } from '../storage/layout.ts';
 import type {
+  RuntimePluginApiPermissions,
   RuntimePluginConfigField,
   RuntimePluginManifest
 } from '../../plugins/types.ts';
@@ -50,6 +51,7 @@ export function resolveProject02RuntimeConfig(
   const diagnostics: RuntimeConfigDiagnostic[] = [
     ...options.loadedConfig.diagnostics
   ];
+  const allowedApisByPluginId = pluginAllowedApisByPluginId(config);
   const pluginConfigs: Record<string, ResolvedPluginRuntimeConfig> = {};
   const redactedPluginConfigs: Record<string, RedactedPluginRuntimeConfig> = {};
 
@@ -82,6 +84,7 @@ export function resolveProject02RuntimeConfig(
     ...(config?.defaultMemoryProvider === undefined
       ? {}
       : { defaultMemoryProvider: config.defaultMemoryProvider }),
+    allowedApisByPluginId,
     pluginConfigs: Object.freeze(pluginConfigs),
     redactedPluginConfigs: Object.freeze(redactedPluginConfigs),
     diagnostics: Object.freeze(diagnostics),
@@ -89,6 +92,7 @@ export function resolveProject02RuntimeConfig(
       effectiveFingerprintInput({
         config,
         storeRoot,
+        allowedApisByPluginId,
         redactedPluginConfigs
       })
     )
@@ -653,6 +657,7 @@ function nestedSecretValuePath(
 function effectiveFingerprintInput(options: {
   readonly config: Project02RuntimeConfig | undefined;
   readonly storeRoot: string;
+  readonly allowedApisByPluginId: Readonly<Record<string, RuntimePluginApiPermissions>>;
   readonly redactedPluginConfigs: Readonly<Record<string, RedactedPluginRuntimeConfig>>;
 }): RuntimeConfigValue {
   const pluginActivation = pluginActivationFingerprintInput(options.config);
@@ -662,9 +667,29 @@ function effectiveFingerprintInput(options: {
     storeRoot: options.storeRoot,
     enabledPlugins: Object.freeze([...(options.config?.enabledPlugins ?? [])]),
     defaultMemoryProvider: options.config?.defaultMemoryProvider ?? null,
+    allowedApisByPluginId: options.allowedApisByPluginId,
     plugins: options.redactedPluginConfigs,
     ...(pluginActivation === undefined ? {} : { pluginActivation })
   });
+}
+
+function pluginAllowedApisByPluginId(
+  config: Project02RuntimeConfig | undefined
+): Readonly<Record<string, RuntimePluginApiPermissions>> {
+  if (config?.plugins === undefined) {
+    return Object.freeze({});
+  }
+
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(config.plugins)
+        .filter(([, pluginConfig]) => pluginConfig.allowedApis !== undefined)
+        .map(([pluginId, pluginConfig]) => [
+          pluginId,
+          pluginConfig.allowedApis ?? {}
+        ])
+    )
+  );
 }
 
 function pluginActivationFingerprintInput(

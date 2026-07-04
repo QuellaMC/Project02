@@ -4,9 +4,9 @@
   "version": "0.0.0-fixture",
   "kind": "bridge_adapter",
   "description": "Normalized OpenClaw-style memory manifest for MVP-007 contract validation.",
-  "contractVersion": "mvp-007.runtime_plugin.v1",
+  "contractVersion": "mvp-008.runtime_plugin.v2",
   "compatibility": {
-    "hostContractVersions": ["mvp-007.runtime_plugin.v1"],
+    "hostContractVersions": ["mvp-008.runtime_plugin.v2"],
     "sourceSystem": "openclaw",
     "sourceVersion": "81c553e2fbec23d9e9e4f232b86ee6b86f8f5d53",
     "externalContract": "openclaw.plugin.json",

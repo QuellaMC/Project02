@@ -17,13 +17,15 @@ import {
 } from '../src/plugins/types.ts';
 import {
   createRuntimePluginHost,
-  runtimePluginDiscoveryPluginId
+  runtimePluginDiscoveryPluginId,
+  type RuntimePluginHost
 } from '../src/plugins/host.ts';
 import {
   roleModelPluginListToolName
 } from '../src/role-model/contracts.ts';
 import type {
   RuntimePlugin,
+  RuntimePluginApiAccess,
   RuntimePluginContext,
   RuntimePluginFileStore,
   RuntimePluginJsonObject,
@@ -255,6 +257,7 @@ describe('runtime plugin host', () => {
     });
     const host = createRuntimePluginHost({
       plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
 
@@ -289,11 +292,135 @@ describe('runtime plugin host', () => {
     expect(fileStore.revision()).toBe(0);
   });
 
+  it('withholds fileStore when the plugin does not declare file_store even if host policy allows it', async () => {
+    const plugin = createFileStoreAvailabilityProbePlugin({
+      pluginId: 'memory.no-file-store-declaration.fixture',
+      requestedApis: {}
+    });
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'write')
+    });
+
+    const result = await callFileStoreAvailabilityProbe(host, plugin);
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      output: {
+        fileStoreAvailable: false
+      }
+    });
+  });
+
+  it('withholds fileStore when a non-built-in plugin declares file_store but host policy does not allow it', async () => {
+    const plugin = createFileStoreAvailabilityProbePlugin({
+      pluginId: 'memory.file-store-denied.fixture',
+      requestedApis: { file_store: 'read' }
+    });
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await callFileStoreAvailabilityProbe(host, plugin);
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      output: {
+        fileStoreAvailable: false
+      }
+    });
+  });
+
+  it('does not trust manifest-declared first_party for default sensitive API access', async () => {
+    const plugin = createFileStoreAvailabilityProbePlugin({
+      pluginId: 'memory.fake-first-party.fixture',
+      localTrustLevel: 'first_party',
+      requestedApis: { file_store: 'read' }
+    });
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await callFileStoreAvailabilityProbe(host, plugin);
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      output: {
+        fileStoreAvailable: false
+      }
+    });
+  });
+
+  it('denies trusted_adapter and test_fixture plugins by default', async () => {
+    const trustedAdapter = createFileStoreAvailabilityProbePlugin({
+      pluginId: 'memory.trusted-adapter-denied.fixture',
+      localTrustLevel: 'trusted_adapter',
+      requestedApis: { file_store: 'read' }
+    });
+    const testFixture = createFileStoreAvailabilityProbePlugin({
+      pluginId: 'memory.test-fixture-denied.fixture',
+      localTrustLevel: 'test_fixture',
+      requestedApis: { file_store: 'read' }
+    });
+    const trustedAdapterHost = createRuntimePluginHost({
+      plugins: [trustedAdapter]
+    });
+    const testFixtureHost = createRuntimePluginHost({
+      plugins: [testFixture]
+    });
+
+    await expect(
+      callFileStoreAvailabilityProbe(trustedAdapterHost, trustedAdapter)
+    ).resolves.toMatchObject({
+      status: 'accepted',
+      output: {
+        fileStoreAvailable: false
+      }
+    });
+    await expect(
+      callFileStoreAvailabilityProbe(testFixtureHost, testFixture)
+    ).resolves.toMatchObject({
+      status: 'accepted',
+      output: {
+        fileStoreAvailable: false
+      }
+    });
+  });
+
+  it('injects fileStore for a non-built-in plugin only when explicitly allowlisted', async () => {
+    const plugin = createFileStoreAvailabilityProbePlugin({
+      pluginId: 'memory.file-store-allowed.fixture',
+      requestedApis: { file_store: 'read' }
+    });
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'read')
+    });
+
+    const result = await callFileStoreAvailabilityProbe(host, plugin);
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      output: {
+        fileStoreAvailable: true
+      }
+    });
+  });
+
+  it('allows host-known Character State built-in file_store write access by default', async () => {
+    const plugin = createCharacterStatePlugin();
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected Character State beforeRoleModelCall to complete.');
+    }
+    expect(result.contextItems).toHaveLength(1);
+  });
+
   it('withholds fileStore writes from read-only handleToolCall tools', async () => {
     const sessionIdentity = {};
     const plugin = createReadOnlyFileStoreProbePlugin();
     const host = createRuntimePluginHost({
       plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'read'),
       sessionIdentity
     });
     const fileStore = createPluginHostTestFileStore({
@@ -337,6 +464,7 @@ describe('runtime plugin host', () => {
     const plugin = createReadOnlyBeforeRoleModelFileStoreProbePlugin();
     const host = createRuntimePluginHost({
       plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'read'),
       sessionIdentity
     });
     const fileStore = createPluginHostTestFileStore({
@@ -370,6 +498,7 @@ describe('runtime plugin host', () => {
     });
     const host = createRuntimePluginHost({
       plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
 
@@ -396,6 +525,7 @@ describe('runtime plugin host', () => {
     });
     const host = createRuntimePluginHost({
       plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
 
@@ -437,6 +567,7 @@ describe('runtime plugin host', () => {
     const plugin = createStagedAppendFileStorePlugin();
     const host = createRuntimePluginHost({
       plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
     const context = testPluginContext();
@@ -478,6 +609,7 @@ describe('runtime plugin host', () => {
     const plugin = createStagedAppendFileStorePlugin();
     const host = createRuntimePluginHost({
       plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
     const rejectedContext = testPluginContext({
@@ -543,6 +675,7 @@ describe('runtime plugin host', () => {
     });
     const host = createRuntimePluginHost({
       plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
 
@@ -1944,7 +2077,7 @@ function createRetainedBeforeRoleModelFileStorePlugin(
         sideEffectLevel: 'local_memory_write'
       },
       declaredPlugins: ['before_role_model_call'],
-      requestedApis: ['file_store']
+      requestedApis: { file_store: 'write' }
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1971,7 +2104,7 @@ function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedApis: ['file_store']
+      requestedApis: { file_store: 'write' }
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -2026,7 +2159,7 @@ function createReadOnlyBeforeRoleModelFileStoreProbePlugin(): RuntimePlugin {
     manifest: {
       ...memorySearchPluginManifest(pluginId),
       declaredPlugins: ['before_role_model_call'],
-      requestedApis: ['file_store']
+      requestedApis: { file_store: 'write' }
     },
     providedTools: [],
     lifecycleHooks: {
@@ -2072,7 +2205,7 @@ function createRetainedHandleToolCallFileStorePlugin(
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedApis: ['file_store']
+      requestedApis: { file_store: 'write' }
     },
     providedTools: localMemoryWriteSearchProvidedTools(),
     lifecycleHooks: {
@@ -2104,7 +2237,7 @@ function createStagedAppendFileStorePlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedApis: ['file_store']
+      requestedApis: { file_store: 'write' }
     },
     providedTools: localMemoryWriteSearchProvidedTools(),
     lifecycleHooks: {
@@ -2147,7 +2280,7 @@ function createRetainedHealthFileStorePlugin(
         sideEffectLevel: 'local_memory_write'
       },
       declaredPlugins: ['health'],
-      requestedApis: ['file_store']
+      requestedApis: { file_store: 'write' }
     },
     providedTools: [],
     lifecycleHooks: {
@@ -2211,6 +2344,17 @@ function createPluginHostTestFileStore(options: {
   });
 }
 
+function allowPluginFileStore(
+  plugin: RuntimePlugin,
+  access: RuntimePluginApiAccess
+) {
+  return {
+    [plugin.manifest.id]: {
+      file_store: access
+    }
+  };
+}
+
 function createLateFileStoreWritePlugin(options: {
   readonly continueAfterTimeout: Promise<null>;
   readonly recordLateWriteOutcome: (outcome: LateFileStoreWriteOutcome) => void;
@@ -2225,7 +2369,7 @@ function createLateFileStoreWritePlugin(options: {
         ...manifest.runtimePolicy,
         timeoutMs: 5
       },
-      requestedApis: ['file_store']
+      requestedApis: { file_store: 'write' }
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -2275,6 +2419,63 @@ function createMemorySearchPluginWithoutHandlerDeclaration(): RuntimePlugin {
   });
 }
 
+async function callFileStoreAvailabilityProbe(
+  host: RuntimePluginHost,
+  plugin: RuntimePlugin
+): Promise<RuntimePluginToolCallResult> {
+  return await host.handleToolCall(
+    {
+      ...testIdentity(),
+      pluginId: plugin.manifest.id,
+      toolName: 'memory.search',
+      input: {
+        query: 'Mira'
+      }
+    },
+    testPluginContext()
+  );
+}
+
+function createFileStoreAvailabilityProbePlugin(options: {
+  readonly pluginId: string;
+  readonly requestedApis: RuntimePlugin['manifest']['requestedApis'];
+  readonly localTrustLevel?: RuntimePlugin['manifest']['localTrustLevel'];
+}): RuntimePlugin {
+  const manifest = memorySearchPluginManifest(options.pluginId);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...manifest,
+      localTrustLevel: options.localTrustLevel ?? manifest.localTrustLevel,
+      requestedApis: options.requestedApis
+    },
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall(_call, context) {
+        return {
+          status: 'accepted',
+          output: {
+            fileStoreAvailable: context.fileStore !== undefined
+          },
+          evidence: [
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId: options.pluginId,
+              evidenceKind: 'tool_invocation',
+              status: 'accepted',
+              summary: 'File store availability probe completed.',
+              redactionLabels: []
+            })
+          ]
+        };
+      }
+    }
+  });
+}
+
 function memorySearchPluginManifest(id: string) {
   return {
     id,
@@ -2310,7 +2511,7 @@ function memorySearchPluginManifest(id: string) {
       defaultEnabled: true,
       reasons: ['test']
     },
-    requestedApis: []
+    requestedApis: {}
   };
 }
 

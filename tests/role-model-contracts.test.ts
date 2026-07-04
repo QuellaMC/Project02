@@ -49,7 +49,7 @@ describe('role-model contracts', () => {
   it('ignores model-supplied version and keeps the internal decision version', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
-        version: 'mvp-007.runtime_plugin.v1',
+        version: 'mvp-008.runtime_plugin.v2',
         toolCalls: [
           {
             name: visibleReplyModelToolName,

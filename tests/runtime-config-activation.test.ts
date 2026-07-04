@@ -290,6 +290,45 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
+  it('records requested, allowed, and effective API permissions in activation snapshots', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-api-perms-'));
+    const plugin = fileStoreSessionEndPlugin('valid.file-store-policy', () => {});
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          allowedApis: {
+            file_store: 'read',
+            conversation_history: 'write'
+          }
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {
+        [plugin.manifest.id]: {
+          manifest: plugin.manifest,
+          create: () => plugin
+        }
+      }
+    });
+
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: plugin.manifest.id,
+        requestedApis: { file_store: 'write' },
+        allowedApis: {
+          file_store: 'read',
+          conversation_history: 'write'
+        },
+        effectiveApis: { file_store: 'read' }
+      })
+    );
+  });
+
   it('keeps unselected registered legacy plugin config wrappers known during strict activation', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-unselected-legacy-wrapper-strict-')
@@ -1401,7 +1440,8 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         },
         'memory.contract': {
           enabled: true,
@@ -1452,7 +1492,8 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'read' }
         },
         [failingPlugin.manifest.id]: {
           enabled: true
@@ -1523,7 +1564,8 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         },
         [failingPlugin.manifest.id]: {
           enabled: true
@@ -1589,7 +1631,8 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         },
         [failingPlugin.manifest.id]: {
           enabled: true
@@ -1652,7 +1695,8 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         },
         [failingPlugin.manifest.id]: {
           enabled: true
@@ -1716,7 +1760,8 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true
+          enabled: true,
+          allowedApis: { file_store: 'write' }
         },
         [firstToolPlugin.manifest.id]: {
           enabled: true
@@ -1906,7 +1951,7 @@ function requiredSecretPlugin(
         defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test_required_secret']
       },
-      requestedApis: []
+      requestedApis: {}
     }
   });
 }
@@ -2001,7 +2046,7 @@ function firstPartyPlugin(
         defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test_first_party']
       },
-      requestedApis: []
+      requestedApis: {}
     }
   });
 }
@@ -2046,7 +2091,7 @@ function fileStoreSessionEndPlugin(
         ...plugin.manifest.runtimePolicy,
         sideEffectLevel: 'local_memory_write'
       },
-      requestedApis: ['file_store']
+      requestedApis: { file_store: 'write' }
     },
     lifecycleHooks: {
       onSessionEnd(context) {

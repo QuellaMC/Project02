@@ -1,3 +1,5 @@
+import type { RuntimePluginApiPermissions } from '../../plugins/types.ts';
+
 export const runtimeConfigVersion = 'project02.runtime_config.v1';
 export const runtimeConfigEnvVarName = 'PROJECT02_RUNTIME_CONFIG';
 export const roleModelProviderEnvVarName = 'PROJECT02_ROLE_MODEL_PROVIDER';
@@ -45,6 +47,7 @@ export type Project02RuntimeConfig = {
 
 export type Project02RuntimePluginConfig = {
   readonly enabled?: boolean;
+  readonly allowedApis?: RuntimePluginApiPermissions;
   readonly config?: Readonly<Record<string, RuntimeConfigValue>>;
 };
 
@@ -103,6 +106,7 @@ export type ResolvedProject02RuntimeConfig = {
   readonly path?: string;
   readonly storeRoot: string;
   readonly defaultMemoryProvider?: string;
+  readonly allowedApisByPluginId: Readonly<Record<string, RuntimePluginApiPermissions>>;
   readonly pluginConfigs: Readonly<Record<string, ResolvedPluginRuntimeConfig>>;
   readonly redactedPluginConfigs: Readonly<Record<string, RedactedPluginRuntimeConfig>>;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];

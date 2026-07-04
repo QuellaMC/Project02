@@ -1003,7 +1003,10 @@ describe('plugin-driven tool loop', () => {
     const pluginHost = createRuntimePluginHost({
       storeRoot,
       sessionId,
-      plugins: [createHandleFileStoreWritePlugin()]
+      plugins: [createHandleFileStoreWritePlugin()],
+      allowedApisByPluginId: {
+        [handleFileStoreWritePluginId]: { file_store: 'write' }
+      }
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
@@ -1070,7 +1073,10 @@ describe('plugin-driven tool loop', () => {
     const pluginHost = createRuntimePluginHost({
       storeRoot,
       sessionId,
-      plugins: [createHandleFileStoreWritePlugin()]
+      plugins: [createHandleFileStoreWritePlugin()],
+      allowedApisByPluginId: {
+        [handleFileStoreWritePluginId]: { file_store: 'write' }
+      }
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
@@ -2325,7 +2331,7 @@ function createHandleFileStoreWritePlugin() {
         defaultEnabled: true,
         reasons: ['test']
       },
-      requestedApis: ['file_store']
+      requestedApis: { file_store: 'write' }
     },
     providedTools: [
       Object.freeze({
@@ -2431,7 +2437,7 @@ function createAfterTurnCommittedProbeHost(
             defaultEnabled: true,
             reasons: ['test']
           },
-          requestedApis: []
+          requestedApis: {}
         },
         providedTools: [],
         lifecycleHooks: {
@@ -2509,7 +2515,7 @@ function createPluginStoreRevisionFixtureHost() {
             defaultEnabled: true,
             reasons: ['test']
           },
-          requestedApis: []
+          requestedApis: {}
         },
         providedTools: [
           createRevisionFixtureTool('revision.zero'),
