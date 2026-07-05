@@ -3108,7 +3108,19 @@ describe('runtime config CLI', () => {
       }
     });
 
-    expect(unsetResult.config.plugins?.['memory']).toBeUndefined();
+    expect(unsetResult.config.plugins?.['memory']).toEqual({
+      allowedApis: {}
+    });
+
+    const unsetPolicyResult = applyRuntimeConfigMutation({
+      configPath,
+      operation: {
+        kind: 'unset',
+        path: 'plugins.memory.allowedApis'
+      }
+    });
+
+    expect(unsetPolicyResult.config.plugins?.['memory']).toBeUndefined();
   });
 
   it('preserves explicit empty plugin allowedApis overrides', () => {
@@ -3146,6 +3158,33 @@ describe('runtime config CLI', () => {
     });
 
     expect(unsetEnabledResult.config.plugins?.['character-state']).toEqual({
+      allowedApis: {}
+    });
+  });
+
+  it('preserves explicit empty allowedApis after unsetting the last API field', () => {
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-empty-allowed-api-leaf-')
+    );
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      plugins: {
+        'character-state': {
+          allowedApis: {
+            file_store: 'none'
+          }
+        }
+      }
+    });
+
+    const unsetResult = applyRuntimeConfigMutation({
+      configPath,
+      operation: {
+        kind: 'unset',
+        path: 'plugins.character-state.allowedApis.file_store'
+      }
+    });
+
+    expect(unsetResult.config.plugins?.['character-state']).toEqual({
       allowedApis: {}
     });
   });

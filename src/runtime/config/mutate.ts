@@ -638,16 +638,16 @@ function unsetConfigPath(
     const nextAllowedApiEntries = Object.entries(currentPlugin.allowedApis ?? {}).filter(
       ([key]) => key !== pluginPath.apiName
     );
+    const nextAllowedApis =
+      currentPlugin.allowedApis === undefined
+        ? undefined
+        : Object.freeze(
+            Object.fromEntries(nextAllowedApiEntries) as RuntimePluginApiPermissions
+          );
 
     return setOrDeletePluginWrapper(config, plugins, pluginPath.pluginId, {
       ...(currentPlugin.enabled === undefined ? {} : { enabled: currentPlugin.enabled }),
-      ...(nextAllowedApiEntries.length === 0
-        ? {}
-        : {
-            allowedApis: Object.freeze(
-              Object.fromEntries(nextAllowedApiEntries) as RuntimePluginApiPermissions
-            )
-          }),
+      ...(nextAllowedApis === undefined ? {} : { allowedApis: nextAllowedApis }),
       ...(currentPlugin.config === undefined ? {} : { config: currentPlugin.config })
     });
   }
