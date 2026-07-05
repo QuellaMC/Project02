@@ -3111,6 +3111,45 @@ describe('runtime config CLI', () => {
     expect(unsetResult.config.plugins?.['memory']).toBeUndefined();
   });
 
+  it('preserves explicit empty plugin allowedApis overrides', () => {
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-empty-allowed-apis-')
+    );
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      plugins: {
+        'character-state': {
+          enabled: true
+        }
+      }
+    });
+
+    const setPolicyResult = applyRuntimeConfigMutation({
+      configPath,
+      operation: {
+        kind: 'set',
+        path: 'plugins.character-state.allowedApis',
+        value: {}
+      }
+    });
+
+    expect(setPolicyResult.config.plugins?.['character-state']).toEqual({
+      enabled: true,
+      allowedApis: {}
+    });
+
+    const unsetEnabledResult = applyRuntimeConfigMutation({
+      configPath,
+      operation: {
+        kind: 'unset',
+        path: 'plugins.character-state.enabled'
+      }
+    });
+
+    expect(unsetEnabledResult.config.plugins?.['character-state']).toEqual({
+      allowedApis: {}
+    });
+  });
+
   it('writes mutations to the normalized selected config path', () => {
     const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-normalized-write-'));
     const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {

@@ -1348,7 +1348,7 @@ function pluginWrappersWithout(
 function isEmptyPluginWrapper(config: Project02RuntimePluginConfig): boolean {
   return (
     config.enabled === undefined &&
-    (config.allowedApis === undefined || Object.keys(config.allowedApis).length === 0) &&
+    config.allowedApis === undefined &&
     (config.config === undefined || Object.keys(config.config).length === 0)
   );
 }

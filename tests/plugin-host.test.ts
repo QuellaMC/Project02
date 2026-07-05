@@ -415,6 +415,24 @@ describe('runtime plugin host', () => {
     expect(result.contextItems).toHaveLength(1);
   });
 
+  it('withholds Character State default file_store access from an id-spoofed plugin', async () => {
+    const plugin = createFileStoreAvailabilityProbePlugin({
+      pluginId: characterStatePluginId,
+      requestedApis: { file_store: 'read' },
+      localTrustLevel: 'first_party'
+    });
+    const host = createRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await callFileStoreAvailabilityProbe(host, plugin);
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      output: {
+        fileStoreAvailable: false
+      }
+    });
+  });
+
   it('withholds fileStore writes from read-only handleToolCall tools', async () => {
     const sessionIdentity = {};
     const plugin = createReadOnlyFileStoreProbePlugin();

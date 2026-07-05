@@ -1,4 +1,4 @@
-import { characterStatePluginId } from './builtin/character-state/index.ts';
+import { isCharacterStatePlugin } from './builtin/character-state/index.ts';
 import {
   firstPartyModelToolsPluginId,
   minRuntimePluginApiAccess,
@@ -35,8 +35,8 @@ export function resolveRuntimePluginApiPermissionsForPlugins(options: {
     Object.fromEntries(
       options.plugins.map((plugin) => [
         plugin.manifest.id,
-        resolveRuntimePluginApiPermissionsForManifest({
-          manifest: plugin.manifest,
+        resolveRuntimePluginApiPermissionsForPlugin({
+          plugin,
           explicitAllowedApisByPluginId
         })
       ])
@@ -60,11 +60,25 @@ export function runtimePluginApiPermissionsForPlugin(options: {
   return apiPermissions;
 }
 
+export function resolveRuntimePluginApiPermissionsForPlugin(options: {
+  readonly plugin: RuntimePlugin;
+  readonly explicitAllowedApisByPluginId: Readonly<
+    Record<string, RuntimePluginApiPermissions>
+  >;
+}): RuntimePluginApiPermissionSnapshot {
+  return resolveRuntimePluginApiPermissionsForManifest({
+    manifest: options.plugin.manifest,
+    explicitAllowedApisByPluginId: options.explicitAllowedApisByPluginId,
+    defaultAllowedApis: defaultAllowedApisForPlugin(options.plugin)
+  });
+}
+
 export function resolveRuntimePluginApiPermissionsForManifest(options: {
   readonly manifest: RuntimePlugin['manifest'];
   readonly explicitAllowedApisByPluginId: Readonly<
     Record<string, RuntimePluginApiPermissions>
   >;
+  readonly defaultAllowedApis?: RuntimePluginApiPermissions;
 }): RuntimePluginApiPermissionSnapshot {
   const requestedApis = normalizeRuntimePluginApiPermissions(
     options.manifest.requestedApis,
@@ -80,7 +94,7 @@ export function resolveRuntimePluginApiPermissionsForManifest(options: {
     ? explicitAllowedApisByPluginId[options.manifest.id]
     : undefined;
   const allowedApis = normalizeRuntimePluginApiPermissions(
-    explicitAllowedApis ?? defaultAllowedApisForPluginId(options.manifest.id),
+    explicitAllowedApis ?? options.defaultAllowedApis ?? {},
     `${options.manifest.id}.allowedApis`
   );
   const effectiveApis: Partial<Record<RuntimePluginApiName, RuntimePluginApiAccess>> = {};
@@ -123,16 +137,14 @@ function normalizeAllowedApisByPluginId(
   );
 }
 
-function defaultAllowedApisForPluginId(
-  pluginId: string
-): RuntimePluginApiPermissions {
-  if (pluginId === characterStatePluginId) {
+function defaultAllowedApisForPlugin(plugin: RuntimePlugin): RuntimePluginApiPermissions {
+  if (isCharacterStatePlugin(plugin)) {
     return Object.freeze({ file_store: 'write' });
   }
 
   if (
-    pluginId === runtimePluginDiscoveryPluginId ||
-    pluginId === firstPartyModelToolsPluginId
+    plugin.manifest.id === runtimePluginDiscoveryPluginId ||
+    plugin.manifest.id === firstPartyModelToolsPluginId
   ) {
     return Object.freeze({});
   }

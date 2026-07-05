@@ -36,6 +36,7 @@ export const characterStatePluginId = 'character-state';
 
 const characterStateEventsPath = 'events.jsonl';
 const characterStateCurrentPath = 'current.json';
+const characterStatePluginInstances = new WeakSet<RuntimePlugin>();
 
 const characterStatePatchInputContract = Object.freeze({
   type: 'object',
@@ -119,7 +120,7 @@ export function createCharacterStatePluginManifest(): RuntimePluginManifest {
 }
 
 export function createCharacterStatePlugin(): RuntimePlugin {
-  return createRuntimePlugin({
+  const plugin = createRuntimePlugin({
     manifest: createCharacterStatePluginManifest(),
     providedTools: [
       Object.freeze({
@@ -296,6 +297,13 @@ export function createCharacterStatePlugin(): RuntimePlugin {
       }
     }
   });
+
+  characterStatePluginInstances.add(plugin);
+  return plugin;
+}
+
+export function isCharacterStatePlugin(plugin: RuntimePlugin): boolean {
+  return characterStatePluginInstances.has(plugin);
 }
 
 function readCurrentCharacterState(
