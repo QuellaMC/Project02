@@ -17,6 +17,7 @@ import {
 } from '../src/plugins/types.ts';
 import {
   createRuntimePluginHost,
+  runRuntimePluginSessionEndHooks,
   runtimePluginDiscoveryPluginId,
   type RuntimePluginHost
 } from '../src/plugins/host.ts';
@@ -360,6 +361,50 @@ describe('runtime plugin host', () => {
         fileStoreAvailable: false
       }
     });
+  });
+
+  it('rejects duplicate plugin ids before standalone session-end API permission injection', async () => {
+    const pluginId = 'memory.duplicate-session-end.fixture';
+    const invokedPlugins: string[] = [];
+    const deniedPlugin = createSessionEndFileStoreProbePlugin({
+      pluginId,
+      requestedApis: {},
+      onSessionEnd(context) {
+        invokedPlugins.push(
+          context.fileStore === undefined ? 'denied:no_file_store' : 'denied:file_store'
+        );
+      }
+    });
+    const grantedPlugin = createSessionEndFileStoreProbePlugin({
+      pluginId,
+      requestedApis: { file_store: 'write' },
+      onSessionEnd(context) {
+        invokedPlugins.push(
+          context.fileStore === undefined ? 'granted:no_file_store' : 'granted:file_store'
+        );
+        context.fileStore?.writeJsonAtomic('duplicate-session-end.json', {
+          value: 'unexpected'
+        });
+      }
+    });
+
+    await expect(
+      runRuntimePluginSessionEndHooks({
+        plugins: [deniedPlugin, grantedPlugin],
+        context: testPluginContext(),
+        allowedApisByPluginId: {
+          [pluginId]: {
+            file_store: 'write'
+          }
+        },
+        hookOptions: {
+          allowFileStoreWrites: true
+        }
+      })
+    ).rejects.toThrow(
+      /Duplicate plugin id "memory\.duplicate-session-end\.fixture" is not allowed/iu
+    );
+    expect(invokedPlugins).toEqual([]);
   });
 
   it('does not trust manifest-declared first_party for default sensitive API access', async () => {
@@ -2576,6 +2621,37 @@ function createFileStoreAvailabilityProbePlugin(options: {
               redactionLabels: []
             })
           ]
+        };
+      }
+    }
+  });
+}
+
+function createSessionEndFileStoreProbePlugin(options: {
+  readonly pluginId: string;
+  readonly requestedApis: RuntimePlugin['manifest']['requestedApis'];
+  readonly onSessionEnd: (context: RuntimePluginContext) => void;
+}): RuntimePlugin {
+  const manifest = memorySearchPluginManifest(options.pluginId);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...manifest,
+      declaredPlugins: ['on_session_end'],
+      runtimePolicy: {
+        ...manifest.runtimePolicy,
+        sideEffectLevel: 'local_memory_write'
+      },
+      requestedApis: options.requestedApis
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      onSessionEnd(context) {
+        options.onSessionEnd(context);
+
+        return {
+          status: 'completed',
+          evidence: []
         };
       }
     }

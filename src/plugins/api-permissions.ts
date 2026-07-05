@@ -1,5 +1,6 @@
 import { isCharacterStatePlugin } from './builtin/character-state/index.ts';
 import {
+  assertUniqueRuntimePluginIds,
   firstPartyModelToolsPluginId,
   minRuntimePluginApiAccess,
   normalizeRuntimePluginApiPermissions,
@@ -31,6 +32,8 @@ export function resolveRuntimePluginApiPermissionsForPlugins(options: {
     Record<string, RuntimePluginApiPermissions>
   >;
 }): RuntimePluginApiPermissionsByPluginId {
+  assertUniqueRuntimePluginIds(options.plugins);
+
   const explicitAllowedApisByPluginId = normalizeAllowedApisByPluginId(
     options.explicitAllowedApisByPluginId
   );
