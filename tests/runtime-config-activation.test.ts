@@ -17,6 +17,8 @@ import {
   createRuntimePluginFileStore,
   createMemoryProviderRuntimePlugin,
   createRuntimePlugin,
+  createCharacterStatePlugin,
+  createCharacterStatePluginManifest,
   memorySearchTool,
   runtimePluginDiscoveryPluginId,
   runtimePluginContractVersion,
@@ -350,7 +352,41 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
-  it('does not report built-in default API permissions for caller-supplied Character State factories', async () => {
+  it('reports built-in default API permissions for caller-supplied real Character State factories', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-character-state-real-factory-api-perms-')
+    );
+    const plugin = createCharacterStatePlugin();
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {
+        [characterStatePluginId]: {
+          manifest: createCharacterStatePluginManifest(),
+          create: () => {
+            factoryCalls += 1;
+
+            return plugin;
+          }
+        }
+      }
+    });
+
+    expect(factoryCalls).toBe(1);
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        requestedApis: { file_store: 'write' },
+        allowedApis: { file_store: 'write' },
+        effectiveApis: { file_store: 'write' }
+      })
+    );
+  });
+
+  it('does not report built-in default API permissions for caller-supplied Character State id spoofs', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-character-state-spoof-api-perms-')
     );
