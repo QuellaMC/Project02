@@ -392,11 +392,17 @@ function createPluginHookContext<TContext extends RuntimePluginContext>(options:
     baseFileStore === undefined
       ? undefined
       : createRevocableRuntimePluginFileStore(baseFileStore, { allowWrites });
+  const {
+    fileStore: inheritedFileStore,
+    ...contextWithoutInheritedFileStore
+  } = options.context;
+  void inheritedFileStore;
+  // Preserve the hook context subtype while making fileStore injection entirely host-controlled.
   const context = Object.freeze({
-    ...options.context,
+    ...contextWithoutInheritedFileStore,
     pluginId: options.plugin.manifest.id,
     ...(fileStore === undefined ? {} : { fileStore: fileStore.fileStore })
-  });
+  }) as TContext;
 
   return Object.freeze({
     context,

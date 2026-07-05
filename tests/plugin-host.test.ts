@@ -312,6 +312,39 @@ describe('runtime plugin host', () => {
     });
   });
 
+  it('strips caller-provided fileStore when the plugin has no effective file_store grant', async () => {
+    const sessionIdentity = {};
+    const plugin = createFileStoreAvailabilityProbePlugin({
+      pluginId: 'memory.no-inherited-file-store.fixture',
+      requestedApis: {}
+    });
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
+      sessionIdentity
+    });
+    const inheritedFileStore = createPluginHostTestFileStore({
+      pluginId: 'memory.inherited-file-store.fixture',
+      sessionIdentity
+    });
+
+    inheritedFileStore.writeJsonAtomic('seed.json', {
+      value: 'inherited'
+    });
+
+    const result = await callFileStoreAvailabilityProbe(host, plugin, {
+      ...testPluginContext(),
+      fileStore: inheritedFileStore
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      output: {
+        fileStoreAvailable: false
+      }
+    });
+  });
+
   it('withholds fileStore when a non-built-in plugin declares file_store but host policy does not allow it', async () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.file-store-denied.fixture',
@@ -401,6 +434,60 @@ describe('runtime plugin host', () => {
         fileStoreAvailable: true
       }
     });
+  });
+
+  it('replaces caller-provided fileStore with the plugin-scoped store when file_store read is granted', async () => {
+    const sessionIdentity = {};
+    const plugin = createReadOnlyFileStoreProbePlugin();
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      allowedApisByPluginId: allowPluginFileStore(plugin, 'read'),
+      sessionIdentity
+    });
+    const scopedFileStore = createPluginHostTestFileStore({
+      pluginId: plugin.manifest.id,
+      sessionIdentity
+    });
+    const inheritedFileStore = createPluginHostTestFileStore({
+      pluginId: 'memory.inherited-file-store.fixture',
+      sessionIdentity
+    });
+
+    scopedFileStore.writeJsonAtomic('seed.json', {
+      value: 'scoped'
+    });
+    inheritedFileStore.writeJsonAtomic('seed.json', {
+      value: 'inherited'
+    });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      {
+        ...testPluginContext(),
+        fileStore: inheritedFileStore
+      }
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected read-only fileStore probe to be accepted.');
+    }
+
+    expect(result.output).toEqual({
+      seed: {
+        value: 'scoped'
+      },
+      writeBlocked: true
+    });
+    expect(scopedFileStore.readJson('read-only-write.json')).toBeUndefined();
+    expect(inheritedFileStore.readJson('read-only-write.json')).toBeUndefined();
   });
 
   it('allows host-known Character State built-in file_store write access by default', async () => {
@@ -2439,7 +2526,8 @@ function createMemorySearchPluginWithoutHandlerDeclaration(): RuntimePlugin {
 
 async function callFileStoreAvailabilityProbe(
   host: RuntimePluginHost,
-  plugin: RuntimePlugin
+  plugin: RuntimePlugin,
+  context: RuntimePluginContext = testPluginContext()
 ): Promise<RuntimePluginToolCallResult> {
   return await host.handleToolCall(
     {
@@ -2450,7 +2538,7 @@ async function callFileStoreAvailabilityProbe(
         query: 'Mira'
       }
     },
-    testPluginContext()
+    context
   );
 }
 
