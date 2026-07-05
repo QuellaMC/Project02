@@ -110,6 +110,16 @@ export type RunRuntimePluginSessionEndHooksOptions = {
   readonly hookOptions?: RuntimePluginSessionEndOptions;
 };
 
+type RunRuntimePluginSessionEndHooksWithResolvedPermissionsOptions = {
+  readonly plugins: readonly RuntimePlugin[];
+  readonly context: RuntimePluginContext;
+  readonly apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId;
+  readonly storeRoot?: string | undefined;
+  readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
+  readonly hookOptions?: RuntimePluginSessionEndOptions;
+};
+
 export type RuntimePluginHealthHostResult = {
   readonly snapshots: readonly RuntimePluginHealthSnapshot[];
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
@@ -301,10 +311,10 @@ export function createRuntimePluginHost(
       } satisfies RuntimePluginHookHostResult);
     },
     async onSessionEnd(context, hookOptions) {
-      return await runRuntimePluginSessionEndHooks({
+      return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
         plugins: enabledPlugins,
         context,
-        allowedApisByPluginId: explicitAllowedApisByPluginId,
+        apiPermissionsByPluginId,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity,
@@ -329,13 +339,29 @@ export async function runRuntimePluginSessionEndHooks(
 ): Promise<RuntimePluginHookHostResult> {
   const explicitAllowedApisByPluginId = options.allowedApisByPluginId ?? {};
 
-  return await runHookPhase({
+  return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
     plugins: options.plugins,
     context: options.context,
     apiPermissionsByPluginId: resolveRuntimePluginApiPermissionsForPlugins({
       plugins: options.plugins,
       explicitAllowedApisByPluginId
     }),
+    storeRoot: options.storeRoot,
+    sessionId: options.sessionId,
+    sessionIdentity: options.sessionIdentity,
+    ...(options.hookOptions === undefined
+      ? {}
+      : { hookOptions: options.hookOptions })
+  });
+}
+
+async function runRuntimePluginSessionEndHooksWithResolvedPermissions(
+  options: RunRuntimePluginSessionEndHooksWithResolvedPermissionsOptions
+): Promise<RuntimePluginHookHostResult> {
+  return await runHookPhase({
+    plugins: options.plugins,
+    context: options.context,
+    apiPermissionsByPluginId: options.apiPermissionsByPluginId,
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,

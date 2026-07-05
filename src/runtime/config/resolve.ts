@@ -167,6 +167,7 @@ export function runtimeConfigDiagnosticPathMatchesPlugin(options: {
   return (
     options.path === pluginPath ||
     runtimeConfigDiagnosticPathMatchesPluginEnabled(options) ||
+    runtimeConfigDiagnosticPathMatchesPluginAllowedApis(options) ||
     runtimeConfigDiagnosticPathMatchesPluginConfig(options)
   );
 }
@@ -188,6 +189,18 @@ function runtimeConfigDiagnosticPathMatchesPluginEnabled(options: {
   readonly pluginId: string;
 }): boolean {
   return options.path === `plugins.${options.pluginId}.enabled`;
+}
+
+function runtimeConfigDiagnosticPathMatchesPluginAllowedApis(options: {
+  readonly path: string | undefined;
+  readonly pluginId: string;
+}): boolean {
+  const allowedApisPath = `plugins.${options.pluginId}.allowedApis`;
+
+  return (
+    options.path === allowedApisPath ||
+    options.path?.startsWith(`${allowedApisPath}.`) === true
+  );
 }
 
 function resolvePluginConfig(options: {

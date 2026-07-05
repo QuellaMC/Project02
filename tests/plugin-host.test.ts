@@ -27,6 +27,7 @@ import {
 import type {
   RuntimePlugin,
   RuntimePluginApiAccess,
+  RuntimePluginApiPermissions,
   RuntimePluginContext,
   RuntimePluginFileStore,
   RuntimePluginJsonObject,
@@ -405,6 +406,44 @@ describe('runtime plugin host', () => {
       /Duplicate plugin id "memory\.duplicate-session-end\.fixture" is not allowed/iu
     );
     expect(invokedPlugins).toEqual([]);
+  });
+
+  it('uses captured API grants for host session-end hooks after caller policy mutation', async () => {
+    const sessionIdentity = {};
+    let sawFileStore = false;
+    const plugin = createSessionEndFileStoreProbePlugin({
+      pluginId: 'memory.session-end-mutated-policy.fixture',
+      requestedApis: { file_store: 'write' },
+      onSessionEnd(context) {
+        sawFileStore = context.fileStore !== undefined;
+        context.fileStore?.writeJsonAtomic('mutated-policy-session-end.json', {
+          value: 'unexpected'
+        });
+      }
+    });
+    const allowedApisByPluginId: Record<string, RuntimePluginApiPermissions> = {
+      [plugin.manifest.id]: {}
+    };
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      allowedApisByPluginId,
+      sessionIdentity
+    });
+
+    allowedApisByPluginId[plugin.manifest.id] = {
+      file_store: 'write'
+    };
+
+    const result = await host.onSessionEnd(testPluginContext());
+    const fileStore = createPluginHostTestFileStore({
+      pluginId: plugin.manifest.id,
+      sessionIdentity
+    });
+
+    expect(result.status).toBe('completed');
+    expect(sawFileStore).toBe(false);
+    expect(fileStore.readJson('mutated-policy-session-end.json')).toBeUndefined();
+    expect(fileStore.revision()).toBe(0);
   });
 
   it('does not trust manifest-declared first_party for default sensitive API access', async () => {

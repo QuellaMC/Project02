@@ -450,6 +450,50 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
+  it('attaches malformed allowedApis diagnostics to the affected plugin activation', async () => {
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-invalid-allowed-apis-')),
+        'config.json'
+      ),
+      {
+        plugins: {
+          'character-state': {
+            allowedApis: {
+              file_store: 'admin'
+            }
+          }
+        }
+      }
+    );
+    const loaded = loadProject02RuntimeConfig({ configPath });
+
+    expect(loaded.config).toBeUndefined();
+    expect(loaded.diagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        code: 'runtime_config_plugin_allowed_apis_invalid',
+        path: 'plugins.character-state.allowedApis'
+      })
+    ]);
+
+    const configured = await createConfiguredProject02PluginHost({ loadedConfig: loaded });
+
+    expect(configured.activation.plugins[0]).toMatchObject({
+      pluginId: 'character-state',
+      enabled: false,
+      activationStatus: 'blocked'
+    });
+    expect(configured.activation.plugins[0]?.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_plugin_allowed_apis_invalid',
+          path: 'plugins.character-state.allowedApis'
+        })
+      ])
+    );
+  });
+
   it('redacts secret env refs and keeps fingerprints independent of env secret values', () => {
     const plugin = createCharacterStatePlugin();
     const loaded = loadProject02RuntimeConfig({
