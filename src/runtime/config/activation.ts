@@ -123,10 +123,15 @@ export function defaultRuntimePluginFactories(): Readonly<
 function defaultAllowedApisByPluginIdForFactories(
   factories: Readonly<Record<string, RuntimePluginFactory>>
 ): Readonly<Record<string, RuntimePluginApiPermissions>> {
-  if (
-    factories[characterStatePluginId] !==
-    defaultRuntimePluginFactoryDefinitions[characterStatePluginId]
-  ) {
+  const defaultCharacterStateFactory =
+    defaultRuntimePluginFactoryDefinitions[characterStatePluginId];
+  const hasCharacterStateFactory = Object.values(factories).some(
+    (factory) =>
+      isRuntimePluginFactoryDefinition(factory) &&
+      runtimePluginManifestsMatch(factory.manifest, defaultCharacterStateFactory.manifest)
+  );
+
+  if (!hasCharacterStateFactory) {
     return Object.freeze({});
   }
 

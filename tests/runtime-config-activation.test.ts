@@ -22,6 +22,7 @@ import {
   memorySearchTool,
   runtimePluginDiscoveryPluginId,
   runtimePluginContractVersion,
+  type RuntimePluginApiPermissions,
   type RuntimePluginContext
 } from '../src/plugins/index.ts';
 
@@ -1008,6 +1009,98 @@ describe('runtime config activation diagnostics', () => {
       })
     );
     expect(stdout).not.toContain('manifest-backed-secret');
+  });
+
+  it('reports built-in default API permissions during check for caller-supplied real Character State factories', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-character-state-real-factory-')
+    );
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          [characterStatePluginId]: {
+            manifest: createCharacterStatePluginManifest(),
+            create() {
+              factoryCalls += 1;
+
+              return createCharacterStatePlugin();
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_legacy_factory_unchecked'
+    );
+    expect(output.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        activationStatus: 'active',
+        enabled: true,
+        requestedApis: { file_store: 'write' },
+        allowedApis: { file_store: 'write' },
+        effectiveApis: { file_store: 'write' }
+      })
+    );
+  });
+
+  it('does not infer Character State check default API permissions from same-id manifest spoofs', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-character-state-spoof-')
+    );
+    const plugin = fileStoreSessionEndPlugin(characterStatePluginId, () => {});
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          [characterStatePluginId]: {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+
+              return plugin;
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(0);
+    expect(output.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        activationStatus: 'active',
+        enabled: true,
+        requestedApis: { file_store: 'write' },
+        allowedApis: {},
+        effectiveApis: {}
+      })
+    );
   });
 
   it('fails check for duplicate manifest ids without constructing factories', async () => {
@@ -2284,6 +2377,9 @@ function parseActivationOutput(stdout: string): {
     readonly pluginId: string;
     readonly activationStatus: string;
     readonly enabled: boolean;
+    readonly requestedApis: RuntimePluginApiPermissions;
+    readonly allowedApis: RuntimePluginApiPermissions;
+    readonly effectiveApis: RuntimePluginApiPermissions;
   }[];
 } {
   return JSON.parse(stdout) as {
@@ -2297,6 +2393,9 @@ function parseActivationOutput(stdout: string): {
       readonly pluginId: string;
       readonly activationStatus: string;
       readonly enabled: boolean;
+      readonly requestedApis: RuntimePluginApiPermissions;
+      readonly allowedApis: RuntimePluginApiPermissions;
+      readonly effectiveApis: RuntimePluginApiPermissions;
     }[];
   };
 }
