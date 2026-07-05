@@ -6,9 +6,11 @@ import {
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
   minRuntimePluginApiAccess,
+  normalizeRuntimePluginApiPermissions,
   runtimePluginApiAccessFor,
   runtimePluginApiAccessAllows,
-  runtimePluginContractVersion
+  runtimePluginContractVersion,
+  type RuntimePluginApiPermissions
 } from '../src/plugins/types.ts';
 
 describe('runtime plugin source references', () => {
@@ -171,6 +173,20 @@ describe('runtime plugin API permissions', () => {
         )
       ).toThrow(/requestedApis/u);
     }
+  });
+
+  it('ignores inherited API permission values', () => {
+    const inheritedPermissions = Object.create({
+      file_store: 'write'
+    }) as RuntimePluginApiPermissions;
+
+    expect(Object.keys(inheritedPermissions)).toEqual([]);
+    expect(runtimePluginApiAccessFor(inheritedPermissions, 'file_store')).toBe(
+      'none'
+    );
+    expect(
+      normalizeRuntimePluginApiPermissions(inheritedPermissions)
+    ).toEqual({});
   });
 
   it('orders access levels for min and allow checks', () => {

@@ -610,6 +610,13 @@ function unsetConfigPath(
     throw new TypeError('Plugin config path must include a field name.');
   }
 
+  if (pluginPath.kind === 'allowed_api') {
+    normalizeRuntimePluginApiPermissions(
+      { [pluginPath.apiName]: 'none' },
+      path
+    );
+  }
+
   const currentPlugin = config.plugins?.[pluginPath.pluginId];
 
   if (currentPlugin === undefined) {

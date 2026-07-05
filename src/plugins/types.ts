@@ -497,6 +497,10 @@ export function runtimePluginApiAccessFor(
   permissions: RuntimePluginApiPermissions,
   api: RuntimePluginApiName
 ): RuntimePluginApiAccess {
+  if (!Object.hasOwn(permissions, api)) {
+    return 'none';
+  }
+
   return permissions[api] ?? 'none';
 }
 
@@ -538,6 +542,10 @@ export function normalizeRuntimePluginApiPermissions(
   }
 
   for (const api of runtimePluginApiNameValues) {
+    if (!Object.hasOwn(value, api)) {
+      continue;
+    }
+
     const access = value[api];
 
     if (access === undefined) {

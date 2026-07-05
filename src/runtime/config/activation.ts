@@ -125,13 +125,10 @@ function defaultAllowedApisByPluginIdForFactories(
 ): Readonly<Record<string, RuntimePluginApiPermissions>> {
   const defaultCharacterStateFactory =
     defaultRuntimePluginFactoryDefinitions[characterStatePluginId];
-  const hasCharacterStateFactory = Object.values(factories).some(
-    (factory) =>
-      isRuntimePluginFactoryDefinition(factory) &&
-      runtimePluginManifestsMatch(factory.manifest, defaultCharacterStateFactory.manifest)
-  );
+  const hasHostOwnedCharacterStateFactory =
+    factories[characterStatePluginId] === defaultCharacterStateFactory;
 
-  if (!hasCharacterStateFactory) {
+  if (!hasHostOwnedCharacterStateFactory) {
     return Object.freeze({});
   }
 

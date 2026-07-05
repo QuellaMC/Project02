@@ -1011,7 +1011,39 @@ describe('runtime config activation diagnostics', () => {
     expect(stdout).not.toContain('manifest-backed-secret');
   });
 
-  it('reports built-in default API permissions during check for caller-supplied real Character State factories', async () => {
+  it('reports host-owned default API permissions during check for the default Character State factory', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-character-state-default-factory-')
+    );
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {})
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(output.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        activationStatus: 'active',
+        enabled: true,
+        requestedApis: { file_store: 'write' },
+        allowedApis: { file_store: 'write' },
+        effectiveApis: { file_store: 'write' }
+      })
+    );
+  });
+
+  it('does not report built-in default API permissions during check for caller-supplied real Character State factories', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-check-character-state-real-factory-')
     );
@@ -1052,8 +1084,58 @@ describe('runtime config activation diagnostics', () => {
         activationStatus: 'active',
         enabled: true,
         requestedApis: { file_store: 'write' },
-        allowedApis: { file_store: 'write' },
-        effectiveApis: { file_store: 'write' }
+        allowedApis: {},
+        effectiveApis: {}
+      })
+    );
+  });
+
+  it('does not infer Character State check default API permissions from exact manifest matches', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-character-state-exact-manifest-')
+    );
+    const builtInPlugin = createCharacterStatePlugin();
+    const plugin = createRuntimePlugin({
+      manifest: builtInPlugin.manifest,
+      providedTools: builtInPlugin.providedTools,
+      lifecycleHooks: builtInPlugin.lifecycleHooks
+    });
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          [characterStatePluginId]: {
+            manifest: createCharacterStatePluginManifest(),
+            create() {
+              factoryCalls += 1;
+
+              return plugin;
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(0);
+    expect(output.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        activationStatus: 'active',
+        enabled: true,
+        requestedApis: { file_store: 'write' },
+        allowedApis: {},
+        effectiveApis: {}
       })
     );
   });

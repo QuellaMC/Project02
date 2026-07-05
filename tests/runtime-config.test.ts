@@ -3167,6 +3167,28 @@ describe('runtime config CLI', () => {
     expect(unsetPolicyResult.config.plugins?.['memory']).toBeUndefined();
   });
 
+  it('rejects unknown plugin allowedApis API names on unset', () => {
+    const configRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-unknown-allowed-api-unset-')
+    );
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {});
+    const originalConfig = readFileSync(configPath, 'utf8');
+
+    expect(() =>
+      applyRuntimeConfigMutation({
+        configPath,
+        operation: {
+          kind: 'unset',
+          path: 'plugins.memory.allowedApis.unknown_api'
+        }
+      })
+    ).toThrow(
+      'plugins.memory.allowedApis.unknown_api contains unknown API "unknown_api".'
+    );
+
+    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
+  });
+
   it('preserves explicit empty plugin allowedApis overrides', () => {
     const configRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-empty-allowed-apis-')
