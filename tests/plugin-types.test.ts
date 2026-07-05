@@ -6,7 +6,7 @@ import {
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
   minRuntimePluginApiAccess,
-  requestedRuntimePluginApiAccess,
+  runtimePluginApiAccessFor,
   runtimePluginApiAccessAllows,
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
@@ -120,7 +120,7 @@ describe('runtime plugin API permissions', () => {
     const manifest = createRuntimePluginManifest(runtimePluginManifestFixture());
 
     expect(manifest.requestedApis).toEqual({});
-    expect(requestedRuntimePluginApiAccess(manifest.requestedApis, 'file_store')).toBe(
+    expect(runtimePluginApiAccessFor(manifest.requestedApis, 'file_store')).toBe(
       'none'
     );
   });

@@ -493,7 +493,7 @@ export function normalizeRuntimePluginApiAccess(
   return value;
 }
 
-export function requestedRuntimePluginApiAccess(
+export function runtimePluginApiAccessFor(
   permissions: RuntimePluginApiPermissions,
   api: RuntimePluginApiName
 ): RuntimePluginApiAccess {

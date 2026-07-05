@@ -1,9 +1,4 @@
 import {
-  firstPartyModelToolsPluginId,
-  minRuntimePluginApiAccess,
-  normalizeRuntimePluginApiPermissions,
-  requestedRuntimePluginApiAccess,
-  runtimePluginApiNames,
   runtimePluginContractVersion,
   createRuntimePlugin,
   createRuntimePluginContextItem,
@@ -12,12 +7,11 @@ import {
   createRuntimePluginRegistrySnapshot,
   isRuntimePluginCredentialKey,
   redactRuntimePluginText,
+  runtimePluginApiAccessFor,
   runtimePluginApiAccessAllows
 } from './types.ts';
 import type {
   RuntimePlugin,
-  RuntimePluginApiAccess,
-  RuntimePluginApiName,
   RuntimePluginApiPermissionSnapshot,
   RuntimePluginApiPermissions,
   RuntimePluginBeforeRoleModelCallResult,
@@ -41,6 +35,12 @@ import type {
   RuntimePluginFileStore
 } from './types.ts';
 import {
+  resolveRuntimePluginApiPermissionsForPlugins,
+  runtimePluginApiPermissionsForPlugin,
+  runtimePluginDiscoveryPluginId,
+  type RuntimePluginApiPermissionsByPluginId
+} from './api-permissions.ts';
+import {
   isBuiltInModelToolName,
   validateModelToolInputAgainstContract
 } from '../role-model/model-tools.ts';
@@ -49,17 +49,13 @@ import {
   roleModelPluginListToolName,
   type RoleModelPluginToolDefinition
 } from '../role-model/contracts.ts';
-import {
-  characterStatePluginId,
-  createCharacterStatePlugin
-} from './builtin/character-state/index.ts';
+import { createCharacterStatePlugin } from './builtin/character-state/index.ts';
 import { createRuntimePluginFileStore } from './file-store.ts';
+
+export { runtimePluginDiscoveryPluginId } from './api-permissions.ts';
 
 export const runtimePluginBeforeRoleModelCallRejectionReason =
   'plugin_before_role_model_call_rejected';
-export const runtimePluginDiscoveryPluginId =
-  'runtime.plugin_discovery';
-
 const runtimePluginDiscoveryMaxPlugins = 16;
 const runtimePluginDiscoveryMaxToolsPerPlugin = 8;
 const runtimePluginDiscoveryMaxTextLength = 160;
@@ -214,10 +210,6 @@ type PluginHookContextScope<TContext extends RuntimePluginContext> = {
   readonly revokeFileStoreWrites: () => void;
 };
 
-type RuntimePluginApiPermissionsByPluginId = Readonly<
-  Record<string, RuntimePluginApiPermissionSnapshot>
->;
-
 type RevocableRuntimePluginFileStore = {
   readonly fileStore: RuntimePluginFileStore;
   revokeWrites(): void;
@@ -227,15 +219,13 @@ export function createRuntimePluginHost(
   options: CreateRuntimePluginHostOptions = {}
 ): RuntimePluginHost {
   const configuredPlugins = Object.freeze([...(options.plugins ?? [])]);
-  const explicitAllowedApisByPluginId = normalizeAllowedApisByPluginId(
-    options.allowedApisByPluginId ?? {}
-  );
+  const explicitAllowedApisByPluginId = options.allowedApisByPluginId ?? {};
   let enabledPlugins: readonly RuntimePlugin[] = [];
   const plugins = Object.freeze([
     createRuntimePluginDiscoveryPlugin(() => enabledPlugins),
     ...configuredPlugins
   ]);
-  const apiPermissionsByPluginId = apiPermissionsForPlugins({
+  const apiPermissionsByPluginId = resolveRuntimePluginApiPermissionsForPlugins({
     plugins,
     explicitAllowedApisByPluginId
   });
@@ -337,14 +327,12 @@ export function createRuntimePluginHost(
 export async function runRuntimePluginSessionEndHooks(
   options: RunRuntimePluginSessionEndHooksOptions
 ): Promise<RuntimePluginHookHostResult> {
-  const explicitAllowedApisByPluginId = normalizeAllowedApisByPluginId(
-    options.allowedApisByPluginId ?? {}
-  );
+  const explicitAllowedApisByPluginId = options.allowedApisByPluginId ?? {};
 
   return await runHookPhase({
     plugins: options.plugins,
     context: options.context,
-    apiPermissionsByPluginId: apiPermissionsForPlugins({
+    apiPermissionsByPluginId: resolveRuntimePluginApiPermissionsForPlugins({
       plugins: options.plugins,
       explicitAllowedApisByPluginId
     }),
@@ -369,118 +357,6 @@ export function createDefaultProject02PluginHost(
   });
 }
 
-function normalizeAllowedApisByPluginId(
-  value: Readonly<Record<string, RuntimePluginApiPermissions>>
-): Readonly<Record<string, RuntimePluginApiPermissions>> {
-  return Object.freeze(
-    Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([pluginId, permissions]) => [
-          pluginId,
-          normalizeRuntimePluginApiPermissions(
-            permissions,
-            `allowedApisByPluginId.${pluginId}`
-          )
-        ])
-    )
-  );
-}
-
-function apiPermissionsForPlugins(options: {
-  readonly plugins: readonly RuntimePlugin[];
-  readonly explicitAllowedApisByPluginId: Readonly<
-    Record<string, RuntimePluginApiPermissions>
-  >;
-}): RuntimePluginApiPermissionsByPluginId {
-  return Object.freeze(
-    Object.fromEntries(
-      options.plugins.map((plugin) => [
-        plugin.manifest.id,
-        resolveRuntimePluginApiPermissionsForManifest({
-          manifest: plugin.manifest,
-          explicitAllowedApisByPluginId: options.explicitAllowedApisByPluginId
-        })
-      ])
-    )
-  );
-}
-
-function apiPermissionsForPlugin(options: {
-  readonly plugin: RuntimePlugin;
-  readonly apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId;
-}): RuntimePluginApiPermissionSnapshot {
-  const apiPermissions =
-    options.apiPermissionsByPluginId[options.plugin.manifest.id];
-
-  if (apiPermissions === undefined) {
-    throw new TypeError(
-      `Plugin "${options.plugin.manifest.id}" is missing resolved API permissions.`
-    );
-  }
-
-  return apiPermissions;
-}
-
-export function resolveRuntimePluginApiPermissionsForManifest(options: {
-  readonly manifest: RuntimePlugin['manifest'];
-  readonly explicitAllowedApisByPluginId: Readonly<
-    Record<string, RuntimePluginApiPermissions>
-  >;
-}): RuntimePluginApiPermissionSnapshot {
-  const requestedApis = normalizeRuntimePluginApiPermissions(
-    options.manifest.requestedApis,
-    `${options.manifest.id}.requestedApis`
-  );
-  const explicitAllowedApis = Object.hasOwn(
-    options.explicitAllowedApisByPluginId,
-    options.manifest.id
-  )
-    ? options.explicitAllowedApisByPluginId[options.manifest.id]
-    : undefined;
-  const allowedApis = normalizeRuntimePluginApiPermissions(
-    explicitAllowedApis ?? defaultAllowedApisForPluginId(options.manifest.id),
-    `${options.manifest.id}.allowedApis`
-  );
-  const effectiveApis: Partial<Record<RuntimePluginApiName, RuntimePluginApiAccess>> = {};
-
-  for (const api of runtimePluginApiNames) {
-    const requested = requestedRuntimePluginApiAccess(requestedApis, api);
-    const allowed = requestedRuntimePluginApiAccess(allowedApis, api);
-    const effective = minRuntimePluginApiAccess(requested, allowed);
-
-    if (effective !== 'none') {
-      effectiveApis[api] = effective;
-    }
-  }
-
-  return Object.freeze({
-    requestedApis,
-    allowedApis,
-    effectiveApis: normalizeRuntimePluginApiPermissions(
-      effectiveApis,
-      `${options.manifest.id}.effectiveApis`
-    )
-  } satisfies RuntimePluginApiPermissionSnapshot);
-}
-
-function defaultAllowedApisForPluginId(
-  pluginId: string
-): RuntimePluginApiPermissions {
-  if (pluginId === characterStatePluginId) {
-    return Object.freeze({ file_store: 'write' });
-  }
-
-  if (
-    pluginId === runtimePluginDiscoveryPluginId ||
-    pluginId === firstPartyModelToolsPluginId
-  ) {
-    return Object.freeze({});
-  }
-
-  return Object.freeze({});
-}
-
 function createPluginHookContext<TContext extends RuntimePluginContext>(options: {
   readonly context: TContext;
   readonly plugin: RuntimePlugin;
@@ -490,7 +366,7 @@ function createPluginHookContext<TContext extends RuntimePluginContext>(options:
   readonly sessionIdentity?: object | undefined;
   readonly allowFileStoreWrites?: boolean;
 }): PluginHookContextScope<TContext> {
-  const fileStoreAccess = requestedRuntimePluginApiAccess(
+  const fileStoreAccess = runtimePluginApiAccessFor(
     options.apiPermissions.effectiveApis,
     'file_store'
   );
@@ -756,7 +632,7 @@ async function runBeforeRoleModelCall(options: {
     const hookContext = createPluginHookContext({
       context: options.context,
       plugin,
-      apiPermissions: apiPermissionsForPlugin({
+      apiPermissions: runtimePluginApiPermissionsForPlugin({
         plugin,
         apiPermissionsByPluginId: options.apiPermissionsByPluginId
       }),
@@ -917,7 +793,7 @@ async function runHandleToolCall(options: {
   const hookContext = createPluginHookContext({
     context: options.context,
     plugin,
-    apiPermissions: apiPermissionsForPlugin({
+    apiPermissions: runtimePluginApiPermissionsForPlugin({
       plugin,
       apiPermissionsByPluginId: options.apiPermissionsByPluginId
     }),
@@ -1021,7 +897,7 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
     const hookContext = createPluginHookContext({
       context: options.context,
       plugin,
-      apiPermissions: apiPermissionsForPlugin({
+      apiPermissions: runtimePluginApiPermissionsForPlugin({
         plugin,
         apiPermissionsByPluginId: options.apiPermissionsByPluginId
       }),
@@ -1435,7 +1311,7 @@ async function runHealth(options: {
     const hookContext = createPluginHookContext({
       context: options.context,
       plugin,
-      apiPermissions: apiPermissionsForPlugin({
+      apiPermissions: runtimePluginApiPermissionsForPlugin({
         plugin,
         apiPermissionsByPluginId: options.apiPermissionsByPluginId
       }),

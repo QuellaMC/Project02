@@ -5,12 +5,14 @@ import {
 } from '../../plugins/builtin/character-state/index.ts';
 import {
   createRuntimePluginHost,
-  resolveRuntimePluginApiPermissionsForManifest,
   runRuntimePluginSessionEndHooks,
   runtimePluginDiscoveryPluginId,
   type RuntimePluginHost,
   type RuntimePluginSessionEndOptions
 } from '../../plugins/host.ts';
+import {
+  resolveRuntimePluginApiPermissionsForManifest
+} from '../../plugins/api-permissions.ts';
 import {
   createRuntimePluginContext,
   type RuntimePluginApiPermissions,

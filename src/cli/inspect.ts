@@ -20,6 +20,7 @@ import {
 } from '../runtime/storage/layout.ts';
 import { createLocalRuntimeSessionStore } from '../runtime/storage/session-store.ts';
 import type {
+  RuntimePluginApiPermissions,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginTurnEvidenceSnapshot
 } from '../plugins/types.ts';
@@ -98,9 +99,9 @@ type InspectConfiguredPlugin = {
   readonly pluginId: string;
   readonly kind: string;
   readonly enabled: boolean;
-  readonly requestedApis: unknown;
-  readonly allowedApis: unknown;
-  readonly effectiveApis: unknown;
+  readonly requestedApis: RuntimePluginApiPermissions;
+  readonly allowedApis: RuntimePluginApiPermissions;
+  readonly effectiveApis: RuntimePluginApiPermissions;
   readonly activationStatus: string;
   readonly activationReasons: readonly string[];
   readonly diagnostics: readonly unknown[];
@@ -220,9 +221,9 @@ type InspectPluginListing = {
   readonly registered: boolean;
   readonly enabled: boolean;
   readonly availableForTurn: boolean;
-  readonly requestedApis: unknown;
-  readonly allowedApis: unknown;
-  readonly effectiveApis: unknown;
+  readonly requestedApis: RuntimePluginApiPermissions;
+  readonly allowedApis: RuntimePluginApiPermissions;
+  readonly effectiveApis: RuntimePluginApiPermissions;
   readonly providedTools: readonly InspectPluginToolListing[];
   readonly registeredLifecycleHooks: readonly string[];
   readonly redactionLabels: readonly string[];

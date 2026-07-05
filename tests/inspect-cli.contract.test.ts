@@ -36,6 +36,7 @@ import {
   createRuntimePlugin,
   runtimePluginContractVersion,
   type RuntimePlugin,
+  type RuntimePluginApiPermissions,
   type RuntimePluginContext
 } from '../src/plugins/types.ts';
 
@@ -918,9 +919,9 @@ describe('inspect CLI plugin evidence', () => {
     const output = JSON.parse(stdout) as {
       readonly plugins: readonly {
         readonly pluginId: string;
-        readonly requestedApis: unknown;
-        readonly allowedApis: unknown;
-        readonly effectiveApis: unknown;
+        readonly requestedApis: RuntimePluginApiPermissions;
+        readonly allowedApis: RuntimePluginApiPermissions;
+        readonly effectiveApis: RuntimePluginApiPermissions;
         readonly activationStatus: string;
       }[];
       readonly sessions: readonly { readonly sessionId: string }[];
