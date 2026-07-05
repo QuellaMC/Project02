@@ -21,6 +21,10 @@ export type RuntimePluginApiPermissionsByPluginId = Readonly<
   Record<string, RuntimePluginApiPermissionSnapshot>
 >;
 
+export const characterStateDefaultAllowedApis = Object.freeze({
+  file_store: 'write'
+} satisfies RuntimePluginApiPermissions);
+
 export function resolveRuntimePluginApiPermissionsForPlugins(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly explicitAllowedApisByPluginId: Readonly<
@@ -139,7 +143,7 @@ function normalizeAllowedApisByPluginId(
 
 function defaultAllowedApisForPlugin(plugin: RuntimePlugin): RuntimePluginApiPermissions {
   if (isCharacterStatePlugin(plugin)) {
-    return Object.freeze({ file_store: 'write' });
+    return characterStateDefaultAllowedApis;
   }
 
   if (
