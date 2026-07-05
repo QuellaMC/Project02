@@ -14,7 +14,8 @@ import {
   createRuntimePluginFileStore
 } from '../src/plugins/file-store.ts';
 import {
-  createRuntimePluginHost
+  createRuntimePluginHost,
+  runtimePluginDiscoveryPluginId
 } from '../src/plugins/host.ts';
 import {
   createRuntimePlugin,
@@ -1004,9 +1005,7 @@ describe('plugin-driven tool loop', () => {
       storeRoot,
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],
-      allowedApisByPluginId: {
-        [handleFileStoreWritePluginId]: { file_store: 'write' }
-      }
+      enabledPluginIds: [runtimePluginDiscoveryPluginId, handleFileStoreWritePluginId]
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
@@ -1074,9 +1073,7 @@ describe('plugin-driven tool loop', () => {
       storeRoot,
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],
-      allowedApisByPluginId: {
-        [handleFileStoreWritePluginId]: { file_store: 'write' }
-      }
+      enabledPluginIds: [runtimePluginDiscoveryPluginId, handleFileStoreWritePluginId]
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
@@ -2331,7 +2328,7 @@ function createHandleFileStoreWritePlugin() {
         defaultEnabled: true,
         reasons: ['test']
       },
-      requestedApis: { file_store: 'write' }
+      requestedApis: { file_store: 'write', model_input: 'write' }
     },
     providedTools: [
       Object.freeze({
@@ -2471,7 +2468,8 @@ function createAfterTurnCommittedProbeHost(
           }
         }
       })
-    ]
+    ],
+    enabledPluginIds: [runtimePluginDiscoveryPluginId, pluginId]
   });
 }
 
@@ -2515,7 +2513,7 @@ function createPluginStoreRevisionFixtureHost() {
             defaultEnabled: true,
             reasons: ['test']
           },
-          requestedApis: {}
+          requestedApis: { model_input: 'write' }
         },
         providedTools: [
           createRevisionFixtureTool('revision.zero'),
@@ -2534,7 +2532,8 @@ function createPluginStoreRevisionFixtureHost() {
           }
         }
       })
-    ]
+    ],
+    enabledPluginIds: [runtimePluginDiscoveryPluginId, pluginId]
   });
 }
 

@@ -23,14 +23,6 @@ import {
   type RuntimeConfigValue
 } from './types.ts';
 import {
-  normalizeRuntimePluginApiPermissions,
-  runtimePluginApiNames
-} from '../../plugins/types.ts';
-import type {
-  RuntimePluginApiName,
-  RuntimePluginApiPermissions
-} from '../../plugins/types.ts';
-import {
   defaultRuntimeConfigPath,
   loadProject02RuntimeConfig,
   validateProject02RuntimeConfig
@@ -255,17 +247,6 @@ function getRuntimeConfigValueForParts(
       return pluginConfig?.config;
     }
 
-    if (pluginPath.kind === 'allowed_apis_object') {
-      return runtimePluginApiPermissionsConfigValue(pluginConfig?.allowedApis);
-    }
-
-    if (pluginPath.kind === 'allowed_api') {
-      return runtimePluginApiAccessConfigValue(
-        pluginConfig?.allowedApis,
-        pluginPath.apiName
-      );
-    }
-
     return pluginConfig?.config?.[pluginPath.fieldName];
   }
 
@@ -301,13 +282,6 @@ function redactionKeyForRuntimeConfigPath(
     return 'config';
   }
 
-  if (
-    pluginPath?.kind === 'allowed_apis_object' ||
-    pluginPath?.kind === 'allowed_api'
-  ) {
-    return undefined;
-  }
-
   return pluginPath?.kind === 'enabled' ? 'enabled' : undefined;
 }
 
@@ -329,29 +303,6 @@ function rootConfigValue(
     default:
       return undefined;
   }
-}
-
-function runtimePluginApiPermissionsConfigValue(
-  permissions: RuntimePluginApiPermissions | undefined
-): RuntimeConfigValue | undefined {
-  return permissions === undefined
-    ? undefined
-    : Object.freeze({ ...permissions });
-}
-
-function runtimePluginApiAccessConfigValue(
-  permissions: RuntimePluginApiPermissions | undefined,
-  apiName: string
-): RuntimeConfigValue | undefined {
-  if (!isRuntimePluginApiName(apiName)) {
-    return undefined;
-  }
-
-  return permissions?.[apiName];
-}
-
-function isRuntimePluginApiName(value: string): value is RuntimePluginApiName {
-  return runtimePluginApiNames.includes(value as RuntimePluginApiName);
 }
 
 function exactPluginConfigForParts(
@@ -513,14 +464,6 @@ function setConfigPath(
   const currentPlugin = config.plugins?.[pluginPath.pluginId] ?? {};
   const plugins = { ...(config.plugins ?? {}) };
 
-  if (pluginPath.kind === 'allowed_apis_object') {
-    plugins[pluginPath.pluginId] = freezePluginConfig({
-      ...currentPlugin,
-      allowedApis: normalizeRuntimePluginApiPermissions(value, path)
-    });
-    return freezeConfig({ ...config, plugins });
-  }
-
   if (pluginPath.kind === 'enabled') {
     if (typeof value !== 'boolean') {
       throw new TypeError('Plugin enabled config value must be boolean.');
@@ -529,22 +472,6 @@ function setConfigPath(
     plugins[pluginPath.pluginId] = freezePluginConfig({
       ...currentPlugin,
       enabled: value
-    });
-    return freezeConfig({ ...config, plugins });
-  }
-
-  if (pluginPath.kind === 'allowed_api') {
-    const allowedApi = normalizeRuntimePluginApiPermissions(
-      { [pluginPath.apiName]: value },
-      path
-    );
-
-    plugins[pluginPath.pluginId] = freezePluginConfig({
-      ...currentPlugin,
-      allowedApis: {
-        ...(currentPlugin.allowedApis ?? {}),
-        ...allowedApi
-      }
     });
     return freezeConfig({ ...config, plugins });
   }
@@ -610,13 +537,6 @@ function unsetConfigPath(
     throw new TypeError('Plugin config path must include a field name.');
   }
 
-  if (pluginPath.kind === 'allowed_api') {
-    normalizeRuntimePluginApiPermissions(
-      { [pluginPath.apiName]: 'none' },
-      path
-    );
-  }
-
   const currentPlugin = config.plugins?.[pluginPath.pluginId];
 
   if (currentPlugin === undefined) {
@@ -627,34 +547,6 @@ function unsetConfigPath(
 
   if (pluginPath.kind === 'enabled') {
     return setOrDeletePluginWrapper(config, plugins, pluginPath.pluginId, {
-      ...(currentPlugin.allowedApis === undefined
-        ? {}
-        : { allowedApis: currentPlugin.allowedApis }),
-      ...(currentPlugin.config === undefined ? {} : { config: currentPlugin.config })
-    });
-  }
-
-  if (pluginPath.kind === 'allowed_apis_object') {
-    return setOrDeletePluginWrapper(config, plugins, pluginPath.pluginId, {
-      ...(currentPlugin.enabled === undefined ? {} : { enabled: currentPlugin.enabled }),
-      ...(currentPlugin.config === undefined ? {} : { config: currentPlugin.config })
-    });
-  }
-
-  if (pluginPath.kind === 'allowed_api') {
-    const nextAllowedApiEntries = Object.entries(currentPlugin.allowedApis ?? {}).filter(
-      ([key]) => key !== pluginPath.apiName
-    );
-    const nextAllowedApis =
-      currentPlugin.allowedApis === undefined
-        ? undefined
-        : Object.freeze(
-            Object.fromEntries(nextAllowedApiEntries) as RuntimePluginApiPermissions
-          );
-
-    return setOrDeletePluginWrapper(config, plugins, pluginPath.pluginId, {
-      ...(currentPlugin.enabled === undefined ? {} : { enabled: currentPlugin.enabled }),
-      ...(nextAllowedApis === undefined ? {} : { allowedApis: nextAllowedApis }),
       ...(currentPlugin.config === undefined ? {} : { config: currentPlugin.config })
     });
   }
@@ -665,9 +557,6 @@ function unsetConfigPath(
 
   return setOrDeletePluginWrapper(config, plugins, pluginPath.pluginId, {
     ...(currentPlugin.enabled === undefined ? {} : { enabled: currentPlugin.enabled }),
-    ...(currentPlugin.allowedApis === undefined
-      ? {}
-      : { allowedApis: currentPlugin.allowedApis }),
     ...(nextPluginConfigEntries.length === 0
       ? {}
       : {
@@ -1067,15 +956,6 @@ type ParsedPluginMutationPath =
       readonly pluginId: string;
     }
   | {
-      readonly kind: 'allowed_apis_object';
-      readonly pluginId: string;
-    }
-  | {
-      readonly kind: 'allowed_api';
-      readonly pluginId: string;
-      readonly apiName: string;
-    }
-  | {
       readonly kind: 'config_field';
       readonly pluginId: string;
       readonly fieldName: string;
@@ -1160,36 +1040,6 @@ function pluginPathCandidates(parts: readonly string[]): readonly ParsedPluginMu
       candidates.push(
         Object.freeze({
           kind: 'config_object',
-          pluginId
-        })
-      );
-    }
-  }
-
-  for (let index = 2; index < parts.length - 1; index += 1) {
-    if (parts[index] === 'allowedApis') {
-      const pluginId = parts.slice(1, index).join('.');
-      const apiName = parts.slice(index + 1).join('.');
-
-      if (pluginId.length > 0 && apiName.length > 0) {
-        candidates.push(
-          Object.freeze({
-            kind: 'allowed_api',
-            pluginId,
-            apiName
-          })
-        );
-      }
-    }
-  }
-
-  if (parts.at(-1) === 'allowedApis') {
-    const pluginId = parts.slice(1, -1).join('.');
-
-    if (pluginId.length > 0) {
-      candidates.push(
-        Object.freeze({
-          kind: 'allowed_apis_object',
           pluginId
         })
       );
@@ -1355,7 +1205,6 @@ function pluginWrappersWithout(
 function isEmptyPluginWrapper(config: Project02RuntimePluginConfig): boolean {
   return (
     config.enabled === undefined &&
-    config.allowedApis === undefined &&
     (config.config === undefined || Object.keys(config.config).length === 0)
   );
 }

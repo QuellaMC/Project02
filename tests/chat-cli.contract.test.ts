@@ -9,7 +9,8 @@ import {
   createConversationSession
 } from '../src/core/conversation.ts';
 import {
-  createRuntimePluginHost
+  createRuntimePluginHost,
+  runtimePluginDiscoveryPluginId
 } from '../src/plugins/host.ts';
 import {
   createRuntimePluginFileStore
@@ -510,11 +511,14 @@ describe('chat CLI plugin lifecycle', () => {
   it('runs session-end hooks when /exit closes the chat', async () => {
     const sessionEndContexts: RuntimePluginContext[] = [];
     const logStore = createRuntimeLogStore();
+    const sessionEndPlugin = createSessionEndPlugin((context) => {
+      sessionEndContexts.push(context);
+    });
     const pluginHost = createRuntimePluginHost({
-      plugins: [
-        createSessionEndPlugin((context) => {
-          sessionEndContexts.push(context);
-        })
+      plugins: [sessionEndPlugin],
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        sessionEndPlugin.manifest.id
       ]
     });
 
@@ -573,11 +577,14 @@ describe('chat CLI plugin lifecycle', () => {
     });
     const sessionId = 'injected-host-session';
     const sessionEndContexts: RuntimePluginContext[] = [];
+    const sessionEndPlugin = createSessionEndPlugin((context) => {
+      sessionEndContexts.push(context);
+    });
     const pluginHost = createRuntimePluginHost({
-      plugins: [
-        createSessionEndPlugin((context) => {
-          sessionEndContexts.push(context);
-        })
+      plugins: [sessionEndPlugin],
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        sessionEndPlugin.manifest.id
       ]
     });
     let stderr = '';
@@ -627,8 +634,7 @@ describe('chat CLI plugin lifecycle', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [configuredPlugin.manifest.id]: {
-          enabled: true,
-          allowedApis: { file_store: 'write' }
+          enabled: true
         }
       }
     });
@@ -679,8 +685,7 @@ describe('chat CLI plugin lifecycle', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [configuredPlugin.manifest.id]: {
-          enabled: true,
-          allowedApis: { file_store: 'write' }
+          enabled: true
         }
       }
     });
@@ -757,7 +762,7 @@ describe('chat CLI plugin lifecycle', () => {
       },
       {
         sideEffectLevel: 'local_memory_write',
-        requestedApis: { file_store: 'write' }
+        requestedApis: { file_store: 'write', turn_context: 'read' }
       }
     );
     let factoryCalls = 0;
@@ -771,8 +776,7 @@ describe('chat CLI plugin lifecycle', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [configuredPlugin.manifest.id]: {
-          enabled: true,
-          allowedApis: { file_store: 'write' }
+          enabled: true
         }
       }
     });
@@ -836,7 +840,7 @@ describe('chat CLI plugin lifecycle', () => {
       },
       {
         sideEffectLevel: 'local_memory_write',
-        requestedApis: { file_store: 'write' }
+        requestedApis: { file_store: 'write', turn_context: 'read' }
       }
     );
     let stdout = '';
@@ -846,8 +850,7 @@ describe('chat CLI plugin lifecycle', () => {
     const configPath = writeRuntimeConfig(join(configRoot, 'config.json'), {
       plugins: {
         [configuredPlugin.manifest.id]: {
-          enabled: true,
-          allowedApis: { file_store: 'write' }
+          enabled: true
         }
       }
     });
@@ -1064,7 +1067,11 @@ describe('chat CLI plugin lifecycle', () => {
       sessionId
     });
     const pluginHost = createRuntimePluginHost({
-      plugins: [createFailingSessionEndPlugin()]
+      plugins: [createFailingSessionEndPlugin()],
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        'chat.session-end.failure.fixture'
+      ]
     });
 
     const exitCode = await runChatCli({
@@ -1213,7 +1220,7 @@ function createSessionEndPlugin(
         defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test']
       },
-      requestedApis: options.requestedApis ?? {}
+      requestedApis: options.requestedApis ?? { turn_context: 'read' }
     },
     providedTools: [],
     lifecycleHooks: {

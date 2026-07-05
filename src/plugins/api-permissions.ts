@@ -1,11 +1,10 @@
 import { isCharacterStatePlugin } from './builtin/character-state/index.ts';
 import {
   assertUniqueRuntimePluginIds,
-  firstPartyModelToolsPluginId,
-  minRuntimePluginApiAccess,
+  isFirstPartyModelToolsPlugin,
   normalizeRuntimePluginApiPermissions,
-  runtimePluginApiAccessFor,
-  runtimePluginApiNames
+  runtimePluginApiAccessAllows,
+  runtimePluginApiAccessFor
 } from './types.ts';
 import type {
   RuntimePlugin,
@@ -22,21 +21,13 @@ export type RuntimePluginApiPermissionsByPluginId = Readonly<
   Record<string, RuntimePluginApiPermissionSnapshot>
 >;
 
-export const characterStateDefaultAllowedApis = Object.freeze({
-  file_store: 'write'
-} satisfies RuntimePluginApiPermissions);
-
 export function resolveRuntimePluginApiPermissionsForPlugins(options: {
   readonly plugins: readonly RuntimePlugin[];
-  readonly explicitAllowedApisByPluginId: Readonly<
-    Record<string, RuntimePluginApiPermissions>
-  >;
+  readonly enabledPluginIds: readonly string[];
 }): RuntimePluginApiPermissionsByPluginId {
   assertUniqueRuntimePluginIds(options.plugins);
 
-  const explicitAllowedApisByPluginId = normalizeAllowedApisByPluginId(
-    options.explicitAllowedApisByPluginId
-  );
+  const enabledPluginIds = new Set(options.enabledPluginIds);
 
   return Object.freeze(
     Object.fromEntries(
@@ -44,7 +35,7 @@ export function resolveRuntimePluginApiPermissionsForPlugins(options: {
         plugin.manifest.id,
         resolveRuntimePluginApiPermissionsForPlugin({
           plugin,
-          explicitAllowedApisByPluginId
+          enabled: enabledPluginIds.has(plugin.manifest.id)
         })
       ])
     )
@@ -69,92 +60,49 @@ export function runtimePluginApiPermissionsForPlugin(options: {
 
 export function resolveRuntimePluginApiPermissionsForPlugin(options: {
   readonly plugin: RuntimePlugin;
-  readonly explicitAllowedApisByPluginId: Readonly<
-    Record<string, RuntimePluginApiPermissions>
-  >;
+  readonly enabled: boolean;
 }): RuntimePluginApiPermissionSnapshot {
-  return resolveRuntimePluginApiPermissionsForManifest({
-    manifest: options.plugin.manifest,
-    explicitAllowedApisByPluginId: options.explicitAllowedApisByPluginId,
-    defaultAllowedApis: defaultAllowedApisForPlugin(options.plugin)
+  return runtimePluginApiPermissionSnapshot({
+    requestedApis: options.plugin.manifest.requestedApis,
+    enabled: options.enabled,
+    fieldPrefix: options.plugin.manifest.id
   });
 }
 
-export function resolveRuntimePluginApiPermissionsForManifest(options: {
-  readonly manifest: RuntimePlugin['manifest'];
-  readonly explicitAllowedApisByPluginId: Readonly<
-    Record<string, RuntimePluginApiPermissions>
-  >;
-  readonly defaultAllowedApis?: RuntimePluginApiPermissions;
+export function runtimePluginApiPermissionSnapshot(options: {
+  readonly requestedApis: RuntimePluginApiPermissions;
+  readonly enabled: boolean;
+  readonly fieldPrefix?: string;
 }): RuntimePluginApiPermissionSnapshot {
+  const fieldPrefix = options.fieldPrefix ?? 'plugin';
   const requestedApis = normalizeRuntimePluginApiPermissions(
-    options.manifest.requestedApis,
-    `${options.manifest.id}.requestedApis`
+    options.requestedApis,
+    `${fieldPrefix}.requestedApis`
   );
-  const explicitAllowedApisByPluginId = normalizeAllowedApisByPluginId(
-    options.explicitAllowedApisByPluginId
-  );
-  const explicitAllowedApis = Object.hasOwn(
-    explicitAllowedApisByPluginId,
-    options.manifest.id
-  )
-    ? explicitAllowedApisByPluginId[options.manifest.id]
-    : undefined;
-  const allowedApis = normalizeRuntimePluginApiPermissions(
-    explicitAllowedApis ?? options.defaultAllowedApis ?? {},
-    `${options.manifest.id}.allowedApis`
-  );
-  const effectiveApis: Partial<Record<RuntimePluginApiName, RuntimePluginApiAccess>> = {};
-
-  for (const api of runtimePluginApiNames) {
-    const requested = runtimePluginApiAccessFor(requestedApis, api);
-    const allowed = runtimePluginApiAccessFor(allowedApis, api);
-    const effective = minRuntimePluginApiAccess(requested, allowed);
-
-    if (effective !== 'none') {
-      effectiveApis[api] = effective;
-    }
-  }
 
   return Object.freeze({
     requestedApis,
-    allowedApis,
-    effectiveApis: normalizeRuntimePluginApiPermissions(
-      effectiveApis,
-      `${options.manifest.id}.effectiveApis`
-    )
+    grantedApis: options.enabled ? requestedApis : Object.freeze({})
   } satisfies RuntimePluginApiPermissionSnapshot);
 }
 
-function normalizeAllowedApisByPluginId(
-  value: Readonly<Record<string, RuntimePluginApiPermissions>>
-): Readonly<Record<string, RuntimePluginApiPermissions>> {
-  return Object.freeze(
-    Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([pluginId, permissions]) => [
-          pluginId,
-          normalizeRuntimePluginApiPermissions(
-            permissions,
-            `allowedApisByPluginId.${pluginId}`
-          )
-        ])
-    )
+export function runtimePluginGrantsApiAccess(options: {
+  readonly apiPermissions: RuntimePluginApiPermissionSnapshot;
+  readonly api: RuntimePluginApiName;
+  readonly access: RuntimePluginApiAccess;
+}): boolean {
+  return runtimePluginApiAccessAllows(
+    runtimePluginApiAccessFor(options.apiPermissions.grantedApis, options.api),
+    options.access
   );
 }
 
-function defaultAllowedApisForPlugin(plugin: RuntimePlugin): RuntimePluginApiPermissions {
-  if (isCharacterStatePlugin(plugin)) {
-    return characterStateDefaultAllowedApis;
-  }
-
-  if (
+export function isHostDefaultEnabledRuntimePlugin(
+  plugin: RuntimePlugin
+): boolean {
+  return (
     plugin.manifest.id === runtimePluginDiscoveryPluginId ||
-    plugin.manifest.id === firstPartyModelToolsPluginId
-  ) {
-    return Object.freeze({});
-  }
-
-  return Object.freeze({});
+    isCharacterStatePlugin(plugin) ||
+    isFirstPartyModelToolsPlugin(plugin)
+  );
 }

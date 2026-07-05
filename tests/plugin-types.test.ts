@@ -5,7 +5,6 @@ import {
   createRuntimePluginManifest,
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
-  minRuntimePluginApiAccess,
   normalizeRuntimePluginApiPermissions,
   runtimePluginApiAccessFor,
   runtimePluginApiAccessAllows,
@@ -147,11 +146,16 @@ describe('runtime plugin API permissions', () => {
         runtimePluginManifestFixture({
           requestedApis: {
             file_store: 'write',
-            conversation_history: 'read'
+            turn_context: 'read',
+            model_input: 'write'
           }
         })
       ).requestedApis
-    ).toEqual({ file_store: 'write', conversation_history: 'read' });
+    ).toEqual({
+      file_store: 'write',
+      turn_context: 'read',
+      model_input: 'write'
+    });
   });
 
   it('rejects legacy arrays and malformed requestedApis values', () => {
@@ -189,13 +193,10 @@ describe('runtime plugin API permissions', () => {
     ).toEqual({});
   });
 
-  it('orders access levels for min and allow checks', () => {
+  it('orders access levels for allow checks', () => {
     expect(runtimePluginApiAccessAllows('write', 'read')).toBe(true);
     expect(runtimePluginApiAccessAllows('read', 'write')).toBe(false);
     expect(runtimePluginApiAccessAllows('read', 'none')).toBe(true);
-    expect(minRuntimePluginApiAccess('write', 'read')).toBe('read');
-    expect(minRuntimePluginApiAccess('write', 'none')).toBe('none');
-    expect(minRuntimePluginApiAccess('read', 'write')).toBe('read');
   });
 });
 

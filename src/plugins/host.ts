@@ -5,15 +5,13 @@ import {
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
   createRuntimePluginRegistrySnapshot,
+  isFirstPartyModelToolsPlugin,
   isRuntimePluginCredentialKey,
-  redactRuntimePluginText,
-  runtimePluginApiAccessFor,
-  runtimePluginApiAccessAllows
+  redactRuntimePluginText
 } from './types.ts';
 import type {
   RuntimePlugin,
   RuntimePluginApiPermissionSnapshot,
-  RuntimePluginApiPermissions,
   RuntimePluginBeforeRoleModelCallResult,
   RuntimePluginContextItem,
   RuntimePluginEvidenceKind,
@@ -35,7 +33,9 @@ import type {
   RuntimePluginFileStore
 } from './types.ts';
 import {
+  isHostDefaultEnabledRuntimePlugin,
   resolveRuntimePluginApiPermissionsForPlugins,
+  runtimePluginGrantsApiAccess,
   runtimePluginApiPermissionsForPlugin,
   runtimePluginDiscoveryPluginId,
   type RuntimePluginApiPermissionsByPluginId
@@ -66,7 +66,6 @@ export type RuntimePluginBeforeRoleModelCallRejectionReason =
 export type CreateRuntimePluginHostOptions = {
   readonly plugins?: readonly RuntimePlugin[];
   readonly enabledPluginIds?: readonly string[];
-  readonly allowedApisByPluginId?: Readonly<Record<string, RuntimePluginApiPermissions>>;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
@@ -103,7 +102,6 @@ export type RuntimePluginSessionEndOptions = {
 export type RunRuntimePluginSessionEndHooksOptions = {
   readonly plugins: readonly RuntimePlugin[];
   readonly context: RuntimePluginContext;
-  readonly allowedApisByPluginId?: Readonly<Record<string, RuntimePluginApiPermissions>>;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
@@ -229,19 +227,13 @@ export function createRuntimePluginHost(
   options: CreateRuntimePluginHostOptions = {}
 ): RuntimePluginHost {
   const configuredPlugins = Object.freeze([...(options.plugins ?? [])]);
-  const explicitAllowedApisByPluginId = options.allowedApisByPluginId ?? {};
   let enabledPlugins: readonly RuntimePlugin[] = [];
+  let apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId =
+    Object.freeze({});
   const plugins = Object.freeze([
     createRuntimePluginDiscoveryPlugin(() => enabledPlugins),
     ...configuredPlugins
   ]);
-  const apiPermissionsByPluginId = resolveRuntimePluginApiPermissionsForPlugins({
-    plugins,
-    explicitAllowedApisByPluginId
-  });
-  const registrySnapshot = createRuntimePluginRegistrySnapshot(plugins, {
-    apiPermissionsByPluginId
-  });
   const enabledIds = enabledPluginIdsForHost({
     plugins,
     enabledPluginIds: options.enabledPluginIds
@@ -249,8 +241,18 @@ export function createRuntimePluginHost(
   enabledPlugins = Object.freeze(
     plugins.filter((plugin) => enabledIds.includes(plugin.manifest.id))
   );
+  apiPermissionsByPluginId = resolveRuntimePluginApiPermissionsForPlugins({
+    plugins,
+    enabledPluginIds: enabledIds
+  });
+  const registrySnapshot = createRuntimePluginRegistrySnapshot(plugins, {
+    apiPermissionsByPluginId
+  });
   const pluginToolDefinitions = createRoleModelPluginToolDefinitions(
-    pluginToolDefinitionsForEnabledPlugins(enabledPlugins)
+    pluginToolDefinitionsForEnabledPlugins({
+      plugins: enabledPlugins,
+      apiPermissionsByPluginId
+    })
   );
 
   return Object.freeze({
@@ -265,9 +267,13 @@ export function createRuntimePluginHost(
     },
     resolveToolPluginId(toolName) {
       return enabledPlugins.find((plugin) =>
-        routableModelFacingPluginTools(plugin).some(
-          (tool) => tool.name === toolName
-        )
+        routableModelFacingPluginTools({
+          plugin,
+          apiPermissions: runtimePluginApiPermissionsForPlugin({
+            plugin,
+            apiPermissionsByPluginId
+          })
+        }).some((tool) => tool.name === toolName)
       )?.manifest.id;
     },
     async beforeRoleModelCall(context) {
@@ -337,14 +343,12 @@ export function createRuntimePluginHost(
 export async function runRuntimePluginSessionEndHooks(
   options: RunRuntimePluginSessionEndHooksOptions
 ): Promise<RuntimePluginHookHostResult> {
-  const explicitAllowedApisByPluginId = options.allowedApisByPluginId ?? {};
-
   return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
     plugins: options.plugins,
     context: options.context,
     apiPermissionsByPluginId: resolveRuntimePluginApiPermissionsForPlugins({
       plugins: options.plugins,
-      explicitAllowedApisByPluginId
+      enabledPluginIds: options.plugins.map((plugin) => plugin.manifest.id)
     }),
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
@@ -392,14 +396,18 @@ function createPluginHookContext<TContext extends RuntimePluginContext>(options:
   readonly sessionIdentity?: object | undefined;
   readonly allowFileStoreWrites?: boolean;
 }): PluginHookContextScope<TContext> {
-  const fileStoreAccess = runtimePluginApiAccessFor(
-    options.apiPermissions.effectiveApis,
-    'file_store'
-  );
-  const grantsFileStore = runtimePluginApiAccessAllows(fileStoreAccess, 'read');
+  const grantsFileStore = runtimePluginGrantsApiAccess({
+    apiPermissions: options.apiPermissions,
+    api: 'file_store',
+    access: 'read'
+  });
   const sessionId = options.sessionId ?? options.context.sessionId;
   const allowWrites =
-    runtimePluginApiAccessAllows(fileStoreAccess, 'write') &&
+    runtimePluginGrantsApiAccess({
+      apiPermissions: options.apiPermissions,
+      api: 'file_store',
+      access: 'write'
+    }) &&
     (options.allowFileStoreWrites ??
       sideEffectLevelAllowsFileStoreWrites(
         options.plugin.manifest.runtimePolicy.sideEffectLevel
@@ -423,9 +431,16 @@ function createPluginHookContext<TContext extends RuntimePluginContext>(options:
     ...contextWithoutInheritedFileStore
   } = options.context;
   void inheritedFileStore;
+  const contextWithScrubbedTurn = runtimePluginGrantsApiAccess({
+    apiPermissions: options.apiPermissions,
+    api: 'turn_context',
+    access: 'read'
+  })
+    ? contextWithoutInheritedFileStore
+    : scrubRuntimePluginTurnContext(contextWithoutInheritedFileStore);
   // Preserve the hook context subtype while making fileStore injection entirely host-controlled.
   const context = Object.freeze({
-    ...contextWithoutInheritedFileStore,
+    ...contextWithScrubbedTurn,
     pluginId: options.plugin.manifest.id,
     ...(fileStore === undefined ? {} : { fileStore: fileStore.fileStore })
   }) as TContext;
@@ -436,6 +451,31 @@ function createPluginHookContext<TContext extends RuntimePluginContext>(options:
       fileStore?.revokeWrites();
     }
   });
+}
+
+function scrubRuntimePluginTurnContext<TContext extends RuntimePluginContext>(
+  context: Omit<TContext, 'fileStore'>
+): Omit<TContext, 'fileStore'> {
+  const baseContext = {
+    ...context,
+    currentUserMessage: ''
+  };
+
+  if ('committedTurn' in context) {
+    const committedTurn = (context as RuntimePluginAfterTurnCommittedContext)
+      .committedTurn;
+
+    return Object.freeze({
+      ...baseContext,
+      committedTurn: Object.freeze({
+        ...committedTurn,
+        visibleMessageIds: Object.freeze([]),
+        visibleMessages: Object.freeze([])
+      })
+    }) as unknown as Omit<TContext, 'fileStore'>;
+  }
+
+  return Object.freeze(baseContext) as unknown as Omit<TContext, 'fileStore'>;
 }
 
 function createRevocableRuntimePluginFileStore(
@@ -533,7 +573,7 @@ function createRuntimePluginDiscoveryPlugin(
         defaultEnabled: true,
         reasons: ['host_provided_current_turn_discovery']
       },
-      requestedApis: {}
+      requestedApis: { model_input: 'write' }
     },
     providedTools: [
       {
@@ -607,7 +647,16 @@ function createPluginDiscoveryOutput(
 function createPluginDiscoverySummary(
   plugin: RuntimePlugin
 ): RuntimePluginJsonObject {
-  const discoverableTools = discoverableCurrentTurnPluginTools(plugin);
+  const discoverableTools = discoverableCurrentTurnPluginTools({
+    plugin,
+    apiPermissions: runtimePluginApiPermissionsForPlugin({
+      plugin,
+      apiPermissionsByPluginId: resolveRuntimePluginApiPermissionsForPlugins({
+        plugins: [plugin],
+        enabledPluginIds: [plugin.manifest.id]
+      })
+    })
+  });
   const safeTools = discoverableTools
     .slice(0, runtimePluginDiscoveryMaxToolsPerPlugin)
     .map(createPluginDiscoveryToolSummary);
@@ -661,13 +710,14 @@ async function runBeforeRoleModelCall(options: {
       continue;
     }
 
+    const apiPermissions = runtimePluginApiPermissionsForPlugin({
+      plugin,
+      apiPermissionsByPluginId: options.apiPermissionsByPluginId
+    });
     const hookContext = createPluginHookContext({
       context: options.context,
       plugin,
-      apiPermissions: runtimePluginApiPermissionsForPlugin({
-        plugin,
-        apiPermissionsByPluginId: options.apiPermissionsByPluginId
-      }),
+      apiPermissions,
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity
@@ -683,6 +733,39 @@ async function runBeforeRoleModelCall(options: {
       if (evidenceRecordsBlockingBeforeRoleModelCall(result.value.evidence)) {
         const rejectsTurn = beforeRoleModelFailureRejectsTurn(plugin);
         const message = `Plugin "${plugin.manifest.id}" accepted beforeRoleModelCall result included blocking before-role-model evidence.`;
+        const failureEvidence = createHookFailureEvidence({
+          plugin,
+          context: options.context,
+          evidenceKind: 'before_role_model_call',
+          status: rejectsTurn ? 'rejected' : 'degraded',
+          summary: rejectsTurn
+            ? `Required before-role-model plugin hook rejected the turn: ${message}`
+            : `Optional before-role-model plugin hook degraded: ${message}`,
+          policyOutcome: rejectsTurn ? 'required_rejected' : 'optional_degraded'
+        });
+
+        evidence.push(...result.value.evidence, failureEvidence);
+
+        if (rejectsTurn) {
+          return Object.freeze({
+            status: 'rejected',
+            reason: runtimePluginBeforeRoleModelCallRejectionReason,
+            pluginId: plugin.manifest.id,
+            message,
+            evidence: Object.freeze([...evidence])
+          } satisfies RuntimePluginBeforeRoleModelCallHostResult);
+        }
+
+        continue;
+      }
+
+      if (
+        !pluginCanWriteModelInput(apiPermissions) &&
+        (result.value.contextItems.length > 0 ||
+          result.value.runtimeNotes.length > 0)
+      ) {
+        const rejectsTurn = beforeRoleModelFailureRejectsTurn(plugin);
+        const message = `Plugin "${plugin.manifest.id}" returned beforeRoleModelCall model input contributions without declaring model_input write access.`;
         const failureEvidence = createHookFailureEvidence({
           plugin,
           context: options.context,
@@ -822,13 +905,29 @@ async function runHandleToolCall(options: {
     plugin,
     providedTool
   });
+  const apiPermissions = runtimePluginApiPermissionsForPlugin({
+    plugin,
+    apiPermissionsByPluginId: options.apiPermissionsByPluginId
+  });
+
+  if (
+    isModelFacingPluginTool({ plugin, tool: providedTool }) &&
+    !pluginCanWriteModelInput(apiPermissions)
+  ) {
+    return createRejectedToolCallResult({
+      call: options.call,
+      context: options.context,
+      reason: 'model_input_not_granted',
+      message: `Plugin "${plugin.manifest.id}" did not declare model_input write access for model-facing tool "${providedTool.name}".`,
+      evidenceStatus: failureDegrades ? 'degraded' : 'rejected',
+      policyOutcome: failureDegrades ? 'optional_degraded' : 'disallowed_tool_call'
+    });
+  }
+
   const hookContext = createPluginHookContext({
     context: options.context,
     plugin,
-    apiPermissions: runtimePluginApiPermissionsForPlugin({
-      plugin,
-      apiPermissionsByPluginId: options.apiPermissionsByPluginId
-    }),
+    apiPermissions,
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
@@ -1054,12 +1153,18 @@ function evidenceRecordsBlockingToolInvocation(
   );
 }
 
-function pluginToolDefinitionsForEnabledPlugins(
-  plugins: readonly RuntimePlugin[]
-): readonly RoleModelPluginToolDefinition[] {
+function pluginToolDefinitionsForEnabledPlugins(options: {
+  readonly plugins: readonly RuntimePlugin[];
+  readonly apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId;
+}): readonly RoleModelPluginToolDefinition[] {
   return Object.freeze(
-    plugins.flatMap((plugin) => {
-      return routableModelFacingPluginTools(plugin).map((tool) =>
+    options.plugins.flatMap((plugin) => {
+      const apiPermissions = runtimePluginApiPermissionsForPlugin({
+        plugin,
+        apiPermissionsByPluginId: options.apiPermissionsByPluginId
+      });
+
+      return routableModelFacingPluginTools({ plugin, apiPermissions }).map((tool) =>
         Object.freeze({
           pluginId: plugin.manifest.id,
           ...tool
@@ -1069,29 +1174,52 @@ function pluginToolDefinitionsForEnabledPlugins(
   );
 }
 
-function routableModelFacingPluginTools(
-  plugin: RuntimePlugin
-): readonly RuntimePluginProvidedTool[] {
-  if (plugin.lifecycleHooks.handleToolCall === undefined) {
+function routableModelFacingPluginTools(options: {
+  readonly plugin: RuntimePlugin;
+  readonly apiPermissions: RuntimePluginApiPermissionSnapshot;
+}): readonly RuntimePluginProvidedTool[] {
+  if (options.plugin.lifecycleHooks.handleToolCall === undefined) {
+    return [];
+  }
+
+  if (!pluginCanWriteModelInput(options.apiPermissions)) {
     return [];
   }
 
   return Object.freeze(
-    plugin.providedTools.filter((tool) =>
+    options.plugin.providedTools.filter((tool) =>
       isModelFacingPluginTool({
-        plugin,
+        plugin: options.plugin,
         tool
       })
     )
   );
 }
 
-function discoverableCurrentTurnPluginTools(
-  plugin: RuntimePlugin
-): readonly RuntimePluginProvidedTool[] {
+function pluginCanWriteModelInput(
+  apiPermissions: RuntimePluginApiPermissionSnapshot
+): boolean {
+  return runtimePluginGrantsApiAccess({
+    apiPermissions,
+    api: 'model_input',
+    access: 'write'
+  });
+}
+
+function discoverableCurrentTurnPluginTools(options: {
+  readonly plugin: RuntimePlugin;
+  readonly apiPermissions: RuntimePluginApiPermissionSnapshot;
+}): readonly RuntimePluginProvidedTool[] {
+  if (!pluginCanWriteModelInput(options.apiPermissions)) {
+    return [];
+  }
+
   return Object.freeze(
-    plugin.providedTools.filter((tool) =>
-      isDiscoverableCurrentTurnTool({ plugin, tool })
+    options.plugin.providedTools.filter((tool) =>
+      isDiscoverableCurrentTurnTool({
+        plugin: options.plugin,
+        tool
+      })
     )
   );
 }
@@ -1112,7 +1240,7 @@ function isFirstPartyBuiltInModelTool(options: {
   readonly tool: RuntimePluginProvidedTool;
 }): boolean {
   return (
-    options.plugin.manifest.localTrustLevel === 'first_party' &&
+    isFirstPartyModelToolsPlugin(options.plugin) &&
     options.tool.validationOwner === 'built_in_model_tools' &&
     isBuiltInModelToolName(options.tool.name) &&
     !toolRequiresConfirmation(options) &&
@@ -1932,7 +2060,7 @@ function enabledPluginIdsForHost(options: {
   if (options.enabledPluginIds === undefined) {
     return Object.freeze(
       options.plugins
-        .filter((plugin) => plugin.manifest.activation.defaultEnabled)
+        .filter(isHostDefaultEnabledRuntimePlugin)
         .map((plugin) => plugin.manifest.id)
     );
   }

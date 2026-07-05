@@ -100,8 +100,7 @@ type InspectConfiguredPlugin = {
   readonly kind: string;
   readonly enabled: boolean;
   readonly requestedApis: RuntimePluginApiPermissions;
-  readonly allowedApis: RuntimePluginApiPermissions;
-  readonly effectiveApis: RuntimePluginApiPermissions;
+  readonly grantedApis: RuntimePluginApiPermissions;
   readonly activationStatus: string;
   readonly activationReasons: readonly string[];
   readonly diagnostics: readonly unknown[];
@@ -222,8 +221,7 @@ type InspectPluginListing = {
   readonly enabled: boolean;
   readonly availableForTurn: boolean;
   readonly requestedApis: RuntimePluginApiPermissions;
-  readonly allowedApis: RuntimePluginApiPermissions;
-  readonly effectiveApis: RuntimePluginApiPermissions;
+  readonly grantedApis: RuntimePluginApiPermissions;
   readonly providedTools: readonly InspectPluginToolListing[];
   readonly registeredLifecycleHooks: readonly string[];
   readonly redactionLabels: readonly string[];
@@ -633,8 +631,7 @@ function inspectConfiguredPlugins(
         kind: plugin.kind,
         enabled: plugin.enabled,
         requestedApis: plugin.requestedApis,
-        allowedApis: plugin.allowedApis,
-        effectiveApis: plugin.effectiveApis,
+        grantedApis: plugin.grantedApis,
         activationStatus: plugin.activationStatus,
         activationReasons: Object.freeze([...plugin.activationReasons]),
         diagnostics: Object.freeze([...plugin.diagnostics]),
@@ -933,8 +930,7 @@ function pluginListings(
         enabled: plugin.enabled,
         availableForTurn: plugin.availableForTurn,
         requestedApis: plugin.requestedApis,
-        allowedApis: plugin.allowedApis,
-        effectiveApis: plugin.effectiveApis,
+        grantedApis: plugin.grantedApis,
         providedTools: Object.freeze(
           plugin.providedTools.map((tool) =>
             Object.freeze({

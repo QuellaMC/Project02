@@ -235,8 +235,7 @@ export function runtimePluginTurnEvidenceOption(options: {
           availableForTurn: enabled,
           redactionLabels: registration.manifest.runtimePolicy.redactionLabels,
           requestedApis: registration.requestedApis,
-          allowedApis: registration.allowedApis,
-          effectiveApis: registration.effectiveApis,
+          grantedApis: registration.grantedApis,
           ...(healthStatus === undefined ? {} : { healthStatus }),
           ...(registration.manifest.config.fingerprint === undefined
             ? {}

@@ -19,6 +19,7 @@ import {
   createRuntimePluginHost,
   runRuntimePluginSessionEndHooks,
   runtimePluginDiscoveryPluginId,
+  type CreateRuntimePluginHostOptions,
   type RuntimePluginHost
 } from '../src/plugins/host.ts';
 import {
@@ -26,8 +27,6 @@ import {
 } from '../src/role-model/contracts.ts';
 import type {
   RuntimePlugin,
-  RuntimePluginApiAccess,
-  RuntimePluginApiPermissions,
   RuntimePluginContext,
   RuntimePluginFileStore,
   RuntimePluginJsonObject,
@@ -57,6 +56,30 @@ type Deferred<T> = {
 };
 
 type LateFileStoreWriteOutcome = 'blocked' | 'missing_file_store' | 'written';
+type TurnContextCapture = {
+  beforeCurrentUserMessage?: string;
+  afterCurrentUserMessage?: string;
+  visibleMessageIds?: readonly string[];
+  visibleMessages?: readonly { readonly text: string }[];
+};
+type TestRuntimePluginHostOptions = Omit<
+  CreateRuntimePluginHostOptions,
+  'plugins'
+> & {
+  readonly plugins: readonly RuntimePlugin[];
+};
+
+function createExplicitlyEnabledRuntimePluginHost(
+  options: TestRuntimePluginHostOptions
+): RuntimePluginHost {
+  return createRuntimePluginHost({
+    ...options,
+    enabledPluginIds: options.enabledPluginIds ?? [
+      runtimePluginDiscoveryPluginId,
+      ...options.plugins.map((plugin) => plugin.manifest.id)
+    ]
+  });
+}
 
 describe('runtime plugin host', () => {
   it('routes plugin.list through the host-owned discovery plugin', async () => {
@@ -116,6 +139,11 @@ describe('runtime plugin host', () => {
         plugins: [
           createMemorySearchPlugin('memory.one'),
           createMemorySearchPlugin('memory.two')
+        ],
+        enabledPluginIds: [
+          runtimePluginDiscoveryPluginId,
+          'memory.one',
+          'memory.two'
         ]
       })
     ).toThrow(/declared more than once/iu);
@@ -182,7 +210,7 @@ describe('runtime plugin host', () => {
 
   it('does not resolve tool-provider-only plugin tools as routable', () => {
     const plugin = createMemorySearchToolProviderOnlyPlugin();
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
       'memory.search'
@@ -192,7 +220,7 @@ describe('runtime plugin host', () => {
 
   it('does not expose tools when the plugin manifest requires confirmation', async () => {
     const plugin = createConfirmationRequiredMemorySearchPlugin();
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
       'memory.search'
@@ -226,7 +254,7 @@ describe('runtime plugin host', () => {
       true,
       'search backend failed api_key=super-secret Bearer secret-token'
     );
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -257,9 +285,8 @@ describe('runtime plugin host', () => {
       continueAfterTimeout: continueAfterTimeout.promise,
       recordLateWriteOutcome: lateWrite.resolve
     });
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
 
@@ -294,14 +321,13 @@ describe('runtime plugin host', () => {
     expect(fileStore.revision()).toBe(0);
   });
 
-  it('withholds fileStore when the plugin does not declare file_store even if host policy allows it', async () => {
+  it('withholds fileStore when an enabled plugin does not declare file_store', async () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.no-file-store-declaration.fixture',
-      requestedApis: {}
+      requestedApis: { model_input: 'write' }
     });
-    const host = createRuntimePluginHost({
-      plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'write')
+    const host = createExplicitlyEnabledRuntimePluginHost({
+      plugins: [plugin]
     });
 
     const result = await callFileStoreAvailabilityProbe(host, plugin);
@@ -314,15 +340,14 @@ describe('runtime plugin host', () => {
     });
   });
 
-  it('strips caller-provided fileStore when the plugin has no effective file_store grant', async () => {
+  it('strips caller-provided fileStore when the plugin has no file_store grant', async () => {
     const sessionIdentity = {};
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.no-inherited-file-store.fixture',
-      requestedApis: {}
+      requestedApis: { model_input: 'write' }
     });
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
     const inheritedFileStore = createPluginHostTestFileStore({
@@ -347,20 +372,172 @@ describe('runtime plugin host', () => {
     });
   });
 
-  it('withholds fileStore when a non-built-in plugin declares file_store but host policy does not allow it', async () => {
+  it('injects fileStore when an enabled non-built-in plugin declares file_store read', async () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
-      pluginId: 'memory.file-store-denied.fixture',
-      requestedApis: { file_store: 'read' }
+      pluginId: 'memory.file-store-read.fixture',
+      requestedApis: { file_store: 'read', model_input: 'write' }
     });
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await callFileStoreAvailabilityProbe(host, plugin);
 
     expect(result).toMatchObject({
       status: 'accepted',
       output: {
-        fileStoreAvailable: false
+        fileStoreAvailable: true
       }
+    });
+  });
+
+  it('scrubs turn context when an enabled plugin does not declare turn_context read', async () => {
+    const captured: TurnContextCapture = {};
+    const plugin = createTurnContextCapturePlugin({
+      pluginId: 'memory.turn-context-scrubbed.fixture',
+      requestedApis: {},
+      capture: captured
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
+
+    await host.beforeRoleModelCall(testPluginContext());
+    await host.afterTurnCommitted(
+      createRuntimePluginAfterTurnCommittedContext({
+        ...testIdentity(),
+        sessionId: 'session-plugin-host',
+        eventType: 'USER_MESSAGE',
+        currentUserMessage: 'hello',
+        character: {
+          id: 'mira',
+          displayName: 'Mira'
+        },
+        committedAt: '2026-06-15T00:00:00.000Z',
+        visibleMessages: [
+          {
+            id: 'message-user',
+            role: 'user',
+            speakerId: 'user',
+            speakerName: 'User',
+            text: 'hello'
+          },
+          {
+            id: 'message-character',
+            role: 'character',
+            speakerId: 'mira',
+            speakerName: 'Mira',
+            text: 'hi'
+          }
+        ]
+      })
+    );
+
+    expect(captured.beforeCurrentUserMessage).toBe('');
+    expect(captured.afterCurrentUserMessage).toBe('');
+    expect(captured.visibleMessageIds).toEqual([]);
+    expect(captured.visibleMessages).toEqual([]);
+  });
+
+  it('preserves turn context when an enabled plugin declares turn_context read', async () => {
+    const captured: TurnContextCapture = {};
+    const plugin = createTurnContextCapturePlugin({
+      pluginId: 'memory.turn-context-readable.fixture',
+      requestedApis: { turn_context: 'read' },
+      capture: captured
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
+
+    await host.beforeRoleModelCall(testPluginContext());
+    await host.afterTurnCommitted(
+      createRuntimePluginAfterTurnCommittedContext({
+        ...testIdentity(),
+        sessionId: 'session-plugin-host',
+        eventType: 'USER_MESSAGE',
+        currentUserMessage: 'hello',
+        character: {
+          id: 'mira',
+          displayName: 'Mira'
+        },
+        committedAt: '2026-06-15T00:00:00.000Z',
+        visibleMessages: [
+          {
+            id: 'message-user',
+            role: 'user',
+            speakerId: 'user',
+            speakerName: 'User',
+            text: 'hello'
+          }
+        ]
+      })
+    );
+
+    expect(captured.beforeCurrentUserMessage).toBe('hello');
+    expect(captured.afterCurrentUserMessage).toBe('hello');
+    expect(captured.visibleMessageIds).toEqual(['message-user']);
+    expect(captured.visibleMessages?.map((message) => message.text)).toEqual([
+      'hello'
+    ]);
+  });
+
+  it('rejects model input contributions when model_input write is not declared', async () => {
+    const plugin = createRuntimeNotesWithoutModelInputPlugin();
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected undeclared model input contribution to degrade.');
+    }
+    expect(result.contextItems).toEqual([]);
+    expect(result.runtimeNotes).toEqual([]);
+    expect(result.evidence).toEqual([
+      expect.objectContaining({
+        pluginId: plugin.manifest.id,
+        evidenceKind: 'before_role_model_call',
+        status: 'degraded',
+        policyOutcome: 'optional_degraded'
+      })
+    ]);
+  });
+
+  it('does not expose or invoke model-facing tools without model_input write', async () => {
+    let invoked = false;
+    const plugin = createModelFacingToolWithoutModelInputPlugin(() => {
+      invoked = true;
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
+
+    expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
+      'memory.search'
+    );
+    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
+
+    const discovery = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginDiscoveryPluginId,
+        toolName: roleModelPluginListToolName,
+        input: {}
+      },
+      testPluginContext()
+    );
+
+    expect(JSON.stringify(discovery)).not.toContain('memory.search');
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(invoked).toBe(false);
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'model_input_not_granted'
     });
   });
 
@@ -393,11 +570,6 @@ describe('runtime plugin host', () => {
       runRuntimePluginSessionEndHooks({
         plugins: [deniedPlugin, grantedPlugin],
         context: testPluginContext(),
-        allowedApisByPluginId: {
-          [pluginId]: {
-            file_store: 'write'
-          }
-        },
         hookOptions: {
           allowFileStoreWrites: true
         }
@@ -408,7 +580,7 @@ describe('runtime plugin host', () => {
     expect(invokedPlugins).toEqual([]);
   });
 
-  it('uses captured API grants for host session-end hooks after caller policy mutation', async () => {
+  it('uses captured API grants for host session-end hooks', async () => {
     const sessionIdentity = {};
     let sawFileStore = false;
     const plugin = createSessionEndFileStoreProbePlugin({
@@ -421,18 +593,10 @@ describe('runtime plugin host', () => {
         });
       }
     });
-    const allowedApisByPluginId: Record<string, RuntimePluginApiPermissions> = {
-      [plugin.manifest.id]: {}
-    };
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      allowedApisByPluginId,
       sessionIdentity
     });
-
-    allowedApisByPluginId[plugin.manifest.id] = {
-      file_store: 'write'
-    };
 
     const result = await host.onSessionEnd(testPluginContext());
     const fileStore = createPluginHostTestFileStore({
@@ -441,9 +605,11 @@ describe('runtime plugin host', () => {
     });
 
     expect(result.status).toBe('completed');
-    expect(sawFileStore).toBe(false);
-    expect(fileStore.readJson('mutated-policy-session-end.json')).toBeUndefined();
-    expect(fileStore.revision()).toBe(0);
+    expect(sawFileStore).toBe(true);
+    expect(fileStore.readJson('mutated-policy-session-end.json')).toEqual({
+      value: 'unexpected'
+    });
+    expect(fileStore.revision()).toBe(1);
   });
 
   it('does not trust manifest-declared first_party for default sensitive API access', async () => {
@@ -457,10 +623,8 @@ describe('runtime plugin host', () => {
     const result = await callFileStoreAvailabilityProbe(host, plugin);
 
     expect(result).toMatchObject({
-      status: 'accepted',
-      output: {
-        fileStoreAvailable: false
-      }
+      status: 'rejected',
+      reason: 'plugin_not_enabled'
     });
   });
 
@@ -485,29 +649,24 @@ describe('runtime plugin host', () => {
     await expect(
       callFileStoreAvailabilityProbe(trustedAdapterHost, trustedAdapter)
     ).resolves.toMatchObject({
-      status: 'accepted',
-      output: {
-        fileStoreAvailable: false
-      }
+      status: 'rejected',
+      reason: 'plugin_not_enabled'
     });
     await expect(
       callFileStoreAvailabilityProbe(testFixtureHost, testFixture)
     ).resolves.toMatchObject({
-      status: 'accepted',
-      output: {
-        fileStoreAvailable: false
-      }
+      status: 'rejected',
+      reason: 'plugin_not_enabled'
     });
   });
 
-  it('injects fileStore for a non-built-in plugin only when explicitly allowlisted', async () => {
+  it('injects fileStore for an explicitly enabled non-built-in plugin that declares it', async () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.file-store-allowed.fixture',
-      requestedApis: { file_store: 'read' }
+      requestedApis: { file_store: 'read', model_input: 'write' }
     });
-    const host = createRuntimePluginHost({
-      plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'read')
+    const host = createExplicitlyEnabledRuntimePluginHost({
+      plugins: [plugin]
     });
 
     const result = await callFileStoreAvailabilityProbe(host, plugin);
@@ -523,9 +682,8 @@ describe('runtime plugin host', () => {
   it('replaces caller-provided fileStore with the plugin-scoped store when file_store read is granted', async () => {
     const sessionIdentity = {};
     const plugin = createReadOnlyFileStoreProbePlugin();
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'read'),
       sessionIdentity
     });
     const scopedFileStore = createPluginHostTestFileStore({
@@ -597,19 +755,16 @@ describe('runtime plugin host', () => {
     const result = await callFileStoreAvailabilityProbe(host, plugin);
 
     expect(result).toMatchObject({
-      status: 'accepted',
-      output: {
-        fileStoreAvailable: false
-      }
+      status: 'rejected',
+      reason: 'plugin_not_enabled'
     });
   });
 
   it('withholds fileStore writes from read-only handleToolCall tools', async () => {
     const sessionIdentity = {};
     const plugin = createReadOnlyFileStoreProbePlugin();
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'read'),
       sessionIdentity
     });
     const fileStore = createPluginHostTestFileStore({
@@ -651,9 +806,8 @@ describe('runtime plugin host', () => {
   it('withholds fileStore writes from read-only hook contexts', async () => {
     const sessionIdentity = {};
     const plugin = createReadOnlyBeforeRoleModelFileStoreProbePlugin();
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'read'),
       sessionIdentity
     });
     const fileStore = createPluginHostTestFileStore({
@@ -685,9 +839,8 @@ describe('runtime plugin host', () => {
     const plugin = createRetainedBeforeRoleModelFileStorePlugin((fileStore) => {
       retainedFileStore = fileStore;
     });
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
 
@@ -712,9 +865,8 @@ describe('runtime plugin host', () => {
     const plugin = createRetainedHandleToolCallFileStorePlugin((fileStore) => {
       retainedFileStore = fileStore;
     });
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
 
@@ -754,9 +906,8 @@ describe('runtime plugin host', () => {
   it('keeps immediate handleToolCall fileStore writes for a later rejected turn context', async () => {
     const sessionIdentity = {};
     const plugin = createStagedAppendFileStorePlugin();
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
     const context = testPluginContext();
@@ -796,9 +947,8 @@ describe('runtime plugin host', () => {
   it('records immediate handleToolCall fileStore writes for same-turn retries', async () => {
     const sessionIdentity = {};
     const plugin = createStagedAppendFileStorePlugin();
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
     const rejectedContext = testPluginContext({
@@ -862,9 +1012,8 @@ describe('runtime plugin host', () => {
     const plugin = createRetainedHealthFileStorePlugin((fileStore) => {
       retainedFileStore = fileStore;
     });
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      allowedApisByPluginId: allowPluginFileStore(plugin, 'write'),
       sessionIdentity
     });
 
@@ -889,7 +1038,7 @@ describe('runtime plugin host', () => {
 
   it('rejects plugin-host-owned invalid input before invoking the handler', async () => {
     const plugin = createMemorySearchPlugin();
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -918,7 +1067,7 @@ describe('runtime plugin host', () => {
     const plugin = createDegradableMemorySearchPlugin(() => {
       handledCalls += 1;
     });
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -945,7 +1094,7 @@ describe('runtime plugin host', () => {
 
   it('redacts plugin-returned rejected tool result messages', async () => {
     const plugin = createRejectingMemorySearchPlugin();
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -989,7 +1138,7 @@ describe('runtime plugin host', () => {
         rejectionReason,
         rejectionMessage
       });
-      const host = createRuntimePluginHost({ plugins: [plugin] });
+      const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
       const result = await host.handleToolCall(
         {
@@ -1021,7 +1170,7 @@ describe('runtime plugin host', () => {
 
   it('preserves degraded evidence from optional rejected plugin tool results', async () => {
     const plugin = createDegradedRejectingMemorySearchPlugin();
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -1053,7 +1202,7 @@ describe('runtime plugin host', () => {
       id: 'memory.rejecting.degraded.fixture',
       handleToolCallFailure: 'degrade'
     });
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -1086,7 +1235,7 @@ describe('runtime plugin host', () => {
     async (evidenceStatus) => {
       const plugin =
         createAcceptedBlockingEvidenceMemorySearchPlugin(evidenceStatus);
-      const host = createRuntimePluginHost({ plugins: [plugin] });
+      const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
       const result = await host.handleToolCall(
         {
@@ -1115,7 +1264,7 @@ describe('runtime plugin host', () => {
 
   it('redacts accepted plugin tool output strings', async () => {
     const plugin = createMemorySearchPlugin();
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -1143,7 +1292,7 @@ describe('runtime plugin host', () => {
 
   it('redacts accepted plugin tool output values with credential-shaped keys', async () => {
     const plugin = createCredentialKeyOutputPlugin();
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -1184,7 +1333,7 @@ describe('runtime plugin host', () => {
 
   it('preserves own __proto__ keys in accepted plugin tool output objects', async () => {
     const plugin = createProtoKeyOutputPlugin();
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -1225,7 +1374,7 @@ describe('runtime plugin host', () => {
       id: 'memory.source-required.unrelated.fixture',
       evidenceKinds: ['policy', 'health']
     });
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -1258,7 +1407,7 @@ describe('runtime plugin host', () => {
       evidenceKinds: ['policy'],
       handleToolCallFailure: 'degrade'
     });
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -1290,7 +1439,7 @@ describe('runtime plugin host', () => {
       id: 'memory.source-required.accepted.fixture',
       evidenceKinds: ['tool_invocation']
     });
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.handleToolCall(
       {
@@ -1328,7 +1477,7 @@ describe('runtime plugin host', () => {
     const plugin = createSourceRequiredRuntimeNotesPlugin({
       id: 'memory.source-required-notes.degraded.fixture'
     });
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.beforeRoleModelCall(testPluginContext());
 
@@ -1352,7 +1501,7 @@ describe('runtime plugin host', () => {
       id: 'memory.source-required-notes.required.fixture',
       requiredForTurn: true
     });
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.beforeRoleModelCall(testPluginContext());
 
@@ -1377,7 +1526,7 @@ describe('runtime plugin host', () => {
         requiredForTurn: true,
         evidenceStatus
       });
-      const host = createRuntimePluginHost({ plugins: [plugin] });
+      const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
       const result = await host.beforeRoleModelCall(testPluginContext());
 
@@ -1405,7 +1554,7 @@ describe('runtime plugin host', () => {
       id: 'memory.before-blocking.optional.fixture',
       evidenceStatus: 'rejected'
     });
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.beforeRoleModelCall(testPluginContext());
 
@@ -1431,7 +1580,7 @@ describe('runtime plugin host', () => {
 
   it('budgets beforeRoleModelCall runtime notes before prompting', async () => {
     const plugin = createRuntimeNotesPlugin();
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.beforeRoleModelCall(testPluginContext());
 
@@ -1453,7 +1602,7 @@ describe('runtime plugin host', () => {
 
   it('budgets beforeRoleModelCall context item text with a host-side estimate', async () => {
     const plugin = createUnderestimatedContextItemPlugin();
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     const result = await host.beforeRoleModelCall(testPluginContext());
 
@@ -1477,7 +1626,7 @@ describe('runtime plugin host', () => {
 
   it('retains higher-priority Character State and runtime notes before lower-priority context', async () => {
     const pressurePlugin = createLowPriorityBudgetPressurePlugin();
-    const host = createRuntimePluginHost({
+    const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [createCharacterStatePlugin(), pressurePlugin],
       sessionIdentity: {
         test: 'priority-budget-pressure'
@@ -1638,6 +1787,92 @@ function createMemorySearchPlugin(
         return createAcceptedMemorySearchResult({
           pluginId: id,
           query,
+          context
+        });
+      }
+    }
+  });
+}
+
+function createTurnContextCapturePlugin(options: {
+  readonly pluginId: string;
+  readonly requestedApis: RuntimePlugin['manifest']['requestedApis'];
+  readonly capture: TurnContextCapture;
+}): RuntimePlugin {
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(options.pluginId),
+      declaredPlugins: ['before_role_model_call', 'after_turn_committed'],
+      requestedApis: options.requestedApis
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall(context) {
+        options.capture.beforeCurrentUserMessage = context.currentUserMessage;
+
+        return {
+          contextItems: [],
+          runtimeNotes: [],
+          evidence: []
+        };
+      },
+      afterTurnCommitted(context) {
+        options.capture.afterCurrentUserMessage = context.currentUserMessage;
+        options.capture.visibleMessageIds =
+          context.committedTurn.visibleMessageIds;
+        options.capture.visibleMessages =
+          context.committedTurn.visibleMessages;
+
+        return {
+          status: 'completed',
+          evidence: []
+        };
+      }
+    }
+  });
+}
+
+function createRuntimeNotesWithoutModelInputPlugin(): RuntimePlugin {
+  const pluginId = 'memory.notes-no-model-input.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      declaredPlugins: ['before_role_model_call'],
+      requestedApis: {}
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall() {
+        return {
+          contextItems: [],
+          runtimeNotes: ['undeclared model input note'],
+          evidence: []
+        };
+      }
+    }
+  });
+}
+
+function createModelFacingToolWithoutModelInputPlugin(
+  onHandle: () => void
+): RuntimePlugin {
+  const pluginId = 'memory.tool-no-model-input.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      requestedApis: {}
+    },
+    providedTools: memorySearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall(call, context) {
+        onHandle();
+        const query = call.input['query'];
+
+        return createAcceptedMemorySearchResult({
+          pluginId,
+          query: typeof query === 'string' ? query : '',
           context
         });
       }
@@ -2293,7 +2528,7 @@ function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedApis: { file_store: 'write' }
+      requestedApis: { file_store: 'write', model_input: 'write' }
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -2348,7 +2583,7 @@ function createReadOnlyBeforeRoleModelFileStoreProbePlugin(): RuntimePlugin {
     manifest: {
       ...memorySearchPluginManifest(pluginId),
       declaredPlugins: ['before_role_model_call'],
-      requestedApis: { file_store: 'write' }
+      requestedApis: { file_store: 'write', model_input: 'write' }
     },
     providedTools: [],
     lifecycleHooks: {
@@ -2394,7 +2629,7 @@ function createRetainedHandleToolCallFileStorePlugin(
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedApis: { file_store: 'write' }
+      requestedApis: { file_store: 'write', model_input: 'write' }
     },
     providedTools: localMemoryWriteSearchProvidedTools(),
     lifecycleHooks: {
@@ -2426,7 +2661,7 @@ function createStagedAppendFileStorePlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedApis: { file_store: 'write' }
+      requestedApis: { file_store: 'write', model_input: 'write' }
     },
     providedTools: localMemoryWriteSearchProvidedTools(),
     lifecycleHooks: {
@@ -2533,17 +2768,6 @@ function createPluginHostTestFileStore(options: {
   });
 }
 
-function allowPluginFileStore(
-  plugin: RuntimePlugin,
-  access: RuntimePluginApiAccess
-) {
-  return {
-    [plugin.manifest.id]: {
-      file_store: access
-    }
-  };
-}
-
 function createLateFileStoreWritePlugin(options: {
   readonly continueAfterTimeout: Promise<null>;
   readonly recordLateWriteOutcome: (outcome: LateFileStoreWriteOutcome) => void;
@@ -2558,7 +2782,7 @@ function createLateFileStoreWritePlugin(options: {
         ...manifest.runtimePolicy,
         timeoutMs: 5
       },
-      requestedApis: { file_store: 'write' }
+      requestedApis: { file_store: 'write', model_input: 'write' }
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -2732,7 +2956,7 @@ function memorySearchPluginManifest(id: string) {
       defaultEnabled: true,
       reasons: ['test']
     },
-    requestedApis: {}
+    requestedApis: { model_input: 'write' }
   };
 }
 

@@ -68,9 +68,9 @@ describe('runtime config loading and resolution', () => {
     expect(resolved.storeRoot).toBe('explicit-store');
   });
 
-  it('includes allowedApis policy in the effective config fingerprint', () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-api-fingerprint-'));
-    const withoutPolicy = resolveProject02RuntimeConfig({
+  it('includes plugin enablement in the effective config fingerprint', () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-plugin-fingerprint-'));
+    const withoutPlugin = resolveProject02RuntimeConfig({
       loadedConfig: {
         source: 'path',
         path: join(storeRoot, 'without.json'),
@@ -81,7 +81,7 @@ describe('runtime config loading and resolution', () => {
       },
       storeRoot
     });
-    const withPolicy = resolveProject02RuntimeConfig({
+    const withEnabledPlugin = resolveProject02RuntimeConfig({
       loadedConfig: {
         source: 'path',
         path: join(storeRoot, 'with.json'),
@@ -89,9 +89,7 @@ describe('runtime config loading and resolution', () => {
           version: runtimeConfigVersion,
           plugins: {
             memory: {
-              allowedApis: {
-                conversation_history: 'read'
-              }
+              enabled: true
             }
           }
         },
@@ -100,13 +98,8 @@ describe('runtime config loading and resolution', () => {
       storeRoot
     });
 
-    expect(withPolicy.allowedApisByPluginId).toEqual({
-      memory: {
-        conversation_history: 'read'
-      }
-    });
-    expect(withPolicy.effectiveConfigFingerprint).not.toBe(
-      withoutPolicy.effectiveConfigFingerprint
+    expect(withEnabledPlugin.effectiveConfigFingerprint).not.toBe(
+      withoutPlugin.effectiveConfigFingerprint
     );
   });
 
@@ -445,50 +438,6 @@ describe('runtime config loading and resolution', () => {
           code: 'runtime_config_unknown_plugin_wrapper_field',
           path: 'plugins.bad.enable',
           pluginId: 'bad'
-        })
-      ])
-    );
-  });
-
-  it('attaches malformed allowedApis diagnostics to the affected plugin activation', async () => {
-    const configPath = writeRuntimeConfig(
-      join(
-        mkdtempSync(join(tmpdir(), 'project02-config-invalid-allowed-apis-')),
-        'config.json'
-      ),
-      {
-        plugins: {
-          'character-state': {
-            allowedApis: {
-              file_store: 'admin'
-            }
-          }
-        }
-      }
-    );
-    const loaded = loadProject02RuntimeConfig({ configPath });
-
-    expect(loaded.config).toBeUndefined();
-    expect(loaded.diagnostics).toEqual([
-      expect.objectContaining({
-        severity: 'error',
-        code: 'runtime_config_plugin_allowed_apis_invalid',
-        path: 'plugins.character-state.allowedApis'
-      })
-    ]);
-
-    const configured = await createConfiguredProject02PluginHost({ loadedConfig: loaded });
-
-    expect(configured.activation.plugins[0]).toMatchObject({
-      pluginId: 'character-state',
-      enabled: false,
-      activationStatus: 'blocked'
-    });
-    expect(configured.activation.plugins[0]?.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          code: 'runtime_config_plugin_allowed_apis_invalid',
-          path: 'plugins.character-state.allowedApis'
         })
       ])
     );
@@ -1162,10 +1111,10 @@ describe('runtime config loading and resolution', () => {
     expect(characterActivation).toMatchObject({
       pluginId: 'character-state',
       enabled: false,
-      activationStatus: 'blocked'
+      activationStatus: 'disabled'
     });
     expect(characterActivation?.activationReasons).toContain(
-      'blocked_by_config_errors'
+      'not_enabled'
     );
     expect(memoryActivation).toMatchObject({
       pluginId: 'memory.required',
@@ -1455,7 +1404,7 @@ describe('runtime config loading and resolution', () => {
       env: { [envVar]: 'from-manifest-backed-factory' }
     });
 
-    expect(characterFactoryCalls).toBe(1);
+    expect(characterFactoryCalls).toBe(0);
     expect(memoryFactoryCalls).toBe(1);
     expect(memoryFactoryInputs).toEqual([
       {
@@ -1465,10 +1414,7 @@ describe('runtime config loading and resolution', () => {
         redactedApiKeyValue: '[redacted]'
       }
     ]);
-    expect(configured.activation.enabledPluginIds).toEqual([
-      'character-state',
-      'memory.required'
-    ]);
+    expect(configured.activation.enabledPluginIds).toEqual(['memory.required']);
   });
 
   it('plans inactive manifest-backed plugin factories without constructing them', async () => {
@@ -1691,10 +1637,10 @@ describe('runtime config loading and resolution', () => {
     expect(characterActivation).toMatchObject({
       pluginId: 'character-state',
       enabled: false,
-      activationStatus: 'blocked'
+      activationStatus: 'disabled'
     });
     expect(characterActivation?.activationReasons).toContain(
-      'blocked_by_config_errors'
+      'not_enabled'
     );
     expect(memoryActivation).toMatchObject({
       pluginId: 'memory.enabled',
@@ -3125,134 +3071,6 @@ describe('runtime config CLI', () => {
 
     expect(unsetResult.config.storeRoot).toBeUndefined();
     expect(unsetResult.envPath).toBe(join(initialStoreRoot, '.env'));
-  });
-
-  it('sets and unsets plugin allowedApis fields', () => {
-    const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-allowed-apis-'));
-    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {});
-
-    const setResult = applyRuntimeConfigMutation({
-      configPath,
-      operation: {
-        kind: 'set',
-        path: 'plugins.memory.allowedApis.file_store',
-        value: 'read'
-      }
-    });
-
-    expect(setResult.config.plugins?.['memory']?.allowedApis).toEqual({
-      file_store: 'read'
-    });
-
-    const unsetResult = applyRuntimeConfigMutation({
-      configPath,
-      operation: {
-        kind: 'unset',
-        path: 'plugins.memory.allowedApis.file_store'
-      }
-    });
-
-    expect(unsetResult.config.plugins?.['memory']).toEqual({
-      allowedApis: {}
-    });
-
-    const unsetPolicyResult = applyRuntimeConfigMutation({
-      configPath,
-      operation: {
-        kind: 'unset',
-        path: 'plugins.memory.allowedApis'
-      }
-    });
-
-    expect(unsetPolicyResult.config.plugins?.['memory']).toBeUndefined();
-  });
-
-  it('rejects unknown plugin allowedApis API names on unset', () => {
-    const configRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-unknown-allowed-api-unset-')
-    );
-    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {});
-    const originalConfig = readFileSync(configPath, 'utf8');
-
-    expect(() =>
-      applyRuntimeConfigMutation({
-        configPath,
-        operation: {
-          kind: 'unset',
-          path: 'plugins.memory.allowedApis.unknown_api'
-        }
-      })
-    ).toThrow(
-      'plugins.memory.allowedApis.unknown_api contains unknown API "unknown_api".'
-    );
-
-    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
-  });
-
-  it('preserves explicit empty plugin allowedApis overrides', () => {
-    const configRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-empty-allowed-apis-')
-    );
-    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
-      plugins: {
-        'character-state': {
-          enabled: true
-        }
-      }
-    });
-
-    const setPolicyResult = applyRuntimeConfigMutation({
-      configPath,
-      operation: {
-        kind: 'set',
-        path: 'plugins.character-state.allowedApis',
-        value: {}
-      }
-    });
-
-    expect(setPolicyResult.config.plugins?.['character-state']).toEqual({
-      enabled: true,
-      allowedApis: {}
-    });
-
-    const unsetEnabledResult = applyRuntimeConfigMutation({
-      configPath,
-      operation: {
-        kind: 'unset',
-        path: 'plugins.character-state.enabled'
-      }
-    });
-
-    expect(unsetEnabledResult.config.plugins?.['character-state']).toEqual({
-      allowedApis: {}
-    });
-  });
-
-  it('preserves explicit empty allowedApis after unsetting the last API field', () => {
-    const configRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-empty-allowed-api-leaf-')
-    );
-    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
-      plugins: {
-        'character-state': {
-          allowedApis: {
-            file_store: 'none'
-          }
-        }
-      }
-    });
-
-    const unsetResult = applyRuntimeConfigMutation({
-      configPath,
-      operation: {
-        kind: 'unset',
-        path: 'plugins.character-state.allowedApis.file_store'
-      }
-    });
-
-    expect(unsetResult.config.plugins?.['character-state']).toEqual({
-      allowedApis: {}
-    });
   });
 
   it('writes mutations to the normalized selected config path', () => {

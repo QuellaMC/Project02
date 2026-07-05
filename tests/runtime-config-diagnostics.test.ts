@@ -129,24 +129,6 @@ describe('runtime config diagnostic plugin matching', () => {
         pluginId: 'memory'
       })
     ).toBe(false);
-    expect(
-      runtimeConfigDiagnosticPathMatchesPlugin({
-        path: 'plugins.memory.allowedApis',
-        pluginId: 'memory'
-      })
-    ).toBe(true);
-    expect(
-      runtimeConfigDiagnosticPathMatchesPlugin({
-        path: 'plugins.memory.allowedApis.file_store',
-        pluginId: 'memory'
-      })
-    ).toBe(true);
-    expect(
-      runtimeConfigDiagnosticPathMatchesPlugin({
-        path: 'plugins.memory.allowedApisx.file_store',
-        pluginId: 'memory'
-      })
-    ).toBe(false);
   });
 });
 

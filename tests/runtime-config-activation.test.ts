@@ -293,18 +293,14 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
-  it('records requested, allowed, and effective API permissions in activation snapshots', async () => {
+  it('records requested and granted API permissions in activation snapshots', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-api-perms-'));
     const plugin = fileStoreSessionEndPlugin('valid.file-store-policy', () => {});
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true,
-          allowedApis: {
-            file_store: 'read',
-            conversation_history: 'write'
-          }
+          enabled: true
         }
       }
     });
@@ -323,16 +319,12 @@ describe('runtime config activation diagnostics', () => {
       expect.objectContaining({
         pluginId: plugin.manifest.id,
         requestedApis: { file_store: 'write' },
-        allowedApis: {
-          file_store: 'read',
-          conversation_history: 'write'
-        },
-        effectiveApis: { file_store: 'read' }
+        grantedApis: { file_store: 'write' }
       })
     );
   });
 
-  it('reports host-owned default API permissions for the built-in Character State factory', async () => {
+  it('reports host-owned default grants for the built-in Character State factory', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-character-state-default-api-perms-')
     );
@@ -346,14 +338,14 @@ describe('runtime config activation diagnostics', () => {
     expect(configured.activation.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
-        requestedApis: { file_store: 'write' },
-        allowedApis: { file_store: 'write' },
-        effectiveApis: { file_store: 'write' }
+        enabled: true,
+        requestedApis: { file_store: 'write', model_input: 'write' },
+        grantedApis: { file_store: 'write', model_input: 'write' }
       })
     );
   });
 
-  it('reports built-in default API permissions for caller-supplied real Character State factories', async () => {
+  it('does not default-enable caller-supplied real Character State factories', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-character-state-real-factory-api-perms-')
     );
@@ -376,18 +368,18 @@ describe('runtime config activation diagnostics', () => {
       }
     });
 
-    expect(factoryCalls).toBe(1);
+    expect(factoryCalls).toBe(0);
     expect(configured.activation.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
-        requestedApis: { file_store: 'write' },
-        allowedApis: { file_store: 'write' },
-        effectiveApis: { file_store: 'write' }
+        enabled: false,
+        requestedApis: { file_store: 'write', model_input: 'write' },
+        grantedApis: {}
       })
     );
   });
 
-  it('does not report built-in default API permissions for caller-supplied Character State id spoofs', async () => {
+  it('does not default-enable caller-supplied Character State id spoofs', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-character-state-spoof-api-perms-')
     );
@@ -408,9 +400,9 @@ describe('runtime config activation diagnostics', () => {
     expect(configured.activation.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
+        enabled: false,
         requestedApis: { file_store: 'write' },
-        allowedApis: {},
-        effectiveApis: {}
+        grantedApis: {}
       })
     );
   });
@@ -1036,14 +1028,13 @@ describe('runtime config activation diagnostics', () => {
         pluginId: characterStatePluginId,
         activationStatus: 'active',
         enabled: true,
-        requestedApis: { file_store: 'write' },
-        allowedApis: { file_store: 'write' },
-        effectiveApis: { file_store: 'write' }
+        requestedApis: { file_store: 'write', model_input: 'write' },
+        grantedApis: { file_store: 'write', model_input: 'write' }
       })
     );
   });
 
-  it('does not report built-in default API permissions during check for caller-supplied real Character State factories', async () => {
+  it('does not default-enable caller-supplied real Character State factories during check', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-check-character-state-real-factory-')
     );
@@ -1081,11 +1072,10 @@ describe('runtime config activation diagnostics', () => {
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
-        activationStatus: 'active',
-        enabled: true,
-        requestedApis: { file_store: 'write' },
-        allowedApis: {},
-        effectiveApis: {}
+        activationStatus: 'disabled',
+        enabled: false,
+        requestedApis: { file_store: 'write', model_input: 'write' },
+        grantedApis: {}
       })
     );
   });
@@ -1131,11 +1121,10 @@ describe('runtime config activation diagnostics', () => {
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
-        activationStatus: 'active',
-        enabled: true,
-        requestedApis: { file_store: 'write' },
-        allowedApis: {},
-        effectiveApis: {}
+        activationStatus: 'disabled',
+        enabled: false,
+        requestedApis: { file_store: 'write', model_input: 'write' },
+        grantedApis: {}
       })
     );
   });
@@ -1176,11 +1165,10 @@ describe('runtime config activation diagnostics', () => {
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
-        activationStatus: 'active',
-        enabled: true,
+        activationStatus: 'disabled',
+        enabled: false,
         requestedApis: { file_store: 'write' },
-        allowedApis: {},
-        effectiveApis: {}
+        grantedApis: {}
       })
     );
   });
@@ -1321,7 +1309,13 @@ describe('runtime config activation diagnostics', () => {
     let stdout = '';
     let factoryCalls = 0;
 
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'mixed.duplicate': {
+          enabled: true
+        }
+      }
+    });
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'check'],
@@ -1641,7 +1635,13 @@ describe('runtime config activation diagnostics', () => {
     let stdout = '';
     let factoryCalls = 0;
 
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [runtimePluginDiscoveryPluginId]: {
+          enabled: true
+        }
+      }
+    });
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'check'],
@@ -1700,8 +1700,7 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true,
-          allowedApis: { file_store: 'write' }
+          enabled: true
         },
         'memory.contract': {
           enabled: true,
@@ -1752,8 +1751,7 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true,
-          allowedApis: { file_store: 'read' }
+          enabled: true
         },
         [failingPlugin.manifest.id]: {
           enabled: true
@@ -1786,7 +1784,7 @@ describe('runtime config activation diagnostics', () => {
     expect(cleanupContexts).toHaveLength(1);
     expect(cleanupContexts[0]).toMatchObject({
       sessionId,
-      currentUserMessage: 'configured plugin construction failed before host creation',
+      currentUserMessage: '',
       privacy: {
         exposePrivateConfig: false
       }
@@ -1824,8 +1822,7 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true,
-          allowedApis: { file_store: 'write' }
+          enabled: true
         },
         [failingPlugin.manifest.id]: {
           enabled: true
@@ -1866,7 +1863,7 @@ describe('runtime config activation diagnostics', () => {
 
     expect(cleanupContext).toMatchObject({
       sessionId: 'configured-plugin-construction-cleanup',
-      currentUserMessage: 'configured plugin construction failed before host creation'
+      currentUserMessage: ''
     });
     expect(cleanupWriteBlocked).toEqual([true]);
     expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
@@ -1891,8 +1888,7 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true,
-          allowedApis: { file_store: 'write' }
+          enabled: true
         },
         [failingPlugin.manifest.id]: {
           enabled: true
@@ -1955,8 +1951,7 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true,
-          allowedApis: { file_store: 'write' }
+          enabled: true
         },
         [failingPlugin.manifest.id]: {
           enabled: true
@@ -2020,8 +2015,7 @@ describe('runtime config activation diagnostics', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [cleanupPlugin.manifest.id]: {
-          enabled: true,
-          allowedApis: { file_store: 'write' }
+          enabled: true
         },
         [firstToolPlugin.manifest.id]: {
           enabled: true
@@ -2067,7 +2061,7 @@ describe('runtime config activation diagnostics', () => {
 
     expect(cleanupContext).toMatchObject({
       sessionId: 'configured-plugin-construction-cleanup',
-      currentUserMessage: 'configured plugin construction failed before host creation'
+      currentUserMessage: ''
     });
     expect(cleanupWriteBlocked).toEqual([true]);
     expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
@@ -2111,7 +2105,7 @@ describe('runtime config activation diagnostics', () => {
     expect(cleanupContexts).toHaveLength(1);
     expect(cleanupContexts[0]).toMatchObject({
       sessionId: 'configured-plugin-construction-cleanup',
-      currentUserMessage: 'configured plugin construction failed before host creation',
+      currentUserMessage: '',
       pluginId: collisionPlugin.manifest.id
     });
   });
@@ -2375,7 +2369,8 @@ function modelFacingMemorySearchPlugin(id: string) {
         'plugin_discovery',
         'tool_provider',
         'handle_tool_call'
-      ]
+      ],
+      requestedApis: { model_input: 'write' }
     },
     providedTools: [memorySearchTool('memory.search')],
     lifecycleHooks: {
@@ -2404,7 +2399,8 @@ function modelFacingPluginListCollisionPlugin(
         'tool_provider',
         'handle_tool_call',
         'on_session_end'
-      ]
+      ],
+      requestedApis: { model_input: 'write' }
     },
     providedTools: [memorySearchTool(roleModelPluginListToolName)],
     lifecycleHooks: {
@@ -2460,8 +2456,7 @@ function parseActivationOutput(stdout: string): {
     readonly activationStatus: string;
     readonly enabled: boolean;
     readonly requestedApis: RuntimePluginApiPermissions;
-    readonly allowedApis: RuntimePluginApiPermissions;
-    readonly effectiveApis: RuntimePluginApiPermissions;
+    readonly grantedApis: RuntimePluginApiPermissions;
   }[];
 } {
   return JSON.parse(stdout) as {
@@ -2476,8 +2471,7 @@ function parseActivationOutput(stdout: string): {
       readonly activationStatus: string;
       readonly enabled: boolean;
       readonly requestedApis: RuntimePluginApiPermissions;
-      readonly allowedApis: RuntimePluginApiPermissions;
-      readonly effectiveApis: RuntimePluginApiPermissions;
+      readonly grantedApis: RuntimePluginApiPermissions;
     }[];
   };
 }

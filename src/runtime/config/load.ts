@@ -14,9 +14,6 @@ import {
   type RuntimeConfigSource,
   type RuntimeConfigValue
 } from './types.ts';
-import {
-  normalizeRuntimePluginApiPermissions
-} from '../../plugins/types.ts';
 
 const project02RuntimeConfigFields = Object.freeze([
   'version',
@@ -27,7 +24,6 @@ const project02RuntimeConfigFields = Object.freeze([
 ]);
 const project02RuntimePluginConfigFields = Object.freeze([
   'enabled',
-  'allowedApis',
   'config'
 ]);
 const runtimeConfigSecretRefFields = Object.freeze(['$env', 'description']);
@@ -276,11 +272,6 @@ function optionalPluginConfigs(
           `plugins.${pluginId}.enabled`,
           diagnostics
         );
-        const allowedApis = optionalApiPermissions(
-          pluginValue['allowedApis'],
-          `plugins.${pluginId}.allowedApis`,
-          diagnostics
-        );
         const config = optionalConfigRecord(
           pluginValue['config'],
           `plugins.${pluginId}.config`,
@@ -292,7 +283,6 @@ function optionalPluginConfigs(
             pluginId,
             Object.freeze({
               ...(enabled === undefined ? {} : { enabled }),
-              ...(allowedApis === undefined ? {} : { allowedApis }),
               ...(config === undefined ? {} : { config })
             } satisfies Project02RuntimePluginConfig)
           ]
@@ -300,32 +290,6 @@ function optionalPluginConfigs(
       })
     )
   );
-}
-
-function optionalApiPermissions(
-  value: unknown,
-  path: string,
-  diagnostics: RuntimeConfigDiagnostic[]
-): Project02RuntimePluginConfig['allowedApis'] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  try {
-    return normalizeRuntimePluginApiPermissions(value, path);
-  } catch (error: unknown) {
-    diagnostics.push(
-      diagnostic(
-        'error',
-        'runtime_config_plugin_allowed_apis_invalid',
-        error instanceof Error
-          ? error.message
-          : 'Plugin allowedApis must be an object.',
-        path
-      )
-    );
-    return undefined;
-  }
 }
 
 function optionalConfigRecord(

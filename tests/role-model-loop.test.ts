@@ -452,8 +452,10 @@ describe('role-model loop plugin tool routing', () => {
     ], () => {
       invocations += 1;
     });
+    const plugin = createDegradingRejectedMemorySearchPlugin();
     const pluginToolHost = createRuntimePluginHost({
-      plugins: [createDegradingRejectedMemorySearchPlugin()]
+      plugins: [plugin],
+      enabledPluginIds: [plugin.manifest.id]
     });
 
     const result = await runRoleModelLoop({
@@ -1114,7 +1116,7 @@ function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
         defaultEnabled: true,
         reasons: ['test']
       },
-      requestedApis: {}
+      requestedApis: { model_input: 'write' }
     },
     providedTools: [
       {

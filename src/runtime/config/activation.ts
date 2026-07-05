@@ -11,13 +11,8 @@ import {
   type RuntimePluginSessionEndOptions
 } from '../../plugins/host.ts';
 import {
-  characterStateDefaultAllowedApis,
-  resolveRuntimePluginApiPermissionsForManifest,
-  resolveRuntimePluginApiPermissionsForPlugin
-} from '../../plugins/api-permissions.ts';
-import {
   createRuntimePluginContext,
-  type RuntimePluginApiPermissionSnapshot,
+  normalizeRuntimePluginApiPermissions,
   type RuntimePluginApiPermissions,
   type RuntimePlugin,
   type RuntimePluginKind,
@@ -67,8 +62,7 @@ export type RuntimePluginActivationSnapshot = {
   readonly kind: RuntimePluginKind;
   readonly enabled: boolean;
   readonly requestedApis: RuntimePluginApiPermissions;
-  readonly allowedApis: RuntimePluginApiPermissions;
-  readonly effectiveApis: RuntimePluginApiPermissions;
+  readonly grantedApis: RuntimePluginApiPermissions;
   readonly activationStatus: RuntimePluginActivationStatus;
   readonly activationReasons: readonly string[];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
@@ -120,21 +114,20 @@ export function defaultRuntimePluginFactories(): Readonly<
   return defaultRuntimePluginFactoryDefinitions;
 }
 
-function defaultAllowedApisByPluginIdForFactories(
+function defaultEnabledPluginIdsForFactories(
   factories: Readonly<Record<string, RuntimePluginFactory>>
-): Readonly<Record<string, RuntimePluginApiPermissions>> {
+): ReadonlySet<string> {
   const defaultCharacterStateFactory =
     defaultRuntimePluginFactoryDefinitions[characterStatePluginId];
   const hasHostOwnedCharacterStateFactory =
     factories[characterStatePluginId] === defaultCharacterStateFactory;
+  const defaultEnabledPluginIds = new Set<string>();
 
-  if (!hasHostOwnedCharacterStateFactory) {
-    return Object.freeze({});
+  if (hasHostOwnedCharacterStateFactory) {
+    defaultEnabledPluginIds.add(characterStatePluginId);
   }
 
-  return Object.freeze({
-    [characterStatePluginId]: characterStateDefaultAllowedApis
-  });
+  return Object.freeze(defaultEnabledPluginIds);
 }
 
 export function resolveConfiguredProject02PluginActivation(options: {
@@ -146,8 +139,7 @@ export function resolveConfiguredProject02PluginActivation(options: {
   readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
 }): Project02ConfiguredPluginActivation {
   const factories = options.factories ?? defaultRuntimePluginFactories();
-  const defaultAllowedApisByPluginId =
-    defaultAllowedApisByPluginIdForFactories(factories);
+  const defaultEnabledPluginIds = defaultEnabledPluginIdsForFactories(factories);
   const legacyFactoryIds = legacyFunctionFactoryIds(factories);
   const disabledLegacyFactoryIds = explicitlyDisabledLegacyFactoryIds({
     factories,
@@ -164,7 +156,7 @@ export function resolveConfiguredProject02PluginActivation(options: {
     pluginManifests,
     additionalKnownPluginIds: legacyFactoryIds,
     disabledKnownPluginIds: [...disabledLegacyFactoryIds],
-    defaultAllowedApisByPluginId,
+    defaultEnabledPluginIds,
     uncheckedLegacyFactoryIds:
       options.diagnoseUncheckedLegacyFactories === true ? legacyFactoryIds : [],
     resolvedConfig,
@@ -189,8 +181,7 @@ export async function createConfiguredProject02PluginHost(options: {
   readonly constructionCleanup?: RuntimePluginSessionEndOptions;
 }): Promise<Project02ConfiguredPluginHost> {
   const factories = options.factories ?? defaultRuntimePluginFactories();
-  const defaultAllowedApisByPluginId =
-    defaultAllowedApisByPluginIdForFactories(factories);
+  const defaultEnabledPluginIds = defaultEnabledPluginIdsForFactories(factories);
   const legacyFactoryIds = legacyFunctionFactoryIds(factories);
   const activationPlan = resolveConfiguredProject02PluginActivation({
     loadedConfig: options.loadedConfig,
@@ -208,7 +199,6 @@ export async function createConfiguredProject02PluginHost(options: {
       host: createRuntimePluginHost({
         plugins,
         enabledPluginIds: activationPlan.activation.enabledPluginIds,
-        allowedApisByPluginId: activationPlan.resolvedConfig.allowedApisByPluginId,
         storeRoot: activationPlan.resolvedConfig.storeRoot,
         ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
         ...(options.sessionIdentity === undefined
@@ -256,7 +246,7 @@ export async function createConfiguredProject02PluginHost(options: {
     pluginManifests: preparedFactories.map((factory) => factory.manifest),
     additionalKnownPluginIds: legacyFactoryIds,
     disabledKnownPluginIds: [...disabledLegacyFactoryIds],
-    defaultAllowedApisByPluginId,
+    defaultEnabledPluginIds,
     resolvedConfig,
     loadedConfig: options.loadedConfig,
     strictUnknownPlugins: options.strictUnknownPlugins === true
@@ -278,7 +268,7 @@ export async function createConfiguredProject02PluginHost(options: {
     pluginManifests: preparedFactories.map((factory) => factory.manifest),
     additionalKnownPluginIds: legacyFactoryIds,
     disabledKnownPluginIds: [...disabledLegacyFactoryIds],
-    defaultAllowedApisByPluginId,
+    defaultEnabledPluginIds,
     resolvedConfig,
     loadedConfig: options.loadedConfig,
     strictUnknownPlugins: options.strictUnknownPlugins === true
@@ -289,7 +279,6 @@ export async function createConfiguredProject02PluginHost(options: {
     host = createRuntimePluginHost({
       plugins,
       enabledPluginIds: finalActivation.enabledPluginIds,
-      allowedApisByPluginId: resolvedConfig.allowedApisByPluginId,
       storeRoot: resolvedConfig.storeRoot,
       ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
       ...(options.sessionIdentity === undefined
@@ -324,7 +313,7 @@ export function resolveRuntimePluginActivation(options: {
   readonly pluginManifests?: readonly RuntimePluginManifest[];
   readonly additionalKnownPluginIds?: readonly string[];
   readonly disabledKnownPluginIds?: readonly string[];
-  readonly defaultAllowedApisByPluginId?: Readonly<Record<string, RuntimePluginApiPermissions>>;
+  readonly defaultEnabledPluginIds?: ReadonlySet<string>;
   readonly uncheckedLegacyFactoryIds?: readonly string[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -332,9 +321,6 @@ export function resolveRuntimePluginActivation(options: {
 }): RuntimePluginActivationResult {
   const pluginManifests =
     options.pluginManifests ?? options.plugins?.map((plugin) => plugin.manifest) ?? [];
-  const runtimePluginsByPluginId = new Map(
-    (options.plugins ?? []).map((plugin) => [plugin.manifest.id, plugin])
-  );
   const config = options.loadedConfig.config;
   const pluginIds = new Set([
     ...pluginManifests.map((manifest) => manifest.id),
@@ -372,6 +358,8 @@ export function resolveRuntimePluginActivation(options: {
     const selectedAsDefaultMemoryProvider =
       manifest.kind === 'memory_provider' &&
       config?.defaultMemoryProvider === manifest.id;
+    const defaultEnabled =
+      options.defaultEnabledPluginIds?.has(manifest.id) === true;
     const configErrors =
       loadedConfigHasErrors ||
       globalConfigErrors ||
@@ -386,14 +374,14 @@ export function resolveRuntimePluginActivation(options: {
         configuredEnabled: configured?.enabled,
         legacyEnabled,
         selectedAsDefaultMemoryProvider,
-        defaultEnabled: manifest.activation.defaultEnabled,
+        defaultEnabled,
         configErrors: false
       }),
       decision: activationDecision({
         configuredEnabled: configured?.enabled,
         legacyEnabled,
         selectedAsDefaultMemoryProvider,
-        defaultEnabled: manifest.activation.defaultEnabled,
+        defaultEnabled,
         configErrors
       })
     });
@@ -443,14 +431,6 @@ export function resolveRuntimePluginActivation(options: {
 
   for (const preliminaryDecision of preliminaryDecisions) {
     const manifest = preliminaryDecision.manifest;
-    const runtimePlugin = runtimePluginsByPluginId.get(manifest.id);
-    const defaultAllowedApis = options.defaultAllowedApisByPluginId?.[manifest.id];
-    const apiPermissions = resolveActivationApiPermissions({
-      manifest,
-      explicitAllowedApisByPluginId: options.resolvedConfig.allowedApisByPluginId,
-      ...(runtimePlugin === undefined ? {} : { plugin: runtimePlugin }),
-      ...(defaultAllowedApis === undefined ? {} : { defaultAllowedApis })
-    });
     const memoryDecision = finalizeMemoryProviderActivation({
       manifest,
       decision: preliminaryDecision.decision,
@@ -472,9 +452,16 @@ export function resolveRuntimePluginActivation(options: {
         pluginId: manifest.id,
         kind: manifest.kind,
         enabled: decision.enabled,
-        requestedApis: apiPermissions.requestedApis,
-        allowedApis: apiPermissions.allowedApis,
-        effectiveApis: apiPermissions.effectiveApis,
+        requestedApis: normalizeRuntimePluginApiPermissions(
+          manifest.requestedApis,
+          `${manifest.id}.requestedApis`
+        ),
+        grantedApis: decision.enabled
+          ? normalizeRuntimePluginApiPermissions(
+              manifest.requestedApis,
+              `${manifest.id}.grantedApis`
+            )
+          : Object.freeze({}),
         activationStatus: decision.status,
         activationReasons: Object.freeze([
           ...manifest.activation.reasons,
@@ -501,33 +488,6 @@ export function resolveRuntimePluginActivation(options: {
       ? {}
       : { defaultMemoryProvider: memoryProviderDecision.defaultMemoryProvider })
   } satisfies RuntimePluginActivationResult);
-}
-
-function resolveActivationApiPermissions(options: {
-  readonly manifest: RuntimePluginManifest;
-  readonly plugin?: RuntimePlugin;
-  readonly explicitAllowedApisByPluginId: Readonly<
-    Record<string, RuntimePluginApiPermissions>
-  >;
-  readonly defaultAllowedApis?: RuntimePluginApiPermissions;
-}): RuntimePluginApiPermissionSnapshot {
-  if (
-    options.plugin !== undefined &&
-    runtimePluginManifestsMatch(options.plugin.manifest, options.manifest)
-  ) {
-    return resolveRuntimePluginApiPermissionsForPlugin({
-      plugin: options.plugin,
-      explicitAllowedApisByPluginId: options.explicitAllowedApisByPluginId
-    });
-  }
-
-  return resolveRuntimePluginApiPermissionsForManifest({
-    manifest: options.manifest,
-    explicitAllowedApisByPluginId: options.explicitAllowedApisByPluginId,
-    ...(options.defaultAllowedApis === undefined
-      ? {}
-      : { defaultAllowedApis: options.defaultAllowedApis })
-  });
 }
 
 type PreparedRuntimePluginFactory =
@@ -795,7 +755,6 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
     await runRuntimePluginSessionEndHooks({
       plugins: options.plugins,
       context,
-      allowedApisByPluginId: options.resolvedConfig.allowedApisByPluginId,
       storeRoot: options.resolvedConfig.storeRoot,
       sessionId,
       ...(options.sessionIdentity === undefined

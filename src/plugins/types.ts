@@ -42,7 +42,8 @@ const runtimePluginTrustLevelValues = [
 
 const runtimePluginApiNameValues = [
   'file_store',
-  'conversation_history'
+  'turn_context',
+  'model_input'
 ] as const;
 
 const runtimePluginApiAccessValues = ['none', 'read', 'write'] as const;
@@ -197,8 +198,7 @@ export type RuntimePluginApiPermissions = Partial<
 
 export type RuntimePluginApiPermissionSnapshot = {
   readonly requestedApis: RuntimePluginApiPermissions;
-  readonly allowedApis: RuntimePluginApiPermissions;
-  readonly effectiveApis: RuntimePluginApiPermissions;
+  readonly grantedApis: RuntimePluginApiPermissions;
 };
 
 export type RuntimePluginFileStore = {
@@ -502,15 +502,6 @@ export function runtimePluginApiAccessFor(
   }
 
   return permissions[api] ?? 'none';
-}
-
-export function minRuntimePluginApiAccess(
-  left: RuntimePluginApiAccess,
-  right: RuntimePluginApiAccess
-): RuntimePluginApiAccess {
-  return runtimePluginApiAccessRank(left) <= runtimePluginApiAccessRank(right)
-    ? left
-    : right;
 }
 
 export function runtimePluginApiAccessAllows(
@@ -955,8 +946,7 @@ export function createRuntimePluginRegistrySnapshot(
       Record<
         string,
         {
-          readonly allowedApis?: RuntimePluginApiPermissions;
-          readonly effectiveApis?: RuntimePluginApiPermissions;
+          readonly grantedApis?: RuntimePluginApiPermissions;
         }
       >
     >;
@@ -971,12 +961,9 @@ export function createRuntimePluginRegistrySnapshot(
       options.apiPermissionsByPluginId?.[plugin.manifest.id];
     const apiPermissions = pluginApiPermissionSnapshot({
       manifest: plugin.manifest,
-      ...(resolvedApiPermissions?.allowedApis === undefined
+      ...(resolvedApiPermissions?.grantedApis === undefined
         ? {}
-        : { allowedApis: resolvedApiPermissions.allowedApis }),
-      ...(resolvedApiPermissions?.effectiveApis === undefined
-        ? {}
-        : { effectiveApis: resolvedApiPermissions.effectiveApis })
+        : { grantedApis: resolvedApiPermissions.grantedApis })
     });
     registrations.push(
       Object.freeze({
@@ -984,8 +971,7 @@ export function createRuntimePluginRegistrySnapshot(
         providedTools: plugin.providedTools,
         registeredLifecycleHooks: registeredLifecycleHooks(plugin),
         requestedApis: apiPermissions.requestedApis,
-        allowedApis: apiPermissions.allowedApis,
-        effectiveApis: apiPermissions.effectiveApis
+        grantedApis: apiPermissions.grantedApis
       } satisfies RuntimePluginRegistrationSnapshot)
     );
   }
@@ -1015,27 +1001,24 @@ export function assertUniqueRuntimePluginIds(
 function pluginApiPermissionSnapshot(options: {
   readonly manifest: RuntimePluginManifest;
   readonly requestedApis?: RuntimePluginApiPermissions;
-  readonly allowedApis?: RuntimePluginApiPermissions;
-  readonly effectiveApis?: RuntimePluginApiPermissions;
+  readonly grantedApis?: RuntimePluginApiPermissions;
 }): RuntimePluginApiPermissionSnapshot {
   return Object.freeze({
     requestedApis: normalizeRuntimePluginApiPermissions(
       options.requestedApis ?? options.manifest.requestedApis,
       'requestedApis'
     ),
-    allowedApis: normalizeRuntimePluginApiPermissions(
-      options.allowedApis,
-      'allowedApis'
-    ),
-    effectiveApis: normalizeRuntimePluginApiPermissions(
-      options.effectiveApis,
-      'effectiveApis'
+    grantedApis: normalizeRuntimePluginApiPermissions(
+      options.grantedApis,
+      'grantedApis'
     )
   } satisfies RuntimePluginApiPermissionSnapshot);
 }
 
+const firstPartyModelToolsPluginInstances = new WeakSet<RuntimePlugin>();
+
 export function createFirstPartyModelToolsPlugin(): RuntimePlugin {
-  return createRuntimePlugin({
+  const plugin = createRuntimePlugin({
     manifest: {
       id: firstPartyModelToolsPluginId,
       displayName: 'First-party model tools',
@@ -1072,7 +1055,7 @@ export function createFirstPartyModelToolsPlugin(): RuntimePlugin {
         defaultEnabled: true,
         reasons: ['built_in_user_turn_tools']
       },
-      requestedApis: {}
+      requestedApis: { model_input: 'write' }
     },
     providedTools: builtInModelToolDefinitionsForUserTurn().map((definition) =>
       Object.freeze({
@@ -1089,6 +1072,13 @@ export function createFirstPartyModelToolsPlugin(): RuntimePlugin {
     ),
     lifecycleHooks: {}
   });
+
+  firstPartyModelToolsPluginInstances.add(plugin);
+  return plugin;
+}
+
+export function isFirstPartyModelToolsPlugin(plugin: RuntimePlugin): boolean {
+  return firstPartyModelToolsPluginInstances.has(plugin);
 }
 
 export function createRuntimePluginEvidenceSnapshot(
@@ -1350,13 +1340,9 @@ export function createRuntimePluginListingSnapshot(
       options['requestedApis'] ?? manifest.requestedApis,
       'requestedApis'
     ),
-    allowedApis: normalizeRuntimePluginApiPermissions(
-      options['allowedApis'],
-      'allowedApis'
-    ),
-    effectiveApis: normalizeRuntimePluginApiPermissions(
-      options['effectiveApis'],
-      'effectiveApis'
+    grantedApis: normalizeRuntimePluginApiPermissions(
+      options['grantedApis'],
+      'grantedApis'
     )
   });
 
@@ -1381,8 +1367,7 @@ export function createRuntimePluginListingSnapshot(
     availableForTurn: requireBooleanRecordField(options, 'availableForTurn'),
     redactionLabels: Object.freeze([...redactionLabels]),
     requestedApis: apiPermissions.requestedApis,
-    allowedApis: apiPermissions.allowedApis,
-    effectiveApis: apiPermissions.effectiveApis,
+    grantedApis: apiPermissions.grantedApis,
     ...(configFingerprint === undefined
       ? {}
       : { configFingerprint: redactRuntimePluginText(configFingerprint) }),
