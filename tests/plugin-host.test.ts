@@ -81,6 +81,59 @@ function createExplicitlyEnabledRuntimePluginHost(
   });
 }
 
+function pluginDiscoveryToolNames(
+  output: RuntimePluginJsonValue
+): readonly string[] {
+  if (!isRuntimePluginJsonObject(output)) {
+    throw new TypeError('Expected plugin discovery output object.');
+  }
+
+  const plugins = output['plugins'];
+
+  if (!isRuntimePluginJsonArray(plugins)) {
+    throw new TypeError('Expected plugin discovery output plugins array.');
+  }
+
+  return Object.freeze(
+    plugins
+      .flatMap((plugin) => {
+        if (!isRuntimePluginJsonObject(plugin)) {
+          throw new TypeError('Expected plugin discovery plugin object.');
+        }
+
+        const tools = plugin['providedTools'];
+
+        if (!isRuntimePluginJsonArray(tools)) {
+          throw new TypeError('Expected plugin discovery tools array.');
+        }
+
+        return tools.map((tool) => {
+          if (
+            !isRuntimePluginJsonObject(tool) ||
+            typeof tool['name'] !== 'string'
+          ) {
+            throw new TypeError('Expected plugin discovery tool name.');
+          }
+
+          return tool['name'];
+        });
+      })
+      .sort((left, right) => left.localeCompare(right))
+  );
+}
+
+function isRuntimePluginJsonObject(
+  value: RuntimePluginJsonValue
+): value is RuntimePluginJsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRuntimePluginJsonArray(
+  value: RuntimePluginJsonValue | undefined
+): value is readonly RuntimePluginJsonValue[] {
+  return Array.isArray(value);
+}
+
 describe('runtime plugin host', () => {
   it('routes plugin.list through the host-owned discovery plugin', async () => {
     const plugin = createMemorySearchPlugin();
@@ -115,6 +168,37 @@ describe('runtime plugin host', () => {
         }
       ]
     });
+  });
+
+  it('advertises the same model-facing tools that the host exposes', async () => {
+    const plugin = createMemorySearchPlugin();
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginDiscoveryPluginId,
+        toolName: roleModelPluginListToolName,
+        input: {}
+      },
+      testPluginContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected plugin.list to be accepted.');
+    }
+
+    const exposedToolNames = Object.freeze(
+      host.pluginToolDefinitions()
+        .map((tool) => tool.name)
+        .sort((left, right) => left.localeCompare(right))
+    );
+
+    expect(pluginDiscoveryToolNames(result.output)).toEqual(exposedToolNames);
+    expect(exposedToolNames).toEqual(
+      expect.arrayContaining([roleModelPluginListToolName, 'memory.search'])
+    );
   });
 
   it('does not inject plugin discovery inventory before model calls', async () => {

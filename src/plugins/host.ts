@@ -231,7 +231,10 @@ export function createRuntimePluginHost(
   let apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId =
     Object.freeze({});
   const plugins = Object.freeze([
-    createRuntimePluginDiscoveryPlugin(() => enabledPlugins),
+    createRuntimePluginDiscoveryPlugin(() => ({
+      enabledPlugins,
+      apiPermissionsByPluginId
+    })),
     ...configuredPlugins
   ]);
   const enabledIds = enabledPluginIdsForHost({
@@ -343,6 +346,9 @@ export function createRuntimePluginHost(
 export async function runRuntimePluginSessionEndHooks(
   options: RunRuntimePluginSessionEndHooksOptions
 ): Promise<RuntimePluginHookHostResult> {
+  // This standalone helper treats the supplied plugins as already selected and
+  // enabled. Callers that need activation filtering should pass only activated
+  // plugins, or use the configured host path.
   return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
     plugins: options.plugins,
     context: options.context,
@@ -453,18 +459,22 @@ function createPluginHookContext<TContext extends RuntimePluginContext>(options:
   });
 }
 
+const scrubbedRuntimePluginCurrentUserMessage = '';
+
 function scrubRuntimePluginTurnContext<TContext extends RuntimePluginContext>(
   context: Omit<TContext, 'fileStore'>
 ): Omit<TContext, 'fileStore'> {
+  // Empty currentUserMessage intentionally represents no turn_context.read grant.
   const baseContext = {
     ...context,
-    currentUserMessage: ''
+    currentUserMessage: scrubbedRuntimePluginCurrentUserMessage
   };
 
   if ('committedTurn' in context) {
     const committedTurn = (context as RuntimePluginAfterTurnCommittedContext)
       .committedTurn;
 
+    // Empty visible turn arrays intentionally represent no turn_context.read grant.
     return Object.freeze({
       ...baseContext,
       committedTurn: Object.freeze({
@@ -534,7 +544,10 @@ function assertPluginFileStoreWritesAllowed(options: {
 }
 
 function createRuntimePluginDiscoveryPlugin(
-  enabledPluginsForTurn: () => readonly RuntimePlugin[]
+  hostStateForTurn: () => {
+    readonly enabledPlugins: readonly RuntimePlugin[];
+    readonly apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId;
+  }
 ): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
@@ -595,9 +608,11 @@ function createRuntimePluginDiscoveryPlugin(
     ],
     lifecycleHooks: {
       handleToolCall(_call, context) {
-        const output = createPluginDiscoveryOutput(
-          enabledPluginsForTurn()
-        );
+        const hostState = hostStateForTurn();
+        const output = createPluginDiscoveryOutput({
+          enabledPlugins: hostState.enabledPlugins,
+          apiPermissionsByPluginId: hostState.apiPermissionsByPluginId
+        });
 
         return {
           status: 'accepted',
@@ -623,48 +638,52 @@ function createRuntimePluginDiscoveryPlugin(
   });
 }
 
-function createPluginDiscoveryOutput(
-  enabledPlugins: readonly RuntimePlugin[]
-): RuntimePluginJsonObject & {
+function createPluginDiscoveryOutput(options: {
+  readonly enabledPlugins: readonly RuntimePlugin[];
+  readonly apiPermissionsByPluginId: RuntimePluginApiPermissionsByPluginId;
+}): RuntimePluginJsonObject & {
   readonly plugins: readonly RuntimePluginJsonValue[];
 } {
-  const boundedPlugins = enabledPlugins.slice(
+  const boundedPlugins = options.enabledPlugins.slice(
     0,
     runtimePluginDiscoveryMaxPlugins
   );
 
   return Object.freeze({
     plugins: Object.freeze(
-      boundedPlugins.map(createPluginDiscoverySummary)
+      boundedPlugins.map((plugin) =>
+        createPluginDiscoverySummary({
+          plugin,
+          apiPermissions: runtimePluginApiPermissionsForPlugin({
+            plugin,
+            apiPermissionsByPluginId: options.apiPermissionsByPluginId
+          })
+        })
+      )
     ),
     truncated:
-      enabledPlugins.length > runtimePluginDiscoveryMaxPlugins
+      options.enabledPlugins.length > runtimePluginDiscoveryMaxPlugins
   } satisfies RuntimePluginJsonObject & {
     readonly plugins: readonly RuntimePluginJsonValue[];
   });
 }
 
-function createPluginDiscoverySummary(
-  plugin: RuntimePlugin
-): RuntimePluginJsonObject {
+function createPluginDiscoverySummary(options: {
+  readonly plugin: RuntimePlugin;
+  readonly apiPermissions: RuntimePluginApiPermissionSnapshot;
+}): RuntimePluginJsonObject {
   const discoverableTools = discoverableCurrentTurnPluginTools({
-    plugin,
-    apiPermissions: runtimePluginApiPermissionsForPlugin({
-      plugin,
-      apiPermissionsByPluginId: resolveRuntimePluginApiPermissionsForPlugins({
-        plugins: [plugin],
-        enabledPluginIds: [plugin.manifest.id]
-      })
-    })
+    plugin: options.plugin,
+    apiPermissions: options.apiPermissions
   });
   const safeTools = discoverableTools
     .slice(0, runtimePluginDiscoveryMaxToolsPerPlugin)
     .map(createPluginDiscoveryToolSummary);
 
   return Object.freeze({
-    id: boundedPluginDiscoveryText(plugin.manifest.id),
-    displayName: boundedPluginDiscoveryText(plugin.manifest.displayName),
-    kind: plugin.manifest.kind,
+    id: boundedPluginDiscoveryText(options.plugin.manifest.id),
+    displayName: boundedPluginDiscoveryText(options.plugin.manifest.displayName),
+    kind: options.plugin.manifest.kind,
     availableForTurn: true,
     providedTools: Object.freeze(safeTools),
     toolsTruncated:
