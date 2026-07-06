@@ -22,6 +22,13 @@ export type CreateRuntimePluginFileStoreOptions = {
   readonly pluginId: string;
 };
 
+export type RuntimePluginFileStoreTransaction = {
+  fileStoreFor(options: CreateRuntimePluginFileStoreOptions): RuntimePluginFileStore;
+  commit(): void;
+  rollback(): void;
+  hasPendingWrites(): boolean;
+};
+
 const durableRevisionFileName = '.project02-plugin-store-revision';
 const durablePathModesFileName = '.project02-plugin-store-modes.json';
 const inMemoryPluginStoresByKey = new Map<string, InMemoryPluginStoreState>();
@@ -37,6 +44,13 @@ type InMemoryPluginStoreState = {
 };
 
 type RuntimePluginFileStorePathMode = 'json' | 'jsonl';
+
+type TransactionalPluginStoreOverlay = {
+  readonly base: RuntimePluginFileStore;
+  readonly jsonWrites: Map<string, RuntimePluginJsonValue>;
+  readonly jsonlAppends: Map<string, RuntimePluginJsonValue[]>;
+  readonly pathModes: Map<string, RuntimePluginFileStorePathMode>;
+};
 
 export function createRuntimePluginFileStore(
   options: CreateRuntimePluginFileStoreOptions
@@ -147,6 +161,135 @@ export function createRuntimePluginFileStore(
   } satisfies RuntimePluginFileStore);
 }
 
+export function createRuntimePluginFileStoreTransaction(): RuntimePluginFileStoreTransaction {
+  const overlays = new Map<string, TransactionalPluginStoreOverlay>();
+  let closed = false;
+
+  function overlayFor(
+    options: CreateRuntimePluginFileStoreOptions
+  ): TransactionalPluginStoreOverlay {
+    assertTransactionOpen(closed);
+
+    const key = transactionStoreKey(options);
+    let overlay = overlays.get(key);
+
+    if (overlay === undefined) {
+      overlay = {
+        base: createRuntimePluginFileStore(options),
+        jsonWrites: new Map<string, RuntimePluginJsonValue>(),
+        jsonlAppends: new Map<string, RuntimePluginJsonValue[]>(),
+        pathModes: new Map<string, RuntimePluginFileStorePathMode>()
+      };
+      overlays.set(key, overlay);
+    }
+
+    return overlay;
+  }
+
+  return Object.freeze({
+    fileStoreFor(options) {
+      const overlay = overlayFor(options);
+
+      return Object.freeze({
+        readJson(path) {
+          const safePath = normalizeRuntimePluginFileStorePath(path);
+
+          assertJsonPathMode(overlay.pathModes.get(safePath));
+
+          if (overlay.jsonWrites.has(safePath)) {
+            const value = overlay.jsonWrites.get(safePath);
+
+            return value === undefined
+              ? undefined
+              : freezeRuntimePluginFileStoreJsonValue(value);
+          }
+
+          return overlay.base.readJson(safePath);
+        },
+        readJsonl(path) {
+          const safePath = normalizeRuntimePluginFileStorePath(path);
+
+          assertJsonlPathMode(overlay.pathModes.get(safePath));
+
+          const appends = overlay.jsonlAppends.get(safePath) ?? [];
+
+          return Object.freeze([
+            ...overlay.base.readJsonl(safePath),
+            ...appends.map(freezeRuntimePluginFileStoreJsonValue)
+          ]);
+        },
+        writeJsonAtomic(path, value) {
+          const safePath = normalizeRuntimePluginFileStorePath(path);
+
+          assertTransactionOpen(closed);
+          assertJsonPathMode(overlay.pathModes.get(safePath));
+          overlay.jsonWrites.set(
+            safePath,
+            freezeRuntimePluginFileStoreJsonValue(value)
+          );
+          overlay.pathModes.set(safePath, 'json');
+        },
+        appendJsonl(path, value) {
+          const safePath = normalizeRuntimePluginFileStorePath(path);
+          const nextLine = freezeRuntimePluginFileStoreJsonValue(value);
+          const appends = overlay.jsonlAppends.get(safePath) ?? [];
+
+          assertTransactionOpen(closed);
+          assertJsonlPathMode(overlay.pathModes.get(safePath));
+          overlay.jsonlAppends.set(safePath, [...appends, nextLine]);
+          overlay.pathModes.set(safePath, 'jsonl');
+        },
+        revision() {
+          return (
+            overlay.base.revision() +
+            overlay.jsonWrites.size +
+            [...overlay.jsonlAppends.values()].reduce(
+              (total, appends) => total + appends.length,
+              0
+            )
+          );
+        }
+      } satisfies RuntimePluginFileStore);
+    },
+    commit() {
+      assertTransactionOpen(closed);
+
+      for (const overlay of overlays.values()) {
+        for (const [path, value] of overlay.jsonWrites) {
+          overlay.base.writeJsonAtomic(path, value);
+        }
+
+        for (const [path, appends] of overlay.jsonlAppends) {
+          for (const value of appends) {
+            overlay.base.appendJsonl(path, value);
+          }
+        }
+      }
+
+      overlays.clear();
+      closed = true;
+    },
+    rollback() {
+      assertTransactionOpen(closed);
+      overlays.clear();
+      closed = true;
+    },
+    hasPendingWrites() {
+      for (const overlay of overlays.values()) {
+        if (overlay.jsonWrites.size > 0) {
+          return true;
+        }
+
+        if ([...overlay.jsonlAppends.values()].some((items) => items.length > 0)) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+  } satisfies RuntimePluginFileStoreTransaction);
+}
+
 function createInMemoryRuntimePluginFileStore(
   options: CreateRuntimePluginFileStoreOptions
 ): RuntimePluginFileStore {
@@ -210,6 +353,20 @@ function createInMemoryRuntimePluginFileStore(
       return state.revision;
     }
   } satisfies RuntimePluginFileStore);
+}
+
+function transactionStoreKey(options: CreateRuntimePluginFileStoreOptions): string {
+  return [
+    options.storeRoot ?? '<memory>',
+    options.sessionId,
+    options.pluginId
+  ].join('\u0000');
+}
+
+function assertTransactionOpen(closed: boolean): void {
+  if (closed) {
+    throw new Error('Plugin fileStore transaction is already closed.');
+  }
 }
 
 export function normalizeRuntimePluginFileStorePath(path: string): string {

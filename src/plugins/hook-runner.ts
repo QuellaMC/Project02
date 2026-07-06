@@ -34,6 +34,10 @@ import {
 import { isHostDefaultEnabledRuntimePlugin } from './default-enabled.ts';
 import { createPluginHookContext } from './hook-context.ts';
 import { createRuntimePluginDiscoveryPlugin } from './discovery-plugin.ts';
+import {
+  createRuntimePluginFileStoreTransaction,
+  type RuntimePluginFileStoreTransaction
+} from './file-store.ts';
 import { validateModelToolInputAgainstContract } from '../role-model/model-tools.ts';
 import {
   isModelFacingPluginTool,
@@ -131,6 +135,9 @@ export type RuntimePluginHost = {
     call: RuntimePluginToolCall,
     context: RuntimePluginContext
   ): Promise<RuntimePluginToolCallResult>;
+  beginFileStoreTransaction?(): void;
+  commitFileStoreTransaction?(): void;
+  rollbackFileStoreTransaction?(): void;
   afterTurnCommitted(
     context: RuntimePluginAfterTurnCommittedContext
   ): Promise<RuntimePluginHookHostResult>;
@@ -240,6 +247,9 @@ export function createRuntimePluginHost(
       accessByPluginId
     })
   );
+  let activeFileStoreTransaction:
+    | RuntimePluginFileStoreTransaction
+    | undefined;
 
   return Object.freeze({
     registrySnapshot() {
@@ -269,7 +279,10 @@ export function createRuntimePluginHost(
         accessByPluginId,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
-        sessionIdentity: options.sessionIdentity
+        sessionIdentity: options.sessionIdentity,
+        ...(activeFileStoreTransaction === undefined
+          ? {}
+          : { fileStoreTransaction: activeFileStoreTransaction })
       });
     },
     async handleToolCall(call, context) {
@@ -280,8 +293,26 @@ export function createRuntimePluginHost(
         accessByPluginId,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
-        sessionIdentity: options.sessionIdentity
+        sessionIdentity: options.sessionIdentity,
+        ...(activeFileStoreTransaction === undefined
+          ? {}
+          : { fileStoreTransaction: activeFileStoreTransaction })
       });
+    },
+    beginFileStoreTransaction() {
+      if (activeFileStoreTransaction !== undefined) {
+        throw new Error('Plugin fileStore transaction is already active.');
+      }
+
+      activeFileStoreTransaction = createRuntimePluginFileStoreTransaction();
+    },
+    commitFileStoreTransaction() {
+      activeFileStoreTransaction?.commit();
+      activeFileStoreTransaction = undefined;
+    },
+    rollbackFileStoreTransaction() {
+      activeFileStoreTransaction?.rollback();
+      activeFileStoreTransaction = undefined;
     },
     async afterTurnCommitted(context) {
       const hookResult = await runHookPhase({
@@ -320,7 +351,10 @@ export function createRuntimePluginHost(
         accessByPluginId,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
-        sessionIdentity: options.sessionIdentity
+        sessionIdentity: options.sessionIdentity,
+        ...(activeFileStoreTransaction === undefined
+          ? {}
+          : { fileStoreTransaction: activeFileStoreTransaction })
       });
     }
   } satisfies RuntimePluginHost);
@@ -383,6 +417,7 @@ async function runBeforeRoleModelCall(options: {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
+  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction;
 }): Promise<RuntimePluginBeforeRoleModelCallHostResult> {
   const contextItems: CollectedPluginContextItem[] = [];
   const runtimeNotes: CollectedPluginRuntimeNote[] = [];
@@ -405,7 +440,10 @@ async function runBeforeRoleModelCall(options: {
       access,
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
-      sessionIdentity: options.sessionIdentity
+      sessionIdentity: options.sessionIdentity,
+      ...(options.fileStoreTransaction === undefined
+        ? {}
+        : { fileStoreTransaction: options.fileStoreTransaction })
     });
     const result = await invokeBeforeRoleModelCallHook({
       plugin,
@@ -558,6 +596,7 @@ async function runHandleToolCall(options: {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
+  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction;
 }): Promise<RuntimePluginToolCallResult> {
   const plugin = options.plugins.find(
     (candidate) => candidate.manifest.id === options.call.pluginId
@@ -616,6 +655,9 @@ async function runHandleToolCall(options: {
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
+    ...(options.fileStoreTransaction === undefined
+      ? {}
+      : { fileStoreTransaction: options.fileStoreTransaction }),
     allowFileStoreWrites: toolAllowsFileStoreWrites(providedTool)
   });
   const inputValidation =
@@ -1013,6 +1055,7 @@ async function runHealth(options: {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
+  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction;
 }): Promise<RuntimePluginHealthHostResult> {
   const snapshots: RuntimePluginHealthSnapshot[] = [];
   const evidence: RuntimePluginEvidenceSnapshot[] = [];
@@ -1033,7 +1076,10 @@ async function runHealth(options: {
       }),
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
-      sessionIdentity: options.sessionIdentity
+      sessionIdentity: options.sessionIdentity,
+      ...(options.fileStoreTransaction === undefined
+        ? {}
+        : { fileStoreTransaction: options.fileStoreTransaction })
     });
 
     try {

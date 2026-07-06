@@ -1,5 +1,8 @@
 import { runtimePluginGrantsAccess } from './access-control.ts';
-import { createRuntimePluginFileStore } from './file-store.ts';
+import {
+  createRuntimePluginFileStore,
+  type RuntimePluginFileStoreTransaction
+} from './file-store.ts';
 import { sideEffectLevelAllowsFileStoreWrites } from './tool-policy.ts';
 import type {
   RuntimePlugin,
@@ -28,6 +31,7 @@ export function createPluginHookContext<TContext extends RuntimePluginContext>(
     readonly sessionId?: string | undefined;
     readonly sessionIdentity?: object | undefined;
     readonly allowFileStoreWrites?: boolean;
+    readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction;
   }
 ): PluginHookContextScope<TContext> {
   const grantsFileStore = runtimePluginGrantsAccess({
@@ -47,14 +51,22 @@ export function createPluginHookContext<TContext extends RuntimePluginContext>(
         options.plugin.manifest.runtimePolicy.sideEffectLevel
       ));
   const baseFileStore = grantsFileStore
-    ? createRuntimePluginFileStore({
+    ? (options.fileStoreTransaction?.fileStoreFor({
         ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
         sessionId,
         ...(options.sessionIdentity === undefined
           ? {}
           : { sessionIdentity: options.sessionIdentity }),
         pluginId: options.plugin.manifest.id
-      })
+      }) ??
+      createRuntimePluginFileStore({
+        ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+        sessionId,
+        ...(options.sessionIdentity === undefined
+          ? {}
+          : { sessionIdentity: options.sessionIdentity }),
+        pluginId: options.plugin.manifest.id
+      }))
     : undefined;
   const fileStore =
     baseFileStore === undefined

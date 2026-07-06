@@ -42,6 +42,7 @@ import {
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot,
   type RoleModelOutputContract,
+  type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
   type RoleModelToolObservation
 } from '../../role-model/contracts.ts';
@@ -972,7 +973,8 @@ function optionalRoleModelIOSnapshot(
       'rawOutputText',
       'malformed_record'
     ),
-    ...optionalRoleModelProviderMetadataOption(value['providerMetadata'])
+    ...optionalRoleModelProviderMetadataOption(value['providerMetadata']),
+    ...optionalRoleModelProviderExchangeOption(value['providerExchange'])
   });
 }
 
@@ -1946,6 +1948,22 @@ function optionalRoleModelProviderMetadataOption(value: unknown): {
       ...(response === undefined ? {} : { response }),
       ...(error === undefined ? {} : { error })
     } satisfies RoleModelProviderMetadata)
+  };
+}
+
+function optionalRoleModelProviderExchangeOption(value: unknown): {
+  readonly providerExchange?: RoleModelProviderExchangeSnapshot;
+} {
+  if (value === undefined) {
+    return {};
+  }
+
+  if (!isRecord(value)) {
+    throwMalformedRecord('providerExchange');
+  }
+
+  return {
+    providerExchange: value as unknown as RoleModelProviderExchangeSnapshot
   };
 }
 

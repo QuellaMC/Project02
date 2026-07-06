@@ -251,6 +251,7 @@ async function runSerializedLocalUserMessageEvent(
   });
   let runtimePluginContextForTurn: RuntimePluginContext | undefined;
   let runtimePluginHostForTurn: RuntimePluginHost | undefined;
+  let pluginFileStoreTransactionActive = false;
 
   function appendTrace(step: RuntimeTraceStepName): RuntimeTraceEntry {
     const traceEntry = options.logStore.appendTrace({
@@ -298,6 +299,7 @@ async function runSerializedLocalUserMessageEvent(
       healthResult.evidence
     );
 
+    rollbackPluginFileStoreTransaction();
     appendTrace(optionsForRejection.traceStep);
     appendRawEvent({
       ...identity,
@@ -393,6 +395,30 @@ async function runSerializedLocalUserMessageEvent(
       toolCallIds: Object.freeze([...finishedToolCallIds]),
       ...visibleMessageIdsForTurnOption(committedVisibleMessages)
     });
+  }
+
+  function beginPluginFileStoreTransaction(pluginHost: RuntimePluginHost): void {
+    pluginHost.beginFileStoreTransaction?.();
+    pluginFileStoreTransactionActive =
+      pluginHost.beginFileStoreTransaction !== undefined;
+  }
+
+  function commitPluginFileStoreTransaction(): void {
+    if (!pluginFileStoreTransactionActive) {
+      return;
+    }
+
+    runtimePluginHostForTurn?.commitFileStoreTransaction?.();
+    pluginFileStoreTransactionActive = false;
+  }
+
+  function rollbackPluginFileStoreTransaction(): void {
+    if (!pluginFileStoreTransactionActive) {
+      return;
+    }
+
+    runtimePluginHostForTurn?.rollbackFileStoreTransaction?.();
+    pluginFileStoreTransactionActive = false;
   }
 
   appendTrace('runtime_event_received');
@@ -639,6 +665,7 @@ async function runSerializedLocalUserMessageEvent(
       logStore: options.logStore
     });
     runtimePluginHostForTurn = pluginHost;
+    beginPluginFileStoreTransaction(pluginHost);
     const beforeRoleModelCallResult = await pluginHost.beforeRoleModelCall(
       runtimePluginContext
     );
@@ -900,6 +927,8 @@ async function runSerializedLocalUserMessageEvent(
       });
     }
 
+    commitPluginFileStoreTransaction();
+
     const turn =
       visibleReplyText === undefined
         ? undefined
@@ -1020,6 +1049,7 @@ async function runSerializedLocalUserMessageEvent(
       });
     }
 
+    rollbackPluginFileStoreTransaction();
     appendRawEvent({
       ...identity,
       kind: 'runtime_turn_rejected',

@@ -29,6 +29,12 @@ import {
   type VisibleReplyModelToolCall
 } from './model-tools.ts';
 import type {
+  RoleModelChatCompletionTool,
+  RoleModelChatMessage,
+  RoleModelProviderCapabilities,
+  RoleModelProviderToolNameMapping
+} from './prompt.ts';
+import type {
   RuntimeEventIdentity,
   UserMessageRuntimeEvent
 } from '../runtime/event.ts';
@@ -75,6 +81,44 @@ export type RoleModelProviderMetadata = {
   readonly error?: {
     readonly code: string;
     readonly message: string;
+  };
+};
+
+export type RoleModelThinkingMode =
+  | {
+      readonly mode: 'none';
+    }
+  | {
+      readonly mode: 'enabled';
+      readonly budgetTokens: number;
+    };
+
+export type RoleModelProviderExchangeSnapshot = {
+  readonly provider: {
+    readonly name: 'local' | 'nvidia';
+    readonly model?: string;
+    readonly endpoint?: string;
+  };
+  readonly capabilities: RoleModelProviderCapabilities;
+  readonly reasoning: {
+    readonly mode: RoleModelThinkingMode['mode'];
+    readonly params: RuntimePluginJsonValue;
+  };
+  readonly renderedMessages: readonly RoleModelChatMessage[];
+  readonly renderedTools: readonly RoleModelChatCompletionTool[];
+  readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
+  readonly toolChoice?: RuntimePluginJsonValue;
+  readonly parallelToolCalls?: boolean;
+  readonly requestBody: RuntimePluginJsonValue;
+  readonly rawFinishReason?: RuntimePluginJsonValue;
+  readonly finishReason?: string;
+  readonly usage?: RuntimePluginJsonValue;
+  readonly nativeAssistantMessage?: RoleModelChatMessage;
+  readonly nativeToolResultMessages: readonly RoleModelChatMessage[];
+  readonly responseBody?: RuntimePluginJsonValue;
+  readonly outputNormalization?: {
+    readonly source: 'terminal_assistant_content' | 'native_tool_calls';
+    readonly committed: false;
   };
 };
 
@@ -217,6 +261,7 @@ export type RoleModelIOSnapshot = RuntimeEventIdentity & {
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly rawOutputText: string;
   readonly providerMetadata?: RoleModelProviderMetadata;
+  readonly providerExchange?: RoleModelProviderExchangeSnapshot;
 };
 
 export type CreateRoleModelIOSnapshotOptions = RuntimeEventIdentity & {
@@ -224,6 +269,7 @@ export type CreateRoleModelIOSnapshotOptions = RuntimeEventIdentity & {
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly rawOutputText: string;
   readonly providerMetadata?: RoleModelProviderMetadata;
+  readonly providerExchange?: RoleModelProviderExchangeSnapshot;
 };
 
 export type ParsedRoleModelDecisionSnapshot = RuntimeEventIdentity & {
@@ -361,7 +407,14 @@ export function createRoleModelIOSnapshot(
     rawOutputText: options.rawOutputText,
     ...(options.providerMetadata === undefined
       ? {}
-      : { providerMetadata: freezeProviderMetadata(options.providerMetadata) })
+      : { providerMetadata: freezeProviderMetadata(options.providerMetadata) }),
+    ...(options.providerExchange === undefined
+      ? {}
+      : {
+          providerExchange: freezeRoleModelProviderExchangeSnapshot(
+            options.providerExchange
+          )
+        })
   } satisfies RoleModelIOSnapshot);
 }
 
@@ -756,10 +809,47 @@ function parseVisibleReplyToolCallInput(
     };
   }
 
+  const scrubbedText = scrubVisibleReplyReasoningLeak(text);
+
+  if (scrubbedText.status === 'rejected') {
+    return rejectToolCall(scrubbedText.details);
+  }
+
   return {
     status: 'accepted',
-    toolCall: createVisibleReplyModelToolCall(text)
+    toolCall: createVisibleReplyModelToolCall(scrubbedText.text)
   };
+}
+
+type ScrubbedVisibleReplyText =
+  | {
+      readonly status: 'accepted';
+      readonly text: string;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly details: string;
+    };
+
+const visibleReplyReasoningBlockPattern =
+  /<\s*(think|reasoning)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/giu;
+const visibleReplyReasoningTagPattern =
+  /<\s*\/?\s*(think|reasoning)\b[^>]*>/iu;
+
+function scrubVisibleReplyReasoningLeak(text: string): ScrubbedVisibleReplyText {
+  const scrubbed = text.replaceAll(visibleReplyReasoningBlockPattern, '');
+
+  if (visibleReplyReasoningTagPattern.test(scrubbed)) {
+    return Object.freeze({
+      status: 'rejected',
+      details: 'visible_reply text contains an unterminated reasoning block.'
+    } satisfies ScrubbedVisibleReplyText);
+  }
+
+  return Object.freeze({
+    status: 'accepted',
+    text: scrubbed
+  } satisfies ScrubbedVisibleReplyText);
 }
 
 function rejectToolCall(details: string): ParsedToolCallResult {
@@ -1115,6 +1205,138 @@ function freezeRuntimePluginJsonValue(
   }
 
   throw new TypeError('Role-model tool observation values must be JSON-compatible.');
+}
+
+function freezeRoleModelProviderExchangeSnapshot(
+  snapshot: RoleModelProviderExchangeSnapshot
+): RoleModelProviderExchangeSnapshot {
+  return Object.freeze({
+    provider: Object.freeze({
+      name: snapshot.provider.name,
+      ...(snapshot.provider.model === undefined
+        ? {}
+        : { model: snapshot.provider.model }),
+      ...(snapshot.provider.endpoint === undefined
+        ? {}
+        : { endpoint: snapshot.provider.endpoint })
+    }),
+    capabilities: Object.freeze({ ...snapshot.capabilities }),
+    reasoning: Object.freeze({
+      mode: snapshot.reasoning.mode,
+      params: freezeRuntimePluginJsonValue(snapshot.reasoning.params)
+    }),
+    renderedMessages: Object.freeze(
+      snapshot.renderedMessages.map(freezeProviderExchangeChatMessage)
+    ),
+    renderedTools: Object.freeze(
+      snapshot.renderedTools.map(freezeProviderExchangeTool)
+    ),
+    toolNameMappings: Object.freeze(
+      snapshot.toolNameMappings.map((mapping) =>
+        Object.freeze({
+          runtimeName: mapping.runtimeName,
+          providerName: mapping.providerName
+        } satisfies RoleModelProviderToolNameMapping)
+      )
+    ),
+    ...(snapshot.toolChoice === undefined
+      ? {}
+      : { toolChoice: freezeRuntimePluginJsonValue(snapshot.toolChoice) }),
+    ...(snapshot.parallelToolCalls === undefined
+      ? {}
+      : { parallelToolCalls: snapshot.parallelToolCalls }),
+    requestBody: freezeRuntimePluginJsonValue(snapshot.requestBody),
+    ...(snapshot.rawFinishReason === undefined
+      ? {}
+      : {
+          rawFinishReason: freezeRuntimePluginJsonValue(
+            snapshot.rawFinishReason
+          )
+        }),
+    ...(snapshot.finishReason === undefined
+      ? {}
+      : { finishReason: snapshot.finishReason }),
+    ...(snapshot.usage === undefined
+      ? {}
+      : { usage: freezeRuntimePluginJsonValue(snapshot.usage) }),
+    ...(snapshot.nativeAssistantMessage === undefined
+      ? {}
+      : {
+          nativeAssistantMessage: freezeProviderExchangeChatMessage(
+            snapshot.nativeAssistantMessage
+          )
+        }),
+    nativeToolResultMessages: Object.freeze(
+      snapshot.nativeToolResultMessages.map(freezeProviderExchangeChatMessage)
+    ),
+    ...(snapshot.responseBody === undefined
+      ? {}
+      : { responseBody: freezeRuntimePluginJsonValue(snapshot.responseBody) }),
+    ...(snapshot.outputNormalization === undefined
+      ? {}
+      : {
+          outputNormalization: Object.freeze({
+            source: snapshot.outputNormalization.source,
+            committed: false
+          })
+        })
+  } satisfies RoleModelProviderExchangeSnapshot);
+}
+
+function freezeProviderExchangeChatMessage(
+  message: RoleModelChatMessage
+): RoleModelChatMessage {
+  if (message.role === 'assistant') {
+    return Object.freeze({
+      role: 'assistant',
+      content: message.content,
+      ...(message.tool_calls === undefined
+        ? {}
+        : {
+            tool_calls: Object.freeze(
+              message.tool_calls.map((toolCall) =>
+                Object.freeze({
+                  id: toolCall.id,
+                  type: 'function',
+                  function: Object.freeze({
+                    name: toolCall.function.name,
+                    arguments: toolCall.function.arguments
+                  })
+                })
+              )
+            )
+          })
+    } satisfies RoleModelChatMessage);
+  }
+
+  if (message.role === 'tool') {
+    return Object.freeze({
+      role: 'tool',
+      content: message.content,
+      tool_call_id: message.tool_call_id
+    } satisfies RoleModelChatMessage);
+  }
+
+  return Object.freeze({
+    role: message.role,
+    content: message.content
+  } satisfies RoleModelChatMessage);
+}
+
+function freezeProviderExchangeTool(
+  tool: RoleModelChatCompletionTool
+): RoleModelChatCompletionTool {
+  return Object.freeze({
+    type: 'function',
+    function: Object.freeze({
+      name: tool.function.name,
+      description: tool.function.description,
+      parameters: freezeRuntimePluginJsonValue(
+        tool.function.parameters
+      ) as RoleModelChatCompletionTool['function']['parameters'],
+      ...(tool.function.strict === undefined ? {} : { strict: true })
+    })
+  } satisfies RoleModelChatCompletionTool);
 }
 
 function freezeProviderMetadata(

@@ -43,31 +43,31 @@ const characterStatePatchInputContract = Object.freeze({
   fields: Object.freeze([
     Object.freeze({
       name: 'mood',
-      description: 'Current mood.',
+      description: "Mira's internal current mood; assistant-owned, model-only, and not the user's mood.",
       required: false,
       allowedValues: characterMoodValues
     }),
     Object.freeze({
       name: 'energy',
-      description: 'Current energy.',
+      description: "Mira's internal current energy; assistant-owned, model-only, and not the user's energy.",
       required: false,
       allowedValues: characterEnergyValues
     }),
     Object.freeze({
       name: 'attention',
-      description: 'Current attention.',
+      description: "Mira's internal current attention; assistant-owned and model-only.",
       required: false,
       allowedValues: characterAttentionValues
     }),
     Object.freeze({
       name: 'currentActivity',
-      description: 'Current activity.',
+      description: "Mira's internal current activity; assistant-owned and model-only.",
       required: false,
       allowedValues: characterCurrentActivityValues
     }),
     Object.freeze({
       name: 'socialOrientation',
-      description: 'Current social orientation.',
+      description: "Mira's internal current social orientation; assistant-owned and model-only.",
       required: false,
       allowedValues: characterSocialOrientationValues
     })
@@ -81,7 +81,7 @@ export function createCharacterStatePluginManifest(): RuntimePluginManifest {
     displayName: 'Character State',
     version: '1.0.0',
     kind: 'first_party',
-    description: 'First-party current Character State context and patch tool.',
+    description: "First-party assistant-owned Character State context and patch tool for Mira's internal state.",
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
@@ -126,7 +126,7 @@ export function createCharacterStatePlugin(): RuntimePlugin {
       Object.freeze({
         name: characterStatePatchModelToolName,
         description:
-          'Optionally patch your current Character State. The Character State plugin validates accepted fields and values.',
+          "Optionally patch Mira's internal Character State. This assistant-owned model-only state is not the user's mood, energy, attention, activity, or social orientation.",
         requiredForUserTurn: false,
         maxCallsPerUserTurn: 1,
         inputContract: characterStatePatchInputContract,
@@ -147,7 +147,7 @@ export function createCharacterStatePlugin(): RuntimePlugin {
               pluginId: characterStatePluginId,
               id: 'current',
               kind: 'runtime_note',
-              text: `Character State: ${brief.text}`,
+              text: `Mira's internal Character State (assistant-owned, model-only; not user state): ${brief.text}`,
               budget: {
                 estimatedTokens: 32,
                 priority: 90
@@ -208,10 +208,57 @@ export function createCharacterStatePlugin(): RuntimePlugin {
           };
         }
 
+        const duplicateEvent = findCharacterStatePatchEvent({
+          events: fileStore.readJsonl(characterStateEventsPath),
+          eventId: call.eventId,
+          traceId: call.traceId,
+          ...(call.toolCallId === undefined ? {} : { toolCallId: call.toolCallId })
+        });
+
+        if (duplicateEvent !== undefined) {
+          return {
+            status: 'accepted',
+            output: Object.freeze({
+              status: 'accepted',
+              current: result.after.current,
+              appliedChanges: result.appliedChanges,
+              idempotent: true
+            }),
+            evidence: [
+              createPluginToolEvidence({
+                context,
+                pluginId: characterStatePluginId,
+                status: 'accepted',
+                summary: 'Skipped duplicate Character State patch event.'
+              })
+            ]
+          };
+        }
+
+        if (result.appliedChanges.length === 0) {
+          return {
+            status: 'accepted',
+            output: Object.freeze({
+              status: 'accepted',
+              current: result.after.current,
+              appliedChanges: result.appliedChanges
+            }),
+            evidence: [
+              createPluginToolEvidence({
+                context,
+                pluginId: characterStatePluginId,
+                status: 'accepted',
+                summary: 'No Character State changes to apply.'
+              })
+            ]
+          };
+        }
+
         const event = Object.freeze({
           type: 'character_state.patch',
           eventId: call.eventId,
           traceId: call.traceId,
+          ...(call.toolCallId === undefined ? {} : { toolCallId: call.toolCallId }),
           createdAt: call.createdAt,
           input: call.input,
           result
@@ -300,6 +347,26 @@ export function createCharacterStatePlugin(): RuntimePlugin {
 
   characterStatePluginInstances.add(plugin);
   return plugin;
+}
+
+function findCharacterStatePatchEvent(options: {
+  readonly events: readonly unknown[];
+  readonly eventId: string;
+  readonly traceId: string;
+  readonly toolCallId?: string;
+}): RuntimePluginJsonObject | undefined {
+  return options.events.find((event): event is RuntimePluginJsonObject => {
+    if (!isJsonObject(event) || event['type'] !== 'character_state.patch') {
+      return false;
+    }
+
+    return (
+      event['eventId'] === options.eventId &&
+      event['traceId'] === options.traceId &&
+      (options.toolCallId === undefined ||
+        event['toolCallId'] === options.toolCallId)
+    );
+  });
 }
 
 export function isCharacterStatePlugin(plugin: RuntimePlugin): boolean {

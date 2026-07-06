@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createDecisionContext,
-  createRoleModelInputEnvelope
+  createRoleModelInputEnvelope,
+  type RoleModelPluginToolDefinition
 } from '../src/role-model/contracts.ts';
 import {
   renderRoleModelTurnContext,
+  type RoleModelSystemChatMessage,
   type RoleModelUserChatMessage
 } from '../src/role-model/prompt.ts';
 import { createRuntimePluginContextItem } from '../src/plugins/types.ts';
@@ -15,7 +17,7 @@ import {
 } from '../src/runtime/event.ts';
 
 describe('role-model prompt rendering', () => {
-  it('neutralizes runtime_context delimiter tags inside hidden context text', () => {
+  it('keeps current user text exact and renders runtime context as model-only context', () => {
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
@@ -49,12 +51,25 @@ describe('role-model prompt rendering', () => {
         ]
       })
     });
-    const currentUserMessage = renderRoleModelTurnContext(inputEnvelope)
-      .messages.at(-1) as RoleModelUserChatMessage | undefined;
-    const content = currentUserMessage?.content ?? '';
+    const turnContext = renderRoleModelTurnContext(inputEnvelope);
+    const currentUserMessage = turnContext.messages.at(-1) as
+      | RoleModelUserChatMessage
+      | undefined;
+    const runtimeContextMessage = turnContext.messages.find(
+      (message): message is RoleModelSystemChatMessage =>
+        message.role === 'system' &&
+        message.content.includes('Model-only runtime context')
+    );
+    const content = runtimeContextMessage?.content ?? '';
 
-    expect(content).toContain('<runtime_context hidden_from_user="true">');
-    expect(content.match(/<\s*\/\s*runtime_context\s*>/giu)).toHaveLength(1);
+    expect(currentUserMessage).toEqual({
+      role: 'user',
+      content: 'hello'
+    });
+    expect(runtimeContextMessage).toBeDefined();
+    expect(content).toContain('Model-only runtime context');
+    expect(content).toContain('This is not user input');
+    expect(content.match(/<\s*\/\s*runtime_context\s*>/giu) ?? []).toHaveLength(0);
     expect(content).toContain('Exact closer </runtime-context> stays data.');
     expect(content).toContain('Spaced closer </runtime-context> stays data.');
     expect(content).toContain('Case closer </runtime-context> stays data.');
@@ -62,8 +77,118 @@ describe('role-model prompt rendering', () => {
     expect(content).toContain(
       'Nested opener <runtime-context hidden_from_user="true"> stays data.'
     );
+    expect(
+      turnContext.frames.find(
+        (frame) => frame.kind === 'model_only_runtime_context'
+      )?.modelOnly
+    ).toBe(true);
+  });
+
+  it('omits CharacterDecision JSON instructions for native tools but keeps JSON fallback available', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-role-model-native-prompt',
+        characterSnapshot: {
+          id: 'mira',
+          displayName: 'Mira'
+        }
+      })
+    });
+    const nativeMessages = renderRoleModelTurnContext(inputEnvelope).messages;
+    const fallbackMessages = renderRoleModelTurnContext(inputEnvelope, {
+      outputMode: 'json_fallback'
+    }).messages;
+
+    expect(nativeMessages.map((message) => message.content).join('\n')).not.toContain(
+      'CharacterDecision JSON'
+    );
+    expect(fallbackMessages.map((message) => message.content).join('\n')).toContain(
+      'CharacterDecision JSON'
+    );
+  });
+
+  it('renders nested JSON Schema with strict mode when every object is closed', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-role-model-nested-schema',
+        characterSnapshot: {
+          id: 'mira',
+          displayName: 'Mira'
+        }
+      }),
+      pluginToolDefinitions: [nestedSchemaToolDefinition]
+    });
+    const tool = renderRoleModelTurnContext(inputEnvelope).tools.find(
+      (candidate) => candidate.function.name === 'memory.capture'
+    );
+
+    expect(tool?.function.strict).toBe(true);
+    expect(tool?.function.parameters).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        memory: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            text: {
+              type: 'string'
+            },
+            tags: {
+              type: 'array',
+              items: {
+                type: 'string'
+              }
+            }
+          }
+        }
+      }
+    });
   });
 });
+
+const nestedSchemaToolDefinition = Object.freeze({
+  pluginId: 'memory.fixture',
+  name: 'memory.capture',
+  description: 'Capture a nested memory object.',
+  requiredForUserTurn: false,
+  maxCallsPerUserTurn: 1,
+  inputContract: {
+    type: 'object',
+    fields: [],
+    additionalFields: false,
+    jsonSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['memory'],
+      properties: {
+        memory: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['text'],
+          properties: {
+            text: {
+              type: 'string',
+              description: 'Memory text.'
+            },
+            tags: {
+              type: 'array',
+              items: {
+                type: 'string'
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  validationOwner: 'plugin_host',
+  sideEffectLevel: 'local_memory_write',
+  requiresConfirmation: false,
+  sourceReferencesRequired: false
+} satisfies RoleModelPluginToolDefinition);
 
 function testIdentity() {
   return createRuntimeEventIdentity({

@@ -24,6 +24,9 @@ import {
 import type {
   RoleModelAdapter
 } from '../src/role-model/loop.ts';
+import {
+  defaultRoleModelProviderCapabilities
+} from '../src/role-model/prompt.ts';
 import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
 import {
   createRuntimePluginFileStore
@@ -84,6 +87,18 @@ describe('inspect CLI plugin evidence', () => {
             readonly roleModelEvidence: {
               readonly output?: {
                 readonly rawOutputText: string;
+                readonly providerExchange?: {
+                  readonly renderedMessages: readonly unknown[];
+                  readonly renderedTools: readonly unknown[];
+                  readonly requestBody: unknown;
+                  readonly nativeToolResultMessages: readonly unknown[];
+                };
+              };
+              readonly input?: {
+                readonly pluginContextItems: readonly {
+                  readonly pluginId: string;
+                  readonly text: string;
+                }[];
               };
             };
           }[];
@@ -108,6 +123,28 @@ describe('inspect CLI plugin evidence', () => {
     expect(
       output.turns[0].modelRounds[0]?.roleModelEvidence.output?.rawOutputText
     ).toContain('character_state.patch');
+    expect(
+      output.turns[0].modelRounds[0]?.roleModelEvidence.input
+        ?.pluginContextItems[0]?.text
+    ).toContain("Mira's internal Character State");
+    expect(
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output
+        ?.providerExchange?.renderedMessages.length
+    ).toBeGreaterThan(0);
+    expect(
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output
+        ?.providerExchange?.renderedTools.length
+    ).toBeGreaterThan(0);
+    expect(
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output
+        ?.providerExchange?.requestBody
+    ).toMatchObject({
+      provider: 'local-fixture'
+    });
+    expect(
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output
+        ?.providerExchange?.nativeToolResultMessages.length
+    ).toBeGreaterThan(0);
     expect(output.turns[0].toolEvents[0].pluginId).toBe('character-state');
     expect(output.turns[0].pluginEvidence.evidence).toEqual(
       expect.arrayContaining([
@@ -1148,7 +1185,7 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
   let calls = 0;
 
   return {
-    invoke() {
+    invoke(_inputEnvelope, invocation) {
       calls += 1;
 
       if (calls === 1) {
@@ -1162,7 +1199,21 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
                 }
               }
             ]
-          })
+          }),
+          nativeAssistantMessage: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_character_state_patch',
+                type: 'function',
+                function: {
+                  name: 'character_state.patch',
+                  arguments: '{"mood":"curious"}'
+                }
+              }
+            ]
+          }
         };
       }
 
@@ -1176,7 +1227,27 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
               }
             }
           ]
-        })
+        }),
+        providerExchange: {
+          provider: {
+            name: 'local',
+            model: 'inspect-fixture'
+          },
+          capabilities: defaultRoleModelProviderCapabilities,
+          reasoning: {
+            mode: 'none',
+            params: {}
+          },
+          renderedMessages: invocation.turnContext.messages,
+          renderedTools: invocation.turnContext.tools,
+          toolNameMappings: [],
+          requestBody: {
+            provider: 'local-fixture'
+          },
+          nativeToolResultMessages: invocation.turnContext.messages.filter(
+            (message) => message.role === 'tool'
+          )
+        }
       };
     }
   };

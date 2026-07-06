@@ -21,6 +21,7 @@ import {
 import { createLocalRuntimeSessionStore } from '../runtime/storage/session-store.ts';
 import type {
   RuntimePluginAccessMap,
+  RuntimePluginContextItem,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginTurnEvidenceSnapshot
 } from '../plugins/types.ts';
@@ -152,10 +153,12 @@ type InspectRoleModelEvidence = {
     readonly currentUserMessage: string;
     readonly recentVisibleMessages: readonly InspectVisibleMessage[];
     readonly runtimeNotes: readonly string[];
+    readonly pluginContextItems: readonly InspectPluginContextItem[];
   };
   readonly output?: {
     readonly rawOutputText: string;
     readonly providerMetadata?: unknown;
+    readonly providerExchange?: unknown;
   };
   readonly parsedDecision?: InspectParsedRoleModelDecision;
   readonly commitValidation?: InspectRoleModelCommitValidation;
@@ -743,7 +746,10 @@ function roleModelEvidenceForRawEvent(
               ),
               runtimeNotes: Object.freeze([
                 ...inputEnvelope.decisionContext.runtimeNotes
-              ])
+              ]),
+              pluginContextItems: pluginContextItemsFromSnapshots(
+                inputEnvelope.decisionContext.pluginContextItems
+              )
             })
           }),
       ...(rawEvent.roleModelIOSnapshot === undefined
@@ -756,6 +762,12 @@ function roleModelEvidenceForRawEvent(
                 : {
                     providerMetadata:
                       rawEvent.roleModelIOSnapshot.providerMetadata
+                  }),
+              ...(rawEvent.roleModelIOSnapshot.providerExchange === undefined
+                ? {}
+                : {
+                    providerExchange:
+                      rawEvent.roleModelIOSnapshot.providerExchange
                   })
             })
           }),
@@ -953,6 +965,28 @@ function pluginListings(
           ? {}
           : { healthStatus: plugin.healthStatus })
       } satisfies InspectPluginListing)
+    )
+  );
+}
+
+function pluginContextItemsFromSnapshots(
+  items: readonly RuntimePluginContextItem[]
+): readonly InspectPluginContextItem[] {
+  return Object.freeze(
+    items.map((item) =>
+      Object.freeze({
+        pluginId: item.pluginId,
+        id: item.id,
+        kind: item.kind,
+        text: item.text,
+        budget: Object.freeze({
+          estimatedTokens: item.budget.estimatedTokens,
+          priority: item.budget.priority
+        }),
+        sourceReferences: sourceReferences(item.sourceReferences),
+        redactionLabels: Object.freeze([...item.redactionLabels]),
+        ...(item.confidence === undefined ? {} : { confidence: item.confidence })
+      } satisfies InspectPluginContextItem)
     )
   );
 }
