@@ -2328,7 +2328,7 @@ function createHandleFileStoreWritePlugin() {
         defaultEnabled: true,
         reasons: ['test']
       },
-      requestedApis: { file_store: 'write', model_input: 'write' }
+      requestedAccess: { file_store: 'write', model_input: 'write' }
     },
     providedTools: [
       Object.freeze({
@@ -2434,7 +2434,7 @@ function createAfterTurnCommittedProbeHost(
             defaultEnabled: true,
             reasons: ['test']
           },
-          requestedApis: {}
+          requestedAccess: {}
         },
         providedTools: [],
         lifecycleHooks: {
@@ -2513,7 +2513,7 @@ function createPluginStoreRevisionFixtureHost() {
             defaultEnabled: true,
             reasons: ['test']
           },
-          requestedApis: { model_input: 'write' }
+          requestedAccess: { model_input: 'write' }
         },
         providedTools: [
           createRevisionFixtureTool('revision.zero'),

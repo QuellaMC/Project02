@@ -6,7 +6,7 @@ import {
   createRuntimePluginHealthSnapshot,
   createFirstPartyModelToolsPlugin,
   type RuntimePlugin,
-  type RuntimePluginApiPermissions,
+  type RuntimePluginAccessMap,
   type RuntimePluginConfigField,
   type RuntimePluginContextItem,
   type RuntimePluginDeclaration,
@@ -849,13 +849,13 @@ function createRuntimePluginManifestForAdapter(options: {
       defaultEnabled: false,
       reasons: options.activationReasons
     },
-    requestedApis: adapterRequestedApis(options.declaredPlugins)
+    requestedAccess: adapterRequestedAccess(options.declaredPlugins)
   };
 }
 
-function adapterRequestedApis(
+function adapterRequestedAccess(
   declaredPlugins: readonly RuntimePluginDeclaration[]
-): RuntimePluginApiPermissions {
+): RuntimePluginAccessMap {
   return Object.freeze({
     ...(declaredPlugins.includes('before_role_model_call') ||
       declaredPlugins.includes('after_turn_committed')
@@ -866,7 +866,7 @@ function adapterRequestedApis(
       declaredPlugins.includes('handle_tool_call')
       ? { model_input: 'write' }
       : {})
-  } satisfies RuntimePluginApiPermissions);
+  } satisfies RuntimePluginAccessMap);
 }
 
 function createAdapterPolicy(options: {

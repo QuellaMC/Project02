@@ -22,7 +22,7 @@ import {
   memorySearchTool,
   runtimePluginDiscoveryPluginId,
   runtimePluginContractVersion,
-  type RuntimePluginApiPermissions,
+  type RuntimePluginAccessMap,
   type RuntimePluginContext
 } from '../src/plugins/index.ts';
 
@@ -293,8 +293,8 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
-  it('records requested and granted API permissions in activation snapshots', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-api-perms-'));
+  it('records requested and granted access in activation snapshots', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-access-'));
     const plugin = fileStoreSessionEndPlugin('valid.file-store-policy', () => {});
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -318,8 +318,8 @@ describe('runtime config activation diagnostics', () => {
     expect(configured.activation.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: plugin.manifest.id,
-        requestedApis: { file_store: 'write' },
-        grantedApis: { file_store: 'write' }
+        requestedAccess: { file_store: 'write' },
+        grantedAccess: { file_store: 'write' }
       })
     );
   });
@@ -339,8 +339,8 @@ describe('runtime config activation diagnostics', () => {
       expect.objectContaining({
         pluginId: characterStatePluginId,
         enabled: true,
-        requestedApis: { file_store: 'write', model_input: 'write' },
-        grantedApis: { file_store: 'write', model_input: 'write' }
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: { file_store: 'write', model_input: 'write' }
       })
     );
   });
@@ -373,8 +373,8 @@ describe('runtime config activation diagnostics', () => {
       expect.objectContaining({
         pluginId: characterStatePluginId,
         enabled: false,
-        requestedApis: { file_store: 'write', model_input: 'write' },
-        grantedApis: {}
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: {}
       })
     );
   });
@@ -401,8 +401,8 @@ describe('runtime config activation diagnostics', () => {
       expect.objectContaining({
         pluginId: characterStatePluginId,
         enabled: false,
-        requestedApis: { file_store: 'write' },
-        grantedApis: {}
+        requestedAccess: { file_store: 'write' },
+        grantedAccess: {}
       })
     );
   });
@@ -1003,7 +1003,7 @@ describe('runtime config activation diagnostics', () => {
     expect(stdout).not.toContain('manifest-backed-secret');
   });
 
-  it('reports host-owned default API permissions during check for the default Character State factory', async () => {
+  it('reports host-owned default access during check for the default Character State factory', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-check-character-state-default-factory-')
     );
@@ -1028,8 +1028,8 @@ describe('runtime config activation diagnostics', () => {
         pluginId: characterStatePluginId,
         activationStatus: 'active',
         enabled: true,
-        requestedApis: { file_store: 'write', model_input: 'write' },
-        grantedApis: { file_store: 'write', model_input: 'write' }
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: { file_store: 'write', model_input: 'write' }
       })
     );
   });
@@ -1074,13 +1074,13 @@ describe('runtime config activation diagnostics', () => {
         pluginId: characterStatePluginId,
         activationStatus: 'disabled',
         enabled: false,
-        requestedApis: { file_store: 'write', model_input: 'write' },
-        grantedApis: {}
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: {}
       })
     );
   });
 
-  it('does not infer Character State check default API permissions from exact manifest matches', async () => {
+  it('does not infer Character State check default access from exact manifest matches', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-check-character-state-exact-manifest-')
     );
@@ -1123,13 +1123,13 @@ describe('runtime config activation diagnostics', () => {
         pluginId: characterStatePluginId,
         activationStatus: 'disabled',
         enabled: false,
-        requestedApis: { file_store: 'write', model_input: 'write' },
-        grantedApis: {}
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: {}
       })
     );
   });
 
-  it('does not infer Character State check default API permissions from same-id manifest spoofs', async () => {
+  it('does not infer Character State check default access from same-id manifest spoofs', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-check-character-state-spoof-')
     );
@@ -1167,8 +1167,8 @@ describe('runtime config activation diagnostics', () => {
         pluginId: characterStatePluginId,
         activationStatus: 'disabled',
         enabled: false,
-        requestedApis: { file_store: 'write' },
-        grantedApis: {}
+        requestedAccess: { file_store: 'write' },
+        grantedAccess: {}
       })
     );
   });
@@ -2205,7 +2205,7 @@ function requiredSecretPlugin(
         defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test_required_secret']
       },
-      requestedApis: {}
+      requestedAccess: {}
     }
   });
 }
@@ -2300,7 +2300,7 @@ function firstPartyPlugin(
         defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test_first_party']
       },
-      requestedApis: {}
+      requestedAccess: {}
     }
   });
 }
@@ -2345,7 +2345,7 @@ function fileStoreSessionEndPlugin(
         ...plugin.manifest.runtimePolicy,
         sideEffectLevel: 'local_memory_write'
       },
-      requestedApis: { file_store: 'write' }
+      requestedAccess: { file_store: 'write' }
     },
     lifecycleHooks: {
       onSessionEnd(context) {
@@ -2370,7 +2370,7 @@ function modelFacingMemorySearchPlugin(id: string) {
         'tool_provider',
         'handle_tool_call'
       ],
-      requestedApis: { model_input: 'write' }
+      requestedAccess: { model_input: 'write' }
     },
     providedTools: [memorySearchTool('memory.search')],
     lifecycleHooks: {
@@ -2400,7 +2400,7 @@ function modelFacingPluginListCollisionPlugin(
         'handle_tool_call',
         'on_session_end'
       ],
-      requestedApis: { model_input: 'write' }
+      requestedAccess: { model_input: 'write' }
     },
     providedTools: [memorySearchTool(roleModelPluginListToolName)],
     lifecycleHooks: {
@@ -2455,8 +2455,8 @@ function parseActivationOutput(stdout: string): {
     readonly pluginId: string;
     readonly activationStatus: string;
     readonly enabled: boolean;
-    readonly requestedApis: RuntimePluginApiPermissions;
-    readonly grantedApis: RuntimePluginApiPermissions;
+    readonly requestedAccess: RuntimePluginAccessMap;
+    readonly grantedAccess: RuntimePluginAccessMap;
   }[];
 } {
   return JSON.parse(stdout) as {
@@ -2470,8 +2470,8 @@ function parseActivationOutput(stdout: string): {
       readonly pluginId: string;
       readonly activationStatus: string;
       readonly enabled: boolean;
-      readonly requestedApis: RuntimePluginApiPermissions;
-      readonly grantedApis: RuntimePluginApiPermissions;
+      readonly requestedAccess: RuntimePluginAccessMap;
+      readonly grantedAccess: RuntimePluginAccessMap;
     }[];
   };
 }

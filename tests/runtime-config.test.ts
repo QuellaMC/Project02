@@ -6364,7 +6364,7 @@ function requiredSecretPlugin(id = 'memory.required') {
         defaultEnabled: true,
         reasons: ['test_required_secret']
       },
-      requestedApis: {}
+      requestedAccess: {}
     }
   });
 }

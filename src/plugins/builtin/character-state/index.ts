@@ -115,7 +115,7 @@ export function createCharacterStatePluginManifest(): RuntimePluginManifest {
       defaultEnabled: true,
       reasons: ['built_in_character_state']
     },
-    requestedApis: { file_store: 'write', model_input: 'write' }
+    requestedAccess: { file_store: 'write', model_input: 'write' }
   });
 }
 

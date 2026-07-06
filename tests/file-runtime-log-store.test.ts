@@ -613,7 +613,7 @@ function createHealthRejectingPluginHost(options?: {
             defaultEnabled: true,
             reasons: ['test']
           },
-          requestedApis: {}
+          requestedAccess: {}
         },
         providedTools: [],
         lifecycleHooks: {

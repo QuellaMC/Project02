@@ -12,6 +12,8 @@ import {
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
+  createRuntimePluginManifest,
+  createRuntimePluginProvidedTool,
   firstPartyModelToolsPluginId,
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
@@ -408,7 +410,7 @@ describe('runtime plugin host', () => {
   it('withholds fileStore when an enabled plugin does not declare file_store', async () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.no-file-store-declaration.fixture',
-      requestedApis: { model_input: 'write' }
+      requestedAccess: { model_input: 'write' }
     });
     const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin]
@@ -428,7 +430,7 @@ describe('runtime plugin host', () => {
     const sessionIdentity = {};
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.no-inherited-file-store.fixture',
-      requestedApis: { model_input: 'write' }
+      requestedAccess: { model_input: 'write' }
     });
     const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
@@ -459,7 +461,7 @@ describe('runtime plugin host', () => {
   it('injects fileStore when an enabled non-built-in plugin declares file_store read', async () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.file-store-read.fixture',
-      requestedApis: { file_store: 'read', model_input: 'write' }
+      requestedAccess: { file_store: 'read', model_input: 'write' }
     });
     const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
@@ -477,7 +479,7 @@ describe('runtime plugin host', () => {
     const captured: TurnContextCapture = {};
     const plugin = createTurnContextCapturePlugin({
       pluginId: 'memory.turn-context-scrubbed.fixture',
-      requestedApis: {},
+      requestedAccess: {},
       capture: captured
     });
     const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
@@ -523,7 +525,7 @@ describe('runtime plugin host', () => {
     const captured: TurnContextCapture = {};
     const plugin = createTurnContextCapturePlugin({
       pluginId: 'memory.turn-context-readable.fixture',
-      requestedApis: { turn_context: 'read' },
+      requestedAccess: { turn_context: 'read' },
       capture: captured
     });
     const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
@@ -582,7 +584,30 @@ describe('runtime plugin host', () => {
     ]);
   });
 
-  it('does not expose or invoke model-facing tools without model_input write', async () => {
+  it('rejects model-facing tools without requestedAccess.model_input write at creation', () => {
+    expect(() =>
+      createRuntimePlugin({
+        manifest: {
+          ...memorySearchPluginManifest('memory.tool-no-model-input.fixture'),
+          requestedAccess: {}
+        },
+        providedTools: memorySearchProvidedTools(),
+        lifecycleHooks: {
+          handleToolCall() {
+            return {
+              status: 'accepted',
+              output: {},
+              evidence: []
+            };
+          }
+        }
+      })
+    ).toThrow(
+      'Model-facing tools require requestedAccess.model_input = "write".'
+    );
+  });
+
+  it('defensively does not expose or invoke unchecked model-facing tools without model_input write', async () => {
     let invoked = false;
     const plugin = createModelFacingToolWithoutModelInputPlugin(() => {
       invoked = true;
@@ -630,7 +655,7 @@ describe('runtime plugin host', () => {
     const invokedPlugins: string[] = [];
     const deniedPlugin = createSessionEndFileStoreProbePlugin({
       pluginId,
-      requestedApis: {},
+      requestedAccess: {},
       onSessionEnd(context) {
         invokedPlugins.push(
           context.fileStore === undefined ? 'denied:no_file_store' : 'denied:file_store'
@@ -639,7 +664,7 @@ describe('runtime plugin host', () => {
     });
     const grantedPlugin = createSessionEndFileStoreProbePlugin({
       pluginId,
-      requestedApis: { file_store: 'write' },
+      requestedAccess: { file_store: 'write' },
       onSessionEnd(context) {
         invokedPlugins.push(
           context.fileStore === undefined ? 'granted:no_file_store' : 'granted:file_store'
@@ -664,12 +689,12 @@ describe('runtime plugin host', () => {
     expect(invokedPlugins).toEqual([]);
   });
 
-  it('uses captured API grants for host session-end hooks', async () => {
+  it('uses captured access grants for host session-end hooks', async () => {
     const sessionIdentity = {};
     let sawFileStore = false;
     const plugin = createSessionEndFileStoreProbePlugin({
       pluginId: 'memory.session-end-mutated-policy.fixture',
-      requestedApis: { file_store: 'write' },
+      requestedAccess: { file_store: 'write' },
       onSessionEnd(context) {
         sawFileStore = context.fileStore !== undefined;
         context.fileStore?.writeJsonAtomic('mutated-policy-session-end.json', {
@@ -696,11 +721,11 @@ describe('runtime plugin host', () => {
     expect(fileStore.revision()).toBe(1);
   });
 
-  it('does not trust manifest-declared first_party for default sensitive API access', async () => {
+  it('does not trust manifest-declared first_party for default sensitive access', async () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.fake-first-party.fixture',
       localTrustLevel: 'first_party',
-      requestedApis: { file_store: 'read' }
+      requestedAccess: { file_store: 'read', model_input: 'write' }
     });
     const host = createRuntimePluginHost({ plugins: [plugin] });
 
@@ -716,12 +741,12 @@ describe('runtime plugin host', () => {
     const trustedAdapter = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.trusted-adapter-denied.fixture',
       localTrustLevel: 'trusted_adapter',
-      requestedApis: { file_store: 'read' }
+      requestedAccess: { file_store: 'read', model_input: 'write' }
     });
     const testFixture = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.test-fixture-denied.fixture',
       localTrustLevel: 'test_fixture',
-      requestedApis: { file_store: 'read' }
+      requestedAccess: { file_store: 'read', model_input: 'write' }
     });
     const trustedAdapterHost = createRuntimePluginHost({
       plugins: [trustedAdapter]
@@ -747,7 +772,7 @@ describe('runtime plugin host', () => {
   it('injects fileStore for an explicitly enabled non-built-in plugin that declares it', async () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.file-store-allowed.fixture',
-      requestedApis: { file_store: 'read', model_input: 'write' }
+      requestedAccess: { file_store: 'read', model_input: 'write' }
     });
     const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin]
@@ -831,7 +856,7 @@ describe('runtime plugin host', () => {
   it('withholds Character State default file_store access from an id-spoofed plugin', async () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: characterStatePluginId,
-      requestedApis: { file_store: 'read' },
+      requestedAccess: { file_store: 'read', model_input: 'write' },
       localTrustLevel: 'first_party'
     });
     const host = createRuntimePluginHost({ plugins: [plugin] });
@@ -1880,14 +1905,14 @@ function createMemorySearchPlugin(
 
 function createTurnContextCapturePlugin(options: {
   readonly pluginId: string;
-  readonly requestedApis: RuntimePlugin['manifest']['requestedApis'];
+  readonly requestedAccess: RuntimePlugin['manifest']['requestedAccess'];
   readonly capture: TurnContextCapture;
 }): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(options.pluginId),
       declaredPlugins: ['before_role_model_call', 'after_turn_committed'],
-      requestedApis: options.requestedApis
+      requestedAccess: options.requestedAccess
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1923,7 +1948,7 @@ function createRuntimeNotesWithoutModelInputPlugin(): RuntimePlugin {
     manifest: {
       ...memorySearchPluginManifest(pluginId),
       declaredPlugins: ['before_role_model_call'],
-      requestedApis: {}
+      requestedAccess: {}
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1943,12 +1968,14 @@ function createModelFacingToolWithoutModelInputPlugin(
 ): RuntimePlugin {
   const pluginId = 'memory.tool-no-model-input.fixture';
 
-  return createRuntimePlugin({
-    manifest: {
+  return Object.freeze({
+    manifest: createRuntimePluginManifest({
       ...memorySearchPluginManifest(pluginId),
-      requestedApis: {}
-    },
-    providedTools: memorySearchProvidedTools(),
+      requestedAccess: {}
+    }),
+    providedTools: Object.freeze(
+      memorySearchProvidedTools().map(createRuntimePluginProvidedTool)
+    ),
     lifecycleHooks: {
       handleToolCall(call, context) {
         onHandle();
@@ -1961,7 +1988,7 @@ function createModelFacingToolWithoutModelInputPlugin(
         });
       }
     }
-  });
+  } satisfies RuntimePlugin);
 }
 
 function createDegradableMemorySearchPlugin(onHandle: () => void): RuntimePlugin {
@@ -2585,7 +2612,7 @@ function createRetainedBeforeRoleModelFileStorePlugin(
         sideEffectLevel: 'local_memory_write'
       },
       declaredPlugins: ['before_role_model_call'],
-      requestedApis: { file_store: 'write' }
+      requestedAccess: { file_store: 'write' }
     },
     providedTools: [],
     lifecycleHooks: {
@@ -2612,7 +2639,7 @@ function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedApis: { file_store: 'write', model_input: 'write' }
+      requestedAccess: { file_store: 'write', model_input: 'write' }
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -2667,7 +2694,7 @@ function createReadOnlyBeforeRoleModelFileStoreProbePlugin(): RuntimePlugin {
     manifest: {
       ...memorySearchPluginManifest(pluginId),
       declaredPlugins: ['before_role_model_call'],
-      requestedApis: { file_store: 'write', model_input: 'write' }
+      requestedAccess: { file_store: 'write', model_input: 'write' }
     },
     providedTools: [],
     lifecycleHooks: {
@@ -2713,7 +2740,7 @@ function createRetainedHandleToolCallFileStorePlugin(
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedApis: { file_store: 'write', model_input: 'write' }
+      requestedAccess: { file_store: 'write', model_input: 'write' }
     },
     providedTools: localMemoryWriteSearchProvidedTools(),
     lifecycleHooks: {
@@ -2745,7 +2772,7 @@ function createStagedAppendFileStorePlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedApis: { file_store: 'write', model_input: 'write' }
+      requestedAccess: { file_store: 'write', model_input: 'write' }
     },
     providedTools: localMemoryWriteSearchProvidedTools(),
     lifecycleHooks: {
@@ -2788,7 +2815,7 @@ function createRetainedHealthFileStorePlugin(
         sideEffectLevel: 'local_memory_write'
       },
       declaredPlugins: ['health'],
-      requestedApis: { file_store: 'write' }
+      requestedAccess: { file_store: 'write' }
     },
     providedTools: [],
     lifecycleHooks: {
@@ -2866,7 +2893,7 @@ function createLateFileStoreWritePlugin(options: {
         ...manifest.runtimePolicy,
         timeoutMs: 5
       },
-      requestedApis: { file_store: 'write', model_input: 'write' }
+      requestedAccess: { file_store: 'write', model_input: 'write' }
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -2936,7 +2963,7 @@ async function callFileStoreAvailabilityProbe(
 
 function createFileStoreAvailabilityProbePlugin(options: {
   readonly pluginId: string;
-  readonly requestedApis: RuntimePlugin['manifest']['requestedApis'];
+  readonly requestedAccess: RuntimePlugin['manifest']['requestedAccess'];
   readonly localTrustLevel?: RuntimePlugin['manifest']['localTrustLevel'];
 }): RuntimePlugin {
   const manifest = memorySearchPluginManifest(options.pluginId);
@@ -2945,7 +2972,7 @@ function createFileStoreAvailabilityProbePlugin(options: {
     manifest: {
       ...manifest,
       localTrustLevel: options.localTrustLevel ?? manifest.localTrustLevel,
-      requestedApis: options.requestedApis
+      requestedAccess: options.requestedAccess
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -2976,7 +3003,7 @@ function createFileStoreAvailabilityProbePlugin(options: {
 
 function createSessionEndFileStoreProbePlugin(options: {
   readonly pluginId: string;
-  readonly requestedApis: RuntimePlugin['manifest']['requestedApis'];
+  readonly requestedAccess: RuntimePlugin['manifest']['requestedAccess'];
   readonly onSessionEnd: (context: RuntimePluginContext) => void;
 }): RuntimePlugin {
   const manifest = memorySearchPluginManifest(options.pluginId);
@@ -2989,7 +3016,7 @@ function createSessionEndFileStoreProbePlugin(options: {
         ...manifest.runtimePolicy,
         sideEffectLevel: 'local_memory_write'
       },
-      requestedApis: options.requestedApis
+      requestedAccess: options.requestedAccess
     },
     providedTools: [],
     lifecycleHooks: {
@@ -3040,7 +3067,7 @@ function memorySearchPluginManifest(id: string) {
       defaultEnabled: true,
       reasons: ['test']
     },
-    requestedApis: { model_input: 'write' }
+    requestedAccess: { model_input: 'write' }
   };
 }
 

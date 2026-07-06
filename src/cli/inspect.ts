@@ -20,7 +20,7 @@ import {
 } from '../runtime/storage/layout.ts';
 import { createLocalRuntimeSessionStore } from '../runtime/storage/session-store.ts';
 import type {
-  RuntimePluginApiPermissions,
+  RuntimePluginAccessMap,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginTurnEvidenceSnapshot
 } from '../plugins/types.ts';
@@ -99,8 +99,8 @@ type InspectConfiguredPlugin = {
   readonly pluginId: string;
   readonly kind: string;
   readonly enabled: boolean;
-  readonly requestedApis: RuntimePluginApiPermissions;
-  readonly grantedApis: RuntimePluginApiPermissions;
+  readonly requestedAccess: RuntimePluginAccessMap;
+  readonly grantedAccess: RuntimePluginAccessMap;
   readonly activationStatus: string;
   readonly activationReasons: readonly string[];
   readonly diagnostics: readonly unknown[];
@@ -220,8 +220,8 @@ type InspectPluginListing = {
   readonly registered: boolean;
   readonly enabled: boolean;
   readonly availableForTurn: boolean;
-  readonly requestedApis: RuntimePluginApiPermissions;
-  readonly grantedApis: RuntimePluginApiPermissions;
+  readonly requestedAccess: RuntimePluginAccessMap;
+  readonly grantedAccess: RuntimePluginAccessMap;
   readonly providedTools: readonly InspectPluginToolListing[];
   readonly registeredLifecycleHooks: readonly string[];
   readonly redactionLabels: readonly string[];
@@ -630,8 +630,8 @@ function inspectConfiguredPlugins(
         pluginId: plugin.pluginId,
         kind: plugin.kind,
         enabled: plugin.enabled,
-        requestedApis: plugin.requestedApis,
-        grantedApis: plugin.grantedApis,
+        requestedAccess: plugin.requestedAccess,
+        grantedAccess: plugin.grantedAccess,
         activationStatus: plugin.activationStatus,
         activationReasons: Object.freeze([...plugin.activationReasons]),
         diagnostics: Object.freeze([...plugin.diagnostics]),
@@ -929,8 +929,8 @@ function pluginListings(
         registered: plugin.registered,
         enabled: plugin.enabled,
         availableForTurn: plugin.availableForTurn,
-        requestedApis: plugin.requestedApis,
-        grantedApis: plugin.grantedApis,
+        requestedAccess: plugin.requestedAccess,
+        grantedAccess: plugin.grantedAccess,
         providedTools: Object.freeze(
           plugin.providedTools.map((tool) =>
             Object.freeze({

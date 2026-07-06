@@ -305,7 +305,7 @@ function dottedConfigManifest(): RuntimePluginManifest {
       defaultEnabled: true,
       reasons: ['test_dotted_redaction']
     },
-    requestedApis: {}
+    requestedAccess: {}
   } satisfies RuntimePluginManifest);
 }
 

@@ -5,7 +5,7 @@ import {
   createRuntimePluginHealthSnapshot,
   runtimePluginContractVersion,
   type RuntimePlugin,
-  type RuntimePluginApiPermissions,
+  type RuntimePluginAccessMap,
   type RuntimePluginContext,
   type RuntimePluginEvidenceKind,
   type RuntimePluginEvidenceSnapshot,
@@ -75,7 +75,7 @@ export function createMemoryProviderRuntimePlugin(
     providedTools.push(memoryAddTool(addToolName));
   }
 
-  const requestedApis = memoryProviderRequestedApis(provider);
+  const requestedAccess = memoryProviderRequestedAccess(provider);
 
   return createRuntimePlugin({
     manifest: {
@@ -115,7 +115,7 @@ export function createMemoryProviderRuntimePlugin(
         defaultEnabled: false,
         reasons: ['memory_provider_factory']
       },
-      requestedApis
+      requestedAccess
     },
     providedTools,
     lifecycleHooks: {
@@ -323,9 +323,9 @@ export function createMemoryProviderRuntimePlugin(
   });
 }
 
-function memoryProviderRequestedApis(
+function memoryProviderRequestedAccess(
   provider: Project02MemoryProvider
-): RuntimePluginApiPermissions {
+): RuntimePluginAccessMap {
   return Object.freeze({
     ...(provider.recall === undefined && provider.captureTurn === undefined
       ? {}
@@ -335,7 +335,7 @@ function memoryProviderRequestedApis(
       provider.add === undefined
       ? {}
       : { model_input: 'write' })
-  } satisfies RuntimePluginApiPermissions);
+  } satisfies RuntimePluginAccessMap);
 }
 
 function acceptedToolResult(options: {

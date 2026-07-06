@@ -36,7 +36,7 @@ import {
   createRuntimePlugin,
   runtimePluginContractVersion,
   type RuntimePlugin,
-  type RuntimePluginApiPermissions,
+  type RuntimePluginAccessMap,
   type RuntimePluginContext
 } from '../src/plugins/types.ts';
 
@@ -914,8 +914,8 @@ describe('inspect CLI plugin evidence', () => {
     const output = JSON.parse(stdout) as {
       readonly plugins: readonly {
         readonly pluginId: string;
-        readonly requestedApis: RuntimePluginApiPermissions;
-        readonly grantedApis: RuntimePluginApiPermissions;
+        readonly requestedAccess: RuntimePluginAccessMap;
+        readonly grantedAccess: RuntimePluginAccessMap;
         readonly activationStatus: string;
       }[];
       readonly sessions: readonly { readonly sessionId: string }[];
@@ -928,8 +928,8 @@ describe('inspect CLI plugin evidence', () => {
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: plugin.manifest.id,
-        requestedApis: { turn_context: 'read' },
-        grantedApis: { turn_context: 'read' },
+        requestedAccess: { turn_context: 'read' },
+        grantedAccess: { turn_context: 'read' },
         activationStatus: 'active'
       })
     );
@@ -1230,7 +1230,7 @@ function createInspectFixturePlugin(pluginId = 'inspect.custom'): RuntimePlugin 
         defaultEnabled: false,
         reasons: ['test_inspect_fixture']
       },
-      requestedApis: {}
+      requestedAccess: {}
     }
   });
 }
@@ -1344,7 +1344,7 @@ function createInspectFileStoreCleanupFixturePlugin(
         defaultEnabled: false,
         reasons: ['test_inspect_cleanup']
       },
-      requestedApis: { file_store: 'write', turn_context: 'read' }
+      requestedAccess: { file_store: 'write', turn_context: 'read' }
     },
     lifecycleHooks: {
       onSessionEnd(context) {
@@ -1399,7 +1399,7 @@ function createInspectSessionEndFixturePlugin(
         defaultEnabled: false,
         reasons: ['test_inspect_cleanup']
       },
-      requestedApis: { turn_context: 'read' }
+      requestedAccess: { turn_context: 'read' }
     },
     lifecycleHooks: {
       onSessionEnd(context) {

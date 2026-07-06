@@ -12,8 +12,8 @@ import {
 } from '../../plugins/host.ts';
 import {
   createRuntimePluginContext,
-  normalizeRuntimePluginApiPermissions,
-  type RuntimePluginApiPermissions,
+  normalizeRuntimePluginAccessMap,
+  type RuntimePluginAccessMap,
   type RuntimePlugin,
   type RuntimePluginKind,
   type RuntimePluginManifest
@@ -61,8 +61,8 @@ export type RuntimePluginActivationSnapshot = {
   readonly pluginId: string;
   readonly kind: RuntimePluginKind;
   readonly enabled: boolean;
-  readonly requestedApis: RuntimePluginApiPermissions;
-  readonly grantedApis: RuntimePluginApiPermissions;
+  readonly requestedAccess: RuntimePluginAccessMap;
+  readonly grantedAccess: RuntimePluginAccessMap;
   readonly activationStatus: RuntimePluginActivationStatus;
   readonly activationReasons: readonly string[];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
@@ -452,14 +452,14 @@ export function resolveRuntimePluginActivation(options: {
         pluginId: manifest.id,
         kind: manifest.kind,
         enabled: decision.enabled,
-        requestedApis: normalizeRuntimePluginApiPermissions(
-          manifest.requestedApis,
-          `${manifest.id}.requestedApis`
+        requestedAccess: normalizeRuntimePluginAccessMap(
+          manifest.requestedAccess,
+          `${manifest.id}.requestedAccess`
         ),
-        grantedApis: decision.enabled
-          ? normalizeRuntimePluginApiPermissions(
-              manifest.requestedApis,
-              `${manifest.id}.grantedApis`
+        grantedAccess: decision.enabled
+          ? normalizeRuntimePluginAccessMap(
+              manifest.requestedAccess,
+              `${manifest.id}.grantedAccess`
             )
           : Object.freeze({}),
         activationStatus: decision.status,

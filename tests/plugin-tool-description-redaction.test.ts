@@ -199,7 +199,7 @@ function credentialDescriptionManifest() {
       defaultEnabled: true,
       reasons: ['test']
     },
-    requestedApis: { model_input: 'write' }
+    requestedAccess: { model_input: 'write' }
   };
 }
 

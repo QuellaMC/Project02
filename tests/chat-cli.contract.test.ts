@@ -762,7 +762,7 @@ describe('chat CLI plugin lifecycle', () => {
       },
       {
         sideEffectLevel: 'local_memory_write',
-        requestedApis: { file_store: 'write', turn_context: 'read' }
+        requestedAccess: { file_store: 'write', turn_context: 'read' }
       }
     );
     let factoryCalls = 0;
@@ -840,7 +840,7 @@ describe('chat CLI plugin lifecycle', () => {
       },
       {
         sideEffectLevel: 'local_memory_write',
-        requestedApis: { file_store: 'write', turn_context: 'read' }
+        requestedAccess: { file_store: 'write', turn_context: 'read' }
       }
     );
     let stdout = '';
@@ -1173,7 +1173,7 @@ function createSessionEndPlugin(
       RuntimePlugin['lifecycleHooks']['beforeRoleModelCall']
     >;
     readonly requiredForTurn?: boolean;
-    readonly requestedApis?: RuntimePlugin['manifest']['requestedApis'];
+    readonly requestedAccess?: RuntimePlugin['manifest']['requestedAccess'];
     readonly sideEffectLevel?: RuntimePlugin['manifest']['runtimePolicy']['sideEffectLevel'];
     readonly defaultEnabled?: boolean;
   } = {}
@@ -1220,7 +1220,7 @@ function createSessionEndPlugin(
         defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test']
       },
-      requestedApis: options.requestedApis ?? { turn_context: 'read' }
+      requestedAccess: options.requestedAccess ?? { turn_context: 'read' }
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1289,7 +1289,7 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
         defaultEnabled: true,
         reasons: ['test']
       },
-      requestedApis: {}
+      requestedAccess: {}
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1360,7 +1360,7 @@ function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
         defaultEnabled: false,
         reasons: ['test']
       },
-      requestedApis: {}
+      requestedAccess: {}
     },
     providedTools: [],
     lifecycleHooks: {
