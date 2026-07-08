@@ -14,10 +14,13 @@ import {
   createRuntimePluginHealthSnapshot,
   createRuntimePluginManifest,
   createRuntimePluginProvidedTool,
+  defaultRuntimePluginCatalogFactoryDefinitions,
   firstPartyModelToolsPluginId,
+  hostFirstPartyRuntimePluginIds,
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
 import {
+  createDefaultProject02PluginHost,
   createRuntimePluginHost,
   runRuntimePluginSessionEndHooks,
   runtimePluginDiscoveryPluginId,
@@ -42,6 +45,7 @@ import {
   mapTencentDbMemoryGatewayFixture
 } from '../src/plugins/adapter-proofs/index.ts';
 import {
+  characterStatePatchModelToolName,
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
 import {
@@ -86,23 +90,9 @@ function createExplicitlyEnabledRuntimePluginHost(
 function pluginDiscoveryToolNames(
   output: RuntimePluginJsonValue
 ): readonly string[] {
-  if (!isRuntimePluginJsonObject(output)) {
-    throw new TypeError('Expected plugin discovery output object.');
-  }
-
-  const plugins = output['plugins'];
-
-  if (!isRuntimePluginJsonArray(plugins)) {
-    throw new TypeError('Expected plugin discovery output plugins array.');
-  }
-
   return Object.freeze(
-    plugins
+    pluginDiscoveryPluginSummaries(output)
       .flatMap((plugin) => {
-        if (!isRuntimePluginJsonObject(plugin)) {
-          throw new TypeError('Expected plugin discovery plugin object.');
-        }
-
         const tools = plugin['providedTools'];
 
         if (!isRuntimePluginJsonArray(tools)) {
@@ -124,6 +114,30 @@ function pluginDiscoveryToolNames(
   );
 }
 
+function pluginDiscoveryPluginSummaries(
+  output: RuntimePluginJsonValue
+): readonly RuntimePluginJsonObject[] {
+  if (!isRuntimePluginJsonObject(output)) {
+    throw new TypeError('Expected plugin discovery output object.');
+  }
+
+  const plugins = output['plugins'];
+
+  if (!isRuntimePluginJsonArray(plugins)) {
+    throw new TypeError('Expected plugin discovery output plugins array.');
+  }
+
+  return Object.freeze(
+    plugins.map((plugin) => {
+      if (!isRuntimePluginJsonObject(plugin)) {
+        throw new TypeError('Expected plugin discovery plugin object.');
+      }
+
+      return plugin;
+    })
+  );
+}
+
 function isRuntimePluginJsonObject(
   value: RuntimePluginJsonValue
 ): value is RuntimePluginJsonObject {
@@ -137,6 +151,23 @@ function isRuntimePluginJsonArray(
 }
 
 describe('runtime plugin host', () => {
+  it('declares the canonical host first-party plugin catalog', () => {
+    const catalog = defaultRuntimePluginCatalogFactoryDefinitions();
+
+    expect([...hostFirstPartyRuntimePluginIds]).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      characterStatePluginId
+    ]);
+    expect(Object.keys(catalog).sort()).toEqual(
+      [
+        runtimePluginDiscoveryPluginId,
+        firstPartyModelToolsPluginId,
+        characterStatePluginId
+      ].sort((left, right) => left.localeCompare(right))
+    );
+  });
+
   it('routes plugin.list through the host-owned discovery plugin', async () => {
     const plugin = createMemorySearchPlugin();
     const host = createRuntimePluginHost({
@@ -164,6 +195,9 @@ describe('runtime plugin host', () => {
       plugins: [
         {
           id: runtimePluginDiscoveryPluginId
+        },
+        {
+          id: firstPartyModelToolsPluginId
         },
         {
           id: 'memory.search.fixture'
@@ -200,6 +234,96 @@ describe('runtime plugin host', () => {
     expect(pluginDiscoveryToolNames(result.output)).toEqual(exposedToolNames);
     expect(exposedToolNames).toEqual(
       expect.arrayContaining([roleModelPluginListToolName, 'memory.search'])
+    );
+  });
+
+  it('keeps visible_reply terminal and routes character_state.patch through plugins', () => {
+    const host = createDefaultProject02PluginHost();
+    const visibleReply = host.pluginToolDefinitions().find(
+      (tool) => tool.name === visibleReplyModelToolName
+    );
+    const characterStatePatch = host.pluginToolDefinitions().find(
+      (tool) => tool.name === characterStatePatchModelToolName
+    );
+
+    expect(visibleReply).toMatchObject({
+      pluginId: firstPartyModelToolsPluginId,
+      validationOwner: 'built_in_model_tools'
+    });
+    expect(host.resolveToolPluginId(visibleReplyModelToolName)).toBeUndefined();
+    expect(characterStatePatch).toMatchObject({
+      pluginId: characterStatePluginId,
+      validationOwner: 'plugin_host'
+    });
+    expect(host.resolveToolPluginId(characterStatePatchModelToolName)).toBe(
+      characterStatePluginId
+    );
+  });
+
+  it('lists enabled plugins by default and includes disabled plugins for all scope', async () => {
+    const enabledPlugin = createMemorySearchPlugin('memory.enabled.fixture');
+    const disabledPlugin = createMemorySearchPlugin('memory.disabled.fixture');
+    const host = createRuntimePluginHost({
+      plugins: [enabledPlugin, disabledPlugin],
+      enabledPluginIds: [enabledPlugin.manifest.id]
+    });
+
+    const defaultResult = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginDiscoveryPluginId,
+        toolName: roleModelPluginListToolName,
+        input: {}
+      },
+      testPluginContext()
+    );
+    const allResult = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginDiscoveryPluginId,
+        toolName: roleModelPluginListToolName,
+        input: {
+          scope: 'all'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(defaultResult.status).toBe('accepted');
+    expect(allResult.status).toBe('accepted');
+
+    if (defaultResult.status !== 'accepted' || allResult.status !== 'accepted') {
+      throw new Error('Expected plugin.list calls to be accepted.');
+    }
+
+    const defaultPluginIds = pluginDiscoveryPluginSummaries(
+      defaultResult.output
+    ).map((plugin) => plugin['id']);
+    const allSummaries = pluginDiscoveryPluginSummaries(allResult.output);
+    const disabledSummary = allSummaries.find(
+      (plugin) => plugin['id'] === disabledPlugin.manifest.id
+    );
+    const enabledSummary = allSummaries.find(
+      (plugin) => plugin['id'] === enabledPlugin.manifest.id
+    );
+
+    expect(defaultPluginIds).not.toContain(disabledPlugin.manifest.id);
+    expect(disabledSummary).toMatchObject({
+      id: disabledPlugin.manifest.id,
+      enabled: false,
+      availableForTurn: false,
+      activationStatus: 'disabled',
+      grantedAccess: {}
+    });
+    expect(enabledSummary?.['providedTools']).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'memory.search',
+          description: 'Search memory.',
+          validationOwner: 'plugin_host',
+          sourceReferencesRequired: false
+        })
+      ])
     );
   });
 

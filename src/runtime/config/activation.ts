@@ -1,12 +1,12 @@
 import {
-  characterStatePluginId,
-  createCharacterStatePlugin,
-  createCharacterStatePluginManifest
-} from '../../plugins/builtin/character-state/index.ts';
+  defaultRuntimePluginCatalogFactoryDefinitions,
+  hostScopedFirstPartyRuntimePluginIds,
+  isDefaultEnabledFirstPartyRuntimePluginId,
+  isHostScopedFirstPartyRuntimePluginId
+} from '../../plugins/catalog.ts';
 import {
   createRuntimePluginHost,
   runRuntimePluginSessionEndHooks,
-  runtimePluginDiscoveryPluginId,
   type RuntimePluginHost,
   type RuntimePluginSessionEndOptions
 } from '../../plugins/host.ts';
@@ -101,12 +101,8 @@ const configuredPluginConstructionCleanupOptions = Object.freeze({
 } satisfies RuntimePluginSessionEndOptions);
 const selectedAsDefaultMemoryProviderReason =
   'selected_as_default_memory_provider';
-const defaultRuntimePluginFactoryDefinitions = Object.freeze({
-  [characterStatePluginId]: Object.freeze({
-    manifest: createCharacterStatePluginManifest(),
-    create: () => createCharacterStatePlugin()
-  } satisfies RuntimePluginFactoryDefinition)
-});
+const defaultRuntimePluginFactoryDefinitions =
+  defaultRuntimePluginFactoryDefinitionsFromCatalog();
 
 export function defaultRuntimePluginFactories(): Readonly<
   Record<string, RuntimePluginFactory>
@@ -117,17 +113,39 @@ export function defaultRuntimePluginFactories(): Readonly<
 function defaultEnabledPluginIdsForFactories(
   factories: Readonly<Record<string, RuntimePluginFactory>>
 ): ReadonlySet<string> {
-  const defaultCharacterStateFactory =
-    defaultRuntimePluginFactoryDefinitions[characterStatePluginId];
-  const hasHostOwnedCharacterStateFactory =
-    factories[characterStatePluginId] === defaultCharacterStateFactory;
-  const defaultEnabledPluginIds = new Set<string>();
+  const defaultEnabledPluginIds = new Set<string>(
+    hostScopedFirstPartyRuntimePluginIds
+  );
 
-  if (hasHostOwnedCharacterStateFactory) {
-    defaultEnabledPluginIds.add(characterStatePluginId);
+  for (const [pluginId, factory] of Object.entries(factories)) {
+    if (!isDefaultEnabledFirstPartyRuntimePluginId(pluginId)) {
+      continue;
+    }
+
+    if (factory === defaultRuntimePluginFactoryDefinitions[pluginId]) {
+      defaultEnabledPluginIds.add(pluginId);
+    }
   }
 
   return Object.freeze(defaultEnabledPluginIds);
+}
+
+function defaultRuntimePluginFactoryDefinitionsFromCatalog(): Readonly<
+  Record<string, RuntimePluginFactoryDefinition>
+> {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(defaultRuntimePluginCatalogFactoryDefinitions()).map(
+        ([pluginId, definition]) => [
+          pluginId,
+          Object.freeze({
+            manifest: definition.manifest,
+            create: () => definition.create()
+          } satisfies RuntimePluginFactoryDefinition)
+        ]
+      )
+    )
+  );
 }
 
 export function resolveConfiguredProject02PluginActivation(options: {
@@ -145,7 +163,7 @@ export function resolveConfiguredProject02PluginActivation(options: {
     factories,
     loadedConfig: options.loadedConfig
   });
-  const pluginManifests = manifestBackedPluginManifests(factories);
+  const pluginManifests = activationPluginManifestsForFactories(factories);
   const resolvedConfig = resolveProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
@@ -236,14 +254,18 @@ export async function createConfiguredProject02PluginHost(options: {
       ? {}
       : { constructionCleanup: options.constructionCleanup })
   });
+  const preparedPluginManifests = activationPluginManifestsForPreparedFactories({
+    factories,
+    preparedFactories
+  });
   const resolvedConfig = resolveProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-    pluginManifests: preparedFactories.map((factory) => factory.manifest),
+    pluginManifests: preparedPluginManifests,
     ...(options.env === undefined ? {} : { env: options.env })
   });
   const activation = resolveRuntimePluginActivation({
-    pluginManifests: preparedFactories.map((factory) => factory.manifest),
+    pluginManifests: preparedPluginManifests,
     additionalKnownPluginIds: legacyFactoryIds,
     disabledKnownPluginIds: [...disabledLegacyFactoryIds],
     defaultEnabledPluginIds,
@@ -405,7 +427,7 @@ export function resolveRuntimePluginActivation(options: {
         preliminaryDecisions,
         memoryProviderDecision: duplicateCandidateMemoryProviderDecision
       }),
-      reservedPluginIds: [runtimePluginDiscoveryPluginId]
+      reservedPluginIds: []
     });
   const diagnostics: RuntimeConfigDiagnostic[] = [
     ...duplicateManifestDiagnostics,
@@ -566,6 +588,10 @@ async function prepareRuntimePluginFactories(options: {
   try {
     for (const [pluginId, factory] of Object.entries(options.factories)) {
       if (isRuntimePluginFactoryDefinition(factory)) {
+        if (isHostScopedFirstPartyRuntimePluginId(pluginId)) {
+          continue;
+        }
+
         preparedFactories.push(
           Object.freeze({
             kind: 'manifest_backed_factory',
@@ -783,13 +809,57 @@ function isRuntimePluginFactoryDefinition(
   return typeof factory !== 'function';
 }
 
-function manifestBackedPluginManifests(
+function activationPluginManifestsForFactories(
   factories: Readonly<Record<string, RuntimePluginFactory>>
 ): readonly RuntimePluginManifest[] {
-  return Object.freeze(
-    Object.values(factories)
+  return Object.freeze([
+    ...hostScopedCatalogPluginManifests(),
+    ...Object.entries(factories)
+      .filter(
+        ([pluginId, factory]) =>
+          !isCanonicalHostScopedDefaultFactory({ pluginId, factory })
+      )
+      .map(([, factory]) => factory)
       .filter(isRuntimePluginFactoryDefinition)
       .map((factory) => factory.manifest)
+  ]);
+}
+
+function activationPluginManifestsForPreparedFactories(options: {
+  readonly factories: Readonly<Record<string, RuntimePluginFactory>>;
+  readonly preparedFactories: readonly PreparedRuntimePluginFactory[];
+}): readonly RuntimePluginManifest[] {
+  return Object.freeze([
+    ...hostScopedCatalogPluginManifests(),
+    ...options.preparedFactories
+      .filter(
+        (preparedFactory) =>
+          !isCanonicalHostScopedDefaultFactory({
+            pluginId: preparedFactory.pluginId,
+            factory: options.factories[preparedFactory.pluginId]
+          })
+      )
+      .map((preparedFactory) => preparedFactory.manifest)
+  ]);
+}
+
+function hostScopedCatalogPluginManifests(): readonly RuntimePluginManifest[] {
+  return Object.freeze(
+    hostScopedFirstPartyRuntimePluginIds.flatMap((pluginId) => {
+      const definition = defaultRuntimePluginFactoryDefinitions[pluginId];
+
+      return definition === undefined ? [] : [definition.manifest];
+    })
+  );
+}
+
+function isCanonicalHostScopedDefaultFactory(options: {
+  readonly pluginId: string;
+  readonly factory: RuntimePluginFactory | undefined;
+}): boolean {
+  return (
+    isHostScopedFirstPartyRuntimePluginId(options.pluginId) &&
+    options.factory === defaultRuntimePluginFactoryDefinitions[options.pluginId]
   );
 }
 

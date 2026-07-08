@@ -19,6 +19,7 @@ import {
   createRuntimePlugin,
   createCharacterStatePlugin,
   createCharacterStatePluginManifest,
+  firstPartyModelToolsPluginId,
   memorySearchTool,
   runtimePluginDiscoveryPluginId,
   runtimePluginContractVersion,
@@ -106,7 +107,7 @@ describe('runtime config activation diagnostics', () => {
     expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_legacy_factory_unchecked'
     );
-    expect(output.plugins).toEqual([]);
+    expect(nonHostScopedActivationPlugins(output)).toEqual([]);
   });
 
   it('fails check for default-memory legacy function factories without constructing them', async () => {
@@ -1291,8 +1292,12 @@ describe('runtime config activation diagnostics', () => {
     expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_duplicate_plugin_manifest_id'
     );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
-    expect(output.plugins.map((plugin) => plugin.activationStatus)).toEqual([
+    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([]);
+    expect(
+      nonHostScopedActivationPlugins(output).map(
+        (plugin) => plugin.activationStatus
+      )
+    ).toEqual([
       'disabled',
       'disabled'
     ]);
@@ -1416,8 +1421,12 @@ describe('runtime config activation diagnostics', () => {
     expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_duplicate_plugin_manifest_id'
     );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
-    expect(output.plugins.map((plugin) => plugin.activationStatus)).toEqual([
+    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([]);
+    expect(
+      nonHostScopedActivationPlugins(output).map(
+        (plugin) => plugin.activationStatus
+      )
+    ).toEqual([
       'disabled',
       'disabled'
     ]);
@@ -1491,7 +1500,7 @@ describe('runtime config activation diagnostics', () => {
     expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_duplicate_plugin_manifest_id'
     );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([
+    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([
       expect.objectContaining({
         pluginId: 'memory.selected'
       })
@@ -2474,4 +2483,25 @@ function parseActivationOutput(stdout: string): {
       readonly grantedAccess: RuntimePluginAccessMap;
     }[];
   };
+}
+
+function nonHostScopedActivationPlugins(
+  output: ReturnType<typeof parseActivationOutput>
+): ReturnType<typeof parseActivationOutput>['plugins'] {
+  const hostScopedPluginIds = new Set([
+    runtimePluginDiscoveryPluginId,
+    firstPartyModelToolsPluginId
+  ]);
+
+  return Object.freeze(
+    output.plugins.filter((plugin) => !hostScopedPluginIds.has(plugin.pluginId))
+  );
+}
+
+function enabledNonHostScopedActivationPlugins(
+  output: ReturnType<typeof parseActivationOutput>
+): ReturnType<typeof parseActivationOutput>['plugins'] {
+  return Object.freeze(
+    nonHostScopedActivationPlugins(output).filter((plugin) => plugin.enabled)
+  );
 }

@@ -31,6 +31,9 @@ import {
   roleModelDecisionContractVersion
 } from '../src/role-model/contracts.ts';
 import {
+  firstPartyModelToolsPluginId
+} from '../src/plugins/index.ts';
+import {
   LocalRuntimeStorageContractError
 } from '../src/runtime/storage/layout.ts';
 import {
@@ -118,6 +121,10 @@ describe('file runtime log store plugin tool event validation', () => {
     expect(
       completed?.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions
     ).toMatchObject([
+      {
+        pluginId: firstPartyModelToolsPluginId,
+        name: visibleReplyModelToolName
+      },
       {
         pluginId: 'character-state',
         name: characterStatePatchModelToolName

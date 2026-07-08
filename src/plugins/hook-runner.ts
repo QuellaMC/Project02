@@ -28,12 +28,15 @@ import type {
 import {
   resolveRuntimePluginAccessForPlugins,
   runtimePluginAccessForPlugin,
-  runtimePluginDiscoveryPluginId,
   type RuntimePluginAccessMapByPluginId
 } from './access-control.ts';
+import {
+  createHostScopedFirstPartyRuntimePlugins,
+  isHostScopedFirstPartyRuntimePlugin,
+  isHostScopedFirstPartyRuntimePluginId
+} from './catalog.ts';
 import { isHostDefaultEnabledRuntimePlugin } from './default-enabled.ts';
 import { createPluginHookContext } from './hook-context.ts';
-import { createRuntimePluginDiscoveryPlugin } from './discovery-plugin.ts';
 import {
   createRuntimePluginFileStoreTransaction,
   type RuntimePluginFileStoreTransaction
@@ -217,16 +220,26 @@ export function createRuntimePluginHost(
   options: CreateRuntimePluginHostOptions = {}
 ): RuntimePluginHost {
   const configuredPlugins = Object.freeze([...(options.plugins ?? [])]);
+  let allPlugins: readonly RuntimePlugin[] = [];
   let enabledPlugins: readonly RuntimePlugin[] = [];
   let accessByPluginId: RuntimePluginAccessMapByPluginId =
     Object.freeze({});
-  const plugins = Object.freeze([
-    createRuntimePluginDiscoveryPlugin(() => ({
+  assertConfiguredHostScopedFirstPartyPluginsAreCanonical(configuredPlugins);
+  const configuredPluginIds = new Set(
+    configuredPlugins.map((plugin) => plugin.manifest.id)
+  );
+  const hostScopedPlugins = createHostScopedFirstPartyRuntimePlugins({
+    discoveryHostState: () => ({
+      plugins: allPlugins,
       enabledPlugins,
       accessByPluginId
-    })),
+    })
+  }).filter((plugin) => !configuredPluginIds.has(plugin.manifest.id));
+  const plugins = Object.freeze([
+    ...hostScopedPlugins,
     ...configuredPlugins
   ]);
+  allPlugins = plugins;
   const enabledIds = enabledPluginIdsForHost({
     plugins,
     enabledPluginIds: options.enabledPluginIds
@@ -1686,11 +1699,45 @@ function enabledPluginIdsForHost(options: {
     enabledIds.push(enabledId);
   }
 
-  if (!seenEnabledIds.has(runtimePluginDiscoveryPluginId)) {
-    enabledIds.unshift(runtimePluginDiscoveryPluginId);
+  for (const defaultEnabledPluginId of [
+    ...hostScopedDefaultEnabledPluginIds(options.plugins)
+  ].reverse()) {
+    if (!seenEnabledIds.has(defaultEnabledPluginId)) {
+      seenEnabledIds.add(defaultEnabledPluginId);
+      enabledIds.unshift(defaultEnabledPluginId);
+    }
   }
 
   return Object.freeze(enabledIds);
+}
+
+function hostScopedDefaultEnabledPluginIds(
+  plugins: readonly RuntimePlugin[]
+): readonly string[] {
+  return Object.freeze(
+    plugins
+      .filter(
+        (plugin) =>
+          isHostScopedFirstPartyRuntimePlugin(plugin) &&
+          isHostDefaultEnabledRuntimePlugin(plugin)
+      )
+      .map((plugin) => plugin.manifest.id)
+  );
+}
+
+function assertConfiguredHostScopedFirstPartyPluginsAreCanonical(
+  plugins: readonly RuntimePlugin[]
+): void {
+  for (const plugin of plugins) {
+    if (
+      isHostScopedFirstPartyRuntimePluginId(plugin.manifest.id) &&
+      !isHostScopedFirstPartyRuntimePlugin(plugin)
+    ) {
+      throw new TypeError(
+        `Plugin "${plugin.manifest.id}" is host-owned and cannot be supplied by configured plugins.`
+      );
+    }
+  }
 }
 
 function beforeRoleModelFailureRejectsTurn(plugin: RuntimePlugin): boolean {

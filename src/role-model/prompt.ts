@@ -1,4 +1,8 @@
 import type { VisibleMessage } from '../core/conversation.ts';
+import type {
+  RuntimePluginContextBudget,
+  RuntimePluginSourceReference
+} from '../plugins/types.ts';
 import type { RoleModelInputEnvelope } from './contracts.ts';
 import type {
   ModelToolDefinition,
@@ -97,8 +101,26 @@ export type RoleModelPromptFrame = {
   readonly message?: RoleModelChatMessage;
 };
 
+export type RoleModelPromptFragmentSlot = 'developer_context';
+
+export type RoleModelPromptFragmentKind =
+  | 'runtime_note'
+  | 'plugin_context_item';
+
+export type RoleModelPromptFragment = {
+  readonly id: string;
+  readonly pluginId?: string;
+  readonly kind: RoleModelPromptFragmentKind;
+  readonly slot: RoleModelPromptFragmentSlot;
+  readonly text: string;
+  readonly budget?: RuntimePluginContextBudget;
+  readonly sourceReferences: readonly RuntimePluginSourceReference[];
+  readonly redactionLabels: readonly string[];
+};
+
 export type RoleModelTurnContext = {
   readonly frames: readonly RoleModelPromptFrame[];
+  readonly promptFragments: readonly RoleModelPromptFragment[];
   readonly messages: readonly RoleModelChatMessage[];
   readonly tools: readonly RoleModelChatCompletionTool[];
 };
@@ -169,10 +191,12 @@ export function prepareRoleModelRequest(
   const capabilities =
     options.capabilities ?? defaultRoleModelProviderCapabilities;
   const outputMode = options.outputMode ?? 'native_tools';
+  const promptFragments = createRoleModelPromptFragments(inputEnvelope);
   const frames = createRoleModelPromptFrames(inputEnvelope, {
     additionalMessages: options.additionalMessages ?? [],
     capabilities,
-    outputMode
+    outputMode,
+    promptFragments
   });
   const messages = frames.flatMap((frame) =>
     frame.message === undefined ? [] : [frame.message]
@@ -182,6 +206,7 @@ export function prepareRoleModelRequest(
     outputMode,
     capabilities,
     frames,
+    promptFragments,
     messages: Object.freeze(messages),
     tools: Object.freeze(
       inputEnvelope.toolDefinitions.map((definition) =>
@@ -332,11 +357,12 @@ function createRoleModelPromptFrames(
     readonly additionalMessages: readonly RoleModelChatMessage[];
     readonly capabilities: RoleModelProviderCapabilities;
     readonly outputMode: 'native_tools' | 'json_fallback';
+    readonly promptFragments: readonly RoleModelPromptFragment[];
   }
 ): readonly RoleModelPromptFrame[] {
   const frames: RoleModelPromptFrame[] = [];
   const runtimeContextMessage = createRuntimeContextMessage(
-    inputEnvelope,
+    options.promptFragments,
     options.capabilities
   );
 
@@ -438,10 +464,10 @@ function createCurrentUserMessage(
 }
 
 function createRuntimeContextMessage(
-  inputEnvelope: RoleModelInputEnvelope,
+  promptFragments: readonly RoleModelPromptFragment[],
   capabilities: RoleModelProviderCapabilities
 ): RoleModelSystemChatMessage | RoleModelDeveloperChatMessage | undefined {
-  const context = renderEphemeralRuntimeContext(inputEnvelope);
+  const context = renderEphemeralRuntimeContext(promptFragments);
 
   if (context === undefined) {
     return undefined;
@@ -464,20 +490,56 @@ function modelOnlyContextRole(
     : 'system';
 }
 
-function renderEphemeralRuntimeContext(
+function createRoleModelPromptFragments(
   inputEnvelope: RoleModelInputEnvelope
-): string | undefined {
-  const runtimeNotes = inputEnvelope.decisionContext.runtimeNotes;
-  const pluginContextItems = inputEnvelope.decisionContext.pluginContextItems;
+): readonly RoleModelPromptFragment[] {
+  return Object.freeze([
+    ...inputEnvelope.decisionContext.runtimeNotes.map((text, index) =>
+      Object.freeze({
+        id: `runtime-note-${String(index + 1)}`,
+        kind: 'runtime_note',
+        slot: 'developer_context',
+        text,
+        sourceReferences: Object.freeze([]),
+        redactionLabels: Object.freeze([])
+      } satisfies RoleModelPromptFragment)
+    ),
+    ...inputEnvelope.decisionContext.pluginContextItems.map((item) =>
+      Object.freeze({
+        id: item.id,
+        pluginId: item.pluginId,
+        kind: 'plugin_context_item',
+        slot: 'developer_context',
+        text: item.text,
+        budget: item.budget,
+        sourceReferences: Object.freeze([...item.sourceReferences]),
+        redactionLabels: Object.freeze([...item.redactionLabels])
+      } satisfies RoleModelPromptFragment)
+    )
+  ]);
+}
 
-  if (runtimeNotes.length === 0 && pluginContextItems.length === 0) {
+function renderEphemeralRuntimeContext(
+  promptFragments: readonly RoleModelPromptFragment[]
+): string | undefined {
+  const runtimeNotes = promptFragments.filter(
+    (fragment) => fragment.kind === 'runtime_note'
+  );
+  const pluginContextItems = promptFragments.filter(
+    (fragment) => fragment.kind === 'plugin_context_item'
+  );
+
+  if (promptFragments.length === 0) {
     return undefined;
   }
 
   const lines = ['Model-only runtime context. This is not user input.'];
 
   if (runtimeNotes.length > 0) {
-    lines.push('runtime_notes:', ...formatRuntimeContextLines(runtimeNotes));
+    lines.push(
+      'runtime_notes:',
+      ...formatRuntimeContextLines(runtimeNotes.map((fragment) => fragment.text))
+    );
   }
 
   if (pluginContextItems.length > 0) {
@@ -485,7 +547,8 @@ function renderEphemeralRuntimeContext(
       'plugin_context:',
       ...formatRuntimeContextLines(
         pluginContextItems.map(
-          (item) => `${item.pluginId}/${item.id}: ${item.text}`
+          (fragment) =>
+            `${fragment.pluginId ?? 'runtime'}/${fragment.id}: ${fragment.text}`
         )
       )
     );

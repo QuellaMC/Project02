@@ -1,5 +1,6 @@
 import { isBuiltInModelToolName } from '../role-model/model-tools.ts';
 import type { RoleModelPluginToolDefinition } from '../role-model/contracts.ts';
+import { isFirstPartyModelToolsPlugin } from './builtin/model-tools.ts';
 import {
   runtimePluginAccessForPlugin,
   runtimePluginGrantsAccess,
@@ -24,19 +25,53 @@ export function pluginToolDefinitionsForEnabledPlugins(options: {
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
 }): readonly RoleModelPluginToolDefinition[] {
   return Object.freeze(
-    options.plugins.flatMap((plugin) => {
-      const access = runtimePluginAccessForPlugin({
-        plugin,
-        accessByPluginId: options.accessByPluginId
-      });
+    options.plugins
+      .flatMap((plugin) => {
+        const access = runtimePluginAccessForPlugin({
+          plugin,
+          accessByPluginId: options.accessByPluginId
+        });
 
-      return routableModelFacingPluginTools({ plugin, access }).map((tool) =>
-        Object.freeze({
-          pluginId: plugin.manifest.id,
-          ...tool
-        } satisfies RoleModelPluginToolDefinition)
-      );
-    })
+        return modelVisiblePluginTools({ plugin, access }).map((tool) =>
+          Object.freeze({
+            pluginId: plugin.manifest.id,
+            ...tool
+          } satisfies RoleModelPluginToolDefinition)
+        );
+      })
+      .sort(modelToolDefinitionOrder)
+  );
+}
+
+function modelToolDefinitionOrder(
+  left: RoleModelPluginToolDefinition,
+  right: RoleModelPluginToolDefinition
+): number {
+  const leftBuiltIn = isBuiltInModelToolName(left.name);
+  const rightBuiltIn = isBuiltInModelToolName(right.name);
+
+  if (leftBuiltIn === rightBuiltIn) {
+    return 0;
+  }
+
+  return leftBuiltIn ? -1 : 1;
+}
+
+export function modelVisiblePluginTools(options: {
+  readonly plugin: RuntimePlugin;
+  readonly access: RuntimePluginAccessSnapshot;
+}): readonly RuntimePluginProvidedTool[] {
+  if (!pluginCanWriteModelInput(options.access)) {
+    return [];
+  }
+
+  return Object.freeze(
+    options.plugin.providedTools.filter((tool) =>
+      isModelVisiblePluginTool({
+        plugin: options.plugin,
+        tool
+      })
+    )
   );
 }
 
@@ -134,6 +169,25 @@ export function isModelFacingPluginTool(options: {
     (options.tool.sideEffectLevel === 'none' ||
       options.tool.sideEffectLevel === 'runtime_read' ||
       options.tool.sideEffectLevel === 'local_memory_write')
+  );
+}
+
+export function isModelVisiblePluginTool(options: {
+  readonly plugin: RuntimePlugin;
+  readonly tool: RuntimePluginProvidedTool;
+}): boolean {
+  if (
+    isFirstPartyBuiltInModelTool({
+      ...options,
+      isHostOwnedFirstPartyModelToolsPlugin: isFirstPartyModelToolsPlugin
+    })
+  ) {
+    return true;
+  }
+
+  return (
+    options.plugin.lifecycleHooks.handleToolCall !== undefined &&
+    isModelFacingPluginTool(options)
   );
 }
 

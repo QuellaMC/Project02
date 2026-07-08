@@ -33,6 +33,8 @@ import {
   createCharacterStatePluginManifest,
   createMemoryProviderRuntimePlugin,
   createRuntimePlugin,
+  firstPartyModelToolsPluginId,
+  runtimePluginDiscoveryPluginId,
   runtimePluginContractVersion
 } from '../src/plugins/index.ts';
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
@@ -213,7 +215,9 @@ describe('runtime config loading and resolution', () => {
     const configured = await createConfiguredProject02PluginHost({ loadedConfig: loaded });
 
     expect(configured.activation.enabledPluginIds).not.toContain('character-state');
-    expect(configured.activation.plugins[0]).toMatchObject({
+    expect(
+      activationPluginById(configured.activation.plugins, 'character-state')
+    ).toMatchObject({
       pluginId: 'character-state',
       enabled: false,
       activationStatus: 'blocked'
@@ -261,12 +265,17 @@ describe('runtime config loading and resolution', () => {
     const configured = await createConfiguredProject02PluginHost({ loadedConfig: loaded });
 
     expect(configured.activation.enabledPluginIds).not.toContain('character-state');
-    expect(configured.activation.plugins[0]).toMatchObject({
+    const characterStateActivation = activationPluginById(
+      configured.activation.plugins,
+      'character-state'
+    );
+
+    expect(characterStateActivation).toMatchObject({
       pluginId: 'character-state',
       enabled: false,
       activationStatus: 'blocked'
     });
-    expect(configured.activation.plugins[0]?.diagnostics).toEqual(
+    expect(characterStateActivation?.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: 'runtime_config_unknown_plugin_wrapper_field',
@@ -331,12 +340,17 @@ describe('runtime config loading and resolution', () => {
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
     expect(configured.activation.enabledPluginIds).toEqual([]);
-    expect(configured.activation.plugins[0]).toMatchObject({
+    const characterStateActivation = activationPluginById(
+      configured.activation.plugins,
+      'character-state'
+    );
+
+    expect(characterStateActivation).toMatchObject({
       pluginId: 'character-state',
       enabled: false,
       activationStatus: 'blocked'
     });
-    expect(configured.activation.plugins[0]?.diagnostics).toEqual([]);
+    expect(characterStateActivation?.diagnostics).toEqual([]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -722,7 +736,9 @@ describe('runtime config loading and resolution', () => {
       configured.resolvedConfig.pluginConfigs['memory.structured']?.['endpoints']
     ).not.toHaveProperty('value');
     expect(configured.activation.enabledPluginIds).not.toContain('memory.structured');
-    expect(configured.activation.plugins[0]).toMatchObject({
+    expect(
+      activationPluginById(configured.activation.plugins, 'memory.structured')
+    ).toMatchObject({
       pluginId: 'memory.structured',
       activationStatus: 'blocked'
     });
@@ -981,11 +997,16 @@ describe('runtime config loading and resolution', () => {
       })
     ]);
     expect(configured.activation.enabledPluginIds).not.toContain('memory.required');
-    expect(configured.activation.plugins[0]).toMatchObject({
+    const memoryRequiredActivation = activationPluginById(
+      configured.activation.plugins,
+      'memory.required'
+    );
+
+    expect(memoryRequiredActivation).toMatchObject({
       pluginId: 'memory.required',
       activationStatus: 'blocked'
     });
-    expect(configured.activation.plugins[0]?.diagnostics.map((item) => item.code)).toEqual([
+    expect(memoryRequiredActivation?.diagnostics.map((item) => item.code)).toEqual([
       'runtime_config_unknown_plugin_config_field',
       'runtime_config_unknown_plugin_config_field'
     ]);
@@ -1017,7 +1038,9 @@ describe('runtime config loading and resolution', () => {
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
     expect(configured.activation.enabledPluginIds).not.toContain('memory');
-    expect(configured.activation.plugins[0]).toMatchObject({
+    expect(
+      activationPluginById(configured.activation.plugins, 'memory')
+    ).toMatchObject({
       pluginId: 'memory',
       enabled: false,
       activationStatus: 'blocked'
@@ -1030,7 +1053,9 @@ describe('runtime config loading and resolution', () => {
         })
       ])
     );
-    expect(configured.activation.plugins[0]?.diagnostics).toEqual(
+    expect(
+      activationPluginById(configured.activation.plugins, 'memory')?.diagnostics
+    ).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: 'runtime_config_required_value_missing',
@@ -1458,7 +1483,7 @@ describe('runtime config loading and resolution', () => {
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
     expect(
-      configured.activation.plugins.map((plugin) => [
+      nonHostScopedActivationPlugins(configured.activation.plugins).map((plugin) => [
         plugin.pluginId,
         plugin.activationStatus
       ])
@@ -1558,7 +1583,7 @@ describe('runtime config loading and resolution', () => {
       ])
     );
     expect(
-      configured.activation.plugins.map((plugin) => [
+      nonHostScopedActivationPlugins(configured.activation.plugins).map((plugin) => [
         plugin.pluginId,
         plugin.activationStatus
       ])
@@ -1691,7 +1716,9 @@ describe('runtime config loading and resolution', () => {
         })
       ])
     );
-    expect(configured.activation.plugins[0]).toMatchObject({
+    expect(
+      activationPluginById(configured.activation.plugins, 'character-state')
+    ).toMatchObject({
       pluginId: 'character-state',
       enabled: false,
       activationStatus: 'blocked'
@@ -1753,7 +1780,7 @@ describe('runtime config loading and resolution', () => {
       ])
     );
     expect(
-      configured.activation.plugins.map((plugin) => [
+      nonHostScopedActivationPlugins(configured.activation.plugins).map((plugin) => [
         plugin.pluginId,
         plugin.activationStatus
       ])
@@ -1761,10 +1788,16 @@ describe('runtime config loading and resolution', () => {
       ['memory.enabled', 'disabled'],
       ['memory.disabled', 'disabled']
     ]);
-    expect(configured.activation.plugins[0]?.activationReasons).toContain(
+    expect(
+      activationPluginById(configured.activation.plugins, 'memory.enabled')
+        ?.activationReasons
+    ).toContain(
       'not_selected_as_default_memory_provider'
     );
-    expect(configured.activation.plugins[1]?.activationReasons).toContain(
+    expect(
+      activationPluginById(configured.activation.plugins, 'memory.disabled')
+        ?.activationReasons
+    ).toContain(
       'disabled_by_config'
     );
 
@@ -1822,14 +1855,17 @@ describe('runtime config loading and resolution', () => {
         })
       ])
     );
-    expect(configured.activation.plugins).toEqual([
+    expect(nonHostScopedActivationPlugins(configured.activation.plugins)).toEqual([
       expect.objectContaining({
         pluginId: 'memory.disabled',
         enabled: false,
         activationStatus: 'disabled'
       })
     ]);
-    expect(configured.activation.plugins[0]?.activationReasons).toContain(
+    expect(
+      activationPluginById(configured.activation.plugins, 'memory.disabled')
+        ?.activationReasons
+    ).toContain(
       'disabled_by_config'
     );
 
@@ -6484,4 +6520,28 @@ function collect(write: (chunk: string) => void): Writable {
       callback();
     }
   });
+}
+
+type ActivationPluginSnapshot = Awaited<
+  ReturnType<typeof createConfiguredProject02PluginHost>
+>['activation']['plugins'][number];
+
+function activationPluginById(
+  plugins: readonly ActivationPluginSnapshot[],
+  pluginId: string
+): ActivationPluginSnapshot | undefined {
+  return plugins.find((plugin) => plugin.pluginId === pluginId);
+}
+
+function nonHostScopedActivationPlugins(
+  plugins: readonly ActivationPluginSnapshot[]
+): readonly ActivationPluginSnapshot[] {
+  const hostScopedPluginIds = new Set([
+    runtimePluginDiscoveryPluginId,
+    firstPartyModelToolsPluginId
+  ]);
+
+  return Object.freeze(
+    plugins.filter((plugin) => !hostScopedPluginIds.has(plugin.pluginId))
+  );
 }

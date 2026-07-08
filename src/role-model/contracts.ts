@@ -2,12 +2,13 @@ import type { CharacterProfile, VisibleMessage } from '../core/conversation.ts';
 import {
   createRuntimePluginContextItem,
   createRuntimePluginProvidedTool,
+  createFirstPartyModelToolsPlugin,
+  firstPartyModelToolsPluginId,
   type RuntimePluginContextItem,
   type RuntimePluginJsonValue,
   type RuntimePluginProvidedTool
 } from '../plugins/types.ts';
 import {
-  builtInModelToolDefinitionsForUserTurn,
   characterStatePatchModelToolName,
   createCharacterStatePatchModelToolCall,
   createVisibleReplyModelToolCall,
@@ -304,7 +305,7 @@ export function createRoleModelInputEnvelope(
   options: CreateRoleModelInputEnvelopeOptions
 ): RoleModelInputEnvelope {
   const pluginToolDefinitions = createRoleModelPluginToolDefinitions(
-    options.pluginToolDefinitions ?? []
+    withDefaultTerminalModelToolDefinitions(options.pluginToolDefinitions ?? [])
   );
   const modelToolDefinitions = modelToolDefinitionsForPluginToolDefinitions(
     pluginToolDefinitions
@@ -434,7 +435,8 @@ export function createParsedRoleModelDecisionSnapshot(
 export function parseRoleModelDecision(
   rawOutputText: string,
   allowedTools: readonly RoleModelAllowedToolName[] = roleModelAllowedToolNames,
-  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[] = [],
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[] =
+    defaultTerminalModelToolDefinitions(),
   toolObservations: readonly RoleModelToolObservation[] = []
 ): RoleModelDecisionResult {
   let parsedOutput: unknown;
@@ -593,7 +595,7 @@ function parseRoleModelDecisionObject(
   toolObservations: readonly RoleModelToolObservation[]
 ): RoleModelDecisionResult {
   const frozenPluginToolDefinitions = createRoleModelPluginToolDefinitions(
-    pluginToolDefinitions
+    withDefaultTerminalModelToolDefinitions(pluginToolDefinitions)
   );
   const modelToolDefinitions = modelToolDefinitionsForPluginToolDefinitions(
     frozenPluginToolDefinitions
@@ -988,6 +990,32 @@ function freezePluginContextItems(
   return Object.freeze(contextItems.map(createRuntimePluginContextItem));
 }
 
+function withDefaultTerminalModelToolDefinitions(
+  definitions: readonly RoleModelPluginToolDefinition[]
+): readonly RoleModelPluginToolDefinition[] {
+  const providedToolNames = new Set(definitions.map((definition) => definition.name));
+
+  return Object.freeze([
+    ...defaultTerminalModelToolDefinitions().filter(
+      (definition) => !providedToolNames.has(definition.name)
+    ),
+    ...definitions
+  ]);
+}
+
+function defaultTerminalModelToolDefinitions(): readonly RoleModelPluginToolDefinition[] {
+  const plugin = createFirstPartyModelToolsPlugin();
+
+  return Object.freeze(
+    plugin.providedTools.map((tool) =>
+      Object.freeze({
+        pluginId: plugin.manifest.id,
+        ...tool
+      } satisfies RoleModelPluginToolDefinition)
+    )
+  );
+}
+
 export function createRoleModelPluginToolDefinitions(
   definitions: readonly RoleModelPluginToolDefinition[]
 ): readonly RoleModelPluginToolDefinition[] {
@@ -1000,10 +1028,17 @@ export function createRoleModelPluginToolDefinitions(
       'pluginId'
     );
     const providedTool = createRuntimePluginProvidedTool(definition);
+    const terminalBuiltInTool = isBuiltInModelToolName(providedTool.name);
 
-    if (isBuiltInModelToolName(providedTool.name)) {
+    if (
+      terminalBuiltInTool &&
+      (pluginId !== firstPartyModelToolsPluginId ||
+        providedTool.validationOwner !== 'built_in_model_tools' ||
+        providedTool.sideEffectLevel !== 'none' ||
+        providedTool.requiresConfirmation)
+    ) {
       throw new TypeError(
-        `Plugin tool "${providedTool.name}" must not duplicate a built-in model tool.`
+        `Plugin tool "${providedTool.name}" must be provided by ${firstPartyModelToolsPluginId}.`
       );
     }
 
@@ -1013,19 +1048,20 @@ export function createRoleModelPluginToolDefinitions(
       );
     }
 
-    if (providedTool.validationOwner !== 'plugin_host') {
+    if (!terminalBuiltInTool && providedTool.validationOwner !== 'plugin_host') {
       throw new TypeError(
         `Plugin tool "${providedTool.name}" must be validated by plugin_host.`
       );
     }
 
-    if (providedTool.requiresConfirmation) {
+    if (!terminalBuiltInTool && providedTool.requiresConfirmation) {
       throw new TypeError(
         `Plugin tool "${providedTool.name}" requires confirmation and cannot be model-facing in CT-03.`
       );
     }
 
     if (
+      !terminalBuiltInTool &&
       providedTool.sideEffectLevel !== 'none' &&
       providedTool.sideEffectLevel !== 'runtime_read' &&
       providedTool.sideEffectLevel !== 'local_memory_write'
@@ -1050,12 +1086,11 @@ export function createRoleModelPluginToolDefinitions(
 function modelToolDefinitionsForPluginToolDefinitions(
   pluginToolDefinitions: readonly RoleModelPluginToolDefinition[]
 ): readonly RoleModelToolDefinition[] {
-  return Object.freeze([
-    ...builtInModelToolDefinitionsForUserTurn(),
-    ...pluginToolDefinitions.map((definition) =>
+  return Object.freeze(
+    pluginToolDefinitions.map((definition) =>
       freezeModelToolDefinition(definition)
     )
-  ]);
+  );
 }
 
 function defaultAllowedToolsForPluginDefinitions(

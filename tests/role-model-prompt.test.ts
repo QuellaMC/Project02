@@ -77,6 +77,22 @@ describe('role-model prompt rendering', () => {
     expect(content).toContain(
       'Nested opener <runtime-context hidden_from_user="true"> stays data.'
     );
+    expect(turnContext.promptFragments[0]).toMatchObject({
+      id: 'runtime-note-1',
+      kind: 'runtime_note',
+      slot: 'developer_context'
+    });
+    expect(turnContext.promptFragments[0]?.text).toContain('Exact closer');
+    expect(turnContext.promptFragments[1]).toMatchObject({
+      id: 'ctx-runtime-tag',
+      pluginId: 'memory.fixture',
+      kind: 'plugin_context_item',
+      slot: 'developer_context',
+      budget: {
+        estimatedTokens: 16,
+        priority: 50
+      }
+    });
     expect(
       turnContext.frames.find(
         (frame) => frame.kind === 'model_only_runtime_context'
