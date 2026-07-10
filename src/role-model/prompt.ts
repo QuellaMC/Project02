@@ -1,14 +1,27 @@
 import type { VisibleMessage } from '../core/conversation.ts';
+import type {
+  RuntimePluginContextBudget,
+  RuntimePluginSourceReference
+} from '../plugins/validation.ts';
 import type { RoleModelInputEnvelope } from './contracts.ts';
 import type {
   ModelToolDefinition,
   ModelToolInputContract,
   ModelToolInputField,
-  ModelToolInputFieldValueType
+  ModelToolInputFieldValueType,
+  ModelToolJsonSchema,
+  ModelToolJsonSchemaType,
+  ModelToolObjectJsonSchema
 } from './model-tools.ts';
+import { visibleReplyModelToolName } from './model-tools.ts';
 
 export type RoleModelSystemChatMessage = {
   readonly role: 'system';
+  readonly content: string;
+};
+
+export type RoleModelDeveloperChatMessage = {
+  readonly role: 'developer';
   readonly content: string;
 };
 
@@ -31,6 +44,7 @@ export type RoleModelToolChatMessage = {
 
 export type RoleModelChatMessage =
   | RoleModelSystemChatMessage
+  | RoleModelDeveloperChatMessage
   | RoleModelUserChatMessage
   | RoleModelAssistantChatMessage
   | RoleModelToolChatMessage;
@@ -50,6 +64,7 @@ export type RoleModelChatCompletionTool = {
     readonly name: string;
     readonly description: string;
     readonly parameters: RoleModelObjectJsonSchema;
+    readonly strict?: true;
   };
 };
 
@@ -61,15 +76,52 @@ export type RoleModelObjectJsonSchema = {
 };
 
 export type RoleModelJsonSchema = {
-  readonly type?: 'string' | 'number' | 'boolean' | 'object' | 'array';
+  readonly type?: ModelToolJsonSchema['type'];
   readonly description?: string;
   readonly enum?: readonly string[];
   readonly properties?: Readonly<Record<string, RoleModelJsonSchema>>;
+  readonly required?: readonly string[];
   readonly additionalProperties?: boolean;
   readonly items?: RoleModelJsonSchema;
 };
 
+export type RoleModelPromptFrameKind =
+  | 'system_protocol'
+  | 'developer_protocol'
+  | 'model_only_runtime_context'
+  | 'visible_transcript'
+  | 'current_user_message'
+  | 'native_assistant_message'
+  | 'native_tool_result_message';
+
+export type RoleModelPromptFrame = {
+  readonly kind: RoleModelPromptFrameKind;
+  readonly role: RoleModelChatMessage['role'];
+  readonly content: string | null;
+  readonly modelOnly: boolean;
+  readonly message?: RoleModelChatMessage;
+};
+
+export type RoleModelPromptFragmentSlot = 'developer_context';
+
+export type RoleModelPromptFragmentKind =
+  | 'runtime_note'
+  | 'plugin_context_item';
+
+export type RoleModelPromptFragment = {
+  readonly id: string;
+  readonly pluginId?: string;
+  readonly kind: RoleModelPromptFragmentKind;
+  readonly slot: RoleModelPromptFragmentSlot;
+  readonly text: string;
+  readonly budget?: RuntimePluginContextBudget;
+  readonly sourceReferences: readonly RuntimePluginSourceReference[];
+  readonly redactionLabels: readonly string[];
+};
+
 export type RoleModelTurnContext = {
+  readonly frames: readonly RoleModelPromptFrame[];
+  readonly promptFragments: readonly RoleModelPromptFragment[];
   readonly messages: readonly RoleModelChatMessage[];
   readonly tools: readonly RoleModelChatCompletionTool[];
 };
@@ -81,55 +133,129 @@ export type RoleModelProviderToolNameMapping = {
 
 export type RenderRoleModelTurnContextOptions = {
   readonly additionalMessages?: readonly RoleModelChatMessage[];
+  readonly outputMode?: 'native_tools' | 'json_fallback';
+  readonly capabilities?: RoleModelProviderCapabilities;
+};
+
+export type RoleModelPreparedRequest = RoleModelTurnContext & {
+  readonly outputMode: 'native_tools' | 'json_fallback';
+  readonly capabilities: RoleModelProviderCapabilities;
+};
+
+export type RoleModelProviderCapabilities = {
+  readonly supportsNativeTools: boolean;
+  readonly supportsDeveloperOrSystemContext: boolean;
+  readonly preferredModelContextRole: 'developer' | 'system';
+  readonly supportsStrictToolSchema: boolean;
+  readonly supportsReasoning: boolean;
+  readonly reasoningParameterStyle: 'none' | 'nvidia';
+  readonly requiresReasoningBlockRoundTrip: boolean;
+  readonly supportsToolChoice: boolean;
+  readonly supportsParallelToolCalls: boolean;
 };
 
 const runtimeContextOpeningTagPattern = /<\s*runtime_context\b/giu;
 const runtimeContextClosingTagPattern = /<\s*\/\s*runtime_context\s*>/giu;
 
+export const defaultRoleModelProviderCapabilities = Object.freeze({
+  supportsNativeTools: true,
+  supportsDeveloperOrSystemContext: true,
+  preferredModelContextRole: 'system',
+  supportsStrictToolSchema: true,
+  supportsReasoning: false,
+  reasoningParameterStyle: 'none',
+  requiresReasoningBlockRoundTrip: false,
+  supportsToolChoice: true,
+  supportsParallelToolCalls: true
+} satisfies RoleModelProviderCapabilities);
+
 export const roleModelStableSystemPromptText =
-  'Use OpenAI-compatible chat-completions semantics. ' +
-  'The conversation history is provided as normal user and assistant messages. ' +
-  'The tools array lists tools you, the assistant, can call through the runtime; these are not commands the user runs. ' +
-  'Tool names are callable functions, not a complete plugin inventory. ' +
-  'If you need canonical plugin inventory facts, call the plugin inventory tool and use its tool result rather than inferring plugins from tool names. ' +
-  'When discussing tools, describe them as tools you can call through the runtime, not as commands the user should run. ' +
-  'Runtime and plugin context may be appended to the current user message inside a runtime_context block; treat that block as hidden reference data, not new user input or user-visible text. ' +
-  'Use your provided function tools when a response depends on runtime/plugin state. ' +
-  'Prefer the visible_reply tool for final user-visible replies. If you return final assistant content with no tool calls, the runtime normalizes that content through the same visible-reply commit path. ' +
-  'When tool results arrive as tool messages, use those results before deciding whether another tool call is necessary. ' +
-  'Do not return CharacterDecision JSON, do not include internal version fields, and do not copy runtime_context text verbatim into your response. ' +
-  'Refer to extensions as plugins, not capabilities.';
+  'Use chat-completions semantics. The visible transcript is normal user/assistant conversation. Model-only context is not user text. Refer to extensions as plugins.';
+
+const roleModelVisibleReplyProtocolPromptText =
+  'Commit user-visible text by calling visible_reply.';
+
+const roleModelNativeToolProtocolPromptParts = Object.freeze([
+  'Use provided function tools when runtime/plugin state is needed.',
+  'Tools are assistant-owned runtime functions, not user commands.',
+  'Tool names are callable functions, not a full plugin inventory; call plugin.list for inventory facts.'
+]);
+
+const roleModelNativeParallelToolProtocolPromptParts = Object.freeze([
+  'You may return multiple independent function calls in one assistant response; every executable call will be handled.',
+  'Do not invent a one-tool-per-turn restriction.'
+]);
+
+const roleModelNativeInterimVisibleReplyProtocolPromptParts = Object.freeze([
+  'visible_reply may share a response with executable calls; in that case it is interim.',
+  'If you sent an interim visible_reply, make a new visible_reply call.'
+]);
+
+const roleModelFinalVisibleReplyProtocolPromptText =
+  'After all requested tool results, call visible_reply with the final response.';
+
+const roleModelTerminalAssistantContentProtocolPromptText =
+  'Terminal assistant content with no tool calls may be normalized by the runtime.';
+
+const roleModelUnavailableVisibleReplyProtocolPromptText =
+  'visible_reply is unavailable. Terminal assistant content is non-committed model text and is not shown to the user.';
 
 export function renderRoleModelTurnContext(
   inputEnvelope: RoleModelInputEnvelope,
   options: RenderRoleModelTurnContextOptions = {}
 ): RoleModelTurnContext {
-  const messages = [
-    createSystemMessage(inputEnvelope),
-    ...inputEnvelope.decisionContext.recentVisibleMessages.map(
-      visibleMessageToChatMessage
-    ),
-    createCurrentUserMessage(inputEnvelope),
-    ...(options.additionalMessages ?? []).map(freezeRoleModelChatMessage)
-  ];
+  return prepareRoleModelRequest(inputEnvelope, options);
+}
+
+export function prepareRoleModelRequest(
+  inputEnvelope: RoleModelInputEnvelope,
+  options: RenderRoleModelTurnContextOptions = {}
+): RoleModelPreparedRequest {
+  const capabilities =
+    options.capabilities ?? defaultRoleModelProviderCapabilities;
+  const outputMode = options.outputMode ?? 'native_tools';
+  const promptFragments = createRoleModelPromptFragments(inputEnvelope);
+  const frames = createRoleModelPromptFrames(inputEnvelope, {
+    additionalMessages: options.additionalMessages ?? [],
+    capabilities,
+    outputMode,
+    promptFragments
+  });
+  const messages = frames.flatMap((frame) =>
+    frame.message === undefined ? [] : [frame.message]
+  );
 
   return Object.freeze({
+    outputMode,
+    capabilities,
+    frames,
+    promptFragments,
     messages: Object.freeze(messages),
     tools: Object.freeze(
-      inputEnvelope.toolDefinitions.map(modelToolDefinitionToChatTool)
+      inputEnvelope.toolDefinitions.map((definition) =>
+        modelToolDefinitionToChatTool(definition, {
+          strict: capabilities.supportsStrictToolSchema
+        })
+      )
     )
-  } satisfies RoleModelTurnContext);
+  } satisfies RoleModelPreparedRequest);
 }
 
 export function modelToolDefinitionToChatTool(
-  definition: ModelToolDefinition
+  definition: ModelToolDefinition,
+  options: { readonly strict?: boolean } = {}
 ): RoleModelChatCompletionTool {
+  const parameters = modelToolInputContractToJsonSchema(definition.inputContract);
+  const strict =
+    options.strict === true && jsonSchemaSupportsStrictTools(parameters);
+
   return Object.freeze({
     type: 'function',
     function: Object.freeze({
       name: definition.name,
       description: definition.description,
-      parameters: modelToolInputContractToJsonSchema(definition.inputContract)
+      parameters,
+      ...(strict ? { strict: true } : {})
     })
   } satisfies RoleModelChatCompletionTool);
 }
@@ -220,7 +346,10 @@ export function freezeRoleModelChatMessage(
   return Object.freeze({
     role: message.role,
     content: message.content
-  } satisfies RoleModelSystemChatMessage | RoleModelUserChatMessage);
+  } satisfies
+    | RoleModelSystemChatMessage
+    | RoleModelDeveloperChatMessage
+    | RoleModelUserChatMessage);
 }
 
 export function freezeRoleModelChatToolCall(
@@ -245,6 +374,144 @@ function createSystemMessage(
   } satisfies RoleModelSystemChatMessage);
 }
 
+function createRoleModelPromptFrames(
+  inputEnvelope: RoleModelInputEnvelope,
+  options: {
+    readonly additionalMessages: readonly RoleModelChatMessage[];
+    readonly capabilities: RoleModelProviderCapabilities;
+    readonly outputMode: 'native_tools' | 'json_fallback';
+    readonly promptFragments: readonly RoleModelPromptFragment[];
+  }
+): readonly RoleModelPromptFrame[] {
+  const frames: RoleModelPromptFrame[] = [];
+  const runtimeContextMessage = createRuntimeContextMessage(
+    options.promptFragments,
+    options.capabilities
+  );
+
+  frames.push(
+    createPromptFrame('system_protocol', createSystemMessage(inputEnvelope), true)
+  );
+  frames.push(
+    createPromptFrame(
+      'developer_protocol',
+      createProtocolMessage({
+        ...options,
+        visibleReplyAvailable: inputEnvelope.allowedTools.includes(
+          visibleReplyModelToolName
+        )
+      }),
+      true
+    )
+  );
+
+  if (runtimeContextMessage !== undefined) {
+    frames.push(
+      createPromptFrame('model_only_runtime_context', runtimeContextMessage, true)
+    );
+  }
+
+  frames.push(
+    ...inputEnvelope.decisionContext.recentVisibleMessages.map((message) =>
+      createPromptFrame(
+        'visible_transcript',
+        visibleMessageToChatMessage(message),
+        false
+      )
+    )
+  );
+  frames.push(
+    createPromptFrame(
+      'current_user_message',
+      createCurrentUserMessage(inputEnvelope),
+      false
+    )
+  );
+  frames.push(
+    ...options.additionalMessages.map((message) =>
+      createPromptFrame(
+        message.role === 'tool'
+          ? 'native_tool_result_message'
+          : 'native_assistant_message',
+        freezeRoleModelChatMessage(message),
+        true
+      )
+    )
+  );
+
+  return Object.freeze(frames);
+}
+
+function createPromptFrame(
+  kind: RoleModelPromptFrameKind,
+  message: RoleModelChatMessage,
+  modelOnly: boolean
+): RoleModelPromptFrame {
+  return Object.freeze({
+    kind,
+    role: message.role,
+    content: message.content,
+    modelOnly,
+    message
+  } satisfies RoleModelPromptFrame);
+}
+
+function createProtocolMessage(options: {
+  readonly capabilities: RoleModelProviderCapabilities;
+  readonly outputMode: 'native_tools' | 'json_fallback';
+  readonly visibleReplyAvailable: boolean;
+}): RoleModelSystemChatMessage | RoleModelDeveloperChatMessage {
+  const content =
+    options.outputMode === 'native_tools'
+      ? createRoleModelNativeToolProtocolPromptText(options)
+      : createRoleModelJsonFallbackProtocolPromptText(
+          options.visibleReplyAvailable
+        );
+  const role = modelOnlyContextRole(options.capabilities);
+
+  return Object.freeze({
+    role,
+    content
+  } satisfies RoleModelSystemChatMessage | RoleModelDeveloperChatMessage);
+}
+
+function createRoleModelNativeToolProtocolPromptText(
+  options: {
+    readonly capabilities: RoleModelProviderCapabilities;
+    readonly visibleReplyAvailable: boolean;
+  }
+): string {
+  return [
+    ...roleModelNativeToolProtocolPromptParts,
+    ...(options.capabilities.supportsParallelToolCalls
+      ? roleModelNativeParallelToolProtocolPromptParts
+      : []),
+    ...(options.visibleReplyAvailable &&
+    options.capabilities.supportsParallelToolCalls
+      ? roleModelNativeInterimVisibleReplyProtocolPromptParts
+      : []),
+    ...(options.visibleReplyAvailable
+      ? [
+          roleModelVisibleReplyProtocolPromptText,
+          roleModelFinalVisibleReplyProtocolPromptText,
+          roleModelTerminalAssistantContentProtocolPromptText
+        ]
+      : [roleModelUnavailableVisibleReplyProtocolPromptText])
+  ].join(' ');
+}
+
+function createRoleModelJsonFallbackProtocolPromptText(
+  visibleReplyAvailable: boolean
+): string {
+  return [
+    'Return one CharacterDecision JSON object with ordered toolCalls.',
+    visibleReplyAvailable
+      ? roleModelVisibleReplyProtocolPromptText
+      : roleModelUnavailableVisibleReplyProtocolPromptText,
+    'Do not include runtime input fields or internal version fields.'
+  ].join(' ');
+}
+
 function visibleMessageToChatMessage(
   message: VisibleMessage
 ): RoleModelUserChatMessage | RoleModelAssistantChatMessage {
@@ -264,41 +531,100 @@ function visibleMessageToChatMessage(
 function createCurrentUserMessage(
   inputEnvelope: RoleModelInputEnvelope
 ): RoleModelUserChatMessage {
-  const context = renderEphemeralRuntimeContext(inputEnvelope);
-  const contextText =
-    context === undefined
-      ? ''
-      : `\n\n<runtime_context hidden_from_user="true">\n${context}\n</runtime_context>`;
-
   return Object.freeze({
     role: 'user',
-    content: `${inputEnvelope.event.payload.currentUserMessage}${contextText}`
+    content: inputEnvelope.event.payload.currentUserMessage
   } satisfies RoleModelUserChatMessage);
 }
 
-function renderEphemeralRuntimeContext(
-  inputEnvelope: RoleModelInputEnvelope
-): string | undefined {
-  const runtimeNotes = inputEnvelope.decisionContext.runtimeNotes;
-  const pluginContextItems = inputEnvelope.decisionContext.pluginContextItems;
+function createRuntimeContextMessage(
+  promptFragments: readonly RoleModelPromptFragment[],
+  capabilities: RoleModelProviderCapabilities
+): RoleModelSystemChatMessage | RoleModelDeveloperChatMessage | undefined {
+  const context = renderEphemeralRuntimeContext(promptFragments);
 
-  if (runtimeNotes.length === 0 && pluginContextItems.length === 0) {
+  if (context === undefined) {
     return undefined;
   }
 
-  const lines = [
-    '[System note: The following runtime context is reference data, NOT new user input. Use it to inform responses, but do not copy it verbatim.]'
-  ];
+  const role = modelOnlyContextRole(capabilities);
+
+  return Object.freeze({
+    role,
+    content: context
+  } satisfies RoleModelSystemChatMessage | RoleModelDeveloperChatMessage);
+}
+
+function modelOnlyContextRole(
+  capabilities: RoleModelProviderCapabilities
+): 'developer' | 'system' {
+  return capabilities.supportsDeveloperOrSystemContext &&
+    capabilities.preferredModelContextRole === 'developer'
+    ? 'developer'
+    : 'system';
+}
+
+function createRoleModelPromptFragments(
+  inputEnvelope: RoleModelInputEnvelope
+): readonly RoleModelPromptFragment[] {
+  return Object.freeze([
+    ...inputEnvelope.decisionContext.runtimeNotes.map((text, index) =>
+      Object.freeze({
+        id: `runtime-note-${String(index + 1)}`,
+        kind: 'runtime_note',
+        slot: 'developer_context',
+        text,
+        sourceReferences: Object.freeze([]),
+        redactionLabels: Object.freeze([])
+      } satisfies RoleModelPromptFragment)
+    ),
+    ...inputEnvelope.decisionContext.pluginContextItems.map((item) =>
+      Object.freeze({
+        id: item.id,
+        pluginId: item.pluginId,
+        kind: 'plugin_context_item',
+        slot: 'developer_context',
+        text: item.text,
+        budget: item.budget,
+        sourceReferences: Object.freeze([...item.sourceReferences]),
+        redactionLabels: Object.freeze([...item.redactionLabels])
+      } satisfies RoleModelPromptFragment)
+    )
+  ]);
+}
+
+function renderEphemeralRuntimeContext(
+  promptFragments: readonly RoleModelPromptFragment[]
+): string | undefined {
+  const runtimeNotes = promptFragments.filter(
+    (fragment) => fragment.kind === 'runtime_note'
+  );
+  const pluginContextItems = promptFragments.filter(
+    (fragment) => fragment.kind === 'plugin_context_item'
+  );
+
+  if (promptFragments.length === 0) {
+    return undefined;
+  }
+
+  const lines = ['Model-only runtime context. This is not user input.'];
 
   if (runtimeNotes.length > 0) {
-    lines.push('', 'Runtime notes:', ...formatRuntimeContextLines(runtimeNotes));
+    lines.push(
+      'runtime_notes:',
+      ...formatRuntimeContextLines(runtimeNotes.map((fragment) => fragment.text))
+    );
   }
 
   if (pluginContextItems.length > 0) {
     lines.push(
-      '',
-      'Runtime context:',
-      ...formatRuntimeContextLines(pluginContextItems.map((item) => item.text))
+      'plugin_context:',
+      ...formatRuntimeContextLines(
+        pluginContextItems.map(
+          (fragment) =>
+            `${fragment.pluginId ?? 'runtime'}/${fragment.id}: ${fragment.text}`
+        )
+      )
     );
   }
 
@@ -337,6 +663,10 @@ function sanitizeRuntimeContextText(value: string): readonly string[] {
 function modelToolInputContractToJsonSchema(
   contract: ModelToolInputContract
 ): RoleModelObjectJsonSchema {
+  if (contract.jsonSchema !== undefined) {
+    return modelToolObjectJsonSchemaToRoleModelSchema(contract.jsonSchema);
+  }
+
   const properties: Record<string, RoleModelJsonSchema> = {};
   const required: string[] = [];
 
@@ -354,6 +684,72 @@ function modelToolInputContractToJsonSchema(
     required: Object.freeze(required),
     additionalProperties: contract.additionalFields
   } satisfies RoleModelObjectJsonSchema);
+}
+
+function modelToolObjectJsonSchemaToRoleModelSchema(
+  schema: ModelToolObjectJsonSchema
+): RoleModelObjectJsonSchema {
+  const converted = modelToolJsonSchemaToRoleModelSchema(schema);
+
+  return Object.freeze({
+    type: 'object',
+    properties: Object.freeze(converted.properties ?? {}),
+    required: Object.freeze(converted.required ?? []),
+    additionalProperties: converted.additionalProperties ?? false
+  } satisfies RoleModelObjectJsonSchema);
+}
+
+function modelToolJsonSchemaToRoleModelSchema(
+  schema: ModelToolJsonSchema
+): RoleModelJsonSchema {
+  const schemaType = freezeRoleModelJsonSchemaType(schema.type);
+
+  return Object.freeze({
+    ...(schemaType === undefined ? {} : { type: schemaType }),
+    ...(schema.description === undefined
+      ? {}
+      : { description: schema.description }),
+    ...(schema.enum === undefined
+      ? {}
+      : { enum: Object.freeze([...schema.enum]) }),
+    ...(schema.properties === undefined
+      ? {}
+      : {
+          properties: Object.freeze(
+            Object.fromEntries(
+              Object.entries(schema.properties).map(([key, value]) => [
+                key,
+                modelToolJsonSchemaToRoleModelSchema(value)
+              ])
+            )
+          )
+        }),
+    ...(schema.required === undefined
+      ? {}
+      : { required: Object.freeze([...schema.required]) }),
+    ...(schema.additionalProperties === undefined
+      ? {}
+      : { additionalProperties: schema.additionalProperties }),
+    ...(schema.items === undefined
+      ? {}
+      : { items: modelToolJsonSchemaToRoleModelSchema(schema.items) })
+  } satisfies RoleModelJsonSchema);
+}
+
+function freezeRoleModelJsonSchemaType(
+  type: ModelToolJsonSchema['type']
+): ModelToolJsonSchema['type'] {
+  if (type === undefined) {
+    return undefined;
+  }
+
+  return isModelToolJsonSchemaTypeArray(type) ? Object.freeze([...type]) : type;
+}
+
+function isModelToolJsonSchemaTypeArray(
+  value: NonNullable<ModelToolJsonSchema['type']>
+): value is readonly ModelToolJsonSchemaType[] {
+  return Array.isArray(value);
 }
 
 function modelToolInputFieldToJsonSchema(
@@ -388,4 +784,44 @@ function modelToolValueTypeToJsonSchemaType(
   }
 
   return valueType;
+}
+
+function jsonSchemaSupportsStrictTools(schema: RoleModelJsonSchema): boolean {
+  const schemaTypes = roleModelJsonSchemaTypes(schema.type);
+
+  if (schemaTypes.includes('object')) {
+    if (schema.additionalProperties !== false) {
+      return false;
+    }
+
+    if (
+      !Object.values(schema.properties ?? {}).every(
+        jsonSchemaSupportsStrictTools
+      )
+    ) {
+      return false;
+    }
+  }
+
+  if (
+    schemaTypes.includes('array') &&
+    schema.items !== undefined &&
+    !jsonSchemaSupportsStrictTools(schema.items)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function roleModelJsonSchemaTypes(
+  type: RoleModelJsonSchema['type']
+): readonly ModelToolJsonSchemaType[] {
+  if (type === undefined) {
+    return Object.freeze([]);
+  }
+
+  return isModelToolJsonSchemaTypeArray(type)
+    ? type
+    : Object.freeze([type]);
 }

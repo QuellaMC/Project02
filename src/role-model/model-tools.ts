@@ -25,23 +25,65 @@ export type ModelToolInputField = {
   readonly allowedValues?: readonly string[];
 };
 
+export type ModelToolJsonSchemaType =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'object'
+  | 'array'
+  | 'null';
+
+export type ModelToolJsonSchema = {
+  readonly type?: ModelToolJsonSchemaType | readonly ModelToolJsonSchemaType[];
+  readonly description?: string;
+  readonly enum?: readonly string[];
+  readonly properties?: Readonly<Record<string, ModelToolJsonSchema>>;
+  readonly required?: readonly string[];
+  readonly additionalProperties?: boolean;
+  readonly items?: ModelToolJsonSchema;
+};
+
+export type ModelToolObjectJsonSchema = ModelToolJsonSchema & {
+  readonly type: 'object';
+  readonly properties: Readonly<Record<string, ModelToolJsonSchema>>;
+  readonly required: readonly string[];
+  readonly additionalProperties: boolean;
+};
+
 export type ModelToolInputContract = {
   readonly type: 'object';
   readonly fields: readonly ModelToolInputField[];
   readonly additionalFields: boolean;
+  readonly jsonSchema?: ModelToolObjectJsonSchema;
+};
+
+export const modelToolCallLimitScopes = Object.freeze([
+  'model_response',
+  'user_turn'
+] as const);
+
+export type ModelToolCallLimitScope =
+  (typeof modelToolCallLimitScopes)[number];
+
+export type ModelToolCallLimit = {
+  readonly scope: ModelToolCallLimitScope;
+  readonly maxCalls: number;
 };
 
 export type ModelToolDefinition = {
   readonly name: string;
   readonly description: string;
   readonly requiredForUserTurn: boolean;
-  readonly maxCallsPerUserTurn: number;
+  readonly callLimit: ModelToolCallLimit;
   readonly inputContract: ModelToolInputContract;
 };
 
 export type BuiltInModelToolDefinition = ModelToolDefinition & {
   readonly name: BuiltInModelToolName;
-  readonly maxCallsPerUserTurn: 1;
+  readonly callLimit: {
+    readonly scope: 'model_response';
+    readonly maxCalls: 1;
+  };
 };
 
 export type VisibleReplyToolInput = {
@@ -177,7 +219,7 @@ export function freezeModelToolDefinition(
     name: definition.name,
     description: definition.description,
     requiredForUserTurn: definition.requiredForUserTurn,
-    maxCallsPerUserTurn: definition.maxCallsPerUserTurn,
+    callLimit: freezeModelToolCallLimit(definition.callLimit),
     inputContract: freezeModelToolInputContract(definition.inputContract)
   } satisfies ModelToolDefinition);
 }
@@ -226,6 +268,24 @@ export function validateModelToolInputAgainstContract(options: {
   readonly input: Readonly<Record<string, unknown>>;
   readonly inputContract: ModelToolInputContract;
 }): ModelToolInputValidationResult {
+  if (options.inputContract.jsonSchema !== undefined) {
+    const schemaValidation = validateModelToolInputAgainstJsonSchema({
+      toolName: options.toolName,
+      value: options.input,
+      schema: options.inputContract.jsonSchema,
+      fieldPath: ''
+    });
+
+    if (schemaValidation !== undefined) {
+      return rejectModelToolInput(schemaValidation);
+    }
+
+    return Object.freeze({
+      status: 'accepted',
+      input: freezeJsonRecord(options.input)
+    } satisfies ModelToolInputValidationResult);
+  }
+
   const supportedFieldNames = options.inputContract.fields.map(
     (field) => field.name
   );
@@ -309,9 +369,21 @@ function createBuiltInModelToolDefinition(options: {
     name: options.name,
     description: options.description,
     requiredForUserTurn: options.requiredForUserTurn,
-    maxCallsPerUserTurn: 1,
+    callLimit: Object.freeze({
+      scope: 'model_response',
+      maxCalls: 1
+    }),
     inputContract: freezeModelToolInputContract(options.inputContract)
   } satisfies BuiltInModelToolDefinition);
+}
+
+function freezeModelToolCallLimit(
+  callLimit: ModelToolCallLimit
+): ModelToolCallLimit {
+  return Object.freeze({
+    scope: callLimit.scope,
+    maxCalls: callLimit.maxCalls
+  });
 }
 
 function freezeModelToolInputContract(
@@ -332,7 +404,10 @@ function freezeModelToolInputContract(
         } satisfies ModelToolInputField)
       )
     ),
-    additionalFields: inputContract.additionalFields
+    additionalFields: inputContract.additionalFields,
+    ...(inputContract.jsonSchema === undefined
+      ? {}
+      : { jsonSchema: freezeModelToolObjectJsonSchema(inputContract.jsonSchema) })
   } satisfies ModelToolInputContract);
 }
 
@@ -447,6 +522,226 @@ function validateModelToolInputJsonValue(options: {
   }
 
   return `${options.toolName} input field "${options.fieldPath}" must be JSON serializable.`;
+}
+
+function validateModelToolInputAgainstJsonSchema(options: {
+  readonly toolName: string;
+  readonly value: unknown;
+  readonly schema: ModelToolJsonSchema;
+  readonly fieldPath: string;
+}): string | undefined {
+  const typeError = validateJsonSchemaType({
+    toolName: options.toolName,
+    value: options.value,
+    schema: options.schema,
+    fieldPath: options.fieldPath
+  });
+
+  if (typeError !== undefined) {
+    return typeError;
+  }
+
+  if (
+    options.schema.enum !== undefined &&
+    (typeof options.value !== 'string' ||
+      !options.schema.enum.includes(options.value))
+  ) {
+    return `${options.toolName} input field "${displayFieldPath(options.fieldPath)}" must be one of: ${options.schema.enum.join(', ')}.`;
+  }
+
+  if (Array.isArray(options.value)) {
+    if (options.schema.items === undefined) {
+      return validateModelToolInputJsonValue({
+        toolName: options.toolName,
+        fieldPath: displayFieldPath(options.fieldPath),
+        value: options.value
+      });
+    }
+
+    for (const [index, item] of options.value.entries()) {
+      const itemError = validateModelToolInputAgainstJsonSchema({
+        toolName: options.toolName,
+        value: item,
+        schema: options.schema.items,
+        fieldPath: `${options.fieldPath}[${String(index)}]`
+      });
+
+      if (itemError !== undefined) {
+        return itemError;
+      }
+    }
+
+    return undefined;
+  }
+
+  if (isJsonRecord(options.value)) {
+    const properties = options.schema.properties ?? {};
+    const required = options.schema.required ?? [];
+
+    for (const field of required) {
+      if (options.value[field] === undefined) {
+        return `${options.toolName} input missing required field "${displayFieldPath(
+          appendFieldPath(options.fieldPath, field)
+        )}".`;
+      }
+    }
+
+    if (options.schema.additionalProperties === false) {
+      const unsupportedKeys = Object.keys(options.value).filter(
+        (key) => properties[key] === undefined
+      );
+
+      if (unsupportedKeys.length > 0) {
+        return `${options.toolName} input includes unsupported fields: ${unsupportedKeys
+          .map((key) => displayFieldPath(appendFieldPath(options.fieldPath, key)))
+          .join(', ')}.`;
+      }
+    }
+
+    for (const [field, schema] of Object.entries(properties)) {
+      const childValue = options.value[field];
+
+      if (childValue === undefined) {
+        continue;
+      }
+
+      const childError = validateModelToolInputAgainstJsonSchema({
+        toolName: options.toolName,
+        value: childValue,
+        schema,
+        fieldPath: appendFieldPath(options.fieldPath, field)
+      });
+
+      if (childError !== undefined) {
+        return childError;
+      }
+    }
+  }
+
+  return validateModelToolInputJsonValue({
+    toolName: options.toolName,
+    fieldPath: displayFieldPath(options.fieldPath),
+    value: options.value
+  });
+}
+
+function validateJsonSchemaType(options: {
+  readonly toolName: string;
+  readonly value: unknown;
+  readonly schema: ModelToolJsonSchema;
+  readonly fieldPath: string;
+}): string | undefined {
+  const schemaType = options.schema.type;
+
+  if (schemaType === undefined) {
+    return undefined;
+  }
+
+  const types = modelToolJsonSchemaTypes(schemaType);
+
+  if (types.some((type) => jsonValueMatchesSchemaType(options.value, type))) {
+    return undefined;
+  }
+
+  return `${options.toolName} input field "${displayFieldPath(
+    options.fieldPath
+  )}" must be ${types.join(' or ')}.`;
+}
+
+function jsonValueMatchesSchemaType(
+  value: unknown,
+  type: ModelToolJsonSchemaType
+): boolean {
+  if (type === 'array') {
+    return Array.isArray(value);
+  }
+
+  if (type === 'object') {
+    return isJsonRecord(value);
+  }
+
+  if (type === 'number') {
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+
+  if (type === 'null') {
+    return value === null;
+  }
+
+  return typeof value === type;
+}
+
+function modelToolJsonSchemaTypes(
+  type: NonNullable<ModelToolJsonSchema['type']>
+): readonly ModelToolJsonSchemaType[] {
+  return isModelToolJsonSchemaTypeArray(type)
+    ? Object.freeze([...type])
+    : Object.freeze([type]);
+}
+
+function isModelToolJsonSchemaTypeArray(
+  value: NonNullable<ModelToolJsonSchema['type']>
+): value is readonly ModelToolJsonSchemaType[] {
+  return Array.isArray(value);
+}
+
+function appendFieldPath(path: string, field: string): string {
+  return path.length === 0 ? field : `${path}.${field}`;
+}
+
+function displayFieldPath(path: string): string {
+  return path.length === 0 ? '$' : path;
+}
+
+function freezeModelToolObjectJsonSchema(
+  schema: ModelToolObjectJsonSchema
+): ModelToolObjectJsonSchema {
+  return freezeModelToolJsonSchema(schema) as ModelToolObjectJsonSchema;
+}
+
+function freezeModelToolJsonSchema(
+  schema: ModelToolJsonSchema
+): ModelToolJsonSchema {
+  return Object.freeze({
+    ...(schema.type === undefined
+      ? {}
+      : {
+          type: freezeModelToolJsonSchemaType(schema.type)
+        }),
+    ...(schema.description === undefined
+      ? {}
+      : { description: schema.description }),
+    ...(schema.enum === undefined
+      ? {}
+      : { enum: Object.freeze([...schema.enum]) }),
+    ...(schema.properties === undefined
+      ? {}
+      : {
+          properties: Object.freeze(
+            Object.fromEntries(
+              Object.entries(schema.properties).map(([key, value]) => [
+                key,
+                freezeModelToolJsonSchema(value)
+              ])
+            )
+          )
+        }),
+    ...(schema.required === undefined
+      ? {}
+      : { required: Object.freeze([...schema.required]) }),
+    ...(schema.additionalProperties === undefined
+      ? {}
+      : { additionalProperties: schema.additionalProperties }),
+    ...(schema.items === undefined
+      ? {}
+      : { items: freezeModelToolJsonSchema(schema.items) })
+  } satisfies ModelToolJsonSchema);
+}
+
+function freezeModelToolJsonSchemaType(
+  type: NonNullable<ModelToolJsonSchema['type']>
+): NonNullable<ModelToolJsonSchema['type']> {
+  return isModelToolJsonSchemaTypeArray(type) ? Object.freeze([...type]) : type;
 }
 
 function freezeJsonRecord(

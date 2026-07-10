@@ -6,6 +6,7 @@ import { Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
+import { createConversationSession } from '../src/core/conversation.ts';
 import { roleModelPluginListToolName } from '../src/role-model/contracts.ts';
 import {
   createConfiguredProject02PluginHost,
@@ -17,13 +18,197 @@ import {
   createRuntimePluginFileStore,
   createMemoryProviderRuntimePlugin,
   createRuntimePlugin,
+  createCharacterStatePlugin,
+  createCharacterStatePluginManifest,
+  firstPartyModelToolsPluginId,
   memorySearchTool,
   runtimePluginDiscoveryPluginId,
   runtimePluginContractVersion,
+  type RuntimePluginAccessMap,
   type RuntimePluginContext
 } from '../src/plugins/index.ts';
+import {
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent
+} from '../src/runtime/event.ts';
+import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
+import { createRuntimeLogStore } from '../src/runtime/log.ts';
 
 describe('runtime config activation diagnostics', () => {
+  it('keeps final activation aligned with host-owned default-enabled plugins', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-host-defaults-aligned-')
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+    });
+
+    expect(configured.activation.enabledPluginIds).toEqual(
+      configured.host.enabledPluginIds()
+    );
+    expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      characterStatePluginId
+    ]);
+    expect(
+      configured.activation.plugins
+        .filter((plugin) => plugin.enabled)
+        .map((plugin) => plugin.pluginId)
+    ).toEqual(configured.host.enabledPluginIds());
+    expect(configured.host.pluginToolDefinitions()).toContainEqual(
+      expect.objectContaining({
+        pluginId: runtimePluginDiscoveryPluginId,
+        name: roleModelPluginListToolName
+      })
+    );
+  });
+
+  it('keeps check access inventory aligned with host-injected discovery', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-host-discovery-')
+    );
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {}
+      }
+    );
+    const output = parseActivationOutput(stdout);
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {}
+    });
+    const checkDiscovery = output.plugins.find(
+      (plugin) => plugin.pluginId === runtimePluginDiscoveryPluginId
+    );
+    const hostDiscovery = configured.host
+      .registrySnapshot()
+      .plugins.find(
+        (plugin) => plugin.manifest.id === runtimePluginDiscoveryPluginId
+      );
+
+    expect(exitCode).toBe(0);
+    expect(checkDiscovery).toMatchObject({
+      pluginId: runtimePluginDiscoveryPluginId,
+      enabled: true,
+      activationStatus: 'active',
+      requestedAccess: { model_input: 'write' },
+      grantedAccess: { model_input: 'write' }
+    });
+    expect(hostDiscovery).toMatchObject({
+      requestedAccess: checkDiscovery?.requestedAccess,
+      grantedAccess: checkDiscovery?.grantedAccess
+    });
+    expect(configured.host.pluginToolDefinitions()).toContainEqual(
+      expect.objectContaining({
+        pluginId: runtimePluginDiscoveryPluginId,
+        name: roleModelPluginListToolName
+      })
+    );
+  });
+
+  it('keeps an explicit host-scoped disable aligned with host state', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-host-disable-aligned-')
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [runtimePluginDiscoveryPluginId]: {
+          enabled: false
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+    });
+
+    expect(configured.activation.enabledPluginIds).toEqual(
+      configured.host.enabledPluginIds()
+    );
+    expect(configured.activation.enabledPluginIds).not.toContain(
+      runtimePluginDiscoveryPluginId
+    );
+    expect(configured.host.resolveToolPluginId(roleModelPluginListToolName)).toBeUndefined();
+  });
+
+  it('keeps character-agent output non-committed when config disables visible_reply', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-model-tools-disabled-runtime-')
+    );
+    const sessionId = 'session-model-tools-disabled-runtime';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [firstPartyModelToolsPluginId]: {
+          enabled: false
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      storeRoot,
+      sessionId
+    });
+    const logStore = createRuntimeLogStore();
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        createRuntimeEventIdentity({
+          eventId: 'evt_model_tools_disabled_runtime',
+          traceId: 'trace_model_tools_disabled_runtime',
+          createdAt: '2026-06-15T00:00:00.000Z'
+        })
+      ),
+      session: createConversationSession({ id: sessionId }),
+      logStore,
+      pluginHost: configured.host,
+      agent: {
+        reply() {
+          return {
+            text: 'Character agent reply.'
+          };
+        }
+      }
+    });
+
+    expect(configured.activation.enabledPluginIds).not.toContain(
+      firstPartyModelToolsPluginId
+    );
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected the disabled visible-reply turn to complete.');
+    }
+
+    expect(
+      result.rawEvent.roleModelIOSnapshot?.inputEnvelope.allowedTools
+    ).not.toContain('visible_reply');
+    expect(result.rawEvent.parsedRoleModelDecisionSnapshot?.result).toMatchObject({
+      status: 'accepted',
+      nonCommittedText: 'Character agent reply.',
+      decision: {
+        toolCalls: []
+      }
+    });
+    expect(result).not.toHaveProperty('turn');
+    expect(result.conversationMessages).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
+  });
+
   it('fails check for config-enabled legacy function factories without constructing them', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-legacy-unchecked-')
@@ -103,7 +288,7 @@ describe('runtime config activation diagnostics', () => {
     expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_legacy_factory_unchecked'
     );
-    expect(output.plugins).toEqual([]);
+    expect(nonHostScopedActivationPlugins(output)).toEqual([]);
   });
 
   it('fails check for default-memory legacy function factories without constructing them', async () => {
@@ -274,7 +459,11 @@ describe('runtime config activation diagnostics', () => {
       }
     });
 
-    expect(configured.activation.enabledPluginIds).toEqual([plugin.manifest.id]);
+    expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      plugin.manifest.id
+    ]);
     expect(configured.plugins.map((item) => item.manifest.id)).toEqual([
       plugin.manifest.id
     ]);
@@ -286,6 +475,120 @@ describe('runtime config activation diagnostics', () => {
         pluginId: plugin.manifest.id,
         enabled: true,
         activationStatus: 'active'
+      })
+    );
+  });
+
+  it('records requested and granted access in activation snapshots', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-access-'));
+    const plugin = fileStoreSessionEndPlugin('valid.file-store-policy', () => {});
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {
+        [plugin.manifest.id]: {
+          manifest: plugin.manifest,
+          create: () => plugin
+        }
+      }
+    });
+
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: plugin.manifest.id,
+        requestedAccess: { file_store: 'write' },
+        grantedAccess: { file_store: 'write' }
+      })
+    );
+  });
+
+  it('reports host-owned default grants for the built-in Character State factory', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-character-state-default-api-perms-')
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+    });
+
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        enabled: true,
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: { file_store: 'write', model_input: 'write' }
+      })
+    );
+  });
+
+  it('does not default-enable caller-supplied real Character State factories', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-character-state-real-factory-api-perms-')
+    );
+    const plugin = createCharacterStatePlugin();
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {
+        [characterStatePluginId]: {
+          manifest: createCharacterStatePluginManifest(),
+          create: () => {
+            factoryCalls += 1;
+
+            return plugin;
+          }
+        }
+      }
+    });
+
+    expect(factoryCalls).toBe(0);
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        enabled: false,
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: {}
+      })
+    );
+  });
+
+  it('does not default-enable caller-supplied Character State id spoofs', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-character-state-spoof-api-perms-')
+    );
+    const plugin = fileStoreSessionEndPlugin(characterStatePluginId, () => {});
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {
+        [characterStatePluginId]: {
+          manifest: plugin.manifest,
+          create: () => plugin
+        }
+      }
+    });
+
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        enabled: false,
+        requestedAccess: { file_store: 'write' },
+        grantedAccess: {}
       })
     );
   });
@@ -554,7 +857,11 @@ describe('runtime config activation diagnostics', () => {
     expect(configured.plugins.map((item) => item.manifest.id)).toEqual([
       plugin.manifest.id
     ]);
-    expect(configured.activation.enabledPluginIds).toEqual([plugin.manifest.id]);
+    expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      plugin.manifest.id
+    ]);
     expect(configured.activation.defaultMemoryProvider).toBe(plugin.manifest.id);
     expect(configured.activation.diagnostics).toEqual([]);
     expect(activation).toMatchObject({
@@ -732,6 +1039,8 @@ describe('runtime config activation diagnostics', () => {
     });
 
     expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
       selectedPlugin.manifest.id
     ]);
     expect(configured.activation.defaultMemoryProvider).toBe(
@@ -805,6 +1114,8 @@ describe('runtime config activation diagnostics', () => {
     );
 
     expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
       selectedPlugin.manifest.id
     ]);
     expect(configured.activation.defaultMemoryProvider).toBe(
@@ -884,6 +1195,176 @@ describe('runtime config activation diagnostics', () => {
       })
     );
     expect(stdout).not.toContain('manifest-backed-secret');
+  });
+
+  it('reports host-owned default access during check for the default Character State factory', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-character-state-default-factory-')
+    );
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {})
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(output.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        activationStatus: 'active',
+        enabled: true,
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: { file_store: 'write', model_input: 'write' }
+      })
+    );
+  });
+
+  it('does not default-enable caller-supplied real Character State factories during check', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-character-state-real-factory-')
+    );
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          [characterStatePluginId]: {
+            manifest: createCharacterStatePluginManifest(),
+            create() {
+              factoryCalls += 1;
+
+              return createCharacterStatePlugin();
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(0);
+    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_legacy_factory_unchecked'
+    );
+    expect(output.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        activationStatus: 'disabled',
+        enabled: false,
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: {}
+      })
+    );
+  });
+
+  it('does not infer Character State check default access from exact manifest matches', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-character-state-exact-manifest-')
+    );
+    const builtInPlugin = createCharacterStatePlugin();
+    const plugin = createRuntimePlugin({
+      manifest: builtInPlugin.manifest,
+      providedTools: builtInPlugin.providedTools,
+      lifecycleHooks: builtInPlugin.lifecycleHooks
+    });
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          [characterStatePluginId]: {
+            manifest: createCharacterStatePluginManifest(),
+            create() {
+              factoryCalls += 1;
+
+              return plugin;
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(0);
+    expect(output.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        activationStatus: 'disabled',
+        enabled: false,
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: {}
+      })
+    );
+  });
+
+  it('does not infer Character State check default access from same-id manifest spoofs', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-character-state-spoof-')
+    );
+    const plugin = fileStoreSessionEndPlugin(characterStatePluginId, () => {});
+    let stdout = '';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {
+          [characterStatePluginId]: {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+
+              return plugin;
+            }
+          }
+        }
+      }
+    );
+    const output = parseActivationOutput(stdout);
+
+    expect(exitCode).toBe(0);
+    expect(factoryCalls).toBe(0);
+    expect(output.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        activationStatus: 'disabled',
+        enabled: false,
+        requestedAccess: { file_store: 'write' },
+        grantedAccess: {}
+      })
+    );
   });
 
   it('fails check for duplicate manifest ids without constructing factories', async () => {
@@ -1004,8 +1485,12 @@ describe('runtime config activation diagnostics', () => {
     expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_duplicate_plugin_manifest_id'
     );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
-    expect(output.plugins.map((plugin) => plugin.activationStatus)).toEqual([
+    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([]);
+    expect(
+      nonHostScopedActivationPlugins(output).map(
+        (plugin) => plugin.activationStatus
+      )
+    ).toEqual([
       'disabled',
       'disabled'
     ]);
@@ -1022,7 +1507,13 @@ describe('runtime config activation diagnostics', () => {
     let stdout = '';
     let factoryCalls = 0;
 
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'mixed.duplicate': {
+          enabled: true
+        }
+      }
+    });
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'check'],
@@ -1123,8 +1614,12 @@ describe('runtime config activation diagnostics', () => {
     expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_duplicate_plugin_manifest_id'
     );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
-    expect(output.plugins.map((plugin) => plugin.activationStatus)).toEqual([
+    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([]);
+    expect(
+      nonHostScopedActivationPlugins(output).map(
+        (plugin) => plugin.activationStatus
+      )
+    ).toEqual([
       'disabled',
       'disabled'
     ]);
@@ -1198,7 +1693,7 @@ describe('runtime config activation diagnostics', () => {
     expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_duplicate_plugin_manifest_id'
     );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([
+    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([
       expect.objectContaining({
         pluginId: 'memory.selected'
       })
@@ -1301,7 +1796,10 @@ describe('runtime config activation diagnostics', () => {
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
     expect(configured.activation.diagnostics).toEqual([]);
-    expect(configured.activation.plugins).toEqual([]);
+    expect(configured.activation.plugins.map((plugin) => plugin.pluginId)).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId
+    ]);
   });
 
   it('skips later unselected legacy factory failures during host preparation', async () => {
@@ -1342,7 +1840,13 @@ describe('runtime config activation diagnostics', () => {
     let stdout = '';
     let factoryCalls = 0;
 
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [runtimePluginDiscoveryPluginId]: {
+          enabled: true
+        }
+      }
+    });
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'check'],
@@ -1485,7 +1989,7 @@ describe('runtime config activation diagnostics', () => {
     expect(cleanupContexts).toHaveLength(1);
     expect(cleanupContexts[0]).toMatchObject({
       sessionId,
-      currentUserMessage: 'configured plugin construction failed before host creation',
+      currentUserMessage: '',
       privacy: {
         exposePrivateConfig: false
       }
@@ -1564,7 +2068,7 @@ describe('runtime config activation diagnostics', () => {
 
     expect(cleanupContext).toMatchObject({
       sessionId: 'configured-plugin-construction-cleanup',
-      currentUserMessage: 'configured plugin construction failed before host creation'
+      currentUserMessage: ''
     });
     expect(cleanupWriteBlocked).toEqual([true]);
     expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
@@ -1762,7 +2266,7 @@ describe('runtime config activation diagnostics', () => {
 
     expect(cleanupContext).toMatchObject({
       sessionId: 'configured-plugin-construction-cleanup',
-      currentUserMessage: 'configured plugin construction failed before host creation'
+      currentUserMessage: ''
     });
     expect(cleanupWriteBlocked).toEqual([true]);
     expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
@@ -1806,7 +2310,7 @@ describe('runtime config activation diagnostics', () => {
     expect(cleanupContexts).toHaveLength(1);
     expect(cleanupContexts[0]).toMatchObject({
       sessionId: 'configured-plugin-construction-cleanup',
-      currentUserMessage: 'configured plugin construction failed before host creation',
+      currentUserMessage: '',
       pluginId: collisionPlugin.manifest.id
     });
   });
@@ -1906,7 +2410,7 @@ function requiredSecretPlugin(
         defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test_required_secret']
       },
-      requestedApis: []
+      requestedAccess: {}
     }
   });
 }
@@ -2001,7 +2505,7 @@ function firstPartyPlugin(
         defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test_first_party']
       },
-      requestedApis: []
+      requestedAccess: {}
     }
   });
 }
@@ -2046,7 +2550,7 @@ function fileStoreSessionEndPlugin(
         ...plugin.manifest.runtimePolicy,
         sideEffectLevel: 'local_memory_write'
       },
-      requestedApis: ['file_store']
+      requestedAccess: { file_store: 'write' }
     },
     lifecycleHooks: {
       onSessionEnd(context) {
@@ -2070,7 +2574,8 @@ function modelFacingMemorySearchPlugin(id: string) {
         'plugin_discovery',
         'tool_provider',
         'handle_tool_call'
-      ]
+      ],
+      requestedAccess: { model_input: 'write' }
     },
     providedTools: [memorySearchTool('memory.search')],
     lifecycleHooks: {
@@ -2099,7 +2604,8 @@ function modelFacingPluginListCollisionPlugin(
         'tool_provider',
         'handle_tool_call',
         'on_session_end'
-      ]
+      ],
+      requestedAccess: { model_input: 'write' }
     },
     providedTools: [memorySearchTool(roleModelPluginListToolName)],
     lifecycleHooks: {
@@ -2154,6 +2660,8 @@ function parseActivationOutput(stdout: string): {
     readonly pluginId: string;
     readonly activationStatus: string;
     readonly enabled: boolean;
+    readonly requestedAccess: RuntimePluginAccessMap;
+    readonly grantedAccess: RuntimePluginAccessMap;
   }[];
 } {
   return JSON.parse(stdout) as {
@@ -2167,6 +2675,29 @@ function parseActivationOutput(stdout: string): {
       readonly pluginId: string;
       readonly activationStatus: string;
       readonly enabled: boolean;
+      readonly requestedAccess: RuntimePluginAccessMap;
+      readonly grantedAccess: RuntimePluginAccessMap;
     }[];
   };
+}
+
+function nonHostScopedActivationPlugins(
+  output: ReturnType<typeof parseActivationOutput>
+): ReturnType<typeof parseActivationOutput>['plugins'] {
+  const hostScopedPluginIds = new Set([
+    runtimePluginDiscoveryPluginId,
+    firstPartyModelToolsPluginId
+  ]);
+
+  return Object.freeze(
+    output.plugins.filter((plugin) => !hostScopedPluginIds.has(plugin.pluginId))
+  );
+}
+
+function enabledNonHostScopedActivationPlugins(
+  output: ReturnType<typeof parseActivationOutput>
+): ReturnType<typeof parseActivationOutput>['plugins'] {
+  return Object.freeze(
+    nonHostScopedActivationPlugins(output).filter((plugin) => plugin.enabled)
+  );
 }

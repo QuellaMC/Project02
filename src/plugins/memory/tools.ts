@@ -1,13 +1,16 @@
 import type {
   RuntimePluginProvidedTool
-} from '../types.ts';
+} from '../validation.ts';
 
 export function memorySearchTool(name: string): RuntimePluginProvidedTool {
   return Object.freeze({
     name,
     description: 'Search configured memory for relevant context.',
     requiredForUserTurn: false,
-    maxCallsPerUserTurn: 2,
+    callLimit: {
+      scope: 'user_turn',
+      maxCalls: 2
+    },
     inputContract: {
       type: 'object',
       fields: [
@@ -32,7 +35,10 @@ export function memoryAddTool(name: string): RuntimePluginProvidedTool {
     name,
     description: 'Add a bounded memory item.',
     requiredForUserTurn: false,
-    maxCallsPerUserTurn: 1,
+    callLimit: {
+      scope: 'user_turn',
+      maxCalls: 1
+    },
     inputContract: {
       type: 'object',
       fields: [

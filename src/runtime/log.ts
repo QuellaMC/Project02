@@ -34,6 +34,7 @@ export type RuntimeTraceStepName =
   | 'plugin_before_role_model_call_rejected'
   | 'tool_call_started'
   | 'tool_call_finished'
+  | 'interim_visible_reply_emitted'
   | 'visible_reply_committed'
   | 'input_validation_rejected'
   | 'character_reply_rejected'
@@ -52,6 +53,7 @@ export type RawEventLogRecordKind =
   | 'plugin_before_role_model_call_rejected'
   | 'tool_call_started'
   | 'tool_call_finished'
+  | 'interim_visible_reply_emitted'
   | 'visible_reply_committed'
   | 'input_validation_rejected'
   | 'character_reply_rejected'
@@ -73,6 +75,7 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly visibleMessageIds?: readonly string[];
   readonly toolCallIds?: readonly string[];
   readonly toolCallId?: string;
+  readonly dispatchedToHost?: boolean;
   readonly toolRound?: number;
   readonly toolName?: string;
   readonly toolPluginId?: string;
@@ -104,6 +107,7 @@ export type RawEventLogRecordInput = RuntimeEventIdentity & {
   readonly visibleMessageIds?: readonly string[];
   readonly toolCallIds?: readonly string[];
   readonly toolCallId?: string;
+  readonly dispatchedToHost?: boolean;
   readonly toolRound?: number;
   readonly toolName?: string;
   readonly toolPluginId?: string;
@@ -234,6 +238,8 @@ export function runtimePluginTurnEvidenceOption(options: {
           enabled,
           availableForTurn: enabled,
           redactionLabels: registration.manifest.runtimePolicy.redactionLabels,
+          requestedAccess: registration.requestedAccess,
+          grantedAccess: registration.grantedAccess,
           ...(healthStatus === undefined ? {} : { healthStatus }),
           ...(registration.manifest.config.fingerprint === undefined
             ? {}
@@ -345,6 +351,9 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
     ...(visibleMessageIds === undefined ? {} : { visibleMessageIds }),
     ...(toolCallIds === undefined ? {} : { toolCallIds }),
     ...(record.toolCallId === undefined ? {} : { toolCallId: record.toolCallId }),
+    ...(record.dispatchedToHost === undefined
+      ? {}
+      : { dispatchedToHost: record.dispatchedToHost }),
     ...(record.toolRound === undefined ? {} : { toolRound: record.toolRound }),
     ...(record.toolName === undefined ? {} : { toolName: record.toolName }),
     ...(record.toolPluginId === undefined

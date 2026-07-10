@@ -2,10 +2,22 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createRuntimePlugin,
+  createRuntimePluginManifest,
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
-  runtimePluginContractVersion
+  isFirstPartyBuiltInModelTool,
+  normalizeRuntimePluginAccessMap,
+  runtimePluginAccessFor,
+  runtimePluginAccessAllows,
+  runtimePluginContractVersion,
+  type RuntimePluginAccessMap
 } from '../src/plugins/types.ts';
+import {
+  createFirstPartyModelToolsPlugin
+} from '../src/plugins/builtin/model-tools.ts';
+import {
+  createRuntimePluginProvidedTool
+} from '../src/plugins/validation.ts';
 
 describe('runtime plugin source references', () => {
   it('accepts external source reference IDs that are not plugin identifiers', () => {
@@ -111,6 +123,310 @@ describe('runtime plugin source references', () => {
   });
 });
 
+describe('runtime plugin access control', () => {
+  it('defaults absent requestedAccess to an empty permission object', () => {
+    const manifest = createRuntimePluginManifest(runtimePluginManifestFixture());
+
+    expect(manifest.requestedAccess).toEqual({});
+    expect(runtimePluginAccessFor(manifest.requestedAccess, 'file_store')).toBe(
+      'none'
+    );
+  });
+
+  it('accepts requestedAccess permission objects', () => {
+    expect(
+      createRuntimePluginManifest(
+        runtimePluginManifestFixture({
+          requestedAccess: {}
+        })
+      ).requestedAccess
+    ).toEqual({});
+    expect(
+      createRuntimePluginManifest(
+        runtimePluginManifestFixture({
+          requestedAccess: { file_store: 'read' }
+        })
+      ).requestedAccess
+    ).toEqual({ file_store: 'read' });
+    expect(
+      createRuntimePluginManifest(
+        runtimePluginManifestFixture({
+          requestedAccess: {
+            file_store: 'write',
+            turn_context: 'read',
+            model_input: 'write'
+          }
+        })
+      ).requestedAccess
+    ).toEqual({
+      file_store: 'write',
+      turn_context: 'read',
+      model_input: 'write'
+    });
+  });
+
+  it('rejects legacy arrays and malformed requestedAccess values', () => {
+    for (const requestedAccess of [
+      [],
+      ['file_store'],
+      { unknown_access: 'read' },
+      { file_store: 'admin' },
+      null,
+      'file_store',
+      true,
+      1
+    ]) {
+      expect(() =>
+        createRuntimePluginManifest(
+          runtimePluginManifestFixture({
+            requestedAccess
+          })
+        )
+      ).toThrow(/requestedAccess/u);
+    }
+  });
+
+  it('ignores inherited access values', () => {
+    const inheritedPermissions = Object.create({
+      file_store: 'write'
+    }) as RuntimePluginAccessMap;
+
+    expect(Object.keys(inheritedPermissions)).toEqual([]);
+    expect(runtimePluginAccessFor(inheritedPermissions, 'file_store')).toBe(
+      'none'
+    );
+    expect(
+      normalizeRuntimePluginAccessMap(inheritedPermissions)
+    ).toEqual({});
+  });
+
+  it('orders access levels for allow checks', () => {
+    expect(runtimePluginAccessAllows('write', 'read')).toBe(true);
+    expect(runtimePluginAccessAllows('read', 'write')).toBe(false);
+    expect(runtimePluginAccessAllows('read', 'none')).toBe(true);
+  });
+});
+
+describe('runtime plugin model-facing tool policy', () => {
+  it('rejects unsupported root JSON Schema keywords with their field path', () => {
+    expect(() =>
+      createRuntimePluginProvidedToolWithJsonSchema({
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+        oneOf: []
+      })
+    ).toThrow('Model tool inputContract.jsonSchema.oneOf is not supported.');
+  });
+
+  it('rejects unsupported property JSON Schema keywords with their field path', () => {
+    expect(() =>
+      createRuntimePluginProvidedToolWithJsonSchema({
+        type: 'object',
+        properties: {
+          profile: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                minLength: 1
+              }
+            },
+            required: ['name'],
+            additionalProperties: false
+          }
+        },
+        required: ['profile'],
+        additionalProperties: false
+      })
+    ).toThrow(
+      'Model tool inputContract.jsonSchema.properties.profile.properties.name.minLength is not supported.'
+    );
+  });
+
+  it('rejects unsupported item JSON Schema keywords with their field path', () => {
+    expect(() =>
+      createRuntimePluginProvidedToolWithJsonSchema({
+        type: 'object',
+        properties: {
+          aliases: {
+            type: 'array',
+            items: {
+              type: 'string',
+              pattern: '^[a-z]+$'
+            }
+          }
+        },
+        required: ['aliases'],
+        additionalProperties: false
+      })
+    ).toThrow(
+      'Model tool inputContract.jsonSchema.properties.aliases.items.pattern is not supported.'
+    );
+  });
+
+  it('preserves supported JSON Schema keywords and union types', () => {
+    const jsonSchema = {
+      type: 'object',
+      description: 'Memory capture input.',
+      properties: {
+        note: {
+          type: ['string', 'null'],
+          description: 'Optional note.',
+          enum: ['remember', 'forget']
+        },
+        entries: {
+          type: ['array', 'null'],
+          items: {
+            type: ['object', 'null'],
+            properties: {
+              text: {
+                type: 'string'
+              }
+            },
+            required: ['text'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['note'],
+      additionalProperties: false
+    };
+
+    const tool = createRuntimePluginProvidedToolWithJsonSchema(jsonSchema);
+
+    expect(tool.inputContract.jsonSchema).toEqual(jsonSchema);
+  });
+
+  it('requires the scoped call-limit contract on provided tools', () => {
+    expect(() =>
+      createRuntimePluginProvidedTool(
+        runtimePluginProvidedToolFixture({
+          callLimit: undefined,
+          maxCallsPerUserTurn: 1
+        })
+      )
+    ).toThrow('Plugin provided tool callLimit must be an object.');
+    expect(() =>
+      createRuntimePluginProvidedTool(
+        runtimePluginProvidedToolFixture({
+          callLimit: {
+            scope: 'session',
+            maxCalls: 1
+          }
+        })
+      )
+    ).toThrow('Plugin provided tool callLimit.scope is not supported.');
+  });
+
+  it('rejects model-facing tools without requestedAccess.model_input write', () => {
+    expect(() =>
+      createRuntimePlugin({
+        manifest: runtimePluginManifestFixture({
+          declaredPlugins: ['tool_provider', 'handle_tool_call'],
+          requestedAccess: {}
+        }),
+        providedTools: [runtimePluginProvidedToolFixture()],
+        lifecycleHooks: {
+          handleToolCall() {
+            return {
+              status: 'accepted',
+              output: {},
+              evidence: []
+            };
+          }
+        }
+      })
+    ).toThrow(
+      'Model-facing tools require requestedAccess.model_input = "write".'
+    );
+  });
+
+  it('accepts model-facing tools with requestedAccess.model_input write', () => {
+    const plugin = createRuntimePlugin({
+      manifest: runtimePluginManifestFixture({
+        declaredPlugins: ['tool_provider', 'handle_tool_call'],
+        requestedAccess: { model_input: 'write' }
+      }),
+      providedTools: [runtimePluginProvidedToolFixture()],
+      lifecycleHooks: {
+        handleToolCall() {
+          return {
+            status: 'accepted',
+            output: {},
+            evidence: []
+          };
+        }
+      }
+    });
+
+    expect(plugin.providedTools).toHaveLength(1);
+  });
+
+  it('accepts non-model-facing tools without model_input write', () => {
+    for (const tool of [
+      runtimePluginProvidedToolFixture({ requiresConfirmation: true }),
+      runtimePluginProvidedToolFixture({ sideEffectLevel: 'external_write' })
+    ]) {
+      expect(() =>
+        createRuntimePlugin({
+          manifest: runtimePluginManifestFixture({
+            declaredPlugins: ['tool_provider', 'handle_tool_call'],
+            requestedAccess: {}
+          }),
+          providedTools: [tool],
+          lifecycleHooks: {
+            handleToolCall() {
+              return {
+                status: 'accepted',
+                output: {},
+                evidence: []
+              };
+            }
+          }
+        })
+      ).not.toThrow();
+    }
+  });
+
+  it('recognizes first-party built-in model tools only from the real host-owned instance', () => {
+    const firstPartyPlugin = createFirstPartyModelToolsPlugin();
+    const firstPartyTool = firstPartyPlugin.providedTools[0];
+    const copiedPlugin = createRuntimePlugin({
+      manifest: firstPartyPlugin.manifest,
+      providedTools: firstPartyPlugin.providedTools,
+      lifecycleHooks: firstPartyPlugin.lifecycleHooks
+    });
+
+    if (firstPartyTool === undefined) {
+      throw new Error('Expected first-party model tools plugin to provide a tool.');
+    }
+
+    expect(firstPartyTool.callLimit).toEqual({
+      scope: 'model_response',
+      maxCalls: 1
+    });
+
+    expect(
+      isFirstPartyBuiltInModelTool({
+        plugin: firstPartyPlugin,
+        tool: firstPartyTool,
+        isHostOwnedFirstPartyModelToolsPlugin: (plugin) =>
+          plugin === firstPartyPlugin
+      })
+    ).toBe(true);
+    expect(
+      isFirstPartyBuiltInModelTool({
+        plugin: copiedPlugin,
+        tool: firstPartyTool,
+        isHostOwnedFirstPartyModelToolsPlugin: (plugin) =>
+          plugin === firstPartyPlugin
+      })
+    ).toBe(false);
+  });
+});
+
 describe('runtime plugin config metadata', () => {
   it('accepts optional config metadata fields without resolved config values', () => {
     const plugin = createRuntimePlugin({
@@ -170,7 +486,7 @@ describe('runtime plugin config metadata', () => {
           defaultEnabled: false,
           reasons: ['test']
         },
-        requestedApis: []
+        requestedAccess: {}
       }
     });
 
@@ -184,3 +500,81 @@ describe('runtime plugin config metadata', () => {
     expect(JSON.stringify(plugin.manifest)).not.toContain('MEMORY_API_KEY=');
   });
 });
+
+function runtimePluginManifestFixture(
+  overrides: Readonly<Record<string, unknown>> = {}
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    id: 'access-control.fixture',
+    displayName: 'Access Control Fixture',
+    version: '1.0.0',
+    kind: 'tool_provider',
+    description: 'Access control fixture.',
+    contractVersion: runtimePluginContractVersion,
+    compatibility: {
+      hostContractVersions: [runtimePluginContractVersion],
+      sourceSystem: 'test'
+    },
+    declaredPlugins: ['plugin_discovery'],
+    config: {
+      fields: []
+    },
+    localTrustLevel: 'test_fixture',
+    runtimePolicy: {
+      requiredForTurn: false,
+      sideEffectLevel: 'runtime_read',
+      confirmation: 'not_required',
+      timeoutMs: 1000,
+      sourceReferencesRequired: false,
+      redactionLabels: [],
+      failureBehavior: {
+        beforeRoleModelCall: 'degrade',
+        handleToolCall: 'degrade',
+        afterTurnCommitted: 'log_failure',
+        health: 'degrade'
+      }
+    },
+    activation: {
+      defaultEnabled: false,
+      reasons: ['test']
+    },
+    ...overrides
+  });
+}
+
+function createRuntimePluginProvidedToolWithJsonSchema(jsonSchema: unknown) {
+  return createRuntimePluginProvidedTool(
+    runtimePluginProvidedToolFixture({
+      inputContract: {
+        type: 'object',
+        fields: [],
+        additionalFields: false,
+        jsonSchema
+      }
+    })
+  );
+}
+
+function runtimePluginProvidedToolFixture(
+  overrides: Readonly<Record<string, unknown>> = {}
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    name: 'memory.search',
+    description: 'Search memory.',
+    requiredForUserTurn: false,
+    callLimit: {
+      scope: 'user_turn',
+      maxCalls: 1
+    },
+    inputContract: {
+      type: 'object',
+      fields: [],
+      additionalFields: false
+    },
+    validationOwner: 'plugin_host',
+    sideEffectLevel: 'runtime_read',
+    requiresConfirmation: false,
+    sourceReferencesRequired: false,
+    ...overrides
+  });
+}
