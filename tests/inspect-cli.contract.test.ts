@@ -29,9 +29,6 @@ import {
 } from '../src/role-model/prompt.ts';
 import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
 import {
-  createRuntimePluginFileStore
-} from '../src/plugins/file-store.ts';
-import {
   runtimeConfigEnvVarName,
   runtimeConfigVersion
 } from '../src/runtime/config/index.ts';
@@ -479,7 +476,7 @@ describe('inspect CLI plugin evidence', () => {
     }
   });
 
-  it('uses custom plugin factories for inspect activation output', async () => {
+  it('uses declared plugin manifests for inspect without constructing plugins', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-factory-'));
     const plugin = createInspectFixturePlugin();
     let stdout = '';
@@ -527,7 +524,7 @@ describe('inspect CLI plugin evidence', () => {
     };
 
     expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(1);
+    expect(factoryCalls).toBe(0);
     expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_unknown_plugin'
     );
@@ -703,243 +700,7 @@ describe('inspect CLI plugin evidence', () => {
     expect(stdout).not.toContain(`plugins.${plugin.manifest.id}.config.apiKey`);
   });
 
-  it('uses a generic configured plugin factory failure for inspect', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-factory-fail-'));
-    const plugin = createInspectFixturePlugin('inspect.factory.failure');
-    let stdout = '';
-    let stderr = '';
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [plugin.manifest.id]: {
-          enabled: true
-        }
-      }
-    });
-
-    const exitCode = await runInspectCliFromArgs(
-      ['--store', storeRoot, '--sessions'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect((chunk) => {
-          stderr += chunk;
-        }),
-        factories: {
-          [plugin.manifest.id]: {
-            manifest: plugin.manifest,
-            create() {
-              throw new Error('inspect fixture factory failed');
-            }
-          }
-        }
-      }
-    );
-
-    expect(exitCode).toBe(1);
-    expect(stdout).toBe('');
-    expect(stderr).toBe(
-      'Error: Runtime config activation failed during plugin construction.\n'
-    );
-  });
-
-  it('does not leak resolved secret config values in inspect factory failures', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-inspect-factory-secret-fail-')
-    );
-    const envVar = 'PROJECT02_INSPECT_FACTORY_SECRET_3450445715';
-    const secret = 'inspect-factory-raw-secret-3450445715';
-    const plugin = createInspectSecretFixturePlugin(
-      'inspect.factory.secret.failure'
-    );
-    let stdout = '';
-    let stderr = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [plugin.manifest.id]: {
-          enabled: true,
-          config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
-    });
-
-    const exitCode = await runInspectCliFromArgs(
-      ['--store', storeRoot, '--sessions'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect((chunk) => {
-          stderr += chunk;
-        }),
-        env: {
-          [envVar]: secret
-        },
-        factories: {
-          [plugin.manifest.id]: {
-            manifest: plugin.manifest,
-            create(input) {
-              factoryCalls += 1;
-              const apiKeyValue = input.resolvedConfig['apiKey']?.value;
-
-              if (typeof apiKeyValue !== 'string') {
-                throw new Error('factory expected resolved api key');
-              }
-
-              throw new Error(`factory read ${apiKeyValue}`);
-            }
-          }
-        }
-      }
-    );
-
-    expect(factoryCalls).toBe(1);
-    expect(exitCode).toBe(1);
-    expect(stdout).toBe('');
-    expect(stderr).toBe(
-      'Error: Runtime config activation failed during plugin construction.\n'
-    );
-    expect(stderr).not.toContain(secret);
-    expect(stderr).not.toContain('factory read');
-  });
-
-  it('keeps inspect construction-failure cleanup read-only', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-inspect-construction-cleanup-readonly-')
-    );
-    const sessionEndContexts: RuntimePluginContext[] = [];
-    const cleanupWriteBlocked: boolean[] = [];
-    const cleanupPlugin = createInspectFileStoreCleanupFixturePlugin((context) => {
-      sessionEndContexts.push(context);
-
-      if (context.fileStore === undefined) {
-        throw new Error('Expected construction cleanup context to include fileStore.');
-      }
-
-      try {
-        context.fileStore.writeJsonAtomic('cleanup.json', {
-          value: 'should-not-write'
-        });
-        cleanupWriteBlocked.push(false);
-      } catch {
-        cleanupWriteBlocked.push(true);
-      }
-    });
-    const failingPlugin = createInspectFixturePlugin(
-      'inspect.factory.failure.after-cleanup'
-    );
-    let stdout = '';
-    let stderr = '';
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [cleanupPlugin.manifest.id]: {
-          enabled: true
-        },
-        [failingPlugin.manifest.id]: {
-          enabled: true
-        }
-      }
-    });
-
-    const exitCode = await runInspectCliFromArgs(
-      ['--store', storeRoot, '--sessions'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect((chunk) => {
-          stderr += chunk;
-        }),
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create() {
-              return cleanupPlugin;
-            }
-          },
-          [failingPlugin.manifest.id]: {
-            manifest: failingPlugin.manifest,
-            create() {
-              throw new Error('inspect fixture factory failed after cleanup');
-            }
-          }
-        }
-      }
-    );
-    const cleanupContext = sessionEndContexts[0];
-
-    if (cleanupContext === undefined) {
-      throw new Error('Expected construction cleanup to run.');
-    }
-
-    const cleanupStore = createRuntimePluginFileStore({
-      storeRoot,
-      sessionId: cleanupContext.sessionId,
-      pluginId: cleanupPlugin.manifest.id
-    });
-
-    expect(exitCode).toBe(1);
-    expect(stdout).toBe('');
-    expect(stderr).toBe(
-      'Error: Runtime config activation failed during plugin construction.\n'
-    );
-    expect(cleanupContext).toMatchObject({
-      sessionId: 'configured-plugin-construction-cleanup',
-      currentUserMessage: 'configured plugin construction failed before host creation'
-    });
-    expect(cleanupWriteBlocked).toEqual([true]);
-    expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
-  });
-
-  it('uses a generic configured plugin manifest mismatch failure for inspect', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-manifest-fail-'));
-    const declaredPlugin = createInspectFixturePlugin('inspect.manifest.declared');
-    const returnedPlugin = createInspectFixturePlugin('inspect.manifest.returned');
-    let stdout = '';
-    let stderr = '';
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [declaredPlugin.manifest.id]: {
-          enabled: true
-        }
-      }
-    });
-
-    const exitCode = await runInspectCliFromArgs(
-      ['--store', storeRoot, '--sessions'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect((chunk) => {
-          stderr += chunk;
-        }),
-        factories: {
-          [declaredPlugin.manifest.id]: {
-            manifest: declaredPlugin.manifest,
-            create() {
-              return returnedPlugin;
-            }
-          }
-        }
-      }
-    );
-
-    expect(exitCode).toBe(1);
-    expect(stdout).toBe('');
-    expect(stderr).toBe(
-      'Error: Runtime config activation failed during plugin construction.\n'
-    );
-  });
-
-  it('closes configured plugins after sessions inspect activation output', async () => {
+  it('does not invoke plugin lifecycle hooks while listing sessions', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-close-'));
     const sessionEndContexts: RuntimePluginContext[] = [];
     const plugin = createInspectSessionEndFixturePlugin((context) => {
@@ -998,74 +759,10 @@ describe('inspect CLI plugin evidence', () => {
         activationStatus: 'active'
       })
     );
-    expect(sessionEndContexts).toHaveLength(1);
-    expect(sessionEndContexts[0]).toMatchObject({
-      sessionId: 'inspect',
-      currentUserMessage: 'inspect plugin activation cleanup'
-    });
+    expect(sessionEndContexts).toHaveLength(0);
   });
 
-  it('keeps inspect configured plugin cleanup read-only', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-cleanup-readonly-'));
-    const sessionEndContexts: RuntimePluginContext[] = [];
-    const cleanupWriteBlocked: boolean[] = [];
-    const plugin = createInspectFileStoreCleanupFixturePlugin((context) => {
-      sessionEndContexts.push(context);
-
-      if (context.fileStore === undefined) {
-        throw new Error('Expected inspect cleanup context to include fileStore.');
-      }
-
-      try {
-        context.fileStore.writeJsonAtomic('cleanup.json', {
-          value: 'should-not-write'
-        });
-        cleanupWriteBlocked.push(false);
-      } catch {
-        cleanupWriteBlocked.push(true);
-      }
-    });
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [plugin.manifest.id]: {
-          enabled: true
-        }
-      }
-    });
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
-      sessionId: 'session-cleanup-readonly',
-      createdAt: '2026-06-22T00:00:00.000Z'
-    });
-
-    const exitCode = await runInspectCliFromArgs(
-      ['--store', storeRoot, '--sessions'],
-      {
-        stdout: collect(() => {}),
-        stderr: collect(() => {}),
-        factories: {
-          [plugin.manifest.id]: {
-            manifest: plugin.manifest,
-            create() {
-              return plugin;
-            }
-          }
-        }
-      }
-    );
-    const cleanupStore = createRuntimePluginFileStore({
-      storeRoot,
-      sessionId: 'inspect',
-      pluginId: plugin.manifest.id
-    });
-
-    expect(exitCode).toBe(0);
-    expect(sessionEndContexts).toHaveLength(1);
-    expect(cleanupWriteBlocked).toEqual([true]);
-    expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
-  });
-
-  it('closes configured plugins after session inspect activation failures', async () => {
+  it('does not invoke plugin lifecycle hooks when a session read fails', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-close-failure-'));
     const missingSessionId = 'missing-session';
     const sessionEndContexts: RuntimePluginContext[] = [];
@@ -1110,20 +807,14 @@ describe('inspect CLI plugin evidence', () => {
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
     expect(stderr).toContain(`Local runtime session "${missingSessionId}"`);
-    expect(sessionEndContexts).toHaveLength(1);
-    expect(sessionEndContexts[0]).toMatchObject({
-      sessionId: missingSessionId,
-      currentUserMessage: 'inspect plugin activation cleanup'
-    });
+    expect(sessionEndContexts).toHaveLength(0);
   });
 
-  it('preserves formatted store read errors when cleanup file-store setup fails', async () => {
+  it('preserves formatted store read errors without constructing plugins', async () => {
     const root = mkdtempSync(join(tmpdir(), 'project02-inspect-invalid-store-'));
     const storeRoot = join(root, 'store-root-file');
     const configPath = join(root, 'config.json');
-    const plugin = createInspectFileStoreCleanupFixturePlugin(() => {
-      throw new Error('cleanup hook should not run when file-store setup fails.');
-    });
+    const plugin = createInspectFixturePlugin('inspect.invalid-store.fixture');
     let stdout = '';
     let stderr = '';
 
@@ -1334,28 +1025,6 @@ function createInspectFixturePlugin(pluginId = 'inspect.custom'): RuntimePlugin 
   });
 }
 
-function createInspectSecretFixturePlugin(pluginId: string): RuntimePlugin {
-  const plugin = createInspectFixturePlugin(pluginId);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...plugin.manifest,
-      config: {
-        fields: [
-          {
-            name: 'apiKey',
-            description: 'API key.',
-            required: true,
-            secret: true,
-            valueType: 'secret',
-            redactionLabels: ['secret']
-          }
-        ]
-      }
-    }
-  });
-}
-
 function createInspectRequiredConfigFixturePlugin(pluginId: string): RuntimePlugin {
   const plugin = createInspectFixturePlugin(pluginId);
 
@@ -1398,61 +1067,6 @@ function createInspectRequiredSecretAndConfigFixturePlugin(
             redactionLabels: ['secret']
           }
         ]
-      }
-    }
-  });
-}
-
-function createInspectFileStoreCleanupFixturePlugin(
-  onSessionEnd: (context: RuntimePluginContext) => void
-): RuntimePlugin {
-  const pluginId = 'inspect.file-store-cleanup.fixture';
-
-  return createRuntimePlugin({
-    manifest: {
-      id: pluginId,
-      displayName: 'Inspect File Store Cleanup Fixture',
-      version: '1.0.0',
-      kind: 'memory_provider',
-      description: 'Test plugin for read-only inspect cleanup.',
-      contractVersion: runtimePluginContractVersion,
-      compatibility: {
-        hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test'
-      },
-      declaredPlugins: ['on_session_end'],
-      config: {
-        fields: []
-      },
-      localTrustLevel: 'test_fixture',
-      runtimePolicy: {
-        requiredForTurn: false,
-        sideEffectLevel: 'local_memory_write',
-        confirmation: 'not_required',
-        timeoutMs: 1000,
-        sourceReferencesRequired: false,
-        redactionLabels: [],
-        failureBehavior: {
-          beforeRoleModelCall: 'degrade',
-          handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
-      },
-      activation: {
-        defaultEnabled: false,
-        reasons: ['test_inspect_cleanup']
-      },
-      requestedAccess: { file_store: 'write', turn_context: 'read' }
-    },
-    lifecycleHooks: {
-      onSessionEnd(context) {
-        onSessionEnd(context);
-
-        return {
-          status: 'completed',
-          evidence: []
-        };
       }
     }
   });

@@ -62,7 +62,7 @@ import {
   resolveConfiguredProject02PluginActivation,
   resolveProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
-  type RuntimePluginFactory
+  type RuntimePluginFactoryDefinition
 } from '../runtime/config/index.ts';
 import type { RoleModelAdapter } from '../role-model/loop.ts';
 import {
@@ -95,7 +95,7 @@ type ChatCliOptions = {
   readonly pluginHost?: RuntimePluginHost;
   readonly session?: ConversationSession;
   readonly logStore?: RuntimeLogStore;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 };
 
 type ChatProviderName = 'local' | 'nvidia';
@@ -218,7 +218,6 @@ export async function runChatCliFromArgs(
               ? {}
               : { storeRoot: parsedArgs.storeRoot }),
             env: baseEnv,
-            diagnoseUncheckedLegacyFactories: true,
             ...(options.factories === undefined ? {} : { factories: options.factories })
           })
         : undefined;
@@ -246,7 +245,6 @@ export async function runChatCliFromArgs(
               ? {}
               : { storeRoot: selectedArgs.storeRoot }),
             env: runtimeEnv,
-            diagnoseUncheckedLegacyFactories: true,
             ...(options.factories === undefined ? {} : { factories: options.factories })
           })
         : undefined;
@@ -433,7 +431,7 @@ async function createConfiguredChatPluginHostBeforeSession(options: {
   >[0]['loadedConfig'];
   readonly storeRoot: string;
   readonly env: NodeJS.ProcessEnv;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 }): Promise<ConfiguredChatPluginHost> {
   try {
     return await createConfiguredProject02PluginHost(options);

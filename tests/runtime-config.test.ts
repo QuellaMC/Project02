@@ -235,6 +235,28 @@ describe('runtime config loading and resolution', () => {
     expect(stdout).toContain('"store_root"');
   });
 
+  it('rejects the removed enabledPlugins config field', () => {
+    const configPath = writeRuntimeConfig(
+      join(
+        mkdtempSync(join(tmpdir(), 'project02-config-removed-enabled-plugins-')),
+        'config.json'
+      ),
+      {
+        enabledPlugins: ['character-state']
+      }
+    );
+    const loaded = loadProject02RuntimeConfig({ configPath });
+
+    expect(loaded.config).toBeUndefined();
+    expect(loaded.diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        code: 'runtime_config_unknown_top_level_field',
+        path: 'enabledPlugins'
+      })
+    );
+  });
+
   it('rejects unknown plugin wrapper fields and blocks that plugin activation', async () => {
     const configPath = writeRuntimeConfig(
       join(
@@ -379,7 +401,6 @@ describe('runtime config loading and resolution', () => {
     );
     const loaded = loadProject02RuntimeConfig({ configPath });
     let manifestBackedFactoryCalls = 0;
-    let legacyFactoryCalls = 0;
 
     expect(loaded.config).toBeUndefined();
     expect(loaded.diagnostics).toEqual([
@@ -407,11 +428,6 @@ describe('runtime config loading and resolution', () => {
             manifestBackedFactoryCalls += 1;
             throw new Error('invalid plugin factory should not be constructed');
           }
-        },
-        legacy() {
-          legacyFactoryCalls += 1;
-
-          return requiredSecretPlugin('legacy');
         }
       }
     });
@@ -423,7 +439,6 @@ describe('runtime config loading and resolution', () => {
     );
 
     expect(manifestBackedFactoryCalls).toBe(0);
-    expect(legacyFactoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
     expect(configured.activation.enabledPluginIds).toEqual([]);
     expect(characterActivation).toMatchObject({
@@ -1083,7 +1098,6 @@ describe('runtime config loading and resolution', () => {
     );
     let characterFactoryCalls = 0;
     let memoryFactoryCalls = 0;
-    let legacyFactoryCalls = 0;
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({ configPath }),
@@ -1103,10 +1117,6 @@ describe('runtime config loading and resolution', () => {
 
             return memoryPlugin;
           }
-        },
-        'legacy.side-effect': () => {
-          legacyFactoryCalls += 1;
-          throw new Error('legacy factory should not be constructed');
         }
       }
     });
@@ -1119,7 +1129,6 @@ describe('runtime config loading and resolution', () => {
 
     expect(characterFactoryCalls).toBe(0);
     expect(memoryFactoryCalls).toBe(0);
-    expect(legacyFactoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
     expect(configured.activation.enabledPluginIds).toEqual([]);
     expect(configured.activation.diagnostics).toEqual(
@@ -1154,36 +1163,6 @@ describe('runtime config loading and resolution', () => {
         })
       ])
     );
-  });
-
-  it('lets explicit per-plugin disable win over legacy enabledPlugins', async () => {
-    const configPath = writeRuntimeConfig(
-      join(mkdtempSync(join(tmpdir(), 'project02-config-disable-')), 'config.json'),
-      {
-        enabledPlugins: ['character-state'],
-        plugins: {
-          'character-state': {
-            enabled: false
-          }
-        }
-      }
-    );
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ configPath })
-    });
-
-    expect(configured.activation.enabledPluginIds).not.toContain('character-state');
-    expect(
-      activationPluginById(configured.activation.plugins, 'character-state')
-    ).toMatchObject({
-      pluginId: 'character-state',
-      enabled: false,
-      activationStatus: 'disabled'
-    });
-    expect(
-      activationPluginById(configured.activation.plugins, 'character-state')
-        ?.activationReasons
-    ).toContain('disabled_by_config');
   });
 
   it('keeps explicitly disabled plugins disabled even when their config is incomplete', async () => {
@@ -1233,113 +1212,6 @@ describe('runtime config loading and resolution', () => {
     );
     expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_unknown_plugin_config_field'
-    );
-  });
-
-  it('skips unreferenced legacy factories instead of discovering default activation', async () => {
-    const configPath = writeRuntimeConfig(
-      join(
-        mkdtempSync(join(tmpdir(), 'project02-config-default-legacy-factory-')),
-        'config.json'
-      ),
-      {}
-    );
-    let legacyFactoryCalls = 0;
-
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ configPath }),
-      factories: {
-        'memory.required': () => {
-          legacyFactoryCalls += 1;
-          throw new Error('unreferenced legacy factory should not be constructed');
-        }
-      }
-    });
-
-    expect(legacyFactoryCalls).toBe(0);
-    expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([
-      runtimePluginDiscoveryPluginId,
-      firstPartyModelToolsPluginId
-    ]);
-    expect(configured.activation.diagnostics).toEqual([]);
-  });
-
-  it('skips explicitly disabled legacy function plugin factories before creation', async () => {
-    const configPath = writeRuntimeConfig(
-      join(
-        mkdtempSync(join(tmpdir(), 'project02-config-disabled-legacy-factory-')),
-        'config.json'
-      ),
-      {
-        enabledPlugins: ['memory.required'],
-        plugins: {
-          'memory.required': {
-            enabled: false
-          }
-        }
-      }
-    );
-    let legacyFactoryCalls = 0;
-
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ configPath }),
-      factories: {
-        'memory.required': () => {
-          legacyFactoryCalls += 1;
-          throw new Error('disabled legacy plugin should not be constructed');
-        }
-      }
-    });
-
-    expect(legacyFactoryCalls).toBe(0);
-    expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([
-      runtimePluginDiscoveryPluginId,
-      firstPartyModelToolsPluginId
-    ]);
-    expect(configured.activation.diagnostics).toEqual([]);
-  });
-
-  it('blocks configured legacy function factories before missing config can trigger construction', async () => {
-    const configPath = writeRuntimeConfig(
-      join(
-        mkdtempSync(join(tmpdir(), 'project02-config-enabled-legacy-factory-')),
-        'config.json'
-      ),
-      {
-        plugins: {
-          'memory.required': {
-            enabled: true
-          }
-        }
-      }
-    );
-    let legacyFactoryCalls = 0;
-
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ configPath }),
-      factories: {
-        'memory.required': () => {
-          legacyFactoryCalls += 1;
-
-          return requiredSecretPlugin();
-        }
-      }
-    });
-
-    expect(legacyFactoryCalls).toBe(0);
-    expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
-    expect(configured.activation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_legacy_factory_unchecked',
-          path: 'plugins.memory.required.enabled',
-          pluginId: 'memory.required'
-        })
-      ])
     );
   });
 
@@ -4248,41 +4120,6 @@ describe('runtime config CLI', () => {
     }
   });
 
-  it('rejects exact legacy enabled plugin mutation paths before fallback parsing', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-exact-legacy-enabled-mutation-')
-    );
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      storeRoot: realpathSync.native(storeRoot),
-      enabledPlugins: ['memory.enabled']
-    });
-    let stderr = '';
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'set', 'plugins.memory.enabled', 'false'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect((chunk) => {
-            stderr += chunk;
-          })
-        }
-      )
-    ).toBe(1);
-
-    expect(stderr).toContain('Ambiguous runtime config plugin path');
-    expect(stderr).toContain('plugins.memory.enabled');
-    expect(stderr).toContain('memory.enabled');
-
-    const configText = readFileSync(configPath, 'utf8');
-    const config: unknown = JSON.parse(configText);
-
-    expect(config).toMatchObject({
-      enabledPlugins: ['memory.enabled']
-    });
-    expect(configText).not.toContain('"memory":');
-  });
-
   it('sets, gets, and unsets dotted plugin config field names', async () => {
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-dotted-field-'));
     const seededStoreRoot = realpathSync.native(storeRoot);
@@ -4882,32 +4719,32 @@ describe('runtime config CLI', () => {
     expect(readFileSync(configPath, 'utf8')).toBe(malformedConfig);
   });
 
+  it('rejects mutations for the removed enabledPlugins field', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-removed-set-'));
+    let stderr = '';
+
+    expect(
+      await runRuntimeConfigCliFromArgs(
+        ['--store', storeRoot, 'set', 'enabledPlugins', '[]'],
+        {
+          stdout: collect(() => {}),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          })
+        }
+      )
+    ).toBe(1);
+    expect(stderr).toContain('Unsupported runtime config path: enabledPlugins');
+    expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+  });
+
   it('refuses to write mutations that would fail runtime config validation', async () => {
-    const emptyStoreRoot = mkdtempSync(join(tmpdir(), 'project02-config-invalid-set-'));
     const configRoot = mkdtempSync(join(tmpdir(), 'project02-config-invalid-env-ref-'));
     const configPath = writeRuntimeConfig(join(configRoot, 'config.json'), {
       storeRoot: 'original-store'
     });
     const originalConfig = readFileSync(configPath, 'utf8');
-    let enabledPluginsStderr = '';
     let envRefStderr = '';
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', emptyStoreRoot, 'set', 'enabledPlugins', '[""]'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect((chunk) => {
-            enabledPluginsStderr += chunk;
-          })
-        }
-      )
-    ).toBe(1);
-    expect(enabledPluginsStderr).toContain(
-      'Cannot mutate runtime config because the mutation would produce invalid config'
-    );
-    expect(enabledPluginsStderr).toContain('array of non-empty strings');
-    expect(existsSync(join(emptyStoreRoot, 'config.json'))).toBe(false);
 
     expect(
       await runRuntimeConfigCliFromArgs(

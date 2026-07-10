@@ -294,8 +294,6 @@ function rootConfigValue(
       return config.version;
     case 'storeRoot':
       return config.storeRoot;
-    case 'enabledPlugins':
-      return config.enabledPlugins;
     case 'defaultMemoryProvider':
       return config.defaultMemoryProvider;
     case 'plugins':
@@ -444,10 +442,6 @@ function setConfigPath(
       return freezeConfig({ ...config, defaultMemoryProvider: value });
     }
 
-    if (field === 'enabledPlugins' && isStringArray(value)) {
-      return freezeConfig({ ...config, enabledPlugins: value });
-    }
-
     throw new TypeError(`Unsupported runtime config path: ${path}.`);
   }
 
@@ -498,7 +492,6 @@ function unsetConfigPath(
     if (field === 'storeRoot') {
       return freezeConfig({
         version: config.version,
-        ...(config.enabledPlugins === undefined ? {} : { enabledPlugins: config.enabledPlugins }),
         ...(config.defaultMemoryProvider === undefined
           ? {}
           : { defaultMemoryProvider: config.defaultMemoryProvider }),
@@ -510,18 +503,6 @@ function unsetConfigPath(
       return freezeConfig({
         version: config.version,
         ...(config.storeRoot === undefined ? {} : { storeRoot: config.storeRoot }),
-        ...(config.enabledPlugins === undefined ? {} : { enabledPlugins: config.enabledPlugins }),
-        ...(config.plugins === undefined ? {} : { plugins: config.plugins })
-      });
-    }
-
-    if (field === 'enabledPlugins') {
-      return freezeConfig({
-        version: config.version,
-        ...(config.storeRoot === undefined ? {} : { storeRoot: config.storeRoot }),
-        ...(config.defaultMemoryProvider === undefined
-          ? {}
-          : { defaultMemoryProvider: config.defaultMemoryProvider }),
         ...(config.plugins === undefined ? {} : { plugins: config.plugins })
       });
     }
@@ -967,7 +948,7 @@ function parsePluginMutationPath(
   config?: Project02RuntimeConfig
 ): ParsedPluginMutationPath {
   // Paths can contain `config` in both plugin IDs and field names; prefer known
-  // plugin IDs before falling back to the legacy delimiter heuristic.
+  // plugin IDs before falling back to delimiter-based path candidates.
   const candidates = pluginPathCandidates(parts);
   const contextCandidate = knownPluginPathCandidate(candidates, path, config);
   const exactPluginId = exactKnownPluginIdForParts(config, parts);
@@ -1121,7 +1102,6 @@ function exactKnownPluginMutationPathError(
 function isKnownPluginId(config: Project02RuntimeConfig, pluginId: string): boolean {
   return (
     Object.hasOwn(config.plugins ?? {}, pluginId) ||
-    config.enabledPlugins?.includes(pluginId) === true ||
     config.defaultMemoryProvider === pluginId
   );
 }
@@ -1229,7 +1209,6 @@ function freezeConfigWithPluginWrappers(
   return freezeConfig({
     version: config.version,
     ...(config.storeRoot === undefined ? {} : { storeRoot: config.storeRoot }),
-    ...(config.enabledPlugins === undefined ? {} : { enabledPlugins: config.enabledPlugins }),
     ...(config.defaultMemoryProvider === undefined
       ? {}
       : { defaultMemoryProvider: config.defaultMemoryProvider })
@@ -1240,8 +1219,4 @@ function freezePluginConfig(
   config: Project02RuntimePluginConfig
 ): Project02RuntimePluginConfig {
   return Object.freeze(config);
-}
-
-function isStringArray(value: RuntimeConfigValue): value is readonly string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
