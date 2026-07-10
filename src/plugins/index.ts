@@ -14,8 +14,11 @@ export {
 } from './host.ts';
 export {
   createRuntimePluginFileStore,
-  type CreateRuntimePluginFileStoreOptions
+  type CreateRuntimePluginFileStoreOptions,
+  type RuntimePluginFileStorePreparedTransaction
 } from './file-store.ts';
+export * from './catalog.ts';
+export * from './builtin/model-tools.ts';
 export {
   createCharacterStatePlugin,
   createCharacterStatePluginManifest,

@@ -2,6 +2,7 @@ import { isBuiltInModelToolName } from '../role-model/model-tools.ts';
 import type { RoleModelPluginToolDefinition } from '../role-model/contracts.ts';
 import { isFirstPartyModelToolsPlugin } from './builtin/model-tools.ts';
 import {
+  runtimePluginAccessFor,
   runtimePluginAccessForPlugin,
   runtimePluginGrantsAccess,
   type RuntimePluginAccessMapByPluginId
@@ -61,16 +62,17 @@ export function modelVisiblePluginTools(options: {
   readonly plugin: RuntimePlugin;
   readonly access: RuntimePluginAccessSnapshot;
 }): readonly RuntimePluginProvidedTool[] {
-  if (!pluginCanWriteModelInput(options.access)) {
-    return [];
-  }
-
   return Object.freeze(
-    options.plugin.providedTools.filter((tool) =>
-      isModelVisiblePluginTool({
-        plugin: options.plugin,
-        tool
-      })
+    options.plugin.providedTools.filter(
+      (tool) =>
+        pluginToolHasRequiredGrantedAccess({
+          tool,
+          access: options.access
+        }) &&
+        isModelVisiblePluginTool({
+          plugin: options.plugin,
+          tool
+        })
     )
   );
 }
@@ -83,16 +85,17 @@ export function routableModelFacingPluginTools(options: {
     return [];
   }
 
-  if (!pluginCanWriteModelInput(options.access)) {
-    return [];
-  }
-
   return Object.freeze(
-    options.plugin.providedTools.filter((tool) =>
-      isModelFacingPluginTool({
-        plugin: options.plugin,
-        tool
-      })
+    options.plugin.providedTools.filter(
+      (tool) =>
+        pluginToolHasRequiredGrantedAccess({
+          tool,
+          access: options.access
+        }) &&
+        isModelFacingPluginTool({
+          plugin: options.plugin,
+          tool
+        })
     )
   );
 }
@@ -107,27 +110,55 @@ export function pluginCanWriteModelInput(
   });
 }
 
+export function pluginToolHasRequiredGrantedAccess(options: {
+  readonly tool: RuntimePluginProvidedTool;
+  readonly access: RuntimePluginAccessSnapshot;
+}): boolean {
+  if (!pluginCanWriteModelInput(options.access)) {
+    return false;
+  }
+
+  const requestedFileStoreAccess = runtimePluginAccessFor(
+    options.access.requestedAccess,
+    'file_store'
+  );
+
+  // A local-memory tool may own storage behind its provider and request no
+  // host fileStore access. If it opts into the host fileStore, a write-classed
+  // tool must hold the matching write grant instead of a read-only handle.
+  return (
+    !toolAllowsFileStoreWrites(options.tool) ||
+    requestedFileStoreAccess === 'none' ||
+    runtimePluginGrantsAccess({
+      access: options.access,
+      accessName: 'file_store',
+      requiredAccess: 'write'
+    })
+  );
+}
+
 export function discoverableCurrentTurnPluginTools(options: {
   readonly plugin: RuntimePlugin;
   readonly access: RuntimePluginAccessSnapshot;
   readonly isHostOwnedFirstPartyModelToolsPlugin?: IsHostOwnedFirstPartyModelToolsPlugin;
 }): readonly RuntimePluginProvidedTool[] {
-  if (!pluginCanWriteModelInput(options.access)) {
-    return [];
-  }
-
   return Object.freeze(
-    options.plugin.providedTools.filter((tool) =>
-      isDiscoverableCurrentTurnTool({
-        plugin: options.plugin,
-        tool,
-        ...(options.isHostOwnedFirstPartyModelToolsPlugin === undefined
-          ? {}
-          : {
-              isHostOwnedFirstPartyModelToolsPlugin:
-                options.isHostOwnedFirstPartyModelToolsPlugin
-            })
-      })
+    options.plugin.providedTools.filter(
+      (tool) =>
+        pluginToolHasRequiredGrantedAccess({
+          tool,
+          access: options.access
+        }) &&
+        isDiscoverableCurrentTurnTool({
+          plugin: options.plugin,
+          tool,
+          ...(options.isHostOwnedFirstPartyModelToolsPlugin === undefined
+            ? {}
+            : {
+                isHostOwnedFirstPartyModelToolsPlugin:
+                  options.isHostOwnedFirstPartyModelToolsPlugin
+              })
+        })
     )
   );
 }

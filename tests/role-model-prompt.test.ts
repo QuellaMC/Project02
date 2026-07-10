@@ -6,11 +6,12 @@ import {
   type RoleModelPluginToolDefinition
 } from '../src/role-model/contracts.ts';
 import {
+  defaultRoleModelProviderCapabilities,
   renderRoleModelTurnContext,
   type RoleModelSystemChatMessage,
   type RoleModelUserChatMessage
 } from '../src/role-model/prompt.ts';
-import { createRuntimePluginContextItem } from '../src/plugins/types.ts';
+import { createRuntimePluginContextItem } from '../src/plugins/validation.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
@@ -124,6 +125,93 @@ describe('role-model prompt rendering', () => {
     );
   });
 
+  it('tells native-tool models to use multiple calls and finalize after interim replies', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('check plugins and answer', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-role-model-native-multi-call-prompt',
+        characterSnapshot: {
+          id: 'mira',
+          displayName: 'Mira'
+        }
+      })
+    });
+    const protocol = renderRoleModelTurnContext(inputEnvelope).frames.find(
+      (frame) => frame.kind === 'developer_protocol'
+    )?.content;
+
+    expect(protocol).toContain(
+      'multiple independent function calls in one assistant response'
+    );
+    expect(protocol).toContain('every executable call will be handled');
+    expect(protocol).toContain('Do not invent a one-tool-per-turn restriction');
+    expect(protocol).toContain(
+      'visible_reply may share a response with executable calls; in that case it is interim'
+    );
+    expect(protocol).toContain(
+      'After all requested tool results, call visible_reply with the final response'
+    );
+    expect(protocol).toContain(
+      'If you sent an interim visible_reply, make a new visible_reply call'
+    );
+  });
+
+  it('omits batching guidance when the native provider cannot call tools in parallel', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('check plugins and answer', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-role-model-native-sequential-prompt',
+        characterSnapshot: {
+          id: 'mira',
+          displayName: 'Mira'
+        }
+      })
+    });
+    const protocol = renderRoleModelTurnContext(inputEnvelope, {
+      capabilities: {
+        ...defaultRoleModelProviderCapabilities,
+        supportsParallelToolCalls: false
+      }
+    }).frames.find((frame) => frame.kind === 'developer_protocol')?.content;
+
+    expect(protocol).not.toContain(
+      'multiple independent function calls in one assistant response'
+    );
+    expect(protocol).not.toContain('one-tool-per-turn restriction');
+    expect(protocol).not.toContain(
+      'visible_reply may share a response with executable calls'
+    );
+    expect(protocol).not.toContain(
+      'If you sent an interim visible_reply, make a new visible_reply call'
+    );
+    expect(protocol).toContain(
+      'After all requested tool results, call visible_reply with the final response'
+    );
+  });
+
+  it('marks terminal content as non-committed when visible_reply is unavailable', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-role-model-no-visible-reply',
+        characterSnapshot: {
+          id: 'mira',
+          displayName: 'Mira'
+        }
+      }),
+      pluginToolDefinitions: []
+    });
+    const protocol = renderRoleModelTurnContext(inputEnvelope).frames.find(
+      (frame) => frame.kind === 'developer_protocol'
+    )?.content;
+
+    expect(protocol).toContain('visible_reply is unavailable.');
+    expect(protocol).toContain(
+      'Terminal assistant content is non-committed model text and is not shown to the user.'
+    );
+    expect(protocol).not.toContain('user-visible text as terminal assistant content');
+  });
+
   it('renders nested JSON Schema with strict mode when every object is closed', () => {
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
@@ -157,11 +245,52 @@ describe('role-model prompt rendering', () => {
               items: {
                 type: 'string'
               }
+            },
+            note: {
+              type: ['string', 'null']
             }
           }
         }
       }
     });
+    expect(
+      tool?.function.parameters.properties['memory']?.properties?.['note']
+        ?.type
+    ).toEqual(['string', 'null']);
+  });
+
+  it('does not mark open object and array unions as strict', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-role-model-union-schema',
+        characterSnapshot: {
+          id: 'mira',
+          displayName: 'Mira'
+        }
+      }),
+      pluginToolDefinitions: [openUnionSchemaToolDefinition]
+    });
+    const tool = renderRoleModelTurnContext(inputEnvelope).tools.find(
+      (candidate) => candidate.function.name === 'memory.union'
+    );
+
+    expect(tool?.function.parameters).toMatchObject({
+      properties: {
+        value: {
+          type: ['object', 'null'],
+          additionalProperties: true
+        },
+        entries: {
+          type: ['array', 'null'],
+          items: {
+            type: ['object', 'null'],
+            additionalProperties: true
+          }
+        }
+      }
+    });
+    expect(tool?.function).not.toHaveProperty('strict');
   });
 });
 
@@ -170,7 +299,10 @@ const nestedSchemaToolDefinition = Object.freeze({
   name: 'memory.capture',
   description: 'Capture a nested memory object.',
   requiredForUserTurn: false,
-  maxCallsPerUserTurn: 1,
+  callLimit: {
+    scope: 'user_turn',
+    maxCalls: 1
+  },
   inputContract: {
     type: 'object',
     fields: [],
@@ -194,6 +326,10 @@ const nestedSchemaToolDefinition = Object.freeze({
               items: {
                 type: 'string'
               }
+            },
+            note: {
+              type: ['string', 'null'],
+              description: 'Optional nested note.'
             }
           }
         }
@@ -202,6 +338,46 @@ const nestedSchemaToolDefinition = Object.freeze({
   },
   validationOwner: 'plugin_host',
   sideEffectLevel: 'local_memory_write',
+  requiresConfirmation: false,
+  sourceReferencesRequired: false
+} satisfies RoleModelPluginToolDefinition);
+
+const openUnionSchemaToolDefinition = Object.freeze({
+  pluginId: 'memory.fixture',
+  name: 'memory.union',
+  description: 'Accept nullable object and array unions.',
+  requiredForUserTurn: false,
+  callLimit: {
+    scope: 'user_turn',
+    maxCalls: 1
+  },
+  inputContract: {
+    type: 'object',
+    fields: [],
+    additionalFields: false,
+    jsonSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: [],
+      properties: {
+        value: {
+          type: ['object', 'null'],
+          additionalProperties: true,
+          properties: {}
+        },
+        entries: {
+          type: ['array', 'null'],
+          items: {
+            type: ['object', 'null'],
+            additionalProperties: true,
+            properties: {}
+          }
+        }
+      }
+    }
+  },
+  validationOwner: 'plugin_host',
+  sideEffectLevel: 'runtime_read',
   requiresConfirmation: false,
   sourceReferencesRequired: false
 } satisfies RoleModelPluginToolDefinition);

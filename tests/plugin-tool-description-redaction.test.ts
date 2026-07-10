@@ -229,7 +229,10 @@ function credentialDescriptionTool() {
     name: 'memory.secret_search',
     description: credentialBearingDescription,
     requiredForUserTurn: false,
-    maxCallsPerUserTurn: 1,
+    callLimit: {
+      scope: 'user_turn',
+      maxCalls: 1
+    },
     inputContract: {
       type: 'object',
       fields: [

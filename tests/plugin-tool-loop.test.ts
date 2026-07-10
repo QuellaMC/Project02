@@ -23,6 +23,7 @@ import {
   createRuntimePluginContext,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
+  firstPartyModelToolsPluginId,
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
 import {
@@ -115,6 +116,7 @@ describe('plugin-driven tool loop', () => {
     expect(toolEvents[1]).toMatchObject({
       toolCallId:
         'evt_plugin_patch.trace_evt_plugin_patch.round-1.1.character_state.patch',
+      dispatchedToHost: true,
       toolName: 'character_state.patch',
       toolPluginId: 'character-state',
       toolResult: {
@@ -348,6 +350,7 @@ describe('plugin-driven tool loop', () => {
     expect(result.status).toBe('completed');
     expect(toolFinishedEvents).toHaveLength(2);
     expect(toolFinishedEvents[0]).toMatchObject({
+      dispatchedToHost: true,
       toolName: 'character_state.patch',
       toolResult: {
         status: 'rejected',
@@ -485,6 +488,7 @@ describe('plugin-driven tool loop', () => {
       ],
       enabledPluginIds: [
         runtimePluginDiscoveryPluginId,
+        firstPartyModelToolsPluginId,
         characterStatePluginId,
         'health-reject.fixture'
       ]
@@ -546,7 +550,11 @@ describe('plugin-driven tool loop', () => {
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
-      enabledPluginIds: [runtimePluginDiscoveryPluginId, characterStatePluginId]
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        firstPartyModelToolsPluginId,
+        characterStatePluginId
+      ]
     });
     const context = createRuntimePluginContext({
       ...createRuntimeEventIdentity({
@@ -585,7 +593,9 @@ describe('plugin-driven tool loop', () => {
       const result = await pluginHost.handleToolCall(call, context);
 
       expect(result.status).toBe('accepted');
-      pluginHost.commitFileStoreTransaction?.();
+      pluginHost
+        .prepareFileStoreTransaction?.(transactionIdentityFromContext(context))
+        ?.finalize();
     }
 
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
@@ -596,7 +606,140 @@ describe('plugin-driven tool loop', () => {
     });
   });
 
-  it('does not write no-op character_state.patch events', async () => {
+  it('replays the stored Character State result after intervening state changes', async () => {
+    const sessionId = 'session-plugin-patch-idempotent-replay';
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
+
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+
+    const pluginHost = createRuntimePluginHost({
+      storeRoot,
+      sessionId,
+      plugins: [createCharacterStatePlugin()],
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        firstPartyModelToolsPluginId,
+        characterStatePluginId
+      ]
+    });
+    const context = createRuntimePluginContext({
+      ...createRuntimeEventIdentity({
+        eventId: 'evt_plugin_patch_idempotent_replay',
+        traceId: 'trace_plugin_patch_idempotent_replay',
+        createdAt: '2026-06-15T00:00:00.000Z'
+      }),
+      sessionId,
+      eventType: 'USER_MESSAGE',
+      currentUserMessage: 'hello',
+      character: {
+        id: 'mira',
+        displayName: 'Mira'
+      }
+    });
+    const originalCall = Object.freeze({
+      eventId: context.eventId,
+      traceId: context.traceId,
+      createdAt: context.timestamp,
+      toolCallId: 'character-state-call-original',
+      pluginId: characterStatePluginId,
+      toolName: 'character_state.patch',
+      input: {
+        mood: 'curious'
+      }
+    });
+    const interveningCall = Object.freeze({
+      eventId: 'evt_plugin_patch_intervening',
+      traceId: 'trace_plugin_patch_intervening',
+      createdAt: context.timestamp,
+      toolCallId: 'character-state-call-intervening',
+      pluginId: characterStatePluginId,
+      toolName: 'character_state.patch',
+      input: {
+        mood: 'playful'
+      }
+    });
+    const pluginStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId: characterStatePluginId
+    });
+
+    pluginHost.beginFileStoreTransaction?.();
+    const originalResult = await pluginHost.handleToolCall(originalCall, context);
+    pluginHost
+      .prepareFileStoreTransaction?.(transactionIdentityFromContext(context))
+      ?.finalize();
+    pluginHost.beginFileStoreTransaction?.();
+    await pluginHost.handleToolCall(interveningCall, context);
+    pluginHost
+      .prepareFileStoreTransaction?.(transactionIdentityFromContext(context))
+      ?.finalize();
+    pluginHost.beginFileStoreTransaction?.();
+    const replayedResult = await pluginHost.handleToolCall(originalCall, context);
+    pluginHost
+      .prepareFileStoreTransaction?.(transactionIdentityFromContext(context))
+      ?.finalize();
+    pluginHost.beginFileStoreTransaction?.();
+    const conflictingResult = await pluginHost.handleToolCall(
+      {
+        ...originalCall,
+        input: {
+          mood: 'tired'
+        }
+      },
+      context
+    );
+    pluginHost
+      .prepareFileStoreTransaction?.(transactionIdentityFromContext(context))
+      ?.finalize();
+
+    expect(originalResult).toMatchObject({
+      status: 'accepted',
+      output: {
+        current: {
+          mood: 'curious'
+        },
+        appliedChanges: [
+          {
+            field: 'mood',
+            before: 'steady',
+            after: 'curious'
+          }
+        ]
+      }
+    });
+    expect(replayedResult).toMatchObject({
+      status: 'accepted',
+      output: {
+        current: {
+          mood: 'curious'
+        },
+        appliedChanges: [
+          {
+            field: 'mood',
+            before: 'steady',
+            after: 'curious'
+          }
+        ],
+        idempotent: true
+      }
+    });
+    expect(conflictingResult).toMatchObject({
+      status: 'rejected',
+      reason: 'character_state_idempotency_conflict'
+    });
+    expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(2);
+    expect(pluginStore.readJson('current.json')).toMatchObject({
+      current: {
+        mood: 'playful'
+      }
+    });
+  });
+
+  it('records no-op character_state.patch identities without writing the current cache', async () => {
     const {
       session,
       logStore,
@@ -633,7 +776,14 @@ describe('plugin-driven tool loop', () => {
     });
 
     expect(result.status).toBe('completed');
-    expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(0);
+    expect(pluginStore.readJsonl('events.jsonl')).toMatchObject([
+      {
+        result: {
+          status: 'accepted',
+          appliedChanges: []
+        }
+      }
+    ]);
     expect(pluginStore.readJson('current.json')).toBeUndefined();
   });
 
@@ -812,6 +962,76 @@ describe('plugin-driven tool loop', () => {
     ).rejects.toThrow('conversation append failed');
     expect(session.visibleTranscript).toEqual([]);
     expect(logStore.conversationMessages()).toEqual([]);
+  });
+
+  it('discards a prepared Character State patch when conversation append fails', async () => {
+    const sessionId = 'session-character-state-conversation-append-fails';
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
+
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+
+    const session = createConversationSession({ id: sessionId });
+    const logStore = createConversationAppendFailingLogStore(
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId
+      })
+    );
+    const pluginHost = createRuntimePluginHost({
+      storeRoot,
+      sessionId,
+      plugins: [createCharacterStatePlugin()],
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        firstPartyModelToolsPluginId,
+        characterStatePluginId
+      ]
+    });
+    const pluginStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId: characterStatePluginId
+    });
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestEvent(
+          'hello',
+          'evt_character_state_conversation_append_fails'
+        ),
+        session,
+        logStore,
+        pluginHost,
+        roleModelAdapter: createSequencedAdapter([
+          {
+            toolCalls: [
+              {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'curious'
+                }
+              }
+            ]
+          },
+          {
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'the conversation append should fail'
+                }
+              }
+            ]
+          }
+        ])
+      })
+    ).rejects.toThrow('conversation append failed');
+
+    expect(pluginStore.readJsonl('events.jsonl')).toEqual([]);
+    expect(pluginStore.readJson('current.json')).toBeUndefined();
   });
 
   it('removes a durable user row when paired character append fails', async () => {
@@ -1062,6 +1282,217 @@ describe('plugin-driven tool loop', () => {
     });
   });
 
+  it('reconciles a one-shot terminal trace failure without rejecting the completed turn', async () => {
+    const sessionId = 'session-terminal-trace-reconciliation';
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
+
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+
+    const fileLogStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const logStore = createOneShotTerminalTraceAppendFailingLogStore(fileLogStore);
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('hello', 'evt_terminal_trace_reconciliation'),
+      session: createConversationSession({ id: sessionId }),
+      logStore,
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'the completed reply survives trace reconciliation'
+              }
+            }
+          ]
+        }
+      ])
+    });
+    const reopened = createFileRuntimeLogStore({ storeRoot, sessionId });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      turn: {
+        reply: {
+          text: 'the completed reply survives trace reconciliation'
+        }
+      }
+    });
+    expect(result).not.toHaveProperty('postCommitFailures');
+    expect(
+      reopened
+        .rawEvents()
+        .filter((record) => record.kind === 'runtime_turn_completed')
+    ).toHaveLength(1);
+    expect(
+      reopened
+        .traceEntries()
+        .filter(
+          (entry) =>
+            entry.eventId === 'evt_terminal_trace_reconciliation' &&
+            (entry.step === 'raw_event_log_appended' ||
+              entry.step === 'runtime_turn_completed')
+        )
+        .map((entry) => entry.step)
+    ).toEqual(['raw_event_log_appended', 'runtime_turn_completed']);
+  });
+
+  it('discards a prepared Character State patch when terminal evidence append fails', async () => {
+    const sessionId = 'session-character-state-terminal-append-fails';
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
+
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+
+    const session = createConversationSession({ id: sessionId });
+    const logStore = createRuntimeTurnCompletedAppendFailingLogStore(
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId
+      })
+    );
+    const pluginHost = createRuntimePluginHost({
+      storeRoot,
+      sessionId,
+      plugins: [createCharacterStatePlugin()],
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        firstPartyModelToolsPluginId,
+        characterStatePluginId
+      ]
+    });
+    const pluginStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId: characterStatePluginId
+    });
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestEvent(
+          'hello',
+          'evt_character_state_terminal_append_fails'
+        ),
+        session,
+        logStore,
+        pluginHost,
+        roleModelAdapter: createSequencedAdapter([
+          {
+            toolCalls: [
+              {
+                name: 'character_state.patch',
+                input: {
+                  mood: 'curious'
+                }
+              }
+            ]
+          },
+          {
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'the terminal append should fail'
+                }
+              }
+            ]
+          }
+        ])
+      })
+    ).rejects.toThrow('terminal raw event append failed');
+
+    expect(pluginStore.readJsonl('events.jsonl')).toEqual([]);
+    expect(pluginStore.readJson('current.json')).toBeUndefined();
+  });
+
+  it('commits a prepared Character State patch when terminal append throws after persisting', async () => {
+    const sessionId = 'session-character-state-terminal-append-then-throw';
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
+
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+
+    const fileLogStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const logStore = createRuntimeTurnCompletedAppendThenThrowLogStore(
+      fileLogStore
+    );
+    const pluginHost = createRuntimePluginHost({
+      storeRoot,
+      sessionId,
+      plugins: [createCharacterStatePlugin()],
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        firstPartyModelToolsPluginId,
+        characterStatePluginId
+      ]
+    });
+    const pluginStore = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId: characterStatePluginId
+    });
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent(
+        'hello',
+        'evt_character_state_terminal_append_then_throw'
+      ),
+      session: createConversationSession({ id: sessionId }),
+      logStore,
+      pluginHost,
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'character_state.patch',
+              input: { mood: 'curious' }
+            }
+          ]
+        },
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: { text: 'the committed terminal is reconciled' }
+            }
+          ]
+        }
+      ])
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      rawEvent: {
+        kind: 'runtime_turn_completed'
+      },
+      postCommitFailures: [
+        'terminal raw event append reported failure after write'
+      ]
+    });
+    expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
+    expect(pluginStore.readJson('current.json')).toMatchObject({
+      current: {
+        mood: 'curious'
+      }
+    });
+    expect(
+      fileLogStore
+        .rawEvents()
+        .filter(
+          (event) =>
+            event.kind === 'runtime_turn_completed' ||
+            event.kind === 'runtime_turn_rejected'
+        )
+        .map((event) => event.kind)
+    ).toEqual(['runtime_turn_completed']);
+  });
+
   it('keeps durable visible-reply evidence valid when terminal raw event append fails', async () => {
     const sessionId = 'session-terminal-append-visible-reply-evidence';
     const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
@@ -1184,7 +1615,11 @@ describe('plugin-driven tool loop', () => {
       storeRoot,
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],
-      enabledPluginIds: [runtimePluginDiscoveryPluginId, handleFileStoreWritePluginId]
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        firstPartyModelToolsPluginId,
+        handleFileStoreWritePluginId
+      ]
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
@@ -1256,7 +1691,11 @@ describe('plugin-driven tool loop', () => {
           rejectHealthWhenValue: 'staged side effect'
         })
       ],
-      enabledPluginIds: [runtimePluginDiscoveryPluginId, handleFileStoreWritePluginId]
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        firstPartyModelToolsPluginId,
+        handleFileStoreWritePluginId
+      ]
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
@@ -1319,7 +1758,11 @@ describe('plugin-driven tool loop', () => {
       storeRoot,
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],
-      enabledPluginIds: [runtimePluginDiscoveryPluginId, handleFileStoreWritePluginId]
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        firstPartyModelToolsPluginId,
+        handleFileStoreWritePluginId
+      ]
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
@@ -1434,8 +1877,14 @@ describe('plugin-driven tool loop', () => {
   });
 
   it('shows interim visible_reply before executable tools without committing it', async () => {
-    const session = createConversationSession();
-    const logStore = createRuntimeLogStore();
+    const sessionId = 'session-interim-visible-reload';
+    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-plugin-loop-'));
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const session = createConversationSession({ id: sessionId });
+    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
     const progress: unknown[] = [];
     const adapter = createSequencedAdapter([
       {
@@ -1477,10 +1926,13 @@ describe('plugin-driven tool loop', () => {
     });
 
     expect(result.status).toBe('completed');
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
-      'needs tool',
-      'finished'
-    ]);
+    const reloadedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    expect(
+      reloadedLogStore.conversationMessages().map((message) => message.text)
+    ).toEqual(['needs tool', 'finished']);
     expect(progress).toEqual([
       {
         kind: 'visible_reply',
@@ -1504,12 +1956,27 @@ describe('plugin-driven tool loop', () => {
         text: 'finished'
       }
     ]);
+    const reloadedRawEvents = reloadedLogStore.rawEvents();
+    const interimEvent = reloadedRawEvents.find(
+      (event) => event.kind === 'interim_visible_reply_emitted'
+    );
+    expect(interimEvent).toMatchObject({
+      kind: 'interim_visible_reply_emitted'
+    });
+    expect(interimEvent).not.toHaveProperty('visibleMessageIds');
+    expect(interimEvent).not.toHaveProperty('commitValidation');
     expect(
-      logStore
-        .rawEvents()
+      reloadedRawEvents
         .filter((event) => event.kind === 'visible_reply_committed')
         .map((event) => event.visibleMessageIds)
-    ).toEqual([undefined, ['local-session:message-1', 'local-session:message-2']]);
+    ).toEqual([
+      [`${sessionId}:message-1`, `${sessionId}:message-2`]
+    ]);
+    expect(
+      reloadedLogStore
+        .traceEntries()
+        .some((entry) => entry.step === 'interim_visible_reply_emitted')
+    ).toBe(true);
   });
 
   it('continues after interim visible_reply progress callback failures', async () => {
@@ -2105,6 +2572,7 @@ describe('plugin-driven tool loop', () => {
     expect(
       logStore.rawEvents().find((event) => event.kind === 'tool_call_finished')
     ).toMatchObject({
+      dispatchedToHost: false,
       toolName: 'plugin.list',
       toolResult: {
         status: 'rejected',
@@ -2155,6 +2623,7 @@ describe('plugin-driven tool loop', () => {
       logStore.rawEvents().find((event) => event.kind === 'tool_call_finished')
     ).toMatchObject({
       kind: 'tool_call_finished',
+      dispatchedToHost: false,
       toolName: 'memory.unknown',
       toolResult: {
         status: 'rejected',
@@ -2364,10 +2833,14 @@ function createSequencedAdapter(
   } satisfies RoleModelAdapter);
 }
 
-function createConversationAppendFailingLogStore(): RuntimeLogStore {
-  const logStore = createRuntimeLogStore();
+function createConversationAppendFailingLogStore(
+  logStore: RuntimeLogStore = createRuntimeLogStore()
+): RuntimeLogStore {
 
   return Object.freeze({
+    ...(logStore.localRuntimeSessionPaths === undefined
+      ? {}
+      : { localRuntimeSessionPaths: logStore.localRuntimeSessionPaths }),
     appendTrace(entry) {
       return logStore.appendTrace(entry);
     },
@@ -2440,6 +2913,81 @@ function createRuntimeTurnCompletedAppendFailingLogStore(
         throw new Error('terminal raw event append failed');
       }
 
+      return logStore.appendRawEvent(record);
+    },
+    appendConversationMessage(record) {
+      return logStore.appendConversationMessage(record);
+    },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
+function createRuntimeTurnCompletedAppendThenThrowLogStore(
+  logStore: RuntimeLogStore
+): RuntimeLogStore {
+  return Object.freeze({
+    ...(logStore.localRuntimeSessionPaths === undefined
+      ? {}
+      : { localRuntimeSessionPaths: logStore.localRuntimeSessionPaths }),
+    appendTrace(entry) {
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      const stored = logStore.appendRawEvent(record);
+
+      if (record.kind === 'runtime_turn_completed') {
+        throw new Error('terminal raw event append reported failure after write');
+      }
+
+      return stored;
+    },
+    appendConversationMessage(record) {
+      return logStore.appendConversationMessage(record);
+    },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
+function createOneShotTerminalTraceAppendFailingLogStore(
+  logStore: RuntimeLogStore
+): RuntimeLogStore {
+  let failed = false;
+
+  return Object.freeze({
+    ...(logStore.localRuntimeSessionPaths === undefined
+      ? {}
+      : { localRuntimeSessionPaths: logStore.localRuntimeSessionPaths }),
+    appendTrace(entry) {
+      if (!failed && entry.step === 'raw_event_log_appended') {
+        failed = true;
+        throw new Error('one-shot terminal trace append failed');
+      }
+
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
       return logStore.appendRawEvent(record);
     },
     appendConversationMessage(record) {
@@ -2634,7 +3182,10 @@ function createHandleFileStoreWritePlugin(
         name: handleFileStoreWriteToolName,
         description: 'Write a test value through the plugin file store.',
         requiredForUserTurn: false,
-        maxCallsPerUserTurn: 1,
+        callLimit: {
+          scope: 'user_turn',
+          maxCalls: 1
+        },
         inputContract: {
           type: 'object',
           fields: [
@@ -2805,7 +3356,11 @@ function createAfterTurnCommittedProbeHost(
         }
       })
     ],
-    enabledPluginIds: [runtimePluginDiscoveryPluginId, pluginId]
+    enabledPluginIds: [
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      pluginId
+    ]
   });
 }
 
@@ -2869,7 +3424,11 @@ function createPluginStoreRevisionFixtureHost() {
         }
       })
     ],
-    enabledPluginIds: [runtimePluginDiscoveryPluginId, pluginId]
+    enabledPluginIds: [
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      pluginId
+    ]
   });
 }
 
@@ -2878,7 +3437,10 @@ function createRevisionFixtureTool(name: string) {
     name,
     description: 'Return plugin store revision metadata.',
     requiredForUserTurn: false,
-    maxCallsPerUserTurn: 1,
+    callLimit: {
+      scope: 'user_turn',
+      maxCalls: 1
+    },
     inputContract: {
       type: 'object',
       fields: [],
@@ -2900,6 +3462,18 @@ function createTestEvent(message: string, eventId: string) {
       createdAt: '2026-06-15T00:00:00.000Z'
     })
   );
+}
+
+function transactionIdentityFromContext(context: {
+  readonly eventId: string;
+  readonly traceId: string;
+  readonly timestamp: string;
+}) {
+  return {
+    eventId: context.eventId,
+    traceId: context.traceId,
+    createdAt: context.timestamp
+  };
 }
 
 async function createDurableCharacterStateHarness(sessionId: string) {

@@ -5,7 +5,6 @@ import {
   createRuntimeEventIdentity
 } from '../src/runtime/event.ts';
 import {
-  createFirstPartyModelToolsPlugin,
   createRuntimePlugin,
   createRuntimePluginAfterTurnCommittedContext,
   createRuntimePluginContext,
@@ -14,11 +13,18 @@ import {
   createRuntimePluginHealthSnapshot,
   createRuntimePluginManifest,
   createRuntimePluginProvidedTool,
-  defaultRuntimePluginCatalogFactoryDefinitions,
-  firstPartyModelToolsPluginId,
-  hostFirstPartyRuntimePluginIds,
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
+import {
+  defaultRuntimePluginCatalogFactoryDefinitions,
+  hostFirstPartyRuntimePluginIds
+} from '../src/plugins/catalog.ts';
+import {
+  createFirstPartyModelToolsPlugin
+} from '../src/plugins/builtin/model-tools.ts';
+import {
+  firstPartyModelToolsPluginId
+} from '../src/plugins/contract.ts';
 import {
   createDefaultProject02PluginHost,
   createRuntimePluginHost,
@@ -42,6 +48,7 @@ import {
   mapHermesMemoryProviderFixture,
   mapFirstPartyModelToolsPlugin,
   mapMcpToolsResourcesFixture,
+  mapOpenClawMemoryPluginFixture,
   mapTencentDbMemoryGatewayFixture
 } from '../src/plugins/adapter-proofs/index.ts';
 import {
@@ -51,6 +58,9 @@ import {
 import {
   createRuntimePluginFileStore
 } from '../src/plugins/file-store.ts';
+import {
+  createRuntimePluginDiscoveryPlugin
+} from '../src/plugins/discovery-plugin.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin
@@ -151,6 +161,30 @@ function isRuntimePluginJsonArray(
 }
 
 describe('runtime plugin host', () => {
+  it('treats an explicit enabled-plugin list as authoritative', () => {
+    const host = createRuntimePluginHost({ enabledPluginIds: [] });
+
+    expect(host.enabledPluginIds()).toEqual([]);
+    expect(host.pluginToolDefinitions()).toEqual([]);
+    expect(host.resolveToolPluginId(roleModelPluginListToolName)).toBeUndefined();
+  });
+
+  it('rejects caller-supplied host-scoped plugin instances', () => {
+    const callerDiscovery = createRuntimePluginDiscoveryPlugin(() => ({
+      plugins: Object.freeze([]),
+      enabledPlugins: Object.freeze([]),
+      accessByPluginId: Object.freeze({})
+    }));
+
+    expect(() =>
+      createRuntimePluginHost({
+        plugins: [callerDiscovery]
+      })
+    ).toThrow(
+      'Plugin "runtime.plugin_discovery" is host-owned and cannot be supplied by callers.'
+    );
+  });
+
   it('declares the canonical host first-party plugin catalog', () => {
     const catalog = defaultRuntimePluginCatalogFactoryDefinitions();
 
@@ -172,7 +206,11 @@ describe('runtime plugin host', () => {
     const plugin = createMemorySearchPlugin();
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [runtimePluginDiscoveryPluginId, plugin.manifest.id]
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        firstPartyModelToolsPluginId,
+        plugin.manifest.id
+      ]
     });
     const context = testPluginContext();
 
@@ -248,12 +286,20 @@ describe('runtime plugin host', () => {
 
     expect(visibleReply).toMatchObject({
       pluginId: firstPartyModelToolsPluginId,
-      validationOwner: 'built_in_model_tools'
+      validationOwner: 'built_in_model_tools',
+      callLimit: {
+        scope: 'model_response',
+        maxCalls: 1
+      }
     });
     expect(host.resolveToolPluginId(visibleReplyModelToolName)).toBeUndefined();
     expect(characterStatePatch).toMatchObject({
       pluginId: characterStatePluginId,
-      validationOwner: 'plugin_host'
+      validationOwner: 'plugin_host',
+      callLimit: {
+        scope: 'user_turn',
+        maxCalls: 1
+      }
     });
     expect(host.resolveToolPluginId(characterStatePatchModelToolName)).toBe(
       characterStatePluginId
@@ -265,7 +311,7 @@ describe('runtime plugin host', () => {
     const disabledPlugin = createMemorySearchPlugin('memory.disabled.fixture');
     const host = createRuntimePluginHost({
       plugins: [enabledPlugin, disabledPlugin],
-      enabledPluginIds: [enabledPlugin.manifest.id]
+      enabledPluginIds: [runtimePluginDiscoveryPluginId, enabledPlugin.manifest.id]
     });
 
     const defaultResult = await host.handleToolCall(
@@ -321,6 +367,10 @@ describe('runtime plugin host', () => {
           name: 'memory.search',
           description: 'Search memory.',
           validationOwner: 'plugin_host',
+          callLimit: {
+            scope: 'user_turn',
+            maxCalls: 1
+          },
           sourceReferencesRequired: false
         })
       ])
@@ -774,6 +824,49 @@ describe('runtime plugin host', () => {
     });
   });
 
+  it('does not expose, advertise, route, or invoke local-memory-write tools without file_store write', async () => {
+    let invoked = false;
+    const plugin = createLocalMemoryWriteToolWithoutFileStorePlugin(() => {
+      invoked = true;
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
+
+    expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
+      'memory.search'
+    );
+    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
+
+    const discovery = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginDiscoveryPluginId,
+        toolName: roleModelPluginListToolName,
+        input: {}
+      },
+      testPluginContext()
+    );
+
+    expect(JSON.stringify(discovery)).not.toContain('memory.search');
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(invoked).toBe(false);
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'file_store_write_not_granted'
+    });
+  });
+
   it('rejects duplicate plugin ids before standalone session-end API permission injection', async () => {
     const pluginId = 'memory.duplicate-session-end.fixture';
     const invokedPlugins: string[] = [];
@@ -1004,6 +1097,9 @@ describe('runtime plugin host', () => {
       pluginId: plugin.manifest.id,
       sessionIdentity
     });
+    const registration = host
+      .registrySnapshot()
+      .plugins.find((item) => item.manifest.id === plugin.manifest.id);
 
     fileStore.writeJsonAtomic('seed.json', {
       value: 'existing'
@@ -1026,6 +1122,11 @@ describe('runtime plugin host', () => {
       throw new Error('Expected read-only fileStore probe to be accepted.');
     }
 
+    expect(plugin.manifest.runtimePolicy.sideEffectLevel).toBe('runtime_read');
+    expect(registration).toMatchObject({
+      requestedAccess: { file_store: 'write', model_input: 'write' },
+      grantedAccess: { file_store: 'write', model_input: 'write' }
+    });
     expect(result.output).toEqual({
       seed: {
         value: 'existing'
@@ -1102,6 +1203,9 @@ describe('runtime plugin host', () => {
       plugins: [plugin],
       sessionIdentity
     });
+    const registration = host
+      .registrySnapshot()
+      .plugins.find((item) => item.manifest.id === plugin.manifest.id);
 
     const result = await host.handleToolCall(
       {
@@ -1115,6 +1219,12 @@ describe('runtime plugin host', () => {
       testPluginContext()
     );
 
+    expect(plugin.manifest.runtimePolicy.sideEffectLevel).toBe('runtime_read');
+    expect(plugin.providedTools[0]?.sideEffectLevel).toBe('local_memory_write');
+    expect(registration).toMatchObject({
+      requestedAccess: { file_store: 'write', model_input: 'write' },
+      grantedAccess: { file_store: 'write', model_input: 'write' }
+    });
     expect(result.status).toBe('accepted');
     expectRetainedFileStoreWriteBlocked(retainedFileStore, 'after-handle.json');
 
@@ -1972,6 +2082,34 @@ describe('runtime plugin host', () => {
     }
   );
 
+  it('does not request model input for adapter-owned OpenClaw tools', () => {
+    const mapping = mapOpenClawMemoryPluginFixture(
+      readAgentCapabilityFixture('openclaw-memory-plugin.json')
+    );
+    const host = createRuntimePluginHost({
+      plugins: [mapping.plugin],
+      enabledPluginIds: [mapping.plugin.manifest.id]
+    });
+    const registration = host
+      .registrySnapshot()
+      .plugins.find(
+        (plugin) => plugin.manifest.id === mapping.plugin.manifest.id
+      );
+
+    expect(mapping.plugin.manifest.requestedAccess).toEqual({});
+    expect(registration).toMatchObject({
+      requestedAccess: {},
+      grantedAccess: {}
+    });
+    const adapterToolNames = new Set(
+      mapping.plugin.providedTools.map((tool) => tool.name)
+    );
+
+    expect(
+      host.pluginToolDefinitions().some((tool) => adapterToolNames.has(tool.name))
+    ).toBe(false);
+  });
+
   it('accepts first-party model tools as tool-provider-only mappings', () => {
     const plugin = createFirstPartyModelToolsPlugin();
     const mapping = mapFirstPartyModelToolsPlugin();
@@ -2113,6 +2251,32 @@ function createModelFacingToolWithoutModelInputPlugin(
       }
     }
   } satisfies RuntimePlugin);
+}
+
+function createLocalMemoryWriteToolWithoutFileStorePlugin(
+  onHandle: () => void
+): RuntimePlugin {
+  const pluginId = 'memory.tool-no-file-store-write.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      requestedAccess: { file_store: 'read', model_input: 'write' }
+    },
+    providedTools: localMemoryWriteSearchProvidedTools(),
+    lifecycleHooks: {
+      handleToolCall(call, context) {
+        onHandle();
+        const query = call.input['query'];
+
+        return createAcceptedMemorySearchResult({
+          pluginId,
+          query: typeof query === 'string' ? query : '',
+          context
+        });
+      }
+    }
+  });
 }
 
 function createDegradableMemorySearchPlugin(onHandle: () => void): RuntimePlugin {
@@ -3201,7 +3365,10 @@ function memorySearchProvidedTools() {
       name: 'memory.search',
       description: 'Search memory.',
       requiredForUserTurn: false,
-      maxCallsPerUserTurn: 1,
+      callLimit: {
+        scope: 'user_turn',
+        maxCalls: 1
+      },
       inputContract: {
         type: 'object',
         fields: [

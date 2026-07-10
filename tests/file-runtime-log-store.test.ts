@@ -1,11 +1,12 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { describe, expect, it } from 'vitest';
 
 import {
-  createFileRuntimeLogStore
+  createFileRuntimeLogStore,
+  findValidatedTerminalRawEventForSession
 } from '../src/runtime/storage/file-runtime-log-store.ts';
 import {
   createLocalRuntimeSessionStore
@@ -34,9 +35,8 @@ import {
   firstPartyModelToolsPluginId
 } from '../src/plugins/index.ts';
 import {
-  LocalRuntimeStorageContractError
-} from '../src/runtime/storage/layout.ts';
-import {
+  decodeRawEventLogRecord,
+  LocalRuntimeStorageContractError,
   createLocalRuntimeStorageLayout
 } from '../src/runtime/storage/layout.ts';
 import {
@@ -44,17 +44,385 @@ import {
 } from '../src/plugins/host.ts';
 import {
   createRuntimePlugin,
-  createRuntimePluginHealthSnapshot,
-  runtimePluginContractVersion
-} from '../src/plugins/types.ts';
+  createRuntimePluginHealthSnapshot
+} from '../src/plugins/validation.ts';
+import { runtimePluginContractVersion } from '../src/plugins/contract.ts';
 import type {
   RuntimePluginHealthStatus
-} from '../src/plugins/types.ts';
+} from '../src/plugins/contract.ts';
 import type {
   RoleModelAdapter
 } from '../src/role-model/loop.ts';
+import type {
+  RoleModelProviderExchangeSnapshot
+} from '../src/role-model/contracts.ts';
+import {
+  createNvidiaRoleModelProviderAdapter,
+  type NvidiaFetchClient
+} from '../src/role-model/providers/nvidia.ts';
+import {
+  defaultRoleModelProviderCapabilities
+} from '../src/role-model/prompt.ts';
 
 describe('file runtime log store plugin tool event validation', () => {
+  it('reconciles a missing terminal trace in memory without mutating public reads', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-read-only-terminal-trace-reconciliation';
+    const eventIdentity = identity('evt_legacy_schema1_patch');
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: eventIdentity.createdAt
+    });
+    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    writeJsonLines(paths.tracePath, [
+      {
+        ...eventIdentity,
+        step: 'runtime_event_received'
+      }
+    ]);
+    writeJsonLines(paths.rawEventsPath, [
+      {
+        ...eventIdentity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE'
+      },
+      {
+        ...eventIdentity,
+        kind: 'runtime_event_normalized',
+        eventType: 'USER_MESSAGE',
+        payloadSummary: {
+          rawInput: 'remember the mood',
+          normalizedCurrentUserMessage: 'remember the mood'
+        }
+      },
+      legacySchema1PatchCompletedEvent(sessionId)
+    ]);
+    const traceBeforePublicReads = readFileSync(paths.tracePath, 'utf8');
+    const rawEventsBeforePublicReads = readFileSync(paths.rawEventsPath, 'utf8');
+
+    expect(logStore.traceEntries().map((entry) => entry.step)).toEqual([
+      'runtime_event_received',
+      'raw_event_log_appended',
+      'runtime_turn_completed'
+    ]);
+    expect(logStore.rawEvents().at(-1)?.kind).toBe('runtime_turn_completed');
+    expect(logStore.conversationMessages()).toEqual([]);
+    expect(readFileSync(paths.tracePath, 'utf8')).toBe(traceBeforePublicReads);
+    expect(readFileSync(paths.rawEventsPath, 'utf8')).toBe(
+      rawEventsBeforePublicReads
+    );
+  });
+
+  it('reconciles rejected terminal trace evidence in memory without writing it', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-read-only-rejected-trace-reconciliation';
+    const eventIdentity = identity('evt_read_only_rejected_trace_reconciliation');
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: eventIdentity.createdAt
+    });
+    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    writeJsonLines(paths.tracePath, [
+      {
+        ...eventIdentity,
+        step: 'runtime_event_received'
+      }
+    ]);
+    writeJsonLines(paths.rawEventsPath, [
+      {
+        ...eventIdentity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE'
+      },
+      {
+        ...eventIdentity,
+        kind: 'runtime_turn_rejected',
+        eventType: 'USER_MESSAGE',
+        status: 'rejected',
+        reason: 'fixture rejection'
+      }
+    ]);
+    const traceBeforePublicRead = readFileSync(paths.tracePath, 'utf8');
+
+    expect(logStore.traceEntries().map((entry) => entry.step)).toEqual([
+      'runtime_event_received',
+      'raw_event_log_appended',
+      'runtime_turn_rejected'
+    ]);
+    expect(readFileSync(paths.tracePath, 'utf8')).toBe(traceBeforePublicRead);
+  });
+
+  it('validates full session evidence before returning an exact terminal identity', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-validated-terminal-lookup';
+    const eventIdentity = identity('evt_legacy_schema1_patch');
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: eventIdentity.createdAt
+    });
+    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    writeJsonLines(paths.rawEventsPath, [
+      legacySchema1PatchCompletedEvent(sessionId)
+    ]);
+
+    expect(() =>
+      findValidatedTerminalRawEventForSession(paths, eventIdentity)
+    ).toThrow(LocalRuntimeStorageContractError);
+
+    writeJsonLines(paths.tracePath, [
+      {
+        ...eventIdentity,
+        step: 'runtime_event_received'
+      }
+    ]);
+    writeJsonLines(paths.rawEventsPath, [
+      {
+        ...eventIdentity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE'
+      }
+    ]);
+
+    expect(
+      findValidatedTerminalRawEventForSession(paths, eventIdentity)
+    ).toBeUndefined();
+
+    writeJsonLines(paths.rawEventsPath, [
+      {
+        ...eventIdentity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE'
+      },
+      legacySchema1PatchCompletedEvent(sessionId)
+    ]);
+
+    expect(
+      findValidatedTerminalRawEventForSession(paths, eventIdentity)?.kind
+    ).toBe('runtime_turn_completed');
+    expect(
+      findValidatedTerminalRawEventForSession(paths, {
+        ...eventIdentity,
+        createdAt: '2026-06-15T00:00:01.000Z'
+      })
+    ).toBeUndefined();
+  });
+
+  it('rejects terminal recovery for durable logs without session metadata', async () => {
+    const storeRoot = createStoreRoot();
+    const eventIdentity = identity('evt_orphaned_terminal_recovery');
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId: 'catalog-session',
+      createdAt: eventIdentity.createdAt
+    });
+    const orphanedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId: 'orphaned-session'
+    });
+    const paths = orphanedLogStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    mkdirSync(paths.sessionRoot, { recursive: true });
+    writeJsonLines(paths.tracePath, [
+      {
+        ...eventIdentity,
+        step: 'runtime_event_received'
+      }
+    ]);
+    writeJsonLines(paths.rawEventsPath, [
+      {
+        ...eventIdentity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE'
+      }
+    ]);
+
+    expect(() =>
+      findValidatedTerminalRawEventForSession(paths, eventIdentity)
+    ).toThrow(LocalRuntimeStorageContractError);
+  });
+
+  it('rejects malformed persisted provider exchange evidence with the storage contract error', () => {
+    const malformedRecord: unknown = structuredClone(
+      legacySchema1PatchCompletedEvent('malformed-provider-exchange')
+    );
+    const roleModelIOSnapshot = isTestRecord(malformedRecord)
+      ? malformedRecord['roleModelIOSnapshot']
+      : undefined;
+
+    if (!isTestRecord(roleModelIOSnapshot)) {
+      throw new Error('Expected role-model IO snapshot fixture.');
+    }
+
+    roleModelIOSnapshot['providerExchange'] = {
+      provider: {}
+    };
+
+    expect(() =>
+      decodeRawEventLogRecord(JSON.stringify(malformedRecord))
+    ).toThrow(LocalRuntimeStorageContractError);
+  });
+
+  it('reloads a durable malformed provider exchange adapter rejection', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-malformed-provider-exchange-rejection';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        identity('evt_malformed_provider_exchange_rejection')
+      ),
+      session: createConversationSession({ id: sessionId }),
+      logStore,
+      roleModelAdapter: createMalformedProviderExchangeAdapter()
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'malformed_output',
+      message: 'Role-model adapter provider exchange is malformed.'
+    });
+
+    const reloadedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const reloadedTerminalEvent = reloadedLogStore.rawEvents().at(-1);
+    expect(reloadedTerminalEvent).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: 'malformed_output',
+            details: 'Role-model adapter provider exchange is malformed.'
+          }
+        }
+      }
+    });
+    expect(
+      reloadedTerminalEvent?.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions.find(
+        (definition) => definition.name === visibleReplyModelToolName
+      )?.callLimit
+    ).toEqual({
+      scope: 'model_response',
+      maxCalls: 1
+    });
+  });
+
+  it('keeps provider credential-key values out of durable raw-event evidence', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-provider-exchange-credential-redaction';
+    const credentialSentinel = 'durable-provider-credential-sentinel';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const fetchClient: NvidiaFetchClient = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: 'Hello.'
+                }
+              }
+            ],
+            usage: {
+              api_key: credentialSentinel,
+              safe: 'preserved'
+            }
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        identity('evt_provider_exchange_credential_redaction')
+      ),
+      session: createConversationSession({ id: sessionId }),
+      logStore: createFileRuntimeLogStore({ storeRoot, sessionId }),
+      roleModelAdapter: createNvidiaRoleModelProviderAdapter({
+        apiKey: 'secret',
+        fetchClient
+      })
+    });
+
+    expect(result.status).toBe('completed');
+
+    const rawEvents = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    }).rawEvents();
+    const completed = rawEvents.find(
+      (rawEvent) => rawEvent.kind === 'runtime_turn_completed'
+    );
+
+    expect(completed?.roleModelIOSnapshot?.providerExchange?.usage).toEqual({
+      api_key: '[redacted]',
+      safe: 'preserved'
+    });
+    expect(JSON.stringify(rawEvents)).not.toContain(credentialSentinel);
+  });
+
+  it('rejects duplicate persisted allowed tools with the storage contract error', () => {
+    const malformedRecord: unknown = structuredClone(
+      legacySchema1PatchCompletedEvent('duplicate-persisted-allowed-tools')
+    );
+    const roleModelIOSnapshot = isTestRecord(malformedRecord)
+      ? malformedRecord['roleModelIOSnapshot']
+      : undefined;
+    const inputEnvelope = isTestRecord(roleModelIOSnapshot)
+      ? roleModelIOSnapshot['inputEnvelope']
+      : undefined;
+
+    if (!isTestRecord(inputEnvelope)) {
+      throw new Error('Expected role-model input envelope fixture.');
+    }
+
+    inputEnvelope['allowedTools'] = [
+      visibleReplyModelToolName,
+      visibleReplyModelToolName,
+      characterStatePatchModelToolName
+    ];
+
+    expect(() =>
+      decodeRawEventLogRecord(JSON.stringify(malformedRecord))
+    ).toThrow(LocalRuntimeStorageContractError);
+  });
+
   it('decodes legacy schema 1 role-model snapshots with character_state.patch as a former built-in allowed tool', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'legacy-schema-1-role-model';
@@ -476,6 +844,10 @@ function writeJsonLines(filePath: string, records: readonly object[]): void {
   );
 }
 
+function isTestRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function legacySchema1PatchCompletedEvent(sessionId: string): object {
   const eventIdentity = identity('evt_legacy_schema1_patch');
   const rawOutputText = JSON.stringify({
@@ -576,6 +948,43 @@ function createMultilineVisibleReplyAdapter(): RoleModelAdapter {
   };
 }
 
+function createMalformedProviderExchangeAdapter(): RoleModelAdapter {
+  return {
+    invoke(_inputEnvelope, invocation) {
+      const providerExchange: RoleModelProviderExchangeSnapshot = {
+        provider: {
+          name: 'local'
+        },
+        capabilities: defaultRoleModelProviderCapabilities,
+        reasoning: {
+          mode: 'none',
+          params: {}
+        },
+        renderedMessages: invocation.turnContext.messages,
+        renderedTools: invocation.turnContext.tools,
+        toolNameMappings: [],
+        requestBody: {},
+        nativeToolResultMessages: []
+      };
+      Reflect.deleteProperty(providerExchange, 'reasoning');
+
+      return {
+        rawOutputText: JSON.stringify({
+          toolCalls: [
+            {
+              name: visibleReplyModelToolName,
+              input: {
+                text: 'hello'
+              }
+            }
+          ]
+        }),
+        providerExchange
+      };
+    }
+  };
+}
+
 function createHealthRejectingPluginHost(options?: {
   readonly status?: RuntimePluginHealthStatus;
   readonly summary?: string;
@@ -636,6 +1045,6 @@ function createHealthRejectingPluginHost(options?: {
         }
       })
     ],
-    enabledPluginIds: ['health.reject.fixture']
+    enabledPluginIds: [firstPartyModelToolsPluginId, 'health.reject.fixture']
   });
 }

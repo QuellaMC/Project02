@@ -287,7 +287,7 @@ export async function createConfiguredProject02PluginHost(options: {
   });
   const finalActivation = resolveRuntimePluginActivation({
     plugins,
-    pluginManifests: preparedFactories.map((factory) => factory.manifest),
+    pluginManifests: preparedPluginManifests,
     additionalKnownPluginIds: legacyFactoryIds,
     disabledKnownPluginIds: [...disabledLegacyFactoryIds],
     defaultEnabledPluginIds,

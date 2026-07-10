@@ -57,17 +57,33 @@ export type ModelToolInputContract = {
   readonly jsonSchema?: ModelToolObjectJsonSchema;
 };
 
+export const modelToolCallLimitScopes = Object.freeze([
+  'model_response',
+  'user_turn'
+] as const);
+
+export type ModelToolCallLimitScope =
+  (typeof modelToolCallLimitScopes)[number];
+
+export type ModelToolCallLimit = {
+  readonly scope: ModelToolCallLimitScope;
+  readonly maxCalls: number;
+};
+
 export type ModelToolDefinition = {
   readonly name: string;
   readonly description: string;
   readonly requiredForUserTurn: boolean;
-  readonly maxCallsPerUserTurn: number;
+  readonly callLimit: ModelToolCallLimit;
   readonly inputContract: ModelToolInputContract;
 };
 
 export type BuiltInModelToolDefinition = ModelToolDefinition & {
   readonly name: BuiltInModelToolName;
-  readonly maxCallsPerUserTurn: 1;
+  readonly callLimit: {
+    readonly scope: 'model_response';
+    readonly maxCalls: 1;
+  };
 };
 
 export type VisibleReplyToolInput = {
@@ -203,7 +219,7 @@ export function freezeModelToolDefinition(
     name: definition.name,
     description: definition.description,
     requiredForUserTurn: definition.requiredForUserTurn,
-    maxCallsPerUserTurn: definition.maxCallsPerUserTurn,
+    callLimit: freezeModelToolCallLimit(definition.callLimit),
     inputContract: freezeModelToolInputContract(definition.inputContract)
   } satisfies ModelToolDefinition);
 }
@@ -353,9 +369,21 @@ function createBuiltInModelToolDefinition(options: {
     name: options.name,
     description: options.description,
     requiredForUserTurn: options.requiredForUserTurn,
-    maxCallsPerUserTurn: 1,
+    callLimit: Object.freeze({
+      scope: 'model_response',
+      maxCalls: 1
+    }),
     inputContract: freezeModelToolInputContract(options.inputContract)
   } satisfies BuiltInModelToolDefinition);
+}
+
+function freezeModelToolCallLimit(
+  callLimit: ModelToolCallLimit
+): ModelToolCallLimit {
+  return Object.freeze({
+    scope: callLimit.scope,
+    maxCalls: callLimit.maxCalls
+  });
 }
 
 function freezeModelToolInputContract(

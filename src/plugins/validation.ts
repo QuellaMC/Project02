@@ -1,6 +1,8 @@
 import type { CharacterProfile, VisibleMessage } from '../core/conversation.ts';
 import {
+  modelToolCallLimitScopes,
   modelToolInputFieldValueTypes,
+  type ModelToolCallLimit,
   type ModelToolInputContract,
   type ModelToolInputField,
   type ModelToolInputFieldValueType,
@@ -140,7 +142,7 @@ export type RuntimePluginProvidedTool = {
   readonly name: string;
   readonly description: string;
   readonly requiredForUserTurn: boolean;
-  readonly maxCallsPerUserTurn: number;
+  readonly callLimit: ModelToolCallLimit;
   readonly inputContract: ModelToolInputContract;
   readonly validationOwner: RuntimePluginToolValidationOwner;
   readonly sideEffectLevel: RuntimePluginSideEffectLevel;
@@ -495,10 +497,7 @@ export function validateRuntimePluginProvidedTool(
     value['requiredForUserTurn'],
     'requiredForUserTurn'
   );
-  const maxCallsPerUserTurn = requiredPositiveInteger(
-    value['maxCallsPerUserTurn'],
-    'maxCallsPerUserTurn'
-  );
+  const callLimit = requiredModelToolCallLimit(value['callLimit']);
   const inputContract = requiredModelToolInputContract(value['inputContract']);
   const validationOwner = value['validationOwner'];
   const sideEffectLevel = value['sideEffectLevel'];
@@ -515,7 +514,7 @@ export function validateRuntimePluginProvidedTool(
     name.status === 'rejected' ||
     description.status === 'rejected' ||
     requiredForUserTurn.status === 'rejected' ||
-    maxCallsPerUserTurn.status === 'rejected' ||
+    callLimit.status === 'rejected' ||
     inputContract.status === 'rejected' ||
     requiresConfirmation.status === 'rejected' ||
     sourceReferencesRequired.status === 'rejected'
@@ -524,7 +523,7 @@ export function validateRuntimePluginProvidedTool(
       name,
       description,
       requiredForUserTurn,
-      maxCallsPerUserTurn,
+      callLimit,
       inputContract,
       requiresConfirmation,
       sourceReferencesRequired
@@ -550,13 +549,48 @@ export function validateRuntimePluginProvidedTool(
       name: name.value,
       description: redactRuntimePluginText(description.value),
       requiredForUserTurn: requiredForUserTurn.value,
-      maxCallsPerUserTurn: maxCallsPerUserTurn.value,
+      callLimit: callLimit.value,
       inputContract: inputContract.value,
       validationOwner,
       sideEffectLevel,
       requiresConfirmation: requiresConfirmation.value,
       sourceReferencesRequired: sourceReferencesRequired.value
     } satisfies RuntimePluginProvidedTool)
+  );
+}
+
+function requiredModelToolCallLimit(
+  value: unknown
+): RuntimePluginValidationResult<ModelToolCallLimit> {
+  if (!isRecord(value)) {
+    return reject(
+      'malformed_tool_definition',
+      'Plugin provided tool callLimit must be an object.'
+    );
+  }
+
+  const scope = value['scope'];
+  const maxCalls = requiredPositiveInteger(
+    value['maxCalls'],
+    'callLimit.maxCalls'
+  );
+
+  if (!isOneOf(scope, modelToolCallLimitScopes)) {
+    return reject(
+      'malformed_tool_definition',
+      'Plugin provided tool callLimit.scope is not supported.'
+    );
+  }
+
+  if (maxCalls.status === 'rejected') {
+    return maxCalls;
+  }
+
+  return accept(
+    Object.freeze({
+      scope,
+      maxCalls: maxCalls.value
+    } satisfies ModelToolCallLimit)
   );
 }
 

@@ -239,6 +239,54 @@ export function freezeCharacterStatePatchResult(
   } satisfies RejectedCharacterStatePatchResult);
 }
 
+export function decodeAcceptedCharacterStatePatchResult(
+  value: unknown,
+  fail: (field: string) => never
+): AcceptedCharacterStatePatchResult {
+  if (!isJsonRecord(value) || value['status'] !== 'accepted') {
+    fail('characterStatePatchResult');
+  }
+
+  const rawPatch = value['patch'];
+
+  if (!isJsonRecord(rawPatch)) {
+    fail('characterStatePatchResult.patch');
+  }
+
+  const parsedPatch = parseCharacterStatePatch(rawPatch);
+
+  if (parsedPatch.status !== 'accepted') {
+    fail('characterStatePatchResult.patch');
+  }
+
+  const before = decodeCharacterRuntimeState(value['before'], fail);
+  const after = decodeCharacterRuntimeState(value['after'], fail);
+  const appliedChanges = decodeCharacterStateAppliedChanges(
+    value['appliedChanges'],
+    fail
+  );
+  const expectedAfter = createCharacterRuntimeState({
+    ...before.current,
+    ...parsedPatch.patch
+  });
+  const expectedChanges = createAppliedChanges(before.current, after.current);
+
+  if (
+    !characterRuntimeStatesEqual(expectedAfter, after) ||
+    !characterStateAppliedChangesEqual(expectedChanges, appliedChanges)
+  ) {
+    fail('characterStatePatchResult');
+  }
+
+  return Object.freeze({
+    status: 'accepted',
+    patch: parsedPatch.patch,
+    before,
+    after,
+    appliedChanges
+  } satisfies AcceptedCharacterStatePatchResult);
+}
+
 function createCharacterRuntimeState(
   current: LivingStateCurrent
 ): CharacterRuntimeState {
@@ -462,6 +510,64 @@ function freezeAppliedChanges(
         after: change.after
       } satisfies CharacterStateAppliedChange)
     )
+  );
+}
+
+function decodeCharacterStateAppliedChanges(
+  value: unknown,
+  fail: (field: string) => never
+): readonly CharacterStateAppliedChange[] {
+  if (!Array.isArray(value)) {
+    fail('characterStatePatchResult.appliedChanges');
+  }
+
+  return Object.freeze(
+    value.map((item, index) => {
+      if (!isJsonRecord(item)) {
+        fail(`characterStatePatchResult.appliedChanges.${String(index)}`);
+      }
+
+      const field = item['field'];
+      const before = item['before'];
+      const after = item['after'];
+
+      if (
+        typeof field !== 'string' ||
+        !isCharacterStateField(field) ||
+        typeof before !== 'string' ||
+        typeof after !== 'string' ||
+        Object.keys(item).some(
+          (key) => key !== 'field' && key !== 'before' && key !== 'after'
+        )
+      ) {
+        fail(`characterStatePatchResult.appliedChanges.${String(index)}`);
+      }
+
+      return Object.freeze({
+        field,
+        before,
+        after
+      } satisfies CharacterStateAppliedChange);
+    })
+  );
+}
+
+function characterStateAppliedChangesEqual(
+  left: readonly CharacterStateAppliedChange[],
+  right: readonly CharacterStateAppliedChange[]
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((change, index) => {
+      const other = right[index];
+
+      return (
+        other !== undefined &&
+        change.field === other.field &&
+        change.before === other.before &&
+        change.after === other.after
+      );
+    })
   );
 }
 

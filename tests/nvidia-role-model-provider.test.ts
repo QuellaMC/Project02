@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
   createRoleModelInputEnvelope,
   roleModelProviderErrorRejectionReason,
@@ -9,6 +10,7 @@ import {
 import {
   createNvidiaRoleModelProviderAdapter,
   createNvidiaRoleModelProviderConfigFromEnv,
+  defaultNvidiaRoleModelReasoningBudget,
   nvidiaModelEnvName,
   renderNvidiaMessages,
   renderNvidiaTools,
@@ -145,6 +147,58 @@ describe('NVIDIA role-model provider', () => {
     expect(loopResult.ioSnapshot.rawOutputText).toBe('');
     expect(JSON.stringify(loopResult)).not.toContain('user:pass');
     expect(JSON.stringify(loopResult)).not.toContain('endpoint-secret');
+  });
+
+  it('redacts credential-bearing response keys from provider exchange evidence', async () => {
+    const credentialSentinel = 'provider-response-credential-sentinel';
+    const nestedCredentialSentinel = 'provider-response-nested-sentinel';
+    const fetchClient: NvidiaFetchClient = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: 'Hello.'
+                }
+              }
+            ],
+            usage: {
+              api_key: credentialSentinel,
+              nested: {
+                access_token: nestedCredentialSentinel,
+                safe: 'preserved'
+              }
+            }
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+    const serializedExchange = JSON.stringify(output.providerExchange);
+
+    expect(output.providerExchange?.usage).toEqual({
+      api_key: '[redacted]',
+      nested: {
+        access_token: '[redacted]',
+        safe: 'preserved'
+      }
+    });
+    expect(serializedExchange).not.toContain(credentialSentinel);
+    expect(serializedExchange).not.toContain(nestedCredentialSentinel);
   });
 
   it('renders OpenAI-compatible messages and native tools', () => {
@@ -428,14 +482,11 @@ describe('NVIDIA role-model provider', () => {
       stream: false,
       tool_choice: 'auto',
       parallel_tool_calls: true,
+      reasoning_budget: defaultNvidiaRoleModelReasoningBudget,
       chat_template_kwargs: {
-        enable_thinking: false
+        enable_thinking: true
       }
     });
-    expect(
-      (capturedBody as { readonly reasoning_budget?: unknown })
-        .reasoning_budget
-    ).toBeUndefined();
     expect(
       (capturedBody as { readonly messages?: readonly { readonly role: string }[] })
         .messages?.map((message) => message.role)
@@ -455,16 +506,121 @@ describe('NVIDIA role-model provider', () => {
       content: 'Hello from assistant content.\n- plugin.list'
     });
     expect(output.providerExchange?.reasoning).toEqual({
-      mode: 'none',
+      mode: 'enabled',
       params: {
+        reasoning_budget: defaultNvidiaRoleModelReasoningBudget,
         chat_template_kwargs: {
-          enable_thinking: false
+          enable_thinking: true
         }
       }
     });
     expect(output.providerExchange?.outputNormalization).toEqual({
       source: 'terminal_assistant_content',
       committed: false
+    });
+  });
+
+  it('keeps terminal assistant content non-committed when visible_reply is unavailable', async () => {
+    let capturedBody: unknown;
+    const fetchClient: NvidiaFetchClient = (_url, request) => {
+      capturedBody = JSON.parse(request.body);
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: 'Internal terminal model text.'
+                }
+              }
+            ]
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient,
+      model: 'nvidia/test-model'
+    });
+    const inputEnvelope = createNvidiaNoVisibleReplyInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(capturedBody).not.toHaveProperty('tools');
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [],
+      text: 'Internal terminal model text.'
+    });
+    expect(output.providerExchange?.outputNormalization).toEqual({
+      source: 'terminal_assistant_content',
+      committed: false
+    });
+  });
+
+  it('uses explicit no-thinking NVIDIA params when requested', async () => {
+    let capturedBody: unknown;
+    const fetchClient: NvidiaFetchClient = (_url, request) => {
+      capturedBody = JSON.parse(request.body);
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: 'No-thinking mode reply.'
+                }
+              }
+            ]
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient,
+      thinkingMode: {
+        mode: 'none'
+      }
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(capturedBody).toMatchObject({
+      chat_template_kwargs: {
+        enable_thinking: false
+      }
+    });
+    expect(
+      (capturedBody as { readonly reasoning_budget?: unknown })
+        .reasoning_budget
+    ).toBeUndefined();
+    expect(output.providerExchange?.reasoning).toEqual({
+      mode: 'none',
+      params: {
+        chat_template_kwargs: {
+          enable_thinking: false
+        }
+      }
     });
   });
 
@@ -895,6 +1051,7 @@ function createNvidiaAliasCollisionInputEnvelope() {
       }
     }),
     pluginToolDefinitions: [
+      ...createDefaultRoleModelPluginToolDefinitions(),
       createAliasCollisionToolDefinition({
         pluginId: 'memory_alias_dot',
         name: 'memory.search'
@@ -911,6 +1068,27 @@ function createNvidiaAliasCollisionInputEnvelope() {
   });
 }
 
+function createNvidiaNoVisibleReplyInputEnvelope() {
+  return createRoleModelInputEnvelope({
+    event: createUserMessageRuntimeEvent(
+      'hello',
+      createRuntimeEventIdentity({
+        eventId: 'evt_nvidia_no_visible_reply',
+        traceId: 'trace_nvidia_no_visible_reply',
+        createdAt: '2026-06-15T00:00:00.000Z'
+      })
+    ),
+    decisionContext: createDecisionContext({
+      sessionId: 'session-nvidia-no-visible-reply',
+      characterSnapshot: {
+        id: 'mira',
+        displayName: 'Mira'
+      }
+    }),
+    pluginToolDefinitions: []
+  });
+}
+
 function createAliasCollisionToolDefinition(options: {
   readonly pluginId: string;
   readonly name: string;
@@ -920,7 +1098,10 @@ function createAliasCollisionToolDefinition(options: {
     name: options.name,
     description: `Alias collision fixture for ${options.name}.`,
     requiredForUserTurn: false,
-    maxCallsPerUserTurn: 1,
+    callLimit: {
+      scope: 'user_turn',
+      maxCalls: 1
+    },
     inputContract: {
       type: 'object',
       fields: [],

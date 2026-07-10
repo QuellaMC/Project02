@@ -48,6 +48,7 @@ import {
 } from '../role-model/loop.ts';
 import {
   createDefaultProject02PluginHost,
+  type RuntimePluginFileStorePreparedTransaction,
   type RuntimePluginHost
 } from '../plugins/index.ts';
 import {
@@ -71,6 +72,9 @@ import type {
   RuntimeTraceEntry,
   RuntimeTraceStepName
 } from './log.ts';
+import {
+  findValidatedTerminalRawEventForSession
+} from './storage/file-runtime-log-store.ts';
 
 const runtimePluginHealthRejectionReason = 'plugin_health_rejected';
 
@@ -122,6 +126,8 @@ export type LocalRuntimeUserMessageCompletedResult = {
   readonly rawEvent: RawEventLogRecord;
   readonly rawEventLogRecords: readonly RawEventLogRecord[];
   readonly traceEntries: readonly RuntimeTraceEntry[];
+  readonly pluginFileStoreRecoveryPending?: boolean;
+  readonly postCommitFailures?: readonly string[];
 };
 
 export type LocalRuntimeUserMessageRejectedResult = {
@@ -252,6 +258,10 @@ async function runSerializedLocalUserMessageEvent(
   let runtimePluginContextForTurn: RuntimePluginContext | undefined;
   let runtimePluginHostForTurn: RuntimePluginHost | undefined;
   let pluginFileStoreTransactionActive = false;
+  let preparedPluginFileStoreTransaction:
+    | RuntimePluginFileStorePreparedTransaction
+    | undefined;
+  let terminalRawEventMayBeDurable = false;
 
   function appendTrace(step: RuntimeTraceStepName): RuntimeTraceEntry {
     const traceEntry = options.logStore.appendTrace({
@@ -261,6 +271,47 @@ async function runSerializedLocalUserMessageEvent(
 
     traceEntries.push(traceEntry);
     return traceEntry;
+  }
+
+  function reconcileCompletedTerminalTrace(): void {
+    const terminalSteps = [
+      'raw_event_log_appended',
+      'runtime_turn_completed'
+    ] as const;
+    let persisted = options.logStore.traceEntries();
+
+    for (const step of terminalSteps) {
+      const exists = persisted.some(
+        (entry) =>
+          entry.eventId === identity.eventId &&
+          entry.traceId === identity.traceId &&
+          entry.step === step
+      );
+
+      if (!exists) {
+        appendTrace(step);
+        persisted = options.logStore.traceEntries();
+      }
+    }
+
+    for (const step of terminalSteps) {
+      if (traceEntries.some((entry) => entry.step === step)) {
+        continue;
+      }
+
+      const storedEntry = persisted.find(
+        (entry) =>
+          entry.eventId === identity.eventId &&
+          entry.traceId === identity.traceId &&
+          entry.step === step
+      );
+
+      if (storedEntry === undefined) {
+        throw new Error(`Completed runtime trace is missing ${step}.`);
+      }
+
+      traceEntries.push(storedEntry);
+    }
   }
 
   function appendRawEvent(record: RawEventLogRecordInput): RawEventLogRecord {
@@ -403,22 +454,32 @@ async function runSerializedLocalUserMessageEvent(
       pluginHost.beginFileStoreTransaction !== undefined;
   }
 
-  function commitPluginFileStoreTransaction(): void {
+  function preparePluginFileStoreTransaction(): void {
     if (!pluginFileStoreTransactionActive) {
       return;
     }
 
-    runtimePluginHostForTurn?.commitFileStoreTransaction?.();
+    preparedPluginFileStoreTransaction =
+      runtimePluginHostForTurn?.prepareFileStoreTransaction?.(identity);
+
     pluginFileStoreTransactionActive = false;
   }
 
   function rollbackPluginFileStoreTransaction(): void {
-    if (!pluginFileStoreTransactionActive) {
-      return;
+    if (pluginFileStoreTransactionActive) {
+      runtimePluginHostForTurn?.rollbackFileStoreTransaction?.();
+      pluginFileStoreTransactionActive = false;
     }
 
-    runtimePluginHostForTurn?.rollbackFileStoreTransaction?.();
-    pluginFileStoreTransactionActive = false;
+    preparedPluginFileStoreTransaction?.discard();
+    preparedPluginFileStoreTransaction = undefined;
+  }
+
+  function finalizePluginFileStoreTransaction(): void {
+    const prepared = preparedPluginFileStoreTransaction;
+
+    preparedPluginFileStoreTransaction = undefined;
+    prepared?.finalize();
   }
 
   appendTrace('runtime_event_received');
@@ -463,6 +524,31 @@ async function runSerializedLocalUserMessageEvent(
     const normalizedReply = normalizeCharacterAgentReply({
       text: optionsForReply.text
     });
+
+    if (!optionsForReply.final) {
+      appendRawEvent({
+        ...identity,
+        kind: 'interim_visible_reply_emitted',
+        eventType: event.type,
+        payloadSummary,
+        roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
+        parsedRoleModelDecisionSnapshot:
+          optionsForReply.parsedRoleModelDecisionSnapshot,
+        ...runtimePluginEvidenceOption(
+          optionsForReply.runtimePluginEvidence
+        )
+      });
+      appendTrace('interim_visible_reply_emitted');
+
+      await emitProgress({
+        kind: 'visible_reply',
+        final: false,
+        text: normalizedReply.text
+      });
+
+      return undefined;
+    }
+
     const commitValidation = createRoleModelCommitValidationSnapshot({
       ...identity,
       sessionId: decisionContextSessionIdFromEvidence(
@@ -473,31 +559,6 @@ async function runSerializedLocalUserMessageEvent(
         acceptedVisibleReplyText: normalizedReply.text
       }
     });
-
-    if (!optionsForReply.final) {
-      appendTrace('visible_reply_committed');
-      appendRawEvent({
-        ...identity,
-        kind: 'visible_reply_committed',
-        eventType: event.type,
-        payloadSummary,
-        roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
-        parsedRoleModelDecisionSnapshot:
-          optionsForReply.parsedRoleModelDecisionSnapshot,
-        commitValidation,
-        ...runtimePluginEvidenceOption(
-          optionsForReply.runtimePluginEvidence
-        )
-      });
-
-      await emitProgress({
-        kind: 'visible_reply',
-        final: false,
-        text: normalizedReply.text
-      });
-
-      return undefined;
-    }
 
     let turn: CharacterTurnResult;
     let visibleMessagesForThisReply: readonly ConversationLogRecord[];
@@ -557,7 +618,6 @@ async function runSerializedLocalUserMessageEvent(
 
     committedVisibleMessages.push(...visibleMessagesForThisReply);
 
-    appendTrace('visible_reply_committed');
     appendRawEvent({
       ...identity,
       kind: 'visible_reply_committed',
@@ -574,6 +634,7 @@ async function runSerializedLocalUserMessageEvent(
         optionsForReply.runtimePluginEvidence
       )
     });
+    appendTrace('visible_reply_committed');
 
     await emitProgress({
       kind: 'visible_reply',
@@ -591,7 +652,6 @@ async function runSerializedLocalUserMessageEvent(
     readonly roleModelIOSnapshot: RoleModelIOSnapshot;
     readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
   }): void {
-    appendTrace('tool_call_started');
     appendRawEvent({
       ...identity,
       kind: 'tool_call_started',
@@ -606,21 +666,23 @@ async function runSerializedLocalUserMessageEvent(
         optionsForTool.parsedRoleModelDecisionSnapshot,
       payloadSummary
     });
+    appendTrace('tool_call_started');
   }
 
   function appendToolCallFinished(optionsForTool: {
     readonly callId: string;
+    readonly dispatchedToHost: boolean;
     readonly round: number;
     readonly pluginId: string;
     readonly toolName: string;
     readonly result: RuntimePluginToolCallResult;
   }): void {
-    appendTrace('tool_call_finished');
     appendRawEvent({
       ...identity,
       kind: 'tool_call_finished',
       eventType: event.type,
       toolCallId: optionsForTool.callId,
+      dispatchedToHost: optionsForTool.dispatchedToHost,
       toolRound: optionsForTool.round,
       toolName: optionsForTool.toolName,
       toolPluginId: optionsForTool.pluginId,
@@ -629,6 +691,7 @@ async function runSerializedLocalUserMessageEvent(
       payloadSummary
     });
     finishedToolCallIds.push(optionsForTool.callId);
+    appendTrace('tool_call_finished');
   }
 
   try {
@@ -734,11 +797,13 @@ async function runSerializedLocalUserMessageEvent(
             Object.freeze({
               callId: progressEvent.callId,
               call,
+              dispatchedToHost: progressEvent.dispatchedToHost,
               result: progressEvent.result
             } satisfies RoleModelPluginToolRoutingEvidence)
           );
           appendToolCallFinished({
             callId: progressEvent.callId,
+            dispatchedToHost: progressEvent.dispatchedToHost,
             round: progressEvent.round,
             pluginId: progressEvent.pluginId,
             toolName: progressEvent.toolName,
@@ -927,7 +992,7 @@ async function runSerializedLocalUserMessageEvent(
       });
     }
 
-    commitPluginFileStoreTransaction();
+    preparePluginFileStoreTransaction();
 
     const turn =
       visibleReplyText === undefined
@@ -944,7 +1009,8 @@ async function runSerializedLocalUserMessageEvent(
       preCommitHealthResult.evidence
     );
 
-    const rawEvent = appendRawEvent({
+    let terminalAppendFailure: string | undefined;
+    const terminalRawEventInput = {
       ...identity,
       kind: 'runtime_turn_completed',
       eventType: event.type,
@@ -973,27 +1039,86 @@ async function runSerializedLocalUserMessageEvent(
         evidence: terminalPluginEvidence,
         health: preCommitHealthResult.snapshots
       })
-    });
+    } satisfies RawEventLogRecordInput;
+    let rawEvent: RawEventLogRecord;
 
-    appendTrace('raw_event_log_appended');
-    appendTrace('runtime_turn_completed');
+    try {
+      rawEvent = appendRawEvent(terminalRawEventInput);
+      terminalRawEventMayBeDurable = true;
+    } catch (error: unknown) {
+      const sessionPaths = options.logStore.localRuntimeSessionPaths;
 
-    const afterCommitPluginContext =
-      createRuntimePluginAfterTurnCommittedContext({
-        ...identity,
-        sessionId: decisionContext.sessionId,
-        eventType: event.type,
-        currentUserMessage: event.payload.currentUserMessage,
-        character: decisionContext.characterSnapshot,
-        committedAt: options.committedAt ?? options.event.createdAt,
-        visibleMessages: committedVisibleMessages
-      });
-    const afterCommitResult = await pluginHost.afterTurnCommitted(
-      afterCommitPluginContext
-    );
+      if (sessionPaths === undefined) {
+        throw error;
+      }
 
-    if (shouldRecordAfterTurnCommittedEvent(afterCommitResult)) {
+      let durableTerminal: RawEventLogRecord | undefined;
+
       try {
+        durableTerminal = findValidatedTerminalRawEventForSession(
+          sessionPaths,
+          identity
+        );
+      } catch {
+        terminalRawEventMayBeDurable = true;
+        throw error;
+      }
+
+      if (durableTerminal?.kind !== 'runtime_turn_completed') {
+        if (durableTerminal !== undefined) {
+          terminalRawEventMayBeDurable = true;
+        }
+
+        throw error;
+      }
+
+      rawEvent = durableTerminal;
+      rawEventLogRecords.push(durableTerminal);
+      terminalRawEventMayBeDurable = true;
+      terminalAppendFailure = runtimePostCommitFailureMessage(error);
+    }
+
+    const postCommitFailures: string[] =
+      terminalAppendFailure === undefined ? [] : [terminalAppendFailure];
+    let pluginFileStoreRecoveryPending = false;
+
+    try {
+      finalizePluginFileStoreTransaction();
+    } catch (error: unknown) {
+      pluginFileStoreRecoveryPending = true;
+      postCommitFailures.push(runtimePostCommitFailureMessage(error));
+    }
+
+    try {
+      appendTrace('raw_event_log_appended');
+      appendTrace('runtime_turn_completed');
+    } catch (error: unknown) {
+      try {
+        reconcileCompletedTerminalTrace();
+      } catch (reconciliationError: unknown) {
+        postCommitFailures.push(
+          `${runtimePostCommitFailureMessage(error)} ` +
+          `Trace reconciliation failed: ${runtimePostCommitFailureMessage(reconciliationError)}`
+        );
+      }
+    }
+
+    try {
+      const afterCommitPluginContext =
+        createRuntimePluginAfterTurnCommittedContext({
+          ...identity,
+          sessionId: decisionContext.sessionId,
+          eventType: event.type,
+          currentUserMessage: event.payload.currentUserMessage,
+          character: decisionContext.characterSnapshot,
+          committedAt: options.committedAt ?? options.event.createdAt,
+          visibleMessages: committedVisibleMessages
+        });
+      const afterCommitResult = await pluginHost.afterTurnCommitted(
+        afterCommitPluginContext
+      );
+
+      if (shouldRecordAfterTurnCommittedEvent(afterCommitResult)) {
         appendRawEvent({
           ...identity,
           kind: 'after_turn_committed',
@@ -1004,10 +1129,11 @@ async function runSerializedLocalUserMessageEvent(
           payloadSummary,
           ...runtimePluginEvidenceOption(afterCommitResult.evidence)
         });
-      } catch {
-        // The completed turn is already durable; follow-up hook evidence cannot
-        // change the terminal commit decision.
       }
+    } catch (error: unknown) {
+      // The completed turn is already durable; follow-up work cannot change the
+      // terminal decision or append a contradictory rejection.
+      postCommitFailures.push(runtimePostCommitFailureMessage(error));
     }
 
     return Object.freeze({
@@ -1017,9 +1143,19 @@ async function runSerializedLocalUserMessageEvent(
       conversationMessages: Object.freeze([...committedVisibleMessages]),
       rawEvent,
       rawEventLogRecords: Object.freeze([...rawEventLogRecords]),
-      traceEntries: Object.freeze([...traceEntries])
+      traceEntries: Object.freeze([...traceEntries]),
+      ...(pluginFileStoreRecoveryPending
+        ? { pluginFileStoreRecoveryPending: true }
+        : {}),
+      ...(postCommitFailures.length === 0
+        ? {}
+        : { postCommitFailures: Object.freeze(postCommitFailures) })
     } satisfies LocalRuntimeUserMessageCompletedResult);
   } catch (error: unknown) {
+    if (terminalRawEventMayBeDurable) {
+      throw error;
+    }
+
     if (error instanceof CharacterInputError) {
       return await appendRejectedResult({
         message: error.message,
@@ -1117,6 +1253,14 @@ function shouldRecordAfterTurnCommittedEvent(afterCommitResult: {
     afterCommitResult.status === 'completed_with_failures' ||
     afterCommitResult.evidence.length > 0
   );
+}
+
+function runtimePostCommitFailureMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return 'Runtime post-commit work failed.';
 }
 
 function decisionContextSessionIdFromEvidence(

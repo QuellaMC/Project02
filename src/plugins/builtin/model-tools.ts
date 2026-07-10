@@ -25,7 +25,7 @@ export function createFirstPartyModelToolsPlugin(): RuntimePlugin {
         name: definition.name,
         description: definition.description,
         requiredForUserTurn: definition.requiredForUserTurn,
-        maxCallsPerUserTurn: definition.maxCallsPerUserTurn,
+        callLimit: definition.callLimit,
         inputContract: definition.inputContract,
         validationOwner: 'built_in_model_tools',
         sideEffectLevel: 'none',

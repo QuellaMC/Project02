@@ -16,6 +16,7 @@ import type {
 } from '../event.ts';
 import {
   createAcceptedRoleModelDecisionResult,
+  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
   createParsedRoleModelDecisionSnapshot,
   createRejectedRoleModelDecisionResult,
@@ -24,8 +25,10 @@ import {
   createRoleModelToolObservation,
   getRequiredVisibleReplyText,
   getVisibleReplyToolCall,
+  hasDuplicateRoleModelAllowedTools,
   isRoleModelAllowedToolName,
   isRoleModelRawOutputReplayableDecisionEvidence,
+  parseRoleModelProviderExchangeSnapshot,
   roleModelPluginToolRejectedRejectionReason,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
@@ -60,17 +63,19 @@ import {
   createRuntimePluginProvidedTool,
   createRuntimePluginTurnEvidenceSnapshot,
   type RuntimePluginContextItem,
-  type RuntimePluginEvidenceKind,
   type RuntimePluginEvidenceSnapshot,
-  type RuntimePluginEvidenceStatus,
-  type RuntimePluginPolicyOutcome,
   type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
-  type RuntimePluginSourceKind,
   type RuntimePluginSourceReference,
   type RuntimePluginToolCallResult,
   type RuntimePluginTurnEvidenceSnapshot
-} from '../../plugins/types.ts';
+} from '../../plugins/validation.ts';
+import type {
+  RuntimePluginEvidenceKind,
+  RuntimePluginEvidenceStatus,
+  RuntimePluginPolicyOutcome,
+  RuntimePluginSourceKind
+} from '../../plugins/contract.ts';
 import {
   createRoleModelCommitValidationSnapshot,
   isTerminalRawEventLogRecordKind,
@@ -197,6 +202,7 @@ const runtimeTraceSteps = [
   'plugin_before_role_model_call_rejected',
   'tool_call_started',
   'tool_call_finished',
+  'interim_visible_reply_emitted',
   'visible_reply_committed',
   'input_validation_rejected',
   'character_reply_rejected',
@@ -212,6 +218,7 @@ const rawEventKinds = [
   'plugin_before_role_model_call_rejected',
   'tool_call_started',
   'tool_call_finished',
+  'interim_visible_reply_emitted',
   'visible_reply_committed',
   'input_validation_rejected',
   'character_reply_rejected',
@@ -275,7 +282,10 @@ const legacySchema1CharacterStatePatchPluginToolDefinition = Object.freeze({
   description:
     'Legacy schema 1 compatibility definition for persisted character_state.patch evidence.',
   requiredForUserTurn: false,
-  maxCallsPerUserTurn: 1,
+  callLimit: {
+    scope: 'user_turn',
+    maxCalls: 1
+  },
   inputContract: {
     type: 'object',
     fields: [],
@@ -462,6 +472,10 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const visibleMessageIds = optionalStringArray(record['visibleMessageIds'], 'visibleMessageIds');
   const toolCallIds = optionalStringArray(record['toolCallIds'], 'toolCallIds');
   const toolCallId = optionalRecordString(record, 'toolCallId', 'malformed_record');
+  const dispatchedToHost = optionalRecordBoolean(
+    record,
+    'dispatchedToHost'
+  );
   const toolRound = optionalRecordNumber(record, 'toolRound');
   const toolName = optionalRecordString(record, 'toolName', 'malformed_record');
   const toolPluginId = optionalRecordString(record, 'toolPluginId', 'malformed_record');
@@ -497,6 +511,7 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   assertToolRawEventSemantics({
     kind,
     toolCallId,
+    dispatchedToHost,
     toolRound,
     toolName,
     toolPluginId,
@@ -538,6 +553,7 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     ...(visibleMessageIds === undefined ? {} : { visibleMessageIds }),
     ...(toolCallIds === undefined ? {} : { toolCallIds }),
     ...(toolCallId === undefined ? {} : { toolCallId }),
+    ...(dispatchedToHost === undefined ? {} : { dispatchedToHost }),
     ...(toolRound === undefined ? {} : { toolRound }),
     ...(toolName === undefined ? {} : { toolName }),
     ...(toolPluginId === undefined ? {} : { toolPluginId }),
@@ -692,6 +708,23 @@ function optionalRecordNumber(
   }
 
   return requiredRecordNumber(record, key, 'malformed_record');
+}
+
+function optionalRecordBoolean(
+  record: Record<string, unknown>,
+  key: string
+): boolean | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== 'boolean') {
+    throwMalformedRecord(key);
+  }
+
+  return value;
 }
 
 function requiredNormalizedVisibleMessageText(
@@ -853,6 +886,7 @@ function assertTerminalRawEventSemantics(options: {
 function assertToolRawEventSemantics(options: {
   readonly kind: RawEventLogRecordKind;
   readonly toolCallId: string | undefined;
+  readonly dispatchedToHost: boolean | undefined;
   readonly toolRound: number | undefined;
   readonly toolName: string | undefined;
   readonly toolPluginId: string | undefined;
@@ -862,6 +896,7 @@ function assertToolRawEventSemantics(options: {
   if (options.kind !== 'tool_call_started' && options.kind !== 'tool_call_finished') {
     if (
       options.toolCallId !== undefined ||
+      options.dispatchedToHost !== undefined ||
       options.toolRound !== undefined ||
       options.toolName !== undefined ||
       options.toolPluginId !== undefined ||
@@ -884,6 +919,10 @@ function assertToolRawEventSemantics(options: {
   }
 
   if (options.kind === 'tool_call_started') {
+    if (options.dispatchedToHost !== undefined) {
+      throwMalformedRecord('dispatchedToHost');
+    }
+
     if (options.toolInput === undefined || options.toolResult !== undefined) {
       throwMalformedRecord('toolInput');
     }
@@ -1314,7 +1353,10 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
   });
 
   if (commitValidation === undefined) {
-    if (options.kind !== 'tool_call_started') {
+    if (
+      options.kind !== 'tool_call_started' &&
+      options.kind !== 'interim_visible_reply_emitted'
+    ) {
       throwMalformedRecord('commitValidation');
     }
 
@@ -1605,46 +1647,44 @@ function requiredRoleModelInputEnvelope(
     throwMalformedRecord('roleModelInputEnvelope');
   }
   const allowedTools = requiredRoleModelAllowedTools(value['allowedTools']);
-  const pluginToolDefinitions = roleModelPluginToolDefinitionsWithLegacyCompat({
-    allowedTools,
-    pluginToolDefinitions: optionalRoleModelPluginToolDefinitions(
-      value['pluginToolDefinitions']
-    )
-  });
+  const storedPluginToolDefinitions = value['pluginToolDefinitions'];
+  const pluginToolDefinitions =
+    storedPluginToolDefinitions === undefined
+      ? legacyRoleModelPluginToolDefinitions(allowedTools)
+      : optionalRoleModelPluginToolDefinitions(storedPluginToolDefinitions);
 
-  return createRoleModelInputEnvelope({
-    event: requiredUserMessageRuntimeEvent(value['event']),
-    decisionContext: requiredDecisionContext(value['decisionContext']),
-    allowedTools,
-    pluginToolDefinitions,
-    toolObservations: optionalRoleModelToolObservations(
-      value['toolObservations']
-    ),
-    outputContract: requiredRoleModelOutputContract(value['outputContract'])
-  });
+  try {
+    return createRoleModelInputEnvelope({
+      event: requiredUserMessageRuntimeEvent(value['event']),
+      decisionContext: requiredDecisionContext(value['decisionContext']),
+      allowedTools,
+      pluginToolDefinitions,
+      toolObservations: optionalRoleModelToolObservations(
+        value['toolObservations']
+      ),
+      outputContract: requiredRoleModelOutputContract(value['outputContract'])
+    });
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      throwMalformedRecord('roleModelInputEnvelope');
+    }
+
+    throw error;
+  }
 }
 
-function roleModelPluginToolDefinitionsWithLegacyCompat(options: {
-  readonly allowedTools: readonly RoleModelAllowedToolName[];
-  readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
-}): readonly RoleModelPluginToolDefinition[] {
-  if (!options.allowedTools.includes(characterStatePatchModelToolName)) {
-    return options.pluginToolDefinitions;
-  }
-
-  if (
-    options.pluginToolDefinitions.some(
-      (definition) => definition.name === characterStatePatchModelToolName
-    )
-  ) {
-    return options.pluginToolDefinitions;
-  }
-
+function legacyRoleModelPluginToolDefinitions(
+  allowedTools: readonly RoleModelAllowedToolName[]
+): readonly RoleModelPluginToolDefinition[] {
   // Schema 1 stored character_state.patch as a built-in tool before plugin
   // definitions were persisted with role-model envelopes.
   return Object.freeze([
-    ...options.pluginToolDefinitions,
-    legacySchema1CharacterStatePatchPluginToolDefinition
+    ...createDefaultRoleModelPluginToolDefinitions().filter((definition) =>
+      allowedTools.includes(definition.name)
+    ),
+    ...(allowedTools.includes(characterStatePatchModelToolName)
+      ? [legacySchema1CharacterStatePatchPluginToolDefinition]
+      : [])
   ]);
 }
 
@@ -1896,6 +1936,10 @@ function requiredRoleModelAllowedTools(
     tools.push(item);
   }
 
+  if (hasDuplicateRoleModelAllowedTools(tools)) {
+    throwMalformedRecord('allowedTools');
+  }
+
   return Object.freeze(tools);
 }
 
@@ -1958,12 +2002,14 @@ function optionalRoleModelProviderExchangeOption(value: unknown): {
     return {};
   }
 
-  if (!isRecord(value)) {
+  const providerExchange = parseRoleModelProviderExchangeSnapshot(value);
+
+  if (providerExchange === undefined) {
     throwMalformedRecord('providerExchange');
   }
 
   return {
-    providerExchange: value as unknown as RoleModelProviderExchangeSnapshot
+    providerExchange
   };
 }
 

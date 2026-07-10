@@ -32,19 +32,21 @@ import {
 } from './access-control.ts';
 import {
   createHostScopedFirstPartyRuntimePlugins,
-  isHostScopedFirstPartyRuntimePlugin,
   isHostScopedFirstPartyRuntimePluginId
 } from './catalog.ts';
 import { isHostDefaultEnabledRuntimePlugin } from './default-enabled.ts';
 import { createPluginHookContext } from './hook-context.ts';
 import {
   createRuntimePluginFileStoreTransaction,
+  type RuntimePluginFileStorePreparedTransaction,
   type RuntimePluginFileStoreTransaction
 } from './file-store.ts';
+import type { RuntimeEventIdentity } from '../runtime/event.ts';
 import { validateModelToolInputAgainstContract } from '../role-model/model-tools.ts';
 import {
   isModelFacingPluginTool,
   pluginCanWriteModelInput,
+  pluginToolHasRequiredGrantedAccess,
   pluginToolDefinitionsForEnabledPlugins,
   routableModelFacingPluginTools,
   toolAllowsFileStoreWrites
@@ -139,7 +141,9 @@ export type RuntimePluginHost = {
     context: RuntimePluginContext
   ): Promise<RuntimePluginToolCallResult>;
   beginFileStoreTransaction?(): void;
-  commitFileStoreTransaction?(): void;
+  prepareFileStoreTransaction?(
+    identity: RuntimeEventIdentity
+  ): RuntimePluginFileStorePreparedTransaction | undefined;
   rollbackFileStoreTransaction?(): void;
   afterTurnCommitted(
     context: RuntimePluginAfterTurnCommittedContext
@@ -224,17 +228,14 @@ export function createRuntimePluginHost(
   let enabledPlugins: readonly RuntimePlugin[] = [];
   let accessByPluginId: RuntimePluginAccessMapByPluginId =
     Object.freeze({});
-  assertConfiguredHostScopedFirstPartyPluginsAreCanonical(configuredPlugins);
-  const configuredPluginIds = new Set(
-    configuredPlugins.map((plugin) => plugin.manifest.id)
-  );
+  assertNoCallerSuppliedHostScopedFirstPartyPlugins(configuredPlugins);
   const hostScopedPlugins = createHostScopedFirstPartyRuntimePlugins({
     discoveryHostState: () => ({
       plugins: allPlugins,
       enabledPlugins,
       accessByPluginId
     })
-  }).filter((plugin) => !configuredPluginIds.has(plugin.manifest.id));
+  });
   const plugins = Object.freeze([
     ...hostScopedPlugins,
     ...configuredPlugins
@@ -319,13 +320,17 @@ export function createRuntimePluginHost(
 
       activeFileStoreTransaction = createRuntimePluginFileStoreTransaction();
     },
-    commitFileStoreTransaction() {
-      activeFileStoreTransaction?.commit();
+    prepareFileStoreTransaction(identity) {
+      const transaction = activeFileStoreTransaction;
+
       activeFileStoreTransaction = undefined;
+      return transaction?.prepare(identity);
     },
     rollbackFileStoreTransaction() {
-      activeFileStoreTransaction?.rollback();
+      const transaction = activeFileStoreTransaction;
+
       activeFileStoreTransaction = undefined;
+      transaction?.rollback();
     },
     async afterTurnCommitted(context) {
       const hookResult = await runHookPhase({
@@ -656,6 +661,20 @@ async function runHandleToolCall(options: {
       context: options.context,
       reason: 'model_input_not_granted',
       message: `Plugin "${plugin.manifest.id}" did not declare model_input write access for model-facing tool "${providedTool.name}".`,
+      evidenceStatus: failureDegrades ? 'degraded' : 'rejected',
+      policyOutcome: failureDegrades ? 'optional_degraded' : 'disallowed_tool_call'
+    });
+  }
+
+  if (
+    isModelFacingPluginTool({ plugin, tool: providedTool }) &&
+    !pluginToolHasRequiredGrantedAccess({ tool: providedTool, access })
+  ) {
+    return createRejectedToolCallResult({
+      call: options.call,
+      context: options.context,
+      reason: 'file_store_write_not_granted',
+      message: `Plugin "${plugin.manifest.id}" did not declare file_store write access for local-memory-write tool "${providedTool.name}".`,
       evidenceStatus: failureDegrades ? 'degraded' : 'rejected',
       policyOutcome: failureDegrades ? 'optional_degraded' : 'disallowed_tool_call'
     });
@@ -1699,42 +1718,16 @@ function enabledPluginIdsForHost(options: {
     enabledIds.push(enabledId);
   }
 
-  for (const defaultEnabledPluginId of [
-    ...hostScopedDefaultEnabledPluginIds(options.plugins)
-  ].reverse()) {
-    if (!seenEnabledIds.has(defaultEnabledPluginId)) {
-      seenEnabledIds.add(defaultEnabledPluginId);
-      enabledIds.unshift(defaultEnabledPluginId);
-    }
-  }
-
   return Object.freeze(enabledIds);
 }
 
-function hostScopedDefaultEnabledPluginIds(
-  plugins: readonly RuntimePlugin[]
-): readonly string[] {
-  return Object.freeze(
-    plugins
-      .filter(
-        (plugin) =>
-          isHostScopedFirstPartyRuntimePlugin(plugin) &&
-          isHostDefaultEnabledRuntimePlugin(plugin)
-      )
-      .map((plugin) => plugin.manifest.id)
-  );
-}
-
-function assertConfiguredHostScopedFirstPartyPluginsAreCanonical(
+function assertNoCallerSuppliedHostScopedFirstPartyPlugins(
   plugins: readonly RuntimePlugin[]
 ): void {
   for (const plugin of plugins) {
-    if (
-      isHostScopedFirstPartyRuntimePluginId(plugin.manifest.id) &&
-      !isHostScopedFirstPartyRuntimePlugin(plugin)
-    ) {
+    if (isHostScopedFirstPartyRuntimePluginId(plugin.manifest.id)) {
       throw new TypeError(
-        `Plugin "${plugin.manifest.id}" is host-owned and cannot be supplied by configured plugins.`
+        `Plugin "${plugin.manifest.id}" is host-owned and cannot be supplied by callers.`
       );
     }
   }

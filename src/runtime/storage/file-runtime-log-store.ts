@@ -25,6 +25,7 @@ import type {
   RuntimeTraceEntry
 } from '../log.ts';
 import { isTerminalRawEventLogRecord } from '../log.ts';
+import type { RuntimeEventIdentity } from '../event.ts';
 import { assertLocalRuntimeSessionReadable } from './session-store.ts';
 
 export type CreateFileRuntimeLogStoreOptions = LocalRuntimeSessionPathsOptions;
@@ -119,6 +120,128 @@ export function createFileRuntimeLogStore(
   } satisfies RuntimeLogStore);
 }
 
+function reconcileTerminalRawTraceEvidence(
+  evidence: DurableRuntimeSessionEvidence
+): DurableRuntimeSessionEvidence {
+  const traceEntries = [...evidence.traceEntries];
+
+  for (const rawEvent of evidence.rawEvents.filter(isTerminalRawEventLogRecord)) {
+    if (
+      rawEvent.kind !== 'runtime_turn_completed' &&
+      rawEvent.kind !== 'runtime_turn_rejected'
+    ) {
+      continue;
+    }
+
+    const terminalStep: RuntimeTraceEntry['step'] = rawEvent.kind;
+    const matchingSteps = new Set(
+      traceEntries
+        .filter(
+          (entry) =>
+            entry.eventId === rawEvent.eventId &&
+            entry.traceId === rawEvent.traceId
+        )
+        .map((entry) => entry.step)
+    );
+
+    if (matchingSteps.has(terminalStep)) {
+      continue;
+    }
+
+    for (const step of ['raw_event_log_appended', terminalStep] as const) {
+      if (matchingSteps.has(step)) {
+        continue;
+      }
+
+      const entry = decodeRuntimeTraceEntry(
+        encodeRuntimeTraceEntry({
+          eventId: rawEvent.eventId,
+          traceId: rawEvent.traceId,
+          createdAt: rawEvent.createdAt,
+          step
+        })
+      );
+
+      matchingSteps.add(step);
+      traceEntries.push(entry);
+    }
+  }
+
+  return Object.freeze({
+    traceEntries: Object.freeze(traceEntries),
+    rawEvents: evidence.rawEvents,
+    conversationMessages: evidence.conversationMessages
+  } satisfies DurableRuntimeSessionEvidence);
+}
+
+function findValidatedTerminalRawEventForIdentity(
+  rawEvents: readonly RawEventLogRecord[],
+  identity: RuntimeEventIdentity
+): RawEventLogRecord | undefined {
+  assertRawEventTerminalOrder(rawEvents);
+  assertRawEventStartsWithReceived(rawEvents);
+  assertRawEventTurnsDoNotOverlap(rawEvents);
+  assertToolCallRawEventsAreComplete({
+    mode: 'appendRawEvent',
+    rawEvents
+  });
+
+  const matchingIdentityKey = runtimeEventIdentityKey(identity);
+  const createdAtByIdentity = new Map<string, string>();
+
+  for (const rawEvent of rawEvents) {
+    const identityKey = runtimeEventIdentityKey(rawEvent);
+    const priorCreatedAt = createdAtByIdentity.get(identityKey);
+
+    if (priorCreatedAt !== undefined && priorCreatedAt !== rawEvent.createdAt) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Raw event log contains inconsistent createdAt values for one event identity.'
+      );
+    }
+
+    createdAtByIdentity.set(identityKey, rawEvent.createdAt);
+  }
+
+  if (createdAtByIdentity.get(matchingIdentityKey) !== identity.createdAt) {
+    return undefined;
+  }
+
+  return [...rawEvents]
+    .reverse()
+    .find(
+      (rawEvent) =>
+        isTerminalRawEventLogRecord(rawEvent) &&
+        rawEvent.eventId === identity.eventId &&
+        rawEvent.traceId === identity.traceId &&
+        rawEvent.createdAt === identity.createdAt
+    );
+}
+
+export function findValidatedTerminalRawEventForSession(
+  paths: LocalRuntimeSessionPaths,
+  identity: RuntimeEventIdentity
+): RawEventLogRecord | undefined {
+  assertLocalRuntimeSessionReadable({
+    storeRoot: paths.storeRoot,
+    sessionId: paths.sessionId
+  });
+
+  const evidence = reconcileTerminalRawTraceEvidence(
+    readRuntimeSessionEvidence(paths, 'publicDecode')
+  );
+
+  // Recovery must accept a valid open final turn so absence of a terminal can
+  // be distinguished from malformed or contradictory durable evidence.
+  assertDurableRuntimeSessionEvidence({
+    paths,
+    evidence,
+    mode: 'appendRawEvent'
+  });
+
+  return findValidatedTerminalRawEventForIdentity(evidence.rawEvents, identity);
+}
+
 function appendJsonLine(options: {
   readonly filePath: string;
   readonly line: string;
@@ -182,7 +305,11 @@ function readValidatedRuntimeSessionEvidence(
   paths: LocalRuntimeSessionPaths,
   mode: RuntimeLogValidationMode
 ): DurableRuntimeSessionEvidence {
-  const evidence = readRuntimeSessionEvidence(paths, 'publicDecode');
+  const storedEvidence = readRuntimeSessionEvidence(paths, 'publicDecode');
+  const evidence =
+    mode === 'public'
+      ? reconcileTerminalRawTraceEvidence(storedEvidence)
+      : storedEvidence;
 
   assertDurableRuntimeSessionEvidence({
     paths,

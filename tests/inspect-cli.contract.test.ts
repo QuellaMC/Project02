@@ -42,6 +42,12 @@ import {
   type RuntimePluginAccessMap,
   type RuntimePluginContext
 } from '../src/plugins/types.ts';
+import {
+  runtimePluginDiscoveryPluginId
+} from '../src/plugins/access-control.ts';
+import {
+  firstPartyModelToolsPluginId
+} from '../src/plugins/contract.ts';
 
 describe('inspect CLI plugin evidence', () => {
   it('shows model rounds and per-tool plugin events', async () => {
@@ -188,22 +194,44 @@ describe('inspect CLI plugin evidence', () => {
         stderr: collect(() => {})
       }
     );
-    const output: unknown = JSON.parse(stdout);
+    const output = JSON.parse(stdout) as {
+      readonly runtimeConfig: {
+        readonly source: string;
+        readonly path: string;
+        readonly storeRoot: string;
+      };
+      readonly plugins: readonly {
+        readonly pluginId: string;
+        readonly enabled: boolean;
+        readonly requestedAccess: RuntimePluginAccessMap;
+        readonly grantedAccess: RuntimePluginAccessMap;
+      }[];
+    };
 
     expect(exitCode).toBe(0);
-    expect(output).toMatchObject({
-      runtimeConfig: {
-        source: 'path',
-        path: configPath,
-        storeRoot
-      },
-      plugins: [
+    expect(output.runtimeConfig).toMatchObject({
+      source: 'path',
+      path: configPath,
+      storeRoot
+    });
+    expect(output.plugins).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pluginId: runtimePluginDiscoveryPluginId,
+          enabled: true,
+          requestedAccess: { model_input: 'write' },
+          grantedAccess: { model_input: 'write' }
+        }),
+        expect.objectContaining({
+          pluginId: firstPartyModelToolsPluginId,
+          enabled: true
+        }),
         expect.objectContaining({
           pluginId: 'character-state',
           enabled: false
         })
-      ]
-    });
+      ])
+    );
     expect(stdout).toContain('"activationDiagnostics"');
     expect(stdout).toContain('"runtime_config_unknown_plugin"');
     expect(stdout).toContain('"disabled_by_config"');

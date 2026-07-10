@@ -6,6 +6,7 @@ import { Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
+import { createConversationSession } from '../src/core/conversation.ts';
 import { roleModelPluginListToolName } from '../src/role-model/contracts.ts';
 import {
   createConfiguredProject02PluginHost,
@@ -26,8 +27,188 @@ import {
   type RuntimePluginAccessMap,
   type RuntimePluginContext
 } from '../src/plugins/index.ts';
+import {
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent
+} from '../src/runtime/event.ts';
+import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
+import { createRuntimeLogStore } from '../src/runtime/log.ts';
 
 describe('runtime config activation diagnostics', () => {
+  it('keeps final activation aligned with host-owned default-enabled plugins', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-host-defaults-aligned-')
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+    });
+
+    expect(configured.activation.enabledPluginIds).toEqual(
+      configured.host.enabledPluginIds()
+    );
+    expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      characterStatePluginId
+    ]);
+    expect(
+      configured.activation.plugins
+        .filter((plugin) => plugin.enabled)
+        .map((plugin) => plugin.pluginId)
+    ).toEqual(configured.host.enabledPluginIds());
+    expect(configured.host.pluginToolDefinitions()).toContainEqual(
+      expect.objectContaining({
+        pluginId: runtimePluginDiscoveryPluginId,
+        name: roleModelPluginListToolName
+      })
+    );
+  });
+
+  it('keeps check access inventory aligned with host-injected discovery', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-check-host-discovery-')
+    );
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: {}
+      }
+    );
+    const output = parseActivationOutput(stdout);
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {}
+    });
+    const checkDiscovery = output.plugins.find(
+      (plugin) => plugin.pluginId === runtimePluginDiscoveryPluginId
+    );
+    const hostDiscovery = configured.host
+      .registrySnapshot()
+      .plugins.find(
+        (plugin) => plugin.manifest.id === runtimePluginDiscoveryPluginId
+      );
+
+    expect(exitCode).toBe(0);
+    expect(checkDiscovery).toMatchObject({
+      pluginId: runtimePluginDiscoveryPluginId,
+      enabled: true,
+      activationStatus: 'active',
+      requestedAccess: { model_input: 'write' },
+      grantedAccess: { model_input: 'write' }
+    });
+    expect(hostDiscovery).toMatchObject({
+      requestedAccess: checkDiscovery?.requestedAccess,
+      grantedAccess: checkDiscovery?.grantedAccess
+    });
+    expect(configured.host.pluginToolDefinitions()).toContainEqual(
+      expect.objectContaining({
+        pluginId: runtimePluginDiscoveryPluginId,
+        name: roleModelPluginListToolName
+      })
+    );
+  });
+
+  it('keeps an explicit host-scoped disable aligned with host state', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-host-disable-aligned-')
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [runtimePluginDiscoveryPluginId]: {
+          enabled: false
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+    });
+
+    expect(configured.activation.enabledPluginIds).toEqual(
+      configured.host.enabledPluginIds()
+    );
+    expect(configured.activation.enabledPluginIds).not.toContain(
+      runtimePluginDiscoveryPluginId
+    );
+    expect(configured.host.resolveToolPluginId(roleModelPluginListToolName)).toBeUndefined();
+  });
+
+  it('keeps character-agent output non-committed when config disables visible_reply', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-model-tools-disabled-runtime-')
+    );
+    const sessionId = 'session-model-tools-disabled-runtime';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [firstPartyModelToolsPluginId]: {
+          enabled: false
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      storeRoot,
+      sessionId
+    });
+    const logStore = createRuntimeLogStore();
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        createRuntimeEventIdentity({
+          eventId: 'evt_model_tools_disabled_runtime',
+          traceId: 'trace_model_tools_disabled_runtime',
+          createdAt: '2026-06-15T00:00:00.000Z'
+        })
+      ),
+      session: createConversationSession({ id: sessionId }),
+      logStore,
+      pluginHost: configured.host,
+      agent: {
+        reply() {
+          return {
+            text: 'Character agent reply.'
+          };
+        }
+      }
+    });
+
+    expect(configured.activation.enabledPluginIds).not.toContain(
+      firstPartyModelToolsPluginId
+    );
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected the disabled visible-reply turn to complete.');
+    }
+
+    expect(
+      result.rawEvent.roleModelIOSnapshot?.inputEnvelope.allowedTools
+    ).not.toContain('visible_reply');
+    expect(result.rawEvent.parsedRoleModelDecisionSnapshot?.result).toMatchObject({
+      status: 'accepted',
+      nonCommittedText: 'Character agent reply.',
+      decision: {
+        toolCalls: []
+      }
+    });
+    expect(result).not.toHaveProperty('turn');
+    expect(result.conversationMessages).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
+  });
+
   it('fails check for config-enabled legacy function factories without constructing them', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-legacy-unchecked-')
@@ -278,7 +459,11 @@ describe('runtime config activation diagnostics', () => {
       }
     });
 
-    expect(configured.activation.enabledPluginIds).toEqual([plugin.manifest.id]);
+    expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      plugin.manifest.id
+    ]);
     expect(configured.plugins.map((item) => item.manifest.id)).toEqual([
       plugin.manifest.id
     ]);
@@ -672,7 +857,11 @@ describe('runtime config activation diagnostics', () => {
     expect(configured.plugins.map((item) => item.manifest.id)).toEqual([
       plugin.manifest.id
     ]);
-    expect(configured.activation.enabledPluginIds).toEqual([plugin.manifest.id]);
+    expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      plugin.manifest.id
+    ]);
     expect(configured.activation.defaultMemoryProvider).toBe(plugin.manifest.id);
     expect(configured.activation.diagnostics).toEqual([]);
     expect(activation).toMatchObject({
@@ -850,6 +1039,8 @@ describe('runtime config activation diagnostics', () => {
     });
 
     expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
       selectedPlugin.manifest.id
     ]);
     expect(configured.activation.defaultMemoryProvider).toBe(
@@ -923,6 +1114,8 @@ describe('runtime config activation diagnostics', () => {
     );
 
     expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
       selectedPlugin.manifest.id
     ]);
     expect(configured.activation.defaultMemoryProvider).toBe(
@@ -1603,7 +1796,10 @@ describe('runtime config activation diagnostics', () => {
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
     expect(configured.activation.diagnostics).toEqual([]);
-    expect(configured.activation.plugins).toEqual([]);
+    expect(configured.activation.plugins.map((plugin) => plugin.pluginId)).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId
+    ]);
   });
 
   it('skips later unselected legacy factory failures during host preparation', async () => {

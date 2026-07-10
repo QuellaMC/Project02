@@ -1,24 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
+  createRoleModelInputEnvelope,
   isRoleModelRawOutputReplayableDecisionEvidence,
   roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
   roleModelTerminalEmptyOutputRejectionDetails,
   type RoleModelPluginToolDefinition,
+  type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata
 } from '../src/role-model/contracts.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginContext,
   createRuntimePluginEvidenceSnapshot,
-  runtimePluginContractVersion,
   type RuntimePluginContext,
   type RuntimePlugin,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult
-} from '../src/plugins/types.ts';
+} from '../src/plugins/validation.ts';
+import { runtimePluginContractVersion } from '../src/plugins/contract.ts';
 import {
   createRuntimePluginHost
 } from '../src/plugins/host.ts';
@@ -27,13 +30,127 @@ import {
   createUserMessageRuntimeEvent
 } from '../src/runtime/event.ts';
 import {
+  createRoleModelAdapterFromCharacterAgent,
   runRoleModelLoop,
   type RoleModelAdapter,
   type RoleModelPluginToolHost
 } from '../src/role-model/loop.ts';
-import type { RoleModelChatMessage } from '../src/role-model/prompt.ts';
+import {
+  defaultRoleModelProviderCapabilities,
+  renderRoleModelTurnContext,
+  type RoleModelChatMessage
+} from '../src/role-model/prompt.ts';
 
 describe('role-model loop plugin tool routing', () => {
+  it('keeps character-agent replies non-committed when visible_reply is unavailable', async () => {
+    const adapter = createRoleModelAdapterFromCharacterAgent({
+      reply() {
+        return {
+          text: 'Character agent reply.'
+        };
+      }
+    });
+    const event = createTestEvent(
+      'hello',
+      'evt_character_agent_no_visible_reply'
+    );
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event,
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: []
+    });
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [],
+      text: 'Character agent reply.'
+    });
+  });
+
+  it('keeps an explicit empty tool set authoritative through prompt and output validation', async () => {
+    let renderedToolNames: readonly string[] = [];
+    let protocol = '';
+    const adapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        renderedToolNames = invocation.turnContext.tools.map(
+          (tool) => tool.function.name
+        );
+        protocol =
+          invocation.turnContext.frames.find(
+            (frame) => frame.kind === 'developer_protocol'
+          )?.content ?? '';
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'should not be accepted'
+                }
+              }
+            ]
+          })
+        };
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_explicit_empty_tools'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: []
+    });
+
+    expect(renderedToolNames).toEqual([]);
+    expect(protocol).not.toContain(
+      'Commit user-visible text by calling visible_reply.'
+    );
+    expect(protocol).not.toContain(
+      'call visible_reply with the final response'
+    );
+    expect(protocol).toContain(
+      'Terminal assistant content is non-committed model text and is not shown to the user.'
+    );
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: 'disallowed_tool'
+      }
+    });
+  });
+
+  it('accepts terminal content as non-committed text when visible_reply is unavailable', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_no_visible_terminal_text'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: [],
+      adapter: Object.freeze({
+        invoke() {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [],
+              text: 'Internal terminal model text.'
+            })
+          };
+        }
+      })
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      decisionResult: {
+        status: 'accepted',
+        nonCommittedText: 'Internal terminal model text.',
+        decision: {
+          toolCalls: []
+        }
+      }
+    });
+  });
+
   it('continues after non-degrading plugin tool failures', async () => {
     let invocations = 0;
     let handledCalls = 0;
@@ -78,7 +195,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_rejected_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_rejected_plugin_tool')
     });
@@ -92,6 +209,7 @@ describe('role-model loop plugin tool routing', () => {
     expect(result.pluginToolResults[0]).toMatchObject({
       callId:
         'evt_rejected_plugin_tool.trace_evt_rejected_plugin_tool.round-1.1.memory.search',
+      dispatchedToHost: true,
       call: {
         pluginId: 'memory.search.fixture',
         toolName: 'memory.search'
@@ -103,6 +221,57 @@ describe('role-model loop plugin tool routing', () => {
     });
     expect(result.rounds).toHaveLength(2);
     expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
+  });
+
+  it('marks missing-host routing as not dispatched to the host', async () => {
+    const completedDispatchSignals: boolean[] = [];
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued without a tool host'
+            }
+          }
+        ]
+      }
+    ], () => undefined);
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_missing_plugin_tool_host'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      runtimePluginContext: createTestPluginContext(
+        'evt_missing_plugin_tool_host'
+      ),
+      onPluginToolCallCompleted(event) {
+        completedDispatchSignals.push(event.dispatchedToHost);
+      }
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(result.pluginToolResults).toMatchObject([
+      {
+        dispatchedToHost: false,
+        result: {
+          status: 'rejected',
+          reason: 'tool_host_missing'
+        }
+      }
+    ]);
+    expect(completedDispatchSignals).toEqual([false]);
   });
 
   it('scopes plugin tool call IDs by trace identity when eventId is reused', async () => {
@@ -143,7 +312,7 @@ describe('role-model loop plugin tool routing', () => {
         ),
         decisionContext: createTestDecisionContext(),
         adapter,
-        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
         pluginToolHost,
         runtimePluginContext: createTestPluginContext(
           'evt_replayed_tool_call',
@@ -209,7 +378,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_required_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [requiredMemorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(requiredMemorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_required_plugin_tool')
     });
@@ -278,7 +447,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_handler_rejected_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext(
         'evt_handler_rejected_plugin_tool'
@@ -349,7 +518,7 @@ describe('role-model loop plugin tool routing', () => {
         ),
         decisionContext: createTestDecisionContext(),
         adapter,
-        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
         pluginToolHost,
         runtimePluginContext: createTestPluginContext(
           `evt_accepted_${evidenceStatus}_evidence_plugin_tool`
@@ -415,7 +584,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_degraded_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_degraded_plugin_tool')
     });
@@ -462,7 +631,10 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_host_degraded_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: pluginToolHost.pluginToolDefinitions(),
+      pluginToolDefinitions: Object.freeze([
+        ...createDefaultRoleModelPluginToolDefinitions(),
+        ...pluginToolHost.pluginToolDefinitions()
+      ]),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_host_degraded_plugin_tool')
     });
@@ -534,7 +706,7 @@ describe('role-model loop plugin tool routing', () => {
         event: createTestEvent('search memory', eventId),
         decisionContext: createTestDecisionContext(),
         adapter,
-        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
         pluginToolHost,
         runtimePluginContext: createTestPluginContext(eventId)
       });
@@ -658,7 +830,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_custom_host_secret_output'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext(
         'evt_custom_host_secret_output'
@@ -723,6 +895,7 @@ describe('role-model loop plugin tool routing', () => {
   it('redacts custom plugin host rejected messages before loop rejection evidence', async () => {
     let invocations = 0;
     const completedResults: RuntimePluginToolCallResult[] = [];
+    const completedDispatchSignals: boolean[] = [];
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
@@ -763,12 +936,13 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_custom_host_secret_reject'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext(
         'evt_custom_host_secret_reject'
       ),
       onPluginToolCallCompleted(event) {
+        completedDispatchSignals.push(event.dispatchedToHost);
         completedResults.push(event.result);
       }
     });
@@ -791,6 +965,7 @@ describe('role-model loop plugin tool routing', () => {
         message: 'search backend failed api_key=[redacted] Bearer [redacted]'
       }
     ]);
+    expect(completedDispatchSignals).toEqual([true]);
 
     const serializedSurfaces = JSON.stringify({
       completedResults,
@@ -840,7 +1015,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_required_observed'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [requiredMemorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(requiredMemorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_required_observed')
     });
@@ -852,7 +1027,7 @@ describe('role-model loop plugin tool routing', () => {
     expect(result.rounds).toHaveLength(2);
   });
 
-  it('rejects plugin tool repeats across rounds against maxCallsPerUserTurn', async () => {
+  it('rejects plugin tool repeats across rounds against its user-turn call limit', async () => {
     let invocations = 0;
     let handledCalls = 0;
     const adapter = createSequencedAdapter([
@@ -891,7 +1066,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_repeated_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_repeated_tool')
     });
@@ -906,7 +1081,7 @@ describe('role-model loop plugin tool routing', () => {
       throw new Error('Expected repeated tool call to be rejected.');
     }
 
-    expect(result.rejection.details).toContain('maxCallsPerUserTurn is 1');
+    expect(result.rejection.details).toContain('user_turn maxCalls is 1');
     expect(invocations).toBe(2);
     expect(handledCalls).toBe(1);
     expect(result.pluginToolResults).toHaveLength(1);
@@ -1048,6 +1223,57 @@ describe('role-model loop plugin tool routing', () => {
     expect(result.ioSnapshot.rawOutputText).toBe('');
     expect(result.ioSnapshot).not.toHaveProperty('providerMetadata');
   });
+
+  it('rejects malformed provider exchange evidence at the adapter boundary', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_malformed_provider_exchange'),
+      decisionContext: createTestDecisionContext(),
+      adapter: Object.freeze({
+        invoke(_inputEnvelope, invocation) {
+          const providerExchange: RoleModelProviderExchangeSnapshot = {
+            provider: {
+              name: 'local'
+            },
+            capabilities: defaultRoleModelProviderCapabilities,
+            reasoning: {
+              mode: 'none',
+              params: {}
+            },
+            renderedMessages: invocation.turnContext.messages,
+            renderedTools: invocation.turnContext.tools,
+            toolNameMappings: [],
+            requestBody: {},
+            nativeToolResultMessages: []
+          };
+          Reflect.deleteProperty(providerExchange, 'reasoning');
+
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'visible_reply',
+                  input: {
+                    text: 'hello'
+                  }
+                }
+              ]
+            }),
+            providerExchange
+          };
+        }
+      } satisfies RoleModelAdapter)
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'Role-model adapter provider exchange is malformed.'
+      }
+    });
+    expect(result.ioSnapshot.rawOutputText).toBe('');
+    expect(result.ioSnapshot).not.toHaveProperty('providerExchange');
+  });
 });
 
 const memorySearchToolDefinition = Object.freeze({
@@ -1055,7 +1281,10 @@ const memorySearchToolDefinition = Object.freeze({
   name: 'memory.search',
   description: 'Search memory.',
   requiredForUserTurn: false,
-  maxCallsPerUserTurn: 1,
+  callLimit: {
+    scope: 'user_turn',
+    maxCalls: 1
+  },
   inputContract: {
     type: 'object',
     fields: [
@@ -1077,6 +1306,15 @@ const requiredMemorySearchToolDefinition = Object.freeze({
   ...memorySearchToolDefinition,
   requiredForUserTurn: true
 } satisfies RoleModelPluginToolDefinition);
+
+function withVisibleReplyTool(
+  definition: RoleModelPluginToolDefinition
+): readonly RoleModelPluginToolDefinition[] {
+  return Object.freeze([
+    ...createDefaultRoleModelPluginToolDefinitions(),
+    definition
+  ]);
+}
 
 function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
   const id = 'memory.search.fixture';
@@ -1123,7 +1361,10 @@ function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
         name: 'memory.search',
         description: 'Search memory.',
         requiredForUserTurn: false,
-        maxCallsPerUserTurn: 1,
+        callLimit: {
+          scope: 'user_turn',
+          maxCalls: 1
+        },
         inputContract: {
           type: 'object',
           fields: [

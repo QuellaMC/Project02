@@ -11,7 +11,12 @@ import {
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   getVisibleReplyToolCall,
+  parseRoleModelProviderExchangeSnapshot,
+  roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails,
+  roleModelAdapterProviderRequestMessageCountNonFiniteDetails,
+  roleModelAdapterProviderResponseStatusNonFiniteDetails,
   roleModelAdapterRejectionNotReplayableDetails,
+  roleModelAdapterProviderExchangeMalformedDetails,
   isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
   roleModelAdapterRawOutputMissingTextRejectionDetails,
@@ -29,6 +34,7 @@ import {
   type RoleModelDecisionRejectionReason,
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot,
+  type RoleModelMalformedAdapterRawOutputDetails,
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
   type RoleModelToolObservation
@@ -52,14 +58,16 @@ import {
   createRuntimePluginEvidenceSnapshot,
   isRuntimePluginCredentialKey,
   redactRuntimePluginText,
-  type RuntimePluginEvidenceStatus,
   type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
-  type RuntimePluginPolicyOutcome,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult,
   type RuntimePluginContext
-} from '../plugins/types.ts';
+} from '../plugins/validation.ts';
+import type {
+  RuntimePluginEvidenceStatus,
+  RuntimePluginPolicyOutcome
+} from '../plugins/contract.ts';
 import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from '../runtime/event.ts';
 
 export { parseRoleModelDecision } from './contracts.ts';
@@ -125,6 +133,7 @@ export type RoleModelPluginToolHost = {
 export type RoleModelPluginToolRoutingEvidence = {
   readonly callId: string;
   readonly call: RuntimePluginToolCall;
+  readonly dispatchedToHost: boolean;
   readonly result: RuntimePluginToolCallResult;
 };
 
@@ -151,6 +160,7 @@ export type RoleModelPluginToolCallStartedEvent = {
 
 export type RoleModelPluginToolCallCompletedEvent = {
   readonly callId: string;
+  readonly dispatchedToHost: boolean;
   readonly pluginId: string;
   readonly round: number;
   readonly status: RuntimePluginToolCallResult['status'];
@@ -215,9 +225,18 @@ export function createRoleModelAdapterFromCharacterAgent(
       const characterReply = validateCharacterAgentReply(reply);
 
       return createRoleModelAdapterRawOutput(
-        JSON.stringify({
-          toolCalls: [createVisibleReplyModelToolCall(characterReply.text)]
-        })
+        JSON.stringify(
+          inputEnvelope.allowedTools.includes(visibleReplyModelToolName)
+            ? {
+                toolCalls: [
+                  createVisibleReplyModelToolCall(characterReply.text)
+                ]
+              }
+            : {
+                toolCalls: [],
+                text: characterReply.text
+              }
+        )
       );
     }
   } satisfies RoleModelAdapter);
@@ -243,7 +262,9 @@ export async function runRoleModelLoop(
     const inputEnvelope = createRoleModelInputEnvelope({
       event: options.event,
       decisionContext: options.decisionContext,
-      pluginToolDefinitions: options.pluginToolDefinitions ?? [],
+      ...(options.pluginToolDefinitions === undefined
+        ? {}
+        : { pluginToolDefinitions: options.pluginToolDefinitions }),
       toolObservations
     });
     const turnContext = renderRoleModelTurnContext(inputEnvelope, {
@@ -438,6 +459,7 @@ export async function runRoleModelLoop(
       await options.onPluginToolCallCompleted?.({
         round,
         callId: result.callId,
+        dispatchedToHost: result.dispatchedToHost,
         pluginId: result.call.pluginId,
         toolName: result.call.toolName,
         status: result.result.status,
@@ -718,6 +740,7 @@ async function routeExecutableToolCalls(options: {
         createRejectedToolRoutingEvidence({
           callId,
           call: routedCall,
+          dispatchedToHost: false,
           ...(options.runtimePluginContext === undefined
             ? {}
             : { context: options.runtimePluginContext }),
@@ -738,6 +761,7 @@ async function routeExecutableToolCalls(options: {
       const routingEvidence = createRejectedToolRoutingEvidence({
         callId,
         call: routedCall,
+        dispatchedToHost: false,
         ...(options.runtimePluginContext === undefined
           ? {}
           : { context: options.runtimePluginContext }),
@@ -766,6 +790,7 @@ async function routeExecutableToolCalls(options: {
       const routingEvidence = createRejectedToolRoutingEvidence({
         callId,
         call: routedCall,
+        dispatchedToHost: true,
         context: options.runtimePluginContext,
         reason: 'handler_failed',
         message:
@@ -788,6 +813,7 @@ async function routeExecutableToolCalls(options: {
       const routingEvidence = createRejectedToolRoutingEvidence({
         callId,
         call: routedCall,
+        dispatchedToHost: true,
         context: options.runtimePluginContext,
         reason: 'invalid_tool_output',
         message:
@@ -809,6 +835,7 @@ async function routeExecutableToolCalls(options: {
     const routingEvidence = Object.freeze({
       callId,
       call: routedCall,
+      dispatchedToHost: true,
       result: routableHostResult
     } satisfies RoleModelPluginToolRoutingEvidence);
 
@@ -830,6 +857,7 @@ function createAcceptedPluginToolRoutingResult(
 function createRejectedToolRoutingEvidence(options: {
   readonly callId: string;
   readonly call: RuntimePluginToolCall;
+  readonly dispatchedToHost: boolean;
   readonly context?: RuntimePluginContext;
   readonly reason: string;
   readonly message: string;
@@ -841,6 +869,7 @@ function createRejectedToolRoutingEvidence(options: {
   return Object.freeze({
     callId: options.callId,
     call: options.call,
+    dispatchedToHost: options.dispatchedToHost,
     result: Object.freeze({
       status: 'rejected',
       reason: options.reason,
@@ -1102,6 +1131,15 @@ function validateRoleModelAdapterRawOutput(
     return createMalformedAdapterRawOutputResult(providerMetadataResult.details);
   }
 
+  if (
+    rawOutput['providerExchange'] !== undefined &&
+    providerExchange === undefined
+  ) {
+    return createMalformedAdapterRawOutputResult(
+      roleModelAdapterProviderExchangeMalformedDetails
+    );
+  }
+
   const providerMetadata = providerMetadataResult.providerMetadata;
   const rejection = optionalRoleModelDecisionRejection(rawOutput['rejection']);
   const nativeAssistantMessage = optionalRoleModelAssistantChatMessage(
@@ -1117,7 +1155,7 @@ function validateRoleModelAdapterRawOutput(
     nativeToolCallArgumentErrors === undefined
   ) {
     return createMalformedAdapterRawOutputResult(
-      'Role-model adapter native tool-call argument errors are malformed.'
+      roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails
     );
   }
 
@@ -1161,7 +1199,8 @@ function validateRoleModelAdapterRawOutput(
 }
 
 function createMalformedAdapterRawOutputResult(
-  details = roleModelAdapterRawOutputMissingTextRejectionDetails
+  details: RoleModelMalformedAdapterRawOutputDetails =
+    roleModelAdapterRawOutputMissingTextRejectionDetails
 ): RoleModelAdapterRawOutputValidationResult {
   return Object.freeze({
     status: 'rejected',
@@ -1341,7 +1380,7 @@ function optionalProviderMetadata(
     }
   | {
       readonly status: 'rejected';
-      readonly details: string;
+      readonly details: RoleModelMalformedAdapterRawOutputDetails;
     } {
   if (value === undefined) {
     return Object.freeze({ status: 'accepted' });
@@ -1385,11 +1424,7 @@ function optionalProviderMetadata(
 function optionalProviderExchange(
   value: unknown
 ): RoleModelProviderExchangeSnapshot | undefined {
-  if (!isJsonRecord(value)) {
-    return undefined;
-  }
-
-  return value as unknown as RoleModelProviderExchangeSnapshot;
+  return parseRoleModelProviderExchangeSnapshot(value);
 }
 
 type ProviderRequestMetadata = NonNullable<RoleModelProviderMetadata['request']>;
@@ -1404,7 +1439,7 @@ function optionalProviderRequestMetadata(
     }
   | {
       readonly status: 'rejected';
-      readonly details: string;
+      readonly details: typeof roleModelAdapterProviderRequestMessageCountNonFiniteDetails;
     }
   | undefined {
   if (!isJsonRecord(value)) {
@@ -1417,7 +1452,7 @@ function optionalProviderRequestMetadata(
   if (typeof messageCount === 'number' && !Number.isFinite(messageCount)) {
     return Object.freeze({
       status: 'rejected',
-      details: 'providerMetadata.request.messageCount must be finite JSON.'
+      details: roleModelAdapterProviderRequestMessageCountNonFiniteDetails
     });
   }
 
@@ -1442,7 +1477,7 @@ function optionalProviderResponseMetadata(
     }
   | {
       readonly status: 'rejected';
-      readonly details: string;
+      readonly details: typeof roleModelAdapterProviderResponseStatusNonFiniteDetails;
     }
   | undefined {
   if (!isJsonRecord(value)) {
@@ -1454,7 +1489,7 @@ function optionalProviderResponseMetadata(
   if (typeof status === 'number' && !Number.isFinite(status)) {
     return Object.freeze({
       status: 'rejected',
-      details: 'providerMetadata.response.status must be finite JSON.'
+      details: roleModelAdapterProviderResponseStatusNonFiniteDetails
     });
   }
 

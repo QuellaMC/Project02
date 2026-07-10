@@ -31,6 +31,7 @@ import type {
   RoleModelNativeToolCallArgumentError
 } from '../loop.ts';
 import {
+  isRuntimePluginCredentialKey,
   redactRuntimePluginText,
   type RuntimePluginJsonValue
 } from '../../plugins/types.ts';
@@ -205,7 +206,8 @@ export function createNvidiaRoleModelProviderAdapter(
         const responseBody = await response.json();
         const rawOutput = parseNvidiaResponseMessage(
           responseBody,
-          toolNameMappings
+          toolNameMappings,
+          inputEnvelope.allowedTools.includes(visibleReplyModelToolName)
         );
 
         if (rawOutput.status === 'rejected') {
@@ -304,9 +306,8 @@ type NormalizedNvidiaThinkingMode =
 function normalizeNvidiaThinkingMode(
   mode: NvidiaRoleModelThinkingMode | undefined
 ): NormalizedNvidiaThinkingMode {
-  if (mode === undefined || mode.mode === 'none') {
+  if (mode?.mode === 'none') {
     if (
-      mode !== undefined &&
       'reasoningBudgetTokens' in mode &&
       typeof mode.reasoningBudgetTokens === 'number' &&
       mode.reasoningBudgetTokens > 0
@@ -320,7 +321,7 @@ function normalizeNvidiaThinkingMode(
   }
 
   const reasoningBudgetTokens =
-    mode.reasoningBudgetTokens ?? defaultNvidiaRoleModelReasoningBudget;
+    mode?.reasoningBudgetTokens ?? defaultNvidiaRoleModelReasoningBudget;
 
   if (
     !Number.isSafeInteger(reasoningBudgetTokens) ||
@@ -684,7 +685,8 @@ type RejectedNvidiaProviderParseResult = {
 
 function parseNvidiaResponseMessage(
   value: unknown,
-  toolNameMappings: readonly RoleModelProviderToolNameMapping[]
+  toolNameMappings: readonly RoleModelProviderToolNameMapping[],
+  visibleReplyAvailable: boolean
 ): ParsedNvidiaResponseMessage {
   if (!isJsonRecord(value)) {
     return rejectResponse('malformed_response', 'NVIDIA response must be an object.');
@@ -743,7 +745,8 @@ function parseNvidiaResponseMessage(
   const rawOutputResult = createRawOutputTextFromNvidiaMessage({
     content,
     toolCalls,
-    toolNameMappings
+    toolNameMappings,
+    visibleReplyAvailable
   });
 
   if (rawOutputResult.status === 'rejected') {
@@ -951,6 +954,7 @@ function createRawOutputTextFromNvidiaMessage(options: {
   readonly content: string | null;
   readonly toolCalls: readonly RoleModelChatToolCall[];
   readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
+  readonly visibleReplyAvailable: boolean;
 }): NvidiaRawOutputTextResult {
   if (options.toolCalls.length === 0) {
     if (options.content === null || options.content.length === 0) {
@@ -965,16 +969,23 @@ function createRawOutputTextFromNvidiaMessage(options: {
 
     return Object.freeze({
       status: 'accepted',
-      rawOutputText: JSON.stringify({
-        toolCalls: [
-          {
-            name: visibleReplyModelToolName,
-            input: {
+      rawOutputText: JSON.stringify(
+        options.visibleReplyAvailable
+          ? {
+              toolCalls: [
+                {
+                  name: visibleReplyModelToolName,
+                  input: {
+                    text: scrubbedContent.text
+                  }
+                }
+              ]
+            }
+          : {
+              toolCalls: [],
               text: scrubbedContent.text
             }
-          }
-        ]
-      }),
+      ),
       outputNormalization: Object.freeze({
         source: 'terminal_assistant_content',
         committed: false
@@ -1193,7 +1204,9 @@ function redactProviderBoundaryJson(value: unknown): RuntimePluginJsonValue {
       Object.fromEntries(
         Object.entries(value).map(([key, item]) => [
           key,
-          redactProviderBoundaryJson(item)
+          isProviderBoundaryCredentialKey(key)
+            ? '[redacted]'
+            : redactProviderBoundaryJson(item)
         ])
       )
     );
@@ -1216,6 +1229,28 @@ function redactProviderBoundaryJson(value: unknown): RuntimePluginJsonValue {
   }
 
   return '[unsupported-provider-value]';
+}
+
+const providerBoundaryTokenUsageMetricKeys = new Set([
+  'accepted_prediction_tokens',
+  'audio_tokens',
+  'cached_tokens',
+  'completion_tokens',
+  'completion_tokens_details',
+  'input_tokens',
+  'output_tokens',
+  'prompt_tokens',
+  'prompt_tokens_details',
+  'reasoning_tokens',
+  'rejected_prediction_tokens',
+  'total_tokens'
+]);
+
+function isProviderBoundaryCredentialKey(key: string): boolean {
+  return (
+    isRuntimePluginCredentialKey(key) &&
+    !providerBoundaryTokenUsageMetricKeys.has(key.toLowerCase())
+  );
 }
 
 function unknownArray(value: unknown): readonly unknown[] {

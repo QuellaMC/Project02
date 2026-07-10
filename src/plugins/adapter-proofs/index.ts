@@ -4,7 +4,6 @@ import {
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
-  createFirstPartyModelToolsPlugin,
   type RuntimePlugin,
   type RuntimePluginAccessMap,
   type RuntimePluginConfigField,
@@ -28,8 +27,12 @@ import {
   type RuntimePluginContext
 } from '../types.ts';
 import {
+  createFirstPartyModelToolsPlugin
+} from '../builtin/model-tools.ts';
+import {
   modelToolInputFieldValueTypes
 } from '../../role-model/model-tools.ts';
+import { isModelFacingPluginTool } from '../tool-policy.ts';
 import type {
   ModelToolInputFieldValueType,
   ModelToolInputContract,
@@ -108,6 +111,7 @@ export function mapOpenClawMemoryPluginFixture(
   const manifest = createOpenClawManifest({
     fixture,
     manifestId,
+    providedTools,
     configFields: configFieldsFromSchema(configSchema),
     activationReasons: activationReasonsFromOpenClawActivation(activation),
     sourceVersion:
@@ -180,7 +184,7 @@ export function mapTencentDbMemoryGatewayFixture(
       validationOwner: 'adapter',
       sideEffectLevel: 'external_read',
       sourceReferencesRequired: true,
-      maxCallsPerUserTurn: 2
+      maxCalls: 2
     }),
     createProvidedToolFromSchema({
       name: 'memory_tencentdb.conversation_search',
@@ -190,7 +194,7 @@ export function mapTencentDbMemoryGatewayFixture(
       validationOwner: 'adapter',
       sideEffectLevel: 'external_read',
       sourceReferencesRequired: true,
-      maxCallsPerUserTurn: 2
+      maxCalls: 2
     })
   ];
   const notes = [
@@ -222,6 +226,7 @@ export function mapTencentDbMemoryGatewayFixture(
     externalContract: 'tdai-gateway-http',
     description:
       'Fixture adapter for TencentDB-Agent-Memory gateway recall, capture, search, session, and health contracts.',
+    providedTools,
     configFields: configFieldsFromConfigRecord(config),
     configFingerprint: 'fixture-redacted-tdai-gateway',
     compatibilityNotes: notes
@@ -389,19 +394,6 @@ export function mapHermesMemoryProviderFixture(
     }),
     ...unsupportedNotesFromFixture(fixture, 'hermes')
   ];
-  const manifest = createMemoryGatewayManifest({
-    id: manifestId,
-    displayName: optionalString(fixture['displayName'], 'displayName') ??
-      'Hermes memory provider fixture',
-    sourceSystem: 'hermes',
-    sourceVersion: optionalString(fixture['version'], 'version') ?? 'fixture',
-    externalContract: 'hermes-memory-provider',
-    description:
-      'Fixture adapter for Hermes memory provider prefetch, sync, search, session, health, and degradation metadata.',
-    configFields: configFieldsFromConfigRecord(config),
-    configFingerprint: 'fixture-redacted-hermes-provider',
-    compatibilityNotes: notes
-  });
   const providedTools = searchTools.map((tool) =>
     createProvidedToolFromSchema({
       name: requiredString(tool['name'], 'behavior.searchTools.name'),
@@ -415,9 +407,23 @@ export function mapHermesMemoryProviderFixture(
       validationOwner: 'adapter',
       sideEffectLevel: 'external_read',
       sourceReferencesRequired: true,
-      maxCallsPerUserTurn: 2
+      maxCalls: 2
     })
   );
+  const manifest = createMemoryGatewayManifest({
+    id: manifestId,
+    displayName: optionalString(fixture['displayName'], 'displayName') ??
+      'Hermes memory provider fixture',
+    sourceSystem: 'hermes',
+    sourceVersion: optionalString(fixture['version'], 'version') ?? 'fixture',
+    externalContract: 'hermes-memory-provider',
+    description:
+      'Fixture adapter for Hermes memory provider prefetch, sync, search, session, health, and degradation metadata.',
+    providedTools,
+    configFields: configFieldsFromConfigRecord(config),
+    configFingerprint: 'fixture-redacted-hermes-provider',
+    compatibilityNotes: notes
+  });
   const plugin = createRuntimePlugin({
     manifest,
     providedTools,
@@ -563,6 +569,19 @@ export function mapMcpToolsResourcesFixture(
     }),
     ...unsupportedNotesFromFixture(fixture, 'model-context-protocol')
   ];
+  const providedTools = tools.map((tool) =>
+    createProvidedToolFromSchema({
+      name: requiredString(tool['name'], 'tools.name'),
+      description: requiredString(tool['description'], 'tools.description'),
+      inputContract: inputContractFromSchema(
+        requiredRecord(tool['inputSchema'], 'tools.inputSchema')
+      ),
+      validationOwner: 'adapter',
+      sideEffectLevel: 'external_read',
+      sourceReferencesRequired: true,
+      maxCalls: 2
+    })
+  );
   const manifest = createRuntimePluginManifestForAdapter({
     id: manifestId,
     displayName:
@@ -581,6 +600,7 @@ export function mapMcpToolsResourcesFixture(
       'before_role_model_call',
       'health'
     ],
+    providedTools,
     configFields: [
       createConfigField({
         name: 'server_id',
@@ -597,19 +617,6 @@ export function mapMcpToolsResourcesFixture(
     activationReasons: ['mcp_fixture_mapping'],
     compatibilityNotes: notes
   });
-  const providedTools = tools.map((tool) =>
-    createProvidedToolFromSchema({
-      name: requiredString(tool['name'], 'tools.name'),
-      description: requiredString(tool['description'], 'tools.description'),
-      inputContract: inputContractFromSchema(
-        requiredRecord(tool['inputSchema'], 'tools.inputSchema')
-      ),
-      validationOwner: 'adapter',
-      sideEffectLevel: 'external_read',
-      sourceReferencesRequired: true,
-      maxCallsPerUserTurn: 2
-    })
-  );
   const plugin = createRuntimePlugin({
     manifest,
     providedTools,
@@ -730,6 +737,7 @@ export function mapFirstPartyModelToolsPlugin(): RuntimePluginAdapterMapping {
 function createOpenClawManifest(options: {
   readonly fixture: JsonRecord;
   readonly manifestId: string;
+  readonly providedTools: readonly RuntimePluginProvidedTool[];
   readonly configFields: readonly RuntimePluginConfigField[];
   readonly activationReasons: readonly string[];
   readonly sourceVersion: string;
@@ -751,6 +759,7 @@ function createOpenClawManifest(options: {
     sourceVersion: options.sourceVersion,
     externalContract: 'openclaw.plugin.json',
     declaredPlugins: ['tool_provider', 'handle_tool_call', 'health'],
+    providedTools: options.providedTools,
     configFields: options.configFields,
     runtimePolicy: createAdapterPolicy({
       sideEffectLevel: 'runtime_read',
@@ -769,6 +778,7 @@ function createMemoryGatewayManifest(options: {
   readonly sourceVersion: string;
   readonly externalContract: string;
   readonly description: string;
+  readonly providedTools: readonly RuntimePluginProvidedTool[];
   readonly configFields: readonly RuntimePluginConfigField[];
   readonly configFingerprint: string;
   readonly compatibilityNotes: readonly RuntimePluginAdapterCompatibilityNote[];
@@ -791,6 +801,7 @@ function createMemoryGatewayManifest(options: {
       'on_session_end',
       'health'
     ],
+    providedTools: options.providedTools,
     configFields: options.configFields,
     configFingerprint: options.configFingerprint,
     runtimePolicy: createAdapterPolicy({
@@ -814,13 +825,14 @@ function createRuntimePluginManifestForAdapter(options: {
   readonly sourceVersion: string;
   readonly externalContract: string;
   readonly declaredPlugins: readonly RuntimePluginDeclaration[];
+  readonly providedTools: readonly RuntimePluginProvidedTool[];
   readonly configFields: readonly RuntimePluginConfigField[];
   readonly configFingerprint?: string;
   readonly runtimePolicy: RuntimePluginRuntimePolicy;
   readonly activationReasons: readonly string[];
   readonly compatibilityNotes: readonly RuntimePluginAdapterCompatibilityNote[];
 }): RuntimePluginManifest {
-  return {
+  const manifest = {
     id: options.id,
     displayName: options.displayName,
     version: options.version,
@@ -849,21 +861,41 @@ function createRuntimePluginManifestForAdapter(options: {
       defaultEnabled: false,
       reasons: options.activationReasons
     },
-    requestedAccess: adapterRequestedAccess(options.declaredPlugins)
+    requestedAccess: {}
+  } satisfies RuntimePluginManifest;
+
+  return {
+    ...manifest,
+    requestedAccess: adapterRequestedAccess({
+      manifest,
+      providedTools: options.providedTools
+    })
   };
 }
 
-function adapterRequestedAccess(
-  declaredPlugins: readonly RuntimePluginDeclaration[]
-): RuntimePluginAccessMap {
+function adapterRequestedAccess(options: {
+  readonly manifest: RuntimePluginManifest;
+  readonly providedTools: readonly RuntimePluginProvidedTool[];
+}): RuntimePluginAccessMap {
+  const pluginShape = {
+    manifest: options.manifest,
+    providedTools: options.providedTools,
+    lifecycleHooks: {}
+  } satisfies RuntimePlugin;
+  const hasModelFacingPluginHostTool = options.providedTools.some((tool) =>
+    isModelFacingPluginTool({
+      plugin: pluginShape,
+      tool
+    })
+  );
+
   return Object.freeze({
-    ...(declaredPlugins.includes('before_role_model_call') ||
-      declaredPlugins.includes('after_turn_committed')
+    ...(options.manifest.declaredPlugins.includes('before_role_model_call') ||
+      options.manifest.declaredPlugins.includes('after_turn_committed')
       ? { turn_context: 'read' }
       : {}),
-    ...(declaredPlugins.includes('before_role_model_call') ||
-      declaredPlugins.includes('tool_provider') ||
-      declaredPlugins.includes('handle_tool_call')
+    ...(options.manifest.declaredPlugins.includes('before_role_model_call') ||
+      hasModelFacingPluginHostTool
       ? { model_input: 'write' }
       : {})
   } satisfies RuntimePluginAccessMap);
@@ -898,13 +930,16 @@ function createProvidedToolFromSchema(options: {
   readonly validationOwner: RuntimePluginToolValidationOwner;
   readonly sideEffectLevel: RuntimePluginSideEffectLevel;
   readonly sourceReferencesRequired: boolean;
-  readonly maxCallsPerUserTurn?: number;
+  readonly maxCalls?: number;
 }): RuntimePluginProvidedTool {
   return {
     name: options.name,
     description: options.description,
     requiredForUserTurn: false,
-    maxCallsPerUserTurn: options.maxCallsPerUserTurn ?? 1,
+    callLimit: {
+      scope: 'user_turn',
+      maxCalls: options.maxCalls ?? 1
+    },
     inputContract: options.inputContract,
     validationOwner: options.validationOwner,
     sideEffectLevel: options.sideEffectLevel,

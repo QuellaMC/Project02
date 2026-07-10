@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  createFirstPartyModelToolsPlugin,
   createRuntimePlugin,
   createRuntimePluginManifest,
   createRuntimePluginContextItem,
@@ -13,6 +12,12 @@ import {
   runtimePluginContractVersion,
   type RuntimePluginAccessMap
 } from '../src/plugins/types.ts';
+import {
+  createFirstPartyModelToolsPlugin
+} from '../src/plugins/builtin/model-tools.ts';
+import {
+  createRuntimePluginProvidedTool
+} from '../src/plugins/validation.ts';
 
 describe('runtime plugin source references', () => {
   it('accepts external source reference IDs that are not plugin identifiers', () => {
@@ -203,6 +208,27 @@ describe('runtime plugin access control', () => {
 });
 
 describe('runtime plugin model-facing tool policy', () => {
+  it('requires the scoped call-limit contract on provided tools', () => {
+    expect(() =>
+      createRuntimePluginProvidedTool(
+        runtimePluginProvidedToolFixture({
+          callLimit: undefined,
+          maxCallsPerUserTurn: 1
+        })
+      )
+    ).toThrow('Plugin provided tool callLimit must be an object.');
+    expect(() =>
+      createRuntimePluginProvidedTool(
+        runtimePluginProvidedToolFixture({
+          callLimit: {
+            scope: 'session',
+            maxCalls: 1
+          }
+        })
+      )
+    ).toThrow('Plugin provided tool callLimit.scope is not supported.');
+  });
+
   it('rejects model-facing tools without requestedAccess.model_input write', () => {
     expect(() =>
       createRuntimePlugin({
@@ -285,6 +311,11 @@ describe('runtime plugin model-facing tool policy', () => {
     if (firstPartyTool === undefined) {
       throw new Error('Expected first-party model tools plugin to provide a tool.');
     }
+
+    expect(firstPartyTool.callLimit).toEqual({
+      scope: 'model_response',
+      maxCalls: 1
+    });
 
     expect(
       isFirstPartyBuiltInModelTool({
@@ -427,7 +458,10 @@ function runtimePluginProvidedToolFixture(
     name: 'memory.search',
     description: 'Search memory.',
     requiredForUserTurn: false,
-    maxCallsPerUserTurn: 1,
+    callLimit: {
+      scope: 'user_turn',
+      maxCalls: 1
+    },
     inputContract: {
       type: 'object',
       fields: [],

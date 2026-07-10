@@ -1173,12 +1173,17 @@ describe('runtime config loading and resolution', () => {
     });
 
     expect(configured.activation.enabledPluginIds).not.toContain('character-state');
-    expect(configured.activation.plugins[0]).toMatchObject({
+    expect(
+      activationPluginById(configured.activation.plugins, 'character-state')
+    ).toMatchObject({
       pluginId: 'character-state',
       enabled: false,
       activationStatus: 'disabled'
     });
-    expect(configured.activation.plugins[0]?.activationReasons).toContain('disabled_by_config');
+    expect(
+      activationPluginById(configured.activation.plugins, 'character-state')
+        ?.activationReasons
+    ).toContain('disabled_by_config');
   });
 
   it('keeps explicitly disabled plugins disabled even when their config is incomplete', async () => {
@@ -1212,12 +1217,17 @@ describe('runtime config loading and resolution', () => {
 
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.plugins[0]).toMatchObject({
+    expect(
+      activationPluginById(configured.activation.plugins, 'memory.required')
+    ).toMatchObject({
       pluginId: 'memory.required',
       enabled: false,
       activationStatus: 'disabled'
     });
-    expect(configured.activation.plugins[0]?.activationReasons).toContain('disabled_by_config');
+    expect(
+      activationPluginById(configured.activation.plugins, 'memory.required')
+        ?.activationReasons
+    ).toContain('disabled_by_config');
     expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_required_secret_missing'
     );
@@ -1248,7 +1258,10 @@ describe('runtime config loading and resolution', () => {
 
     expect(legacyFactoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId
+    ]);
     expect(configured.activation.diagnostics).toEqual([]);
   });
 
@@ -1281,7 +1294,10 @@ describe('runtime config loading and resolution', () => {
 
     expect(legacyFactoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId
+    ]);
     expect(configured.activation.diagnostics).toEqual([]);
   });
 
@@ -1439,7 +1455,11 @@ describe('runtime config loading and resolution', () => {
         redactedApiKeyValue: '[redacted]'
       }
     ]);
-    expect(configured.activation.enabledPluginIds).toEqual(['memory.required']);
+    expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      'memory.required'
+    ]);
   });
 
   it('plans inactive manifest-backed plugin factories without constructing them', async () => {

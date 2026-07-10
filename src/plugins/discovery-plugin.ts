@@ -43,7 +43,10 @@ export function createRuntimePluginDiscoveryPlugin(
         description:
           'List plugins available to you in the current turn. Call this when you need canonical plugin inventory.',
         requiredForUserTurn: false,
-        maxCallsPerUserTurn: 1,
+        callLimit: {
+          scope: 'user_turn',
+          maxCalls: 1
+        },
         inputContract: {
           type: 'object',
           fields: [
@@ -236,7 +239,7 @@ function createPluginDiscoveryToolSummary(
     description: boundedPluginDiscoveryText(tool.description),
     sideEffectLevel: tool.sideEffectLevel,
     requiredForUserTurn: tool.requiredForUserTurn,
-    maxCallsPerUserTurn: tool.maxCallsPerUserTurn,
+    callLimit: tool.callLimit,
     requiresConfirmation: tool.requiresConfirmation,
     validationOwner: tool.validationOwner,
     sourceReferencesRequired: tool.sourceReferencesRequired

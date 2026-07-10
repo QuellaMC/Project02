@@ -25,3 +25,8 @@ __pycache__/
 *.log
 tmp/
 temp/
+
+# Local planning and operator artifacts that can contain sensitive notes.
+docs/develop-journal/
+docs/plan/
+scripts/manual-runtime-store.sh

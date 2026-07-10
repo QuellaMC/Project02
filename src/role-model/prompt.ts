@@ -2,7 +2,7 @@ import type { VisibleMessage } from '../core/conversation.ts';
 import type {
   RuntimePluginContextBudget,
   RuntimePluginSourceReference
-} from '../plugins/types.ts';
+} from '../plugins/validation.ts';
 import type { RoleModelInputEnvelope } from './contracts.ts';
 import type {
   ModelToolDefinition,
@@ -13,6 +13,7 @@ import type {
   ModelToolJsonSchemaType,
   ModelToolObjectJsonSchema
 } from './model-tools.ts';
+import { visibleReplyModelToolName } from './model-tools.ts';
 
 export type RoleModelSystemChatMessage = {
   readonly role: 'system';
@@ -75,7 +76,7 @@ export type RoleModelObjectJsonSchema = {
 };
 
 export type RoleModelJsonSchema = {
-  readonly type?: 'string' | 'number' | 'boolean' | 'object' | 'array';
+  readonly type?: ModelToolJsonSchema['type'];
   readonly description?: string;
   readonly enum?: readonly string[];
   readonly properties?: Readonly<Record<string, RoleModelJsonSchema>>;
@@ -171,11 +172,33 @@ export const defaultRoleModelProviderCapabilities = Object.freeze({
 export const roleModelStableSystemPromptText =
   'Use chat-completions semantics. The visible transcript is normal user/assistant conversation. Model-only context is not user text. Refer to extensions as plugins.';
 
-const roleModelNativeToolProtocolPromptText =
-  'Use provided function tools when runtime/plugin state is needed. Tools are assistant-owned runtime functions, not user commands. Tool names are callable functions, not a full plugin inventory; call plugin.list for inventory facts. Commit user-visible text by calling visible_reply. Terminal assistant content with no tool calls may be normalized by the runtime.';
+const roleModelVisibleReplyProtocolPromptText =
+  'Commit user-visible text by calling visible_reply.';
 
-const roleModelJsonFallbackProtocolPromptText =
-  'Return one CharacterDecision JSON object with ordered toolCalls. Use visible_reply for user-visible text. Do not include runtime input fields or internal version fields.';
+const roleModelNativeToolProtocolPromptParts = Object.freeze([
+  'Use provided function tools when runtime/plugin state is needed.',
+  'Tools are assistant-owned runtime functions, not user commands.',
+  'Tool names are callable functions, not a full plugin inventory; call plugin.list for inventory facts.'
+]);
+
+const roleModelNativeParallelToolProtocolPromptParts = Object.freeze([
+  'You may return multiple independent function calls in one assistant response; every executable call will be handled.',
+  'Do not invent a one-tool-per-turn restriction.'
+]);
+
+const roleModelNativeInterimVisibleReplyProtocolPromptParts = Object.freeze([
+  'visible_reply may share a response with executable calls; in that case it is interim.',
+  'If you sent an interim visible_reply, make a new visible_reply call.'
+]);
+
+const roleModelFinalVisibleReplyProtocolPromptText =
+  'After all requested tool results, call visible_reply with the final response.';
+
+const roleModelTerminalAssistantContentProtocolPromptText =
+  'Terminal assistant content with no tool calls may be normalized by the runtime.';
+
+const roleModelUnavailableVisibleReplyProtocolPromptText =
+  'visible_reply is unavailable. Terminal assistant content is non-committed model text and is not shown to the user.';
 
 export function renderRoleModelTurnContext(
   inputEnvelope: RoleModelInputEnvelope,
@@ -369,7 +392,18 @@ function createRoleModelPromptFrames(
   frames.push(
     createPromptFrame('system_protocol', createSystemMessage(inputEnvelope), true)
   );
-  frames.push(createPromptFrame('developer_protocol', createProtocolMessage(options), true));
+  frames.push(
+    createPromptFrame(
+      'developer_protocol',
+      createProtocolMessage({
+        ...options,
+        visibleReplyAvailable: inputEnvelope.allowedTools.includes(
+          visibleReplyModelToolName
+        )
+      }),
+      true
+    )
+  );
 
   if (runtimeContextMessage !== undefined) {
     frames.push(
@@ -425,17 +459,57 @@ function createPromptFrame(
 function createProtocolMessage(options: {
   readonly capabilities: RoleModelProviderCapabilities;
   readonly outputMode: 'native_tools' | 'json_fallback';
+  readonly visibleReplyAvailable: boolean;
 }): RoleModelSystemChatMessage | RoleModelDeveloperChatMessage {
   const content =
     options.outputMode === 'native_tools'
-      ? roleModelNativeToolProtocolPromptText
-      : roleModelJsonFallbackProtocolPromptText;
+      ? createRoleModelNativeToolProtocolPromptText(options)
+      : createRoleModelJsonFallbackProtocolPromptText(
+          options.visibleReplyAvailable
+        );
   const role = modelOnlyContextRole(options.capabilities);
 
   return Object.freeze({
     role,
     content
   } satisfies RoleModelSystemChatMessage | RoleModelDeveloperChatMessage);
+}
+
+function createRoleModelNativeToolProtocolPromptText(
+  options: {
+    readonly capabilities: RoleModelProviderCapabilities;
+    readonly visibleReplyAvailable: boolean;
+  }
+): string {
+  return [
+    ...roleModelNativeToolProtocolPromptParts,
+    ...(options.capabilities.supportsParallelToolCalls
+      ? roleModelNativeParallelToolProtocolPromptParts
+      : []),
+    ...(options.visibleReplyAvailable &&
+    options.capabilities.supportsParallelToolCalls
+      ? roleModelNativeInterimVisibleReplyProtocolPromptParts
+      : []),
+    ...(options.visibleReplyAvailable
+      ? [
+          roleModelVisibleReplyProtocolPromptText,
+          roleModelFinalVisibleReplyProtocolPromptText,
+          roleModelTerminalAssistantContentProtocolPromptText
+        ]
+      : [roleModelUnavailableVisibleReplyProtocolPromptText])
+  ].join(' ');
+}
+
+function createRoleModelJsonFallbackProtocolPromptText(
+  visibleReplyAvailable: boolean
+): string {
+  return [
+    'Return one CharacterDecision JSON object with ordered toolCalls.',
+    visibleReplyAvailable
+      ? roleModelVisibleReplyProtocolPromptText
+      : roleModelUnavailableVisibleReplyProtocolPromptText,
+    'Do not include runtime input fields or internal version fields.'
+  ].join(' ');
 }
 
 function visibleMessageToChatMessage(
@@ -628,12 +702,10 @@ function modelToolObjectJsonSchemaToRoleModelSchema(
 function modelToolJsonSchemaToRoleModelSchema(
   schema: ModelToolJsonSchema
 ): RoleModelJsonSchema {
-  const schemaType = firstModelToolJsonSchemaType(schema.type);
+  const schemaType = freezeRoleModelJsonSchemaType(schema.type);
 
   return Object.freeze({
-    ...(schemaType === undefined || schemaType === 'null'
-      ? {}
-      : { type: schemaType }),
+    ...(schemaType === undefined ? {} : { type: schemaType }),
     ...(schema.description === undefined
       ? {}
       : { description: schema.description }),
@@ -664,14 +736,14 @@ function modelToolJsonSchemaToRoleModelSchema(
   } satisfies RoleModelJsonSchema);
 }
 
-function firstModelToolJsonSchemaType(
+function freezeRoleModelJsonSchemaType(
   type: ModelToolJsonSchema['type']
-): ModelToolJsonSchemaType | undefined {
+): ModelToolJsonSchema['type'] {
   if (type === undefined) {
     return undefined;
   }
 
-  return isModelToolJsonSchemaTypeArray(type) ? type[0] : type;
+  return isModelToolJsonSchemaTypeArray(type) ? Object.freeze([...type]) : type;
 }
 
 function isModelToolJsonSchemaTypeArray(
@@ -715,19 +787,41 @@ function modelToolValueTypeToJsonSchemaType(
 }
 
 function jsonSchemaSupportsStrictTools(schema: RoleModelJsonSchema): boolean {
-  if (schema.type === 'object') {
+  const schemaTypes = roleModelJsonSchemaTypes(schema.type);
+
+  if (schemaTypes.includes('object')) {
     if (schema.additionalProperties !== false) {
       return false;
     }
 
-    return Object.values(schema.properties ?? {}).every(
-      jsonSchemaSupportsStrictTools
-    );
+    if (
+      !Object.values(schema.properties ?? {}).every(
+        jsonSchemaSupportsStrictTools
+      )
+    ) {
+      return false;
+    }
   }
 
-  if (schema.type === 'array' && schema.items !== undefined) {
-    return jsonSchemaSupportsStrictTools(schema.items);
+  if (
+    schemaTypes.includes('array') &&
+    schema.items !== undefined &&
+    !jsonSchemaSupportsStrictTools(schema.items)
+  ) {
+    return false;
   }
 
   return true;
+}
+
+function roleModelJsonSchemaTypes(
+  type: RoleModelJsonSchema['type']
+): readonly ModelToolJsonSchemaType[] {
+  if (type === undefined) {
+    return Object.freeze([]);
+  }
+
+  return isModelToolJsonSchemaTypeArray(type)
+    ? type
+    : Object.freeze([type]);
 }
