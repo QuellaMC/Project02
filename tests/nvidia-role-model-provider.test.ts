@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
   createRoleModelInputEnvelope,
   roleModelProviderErrorRejectionReason,
@@ -9,6 +10,7 @@ import {
 import {
   createNvidiaRoleModelProviderAdapter,
   createNvidiaRoleModelProviderConfigFromEnv,
+  defaultNvidiaRoleModelReasoningBudget,
   nvidiaModelEnvName,
   renderNvidiaMessages,
   renderNvidiaTools,
@@ -147,6 +149,58 @@ describe('NVIDIA role-model provider', () => {
     expect(JSON.stringify(loopResult)).not.toContain('endpoint-secret');
   });
 
+  it('redacts credential-bearing response keys from provider exchange evidence', async () => {
+    const credentialSentinel = 'provider-response-credential-sentinel';
+    const nestedCredentialSentinel = 'provider-response-nested-sentinel';
+    const fetchClient: NvidiaFetchClient = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: 'Hello.'
+                }
+              }
+            ],
+            usage: {
+              api_key: credentialSentinel,
+              nested: {
+                access_token: nestedCredentialSentinel,
+                safe: 'preserved'
+              }
+            }
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+    const serializedExchange = JSON.stringify(output.providerExchange);
+
+    expect(output.providerExchange?.usage).toEqual({
+      api_key: '[redacted]',
+      nested: {
+        access_token: '[redacted]',
+        safe: 'preserved'
+      }
+    });
+    expect(serializedExchange).not.toContain(credentialSentinel);
+    expect(serializedExchange).not.toContain(nestedCredentialSentinel);
+  });
+
   it('renders OpenAI-compatible messages and native tools', () => {
     const inputEnvelope = createNvidiaTestInputEnvelope();
     const messages = renderNvidiaMessages(inputEnvelope);
@@ -154,57 +208,58 @@ describe('NVIDIA role-model provider', () => {
 
     expect(messages.map((message) => message.role)).toEqual([
       'system',
+      'system',
+      'system',
       'user',
       'assistant',
       'user'
     ]);
     expect(messages[0]?.content).toContain(
-      'Use OpenAI-compatible chat-completions semantics'
+      'Use chat-completions semantics'
     );
-    expect(messages[0]?.content).toContain(
-      'tools you, the assistant, can call through the runtime'
+    expect(messages[1]?.content).toContain(
+      'provided function tools'
     );
-    expect(messages[0]?.content).toContain(
-      'not commands the user runs'
+    expect(messages[1]?.content).toContain(
+      'not user commands'
     );
-    expect(messages[0]?.content).toContain(
-      'call the plugin inventory tool and use its tool result'
-    );
-    expect(messages[0]?.content).toContain(
-      'not as commands the user should run'
+    expect(messages[1]?.content).toContain(
+      'call plugin.list'
     );
     expect(messages[0]?.content).toContain('Refer to extensions as plugins');
-    expect(messages[1]).toMatchObject({
+    expect(messages[2]?.content).toContain('Model-only runtime context');
+    expect(messages[2]?.content).toContain('This is not user input');
+    expect(messages[2]?.content).toContain(
+      "Mira's internal Character State"
+    );
+    expect(messages[2]?.content).toContain('not user state');
+    expect(messages[3]).toMatchObject({
       role: 'user',
       content: 'previous question'
     });
-    expect(messages[2]).toMatchObject({
+    expect(messages[4]).toMatchObject({
       role: 'assistant',
       content: 'previous answer'
     });
-    expect(messages[3]?.content).toContain('hello');
-    expect(messages[3]?.content).toContain(
-      '<runtime_context hidden_from_user="true">'
+    expect(messages[5]).toMatchObject({
+      role: 'user',
+      content: 'hello'
+    });
+    expect(messages[2]?.content).toContain(
+      'runtime_notes:\n- Use concise replies.'
     );
-    expect(messages[3]?.content).toContain(
-      'runtime context is reference data, NOT new user input'
+    expect(messages[2]?.content).toContain(
+      "plugin_context:\n- character-state/current: Mira's internal Character State"
     );
-    expect(messages[3]?.content).toContain(
-      'Runtime notes:\n- Use concise replies.'
-    );
-    expect(messages[3]?.content).toContain(
-      'Runtime context:\n- Character State: steady'
-    );
-    expect(messages[3]?.content).toContain('Character State: steady');
-    expect(messages[3]?.content).not.toContain('"event"');
-    expect(messages[3]?.content).not.toContain('"toolObservations"');
-    expect(messages[3]?.content).not.toContain('"version"');
-    expect(messages[3]?.content).not.toContain('pluginId');
-    expect(messages[3]?.content).not.toContain('sourceReferences');
-    expect(messages[3]?.content).not.toContain('confidence');
-    expect(messages[3]?.content).not.toContain('budget');
-    expect(messages[3]?.content).not.toContain(visibleReplyModelToolName);
-    expect(messages[3]?.content).not.toContain('character_state.patch');
+    expect(messages[5]?.content).not.toContain('runtime_context');
+    expect(messages[2]?.content).not.toContain('"event"');
+    expect(messages[2]?.content).not.toContain('"toolObservations"');
+    expect(messages[2]?.content).not.toContain('"version"');
+    expect(messages[2]?.content).not.toContain('sourceReferences');
+    expect(messages[2]?.content).not.toContain('confidence');
+    expect(messages[2]?.content).not.toContain('budget');
+    expect(messages[2]?.content).not.toContain(visibleReplyModelToolName);
+    expect(messages[2]?.content).not.toContain('character_state.patch');
 
     expect(tools.map((tool) => tool.function.name)).toEqual([
       visibleReplyModelToolName,
@@ -232,11 +287,15 @@ describe('NVIDIA role-model provider', () => {
     expect(
       tools.find((tool) => tool.function.name === 'character_state_patch')
         ?.function.description
-    ).toContain('your current Character State');
+    ).toContain("Mira's internal Character State");
     expect(
       tools.find((tool) => tool.function.name === 'plugin_list')
         ?.function.parameters.additionalProperties
     ).toBe(false);
+    expect(
+      tools.find((tool) => tool.function.name === 'plugin_list')
+        ?.function.strict
+    ).toBe(true);
   });
 
   it('keeps provider tool aliases globally unique for sanitized runtime collisions', async () => {
@@ -421,12 +480,17 @@ describe('NVIDIA role-model provider', () => {
     expect(capturedBody).toMatchObject({
       model: 'nvidia/test-model',
       stream: false,
-      tool_choice: 'auto'
+      tool_choice: 'auto',
+      parallel_tool_calls: true,
+      reasoning_budget: defaultNvidiaRoleModelReasoningBudget,
+      chat_template_kwargs: {
+        enable_thinking: true
+      }
     });
     expect(
       (capturedBody as { readonly messages?: readonly { readonly role: string }[] })
         .messages?.map((message) => message.role)
-    ).toEqual(['system', 'user', 'assistant', 'user']);
+    ).toEqual(['system', 'system', 'system', 'user', 'assistant', 'user']);
     expect(JSON.parse(output.rawOutputText)).toEqual({
       toolCalls: [
         {
@@ -441,6 +505,231 @@ describe('NVIDIA role-model provider', () => {
       role: 'assistant',
       content: 'Hello from assistant content.\n- plugin.list'
     });
+    expect(output.providerExchange?.reasoning).toEqual({
+      mode: 'enabled',
+      params: {
+        reasoning_budget: defaultNvidiaRoleModelReasoningBudget,
+        chat_template_kwargs: {
+          enable_thinking: true
+        }
+      }
+    });
+    expect(output.providerExchange?.outputNormalization).toEqual({
+      source: 'terminal_assistant_content',
+      committed: false
+    });
+  });
+
+  it('keeps terminal assistant content non-committed when visible_reply is unavailable', async () => {
+    let capturedBody: unknown;
+    const fetchClient: NvidiaFetchClient = (_url, request) => {
+      capturedBody = JSON.parse(request.body);
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: 'Internal terminal model text.'
+                }
+              }
+            ]
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient,
+      model: 'nvidia/test-model'
+    });
+    const inputEnvelope = createNvidiaNoVisibleReplyInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(capturedBody).not.toHaveProperty('tools');
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [],
+      text: 'Internal terminal model text.'
+    });
+    expect(output.providerExchange?.outputNormalization).toEqual({
+      source: 'terminal_assistant_content',
+      committed: false
+    });
+  });
+
+  it('uses explicit no-thinking NVIDIA params when requested', async () => {
+    let capturedBody: unknown;
+    const fetchClient: NvidiaFetchClient = (_url, request) => {
+      capturedBody = JSON.parse(request.body);
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: 'No-thinking mode reply.'
+                }
+              }
+            ]
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient,
+      thinkingMode: {
+        mode: 'none'
+      }
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(capturedBody).toMatchObject({
+      chat_template_kwargs: {
+        enable_thinking: false
+      }
+    });
+    expect(
+      (capturedBody as { readonly reasoning_budget?: unknown })
+        .reasoning_budget
+    ).toBeUndefined();
+    expect(output.providerExchange?.reasoning).toEqual({
+      mode: 'none',
+      params: {
+        chat_template_kwargs: {
+          enable_thinking: false
+        }
+      }
+    });
+  });
+
+  it('uses consistent thinking-enabled NVIDIA params and provider exchange evidence', async () => {
+    let capturedBody: unknown;
+    const fetchClient: NvidiaFetchClient = (_url, request) => {
+      capturedBody = JSON.parse(request.body);
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: 'Thinking mode reply.'
+                }
+              }
+            ],
+            usage: {
+              total_tokens: 42
+            }
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient,
+      thinkingMode: {
+        mode: 'enabled',
+        reasoningBudgetTokens: 2048
+      }
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(capturedBody).toMatchObject({
+      reasoning_budget: 2048,
+      chat_template_kwargs: {
+        enable_thinking: true
+      }
+    });
+    expect(output.providerExchange?.reasoning).toEqual({
+      mode: 'enabled',
+      params: {
+        reasoning_budget: 2048,
+        chat_template_kwargs: {
+          enable_thinking: true
+        }
+      }
+    });
+    expect(output.providerExchange?.usage).toEqual({
+      total_tokens: 42
+    });
+    expect(output.providerExchange?.finishReason).toBe('stop');
+  });
+
+  it('scrubs leaked think blocks before visible_reply normalization', async () => {
+    const fetchClient: NvidiaFetchClient = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: '<think>secret</think>Hello'
+                }
+              }
+            ]
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [
+        {
+          name: visibleReplyModelToolName,
+          input: {
+            text: 'Hello'
+          }
+        }
+      ]
+    });
+    expect(output.rawOutputText).not.toContain('secret');
+    expect(output.rawOutputText).not.toContain('<think>');
   });
 
   it('rejects length-finished assistant content as partial output', async () => {
@@ -537,12 +826,6 @@ describe('NVIDIA role-model provider', () => {
     expect(rawDecision).toEqual({
       toolCalls: [
         {
-          name: visibleReplyModelToolName,
-          input: {
-            text: 'Checking the available plugins.'
-          }
-        },
-        {
           name: 'plugin.list',
           input: {}
         },
@@ -555,6 +838,10 @@ describe('NVIDIA role-model provider', () => {
       ]
     });
     expect(rawDecision).not.toHaveProperty('text');
+    expect(output.providerExchange?.outputNormalization).toEqual({
+      source: 'native_tool_calls',
+      committed: false
+    });
     expect(output.nativeAssistantMessage?.tool_calls).toMatchObject([
       {
         id: 'call_plugin_list',
@@ -669,12 +956,6 @@ describe('NVIDIA role-model provider', () => {
     expect(JSON.parse(output.rawOutputText)).toEqual({
       toolCalls: [
         {
-          name: visibleReplyModelToolName,
-          input: {
-            text: 'Checking the available plugins.'
-          }
-        },
-        {
           name: 'plugin.list',
           input: {}
         }
@@ -736,7 +1017,8 @@ function createNvidiaTestInputEnvelope() {
           pluginId: 'character-state',
           id: 'current',
           kind: 'runtime_note',
-          text: 'Character State: steady',
+          text:
+            "Mira's internal Character State (assistant-owned, model-only; not user state): mood=steady",
           budget: {
             estimatedTokens: 8,
             priority: 90
@@ -769,6 +1051,7 @@ function createNvidiaAliasCollisionInputEnvelope() {
       }
     }),
     pluginToolDefinitions: [
+      ...createDefaultRoleModelPluginToolDefinitions(),
       createAliasCollisionToolDefinition({
         pluginId: 'memory_alias_dot',
         name: 'memory.search'
@@ -785,6 +1068,27 @@ function createNvidiaAliasCollisionInputEnvelope() {
   });
 }
 
+function createNvidiaNoVisibleReplyInputEnvelope() {
+  return createRoleModelInputEnvelope({
+    event: createUserMessageRuntimeEvent(
+      'hello',
+      createRuntimeEventIdentity({
+        eventId: 'evt_nvidia_no_visible_reply',
+        traceId: 'trace_nvidia_no_visible_reply',
+        createdAt: '2026-06-15T00:00:00.000Z'
+      })
+    ),
+    decisionContext: createDecisionContext({
+      sessionId: 'session-nvidia-no-visible-reply',
+      characterSnapshot: {
+        id: 'mira',
+        displayName: 'Mira'
+      }
+    }),
+    pluginToolDefinitions: []
+  });
+}
+
 function createAliasCollisionToolDefinition(options: {
   readonly pluginId: string;
   readonly name: string;
@@ -794,7 +1098,10 @@ function createAliasCollisionToolDefinition(options: {
     name: options.name,
     description: `Alias collision fixture for ${options.name}.`,
     requiredForUserTurn: false,
-    maxCallsPerUserTurn: 1,
+    callLimit: {
+      scope: 'user_turn',
+      maxCalls: 1
+    },
     inputContract: {
       type: 'object',
       fields: [],

@@ -5,17 +5,128 @@ import {
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
 import {
+  createDefaultRoleModelPluginToolDefinitions,
+  createDecisionContext,
+  createRejectedRoleModelDecisionResult,
+  createRoleModelInputEnvelope,
   isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
+  roleModelDisallowedToolRejectionReason,
+  roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
   roleModelTerminalEmptyOutputRejectionDetails,
   roleModelUnsupportedEffectRejectionReason
 } from '../src/role-model/contracts.ts';
 import type { RoleModelPluginToolDefinition } from '../src/role-model/contracts.ts';
 import { createDefaultProject02PluginHost } from '../src/plugins/host.ts';
+import {
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent
+} from '../src/runtime/event.ts';
 
 describe('role-model contracts', () => {
+  it.each([
+    'Adapter raw output must include string rawOutputText.',
+    'Role-model adapter provider exchange is malformed.',
+    'Adapter rejection must be replayable from rawOutputText.',
+    'Role-model adapter native tool-call argument errors are malformed.',
+    'providerMetadata.request.messageCount must be finite JSON.',
+    'providerMetadata.response.status must be finite JSON.'
+  ])('replays malformed adapter evidence detail %s', (details) => {
+    expect(
+      isRoleModelRawOutputReplayableDecisionEvidence({
+        rawOutputText: '',
+        providerMetadata: undefined,
+        decisionResult: createRejectedRoleModelDecisionResult(
+          roleModelMalformedOutputRejectionReason,
+          details
+        )
+      })
+    ).toBe(true);
+  });
+
+  it('keeps the real host default allowed tools unique and ordered', () => {
+    const pluginHost = createDefaultProject02PluginHost();
+    const identity = createRuntimeEventIdentity({
+      eventId: 'evt_default_allowed_tools',
+      traceId: 'trace_default_allowed_tools',
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', identity),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-default-allowed-tools',
+        characterSnapshot: {
+          id: 'mira',
+          displayName: 'Mira'
+        }
+      }),
+      pluginToolDefinitions: pluginHost.pluginToolDefinitions()
+    });
+
+    expect(inputEnvelope.allowedTools).toEqual([
+      visibleReplyModelToolName,
+      'plugin.list',
+      characterStatePatchModelToolName
+    ]);
+    expect(
+      inputEnvelope.toolDefinitions.find(
+        (definition) => definition.name === visibleReplyModelToolName
+      )?.callLimit
+    ).toEqual({
+      scope: 'model_response',
+      maxCalls: 1
+    });
+  });
+
+  it('rejects duplicate explicit allowed tools', () => {
+    const identity = createRuntimeEventIdentity({
+      eventId: 'evt_duplicate_allowed_tools',
+      traceId: 'trace_duplicate_allowed_tools',
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+
+    expect(() =>
+      createRoleModelInputEnvelope({
+        event: createUserMessageRuntimeEvent('hello', identity),
+        decisionContext: createDecisionContext({
+          sessionId: 'session-duplicate-allowed-tools',
+          characterSnapshot: {
+            id: 'mira',
+            displayName: 'Mira'
+          }
+        }),
+        allowedTools: [visibleReplyModelToolName, visibleReplyModelToolName]
+      })
+    ).toThrow('Role-model allowedTools must not contain duplicates.');
+  });
+
+  it('allows one visible reply per model response', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        toolCalls: [
+          {
+            name: visibleReplyModelToolName,
+            input: { text: 'first' }
+          },
+          {
+            name: visibleReplyModelToolName,
+            input: { text: 'second' }
+          }
+        ]
+      })
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelDuplicateToolCallRejectionReason,
+        details: 'Decision must not include duplicate visible_reply tool calls.'
+      }
+    });
+  });
+
   it('stamps accepted versionless model output with the internal decision version', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
@@ -49,7 +160,7 @@ describe('role-model contracts', () => {
   it('ignores model-supplied version and keeps the internal decision version', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
-        version: 'mvp-007.runtime_plugin.v1',
+        version: 'mvp-008.runtime_plugin.v2',
         toolCalls: [
           {
             name: visibleReplyModelToolName,
@@ -163,12 +274,16 @@ describe('role-model contracts', () => {
   it('replays final visible replies with prior required plugin observations from the input envelope', () => {
     const requiredToolName = 'memory.lookup';
     const pluginToolDefinitions = [
+      ...createDefaultRoleModelPluginToolDefinitions(),
       {
         pluginId: 'memory',
         name: requiredToolName,
         description: 'Look up relevant memory before answering.',
         requiredForUserTurn: true,
-        maxCallsPerUserTurn: 1,
+        callLimit: {
+          scope: 'user_turn',
+          maxCalls: 1
+        },
         inputContract: {
           type: 'object',
           fields: [],
@@ -253,7 +368,26 @@ describe('role-model contracts', () => {
     });
   });
 
-  it('accepts undeclared executable tools for loop routing', () => {
+  it('rejects executable tools omitted from allowedTools even when defined', () => {
+    const memoryUnknownTool = {
+      pluginId: 'memory',
+      name: 'memory.unknown',
+      description: 'Exercise a defined but unavailable memory tool.',
+      requiredForUserTurn: false,
+      callLimit: {
+        scope: 'user_turn',
+        maxCalls: 1
+      },
+      inputContract: {
+        type: 'object',
+        fields: [],
+        additionalFields: true
+      },
+      validationOwner: 'plugin_host',
+      sideEffectLevel: 'runtime_read',
+      requiresConfirmation: false,
+      sourceReferencesRequired: false
+    } satisfies RoleModelPluginToolDefinition;
     const result = parseRoleModelDecision(
       JSON.stringify({
         version: roleModelDecisionContractVersion,
@@ -265,21 +399,21 @@ describe('role-model contracts', () => {
             }
           }
         ]
-      })
+      }),
+      [visibleReplyModelToolName],
+      [
+        ...createDefaultRoleModelPluginToolDefinitions(),
+        memoryUnknownTool
+      ]
     );
 
     expect(result).toMatchObject({
-      status: 'accepted',
-      decision: {
-        toolCalls: [
-          {
-            name: 'memory.unknown',
-            input: {
-              query: 'Mira'
-            }
-          }
-        ]
-      }
+      status: 'rejected',
+      rejection: {
+        reason: roleModelDisallowedToolRejectionReason,
+        details: 'Decision requested disallowed tool memory.unknown.'
+      },
+      requestedToolNames: ['memory.unknown']
     });
   });
 

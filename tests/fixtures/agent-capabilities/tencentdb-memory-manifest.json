@@ -4,9 +4,9 @@
   "version": "1.0.0-fixture",
   "kind": "memory_provider",
   "description": "Normalized TencentDB-Agent-Memory gateway fixture for MVP-007 contract validation.",
-  "contractVersion": "mvp-007.runtime_plugin.v1",
+  "contractVersion": "mvp-008.runtime_plugin.v2",
   "compatibility": {
-    "hostContractVersions": ["mvp-007.runtime_plugin.v1"],
+    "hostContractVersions": ["mvp-008.runtime_plugin.v2"],
     "sourceSystem": "TencentDB-Agent-Memory",
     "sourceVersion": "main",
     "externalContract": "tdai-gateway-http",

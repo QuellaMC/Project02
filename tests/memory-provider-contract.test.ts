@@ -379,7 +379,12 @@ describe('memory provider runtime plugin helper', () => {
       enabledPluginIds: [plugin.manifest.id]
     });
 
+    expect(plugin.manifest.requestedAccess).toEqual({ model_input: 'write' });
     expect(plugin.providedTools.map((tool) => tool.name)).toEqual([
+      'memory.search',
+      'memory.add'
+    ]);
+    expect(host.pluginToolDefinitions().map((tool) => tool.name)).toEqual([
       'memory.search',
       'memory.add'
     ]);

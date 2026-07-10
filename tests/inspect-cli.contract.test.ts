@@ -24,6 +24,9 @@ import {
 import type {
   RoleModelAdapter
 } from '../src/role-model/loop.ts';
+import {
+  defaultRoleModelProviderCapabilities
+} from '../src/role-model/prompt.ts';
 import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
 import {
   createRuntimePluginFileStore
@@ -36,8 +39,15 @@ import {
   createRuntimePlugin,
   runtimePluginContractVersion,
   type RuntimePlugin,
+  type RuntimePluginAccessMap,
   type RuntimePluginContext
 } from '../src/plugins/types.ts';
+import {
+  runtimePluginDiscoveryPluginId
+} from '../src/plugins/access-control.ts';
+import {
+  firstPartyModelToolsPluginId
+} from '../src/plugins/contract.ts';
 
 describe('inspect CLI plugin evidence', () => {
   it('shows model rounds and per-tool plugin events', async () => {
@@ -83,6 +93,18 @@ describe('inspect CLI plugin evidence', () => {
             readonly roleModelEvidence: {
               readonly output?: {
                 readonly rawOutputText: string;
+                readonly providerExchange?: {
+                  readonly renderedMessages: readonly unknown[];
+                  readonly renderedTools: readonly unknown[];
+                  readonly requestBody: unknown;
+                  readonly nativeToolResultMessages: readonly unknown[];
+                };
+              };
+              readonly input?: {
+                readonly pluginContextItems: readonly {
+                  readonly pluginId: string;
+                  readonly text: string;
+                }[];
               };
             };
           }[];
@@ -107,6 +129,28 @@ describe('inspect CLI plugin evidence', () => {
     expect(
       output.turns[0].modelRounds[0]?.roleModelEvidence.output?.rawOutputText
     ).toContain('character_state.patch');
+    expect(
+      output.turns[0].modelRounds[0]?.roleModelEvidence.input
+        ?.pluginContextItems[0]?.text
+    ).toContain("Mira's internal Character State");
+    expect(
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output
+        ?.providerExchange?.renderedMessages.length
+    ).toBeGreaterThan(0);
+    expect(
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output
+        ?.providerExchange?.renderedTools.length
+    ).toBeGreaterThan(0);
+    expect(
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output
+        ?.providerExchange?.requestBody
+    ).toMatchObject({
+      provider: 'local-fixture'
+    });
+    expect(
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output
+        ?.providerExchange?.nativeToolResultMessages.length
+    ).toBeGreaterThan(0);
     expect(output.turns[0].toolEvents[0].pluginId).toBe('character-state');
     expect(output.turns[0].pluginEvidence.evidence).toEqual(
       expect.arrayContaining([
@@ -150,22 +194,44 @@ describe('inspect CLI plugin evidence', () => {
         stderr: collect(() => {})
       }
     );
-    const output: unknown = JSON.parse(stdout);
+    const output = JSON.parse(stdout) as {
+      readonly runtimeConfig: {
+        readonly source: string;
+        readonly path: string;
+        readonly storeRoot: string;
+      };
+      readonly plugins: readonly {
+        readonly pluginId: string;
+        readonly enabled: boolean;
+        readonly requestedAccess: RuntimePluginAccessMap;
+        readonly grantedAccess: RuntimePluginAccessMap;
+      }[];
+    };
 
     expect(exitCode).toBe(0);
-    expect(output).toMatchObject({
-      runtimeConfig: {
-        source: 'path',
-        path: configPath,
-        storeRoot
-      },
-      plugins: [
+    expect(output.runtimeConfig).toMatchObject({
+      source: 'path',
+      path: configPath,
+      storeRoot
+    });
+    expect(output.plugins).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pluginId: runtimePluginDiscoveryPluginId,
+          enabled: true,
+          requestedAccess: { model_input: 'write' },
+          grantedAccess: { model_input: 'write' }
+        }),
+        expect.objectContaining({
+          pluginId: firstPartyModelToolsPluginId,
+          enabled: true
+        }),
         expect.objectContaining({
           pluginId: 'character-state',
           enabled: false
         })
-      ]
-    });
+      ])
+    );
     expect(stdout).toContain('"activationDiagnostics"');
     expect(stdout).toContain('"runtime_config_unknown_plugin"');
     expect(stdout).toContain('"disabled_by_config"');
@@ -913,6 +979,8 @@ describe('inspect CLI plugin evidence', () => {
     const output = JSON.parse(stdout) as {
       readonly plugins: readonly {
         readonly pluginId: string;
+        readonly requestedAccess: RuntimePluginAccessMap;
+        readonly grantedAccess: RuntimePluginAccessMap;
         readonly activationStatus: string;
       }[];
       readonly sessions: readonly { readonly sessionId: string }[];
@@ -925,6 +993,8 @@ describe('inspect CLI plugin evidence', () => {
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: plugin.manifest.id,
+        requestedAccess: { turn_context: 'read' },
+        grantedAccess: { turn_context: 'read' },
         activationStatus: 'active'
       })
     );
@@ -1143,7 +1213,7 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
   let calls = 0;
 
   return {
-    invoke() {
+    invoke(_inputEnvelope, invocation) {
       calls += 1;
 
       if (calls === 1) {
@@ -1157,7 +1227,21 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
                 }
               }
             ]
-          })
+          }),
+          nativeAssistantMessage: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_character_state_patch',
+                type: 'function',
+                function: {
+                  name: 'character_state.patch',
+                  arguments: '{"mood":"curious"}'
+                }
+              }
+            ]
+          }
         };
       }
 
@@ -1171,7 +1255,27 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
               }
             }
           ]
-        })
+        }),
+        providerExchange: {
+          provider: {
+            name: 'local',
+            model: 'inspect-fixture'
+          },
+          capabilities: defaultRoleModelProviderCapabilities,
+          reasoning: {
+            mode: 'none',
+            params: {}
+          },
+          renderedMessages: invocation.turnContext.messages,
+          renderedTools: invocation.turnContext.tools,
+          toolNameMappings: [],
+          requestBody: {
+            provider: 'local-fixture'
+          },
+          nativeToolResultMessages: invocation.turnContext.messages.filter(
+            (message) => message.role === 'tool'
+          )
+        }
       };
     }
   };
@@ -1225,7 +1329,7 @@ function createInspectFixturePlugin(pluginId = 'inspect.custom'): RuntimePlugin 
         defaultEnabled: false,
         reasons: ['test_inspect_fixture']
       },
-      requestedApis: []
+      requestedAccess: {}
     }
   });
 }
@@ -1339,7 +1443,7 @@ function createInspectFileStoreCleanupFixturePlugin(
         defaultEnabled: false,
         reasons: ['test_inspect_cleanup']
       },
-      requestedApis: ['file_store']
+      requestedAccess: { file_store: 'write', turn_context: 'read' }
     },
     lifecycleHooks: {
       onSessionEnd(context) {
@@ -1394,7 +1498,7 @@ function createInspectSessionEndFixturePlugin(
         defaultEnabled: false,
         reasons: ['test_inspect_cleanup']
       },
-      requestedApis: []
+      requestedAccess: { turn_context: 'read' }
     },
     lifecycleHooks: {
       onSessionEnd(context) {

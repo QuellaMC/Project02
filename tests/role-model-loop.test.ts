@@ -1,24 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
+  createRoleModelInputEnvelope,
   isRoleModelRawOutputReplayableDecisionEvidence,
+  roleModelDisallowedToolRejectionReason,
   roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
   roleModelTerminalEmptyOutputRejectionDetails,
   type RoleModelPluginToolDefinition,
+  type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata
 } from '../src/role-model/contracts.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginContext,
   createRuntimePluginEvidenceSnapshot,
-  runtimePluginContractVersion,
   type RuntimePluginContext,
   type RuntimePlugin,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult
-} from '../src/plugins/types.ts';
+} from '../src/plugins/validation.ts';
+import { runtimePluginContractVersion } from '../src/plugins/contract.ts';
 import {
   createRuntimePluginHost
 } from '../src/plugins/host.ts';
@@ -27,13 +31,725 @@ import {
   createUserMessageRuntimeEvent
 } from '../src/runtime/event.ts';
 import {
+  createRoleModelAdapterFromCharacterAgent,
   runRoleModelLoop,
   type RoleModelAdapter,
   type RoleModelPluginToolHost
 } from '../src/role-model/loop.ts';
-import type { RoleModelChatMessage } from '../src/role-model/prompt.ts';
+import {
+  createRoleModelProviderToolNameMappings,
+  defaultRoleModelProviderCapabilities,
+  renderRoleModelTurnContext,
+  type RoleModelAssistantChatMessage,
+  type RoleModelChatMessage
+} from '../src/role-model/prompt.ts';
+import { visibleReplyModelToolName } from '../src/role-model/model-tools.ts';
 
 describe('role-model loop plugin tool routing', () => {
+  it('keeps character-agent replies non-committed when visible_reply is unavailable', async () => {
+    const adapter = createRoleModelAdapterFromCharacterAgent({
+      reply() {
+        return {
+          text: 'Character agent reply.'
+        };
+      }
+    });
+    const event = createTestEvent(
+      'hello',
+      'evt_character_agent_no_visible_reply'
+    );
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event,
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: []
+    });
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [],
+      text: 'Character agent reply.'
+    });
+  });
+
+  it('keeps an explicit empty tool set authoritative through prompt and output validation', async () => {
+    let renderedToolNames: readonly string[] = [];
+    let protocol = '';
+    const adapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        renderedToolNames = invocation.turnContext.tools.map(
+          (tool) => tool.function.name
+        );
+        protocol =
+          invocation.turnContext.frames.find(
+            (frame) => frame.kind === 'developer_protocol'
+          )?.content ?? '';
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'should not be accepted'
+                }
+              }
+            ]
+          })
+        };
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_explicit_empty_tools'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: []
+    });
+
+    expect(renderedToolNames).toEqual([]);
+    expect(protocol).not.toContain(
+      'Commit user-visible text by calling visible_reply.'
+    );
+    expect(protocol).not.toContain(
+      'call visible_reply with the final response'
+    );
+    expect(protocol).toContain(
+      'Terminal assistant content is non-committed model text and is not shown to the user.'
+    );
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: 'disallowed_tool'
+      }
+    });
+  });
+
+  it('derives requested tool names for a replayable live adapter rejection', async () => {
+    const details = 'Decision requested disallowed tool visible_reply.';
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_live_replayable_rejection'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: [],
+      adapter: Object.freeze({
+        invoke() {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: visibleReplyModelToolName,
+                  input: {
+                    text: 'not allowed'
+                  }
+                }
+              ]
+            }),
+            rejection: {
+              reason: roleModelDisallowedToolRejectionReason,
+              details
+            }
+          };
+        }
+      } satisfies RoleModelAdapter)
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelDisallowedToolRejectionReason,
+        details
+      },
+      decisionResult: {
+        status: 'rejected',
+        requestedToolNames: [visibleReplyModelToolName]
+      }
+    });
+    expect(
+      isRoleModelRawOutputReplayableDecisionEvidence({
+        rawOutputText: result.ioSnapshot.rawOutputText,
+        providerMetadata: result.ioSnapshot.providerMetadata,
+        decisionResult: result.decisionResult,
+        allowedTools: result.inputEnvelope.allowedTools,
+        pluginToolDefinitions: result.inputEnvelope.pluginToolDefinitions,
+        toolObservations: result.inputEnvelope.toolObservations
+      })
+    ).toBe(true);
+  });
+
+  it('accepts terminal content as non-committed text when visible_reply is unavailable', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_no_visible_terminal_text'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: [],
+      adapter: Object.freeze({
+        invoke() {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [],
+              text: 'Internal terminal model text.'
+            })
+          };
+        }
+      })
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      decisionResult: {
+        status: 'accepted',
+        nonCommittedText: 'Internal terminal model text.',
+        decision: {
+          toolCalls: []
+        }
+      }
+    });
+  });
+
+  it('does not route a defined plugin tool omitted from allowedTools', async () => {
+    let handledCalls = 0;
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall() {
+        handledCalls += 1;
+        return createAcceptedToolCallResult();
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_disallowed_memory_search'),
+      decisionContext: createTestDecisionContext(),
+      allowedTools: [visibleReplyModelToolName],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext(
+        'evt_disallowed_memory_search'
+      ),
+      adapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'memory.search',
+              input: {
+                query: 'Mira'
+              }
+            }
+          ]
+        }
+      ], () => undefined)
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: 'disallowed_tool',
+        details: 'Decision requested disallowed tool memory.search.'
+      }
+    });
+    expect(handledCalls).toBe(0);
+    expect(result.pluginToolResults).toEqual([]);
+  });
+
+  it('drops native tool history when its arguments differ from the accepted decision', async () => {
+    let invocationCount = 0;
+    let handledCalls = 0;
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    const adapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        invocationCount += 1;
+        messagesByRound.push([...invocation.turnContext.messages]);
+
+        if (invocationCount === 1) {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'memory.search',
+                  input: {
+                    query: 'Mira'
+                  }
+                }
+              ]
+            }),
+            nativeAssistantMessage: {
+              role: 'assistant',
+              content: 'Searching memory.',
+              tool_calls: [
+                {
+                  id: 'call_memory_search',
+                  type: 'function',
+                  function: {
+                    name: 'memory.search',
+                    arguments: '{"query":"Another character"}'
+                  }
+                }
+              ]
+            }
+          };
+        }
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'memory checked'
+                }
+              }
+            ]
+          })
+        };
+      }
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall() {
+        handledCalls += 1;
+        return createAcceptedToolCallResult();
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_native_argument_mismatch'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext(
+        'evt_native_argument_mismatch'
+      )
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(handledCalls).toBe(1);
+    expect(messagesByRound).toHaveLength(2);
+    expect(
+      messagesByRound[1]?.some(
+        (message) => message.role === 'assistant' || message.role === 'tool'
+      )
+    ).toBe(false);
+  });
+
+  it('retains aligned native history after provider tool-name normalization', async () => {
+    let invocationCount = 0;
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    const adapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        invocationCount += 1;
+        messagesByRound.push([...invocation.turnContext.messages]);
+
+        if (invocationCount === 1) {
+          const nativeAssistantMessage = Object.freeze({
+            role: 'assistant',
+            content: 'Searching memory.',
+            tool_calls: Object.freeze([
+              {
+                id: 'call_provider_memory_search',
+                type: 'function',
+                function: {
+                  name: 'memory_search',
+                  arguments: '{"query":"Mira"}'
+                }
+              }
+            ])
+          } satisfies RoleModelAssistantChatMessage);
+          const providerExchange: RoleModelProviderExchangeSnapshot = {
+            provider: {
+              name: 'local'
+            },
+            capabilities: defaultRoleModelProviderCapabilities,
+            reasoning: {
+              mode: 'none',
+              params: {}
+            },
+            renderedMessages: invocation.turnContext.messages,
+            renderedTools: invocation.turnContext.tools,
+            toolNameMappings: [
+              {
+                runtimeName: 'memory.search',
+                providerName: 'memory_search'
+              }
+            ],
+            requestBody: {},
+            nativeAssistantMessage,
+            nativeToolResultMessages: []
+          };
+
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'memory.search',
+                  input: {
+                    query: 'Mira'
+                  }
+                }
+              ]
+            }),
+            nativeAssistantMessage,
+            providerExchange
+          };
+        }
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'memory checked'
+                }
+              }
+            ]
+          })
+        };
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_provider_name_mapping'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolHost: Object.freeze({
+        handleToolCall() {
+          return createAcceptedToolCallResult();
+        }
+      }),
+      runtimePluginContext: createTestPluginContext(
+        'evt_provider_name_mapping'
+      )
+    });
+
+    expect(result.status).toBe('accepted');
+    const assistantHistoryMessage = messagesByRound[1]?.find(
+      (message) => message.role === 'assistant'
+    );
+    const toolHistoryMessage = messagesByRound[1]?.find(
+      (message) => message.role === 'tool'
+    );
+
+    expect(assistantHistoryMessage).toMatchObject({
+      role: 'assistant',
+      tool_calls: [
+        {
+          id: 'call_provider_memory_search',
+          function: {
+            name: 'memory_search'
+          }
+        }
+      ]
+    });
+    expect(toolHistoryMessage).toMatchObject({
+      role: 'tool',
+      tool_call_id: 'call_provider_memory_search'
+    });
+  });
+
+  it('classifies colliding provider tool names by their runtime mappings', async () => {
+    let invocationCount = 0;
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    const adapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        invocationCount += 1;
+        messagesByRound.push([...invocation.turnContext.messages]);
+
+        if (invocationCount === 1) {
+          const toolNameMappings = createRoleModelProviderToolNameMappings(
+            invocation.turnContext.tools.map((tool) => tool.function.name)
+          );
+          const nativeAssistantMessage = Object.freeze({
+            role: 'assistant',
+            content: 'Checking the mapped tool.',
+            tool_calls: Object.freeze([
+              {
+                id: 'call_executable_visible_reply',
+                type: 'function',
+                function: {
+                  name: 'visible_reply',
+                  arguments: '{"query":"Mira"}'
+                }
+              },
+              {
+                id: 'call_terminal_visible_reply',
+                type: 'function',
+                function: {
+                  name: 'visible_reply_2',
+                  arguments: '{"text":"Checking."}'
+                }
+              }
+            ])
+          } satisfies RoleModelAssistantChatMessage);
+          const providerExchange: RoleModelProviderExchangeSnapshot = {
+            provider: {
+              name: 'local'
+            },
+            capabilities: defaultRoleModelProviderCapabilities,
+            reasoning: {
+              mode: 'none',
+              params: {}
+            },
+            renderedMessages: invocation.turnContext.messages,
+            renderedTools: invocation.turnContext.tools,
+            toolNameMappings,
+            requestBody: {},
+            nativeAssistantMessage,
+            nativeToolResultMessages: []
+          };
+
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'visible.reply',
+                  input: {
+                    query: 'Mira'
+                  }
+                },
+                {
+                  name: visibleReplyModelToolName,
+                  input: {
+                    text: 'Checking.'
+                  }
+                }
+              ]
+            }),
+            nativeAssistantMessage,
+            providerExchange
+          };
+        }
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: visibleReplyModelToolName,
+                input: {
+                  text: 'Finished.'
+                }
+              }
+            ]
+          })
+        };
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('use colliding tools', 'evt_provider_name_collision'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: Object.freeze([
+        visibleDotReplyToolDefinition,
+        ...createDefaultRoleModelPluginToolDefinitions()
+      ]),
+      pluginToolHost: Object.freeze({
+        handleToolCall() {
+          return Object.freeze({
+            status: 'accepted',
+            output: Object.freeze({
+              kind: 'plugin_output'
+            }),
+            evidence: Object.freeze([])
+          });
+        }
+      }),
+      runtimePluginContext: createTestPluginContext(
+        'evt_provider_name_collision'
+      )
+    });
+
+    expect(result.status).toBe('accepted');
+    const executableResultMessage = messagesByRound[1]?.find(
+      (message) =>
+        message.role === 'tool' &&
+        message.tool_call_id === 'call_executable_visible_reply'
+    );
+    const visibleReplyResultMessage = messagesByRound[1]?.find(
+      (message) =>
+        message.role === 'tool' &&
+        message.tool_call_id === 'call_terminal_visible_reply'
+    );
+
+    expect(
+      executableResultMessage?.role === 'tool'
+        ? parseTestJson(executableResultMessage.content)
+        : undefined
+    ).toMatchObject({
+      status: 'accepted',
+      toolName: 'visible.reply',
+      output: {
+        kind: 'plugin_output'
+      }
+    });
+    expect(
+      visibleReplyResultMessage?.role === 'tool'
+        ? parseTestJson(visibleReplyResultMessage.content)
+        : undefined
+    ).toMatchObject({
+      status: 'accepted',
+      toolName: visibleReplyModelToolName,
+      output: {
+        kind: 'interim_visible_reply'
+      }
+    });
+  });
+
+  it.each([
+    {
+      label: 'the tool name differs',
+      rawToolCalls: [
+        {
+          name: 'memory.search',
+          input: {
+            query: 'Mira'
+          }
+        }
+      ],
+      nativeToolCalls: [
+        {
+          id: 'call_wrong_name',
+          type: 'function' as const,
+          function: {
+            name: 'memory.recall',
+            arguments: '{"query":"Mira"}'
+          }
+        }
+      ]
+    },
+    {
+      label: 'the executable order differs',
+      rawToolCalls: [
+        {
+          name: 'memory.search',
+          input: {
+            query: 'Mira'
+          }
+        },
+        {
+          name: 'memory.recall',
+          input: {
+            query: 'Mira'
+          }
+        }
+      ],
+      nativeToolCalls: [
+        {
+          id: 'call_memory_recall_first',
+          type: 'function' as const,
+          function: {
+            name: 'memory.recall',
+            arguments: '{"query":"Mira"}'
+          }
+        },
+        {
+          id: 'call_memory_search_second',
+          type: 'function' as const,
+          function: {
+            name: 'memory.search',
+            arguments: '{"query":"Mira"}'
+          }
+        }
+      ]
+    },
+    {
+      label: 'tool-call IDs are duplicated',
+      rawToolCalls: [
+        {
+          name: 'memory.search',
+          input: {
+            query: 'Mira'
+          }
+        },
+        {
+          name: 'memory.recall',
+          input: {
+            query: 'Mira'
+          }
+        }
+      ],
+      nativeToolCalls: [
+        {
+          id: 'call_duplicate',
+          type: 'function' as const,
+          function: {
+            name: 'memory.search',
+            arguments: '{"query":"Mira"}'
+          }
+        },
+        {
+          id: 'call_duplicate',
+          type: 'function' as const,
+          function: {
+            name: 'memory.recall',
+            arguments: '{"query":"Mira"}'
+          }
+        }
+      ]
+    }
+  ])('drops native tool history when $label', async ({
+    rawToolCalls,
+    nativeToolCalls
+  }) => {
+    let invocationCount = 0;
+    let handledCalls = 0;
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    const adapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        invocationCount += 1;
+        messagesByRound.push([...invocation.turnContext.messages]);
+
+        return invocationCount === 1
+          ? {
+              rawOutputText: JSON.stringify({ toolCalls: rawToolCalls }),
+              nativeAssistantMessage: {
+                role: 'assistant',
+                content: 'Using tools.',
+                tool_calls: nativeToolCalls
+              }
+            }
+          : {
+              rawOutputText: JSON.stringify({
+                toolCalls: [
+                  {
+                    name: 'visible_reply',
+                    input: {
+                      text: 'tools checked'
+                    }
+                  }
+                ]
+              })
+            };
+      }
+    });
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      handleToolCall() {
+        handledCalls += 1;
+        return createAcceptedToolCallResult();
+      }
+    });
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('use tools', 'evt_native_history_mismatch'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: Object.freeze([
+        ...withVisibleReplyTool(memorySearchToolDefinition),
+        memoryRecallToolDefinition
+      ]),
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext(
+        'evt_native_history_mismatch'
+      )
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(handledCalls).toBe(rawToolCalls.length);
+    expect(
+      messagesByRound[1]?.some(
+        (message) => message.role === 'assistant' || message.role === 'tool'
+      )
+    ).toBe(false);
+  });
+
   it('continues after non-degrading plugin tool failures', async () => {
     let invocations = 0;
     let handledCalls = 0;
@@ -78,7 +794,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_rejected_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_rejected_plugin_tool')
     });
@@ -92,6 +808,7 @@ describe('role-model loop plugin tool routing', () => {
     expect(result.pluginToolResults[0]).toMatchObject({
       callId:
         'evt_rejected_plugin_tool.trace_evt_rejected_plugin_tool.round-1.1.memory.search',
+      dispatchedToHost: true,
       call: {
         pluginId: 'memory.search.fixture',
         toolName: 'memory.search'
@@ -103,6 +820,57 @@ describe('role-model loop plugin tool routing', () => {
     });
     expect(result.rounds).toHaveLength(2);
     expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
+  });
+
+  it('marks missing-host routing as not dispatched to the host', async () => {
+    const completedDispatchSignals: boolean[] = [];
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.search',
+            input: {
+              query: 'Mira'
+            }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {
+              text: 'continued without a tool host'
+            }
+          }
+        ]
+      }
+    ], () => undefined);
+
+    const result = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_missing_plugin_tool_host'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      runtimePluginContext: createTestPluginContext(
+        'evt_missing_plugin_tool_host'
+      ),
+      onPluginToolCallCompleted(event) {
+        completedDispatchSignals.push(event.dispatchedToHost);
+      }
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(result.pluginToolResults).toMatchObject([
+      {
+        dispatchedToHost: false,
+        result: {
+          status: 'rejected',
+          reason: 'tool_host_missing'
+        }
+      }
+    ]);
+    expect(completedDispatchSignals).toEqual([false]);
   });
 
   it('scopes plugin tool call IDs by trace identity when eventId is reused', async () => {
@@ -143,7 +911,7 @@ describe('role-model loop plugin tool routing', () => {
         ),
         decisionContext: createTestDecisionContext(),
         adapter,
-        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
         pluginToolHost,
         runtimePluginContext: createTestPluginContext(
           'evt_replayed_tool_call',
@@ -209,7 +977,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_required_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [requiredMemorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(requiredMemorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_required_plugin_tool')
     });
@@ -278,7 +1046,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_handler_rejected_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext(
         'evt_handler_rejected_plugin_tool'
@@ -349,7 +1117,7 @@ describe('role-model loop plugin tool routing', () => {
         ),
         decisionContext: createTestDecisionContext(),
         adapter,
-        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
         pluginToolHost,
         runtimePluginContext: createTestPluginContext(
           `evt_accepted_${evidenceStatus}_evidence_plugin_tool`
@@ -415,7 +1183,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_degraded_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_degraded_plugin_tool')
     });
@@ -452,15 +1220,20 @@ describe('role-model loop plugin tool routing', () => {
     ], () => {
       invocations += 1;
     });
+    const plugin = createDegradingRejectedMemorySearchPlugin();
     const pluginToolHost = createRuntimePluginHost({
-      plugins: [createDegradingRejectedMemorySearchPlugin()]
+      plugins: [plugin],
+      enabledPluginIds: [plugin.manifest.id]
     });
 
     const result = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_host_degraded_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: pluginToolHost.pluginToolDefinitions(),
+      pluginToolDefinitions: Object.freeze([
+        ...createDefaultRoleModelPluginToolDefinitions(),
+        ...pluginToolHost.pluginToolDefinitions()
+      ]),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_host_degraded_plugin_tool')
     });
@@ -532,7 +1305,7 @@ describe('role-model loop plugin tool routing', () => {
         event: createTestEvent('search memory', eventId),
         decisionContext: createTestDecisionContext(),
         adapter,
-        pluginToolDefinitions: [memorySearchToolDefinition],
+        pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
         pluginToolHost,
         runtimePluginContext: createTestPluginContext(eventId)
       });
@@ -656,7 +1429,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_custom_host_secret_output'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext(
         'evt_custom_host_secret_output'
@@ -721,6 +1494,7 @@ describe('role-model loop plugin tool routing', () => {
   it('redacts custom plugin host rejected messages before loop rejection evidence', async () => {
     let invocations = 0;
     const completedResults: RuntimePluginToolCallResult[] = [];
+    const completedDispatchSignals: boolean[] = [];
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
@@ -761,12 +1535,13 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_custom_host_secret_reject'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext(
         'evt_custom_host_secret_reject'
       ),
       onPluginToolCallCompleted(event) {
+        completedDispatchSignals.push(event.dispatchedToHost);
         completedResults.push(event.result);
       }
     });
@@ -789,6 +1564,7 @@ describe('role-model loop plugin tool routing', () => {
         message: 'search backend failed api_key=[redacted] Bearer [redacted]'
       }
     ]);
+    expect(completedDispatchSignals).toEqual([true]);
 
     const serializedSurfaces = JSON.stringify({
       completedResults,
@@ -838,7 +1614,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_required_observed'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [requiredMemorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(requiredMemorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_required_observed')
     });
@@ -850,7 +1626,7 @@ describe('role-model loop plugin tool routing', () => {
     expect(result.rounds).toHaveLength(2);
   });
 
-  it('rejects plugin tool repeats across rounds against maxCallsPerUserTurn', async () => {
+  it('rejects plugin tool repeats across rounds against its user-turn call limit', async () => {
     let invocations = 0;
     let handledCalls = 0;
     const adapter = createSequencedAdapter([
@@ -889,7 +1665,7 @@ describe('role-model loop plugin tool routing', () => {
       event: createTestEvent('search memory', 'evt_repeated_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_repeated_tool')
     });
@@ -904,7 +1680,7 @@ describe('role-model loop plugin tool routing', () => {
       throw new Error('Expected repeated tool call to be rejected.');
     }
 
-    expect(result.rejection.details).toContain('maxCallsPerUserTurn is 1');
+    expect(result.rejection.details).toContain('user_turn maxCalls is 1');
     expect(invocations).toBe(2);
     expect(handledCalls).toBe(1);
     expect(result.pluginToolResults).toHaveLength(1);
@@ -1046,6 +1822,57 @@ describe('role-model loop plugin tool routing', () => {
     expect(result.ioSnapshot.rawOutputText).toBe('');
     expect(result.ioSnapshot).not.toHaveProperty('providerMetadata');
   });
+
+  it('rejects malformed provider exchange evidence at the adapter boundary', async () => {
+    const result = await runRoleModelLoop({
+      event: createTestEvent('hello', 'evt_malformed_provider_exchange'),
+      decisionContext: createTestDecisionContext(),
+      adapter: Object.freeze({
+        invoke(_inputEnvelope, invocation) {
+          const providerExchange: RoleModelProviderExchangeSnapshot = {
+            provider: {
+              name: 'local'
+            },
+            capabilities: defaultRoleModelProviderCapabilities,
+            reasoning: {
+              mode: 'none',
+              params: {}
+            },
+            renderedMessages: invocation.turnContext.messages,
+            renderedTools: invocation.turnContext.tools,
+            toolNameMappings: [],
+            requestBody: {},
+            nativeToolResultMessages: []
+          };
+          Reflect.deleteProperty(providerExchange, 'reasoning');
+
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'visible_reply',
+                  input: {
+                    text: 'hello'
+                  }
+                }
+              ]
+            }),
+            providerExchange
+          };
+        }
+      } satisfies RoleModelAdapter)
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'Role-model adapter provider exchange is malformed.'
+      }
+    });
+    expect(result.ioSnapshot.rawOutputText).toBe('');
+    expect(result.ioSnapshot).not.toHaveProperty('providerExchange');
+  });
 });
 
 const memorySearchToolDefinition = Object.freeze({
@@ -1053,7 +1880,10 @@ const memorySearchToolDefinition = Object.freeze({
   name: 'memory.search',
   description: 'Search memory.',
   requiredForUserTurn: false,
-  maxCallsPerUserTurn: 1,
+  callLimit: {
+    scope: 'user_turn',
+    maxCalls: 1
+  },
   inputContract: {
     type: 'object',
     fields: [
@@ -1075,6 +1905,28 @@ const requiredMemorySearchToolDefinition = Object.freeze({
   ...memorySearchToolDefinition,
   requiredForUserTurn: true
 } satisfies RoleModelPluginToolDefinition);
+
+const memoryRecallToolDefinition = Object.freeze({
+  ...memorySearchToolDefinition,
+  name: 'memory.recall',
+  description: 'Recall memory.'
+} satisfies RoleModelPluginToolDefinition);
+
+const visibleDotReplyToolDefinition = Object.freeze({
+  ...memorySearchToolDefinition,
+  pluginId: 'visible.reply.fixture',
+  name: 'visible.reply',
+  description: 'Exercise a provider-name collision with visible_reply.'
+} satisfies RoleModelPluginToolDefinition);
+
+function withVisibleReplyTool(
+  definition: RoleModelPluginToolDefinition
+): readonly RoleModelPluginToolDefinition[] {
+  return Object.freeze([
+    ...createDefaultRoleModelPluginToolDefinitions(),
+    definition
+  ]);
+}
 
 function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
   const id = 'memory.search.fixture';
@@ -1114,14 +1966,17 @@ function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
         defaultEnabled: true,
         reasons: ['test']
       },
-      requestedApis: []
+      requestedAccess: { model_input: 'write' }
     },
     providedTools: [
       {
         name: 'memory.search',
         description: 'Search memory.',
         requiredForUserTurn: false,
-        maxCallsPerUserTurn: 1,
+        callLimit: {
+          scope: 'user_turn',
+          maxCalls: 1
+        },
         inputContract: {
           type: 'object',
           fields: [
@@ -1326,4 +2181,10 @@ function createTestEvent(
       createdAt: '2026-06-15T00:00:00.000Z'
     })
   );
+}
+
+function parseTestJson(value: string): unknown {
+  const parsed: unknown = JSON.parse(value);
+
+  return parsed;
 }

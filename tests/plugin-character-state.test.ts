@@ -12,7 +12,8 @@ import {
   createCharacterStatePlugin
 } from '../src/plugins/builtin/character-state/index.ts';
 import {
-  createDefaultCharacterRuntimeState
+  createDefaultCharacterRuntimeState,
+  planCharacterStatePatch
 } from '../src/plugins/builtin/character-state/schema.ts';
 import {
   createRuntimeEventIdentity
@@ -21,7 +22,8 @@ import {
   createRuntimePluginContext
 } from '../src/plugins/types.ts';
 import type {
-  RuntimePluginFileStore
+  RuntimePluginFileStore,
+  RuntimePluginJsonObject
 } from '../src/plugins/types.ts';
 import {
   createRuntimePluginFileStore
@@ -177,6 +179,280 @@ describe('Character State plugin', () => {
 
     expect(beforeResult?.contextItems[0]?.text).toContain('mood=curious');
   });
+
+  it('records and replays accepted no-op identities', async () => {
+    const { plugin, context, fileStore } =
+      createCharacterStateHarness('session-character-state-noop-idempotency');
+    const call = {
+      ...testIdentity(),
+      pluginId: characterStatePluginId,
+      toolName: characterStatePatchModelToolName,
+      input: {
+        mood: 'steady'
+      }
+    };
+
+    const first = await plugin.lifecycleHooks.handleToolCall?.(call, context);
+    const intervening = await plugin.lifecycleHooks.handleToolCall?.(
+      {
+        ...call,
+        eventId: 'evt_character_state_intervening',
+        traceId: 'trace_character_state_intervening',
+        input: {
+          mood: 'curious'
+        }
+      },
+      context
+    );
+    const retry = await plugin.lifecycleHooks.handleToolCall?.(call, context);
+    const conflictingRetry = await plugin.lifecycleHooks.handleToolCall?.(
+      {
+        ...call,
+        input: {
+          mood: 'curious'
+        }
+      },
+      context
+    );
+
+    expect(first).toMatchObject({
+      status: 'accepted',
+      output: {
+        appliedChanges: []
+      }
+    });
+    expect(intervening).toMatchObject({
+      status: 'accepted',
+      output: {
+        current: {
+          mood: 'curious'
+        }
+      }
+    });
+    expect(retry).toMatchObject({
+      status: 'accepted',
+      output: {
+        current: {
+          mood: 'steady'
+        },
+        appliedChanges: [],
+        idempotent: true
+      }
+    });
+    expect(conflictingRetry).toMatchObject({
+      status: 'rejected',
+      reason: 'character_state_idempotency_conflict'
+    });
+    expect(fileStore.readJsonl('events.jsonl')).toHaveLength(2);
+    expect(fileStore.readJson('current.json')).toMatchObject({
+      current: {
+        mood: 'curious'
+      }
+    });
+  });
+
+  it('rejects malformed persisted appliedChanges instead of recomputing them', () => {
+    const { plugin, context, fileStore } =
+      createCharacterStateHarness('session-character-state-malformed-replay');
+    const before = createDefaultCharacterRuntimeState();
+    const result = planCharacterStatePatch({
+      before,
+      patchInput: {
+        mood: 'curious'
+      }
+    });
+
+    if (result.status !== 'accepted') {
+      throw new Error('Expected valid Character State patch fixture.');
+    }
+
+    fileStore.appendJsonl('events.jsonl', {
+      type: 'character_state.patch',
+      ...testIdentity(),
+      input: {
+        mood: 'curious'
+      },
+      result: {
+        ...result,
+        appliedChanges: [
+          {
+            field: 'mood',
+            before: 'playful',
+            after: 'curious'
+          }
+        ]
+      }
+    });
+
+    expect(() =>
+      plugin.lifecycleHooks.beforeRoleModelCall?.(context)
+    ).toThrow(/stored Character State plugin event field/iu);
+    expect(() =>
+      plugin.lifecycleHooks.handleToolCall?.(
+        {
+          ...testIdentity(),
+          pluginId: characterStatePluginId,
+          toolName: characterStatePatchModelToolName,
+          input: {
+            mood: 'curious'
+          }
+        },
+        context
+      )
+    ).toThrow(/stored Character State plugin event field/iu);
+  });
+
+  it('rejects a discontinuous authoritative event chain', () => {
+    const { plugin, context, fileStore } =
+      createCharacterStateHarness('session-character-state-discontinuous-log');
+    const initial = createDefaultCharacterRuntimeState();
+    const first = acceptedPatchResult(initial, { mood: 'curious' });
+    const discontinuous = acceptedPatchResult(initial, { mood: 'playful' });
+
+    appendPatchEvent(fileStore, {
+      identity: testIdentity(),
+      input: { mood: 'curious' },
+      result: first
+    });
+    appendPatchEvent(fileStore, {
+      identity: createRuntimeEventIdentity({
+        eventId: 'evt_character_state_discontinuous',
+        traceId: 'trace_character_state_discontinuous',
+        createdAt: '2026-06-15T00:01:00.000Z'
+      }),
+      input: { mood: 'playful' },
+      result: discontinuous
+    });
+
+    expect(() =>
+      plugin.lifecycleHooks.beforeRoleModelCall?.(context)
+    ).toThrow(/Character State plugin event chain/iu);
+  });
+
+  it('requires the first authoritative event to start from the default state', () => {
+    const { plugin, context, fileStore } =
+      createCharacterStateHarness('session-character-state-invalid-first-before');
+    const nonDefault = acceptedPatchResult(
+      createDefaultCharacterRuntimeState(),
+      { mood: 'curious' }
+    ).after;
+    const first = acceptedPatchResult(nonDefault, { mood: 'playful' });
+
+    appendPatchEvent(fileStore, {
+      identity: testIdentity(),
+      input: { mood: 'playful' },
+      result: first
+    });
+
+    expect(() =>
+      plugin.lifecycleHooks.beforeRoleModelCall?.(context)
+    ).toThrow(/Character State plugin event chain/iu);
+  });
+
+  it('does not let a cache without events seed the authoritative event chain', async () => {
+    const { plugin, context, fileStore } =
+      createCharacterStateHarness('session-character-state-cache-without-log');
+    const staleCache = acceptedPatchResult(
+      createDefaultCharacterRuntimeState(),
+      { mood: 'curious' }
+    ).after;
+
+    fileStore.writeJsonAtomic('current.json', staleCache);
+
+    const result = await plugin.lifecycleHooks.handleToolCall?.(
+      {
+        ...testIdentity(),
+        pluginId: characterStatePluginId,
+        toolName: characterStatePatchModelToolName,
+        input: {
+          mood: 'playful'
+        }
+      },
+      context
+    );
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      output: {
+        appliedChanges: [
+          {
+            field: 'mood',
+            before: 'steady',
+            after: 'playful'
+          }
+        ]
+      }
+    });
+    expect(() =>
+      plugin.lifecycleHooks.beforeRoleModelCall?.(context)
+    ).not.toThrow();
+  });
+
+  it('rejects duplicate persisted idempotency identities', () => {
+    const { plugin, context, fileStore } =
+      createCharacterStateHarness('session-character-state-duplicate-identity');
+    const identity = testIdentity();
+    const first = acceptedPatchResult(
+      createDefaultCharacterRuntimeState(),
+      { mood: 'curious' }
+    );
+    const second = acceptedPatchResult(first.after, { mood: 'playful' });
+
+    appendPatchEvent(fileStore, {
+      identity,
+      input: { mood: 'curious' },
+      result: first
+    });
+    appendPatchEvent(fileStore, {
+      identity,
+      input: { mood: 'playful' },
+      result: second
+    });
+
+    expect(() =>
+      plugin.lifecycleHooks.beforeRoleModelCall?.(context)
+    ).toThrow(/Character State plugin event identity is duplicated/iu);
+  });
+
+  it('validates the complete authoritative log before replaying an early duplicate', () => {
+    const { plugin, context, fileStore } =
+      createCharacterStateHarness('session-character-state-malformed-after-duplicate');
+    const identity = testIdentity();
+    const initial = createDefaultCharacterRuntimeState();
+    const first = acceptedPatchResult(initial, { mood: 'curious' });
+
+    appendPatchEvent(fileStore, {
+      identity,
+      input: { mood: 'curious' },
+      result: first
+    });
+    fileStore.appendJsonl('events.jsonl', {
+      type: 'character_state.patch',
+      ...createRuntimeEventIdentity({
+        eventId: 'evt_character_state_after_duplicate',
+        traceId: 'trace_character_state_after_duplicate',
+        createdAt: '2026-06-15T00:01:00.000Z'
+      }),
+      input: { mood: 'playful' },
+      result: {
+        status: 'accepted'
+      }
+    });
+
+    expect(() =>
+      plugin.lifecycleHooks.handleToolCall?.(
+        {
+          ...identity,
+          pluginId: characterStatePluginId,
+          toolName: characterStatePatchModelToolName,
+          input: {
+            mood: 'curious'
+          }
+        },
+        context
+      )
+    ).toThrow(/Stored Character State plugin event field/iu);
+  });
 });
 
 function createCharacterStateHarness(sessionId: string, storeRoot?: string) {
@@ -238,5 +514,37 @@ function testIdentity() {
     eventId: 'evt_character_state',
     traceId: 'trace_character_state',
     createdAt: '2026-06-15T00:00:00.000Z'
+  });
+}
+
+function acceptedPatchResult(
+  before: ReturnType<typeof createDefaultCharacterRuntimeState>,
+  input: RuntimePluginJsonObject
+) {
+  const result = planCharacterStatePatch({
+    before,
+    patchInput: input
+  });
+
+  if (result.status !== 'accepted') {
+    throw new Error('Expected valid Character State patch fixture.');
+  }
+
+  return result;
+}
+
+function appendPatchEvent(
+  fileStore: RuntimePluginFileStore,
+  options: {
+    readonly identity: ReturnType<typeof createRuntimeEventIdentity>;
+    readonly input: RuntimePluginJsonObject;
+    readonly result: ReturnType<typeof acceptedPatchResult>;
+  }
+) {
+  fileStore.appendJsonl('events.jsonl', {
+    type: 'character_state.patch',
+    ...options.identity,
+    input: options.input,
+    result: options.result
   });
 }

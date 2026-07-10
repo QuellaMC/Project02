@@ -9,7 +9,8 @@ import {
   createConversationSession
 } from '../src/core/conversation.ts';
 import {
-  createRuntimePluginHost
+  createRuntimePluginHost,
+  runtimePluginDiscoveryPluginId
 } from '../src/plugins/host.ts';
 import {
   createRuntimePluginFileStore
@@ -22,7 +23,8 @@ import {
   type RuntimePluginContext
 } from '../src/plugins/types.ts';
 import {
-  createRuntimeLogStore
+  createRuntimeLogStore,
+  type RuntimeLogStore
 } from '../src/runtime/log.ts';
 import {
   runtimeConfigEnvVarName,
@@ -62,6 +64,573 @@ describe('chat CLI folded top-level model text', () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).not.toContain('folded model note');
+  });
+});
+
+describe('chat CLI trace summary', () => {
+  it('keeps provider and terminal tool evidence when terminal persistence fails', async () => {
+    let stderr = '';
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['hello\n']),
+      stdout: collect(() => {}),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      logStore: createTerminalRawEventAppendFailingLogStore(),
+      roleModelAdapter: {
+        invoke() {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'visible_reply',
+                  input: {
+                    text: 'hello from a failed terminal commit'
+                  }
+                }
+              ]
+            }),
+            providerMetadata: {
+              provider: 'nvidia',
+              model: 'trace-fixture',
+              request: {
+                messageCount: 3,
+                stream: false
+              },
+              response: {
+                status: 200
+              }
+            }
+          };
+        }
+      }
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      status: 'rejected',
+      provider: {
+        name: 'nvidia',
+        model: 'trace-fixture',
+        responseStatus: 200
+      },
+      requestedToolCalls: ['visible_reply'],
+      executedToolCalls: [],
+      terminalToolCalls: ['visible_reply']
+    });
+  });
+
+  it('does not classify an interrupted executable round as terminal', async () => {
+    let adapterRound = 0;
+    let stderr = '';
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['inspect plugins\n']),
+      stdout: collect(() => {}),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      roleModelAdapter: {
+        invoke() {
+          adapterRound += 1;
+
+          if (adapterRound > 1) {
+            throw new Error('provider failed before terminal output');
+          }
+
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'plugin.list',
+                  input: {}
+                }
+              ]
+            }),
+            providerMetadata: {
+              provider: 'nvidia',
+              model: 'trace-fixture',
+              request: {
+                messageCount: 3,
+                stream: false
+              },
+              response: {
+                status: 200
+              }
+            }
+          };
+        }
+      }
+    });
+
+    expect(exitCode).toBe(1);
+    expect(adapterRound).toBe(2);
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      status: 'rejected',
+      provider: {
+        name: 'nvidia',
+        model: 'trace-fixture',
+        responseStatus: 200
+      },
+      requestedToolCalls: ['plugin.list'],
+      executedToolCalls: ['plugin.list'],
+      terminalToolCalls: []
+    });
+  });
+
+  it('recovers requested calls from interim evidence when tool-start tracing fails', async () => {
+    let stderr = '';
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['inspect plugins\n']),
+      stdout: collect(() => {}),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      logStore: createToolTraceFailingLogStore('tool_call_started'),
+      roleModelAdapter: {
+        invoke() {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'visible_reply',
+                  input: {
+                    text: 'Checking the plugin inventory.'
+                  }
+                },
+                {
+                  name: 'plugin.list',
+                  input: {}
+                }
+              ]
+            })
+          };
+        }
+      }
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      status: 'rejected',
+      requestedToolCalls: ['visible_reply', 'plugin.list'],
+      executedToolCalls: [],
+      terminalToolCalls: []
+    });
+  });
+
+  it('keeps tool-only requested evidence when tool-start tracing fails', async () => {
+    let stderr = '';
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['inspect plugins\n']),
+      stdout: collect(() => {}),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      logStore: createToolTraceFailingLogStore('tool_call_started'),
+      roleModelAdapter: {
+        invoke() {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'plugin.list',
+                  input: {}
+                }
+              ]
+            })
+          };
+        }
+      }
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      status: 'rejected',
+      requestedToolCalls: ['plugin.list'],
+      executedToolCalls: [],
+      terminalToolCalls: []
+    });
+  });
+
+  it('keeps host-executed evidence when tool-finish tracing fails', async () => {
+    let stderr = '';
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['inspect plugins\n']),
+      stdout: collect(() => {}),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      logStore: createToolTraceFailingLogStore('tool_call_finished'),
+      roleModelAdapter: {
+        invoke() {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'plugin.list',
+                  input: {}
+                }
+              ]
+            })
+          };
+        }
+      }
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      status: 'rejected',
+      requestedToolCalls: ['plugin.list'],
+      executedToolCalls: ['plugin.list'],
+      terminalToolCalls: []
+    });
+  });
+
+  it('keeps interim requested evidence when interim tracing fails', async () => {
+    let stderr = '';
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['inspect plugins\n']),
+      stdout: collect(() => {}),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      logStore: createToolTraceFailingLogStore(
+        'interim_visible_reply_emitted'
+      ),
+      roleModelAdapter: {
+        invoke() {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'visible_reply',
+                  input: {
+                    text: 'Checking the plugin inventory.'
+                  }
+                },
+                {
+                  name: 'plugin.list',
+                  input: {}
+                }
+              ]
+            })
+          };
+        }
+      }
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      status: 'rejected',
+      requestedToolCalls: ['visible_reply', 'plugin.list'],
+      executedToolCalls: [],
+      terminalToolCalls: []
+    });
+  });
+
+  it('keeps final terminal evidence and a readable conversation when commit tracing fails', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-chat-visible-trace-failure-')
+    );
+    const sessionId = 'visible-trace-failure';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-07-10T00:00:00.000Z'
+    });
+    const backingLogStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    let stderr = '';
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['hello\n']),
+      stdout: collect(() => {}),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      session: createConversationSession({ id: sessionId }),
+      logStore: createToolTraceFailingLogStore(
+        'visible_reply_committed',
+        backingLogStore
+      ),
+      roleModelAdapter: {
+        invoke() {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'visible_reply',
+                  input: {
+                    text: 'Final reply before trace failure.'
+                  }
+                }
+              ]
+            })
+          };
+        }
+      }
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      status: 'rejected',
+      requestedToolCalls: ['visible_reply'],
+      executedToolCalls: [],
+      terminalToolCalls: ['visible_reply']
+    });
+
+    const reopenedLogStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+
+    expect(
+      reopenedLogStore.conversationMessages().map((message) => message.text)
+    ).toEqual(['hello', 'Final reply before trace failure.']);
+    expect(reopenedLogStore.rawEvents().map((event) => event.kind)).toEqual(
+      expect.arrayContaining([
+        'visible_reply_committed',
+        'runtime_turn_rejected'
+      ])
+    );
+  });
+
+  it('distinguishes requested, executed, and terminal tool calls for the whole turn', async () => {
+    let adapterRound = 0;
+    let stderr = '';
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke() {
+        adapterRound += 1;
+
+        return {
+          rawOutputText: JSON.stringify(
+            adapterRound === 1
+              ? {
+                  toolCalls: [
+                    {
+                      name: 'plugin.list',
+                      input: {}
+                    },
+                    {
+                      name: 'visible_reply',
+                      input: {
+                        text: 'Checking the plugin inventory.'
+                      }
+                    },
+                    {
+                      name: 'character_state.patch',
+                      input: {
+                        mood: 'curious'
+                      }
+                    }
+                  ]
+                }
+              : {
+                  toolCalls: [
+                    {
+                      name: 'visible_reply',
+                      input: {
+                        text: 'The plugin inventory is available.'
+                      }
+                    }
+                  ]
+                }
+          )
+        };
+      }
+    };
+
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['check plugins\n/exit\n']),
+      stdout: collect(() => {}),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      roleModelAdapter
+    });
+
+    expect(exitCode).toBe(0);
+    expect(adapterRound).toBe(2);
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      status: 'completed',
+      requestedToolCalls: [
+        'plugin.list',
+        'visible_reply',
+        'character_state.patch',
+        'visible_reply'
+      ],
+      executedToolCalls: ['plugin.list', 'character_state.patch'],
+      terminalToolCalls: ['visible_reply']
+    });
+    expect(JSON.parse(stderr.trim())).not.toHaveProperty('toolCalls');
+  });
+
+  it('rejects undeclared calls before any routing attempt', async () => {
+    let adapterRound = 0;
+    let stderr = '';
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke() {
+        adapterRound += 1;
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'memory.unknown',
+                input: {
+                  query: 'Mira'
+                }
+              }
+            ]
+          })
+        };
+      }
+    };
+
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['try an unavailable tool\n/exit\n']),
+      stdout: collect(() => {}),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      roleModelAdapter
+    });
+
+    expect(exitCode).toBe(1);
+    expect(adapterRound).toBe(1);
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      status: 'rejected',
+      requestedToolCalls: ['memory.unknown'],
+      executedToolCalls: [],
+      terminalToolCalls: []
+    });
+  });
+
+  it('does not count native argument validation failures as executed calls', async () => {
+    let adapterRound = 0;
+    let stderr = '';
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke() {
+        adapterRound += 1;
+
+        if (adapterRound === 1) {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'plugin.list',
+                  input: {}
+                }
+              ]
+            }),
+            nativeAssistantMessage: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_invalid_plugin_list_args',
+                  type: 'function',
+                  function: {
+                    name: 'plugin.list',
+                    arguments: '{"score":1e999}'
+                  }
+                }
+              ]
+            },
+            nativeToolCallArgumentErrors: [
+              {
+                executableIndex: 0,
+                toolName: 'plugin.list',
+                reason: 'invalid_native_tool_arguments',
+                message:
+                  'plugin.list arguments must contain finite JSON values.'
+              }
+            ]
+          };
+        }
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: {
+                  text: 'The invalid arguments were rejected.'
+                }
+              }
+            ]
+          })
+        };
+      }
+    };
+
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['try invalid plugin arguments\n/exit\n']),
+      stdout: collect(() => {}),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      roleModelAdapter
+    });
+
+    expect(exitCode).toBe(0);
+    expect(adapterRound).toBe(2);
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      requestedToolCalls: ['plugin.list', 'visible_reply'],
+      executedToolCalls: [],
+      terminalToolCalls: ['visible_reply']
+    });
+  });
+
+  it('counts a host-dispatched rejection as an executed tool call', async () => {
+    let adapterRound = 0;
+    let stderr = '';
+    const roleModelAdapter: RoleModelAdapter = {
+      invoke() {
+        adapterRound += 1;
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              adapterRound === 1
+                ? {
+                    name: 'character_state.patch',
+                    input: {
+                      activity: 'reflecting'
+                    }
+                  }
+                : {
+                    name: 'visible_reply',
+                    input: {
+                      text: 'The invalid state patch was rejected.'
+                    }
+                  }
+            ]
+          })
+        };
+      }
+    };
+
+    const exitCode = await runChatCli({
+      stdin: Readable.from(['try an invalid state patch\n/exit\n']),
+      stdout: collect(() => {}),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      roleModelAdapter
+    });
+
+    expect(exitCode).toBe(0);
+    expect(adapterRound).toBe(2);
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      requestedToolCalls: ['character_state.patch', 'visible_reply'],
+      executedToolCalls: ['character_state.patch'],
+      terminalToolCalls: ['visible_reply']
+    });
   });
 });
 
@@ -510,11 +1079,14 @@ describe('chat CLI plugin lifecycle', () => {
   it('runs session-end hooks when /exit closes the chat', async () => {
     const sessionEndContexts: RuntimePluginContext[] = [];
     const logStore = createRuntimeLogStore();
+    const sessionEndPlugin = createSessionEndPlugin((context) => {
+      sessionEndContexts.push(context);
+    });
     const pluginHost = createRuntimePluginHost({
-      plugins: [
-        createSessionEndPlugin((context) => {
-          sessionEndContexts.push(context);
-        })
+      plugins: [sessionEndPlugin],
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        sessionEndPlugin.manifest.id
       ]
     });
 
@@ -573,11 +1145,14 @@ describe('chat CLI plugin lifecycle', () => {
     });
     const sessionId = 'injected-host-session';
     const sessionEndContexts: RuntimePluginContext[] = [];
+    const sessionEndPlugin = createSessionEndPlugin((context) => {
+      sessionEndContexts.push(context);
+    });
     const pluginHost = createRuntimePluginHost({
-      plugins: [
-        createSessionEndPlugin((context) => {
-          sessionEndContexts.push(context);
-        })
+      plugins: [sessionEndPlugin],
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        sessionEndPlugin.manifest.id
       ]
     });
     let stderr = '';
@@ -755,7 +1330,7 @@ describe('chat CLI plugin lifecycle', () => {
       },
       {
         sideEffectLevel: 'local_memory_write',
-        requestedApis: ['file_store']
+        requestedAccess: { file_store: 'write', turn_context: 'read' }
       }
     );
     let factoryCalls = 0;
@@ -833,7 +1408,7 @@ describe('chat CLI plugin lifecycle', () => {
       },
       {
         sideEffectLevel: 'local_memory_write',
-        requestedApis: ['file_store']
+        requestedAccess: { file_store: 'write', turn_context: 'read' }
       }
     );
     let stdout = '';
@@ -1060,7 +1635,11 @@ describe('chat CLI plugin lifecycle', () => {
       sessionId
     });
     const pluginHost = createRuntimePluginHost({
-      plugins: [createFailingSessionEndPlugin()]
+      plugins: [createFailingSessionEndPlugin()],
+      enabledPluginIds: [
+        runtimePluginDiscoveryPluginId,
+        'chat.session-end.failure.fixture'
+      ]
     });
 
     const exitCode = await runChatCli({
@@ -1162,7 +1741,7 @@ function createSessionEndPlugin(
       RuntimePlugin['lifecycleHooks']['beforeRoleModelCall']
     >;
     readonly requiredForTurn?: boolean;
-    readonly requestedApis?: RuntimePlugin['manifest']['requestedApis'];
+    readonly requestedAccess?: RuntimePlugin['manifest']['requestedAccess'];
     readonly sideEffectLevel?: RuntimePlugin['manifest']['runtimePolicy']['sideEffectLevel'];
     readonly defaultEnabled?: boolean;
   } = {}
@@ -1209,7 +1788,7 @@ function createSessionEndPlugin(
         defaultEnabled: options.defaultEnabled ?? true,
         reasons: ['test']
       },
-      requestedApis: options.requestedApis ?? []
+      requestedAccess: options.requestedAccess ?? { turn_context: 'read' }
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1278,7 +1857,7 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
         defaultEnabled: true,
         reasons: ['test']
       },
-      requestedApis: []
+      requestedAccess: {}
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1349,7 +1928,7 @@ function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
         defaultEnabled: false,
         reasons: ['test']
       },
-      requestedApis: []
+      requestedAccess: {}
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1424,4 +2003,76 @@ function collect(write: (chunk: string) => void): Writable {
       callback();
     }
   });
+}
+
+function createTerminalRawEventAppendFailingLogStore(): RuntimeLogStore {
+  const logStore = createRuntimeLogStore();
+
+  return Object.freeze({
+    appendTrace(entry) {
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      if (record.kind === 'runtime_turn_completed') {
+        throw new Error('terminal raw event append failed');
+      }
+
+      return logStore.appendRawEvent(record);
+    },
+    appendConversationMessage(record) {
+      return logStore.appendConversationMessage(record);
+    },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
+function createToolTraceFailingLogStore(
+  failingStep:
+    | 'interim_visible_reply_emitted'
+    | 'tool_call_started'
+    | 'tool_call_finished'
+    | 'visible_reply_committed',
+  logStore: RuntimeLogStore = createRuntimeLogStore()
+): RuntimeLogStore {
+  return Object.freeze({
+    ...(logStore.localRuntimeSessionPaths === undefined
+      ? {}
+      : { localRuntimeSessionPaths: logStore.localRuntimeSessionPaths }),
+    appendTrace(entry) {
+      if (entry.step === failingStep) {
+        throw new Error(`${failingStep} trace append failed`);
+      }
+
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      return logStore.appendRawEvent(record);
+    },
+    appendConversationMessage(record) {
+      return logStore.appendConversationMessage(record);
+    },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
 }

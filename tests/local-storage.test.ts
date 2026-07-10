@@ -30,15 +30,47 @@ describe('local storage plugin schema', () => {
   });
 
   it('decodes plugin tool call records', () => {
+    const record = decodeRawEventLogRecord(
+      JSON.stringify({
+        eventId: 'evt_storage_tool',
+        traceId: 'trace_storage_tool',
+        createdAt: '2026-06-15T00:00:00.000Z',
+        kind: 'tool_call_finished',
+        eventType: 'USER_MESSAGE',
+        toolCallId: 'round-1.1.character_state.patch',
+        toolRound: 1,
+        toolName: 'character_state.patch',
+        toolPluginId: 'character-state',
+        toolResult: {
+          status: 'rejected',
+          reason: 'invalid_state_value',
+          message: 'Invalid value.',
+          evidence: []
+        }
+      })
+    );
+
+    expect(record).toMatchObject({
+      kind: 'tool_call_finished',
+      toolPluginId: 'character-state',
+      toolResult: {
+        status: 'rejected'
+      }
+    });
+    expect(record).not.toHaveProperty('dispatchedToHost');
+  });
+
+  it('decodes the optional host-dispatch signal on finished tool calls', () => {
     expect(
       decodeRawEventLogRecord(
         JSON.stringify({
-          eventId: 'evt_storage_tool',
-          traceId: 'trace_storage_tool',
+          eventId: 'evt_storage_dispatched_tool',
+          traceId: 'trace_storage_dispatched_tool',
           createdAt: '2026-06-15T00:00:00.000Z',
           kind: 'tool_call_finished',
           eventType: 'USER_MESSAGE',
           toolCallId: 'round-1.1.character_state.patch',
+          dispatchedToHost: true,
           toolRound: 1,
           toolName: 'character_state.patch',
           toolPluginId: 'character-state',
@@ -52,10 +84,7 @@ describe('local storage plugin schema', () => {
       )
     ).toMatchObject({
       kind: 'tool_call_finished',
-      toolPluginId: 'character-state',
-      toolResult: {
-        status: 'rejected'
-      }
+      dispatchedToHost: true
     });
   });
 });

@@ -22,7 +22,10 @@ const project02RuntimeConfigFields = Object.freeze([
   'defaultMemoryProvider',
   'plugins'
 ]);
-const project02RuntimePluginConfigFields = Object.freeze(['enabled', 'config']);
+const project02RuntimePluginConfigFields = Object.freeze([
+  'enabled',
+  'config'
+]);
 const runtimeConfigSecretRefFields = Object.freeze(['$env', 'description']);
 const runtimeConfigPlaintextSecretOverrideFields = Object.freeze([
   '$plaintextSecret',
