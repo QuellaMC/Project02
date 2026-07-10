@@ -1843,6 +1843,17 @@ function requiredModelToolJsonSchema(
     );
   }
 
+  const unsupportedKeyword = Object.keys(value).find(
+    (keyword) => !supportedModelToolJsonSchemaKeywords.has(keyword)
+  );
+
+  if (unsupportedKeyword !== undefined) {
+    return reject(
+      'malformed_tool_definition',
+      `Model tool inputContract.${fieldPath}.${unsupportedKeyword} is not supported.`
+    );
+  }
+
   const type = optionalModelToolJsonSchemaType(value['type'], fieldPath);
   const description =
     value['description'] === undefined
@@ -1912,6 +1923,16 @@ function requiredModelToolJsonSchema(
     } satisfies ModelToolJsonSchema)
   );
 }
+
+const supportedModelToolJsonSchemaKeywords = new Set([
+  'type',
+  'description',
+  'enum',
+  'properties',
+  'required',
+  'additionalProperties',
+  'items'
+]);
 
 function requiredModelToolJsonSchemaProperties(
   value: unknown,

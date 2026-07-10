@@ -1077,6 +1077,10 @@ function traceToolCallSummaryOption(
       ? terminalDecision.decision.toolCalls.map((call) => call.name)
       : [];
 
+  if (terminalDecision?.status === 'rejected') {
+    requestedToolCalls.push(...(terminalDecision.requestedToolNames ?? []));
+  }
+
   requestedToolCalls.push(...terminalToolCalls);
 
   return {

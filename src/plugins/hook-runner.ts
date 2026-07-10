@@ -616,6 +616,15 @@ async function runHandleToolCall(options: {
   readonly sessionIdentity?: object | undefined;
   readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction;
 }): Promise<RuntimePluginToolCallResult> {
+  if (!runtimeIdentityMatchesContext(options.call, options.context)) {
+    return createRejectedToolCallResult({
+      call: options.call,
+      context: options.context,
+      reason: 'tool_call_identity_mismatch',
+      message: 'Tool call identity must match current runtime event identity.'
+    });
+  }
+
   const plugin = options.plugins.find(
     (candidate) => candidate.manifest.id === options.call.pluginId
   );
@@ -1772,16 +1781,23 @@ function assertSnapshotRuntimeIdentity(options: {
   readonly snapshot: Pick<RuntimePluginEvidenceSnapshot, 'eventId' | 'traceId' | 'createdAt'>;
   readonly field: string;
 }): void {
-  if (
-    options.snapshot.eventId === options.context.eventId &&
-    options.snapshot.traceId === options.context.traceId &&
-    options.snapshot.createdAt === options.context.timestamp
-  ) {
+  if (runtimeIdentityMatchesContext(options.snapshot, options.context)) {
     return;
   }
 
   throw new TypeError(
     `${options.field} identity must match current runtime event identity.`
+  );
+}
+
+function runtimeIdentityMatchesContext(
+  identity: Pick<RuntimeEventIdentity, 'eventId' | 'traceId' | 'createdAt'>,
+  context: RuntimePluginContext
+): boolean {
+  return (
+    identity.eventId === context.eventId &&
+    identity.traceId === context.traceId &&
+    identity.createdAt === context.timestamp
   );
 }
 

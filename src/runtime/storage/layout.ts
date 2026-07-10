@@ -28,6 +28,7 @@ import {
   hasDuplicateRoleModelAllowedTools,
   isRoleModelAllowedToolName,
   isRoleModelRawOutputReplayableDecisionEvidence,
+  normalizeReplayableRejectedRoleModelDecisionResult,
   parseRoleModelProviderExchangeSnapshot,
   roleModelPluginToolRejectedRejectionReason,
   roleModelCommitValidationFailureRejectionReason,
@@ -489,10 +490,16 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const roleModelIOSnapshot = optionalRoleModelIOSnapshot(
     record['roleModelIOSnapshot']
   );
-  const parsedRoleModelDecisionSnapshot =
+  const decodedParsedRoleModelDecisionSnapshot =
     optionalParsedRoleModelDecisionSnapshot(
       record['parsedRoleModelDecisionSnapshot']
     );
+  const parsedRoleModelDecisionSnapshot =
+    normalizeLegacyRejectedDecisionRequestedToolNames({
+      roleModelIOSnapshot,
+      parsedRoleModelDecisionSnapshot:
+        decodedParsedRoleModelDecisionSnapshot
+    });
   const commitValidation = optionalRoleModelCommitValidationSnapshot(
     record['commitValidation']
   );
@@ -1386,6 +1393,51 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
   });
 }
 
+function normalizeLegacyRejectedDecisionRequestedToolNames(options: {
+  readonly roleModelIOSnapshot: RoleModelIOSnapshot | undefined;
+  readonly parsedRoleModelDecisionSnapshot:
+    | ParsedRoleModelDecisionSnapshot
+    | undefined;
+}): ParsedRoleModelDecisionSnapshot | undefined {
+  const roleModelIOSnapshot = options.roleModelIOSnapshot;
+  const parsedSnapshot = options.parsedRoleModelDecisionSnapshot;
+  const storedResult = parsedSnapshot?.result;
+
+  if (
+    roleModelIOSnapshot === undefined ||
+    parsedSnapshot === undefined ||
+    storedResult?.status !== 'rejected' ||
+    storedResult.requestedToolNames !== undefined
+  ) {
+    return parsedSnapshot;
+  }
+
+  const normalizedResult = normalizeReplayableRejectedRoleModelDecisionResult({
+    rawOutputText: roleModelIOSnapshot.rawOutputText,
+    providerMetadata: roleModelIOSnapshot.providerMetadata,
+    decisionResult: storedResult,
+    allowedTools: roleModelIOSnapshot.inputEnvelope.allowedTools,
+    pluginToolDefinitions:
+      roleModelIOSnapshot.inputEnvelope.pluginToolDefinitions,
+    toolObservations: roleModelIOSnapshot.inputEnvelope.toolObservations
+  });
+
+  if (
+    normalizedResult === undefined ||
+    normalizedResult.requestedToolNames === undefined
+  ) {
+    return parsedSnapshot;
+  }
+
+  return createParsedRoleModelDecisionSnapshot({
+    eventId: parsedSnapshot.eventId,
+    traceId: parsedSnapshot.traceId,
+    createdAt: parsedSnapshot.createdAt,
+    sessionId: parsedSnapshot.sessionId,
+    result: normalizedResult
+  });
+}
+
 function assertRoleModelInputTextMatchesPayloadSummary(options: {
   readonly payloadSummary: RawEventLogPayloadSummary | undefined;
   readonly inputText: string;
@@ -1437,13 +1489,11 @@ function assertParsedRoleModelDecisionAllowedByEnvelope(options: {
     return;
   }
 
-  const visibleReplyIsAllowed = parsedResult.decision.toolCalls
-    .filter((call) => call.name === visibleReplyModelToolName)
-    .every((call) =>
-      options.roleModelIOSnapshot.inputEnvelope.allowedTools.includes(call.name)
-    );
+  const everyToolIsAllowed = parsedResult.decision.toolCalls.every((call) =>
+    options.roleModelIOSnapshot.inputEnvelope.allowedTools.includes(call.name)
+  );
 
-  if (!visibleReplyIsAllowed) {
+  if (!everyToolIsAllowed) {
     throwMalformedRecord('roleModelIOSnapshot.inputEnvelope.allowedTools');
   }
 }
@@ -2105,10 +2155,25 @@ function requiredRoleModelDecisionResult(
 
   if (status === 'rejected') {
     const rejection = requiredRoleModelDecisionRejection(value['rejection']);
+    const requestedToolNames = optionalStringArray(
+      value['requestedToolNames'],
+      'roleModelDecisionResult.requestedToolNames'
+    );
+
+    if (
+      requestedToolNames?.some(
+        (toolName) => !isRoleModelAllowedToolName(toolName)
+      ) === true
+    ) {
+      throwMalformedRecord('roleModelDecisionResult.requestedToolNames');
+    }
 
     return createRejectedRoleModelDecisionResult(
       rejection.reason,
-      rejection.details
+      rejection.details,
+      {
+        ...(requestedToolNames === undefined ? {} : { requestedToolNames })
+      }
     );
   }
 

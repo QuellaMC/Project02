@@ -286,6 +286,7 @@ export type AcceptedRoleModelDecisionResult = {
 export type RejectedRoleModelDecisionResult = {
   readonly status: 'rejected';
   readonly rejection: RoleModelDecisionRejection;
+  readonly requestedToolNames?: readonly RoleModelAllowedToolName[];
 };
 
 export type RoleModelDecisionResult =
@@ -420,15 +421,37 @@ export function createAcceptedRoleModelDecisionResult(
 
 export function createRejectedRoleModelDecisionResult(
   reason: RoleModelDecisionRejectionReason,
-  details?: string
+  details?: string,
+  options: {
+    readonly requestedToolNames?: readonly RoleModelAllowedToolName[];
+  } = {}
 ): RejectedRoleModelDecisionResult {
   return Object.freeze({
     status: 'rejected',
     rejection: freezeRoleModelDecisionRejection({
       reason,
       ...(details === undefined ? {} : { details })
-    })
+    }),
+    ...(options.requestedToolNames === undefined
+      ? {}
+      : {
+          requestedToolNames: freezeRequestedToolNames(
+            options.requestedToolNames
+          )
+        })
   } satisfies RejectedRoleModelDecisionResult);
+}
+
+function freezeRequestedToolNames(
+  requestedToolNames: readonly RoleModelAllowedToolName[]
+): readonly RoleModelAllowedToolName[] {
+  if (!requestedToolNames.every(isRoleModelAllowedToolName)) {
+    throw new TypeError(
+      'Role-model requestedToolNames must contain only valid tool names.'
+    );
+  }
+
+  return Object.freeze([...requestedToolNames]);
 }
 
 export function createRoleModelIOSnapshot(
@@ -495,9 +518,11 @@ export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
   readonly rawOutputText: string;
   readonly providerMetadata: RoleModelProviderMetadata | undefined;
   readonly decisionResult: RoleModelDecisionResult;
-  readonly allowedTools?: readonly RoleModelAllowedToolName[];
-  readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
-  readonly toolObservations?: readonly RoleModelToolObservation[];
+  readonly allowedTools?: readonly RoleModelAllowedToolName[] | undefined;
+  readonly pluginToolDefinitions?:
+    | readonly RoleModelPluginToolDefinition[]
+    | undefined;
+  readonly toolObservations?: readonly RoleModelToolObservation[] | undefined;
 }): boolean {
   const parsedRawOutputDecision = parseRoleModelDecision(
     options.rawOutputText,
@@ -525,6 +550,77 @@ export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
       decisionResult: options.decisionResult
     })
   );
+}
+
+export function normalizeReplayableRejectedRoleModelDecisionResult(options: {
+  readonly rawOutputText: string;
+  readonly providerMetadata: RoleModelProviderMetadata | undefined;
+  readonly decisionResult: RejectedRoleModelDecisionResult;
+  readonly allowedTools?: readonly RoleModelAllowedToolName[];
+  readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
+  readonly toolObservations?: readonly RoleModelToolObservation[];
+}): RejectedRoleModelDecisionResult | undefined {
+  if (
+    isRoleModelRawOutputReplayableDecisionEvidence({
+      rawOutputText: options.rawOutputText,
+      providerMetadata: options.providerMetadata,
+      decisionResult: options.decisionResult,
+      ...(options.allowedTools === undefined
+        ? {}
+        : { allowedTools: options.allowedTools }),
+      ...(options.pluginToolDefinitions === undefined
+        ? {}
+        : { pluginToolDefinitions: options.pluginToolDefinitions }),
+      ...(options.toolObservations === undefined
+        ? {}
+        : { toolObservations: options.toolObservations })
+    })
+  ) {
+    return options.decisionResult;
+  }
+
+  if (options.decisionResult.requestedToolNames !== undefined) {
+    return undefined;
+  }
+
+  const canonicalResult = parseRoleModelDecision(
+    options.rawOutputText,
+    options.allowedTools,
+    options.pluginToolDefinitions,
+    options.toolObservations
+  );
+
+  if (
+    canonicalResult.status !== 'rejected' ||
+    canonicalResult.requestedToolNames === undefined
+  ) {
+    return undefined;
+  }
+
+  const normalizedResult = createRejectedRoleModelDecisionResult(
+    options.decisionResult.rejection.reason,
+    options.decisionResult.rejection.details,
+    {
+      requestedToolNames: canonicalResult.requestedToolNames
+    }
+  );
+
+  return isRoleModelRawOutputReplayableDecisionEvidence({
+    rawOutputText: options.rawOutputText,
+    providerMetadata: options.providerMetadata,
+    decisionResult: normalizedResult,
+    ...(options.allowedTools === undefined
+      ? {}
+      : { allowedTools: options.allowedTools }),
+    ...(options.pluginToolDefinitions === undefined
+      ? {}
+      : { pluginToolDefinitions: options.pluginToolDefinitions }),
+    ...(options.toolObservations === undefined
+      ? {}
+      : { toolObservations: options.toolObservations })
+  })
+    ? normalizedResult
+    : undefined;
 }
 
 function isRoleModelTerminalEmptyOutputRejectionEvidence(options: {
@@ -580,7 +676,24 @@ function roleModelDecisionResultsMatch(options: {
   return (
     options.expected.status === 'rejected' &&
     options.actual.rejection.reason === options.expected.rejection.reason &&
-    options.actual.rejection.details === options.expected.rejection.details
+    options.actual.rejection.details === options.expected.rejection.details &&
+    isDeepEqualStringArray(
+      options.actual.requestedToolNames,
+      options.expected.requestedToolNames
+    )
+  );
+}
+
+function isDeepEqualStringArray(
+  actual: readonly string[] | undefined,
+  expected: readonly string[] | undefined
+): boolean {
+  return (
+    actual === expected ||
+    (actual !== undefined &&
+      expected !== undefined &&
+      actual.length === expected.length &&
+      actual.every((item, index) => item === expected[index]))
   );
 }
 
@@ -689,7 +802,7 @@ function parseRoleModelDecisionObject(
     toolCalls.push(parsedToolCall.toolCall);
   }
 
-  const availabilityResult = validateTerminalToolCallAvailability({
+  const availabilityResult = validateToolCallAvailability({
     toolCalls,
     allowedTools: frozenAllowedTools
   });
@@ -908,21 +1021,21 @@ function rejectToolCall(details: string): ParsedToolCallResult {
   };
 }
 
-function validateTerminalToolCallAvailability(options: {
+function validateToolCallAvailability(options: {
   readonly toolCalls: readonly ModelToolCall[];
   readonly allowedTools: readonly RoleModelAllowedToolName[];
 }): RejectedRoleModelDecisionResult | undefined {
-  const visibleReplyRequested = options.toolCalls.some(
-    (call) => call.name === visibleReplyModelToolName
+  const disallowedToolCall = options.toolCalls.find(
+    (call) => !options.allowedTools.includes(call.name)
   );
 
-  if (
-    visibleReplyRequested &&
-    !options.allowedTools.includes(visibleReplyModelToolName)
-  ) {
+  if (disallowedToolCall !== undefined) {
     return createRejectedRoleModelDecisionResult(
       roleModelDisallowedToolRejectionReason,
-      `Decision requested disallowed tool ${visibleReplyModelToolName}.`
+      `Decision requested disallowed tool ${disallowedToolCall.name}.`,
+      {
+        requestedToolNames: options.toolCalls.map((call) => call.name)
+      }
     );
   }
 
@@ -940,7 +1053,10 @@ function validateUserTurnToolCallCardinality(
   if (visibleReplyCount > 1) {
     return createRejectedRoleModelDecisionResult(
       roleModelDuplicateToolCallRejectionReason,
-      'Decision must not include duplicate visible_reply tool calls.'
+      'Decision must not include duplicate visible_reply tool calls.',
+      {
+        requestedToolNames: toolCalls.map((call) => call.name)
+      }
     );
   }
 
@@ -961,7 +1077,10 @@ function validateUserTurnToolCallCardinality(
     if (definition.requiredForUserTurn && count === 0) {
       return createRejectedRoleModelDecisionResult(
         roleModelMissingRequiredToolCallRejectionReason,
-        `Decision must include required ${definition.name} tool call.`
+        `Decision must include required ${definition.name} tool call.`,
+        {
+          requestedToolNames: toolCalls.map((call) => call.name)
+        }
       );
     }
 
@@ -972,7 +1091,10 @@ function validateUserTurnToolCallCardinality(
           count
         )} times; ${definition.callLimit.scope} maxCalls is ${String(
           definition.callLimit.maxCalls
-        )}.`
+        )}.`,
+        {
+          requestedToolNames: toolCalls.map((call) => call.name)
+        }
       );
     }
   }
@@ -1794,7 +1916,12 @@ function freezeRoleModelDecisionResult(
 
   return createRejectedRoleModelDecisionResult(
     result.rejection.reason,
-    result.rejection.details
+    result.rejection.details,
+    {
+      ...(result.requestedToolNames === undefined
+        ? {}
+        : { requestedToolNames: result.requestedToolNames })
+    }
   );
 }
 

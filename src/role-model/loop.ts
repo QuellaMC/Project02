@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+
 import {
   createDeterministicCharacterAgent,
   validateCharacterAgentReply,
@@ -17,7 +19,7 @@ import {
   roleModelAdapterProviderResponseStatusNonFiniteDetails,
   roleModelAdapterRejectionNotReplayableDetails,
   roleModelAdapterProviderExchangeMalformedDetails,
-  isRoleModelRawOutputReplayableDecisionEvidence,
+  normalizeReplayableRejectedRoleModelDecisionResult,
   parseRoleModelDecision,
   roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelDecisionRejectionReasons,
@@ -48,9 +50,11 @@ import {
 import {
   freezeRoleModelChatMessage,
   renderRoleModelTurnContext,
+  runtimeToolNameForProviderToolName,
   type RoleModelAssistantChatMessage,
   type RoleModelChatMessage,
   type RoleModelChatToolCall,
+  type RoleModelProviderToolNameMapping,
   type RoleModelToolChatMessage,
   type RoleModelTurnContext
 } from './prompt.ts';
@@ -103,6 +107,7 @@ export type RunRoleModelLoopOptions = {
   readonly event: UserMessageRuntimeEvent;
   readonly decisionContext: DecisionContext;
   readonly adapter?: RoleModelAdapter;
+  readonly allowedTools?: readonly RoleModelAllowedToolName[];
   readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
   readonly pluginToolHost?: RoleModelPluginToolHost;
   readonly resolveToolPluginId?: (toolName: string) => string | undefined;
@@ -262,6 +267,9 @@ export async function runRoleModelLoop(
     const inputEnvelope = createRoleModelInputEnvelope({
       event: options.event,
       decisionContext: options.decisionContext,
+      ...(options.allowedTools === undefined
+        ? {}
+        : { allowedTools: options.allowedTools }),
       ...(options.pluginToolDefinitions === undefined
         ? {}
         : { pluginToolDefinitions: options.pluginToolDefinitions }),
@@ -276,9 +284,10 @@ export async function runRoleModelLoop(
     const rawOutputValidation = validateRoleModelAdapterRawOutput(
       rawOutput,
       inputEnvelope.allowedTools,
-      inputEnvelope.pluginToolDefinitions
+      inputEnvelope.pluginToolDefinitions,
+      inputEnvelope.toolObservations
     );
-    const nativeAssistantMessage =
+    const adapterNativeAssistantMessage =
       rawOutputValidation.status === 'accepted'
         ? rawOutputValidation.nativeAssistantMessage
         : undefined;
@@ -333,6 +342,16 @@ export async function runRoleModelLoop(
     const executableToolCalls = executableModelToolCalls(
       decisionResult.decision.toolCalls
     );
+    const nativeAssistantMessage = nativeAssistantMessageForAcceptedDecision({
+      assistantMessage: adapterNativeAssistantMessage,
+      decision: decisionResult.decision,
+      allowedTools: inputEnvelope.allowedTools,
+      pluginToolDefinitions: inputEnvelope.pluginToolDefinitions,
+      toolObservations,
+      toolNameMappings:
+        rawOutputValidation.providerExchange?.toolNameMappings ?? [],
+      nativeToolCallArgumentErrors
+    });
 
     if (executableToolCalls.length === 0) {
       if (
@@ -482,7 +501,9 @@ export async function runRoleModelLoop(
     nativeAdditionalMessages = appendNativeToolRoundMessages({
       assistantMessage: nativeAssistantMessage,
       previousMessages: nativeAdditionalMessages,
-      results: pluginToolRouting.results
+      results: pluginToolRouting.results,
+      toolNameMappings:
+        rawOutputValidation.providerExchange?.toolNameMappings ?? []
     });
 
     toolRounds += 1;
@@ -544,6 +565,134 @@ function executableModelToolCalls(
   );
 }
 
+function nativeAssistantMessageForAcceptedDecision(options: {
+  readonly assistantMessage: RoleModelAssistantChatMessage | undefined;
+  readonly decision: CharacterDecision;
+  readonly allowedTools: readonly RoleModelAllowedToolName[];
+  readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
+  readonly toolObservations: readonly RoleModelToolObservation[];
+  readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
+  readonly nativeToolCallArgumentErrors: readonly RoleModelNativeToolCallArgumentError[];
+}): RoleModelAssistantChatMessage | undefined {
+  const nativeToolCalls = options.assistantMessage?.tool_calls;
+
+  if (options.assistantMessage === undefined || nativeToolCalls === undefined) {
+    return undefined;
+  }
+
+  const nativeToolCallIds = new Set<string>();
+
+  for (const nativeToolCall of nativeToolCalls) {
+    if (
+      nativeToolCall.id.length === 0 ||
+      nativeToolCallIds.has(nativeToolCall.id)
+    ) {
+      return undefined;
+    }
+
+    nativeToolCallIds.add(nativeToolCall.id);
+  }
+
+  const expectedExecutableToolCalls = executableModelToolCalls(
+    options.decision.toolCalls
+  );
+  const argumentErrorsByExecutableIndex = new Map<
+    number,
+    RoleModelNativeToolCallArgumentError
+  >();
+
+  for (const error of options.nativeToolCallArgumentErrors) {
+    const expectedToolCall = expectedExecutableToolCalls[error.executableIndex];
+
+    if (
+      expectedToolCall === undefined ||
+      expectedToolCall.name !== error.toolName ||
+      argumentErrorsByExecutableIndex.has(error.executableIndex)
+    ) {
+      return undefined;
+    }
+
+    argumentErrorsByExecutableIndex.set(error.executableIndex, error);
+  }
+
+  const normalizedNativeToolCalls: Array<{
+    readonly name: string;
+    readonly input: unknown;
+  }> = [];
+  let executableIndex = 0;
+
+  for (const nativeToolCall of nativeToolCalls) {
+    const runtimeToolName = runtimeToolNameForProviderToolName(
+      nativeToolCall.function.name,
+      options.toolNameMappings
+    );
+    const expectedExecutableToolCall =
+      runtimeToolName === visibleReplyModelToolName
+        ? undefined
+        : expectedExecutableToolCalls[executableIndex];
+
+    if (
+      runtimeToolName !== visibleReplyModelToolName &&
+      (expectedExecutableToolCall === undefined ||
+        expectedExecutableToolCall.name !== runtimeToolName)
+    ) {
+      return undefined;
+    }
+
+    let input: unknown;
+    const argumentError =
+      runtimeToolName === visibleReplyModelToolName
+        ? undefined
+        : argumentErrorsByExecutableIndex.get(executableIndex);
+
+    if (argumentError !== undefined) {
+      input = expectedExecutableToolCall?.input;
+    } else {
+      try {
+        input = JSON.parse(nativeToolCall.function.arguments);
+      } catch {
+        return undefined;
+      }
+    }
+
+    normalizedNativeToolCalls.push(
+      Object.freeze({
+        name: runtimeToolName,
+        input
+      })
+    );
+
+    if (runtimeToolName !== visibleReplyModelToolName) {
+      executableIndex += 1;
+    }
+  }
+
+  if (executableIndex !== expectedExecutableToolCalls.length) {
+    return undefined;
+  }
+
+  const nativeDecisionResult = parseRoleModelDecision(
+    JSON.stringify({
+      toolCalls: normalizedNativeToolCalls
+    }),
+    options.allowedTools,
+    options.pluginToolDefinitions,
+    options.toolObservations
+  );
+
+  if (
+    nativeDecisionResult.status === 'rejected' ||
+    !isDeepStrictEqual(
+      nativeDecisionResult.decision.toolCalls,
+      options.decision.toolCalls
+    )
+  ) {
+    return undefined;
+  }
+
+  return options.assistantMessage;
+}
+
 function createToolObservationFromRouting(options: {
   readonly round: number;
   readonly routing: RoleModelPluginToolRoutingEvidence;
@@ -573,6 +722,7 @@ function appendNativeToolRoundMessages(options: {
   readonly assistantMessage: RoleModelAssistantChatMessage | undefined;
   readonly previousMessages: readonly RoleModelChatMessage[];
   readonly results: readonly RoleModelPluginToolRoutingEvidence[];
+  readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
 }): readonly RoleModelChatMessage[] {
   if (
     options.assistantMessage === undefined ||
@@ -586,7 +736,8 @@ function appendNativeToolRoundMessages(options: {
     freezeRoleModelChatMessage(options.assistantMessage),
     ...createNativeToolResultMessages({
       assistantMessage: options.assistantMessage,
-      results: options.results
+      results: options.results,
+      toolNameMappings: options.toolNameMappings
     })
   ]);
 }
@@ -594,6 +745,7 @@ function appendNativeToolRoundMessages(options: {
 function createNativeToolResultMessages(options: {
   readonly assistantMessage: RoleModelAssistantChatMessage;
   readonly results: readonly RoleModelPluginToolRoutingEvidence[];
+  readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
 }): readonly RoleModelToolChatMessage[] {
   let executableResultIndex = 0;
   const nativeToolCalls = options.assistantMessage.tool_calls ?? [];
@@ -612,7 +764,12 @@ function createNativeToolResultMessages(options: {
 
   return Object.freeze(
     nativeToolCalls.map((toolCall) => {
-      if (toolCall.function.name === visibleReplyModelToolName) {
+      const runtimeToolName = runtimeToolNameForProviderToolName(
+        toolCall.function.name,
+        options.toolNameMappings
+      );
+
+      if (runtimeToolName === visibleReplyModelToolName) {
         return Object.freeze({
           role: 'tool',
           tool_call_id: toolCall.id,
@@ -629,7 +786,7 @@ function createNativeToolResultMessages(options: {
         tool_call_id: toolCall.id,
         content: JSON.stringify(
           result === undefined
-            ? createNativeMissingToolResultContent(toolCall.function.name)
+            ? createNativeMissingToolResultContent(runtimeToolName)
             : createNativeToolResultMessageContent(result)
         )
       } satisfies RoleModelToolChatMessage);
@@ -1110,7 +1267,8 @@ type RoleModelAdapterRawOutputValidationResult =
 function validateRoleModelAdapterRawOutput(
   rawOutput: unknown,
   allowedTools: readonly RoleModelAllowedToolName[],
-  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[]
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
+  toolObservations: readonly RoleModelToolObservation[]
 ): RoleModelAdapterRawOutputValidationResult {
   if (!isJsonRecord(rawOutput)) {
     return createMalformedAdapterRawOutputResult();
@@ -1160,20 +1318,19 @@ function validateRoleModelAdapterRawOutput(
   }
 
   if (rejection !== undefined) {
-    const decisionResult = createRejectedRoleModelDecisionResult(
-      rejection.reason,
-      rejection.details
-    );
+    const decisionResult = normalizeReplayableRejectedRoleModelDecisionResult({
+      rawOutputText,
+      providerMetadata,
+      decisionResult: createRejectedRoleModelDecisionResult(
+        rejection.reason,
+        rejection.details
+      ),
+      allowedTools,
+      pluginToolDefinitions,
+      toolObservations
+    });
 
-    if (
-      !isRoleModelRawOutputReplayableDecisionEvidence({
-        rawOutputText,
-        providerMetadata,
-        decisionResult,
-        allowedTools,
-        pluginToolDefinitions
-      })
-    ) {
+    if (decisionResult === undefined) {
       return createMalformedAdapterRawOutputResult(
         roleModelAdapterRejectionNotReplayableDetails
       );

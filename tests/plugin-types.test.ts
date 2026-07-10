@@ -208,6 +208,97 @@ describe('runtime plugin access control', () => {
 });
 
 describe('runtime plugin model-facing tool policy', () => {
+  it('rejects unsupported root JSON Schema keywords with their field path', () => {
+    expect(() =>
+      createRuntimePluginProvidedToolWithJsonSchema({
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+        oneOf: []
+      })
+    ).toThrow('Model tool inputContract.jsonSchema.oneOf is not supported.');
+  });
+
+  it('rejects unsupported property JSON Schema keywords with their field path', () => {
+    expect(() =>
+      createRuntimePluginProvidedToolWithJsonSchema({
+        type: 'object',
+        properties: {
+          profile: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                minLength: 1
+              }
+            },
+            required: ['name'],
+            additionalProperties: false
+          }
+        },
+        required: ['profile'],
+        additionalProperties: false
+      })
+    ).toThrow(
+      'Model tool inputContract.jsonSchema.properties.profile.properties.name.minLength is not supported.'
+    );
+  });
+
+  it('rejects unsupported item JSON Schema keywords with their field path', () => {
+    expect(() =>
+      createRuntimePluginProvidedToolWithJsonSchema({
+        type: 'object',
+        properties: {
+          aliases: {
+            type: 'array',
+            items: {
+              type: 'string',
+              pattern: '^[a-z]+$'
+            }
+          }
+        },
+        required: ['aliases'],
+        additionalProperties: false
+      })
+    ).toThrow(
+      'Model tool inputContract.jsonSchema.properties.aliases.items.pattern is not supported.'
+    );
+  });
+
+  it('preserves supported JSON Schema keywords and union types', () => {
+    const jsonSchema = {
+      type: 'object',
+      description: 'Memory capture input.',
+      properties: {
+        note: {
+          type: ['string', 'null'],
+          description: 'Optional note.',
+          enum: ['remember', 'forget']
+        },
+        entries: {
+          type: ['array', 'null'],
+          items: {
+            type: ['object', 'null'],
+            properties: {
+              text: {
+                type: 'string'
+              }
+            },
+            required: ['text'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['note'],
+      additionalProperties: false
+    };
+
+    const tool = createRuntimePluginProvidedToolWithJsonSchema(jsonSchema);
+
+    expect(tool.inputContract.jsonSchema).toEqual(jsonSchema);
+  });
+
   it('requires the scoped call-limit contract on provided tools', () => {
     expect(() =>
       createRuntimePluginProvidedTool(
@@ -449,6 +540,19 @@ function runtimePluginManifestFixture(
     },
     ...overrides
   });
+}
+
+function createRuntimePluginProvidedToolWithJsonSchema(jsonSchema: unknown) {
+  return createRuntimePluginProvidedTool(
+    runtimePluginProvidedToolFixture({
+      inputContract: {
+        type: 'object',
+        fields: [],
+        additionalFields: false,
+        jsonSchema
+      }
+    })
+  );
 }
 
 function runtimePluginProvidedToolFixture(

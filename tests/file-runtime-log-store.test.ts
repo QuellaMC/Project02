@@ -283,6 +283,63 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toThrow(LocalRuntimeStorageContractError);
   });
 
+  it('normalizes missing legacy requested tool names from replayable raw evidence', async () => {
+    const storedRecord = await persistedDisallowedToolRejectionRecord(
+      'legacy-missing-requested-tool-names'
+    );
+    const storedDecisionResult = rejectedDecisionResultRecord(storedRecord);
+
+    Reflect.deleteProperty(storedDecisionResult, 'requestedToolNames');
+
+    const decodedRecord = decodeRawEventLogRecord(JSON.stringify(storedRecord));
+
+    expect(
+      decodedRecord.parsedRoleModelDecisionSnapshot?.result
+    ).toMatchObject({
+      status: 'rejected',
+      requestedToolNames: ['memory.unknown']
+    });
+  });
+
+  it('rejects present requested tool names that disagree with raw evidence', async () => {
+    const storedRecord = await persistedDisallowedToolRejectionRecord(
+      'tampered-requested-tool-names'
+    );
+    const storedDecisionResult = rejectedDecisionResultRecord(storedRecord);
+
+    storedDecisionResult['requestedToolNames'] = [visibleReplyModelToolName];
+
+    expect(() =>
+      decodeRawEventLogRecord(JSON.stringify(storedRecord))
+    ).toThrow(LocalRuntimeStorageContractError);
+  });
+
+  it('round-trips supported persisted plugin tool schemas unchanged', () => {
+    const jsonSchema = supportedPersistedPluginToolJsonSchema();
+    const storedRecord = storedRecordWithPluginToolJsonSchema(jsonSchema);
+    const decodedRecord = decodeRawEventLogRecord(
+      JSON.stringify(storedRecord)
+    );
+
+    expect(
+      decodedRecord.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions.find(
+        (definition) => definition.name === 'memory.capture'
+      )?.inputContract.jsonSchema
+    ).toEqual(jsonSchema);
+  });
+
+  it('rejects unsupported nested keywords in persisted plugin tool schemas', () => {
+    const jsonSchema = supportedPersistedPluginToolJsonSchema();
+    Object.assign(jsonSchema.properties.entries.items, {
+      pattern: 'unsupported'
+    });
+    const storedRecord = storedRecordWithPluginToolJsonSchema(jsonSchema);
+
+    expect(() =>
+      decodeRawEventLogRecord(JSON.stringify(storedRecord))
+    ).toThrow(LocalRuntimeStorageContractError);
+  });
+
   it('reloads a durable malformed provider exchange adapter rejection', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-malformed-provider-exchange-rejection';
@@ -846,6 +903,152 @@ function writeJsonLines(filePath: string, records: readonly object[]): void {
 
 function isTestRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function persistedDisallowedToolRejectionRecord(
+  sessionId: string
+): Promise<Record<string, unknown>> {
+  const storeRoot = createStoreRoot();
+  await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    sessionId,
+    createdAt: '2026-06-15T00:00:00.000Z'
+  });
+  const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+  const result = await runLocalUserMessageEvent({
+    event: createUserMessageRuntimeEvent(
+      'try unknown',
+      identity(`evt_${sessionId}`)
+    ),
+    session: createConversationSession({ id: sessionId }),
+    logStore,
+    roleModelAdapter: Object.freeze({
+      invoke() {
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'memory.unknown',
+                input: {
+                  query: 'Mira'
+                }
+              }
+            ]
+          })
+        };
+      }
+    } satisfies RoleModelAdapter)
+  });
+  const storedRecord: unknown = structuredClone(logStore.rawEvents().at(-1));
+
+  expect(result).toMatchObject({
+    status: 'rejected',
+    reason: 'disallowed_tool'
+  });
+
+  if (!isTestRecord(storedRecord)) {
+    throw new Error('Expected persisted disallowed-tool rejection fixture.');
+  }
+
+  return storedRecord;
+}
+
+function rejectedDecisionResultRecord(
+  storedRecord: Record<string, unknown>
+): Record<string, unknown> {
+  const parsedSnapshot = storedRecord['parsedRoleModelDecisionSnapshot'];
+  const result = isTestRecord(parsedSnapshot)
+    ? parsedSnapshot['result']
+    : undefined;
+
+  if (!isTestRecord(result) || result['status'] !== 'rejected') {
+    throw new Error('Expected persisted rejected decision result fixture.');
+  }
+
+  return result;
+}
+
+function supportedPersistedPluginToolJsonSchema() {
+  return {
+    type: 'object',
+    description: 'Capture memory entries.',
+    properties: {
+      note: {
+        type: ['string', 'null'],
+        description: 'Optional note.',
+        enum: ['remember', 'forget']
+      },
+      entries: {
+        type: ['array', 'null'],
+        items: {
+          type: ['object', 'null'],
+          properties: {
+            text: {
+              type: 'string'
+            }
+          },
+          required: ['text'],
+          additionalProperties: false
+        }
+      }
+    },
+    required: ['entries'],
+    additionalProperties: false
+  };
+}
+
+function storedRecordWithPluginToolJsonSchema(
+  jsonSchema: Readonly<Record<string, unknown>>
+): object {
+  const storedRecord: unknown = structuredClone(
+    decodeRawEventLogRecord(
+      JSON.stringify(
+        legacySchema1PatchCompletedEvent('persisted-plugin-tool-schema')
+      )
+    )
+  );
+
+  if (!isTestRecord(storedRecord)) {
+    throw new Error('Expected persisted raw-event fixture.');
+  }
+
+  const roleModelIOSnapshot = storedRecord['roleModelIOSnapshot'];
+  const inputEnvelope = isTestRecord(roleModelIOSnapshot)
+    ? roleModelIOSnapshot['inputEnvelope']
+    : undefined;
+  const pluginToolDefinitions = isTestRecord(inputEnvelope)
+    ? inputEnvelope['pluginToolDefinitions']
+    : undefined;
+  const allowedTools = isTestRecord(inputEnvelope)
+    ? inputEnvelope['allowedTools']
+    : undefined;
+
+  if (!Array.isArray(pluginToolDefinitions) || !Array.isArray(allowedTools)) {
+    throw new Error('Expected persisted role-model input envelope fixture.');
+  }
+
+  pluginToolDefinitions.push({
+    pluginId: 'memory.fixture',
+    name: 'memory.capture',
+    description: 'Capture a memory.',
+    requiredForUserTurn: false,
+    callLimit: {
+      scope: 'user_turn',
+      maxCalls: 1
+    },
+    inputContract: {
+      type: 'object',
+      fields: [],
+      additionalFields: false,
+      jsonSchema
+    },
+    validationOwner: 'plugin_host',
+    sideEffectLevel: 'local_memory_write',
+    requiresConfirmation: false,
+    sourceReferencesRequired: false
+  });
+  allowedTools.push('memory.capture');
+
+  return storedRecord;
 }
 
 function legacySchema1PatchCompletedEvent(sessionId: string): object {

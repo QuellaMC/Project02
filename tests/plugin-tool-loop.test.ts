@@ -650,10 +650,24 @@ describe('plugin-driven tool loop', () => {
         mood: 'curious'
       }
     });
+    const interveningContext = createRuntimePluginContext({
+      ...createRuntimeEventIdentity({
+        eventId: 'evt_plugin_patch_intervening',
+        traceId: 'trace_plugin_patch_intervening',
+        createdAt: context.timestamp
+      }),
+      sessionId,
+      eventType: 'USER_MESSAGE',
+      currentUserMessage: 'hello',
+      character: {
+        id: 'mira',
+        displayName: 'Mira'
+      }
+    });
     const interveningCall = Object.freeze({
-      eventId: 'evt_plugin_patch_intervening',
-      traceId: 'trace_plugin_patch_intervening',
-      createdAt: context.timestamp,
+      eventId: interveningContext.eventId,
+      traceId: interveningContext.traceId,
+      createdAt: interveningContext.timestamp,
       toolCallId: 'character-state-call-intervening',
       pluginId: characterStatePluginId,
       toolName: 'character_state.patch',
@@ -673,9 +687,11 @@ describe('plugin-driven tool loop', () => {
       .prepareFileStoreTransaction?.(transactionIdentityFromContext(context))
       ?.finalize();
     pluginHost.beginFileStoreTransaction?.();
-    await pluginHost.handleToolCall(interveningCall, context);
+    await pluginHost.handleToolCall(interveningCall, interveningContext);
     pluginHost
-      .prepareFileStoreTransaction?.(transactionIdentityFromContext(context))
+      .prepareFileStoreTransaction?.(
+        transactionIdentityFromContext(interveningContext)
+      )
       ?.finalize();
     pluginHost.beginFileStoreTransaction?.();
     const replayedResult = await pluginHost.handleToolCall(originalCall, context);
@@ -2581,7 +2597,7 @@ describe('plugin-driven tool loop', () => {
     });
   });
 
-  it('continues after undeclared executable tools return rejected tool results', async () => {
+  it('rejects undeclared executable tools before routing', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
     const adapter = createSequencedAdapter([
@@ -2591,16 +2607,6 @@ describe('plugin-driven tool loop', () => {
             name: 'memory.unknown',
             input: {
               query: 'Mira'
-            }
-          }
-        ]
-      },
-      {
-        toolCalls: [
-          {
-            name: 'visible_reply',
-            input: {
-              text: 'continued'
             }
           }
         ]
@@ -2614,22 +2620,15 @@ describe('plugin-driven tool loop', () => {
       roleModelAdapter: adapter
     });
 
-    expect(result.status).toBe('completed');
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
-      'try unknown',
-      'continued'
-    ]);
-    expect(
-      logStore.rawEvents().find((event) => event.kind === 'tool_call_finished')
-    ).toMatchObject({
-      kind: 'tool_call_finished',
-      dispatchedToHost: false,
-      toolName: 'memory.unknown',
-      toolResult: {
-        status: 'rejected',
-        reason: 'tool_not_declared'
-      }
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'disallowed_tool',
+      message: 'Decision requested disallowed tool memory.unknown.'
     });
+    expect(logStore.conversationMessages()).toEqual([]);
+    expect(
+      logStore.rawEvents().some((event) => event.kind.startsWith('tool_call'))
+    ).toBe(false);
   });
 
   it('logs only valid pluginStoreRevision metadata from accepted tool output', async () => {

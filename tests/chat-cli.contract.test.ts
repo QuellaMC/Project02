@@ -466,7 +466,7 @@ describe('chat CLI trace summary', () => {
     expect(JSON.parse(stderr.trim())).not.toHaveProperty('toolCalls');
   });
 
-  it('does not count rejected undeclared routing attempts as executed calls', async () => {
+  it('rejects undeclared calls before any routing attempt', async () => {
     let adapterRound = 0;
     let stderr = '';
     const roleModelAdapter: RoleModelAdapter = {
@@ -476,19 +476,12 @@ describe('chat CLI trace summary', () => {
         return {
           rawOutputText: JSON.stringify({
             toolCalls: [
-              adapterRound < 3
-                ? {
-                    name: 'memory.unknown',
-                    input: {
-                      query: 'Mira'
-                    }
-                  }
-                : {
-                    name: 'visible_reply',
-                    input: {
-                      text: 'The unavailable tool was rejected.'
-                    }
-                  }
+              {
+                name: 'memory.unknown',
+                input: {
+                  query: 'Mira'
+                }
+              }
             ]
           })
         };
@@ -505,16 +498,13 @@ describe('chat CLI trace summary', () => {
       roleModelAdapter
     });
 
-    expect(exitCode).toBe(0);
-    expect(adapterRound).toBe(3);
+    expect(exitCode).toBe(1);
+    expect(adapterRound).toBe(1);
     expect(JSON.parse(stderr.trim())).toMatchObject({
-      requestedToolCalls: [
-        'memory.unknown',
-        'memory.unknown',
-        'visible_reply'
-      ],
+      status: 'rejected',
+      requestedToolCalls: ['memory.unknown'],
       executedToolCalls: [],
-      terminalToolCalls: ['visible_reply']
+      terminalToolCalls: []
     });
   });
 

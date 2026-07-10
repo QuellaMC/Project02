@@ -12,6 +12,7 @@ import {
   isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
+  roleModelDisallowedToolRejectionReason,
   roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
   roleModelTerminalEmptyOutputRejectionDetails,
@@ -367,7 +368,26 @@ describe('role-model contracts', () => {
     });
   });
 
-  it('accepts undeclared executable tools for loop routing', () => {
+  it('rejects executable tools omitted from allowedTools even when defined', () => {
+    const memoryUnknownTool = {
+      pluginId: 'memory',
+      name: 'memory.unknown',
+      description: 'Exercise a defined but unavailable memory tool.',
+      requiredForUserTurn: false,
+      callLimit: {
+        scope: 'user_turn',
+        maxCalls: 1
+      },
+      inputContract: {
+        type: 'object',
+        fields: [],
+        additionalFields: true
+      },
+      validationOwner: 'plugin_host',
+      sideEffectLevel: 'runtime_read',
+      requiresConfirmation: false,
+      sourceReferencesRequired: false
+    } satisfies RoleModelPluginToolDefinition;
     const result = parseRoleModelDecision(
       JSON.stringify({
         version: roleModelDecisionContractVersion,
@@ -379,21 +399,21 @@ describe('role-model contracts', () => {
             }
           }
         ]
-      })
+      }),
+      [visibleReplyModelToolName],
+      [
+        ...createDefaultRoleModelPluginToolDefinitions(),
+        memoryUnknownTool
+      ]
     );
 
     expect(result).toMatchObject({
-      status: 'accepted',
-      decision: {
-        toolCalls: [
-          {
-            name: 'memory.unknown',
-            input: {
-              query: 'Mira'
-            }
-          }
-        ]
-      }
+      status: 'rejected',
+      rejection: {
+        reason: roleModelDisallowedToolRejectionReason,
+        details: 'Decision requested disallowed tool memory.unknown.'
+      },
+      requestedToolNames: ['memory.unknown']
     });
   });
 

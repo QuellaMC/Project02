@@ -212,7 +212,7 @@ describe('role-model prompt rendering', () => {
     expect(protocol).not.toContain('user-visible text as terminal assistant content');
   });
 
-  it('renders nested JSON Schema with strict mode when every object is closed', () => {
+  it('renders supported nested JSON Schema unchanged with strict mode', () => {
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
@@ -229,30 +229,9 @@ describe('role-model prompt rendering', () => {
     );
 
     expect(tool?.function.strict).toBe(true);
-    expect(tool?.function.parameters).toMatchObject({
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        memory: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            text: {
-              type: 'string'
-            },
-            tags: {
-              type: 'array',
-              items: {
-                type: 'string'
-              }
-            },
-            note: {
-              type: ['string', 'null']
-            }
-          }
-        }
-      }
-    });
+    expect(tool?.function.parameters).toEqual(
+      nestedSchemaToolDefinition.inputContract.jsonSchema
+    );
     expect(
       tool?.function.parameters.properties['memory']?.properties?.['note']
         ?.type
@@ -275,21 +254,9 @@ describe('role-model prompt rendering', () => {
       (candidate) => candidate.function.name === 'memory.union'
     );
 
-    expect(tool?.function.parameters).toMatchObject({
-      properties: {
-        value: {
-          type: ['object', 'null'],
-          additionalProperties: true
-        },
-        entries: {
-          type: ['array', 'null'],
-          items: {
-            type: ['object', 'null'],
-            additionalProperties: true
-          }
-        }
-      }
-    });
+    expect(tool?.function.parameters).toEqual(
+      openUnionSchemaToolDefinition.inputContract.jsonSchema
+    );
     expect(tool?.function).not.toHaveProperty('strict');
   });
 });

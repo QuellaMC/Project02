@@ -275,6 +275,118 @@ describe('runtime plugin host', () => {
     );
   });
 
+  it.each([
+    ['event id', { eventId: 'evt_other' }],
+    ['trace id', { traceId: 'trace_other' }],
+    ['creation time', { createdAt: '2026-06-15T00:00:01.000Z' }]
+  ])(
+    'rejects a tool call with a mismatched %s before invoking the plugin',
+    async (_field, mismatchedIdentity) => {
+      let invoked = false;
+      const plugin = createMemorySearchPluginWithInvocationProbe(() => {
+        invoked = true;
+      });
+      const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
+      const context = testPluginContext();
+
+      const result = await host.handleToolCall(
+        {
+          ...testIdentity(mismatchedIdentity),
+          pluginId: plugin.manifest.id,
+          toolName: 'memory.search',
+          input: {
+            query: 'Mira'
+          }
+        },
+        context
+      );
+
+      expect(invoked).toBe(false);
+      expect(result).toMatchObject({
+        status: 'rejected',
+        reason: 'tool_call_identity_mismatch',
+        evidence: [
+          {
+            eventId: context.eventId,
+            traceId: context.traceId,
+            createdAt: context.timestamp,
+            evidenceKind: 'tool_invocation',
+            status: 'rejected'
+          }
+        ]
+      });
+    }
+  );
+
+  it('invokes a plugin tool when the call and context identities match exactly', async () => {
+    let invoked = false;
+    const plugin = createMemorySearchPluginWithInvocationProbe(() => {
+      invoked = true;
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
+    const identity = testIdentity();
+    const context = testPluginContext(identity);
+
+    const result = await host.handleToolCall(
+      {
+        ...identity,
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira'
+        }
+      },
+      context
+    );
+
+    expect(invoked).toBe(true);
+    expect(result).toMatchObject({
+      status: 'accepted',
+      evidence: [
+        {
+          eventId: identity.eventId,
+          traceId: identity.traceId,
+          createdAt: identity.createdAt,
+          evidenceKind: 'tool_invocation',
+          status: 'accepted'
+        }
+      ]
+    });
+  });
+
+  it('does not persist Character State when a tool-call identity is mismatched', async () => {
+    const sessionIdentity = {};
+    const plugin = createCharacterStatePlugin();
+    const host = createExplicitlyEnabledRuntimePluginHost({
+      plugins: [plugin],
+      sessionIdentity
+    });
+    const fileStore = createPluginHostTestFileStore({
+      pluginId: characterStatePluginId,
+      sessionIdentity
+    });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity({ eventId: 'evt_other' }),
+        pluginId: characterStatePluginId,
+        toolName: characterStatePatchModelToolName,
+        input: {
+          mood: 'curious'
+        }
+      },
+      testPluginContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'tool_call_identity_mismatch'
+    });
+    expect(fileStore.readJsonl('events.jsonl')).toEqual([]);
+    expect(fileStore.readJson('current.json')).toBeUndefined();
+    expect(fileStore.revision()).toBe(0);
+  });
+
   it('keeps visible_reply terminal and routes character_state.patch through plugins', () => {
     const host = createDefaultProject02PluginHost();
     const visibleReply = host.pluginToolDefinitions().find(
@@ -2139,13 +2251,16 @@ describe('runtime plugin host', () => {
 function createMemorySearchPlugin(
   id = 'memory.search.fixture',
   fails = false,
-  failureMessage = 'search backend failed'
+  failureMessage = 'search backend failed',
+  onHandle?: () => void
 ): RuntimePlugin {
   return createRuntimePlugin({
     manifest: memorySearchPluginManifest(id),
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
       handleToolCall(call, context) {
+        onHandle?.();
+
         if (fails) {
           throw new Error(failureMessage);
         }
@@ -2163,6 +2278,17 @@ function createMemorySearchPlugin(
       }
     }
   });
+}
+
+function createMemorySearchPluginWithInvocationProbe(
+  onHandle: () => void
+): RuntimePlugin {
+  return createMemorySearchPlugin(
+    'memory.identity-probe.fixture',
+    false,
+    'search backend failed',
+    onHandle
+  );
 }
 
 function createTurnContextCapturePlugin(options: {
@@ -3401,6 +3527,7 @@ function testPluginContext(
   identity: {
     readonly eventId?: string;
     readonly traceId?: string;
+    readonly createdAt?: string;
   } = {}
 ) {
   return createRuntimePluginContext({
@@ -3439,12 +3566,13 @@ function testIdentity(
   options: {
     readonly eventId?: string;
     readonly traceId?: string;
+    readonly createdAt?: string;
   } = {}
 ) {
   return createRuntimeEventIdentity({
     eventId: options.eventId ?? 'evt_plugin_host',
     traceId: options.traceId ?? 'trace_plugin_host',
-    createdAt: '2026-06-15T00:00:00.000Z'
+    createdAt: options.createdAt ?? '2026-06-15T00:00:00.000Z'
   });
 }
 
