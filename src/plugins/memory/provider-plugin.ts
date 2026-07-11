@@ -1,19 +1,23 @@
 import {
   createRuntimePlugin,
-  createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
-  createRuntimePluginHealthSnapshot,
+  createRuntimePluginHealthSnapshot
+} from '../constructors.ts';
+import { createRuntimePluginContextItem } from '../manifest-validation.ts';
+import {
   runtimePluginContractVersion,
-  type RuntimePlugin,
   type RuntimePluginAccessMap,
-  type RuntimePluginContext,
-  type RuntimePluginEvidenceKind,
-  type RuntimePluginEvidenceSnapshot,
-  type RuntimePluginJsonObject,
-  type RuntimePluginProvidedTool,
-  type RuntimePluginSourceReference,
-  type RuntimePluginToolCallResult
-} from '../types.ts';
+  type RuntimePluginEvidenceKind
+} from '../contract.ts';
+import type {
+  RuntimePlugin,
+  RuntimePluginContext,
+  RuntimePluginEvidenceSnapshot,
+  RuntimePluginJsonObject,
+  RuntimePluginProvidedTool,
+  RuntimePluginSourceReference,
+  RuntimePluginToolCallResult
+} from '../plugin-types.ts';
 import {
   boundedMemoryItems,
   boundedText,
@@ -150,7 +154,6 @@ export function createMemoryProviderRuntimePlugin(
                     redactionLabels: ['memory']
                   })
                 ),
-                runtimeNotes: [],
                 evidence: [
                   memoryEvidence({
                     context,

@@ -38,4 +38,35 @@ describe('plugin type barrel startup safety', () => {
     );
     expect(result.status).toBe(0);
   });
+
+  it.each([
+    [
+      './src/plugins/validation.ts',
+      './src/plugins/tool-policy.ts',
+      './src/plugins/builtin/model-tools.ts'
+    ],
+    [
+      './src/plugins/builtin/model-tools.ts',
+      './src/plugins/validation.ts',
+      './src/plugins/tool-policy.ts'
+    ],
+    [
+      './src/plugins/tool-policy.ts',
+      './src/plugins/builtin/model-tools.ts',
+      './src/plugins/validation.ts'
+    ]
+  ])('imports plugin construction and policy modules in order %j', (...modules) => {
+    const importChain = modules
+      .map((modulePath) => `import(${JSON.stringify(modulePath)})`)
+      .join('.then(() => ')
+      .concat(')'.repeat(modules.length - 1));
+    const result = spawnSync(process.execPath, ['-e', importChain], {
+      cwd: process.cwd(),
+      encoding: 'utf8'
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    expect(output).not.toContain('ReferenceError');
+    expect(result.status).toBe(0);
+  });
 });

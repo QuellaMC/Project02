@@ -9,7 +9,7 @@ import type {
   RuntimePluginAfterTurnCommittedContext,
   RuntimePluginContext,
   RuntimePluginFileStore
-} from './validation.ts';
+} from './plugin-types.ts';
 import type { RuntimePluginAccessSnapshot } from './contract.ts';
 
 export type PluginHookContextScope<TContext extends RuntimePluginContext> = {

@@ -10,7 +10,9 @@ export type CharacterProfile = {
   readonly displayName: string;
 };
 
-export type VisibleMessageRole = 'user' | 'character';
+export const visibleMessageRoleValues = ['user', 'character'] as const;
+
+export type VisibleMessageRole = (typeof visibleMessageRoleValues)[number];
 
 export type VisibleMessage = {
   readonly id: string;
@@ -42,11 +44,6 @@ export type CharacterAgent = {
 
 export type CharacterTurnResult = {
   readonly userMessage: VisibleMessage;
-  readonly characterMessage: VisibleMessage;
-  readonly reply: CharacterAgentReply;
-};
-
-export type CharacterMessageAppendResult = {
   readonly characterMessage: VisibleMessage;
   readonly reply: CharacterAgentReply;
 };
@@ -174,28 +171,6 @@ export function rollbackLastCharacterTurn(
   }
 
   transcript.splice(userMessageIndex, 2);
-}
-
-export function appendCharacterVisibleMessage(
-  session: ConversationSession,
-  reply: CharacterAgentReply
-): CharacterMessageAppendResult {
-  const transcript = getMutableTranscript(session);
-  const normalizedReplyText = normalizeCharacterReply(reply);
-  const characterMessage = createCharacterVisibleMessage({
-    messageNumber: transcript.length + 1,
-    replyText: normalizedReplyText,
-    session
-  });
-
-  transcript.push(characterMessage);
-
-  return Object.freeze({
-    characterMessage,
-    reply: {
-      text: normalizedReplyText
-    }
-  } satisfies CharacterMessageAppendResult);
 }
 
 async function runSerializedCharacterTurn(

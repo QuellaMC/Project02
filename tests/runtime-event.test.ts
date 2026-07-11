@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  assertCanonicalRuntimeTimestamp,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
   RuntimeEventInputError
@@ -45,6 +46,30 @@ describe('runtime event contract', () => {
         createdAt: '2026-06-04T00:00:00.000Z'
       })
     ).toThrow('Runtime event identity requires separate event and trace IDs.');
+  });
+
+  it.each([
+    '',
+    'not-a-date',
+    '2026-06-04T08:00:00.000+08:00',
+    '2026-06-04T00:00:00Z'
+  ])('rejects non-canonical runtime timestamps', (createdAt) => {
+    expect(() =>
+      createRuntimeEventIdentity({
+        eventId: 'evt_invalid_timestamp',
+        traceId: 'trace_invalid_timestamp',
+        createdAt
+      })
+    ).toThrow('Runtime event createdAt must be a canonical UTC ISO timestamp.');
+  });
+
+  it('accepts and returns a canonical runtime timestamp unchanged', () => {
+    expect(
+      assertCanonicalRuntimeTimestamp(
+        '2026-06-04T00:00:00.000Z',
+        'Runtime event createdAt'
+      )
+    ).toBe('2026-06-04T00:00:00.000Z');
   });
 
   it('rejects empty input with the identity reserved for the rejected event intake', () => {
@@ -135,4 +160,19 @@ describe('runtime event contract', () => {
 
     throw new Error('Expected multiline input to be rejected.');
   });
+
+  it.each([
+    'hello\u2028world',
+    'hello\u2029world',
+    '\u2028hello',
+    'hello\u2029',
+    '\u2028hello\u2029'
+  ])(
+    'rejects Unicode line separators in one-line input',
+    (message) => {
+      expect(() => createUserMessageRuntimeEvent(message)).toThrow(
+        'Provide exactly one non-empty single-line message.'
+      );
+    }
+  );
 });

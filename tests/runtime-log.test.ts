@@ -113,6 +113,46 @@ describe('runtime log store', () => {
     expect(store.rawEvents()).toEqual([receivedRecord, appended]);
   });
 
+  it('deeply snapshots tool input and result evidence before storing it', () => {
+    const store = createRuntimeLogStore();
+    const nestedInput = { query: 'before' };
+    const nestedOutput = { answer: 'before' };
+    const record: RawEventLogRecordInput = {
+      ...identity,
+      kind: 'tool_call_finished',
+      eventType: 'USER_MESSAGE',
+      status: 'completed',
+      toolCallId: 'call_snapshot_001',
+      toolRound: 1,
+      toolName: 'memory.search',
+      toolPluginId: 'memory.fixture',
+      dispatchedToHost: true,
+      toolInput: { nested: nestedInput },
+      toolResult: {
+        status: 'accepted',
+        output: { nested: nestedOutput },
+        evidence: []
+      }
+    };
+
+    const stored = store.appendRawEvent(record);
+
+    nestedInput.query = 'after';
+    nestedOutput.answer = 'after';
+
+    expect(stored.toolInput).toEqual({ nested: { query: 'before' } });
+    expect(stored.toolResult).toEqual({
+      status: 'accepted',
+      output: { nested: { answer: 'before' } },
+      evidence: []
+    });
+    expect(Object.isFrozen(stored.toolInput?.['nested'])).toBe(true);
+    expect(
+      stored.toolResult?.status === 'accepted' &&
+        Object.isFrozen(stored.toolResult.output)
+    ).toBe(true);
+  });
+
   it('appends visible conversation records only through explicit committed-message inputs', () => {
     const store = createRuntimeLogStore();
     const userMessage: ConversationLogRecordInput = {

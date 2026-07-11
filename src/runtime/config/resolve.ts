@@ -23,9 +23,11 @@ import {
   type ResolvedProject02RuntimeConfig,
   type ResolvedRuntimeConfigField,
   type RuntimeConfigDiagnostic,
+  type RuntimeConfigDiagnosticPluginMetadata,
   type RuntimeConfigSecretRef,
   type RuntimeConfigValue
 } from './types.ts';
+import { createJsonBoundarySnapshot } from '../../shared/json-boundary.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -127,63 +129,21 @@ export function runtimeConfigDiagnosticMatchesPlugin(options: {
   readonly diagnostic: RuntimeConfigDiagnostic;
   readonly pluginId: string;
 }): boolean {
-  if (options.diagnostic.pluginId !== undefined) {
-    return options.diagnostic.pluginId === options.pluginId;
-  }
-
-  return runtimeConfigDiagnosticPathMatchesPlugin({
-    path: options.diagnostic.path,
-    pluginId: options.pluginId
-  });
+  return (
+    options.diagnostic.scope === 'plugin' &&
+    options.diagnostic.pluginId === options.pluginId
+  );
 }
 
 export function runtimeConfigDiagnosticMatchesPluginConfig(options: {
   readonly diagnostic: RuntimeConfigDiagnostic;
   readonly pluginId: string;
 }): boolean {
-  if (options.diagnostic.pluginId !== undefined) {
-    return (
-      options.diagnostic.pluginId === options.pluginId &&
-      options.diagnostic.pluginConfigField !== undefined
-    );
-  }
-
-  return runtimeConfigDiagnosticPathMatchesPluginConfig({
-    path: options.diagnostic.path,
-    pluginId: options.pluginId
-  });
-}
-
-export function runtimeConfigDiagnosticPathMatchesPlugin(options: {
-  readonly path: string | undefined;
-  readonly pluginId: string;
-}): boolean {
-  const pluginPath = `plugins.${options.pluginId}`;
-
   return (
-    options.path === pluginPath ||
-    runtimeConfigDiagnosticPathMatchesPluginEnabled(options) ||
-    runtimeConfigDiagnosticPathMatchesPluginConfig(options)
+    options.diagnostic.scope === 'plugin' &&
+    options.diagnostic.pluginId === options.pluginId &&
+    options.diagnostic.pluginConfigField !== undefined
   );
-}
-
-export function runtimeConfigDiagnosticPathMatchesPluginConfig(options: {
-  readonly path: string | undefined;
-  readonly pluginId: string;
-}): boolean {
-  const configPath = `plugins.${options.pluginId}.config`;
-
-  return (
-    options.path === configPath ||
-    options.path?.startsWith(`${configPath}.`) === true
-  );
-}
-
-function runtimeConfigDiagnosticPathMatchesPluginEnabled(options: {
-  readonly path: string | undefined;
-  readonly pluginId: string;
-}): boolean {
-  return options.path === `plugins.${options.pluginId}.enabled`;
 }
 
 function resolvePluginConfig(options: {
@@ -521,7 +481,7 @@ function pushUnknownPluginConfigFieldDiagnostics(options: {
 function pluginConfigDiagnosticMetadata(options: {
   readonly manifest: RuntimePluginManifest;
   readonly field: RuntimePluginConfigField;
-}): Pick<RuntimeConfigDiagnostic, 'pluginId' | 'pluginConfigField'> {
+}): RuntimeConfigDiagnosticPluginMetadata {
   return {
     pluginId: options.manifest.id,
     pluginConfigField: options.field.name
@@ -572,7 +532,13 @@ function fieldResult(options: {
     secret: options.field.secret,
     source: options.source,
     resolved: options.resolved,
-    ...(options.value === undefined ? {} : { value: options.value })
+    ...(options.value === undefined
+      ? {}
+      : {
+          value: createJsonBoundarySnapshot(options.value, {
+            field: `Resolved runtime config field ${options.field.name}`
+          })
+        })
   } satisfies ResolvedRuntimeConfigField);
 }
 
@@ -687,16 +653,23 @@ function diagnostic(
   code: string,
   message: string,
   path: string,
-  metadata?: Pick<RuntimeConfigDiagnostic, 'pluginId' | 'pluginConfigField'>
+  metadata?: RuntimeConfigDiagnosticPluginMetadata
 ): RuntimeConfigDiagnostic {
-  return Object.freeze({
+  const base = {
     severity,
     code,
     message,
-    path,
-    ...(metadata?.pluginId === undefined ? {} : { pluginId: metadata.pluginId }),
-    ...(metadata?.pluginConfigField === undefined
-      ? {}
-      : { pluginConfigField: metadata.pluginConfigField })
-  } satisfies RuntimeConfigDiagnostic);
+    path
+  } as const;
+
+  return metadata === undefined
+    ? Object.freeze({ ...base, scope: 'global' })
+    : Object.freeze({
+        ...base,
+        scope: 'plugin',
+        pluginId: metadata.pluginId,
+        ...(metadata.pluginConfigField === undefined
+          ? {}
+          : { pluginConfigField: metadata.pluginConfigField })
+      });
 }

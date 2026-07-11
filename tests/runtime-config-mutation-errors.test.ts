@@ -1,14 +1,14 @@
 import {
-  mkdtempSync,
   realpathSync,
   readFileSync,
   writeFileSync
 } from 'node:fs';
 import type * as NodeFs from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { createTestTempRoot } from './support/temp-root.ts';
 
 describe('runtime config mutation error handling', () => {
   afterEach(() => {
@@ -19,9 +19,7 @@ describe('runtime config mutation error handling', () => {
   it(
     'wraps failed secret writes and failed config rollback in a mutation error',
     async () => {
-      const storeRoot = mkdtempSync(
-        join(tmpdir(), 'project02-config-rollback-error-')
-      );
+      const storeRoot = createTestTempRoot('project02-config-rollback-error-');
       const configPath = join(storeRoot, 'config.json');
 
       writeFileSync(

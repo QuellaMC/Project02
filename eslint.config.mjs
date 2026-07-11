@@ -20,5 +20,15 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-non-null-assertion': 'error'
     }
+  },
+  {
+    files: ['src/runtime/turn/**/*.ts'],
+    rules: {
+      complexity: ['error', 20],
+      'max-lines-per-function': [
+        'error',
+        { max: 200, skipBlankLines: true, skipComments: true }
+      ]
+    }
   }
 );

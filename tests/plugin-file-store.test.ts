@@ -17,6 +17,7 @@ import {
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction
 } from '../src/plugins/file-store.ts';
+import { createDurableRuntimePluginFileStore } from '../src/plugins/file-store/durable-store.ts';
 import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeSessionPaths,
@@ -120,19 +121,23 @@ describe('runtime plugin file store', () => {
     const deadPid = 99_999_999;
     const uuid = '00000000-0000-4000-8000-000000000000';
     const deadTempPaths = [
-      join(root, `state.json.${String(deadPid)}.${uuid}.tmp`),
+      join(root, `.state.json.${String(deadPid)}.${uuid}.tmp`),
       join(
         root,
-        `.project02-plugin-store-modes.json.${String(deadPid)}.${uuid}.tmp`
+        `..project02-plugin-store-modes.json.${String(deadPid)}.${uuid}.tmp`
       ),
       join(
         root,
-        `.project02-plugin-store-revision.${String(deadPid)}.${uuid}.tmp`
+        `..project02-plugin-store-revision.${String(deadPid)}.${uuid}.tmp`
       )
     ];
     const liveTempPath = join(
       root,
-      `live.json.${String(process.pid)}.${uuid}.tmp`
+      `.live.json.${String(process.pid)}.${uuid}.tmp`
+    );
+    const legitimateUserPath = join(
+      root,
+      `notes.${String(deadPid)}.${uuid}.tmp`
     );
 
     mkdirSync(root, { recursive: true });
@@ -140,6 +145,7 @@ describe('runtime plugin file store', () => {
     for (const path of [...deadTempPaths, liveTempPath]) {
       writeFileSync(path, '{"temporary":true}\n', 'utf8');
     }
+    writeFileSync(legitimateUserPath, '{"userData":true}\n', 'utf8');
 
     const store = createRuntimePluginFileStore({
       storeRoot,
@@ -147,13 +153,86 @@ describe('runtime plugin file store', () => {
       pluginId
     });
 
-    expect(store.revision()).toBe(0);
+    expect(store.revision()).toBe(1);
 
     for (const path of deadTempPaths) {
       expect(() => readFileSync(path, 'utf8')).toThrow();
     }
 
     expect(readFileSync(liveTempPath, 'utf8')).toBe('{"temporary":true}\n');
+    expect(store.readJson(`notes.${String(deadPid)}.${uuid}.tmp`)).toEqual({
+      userData: true
+    });
+  });
+
+  it('recovers a direct append when metadata persistence fails after content', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-direct-mutation-recovery';
+    const pluginId = 'plugin.direct-mutation-recovery';
+    const options = { storeRoot, sessionId, pluginId };
+    const base = createRuntimePluginFileStore(options);
+
+    base.appendJsonl('events.jsonl', { value: 1 });
+
+    const injected = createDurableRuntimePluginFileStore(options, {
+      faultInjector(point) {
+        expect(point).toBe('after_content_persisted');
+        throw new Error('injected path-mode persistence failure');
+      }
+    });
+
+    expect(() => {
+      injected.appendJsonl('events.jsonl', { value: 2 });
+    }).toThrow(/injected path-mode persistence failure/iu);
+
+    const root = pluginRoot(storeRoot, sessionId, pluginId);
+
+    expect(readFileSync(join(root, 'events.jsonl'), 'utf8')).toBe(
+      '{"value":1}\n{"value":2}\n'
+    );
+    expect(
+      readFileSync(join(root, '.project02-plugin-store-revision'), 'utf8')
+    ).toBe('1\n');
+
+    const recovered = createRuntimePluginFileStore(options);
+
+    expect(recovered.readJsonl('events.jsonl')).toEqual([
+      { value: 1 },
+      { value: 2 }
+    ]);
+    expect(recovered.revision()).toBe(2);
+    expect(() =>
+      readFileSync(
+        join(root, '.project02-plugin-store-direct-mutation.json'),
+        'utf8'
+      )
+    ).toThrow();
+  });
+
+  it('reserves metadata and atomic-temp names in every plugin path segment', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-reserved-plugin-paths';
+    const pluginId = 'plugin.reserved-paths';
+    const store = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId
+    });
+    const uuid = '00000000-0000-4000-8000-000000000000';
+    const reservedPaths = [
+      '.project02-plugin-store-revision/child.json',
+      'nested/.project02-plugin-store-modes.json/child.json',
+      '.project02-plugin-store-direct-mutation.json/child.json',
+      `.state.json.99999999.${uuid}.tmp`
+    ];
+
+    for (const path of reservedPaths) {
+      expect(() => {
+        store.writeJsonAtomic(path, { unsafe: true });
+      }).toThrow(/safe relative path/iu);
+    }
+
+    expect(store.revision()).toBe(0);
   });
 
   it('isolates in-memory stores by session object when supplied', () => {
@@ -183,6 +262,17 @@ describe('runtime plugin file store', () => {
 
     expect(firstAgain.readJson('state.json')).toEqual({ value: 'first' });
     expect(firstAgain.revision()).toBe(1);
+  });
+
+  it('rejects in-memory stores without an owning session identity', () => {
+    const unsafeOptions: unknown = {
+      sessionId: 'session-without-owner',
+      pluginId: 'plugin.memory-without-owner'
+    };
+
+    expect(() => {
+      Reflect.apply(createRuntimePluginFileStore, undefined, [unsafeOptions]);
+    }).toThrow(/sessionIdentity/iu);
   });
 
   it('rejects mixing distinct in-memory session identities in one transaction', () => {
@@ -226,6 +316,7 @@ describe('runtime plugin file store', () => {
   it('preserves own __proto__ keys in plugin file values', () => {
     const memory = createRuntimePluginFileStore({
       sessionId: 'session-proto-key',
+      sessionIdentity: {},
       pluginId: 'plugin.proto'
     });
     const durable = createRuntimePluginFileStore({
@@ -248,6 +339,7 @@ describe('runtime plugin file store', () => {
   it('rejects non-finite plugin file values before writing', () => {
     const memory = createRuntimePluginFileStore({
       sessionId: 'session-finite-json',
+      sessionIdentity: {},
       pluginId: 'plugin.finite'
     });
     const nonFiniteMemoryValue: RuntimePluginJsonObject = {
@@ -280,6 +372,7 @@ describe('runtime plugin file store', () => {
     const stores = [
       createRuntimePluginFileStore({
         sessionId: 'session-mixed-json-jsonl-memory',
+        sessionIdentity: {},
         pluginId: 'plugin.mixed-mode'
       }),
       createRuntimePluginFileStore({
@@ -478,6 +571,7 @@ describe('runtime plugin file store', () => {
     const stores = [
       createRuntimePluginFileStore({
         sessionId: 'session-mixed-jsonl-json-memory',
+        sessionIdentity: {},
         pluginId: 'plugin.mixed-mode'
       }),
       createRuntimePluginFileStore({
@@ -823,7 +917,7 @@ describe('runtime plugin file store', () => {
     expect(base.revision()).toBe(2);
   });
 
-  it('keeps a durable recovery journal after finalization partially applies', () => {
+  it('keeps a planned recovery journal when preflight rejects before mutation', () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-partial-finalize-recovery';
     const pluginId = 'plugin.partial-finalize-recovery';
@@ -849,15 +943,104 @@ describe('runtime plugin file store', () => {
 
     prepared.discard();
 
-    expect(readFileSync(journalPath, 'utf8')).toContain('"status":"applied"');
+    expect(readFileSync(journalPath, 'utf8')).toContain('"status":"planned"');
     expect(
       JSON.parse(
         readFileSync(join(pluginRoot(storeRoot, sessionId, pluginId), 'first.json'), 'utf8')
       )
-    ).toEqual({ value: 'prepared' });
+    ).toEqual({ value: 'before' });
   });
 
-  it('fails closed when a partially applied journal has no terminal evidence', async () => {
+  it('preflights completed multi-operation recovery before applying any operation', async () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-completed-preflight-conflict';
+    const pluginId = 'plugin.completed-preflight-conflict';
+    const options = { storeRoot, sessionId, pluginId };
+    await registerRuntimeSession(storeRoot, sessionId);
+    const base = createRuntimePluginFileStore(options);
+
+    base.writeJsonAtomic('first.json', { value: 'before' });
+    base.writeJsonAtomic('second.json', { value: 'before' });
+
+    const transaction = createRuntimePluginFileStoreTransaction();
+    const staged = transaction.fileStoreFor(options);
+
+    staged.writeJsonAtomic('first.json', { value: 'transaction' });
+    staged.writeJsonAtomic('second.json', { value: 'transaction' });
+    const prepared = transaction.prepare(testTransactionIdentity());
+
+    base.writeJsonAtomic('second.json', { value: 'direct' });
+    writeCompletedRuntimeEvidence(
+      createLocalRuntimeSessionPaths({ storeRoot, sessionId }),
+      testTransactionIdentity()
+    );
+
+    expect(() => {
+      prepared.finalize();
+    }).toThrow(/transaction conflict/iu);
+    expect(
+      JSON.parse(
+        readFileSync(
+          join(pluginRoot(storeRoot, sessionId, pluginId), 'first.json'),
+          'utf8'
+        )
+      )
+    ).toEqual({ value: 'before' });
+
+    expect(() => createRuntimePluginFileStore(options)).toThrow(
+      /transaction conflict/iu
+    );
+    expect(
+      JSON.parse(
+        readFileSync(
+          join(pluginRoot(storeRoot, sessionId, pluginId), 'first.json'),
+          'utf8'
+        )
+      )
+    ).toEqual({ value: 'before' });
+  });
+
+  it('resumes completed batched recovery after content persists before progress', async () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-batched-progress-recovery';
+    const pluginId = 'plugin.batched-progress-recovery';
+    const options = { storeRoot, sessionId, pluginId };
+    await registerRuntimeSession(storeRoot, sessionId);
+    const base = createRuntimePluginFileStore(options);
+
+    base.writeJsonAtomic('first.json', { value: 'before' });
+    base.writeJsonAtomic('second.json', { value: 'before' });
+    let injectFailure = true;
+    const transaction = createRuntimePluginFileStoreTransaction({
+      durableFaultInjector() {
+        if (injectFailure) {
+          injectFailure = false;
+          throw new Error('injected batched progress failure');
+        }
+      }
+    });
+    const staged = transaction.fileStoreFor(options);
+
+    staged.writeJsonAtomic('first.json', { value: 'after' });
+    staged.writeJsonAtomic('second.json', { value: 'after' });
+    const prepared = transaction.prepare(testTransactionIdentity());
+    writeCompletedRuntimeEvidence(
+      createLocalRuntimeSessionPaths({ storeRoot, sessionId }),
+      testTransactionIdentity()
+    );
+
+    expect(() => {
+      prepared.finalize();
+    }).toThrow(/injected batched progress failure/iu);
+
+    const recovered = createRuntimePluginFileStore(options);
+
+    expect(recovered.readJson('first.json')).toEqual({ value: 'after' });
+    expect(recovered.readJson('second.json')).toEqual({ value: 'after' });
+    expect(recovered.revision()).toBe(4);
+  });
+
+  it('discards a preflight-rejected journal with no terminal evidence', async () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-partial-finalize-no-terminal';
     const pluginId = 'plugin.partial-finalize-no-terminal';
@@ -881,10 +1064,11 @@ describe('runtime plugin file store', () => {
       prepared.finalize();
     }).toThrow(/transaction conflict/iu);
 
-    expect(() => createRuntimePluginFileStore(options)).toThrow(
-      /partially applied.*terminal evidence/iu
-    );
-    expect(readFileSync(journalPath, 'utf8')).toContain('"status":"applied"');
+    const recovered = createRuntimePluginFileStore(options);
+
+    expect(recovered.readJson('first.json')).toEqual({ value: 'before' });
+    expect(recovered.readJson('second.json')).toEqual({ value: 'later' });
+    expect(() => readFileSync(journalPath, 'utf8')).toThrow();
   });
 
   it('fails closed when planned journal content changed without terminal evidence', async () => {
@@ -902,6 +1086,7 @@ describe('runtime plugin file store', () => {
 
     mkdirSync(root, { recursive: true });
     writeFileSync(join(root, 'events.jsonl'), '{"value":1}\n', 'utf8');
+    writeFileSync(join(root, '.project02-plugin-store-revision'), '1\n', 'utf8');
 
     expect(() => createRuntimePluginFileStore(options)).toThrow(
       /partially applied.*terminal evidence/iu
@@ -963,7 +1148,7 @@ describe('runtime plugin file store', () => {
     expect(readFileSync(journal.path, 'utf8')).toContain('"status":"planned"');
   });
 
-  it('fails closed when a partially applied journal has rejected terminal evidence', async () => {
+  it('discards a preflight-rejected journal after rejected terminal evidence', async () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-partial-finalize-rejected';
     const pluginId = 'plugin.partial-finalize-rejected';
@@ -990,10 +1175,11 @@ describe('runtime plugin file store', () => {
     const sessionPaths = createLocalRuntimeSessionPaths({ storeRoot, sessionId });
     writeRejectedRuntimeEvidence(sessionPaths, testTransactionIdentity());
 
-    expect(() => createRuntimePluginFileStore(options)).toThrow(
-      /partially applied.*terminal evidence/iu
-    );
-    expect(readFileSync(journalPath, 'utf8')).toContain('"status":"applied"');
+    const recovered = createRuntimePluginFileStore(options);
+
+    expect(recovered.readJson('first.json')).toEqual({ value: 'before' });
+    expect(recovered.readJson('second.json')).toEqual({ value: 'later' });
+    expect(() => readFileSync(journalPath, 'utf8')).toThrow();
   });
 
   it('rejects an exact durable plugin-root symlink without following it', () => {
@@ -1084,6 +1270,143 @@ describe('runtime plugin file store', () => {
       /symlink/iu
     );
     expect(readdirSync(outsideRoot)).toEqual([]);
+  });
+
+  it('keeps transaction journal identities distinct by createdAt', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-created-at-journal-identity';
+    const firstTransaction = createRuntimePluginFileStoreTransaction();
+    const secondTransaction = createRuntimePluginFileStoreTransaction();
+
+    firstTransaction
+      .fileStoreFor({
+        storeRoot,
+        sessionId,
+        pluginId: 'plugin.created-at-first'
+      })
+      .appendJsonl('events.jsonl', { value: 1 });
+    secondTransaction
+      .fileStoreFor({
+        storeRoot,
+        sessionId,
+        pluginId: 'plugin.created-at-second'
+      })
+      .appendJsonl('events.jsonl', { value: 2 });
+
+    const first = firstTransaction.prepare(testTransactionIdentity());
+    const second = secondTransaction.prepare({
+      ...testTransactionIdentity(),
+      createdAt: '2026-06-15T00:00:01.000Z'
+    });
+    const journalRoot = join(
+      createLocalRuntimeSessionPaths({ storeRoot, sessionId }).sessionRoot,
+      '.plugin-transactions'
+    );
+
+    expect(
+      readdirSync(journalRoot).filter((name) => name.endsWith('.json'))
+    ).toHaveLength(2);
+
+    first.discard();
+    second.discard();
+  });
+
+  it('rejects a journal whose persisted identity does not match its path', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-journal-path-identity';
+    const pluginId = 'plugin.journal-path-identity';
+    const options = { storeRoot, sessionId, pluginId };
+    const transaction = createRuntimePluginFileStoreTransaction();
+
+    transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
+    const prepared = transaction.prepare(testTransactionIdentity());
+    const journal = abandonPreparedJournal({
+      storeRoot,
+      sessionId,
+      prepared,
+      createdAt: '2026-06-15T00:00:01.000Z'
+    });
+
+    expect(() => createRuntimePluginFileStore(options)).toThrow(
+      /journal identity.*path/iu
+    );
+    expect(readFileSync(journal.path, 'utf8')).toContain(
+      '"createdAt":"2026-06-15T00:00:01.000Z"'
+    );
+  });
+
+  it('never recovers or removes a journal owned on another host', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-foreign-journal-owner';
+    const pluginId = 'plugin.foreign-journal-owner';
+    const options = { storeRoot, sessionId, pluginId };
+    const transaction = createRuntimePluginFileStoreTransaction();
+
+    transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
+    const prepared = transaction.prepare(testTransactionIdentity());
+    const journal = abandonPreparedJournal({
+      storeRoot,
+      sessionId,
+      prepared,
+      ownerHostname: 'remote-host.invalid'
+    });
+    const store = createRuntimePluginFileStore(options);
+
+    expect(store.readJsonl('events.jsonl')).toEqual([]);
+    expect(store.revision()).toBe(0);
+    expect(readFileSync(journal.path, 'utf8')).toContain(
+      '"ownerHostname":"remote-host.invalid"'
+    );
+  });
+
+  it('preserves journal temp files whose host ownership is unknown', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-foreign-journal-temp';
+    const pluginId = 'plugin.foreign-journal-temp';
+    const journalRoot = join(
+      createLocalRuntimeSessionPaths({ storeRoot, sessionId }).sessionRoot,
+      '.plugin-transactions'
+    );
+    const tempPath = join(
+      journalRoot,
+      '.journal.json.99999999.00000000-0000-4000-8000-000000000000.tmp'
+    );
+
+    mkdirSync(journalRoot, { recursive: true });
+    writeFileSync(tempPath, '{"foreignHostWrite":true}\n', 'utf8');
+
+    const store = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId
+    });
+
+    expect(store.revision()).toBe(0);
+    expect(readFileSync(tempPath, 'utf8')).toBe(
+      '{"foreignHostWrite":true}\n'
+    );
+  });
+
+  it('rejects malformed journal owner nonces', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-malformed-journal-owner';
+    const pluginId = 'plugin.malformed-journal-owner';
+    const options = { storeRoot, sessionId, pluginId };
+    const transaction = createRuntimePluginFileStoreTransaction();
+
+    transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
+    const prepared = transaction.prepare(testTransactionIdentity());
+
+    abandonPreparedJournal({
+      storeRoot,
+      sessionId,
+      prepared,
+      ownerNonce: 'not-a-valid-owner-nonce'
+    });
+
+    expect(() => createRuntimePluginFileStore(options)).toThrow(
+      /journal.*malformed/iu
+    );
   });
 
   it('finalizes a crash-left journal only when completed terminal evidence exists', async () => {
@@ -1514,6 +1837,9 @@ function abandonPreparedJournal(options: {
   readonly storeRoot: string;
   readonly sessionId: string;
   readonly prepared: { discard(): void };
+  readonly createdAt?: string;
+  readonly ownerHostname?: string;
+  readonly ownerNonce?: string;
   readonly ownerPid?: number;
 }): { readonly path: string } {
   const path = preparedJournalPath(options.storeRoot, options.sessionId);
@@ -1528,6 +1854,15 @@ function abandonPreparedJournal(options: {
     path,
     `${JSON.stringify({
       ...parsed,
+      ...(options.createdAt === undefined
+        ? {}
+        : { createdAt: options.createdAt }),
+      ...(options.ownerHostname === undefined
+        ? {}
+        : { ownerHostname: options.ownerHostname }),
+      ...(options.ownerNonce === undefined
+        ? {}
+        : { ownerNonce: options.ownerNonce }),
       ownerPid: options.ownerPid ?? 99_999_999
     })}\n`,
     'utf8'

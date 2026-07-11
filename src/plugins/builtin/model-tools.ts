@@ -6,14 +6,14 @@ import {
   runtimePluginContractVersion
 } from '../contract.ts';
 import {
-  createRuntimePlugin,
-  createRuntimePluginManifest
-} from '../validation.ts';
+  createRuntimePlugin
+} from '../constructors.ts';
+import { createRuntimePluginManifest } from '../manifest-validation.ts';
 import type {
   RuntimePlugin,
   RuntimePluginManifest,
   RuntimePluginProvidedTool
-} from '../validation.ts';
+} from '../plugin-types.ts';
 
 const firstPartyModelToolsPluginInstances = new WeakSet<RuntimePlugin>();
 

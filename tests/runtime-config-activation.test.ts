@@ -1,10 +1,7 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Writable } from 'node:stream';
-
 import { describe, expect, it } from 'vitest';
-
+import { createTestTempRoot } from './support/temp-root.ts';
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
 import { createConversationSession } from '../src/core/conversation.ts';
 import { roleModelPluginListToolName } from '../src/role-model/contracts.ts';
@@ -14,36 +11,56 @@ import {
 } from '../src/role-model/model-tools.ts';
 import {
   createConfiguredProject02PluginHost,
+  createConfiguredProject02PluginHostFromPlan,
   loadProject02RuntimeConfig,
-  runtimeConfigVersion
+  prepareConfiguredProject02PluginActivation
 } from '../src/runtime/config/index.ts';
 import {
   characterStatePluginId,
-  createRuntimePluginFileStore,
   createMemoryProviderRuntimePlugin,
-  createRuntimePlugin,
   createCharacterStatePlugin,
   createCharacterStatePluginManifest,
   defaultRuntimePluginCatalogFactoryDefinitions,
   firstPartyModelToolsPluginId,
-  memorySearchTool,
-  runtimePluginDiscoveryPluginId,
-  runtimePluginContractVersion,
-  type RuntimePluginAccessMap,
-  type RuntimePluginContext
+  runtimePluginDiscoveryPluginId
 } from '../src/plugins/index.ts';
-import {
-  createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent
-} from '../src/runtime/event.ts';
+import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/runtime/event.ts';
 import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
 import { createRuntimeLogStore } from '../src/runtime/log.ts';
+import {
+  collect,
+  writeRuntimeConfig
+} from './support/runtime-config.ts';
+import {
+  fileStoreSessionEndPlugin,
+  firstPartyPlugin,
+  parseActivationOutput,
+  requiredSecretAndEndpointPlugin,
+  requiredSecretPlugin
+} from './support/runtime-config-activation-fixtures.ts';
 
-describe('runtime config activation diagnostics', () => {
-  it('keeps final activation aligned with host-owned default-enabled plugins', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-host-defaults-aligned-')
+describe('runtime config activation planning', () => {
+  it('constructs the configured host from the exact prepared activation plan', async () => {
+    const storeRoot = createTestTempRoot('project02-config-prepared-activation-');
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const activationPlan = prepareConfiguredProject02PluginActivation({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+    });
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan
+    });
+
+    expect(configured.resolvedConfig).toBe(activationPlan.resolvedConfig);
+    expect(configured.activation).toBe(activationPlan.activation);
+    expect(configured.host.enabledPluginIds()).toEqual(
+      activationPlan.activation.enabledPluginIds
     );
+  });
+
+  it('keeps final activation aligned with host-owned default-enabled plugins', async () => {
+    const storeRoot = createTestTempRoot('project02-config-host-defaults-aligned-');
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
@@ -73,9 +90,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('accepts fresh catalog factory definitions without duplicating host-scoped manifests', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-fresh-catalog-definitions-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-fresh-catalog-definitions-');
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
@@ -112,9 +127,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('keeps check access inventory aligned with host-injected discovery', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-check-host-discovery-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-check-host-discovery-');
     let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
@@ -164,9 +177,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('keeps an explicit host-scoped disable aligned with host state', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-host-disable-aligned-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-host-disable-aligned-');
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
@@ -190,9 +201,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('keeps character-agent output non-committed when config disables visible_reply', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-model-tools-disabled-runtime-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-model-tools-disabled-runtime-');
     const sessionId = 'session-model-tools-disabled-runtime';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -254,9 +263,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('loads runtime env before reporting mixed check activation diagnostics', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-check-mixed-env-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-check-mixed-env-');
     const plugin = requiredSecretAndEndpointPlugin('memory.mixed-check');
     const envVar = 'PROJECT02_CHECK_MIXED_SECRET_3452532128';
     let stdout = '';
@@ -309,9 +316,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('ignores explicitly disabled unknown plugin wrappers during strict activation', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-disabled-unknown-strict-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-disabled-unknown-strict-');
     const plugin = firstPartyPlugin('valid.runtime');
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -357,7 +362,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('records requested and granted access in activation snapshots', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-config-access-'));
+    const storeRoot = createTestTempRoot('project02-config-access-');
     const plugin = fileStoreSessionEndPlugin('valid.file-store-policy', () => {});
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -388,9 +393,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('reports host-owned default grants for the built-in Character State factory', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-character-state-default-api-perms-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-character-state-default-api-perms-');
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
@@ -409,9 +412,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('does not default-enable caller-supplied real Character State factories', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-character-state-real-factory-api-perms-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-character-state-real-factory-api-perms-');
     const plugin = createCharacterStatePlugin();
     let factoryCalls = 0;
 
@@ -443,9 +444,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('does not default-enable caller-supplied Character State id spoofs', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-character-state-spoof-api-perms-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-character-state-spoof-api-perms-');
     const plugin = fileStoreSessionEndPlugin(characterStatePluginId, () => {});
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
@@ -471,9 +470,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('does not trust caller-forged catalog provenance for host defaults', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-character-state-forged-catalog-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-character-state-forged-catalog-');
     const plugin = createCharacterStatePlugin();
     let factoryCalls = 0;
     const factories = {
@@ -508,9 +505,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('canonicalizes host definitions copied from the public catalog', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-character-state-copied-catalog-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-character-state-copied-catalog-');
     const catalog = defaultRuntimePluginCatalogFactoryDefinitions();
     const characterDefinition = catalog[characterStatePluginId];
     const spoofedPlugin = fileStoreSessionEndPlugin(
@@ -561,9 +556,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('keeps disabled unknown plugin wrappers strict when selected by defaultMemoryProvider', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-disabled-unknown-default-memory-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-disabled-unknown-default-memory-');
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'old',
@@ -590,9 +583,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('fails strict activation for an unknown default memory provider', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-memory-default-strict-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-memory-default-strict-');
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'memory.typo'
@@ -629,9 +620,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('keeps non-strict unknown default memory providers warning-only when no provider is active', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-memory-default-warning-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-memory-default-warning-');
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'memory.typo'
@@ -665,9 +654,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('does not activate memory providers selected only by defaultMemoryProvider', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-helper-default-memory-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-helper-default-memory-');
     const plugin = createMemoryProviderRuntimePlugin({
       id: 'memory.local',
       displayName: 'Local Memory',
@@ -727,9 +714,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('keeps helper memory providers disabled when selected but explicitly disabled', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-helper-default-memory-disabled-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-helper-default-memory-disabled-');
     const plugin = createMemoryProviderRuntimePlugin({
       id: 'memory.local',
       displayName: 'Local Memory',
@@ -792,9 +777,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('does not validate required config for inactive default memory providers', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-default-memory-required-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-default-memory-required-');
     const plugin = requiredSecretPlugin('memory.default-required', {
       defaultEnabled: false
     });
@@ -843,9 +826,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('skips required config validation for unselected memory providers', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-memory-default-selected-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-memory-default-selected-');
     const selectedPlugin = requiredSecretPlugin('memory.selected');
     const unselectedPlugin = requiredSecretPlugin('memory.unselected');
     const envVar = 'PROJECT02_SELECTED_MEMORY_SECRET_3449142730';
@@ -912,9 +893,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('skips required config validation for explicitly enabled unselected memory providers', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-memory-enabled-default-selected-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-memory-enabled-default-selected-');
     const selectedPlugin = requiredSecretPlugin('memory.selected');
     const unselectedPlugin = requiredSecretPlugin('memory.unselected');
     const envVar = 'PROJECT02_EXPLICIT_SELECTED_MEMORY_SECRET_3449174646';
@@ -991,9 +970,7 @@ describe('runtime config activation diagnostics', () => {
   });
 
   it('keeps manifest-backed factories eligible for non-instantiating checks', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-manifest-backed-check-')
-    );
+    const storeRoot = createTestTempRoot('project02-config-manifest-backed-check-');
     const envVar = 'PROJECT02_MANIFEST_BACKED_CHECK_SECRET_3448479333';
     const plugin = requiredSecretPlugin('memory.required');
     let stdout = '';
@@ -1044,1446 +1021,4 @@ describe('runtime config activation diagnostics', () => {
     );
     expect(stdout).not.toContain('manifest-backed-secret');
   });
-
-  it('reports host-owned default access during check for the default Character State factory', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-check-character-state-default-factory-')
-    );
-    let stdout = '';
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {})
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(0);
-    expect(output.plugins).toContainEqual(
-      expect.objectContaining({
-        pluginId: characterStatePluginId,
-        activationStatus: 'active',
-        enabled: true,
-        requestedAccess: { file_store: 'write', model_input: 'write' },
-        grantedAccess: { file_store: 'write', model_input: 'write' }
-      })
-    );
-  });
-
-  it('does not default-enable caller-supplied real Character State factories during check', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-check-character-state-real-factory-')
-    );
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          [characterStatePluginId]: {
-            manifest: createCharacterStatePluginManifest(),
-            create() {
-              factoryCalls += 1;
-
-              return createCharacterStatePlugin();
-            }
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(0);
-    expect(output.plugins).toContainEqual(
-      expect.objectContaining({
-        pluginId: characterStatePluginId,
-        activationStatus: 'disabled',
-        enabled: false,
-        requestedAccess: { file_store: 'write', model_input: 'write' },
-        grantedAccess: {}
-      })
-    );
-  });
-
-  it('does not infer Character State check default access from exact manifest matches', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-check-character-state-exact-manifest-')
-    );
-    const builtInPlugin = createCharacterStatePlugin();
-    const plugin = createRuntimePlugin({
-      manifest: builtInPlugin.manifest,
-      providedTools: builtInPlugin.providedTools,
-      lifecycleHooks: builtInPlugin.lifecycleHooks
-    });
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          [characterStatePluginId]: {
-            manifest: createCharacterStatePluginManifest(),
-            create() {
-              factoryCalls += 1;
-
-              return plugin;
-            }
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(0);
-    expect(output.plugins).toContainEqual(
-      expect.objectContaining({
-        pluginId: characterStatePluginId,
-        activationStatus: 'disabled',
-        enabled: false,
-        requestedAccess: { file_store: 'write', model_input: 'write' },
-        grantedAccess: {}
-      })
-    );
-  });
-
-  it('does not infer Character State check default access from same-id manifest spoofs', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-check-character-state-spoof-')
-    );
-    const plugin = fileStoreSessionEndPlugin(characterStatePluginId, () => {});
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          [characterStatePluginId]: {
-            manifest: plugin.manifest,
-            create() {
-              factoryCalls += 1;
-
-              return plugin;
-            }
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(0);
-    expect(output.plugins).toContainEqual(
-      expect.objectContaining({
-        pluginId: characterStatePluginId,
-        activationStatus: 'disabled',
-        enabled: false,
-        requestedAccess: { file_store: 'write' },
-        grantedAccess: {}
-      })
-    );
-  });
-
-  it('fails check for duplicate manifest ids without constructing factories', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-duplicate-manifest-check-')
-    );
-    const envVar = 'PROJECT02_DUPLICATE_MANIFEST_CHECK_SECRET_3448711003';
-    const firstPlugin = requiredSecretPlugin('memory.duplicate');
-    const secondPlugin = requiredSecretPlugin('memory.duplicate');
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        'memory.duplicate': {
-          enabled: true,
-          config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        env: {
-          [envVar]: 'duplicate-manifest-secret'
-        },
-        factories: {
-          'memory.duplicate.primary': {
-            manifest: firstPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error('duplicate manifest check must not construct factories');
-            }
-          },
-          'memory.duplicate.secondary': {
-            manifest: secondPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error('duplicate manifest check must not construct factories');
-            }
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(1);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_duplicate_plugin_manifest_id',
-          path: 'plugins.memory.duplicate',
-          pluginId: 'memory.duplicate'
-        })
-      ])
-    );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
-    expect(stdout).not.toContain('duplicate-manifest-secret');
-  });
-
-  it('keeps unreferenced default-disabled duplicate manifest ids passing check', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-duplicate-default-disabled-')
-    );
-    const firstPlugin = firstPartyPlugin('optional.duplicate', {
-      defaultEnabled: false
-    });
-    const secondPlugin = firstPartyPlugin('optional.duplicate', {
-      defaultEnabled: false
-    });
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'optional.duplicate.primary': {
-            manifest: firstPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'inactive duplicate manifest check must not construct factories'
-              );
-            }
-          },
-          'optional.duplicate.secondary': {
-            manifest: secondPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'inactive duplicate manifest check must not construct factories'
-              );
-            }
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_duplicate_plugin_manifest_id'
-    );
-    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([]);
-    expect(
-      nonHostScopedActivationPlugins(output).map(
-        (plugin) => plugin.activationStatus
-      )
-    ).toEqual([
-      'disabled',
-      'disabled'
-    ]);
-  });
-
-  it('fails check for mixed default-enabled duplicate manifest ids', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-duplicate-mixed-default-')
-    );
-    const firstPlugin = firstPartyPlugin('mixed.duplicate');
-    const secondPlugin = firstPartyPlugin('mixed.duplicate', {
-      defaultEnabled: false
-    });
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        'mixed.duplicate': {
-          enabled: true
-        }
-      }
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'mixed.duplicate.primary': {
-            manifest: firstPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'mixed default duplicate manifest check must not construct factories'
-              );
-            }
-          },
-          'mixed.duplicate.secondary': {
-            manifest: secondPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'mixed default duplicate manifest check must not construct factories'
-              );
-            }
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(1);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_duplicate_plugin_manifest_id',
-          path: 'plugins.mixed.duplicate',
-          pluginId: 'mixed.duplicate'
-        })
-      ])
-    );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
-  });
-
-  it('keeps explicitly disabled duplicate manifest ids passing check', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-duplicate-disabled-')
-    );
-    const firstPlugin = firstPartyPlugin('disabled.duplicate');
-    const secondPlugin = firstPartyPlugin('disabled.duplicate');
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        'disabled.duplicate': {
-          enabled: false
-        }
-      }
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'disabled.duplicate.primary': {
-            manifest: firstPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'disabled duplicate manifest check must not construct factories'
-              );
-            }
-          },
-          'disabled.duplicate.secondary': {
-            manifest: secondPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'disabled duplicate manifest check must not construct factories'
-              );
-            }
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_duplicate_plugin_manifest_id'
-    );
-    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([]);
-    expect(
-      nonHostScopedActivationPlugins(output).map(
-        (plugin) => plugin.activationStatus
-      )
-    ).toEqual([
-      'disabled',
-      'disabled'
-    ]);
-  });
-
-  it('keeps unselected duplicate memory providers passing check', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-duplicate-memory-unselected-')
-    );
-    const envVar = 'PROJECT02_SELECTED_MEMORY_DUPLICATE_SECRET_3450063170';
-    const selectedPlugin = requiredSecretPlugin('memory.selected');
-    const firstUnselectedPlugin = requiredSecretPlugin('memory.unselected');
-    const secondUnselectedPlugin = requiredSecretPlugin('memory.unselected');
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      defaultMemoryProvider: 'memory.selected',
-      plugins: {
-        'memory.selected': {
-          enabled: true,
-          config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        env: {
-          [envVar]: 'selected-memory-secret'
-        },
-        factories: {
-          'memory.selected': {
-            manifest: selectedPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error('runtime-config check must not construct factories');
-            }
-          },
-          'memory.unselected.primary': {
-            manifest: firstUnselectedPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'unselected duplicate manifest check must not construct factories'
-              );
-            }
-          },
-          'memory.unselected.secondary': {
-            manifest: secondUnselectedPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'unselected duplicate manifest check must not construct factories'
-              );
-            }
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_duplicate_plugin_manifest_id'
-    );
-    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([
-      expect.objectContaining({
-        pluginId: 'memory.selected'
-      })
-    ]);
-    expect(
-      output.plugins
-        .filter((plugin) => plugin.pluginId === 'memory.unselected')
-        .map((plugin) => plugin.activationStatus)
-    ).toEqual(['disabled', 'disabled']);
-  });
-
-  it('fails check for config-enabled default-disabled duplicate manifest ids', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-duplicate-enabled-')
-    );
-    const firstPlugin = firstPartyPlugin('selected.duplicate', {
-      defaultEnabled: false
-    });
-    const secondPlugin = firstPartyPlugin('selected.duplicate', {
-      defaultEnabled: false
-    });
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        'selected.duplicate': {
-          enabled: true
-        }
-      }
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'selected.duplicate.primary': {
-            manifest: firstPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'active duplicate manifest check must not construct factories'
-              );
-            }
-          },
-          'selected.duplicate.secondary': {
-            manifest: secondPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'active duplicate manifest check must not construct factories'
-              );
-            }
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(1);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_duplicate_plugin_manifest_id',
-          path: 'plugins.selected.duplicate',
-          pluginId: 'selected.duplicate'
-        })
-      ])
-    );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
-  });
-
-  it('fails check for manifest ids reserved by the host discovery plugin', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-reserved-discovery-id-')
-    );
-    const plugin = firstPartyPlugin(runtimePluginDiscoveryPluginId);
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [runtimePluginDiscoveryPluginId]: {
-          enabled: true
-        }
-      }
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'fixture.discovery-collision': {
-            manifest: plugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error('reserved id check must not construct factories');
-            }
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(1);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_duplicate_plugin_manifest_id',
-          path: `plugins.${runtimePluginDiscoveryPluginId}`,
-          pluginId: runtimePluginDiscoveryPluginId
-        })
-      ])
-    );
-    expect(output.plugins).toContainEqual(
-      expect.objectContaining({
-        pluginId: runtimePluginDiscoveryPluginId,
-        activationStatus: 'blocked',
-        enabled: false
-      })
-    );
-  });
-
-  it('rejects manifest-backed factories that return a different same-id manifest', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-manifest-mismatch-')
-    );
-    const configPath = join(storeRoot, 'config.json');
-    const envVar = 'PROJECT02_MANIFEST_MISMATCH_SECRET_3448659339';
-    let cleanupCalls = 0;
-    const cleanupPlugin = sessionEndPlugin('first.cleanup', () => {
-      cleanupCalls += 1;
-    });
-    const declaredPlugin = requiredSecretPlugin('memory.contract');
-    const returnedPlugin = pluginWithAdditionalConfigField('memory.contract');
-
-    writeRuntimeConfig(configPath, {
-      plugins: {
-        [cleanupPlugin.manifest.id]: {
-          enabled: true
-        },
-        'memory.contract': {
-          enabled: true,
-          config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
-    });
-
-    const loadedConfig = loadProject02RuntimeConfig({ configPath });
-
-    await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig,
-        env: {
-          [envVar]: 'same-id-different-manifest-secret'
-        },
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: () => cleanupPlugin
-          },
-          'memory.contract': {
-            manifest: declaredPlugin.manifest,
-            create: () => returnedPlugin
-          }
-        }
-      })
-    ).rejects.toThrow(
-      'Plugin factory "memory.contract" returned a manifest that differs from its declared manifest "memory.contract".'
-    );
-    expect(cleanupCalls).toBe(1);
-  });
-
-  it('closes already-created plugins when a later manifest-backed factory throws', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-factory-throw-cleanup-')
-    );
-    const configPath = join(storeRoot, 'config.json');
-    const cleanupContexts: RuntimePluginContext[] = [];
-    const cleanupPlugin = sessionEndPlugin('first.cleanup', (context) => {
-      cleanupContexts.push(context);
-    });
-    const failingPlugin = firstPartyPlugin('later.failure');
-    const sessionId = 'factory-throw-cleanup-session';
-
-    writeRuntimeConfig(configPath, {
-      plugins: {
-        [cleanupPlugin.manifest.id]: {
-          enabled: true
-        },
-        [failingPlugin.manifest.id]: {
-          enabled: true
-        }
-      }
-    });
-
-    const loadedConfig = loadProject02RuntimeConfig({ configPath });
-
-    await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig,
-        storeRoot,
-        sessionId,
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: () => cleanupPlugin
-          },
-          [failingPlugin.manifest.id]: {
-            manifest: failingPlugin.manifest,
-            create: () => {
-              throw new Error('later manifest-backed factory failed');
-            }
-          }
-        }
-      })
-    ).rejects.toThrow('later manifest-backed factory failed');
-
-    expect(cleanupContexts).toHaveLength(1);
-    expect(cleanupContexts[0]).toMatchObject({
-      sessionId,
-      currentUserMessage: '',
-      privacy: {
-        exposePrivateConfig: false
-      }
-    });
-    expect(cleanupContexts[0]?.currentUserMessage).not.toContain(
-      'later manifest-backed factory failed'
-    );
-  });
-
-  it('keeps construction-failure cleanup read-only by default', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-factory-readonly-cleanup-')
-    );
-    const configPath = join(storeRoot, 'config.json');
-    const cleanupContexts: RuntimePluginContext[] = [];
-    const cleanupWriteBlocked: boolean[] = [];
-    const cleanupPlugin = fileStoreSessionEndPlugin('first.cleanup', (context) => {
-      cleanupContexts.push(context);
-
-      if (context.fileStore === undefined) {
-        throw new Error('Expected construction cleanup context to include fileStore.');
-      }
-
-      try {
-        context.fileStore.writeJsonAtomic('cleanup.json', {
-          value: 'should-not-write'
-        });
-        cleanupWriteBlocked.push(false);
-      } catch {
-        cleanupWriteBlocked.push(true);
-      }
-    });
-    const failingPlugin = firstPartyPlugin('later.failure');
-
-    writeRuntimeConfig(configPath, {
-      plugins: {
-        [cleanupPlugin.manifest.id]: {
-          enabled: true
-        },
-        [failingPlugin.manifest.id]: {
-          enabled: true
-        }
-      }
-    });
-
-    await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({ configPath }),
-        storeRoot,
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: () => cleanupPlugin
-          },
-          [failingPlugin.manifest.id]: {
-            manifest: failingPlugin.manifest,
-            create: () => {
-              throw new Error('later manifest-backed factory failed');
-            }
-          }
-        }
-      })
-    ).rejects.toThrow('later manifest-backed factory failed');
-
-    const cleanupContext = cleanupContexts[0];
-
-    if (cleanupContext === undefined) {
-      throw new Error('Expected construction cleanup to run.');
-    }
-
-    const cleanupStore = createRuntimePluginFileStore({
-      storeRoot,
-      sessionId: cleanupContext.sessionId,
-      pluginId: cleanupPlugin.manifest.id
-    });
-
-    expect(cleanupContext).toMatchObject({
-      sessionId: 'configured-plugin-construction-cleanup',
-      currentUserMessage: ''
-    });
-    expect(cleanupWriteBlocked).toEqual([true]);
-    expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
-  });
-
-  it('uses the configured store root for construction-failure cleanup file-store reads', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-factory-durable-cleanup-')
-    );
-    const configPath = join(storeRoot, 'config.json');
-    const sessionId = 'configured-plugin-durable-construction-cleanup';
-    const cleanupReads: unknown[] = [];
-    const cleanupPlugin = fileStoreSessionEndPlugin('first.cleanup', (context) => {
-      if (context.fileStore === undefined) {
-        throw new Error('Expected construction cleanup context to include fileStore.');
-      }
-
-      cleanupReads.push(context.fileStore.readJson('state.json'));
-    });
-    const failingPlugin = firstPartyPlugin('later.failure');
-
-    writeRuntimeConfig(configPath, {
-      plugins: {
-        [cleanupPlugin.manifest.id]: {
-          enabled: true
-        },
-        [failingPlugin.manifest.id]: {
-          enabled: true
-        }
-      }
-    });
-
-    await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({ configPath }),
-        storeRoot,
-        sessionId,
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: (input) => {
-              createRuntimePluginFileStore({
-                storeRoot: input.storeRoot,
-                sessionId,
-                pluginId: cleanupPlugin.manifest.id
-              }).writeJsonAtomic('state.json', {
-                value: 'durable construction state'
-              });
-
-              return cleanupPlugin;
-            }
-          },
-          [failingPlugin.manifest.id]: {
-            manifest: failingPlugin.manifest,
-            create: () => {
-              throw new Error('later manifest-backed factory failed');
-            }
-          }
-        }
-      })
-    ).rejects.toThrow('later manifest-backed factory failed');
-
-    expect(cleanupReads).toEqual([
-      {
-        value: 'durable construction state'
-      }
-    ]);
-  });
-
-  it('preserves factory errors when the configured construction cleanup store is unusable', async () => {
-    const configRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-factory-invalid-store-cleanup-')
-    );
-    const invalidStoreRoot = join(configRoot, 'store-root-file');
-    const configPath = join(configRoot, 'config.json');
-    const cleanupContexts: RuntimePluginContext[] = [];
-    const cleanupFileStoreAvailable: boolean[] = [];
-    const cleanupPlugin = fileStoreSessionEndPlugin('first.cleanup', (context) => {
-      cleanupContexts.push(context);
-      cleanupFileStoreAvailable.push(context.fileStore !== undefined);
-    });
-    const failingPlugin = firstPartyPlugin('later.failure');
-
-    writeFileSync(invalidStoreRoot, 'not a runtime store directory\n', 'utf8');
-    writeRuntimeConfig(configPath, {
-      plugins: {
-        [cleanupPlugin.manifest.id]: {
-          enabled: true
-        },
-        [failingPlugin.manifest.id]: {
-          enabled: true
-        }
-      }
-    });
-
-    await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({ configPath }),
-        storeRoot: invalidStoreRoot,
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: () => cleanupPlugin
-          },
-          [failingPlugin.manifest.id]: {
-            manifest: failingPlugin.manifest,
-            create: () => {
-              throw new Error(
-                'later manifest-backed factory failed with unusable store'
-              );
-            }
-          }
-        }
-      })
-    ).rejects.toThrow(
-      'later manifest-backed factory failed with unusable store'
-    );
-
-    expect(cleanupContexts).toHaveLength(0);
-    expect(cleanupFileStoreAvailable).toEqual([]);
-  });
-
-  it('cleans up created plugins when host construction fails after factories succeed', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-host-throw-cleanup-')
-    );
-    const configPath = join(storeRoot, 'config.json');
-    const cleanupContexts: RuntimePluginContext[] = [];
-    const cleanupWriteBlocked: boolean[] = [];
-    const cleanupPlugin = fileStoreSessionEndPlugin('first.cleanup', (context) => {
-      cleanupContexts.push(context);
-
-      if (context.fileStore === undefined) {
-        throw new Error('Expected host cleanup context to include fileStore.');
-      }
-
-      try {
-        context.fileStore.writeJsonAtomic('cleanup.json', {
-          value: 'should-not-write'
-        });
-        cleanupWriteBlocked.push(false);
-      } catch {
-        cleanupWriteBlocked.push(true);
-      }
-    });
-    const firstToolPlugin = modelFacingMemorySearchPlugin('memory.first');
-    const secondToolPlugin = modelFacingMemorySearchPlugin('memory.second');
-
-    writeRuntimeConfig(configPath, {
-      plugins: {
-        [cleanupPlugin.manifest.id]: {
-          enabled: true
-        },
-        [firstToolPlugin.manifest.id]: {
-          enabled: true
-        },
-        [secondToolPlugin.manifest.id]: {
-          enabled: true
-        }
-      }
-    });
-
-    await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({ configPath }),
-        storeRoot,
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: () => cleanupPlugin
-          },
-          [firstToolPlugin.manifest.id]: {
-            manifest: firstToolPlugin.manifest,
-            create: () => firstToolPlugin
-          },
-          [secondToolPlugin.manifest.id]: {
-            manifest: secondToolPlugin.manifest,
-            create: () => secondToolPlugin
-          }
-        }
-      })
-    ).rejects.toThrow(/declared more than once/iu);
-
-    const cleanupContext = cleanupContexts[0];
-
-    if (cleanupContext === undefined) {
-      throw new Error('Expected host construction cleanup to run.');
-    }
-
-    const cleanupStore = createRuntimePluginFileStore({
-      storeRoot,
-      sessionId: cleanupContext.sessionId,
-      pluginId: cleanupPlugin.manifest.id
-    });
-
-    expect(cleanupContext).toMatchObject({
-      sessionId: 'configured-plugin-construction-cleanup',
-      currentUserMessage: ''
-    });
-    expect(cleanupWriteBlocked).toEqual([true]);
-    expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
-  });
-
-  it('runs cleanup for partial plugins that collide with host plugin.list', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-plugin-list-cleanup-')
-    );
-    const configPath = join(storeRoot, 'config.json');
-    const cleanupContexts: RuntimePluginContext[] = [];
-    const collisionPlugin = modelFacingPluginListCollisionPlugin(
-      'plugin-list.cleanup-collision',
-      (context) => {
-        cleanupContexts.push(context);
-        throw new Error('cleanup hook failure must not mask host construction');
-      }
-    );
-
-    writeRuntimeConfig(configPath, {
-      plugins: {
-        [collisionPlugin.manifest.id]: {
-          enabled: true
-        }
-      }
-    });
-
-    await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({ configPath }),
-        storeRoot,
-        factories: {
-          [collisionPlugin.manifest.id]: {
-            manifest: collisionPlugin.manifest,
-            create: () => collisionPlugin
-          }
-        }
-      })
-    ).rejects.toThrow('Plugin tool "plugin.list" is declared more than once.');
-
-    expect(cleanupContexts).toHaveLength(1);
-    expect(cleanupContexts[0]).toMatchObject({
-      sessionId: 'configured-plugin-construction-cleanup',
-      currentUserMessage: '',
-      pluginId: collisionPlugin.manifest.id
-    });
-  });
-
-  it('accepts manifest-backed factories that return their declared manifest', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-manifest-match-')
-    );
-    const configPath = join(storeRoot, 'config.json');
-    const envVar = 'PROJECT02_MANIFEST_MATCH_SECRET_3448659339';
-    const plugin = requiredSecretPlugin('memory.contract');
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(configPath, {
-      plugins: {
-        'memory.contract': {
-          enabled: true,
-          config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
-    });
-
-    const loadedConfig = loadProject02RuntimeConfig({ configPath });
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig,
-      env: {
-        [envVar]: 'same-id-matching-manifest-secret'
-      },
-      factories: {
-        'memory.contract': {
-          manifest: plugin.manifest,
-          create: () => {
-            factoryCalls += 1;
-
-            return plugin;
-          }
-        }
-      }
-    });
-
-    expect(factoryCalls).toBe(1);
-    expect(configured.plugins.map((item) => item.manifest.id)).toEqual([
-      'memory.contract'
-    ]);
-  });
 });
-
-function requiredSecretPlugin(
-  id: string,
-  options: {
-    readonly defaultEnabled?: boolean;
-  } = {}
-) {
-  return createRuntimePlugin({
-    manifest: {
-      id,
-      displayName: 'Required Secret',
-      version: '1.0.0',
-      kind: 'memory_provider',
-      description: 'Test plugin with required secret config.',
-      contractVersion: runtimePluginContractVersion,
-      compatibility: {
-        hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02'
-      },
-      declaredPlugins: ['plugin_discovery'],
-      config: {
-        fields: [
-          {
-            name: 'apiKey',
-            description: 'API key.',
-            required: true,
-            secret: true,
-            valueType: 'secret',
-            redactionLabels: ['secret']
-          }
-        ]
-      },
-      localTrustLevel: 'trusted_adapter',
-      runtimePolicy: {
-        requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
-        confirmation: 'not_required',
-        timeoutMs: 1000,
-        sourceReferencesRequired: false,
-        redactionLabels: [],
-        failureBehavior: {
-          beforeRoleModelCall: 'degrade',
-          handleToolCall: 'degrade',
-          afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
-      },
-      activation: {
-        defaultEnabled: options.defaultEnabled ?? true,
-        reasons: ['test_required_secret']
-      },
-      requestedAccess: {}
-    }
-  });
-}
-
-function requiredSecretAndEndpointPlugin(id: string): ReturnType<
-  typeof requiredSecretPlugin
-> {
-  const plugin = requiredSecretPlugin(id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...plugin.manifest,
-      config: {
-        fields: [
-          ...plugin.manifest.config.fields,
-          {
-            name: 'endpoint',
-            description: 'Endpoint.',
-            required: true,
-            secret: false,
-            valueType: 'string',
-            redactionLabels: []
-          }
-        ]
-      }
-    }
-  });
-}
-
-function pluginWithAdditionalConfigField(id: string) {
-  const plugin = requiredSecretPlugin(id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...plugin.manifest,
-      config: {
-        ...plugin.manifest.config,
-        fields: [
-          ...plugin.manifest.config.fields,
-          {
-            name: 'region',
-            description: 'Region.',
-            required: false,
-            secret: false,
-            valueType: 'string',
-            redactionLabels: []
-          }
-        ]
-      }
-    }
-  });
-}
-
-function firstPartyPlugin(
-  id: string,
-  options: {
-    readonly defaultEnabled?: boolean;
-  } = {}
-) {
-  return createRuntimePlugin({
-    manifest: {
-      id,
-      displayName: 'First Party',
-      version: '1.0.0',
-      kind: 'first_party',
-      description: 'Test first-party plugin.',
-      contractVersion: runtimePluginContractVersion,
-      compatibility: {
-        hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02'
-      },
-      declaredPlugins: ['plugin_discovery'],
-      config: {
-        fields: []
-      },
-      localTrustLevel: 'first_party',
-      runtimePolicy: {
-        requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
-        confirmation: 'not_required',
-        timeoutMs: 1000,
-        sourceReferencesRequired: false,
-        redactionLabels: [],
-        failureBehavior: {
-          beforeRoleModelCall: 'degrade',
-          handleToolCall: 'degrade',
-          afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
-      },
-      activation: {
-        defaultEnabled: options.defaultEnabled ?? true,
-        reasons: ['test_first_party']
-      },
-      requestedAccess: {}
-    }
-  });
-}
-
-function sessionEndPlugin(
-  id: string,
-  onSessionEnd: (context: RuntimePluginContext) => void,
-  options: {
-    readonly defaultEnabled?: boolean;
-  } = {}
-) {
-  const plugin = firstPartyPlugin(id, options);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...plugin.manifest,
-      declaredPlugins: ['plugin_discovery', 'on_session_end']
-    },
-    lifecycleHooks: {
-      onSessionEnd(context) {
-        onSessionEnd(context);
-        return {
-          status: 'completed',
-          evidence: []
-        };
-      }
-    }
-  });
-}
-
-function fileStoreSessionEndPlugin(
-  id: string,
-  onSessionEnd: (context: RuntimePluginContext) => void
-) {
-  const plugin = firstPartyPlugin(id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...plugin.manifest,
-      declaredPlugins: ['plugin_discovery', 'on_session_end'],
-      runtimePolicy: {
-        ...plugin.manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write'
-      },
-      requestedAccess: { file_store: 'write' }
-    },
-    lifecycleHooks: {
-      onSessionEnd(context) {
-        onSessionEnd(context);
-        return {
-          status: 'completed',
-          evidence: []
-        };
-      }
-    }
-  });
-}
-
-function modelFacingMemorySearchPlugin(id: string) {
-  const plugin = firstPartyPlugin(id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...plugin.manifest,
-      declaredPlugins: [
-        'plugin_discovery',
-        'tool_provider',
-        'handle_tool_call'
-      ],
-      requestedAccess: { model_input: 'write' }
-    },
-    providedTools: [memorySearchTool('memory.search')],
-    lifecycleHooks: {
-      handleToolCall() {
-        return {
-          status: 'accepted',
-          output: {},
-          evidence: []
-        };
-      }
-    }
-  });
-}
-
-function modelFacingPluginListCollisionPlugin(
-  id: string,
-  onSessionEnd: (context: RuntimePluginContext) => void
-) {
-  const plugin = firstPartyPlugin(id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...plugin.manifest,
-      declaredPlugins: [
-        'plugin_discovery',
-        'tool_provider',
-        'handle_tool_call',
-        'on_session_end'
-      ],
-      requestedAccess: { model_input: 'write' }
-    },
-    providedTools: [memorySearchTool(roleModelPluginListToolName)],
-    lifecycleHooks: {
-      handleToolCall() {
-        return {
-          status: 'accepted',
-          output: {},
-          evidence: []
-        };
-      },
-      onSessionEnd(context) {
-        onSessionEnd(context);
-
-        return {
-          status: 'completed',
-          evidence: []
-        };
-      }
-    }
-  });
-}
-
-function writeRuntimeConfig(
-  path: string,
-  config: Readonly<Record<string, unknown>>
-): string {
-  writeFileSync(
-    path,
-    `${JSON.stringify({ version: runtimeConfigVersion, ...config }, null, 2)}\n`,
-    'utf8'
-  );
-  return path;
-}
-
-function collect(write: (chunk: string) => void): Writable {
-  return new Writable({
-    write(chunk, _encoding, callback) {
-      write(String(chunk));
-      callback();
-    }
-  });
-}
-
-function parseActivationOutput(stdout: string): {
-  readonly activationDiagnostics: readonly {
-    readonly severity: string;
-    readonly code: string;
-    readonly path?: string;
-    readonly pluginId?: string;
-  }[];
-  readonly plugins: readonly {
-    readonly pluginId: string;
-    readonly activationStatus: string;
-    readonly enabled: boolean;
-    readonly requestedAccess: RuntimePluginAccessMap;
-    readonly grantedAccess: RuntimePluginAccessMap;
-  }[];
-} {
-  return JSON.parse(stdout) as {
-    readonly activationDiagnostics: readonly {
-      readonly severity: string;
-      readonly code: string;
-      readonly path?: string;
-      readonly pluginId?: string;
-    }[];
-    readonly plugins: readonly {
-      readonly pluginId: string;
-      readonly activationStatus: string;
-      readonly enabled: boolean;
-      readonly requestedAccess: RuntimePluginAccessMap;
-      readonly grantedAccess: RuntimePluginAccessMap;
-    }[];
-  };
-}
-
-function nonHostScopedActivationPlugins(
-  output: ReturnType<typeof parseActivationOutput>
-): ReturnType<typeof parseActivationOutput>['plugins'] {
-  const hostScopedPluginIds = new Set([
-    runtimePluginDiscoveryPluginId,
-    firstPartyModelToolsPluginId
-  ]);
-
-  return Object.freeze(
-    output.plugins.filter((plugin) => !hostScopedPluginIds.has(plugin.pluginId))
-  );
-}
-
-function enabledNonHostScopedActivationPlugins(
-  output: ReturnType<typeof parseActivationOutput>
-): ReturnType<typeof parseActivationOutput>['plugins'] {
-  return Object.freeze(
-    nonHostScopedActivationPlugins(output).filter((plugin) => plugin.enabled)
-  );
-}

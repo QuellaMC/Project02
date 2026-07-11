@@ -1,9 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Readable, Writable } from 'node:stream';
+import { Readable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
+
+import { createTestTempRoot } from './support/temp-root.ts';
+import {
+  collect,
+  writeRuntimeConfig
+} from './support/runtime-config.ts';
 
 import {
   createConversationSession
@@ -26,10 +31,7 @@ import {
   createRuntimeLogStore,
   type RuntimeLogStore
 } from '../src/runtime/log.ts';
-import {
-  runtimeConfigEnvVarName,
-  runtimeConfigVersion
-} from '../src/runtime/config/index.ts';
+import { runtimeConfigEnvVarName } from '../src/runtime/config/index.ts';
 import {
   createFileRuntimeLogStore
 } from '../src/runtime/storage/file-runtime-log-store.ts';
@@ -334,9 +336,7 @@ describe('chat CLI trace summary', () => {
   });
 
   it('keeps final terminal evidence and a readable conversation when commit tracing fails', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-chat-visible-trace-failure-')
-    );
+    const storeRoot = createTestTempRoot('project02-chat-visible-trace-failure-');
     const sessionId = 'visible-trace-failure';
     await createLocalRuntimeSessionStore({ storeRoot }).createSession({
       sessionId,
@@ -635,9 +635,47 @@ describe('chat CLI trace summary', () => {
 });
 
 describe('chat CLI provider selection', () => {
+  it('releases the durable writer lease when the provider turn fails', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-provider-failure-lease-');
+    const sessionId = 'provider-failure-lease';
+    let firstStderr = '';
+    let secondStderr = '';
+    writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=nvidia\n`);
+
+    const failedExitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', sessionId],
+      {
+        stdin: Readable.from(['hello\n']),
+        stdout: collect(() => {}),
+        stderr: collect((chunk) => {
+          firstStderr += chunk;
+        }),
+        env: { [nvidiaApiKeyEnvName]: '' }
+      }
+    );
+    const recoveredExitCode = await runChatCliFromArgs(
+      ['--provider', 'local', '--store', storeRoot, '--session', sessionId],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect((chunk) => {
+          secondStderr += chunk;
+        }),
+        env: {}
+      }
+    );
+
+    expect(failedExitCode).toBe(1);
+    expect(firstStderr).toContain(
+      `NVIDIA provider requires ${nvidiaApiKeyEnvName}.`
+    );
+    expect(recoveredExitCode).toBe(0);
+    expect(secondStderr).toBe('');
+  });
+
   it('lets the selected store env override the cwd dotenv defaults', async () => {
-    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-chat-cwd-env-'));
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-store-env-'));
+    const cwdRoot = createTestTempRoot('project02-chat-cwd-env-');
+    const storeRoot = createTestTempRoot('project02-chat-store-env-');
     const previousCwd = process.cwd();
     const previousProvider = process.env[roleModelProviderEnvName];
     const previousApiKey = process.env[nvidiaApiKeyEnvName];
@@ -682,13 +720,9 @@ describe('chat CLI provider selection', () => {
   });
 
   it('ignores process and cwd dotenv runtime config selectors when --store is explicit', async () => {
-    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-chat-cwd-config-'));
-    const defaultStoreRoot = mkdtempSync(
-      join(tmpdir(), 'project02-chat-default-config-store-')
-    );
-    const selectedStoreRoot = mkdtempSync(
-      join(tmpdir(), 'project02-chat-selected-config-store-')
-    );
+    const cwdRoot = createTestTempRoot('project02-chat-cwd-config-');
+    const defaultStoreRoot = createTestTempRoot('project02-chat-default-config-store-');
+    const selectedStoreRoot = createTestTempRoot('project02-chat-selected-config-store-');
     const sessionId = 'selected-store-config';
     const previousCwd = process.cwd();
     const previousProvider = process.env[roleModelProviderEnvName];
@@ -749,10 +783,8 @@ describe('chat CLI provider selection', () => {
   });
 
   it('uses an explicit store before reading an unrelated cwd dotenv', async () => {
-    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-chat-cwd-dotenv-error-'));
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-chat-selected-dotenv-error-')
-    );
+    const cwdRoot = createTestTempRoot('project02-chat-cwd-dotenv-error-');
+    const storeRoot = createTestTempRoot('project02-chat-selected-dotenv-error-');
     const sessionId = 'selected-store-before-cwd-dotenv';
     const previousCwd = process.cwd();
     const previousProvider = process.env[roleModelProviderEnvName];
@@ -799,15 +831,9 @@ describe('chat CLI provider selection', () => {
   });
 
   it('uses a process-env selected runtime config before reading an unrelated cwd dotenv', async () => {
-    const cwdRoot = mkdtempSync(
-      join(tmpdir(), 'project02-chat-env-cwd-dotenv-error-')
-    );
-    const selectedStoreRoot = mkdtempSync(
-      join(tmpdir(), 'project02-chat-env-selected-store-')
-    );
-    const configRoot = mkdtempSync(
-      join(tmpdir(), 'project02-chat-env-selected-config-')
-    );
+    const cwdRoot = createTestTempRoot('project02-chat-env-cwd-dotenv-error-');
+    const selectedStoreRoot = createTestTempRoot('project02-chat-env-selected-store-');
+    const configRoot = createTestTempRoot('project02-chat-env-selected-config-');
     const configPath = writeRuntimeConfig(
       join(configRoot, 'runtime-config.json'),
       {
@@ -862,7 +888,7 @@ describe('chat CLI provider selection', () => {
   });
 
   it('loads the runtime store env before selecting the default chat provider', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-provider-env-'));
+    const storeRoot = createTestTempRoot('project02-chat-provider-env-');
     const sessionId = 'runtime-env-provider';
     let stderr = '';
 
@@ -887,7 +913,7 @@ describe('chat CLI provider selection', () => {
   });
 
   it('keeps injected env values ahead of the runtime store env', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-injected-env-'));
+    const storeRoot = createTestTempRoot('project02-chat-injected-env-');
     let stderr = '';
 
     writeRuntimeEnv(
@@ -914,7 +940,7 @@ describe('chat CLI provider selection', () => {
   });
 
   it('lets --provider take precedence over the runtime store env', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-provider-cli-'));
+    const storeRoot = createTestTempRoot('project02-chat-provider-cli-');
     let stderr = '';
 
     writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=not-a-provider\n`);
@@ -936,9 +962,7 @@ describe('chat CLI provider selection', () => {
   });
 
   it('reports config load errors before runtime env file errors', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-chat-load-error-before-env-')
-    );
+    const storeRoot = createTestTempRoot('project02-chat-load-error-before-env-');
     let stdout = '';
     let stderr = '';
 
@@ -970,9 +994,7 @@ describe('chat CLI provider selection', () => {
   });
 
   it('reports activation config errors before runtime env file errors', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-chat-activation-before-env-')
-    );
+    const storeRoot = createTestTempRoot('project02-chat-activation-before-env-');
     const plugin = createRequiredConfigPlugin('chat.required-config');
     const layout = createLocalRuntimeStorageLayout({ storeRoot });
     let stdout = '';
@@ -1019,9 +1041,7 @@ describe('chat CLI provider selection', () => {
   });
 
   it('loads runtime env before reporting mixed activation diagnostics', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-chat-mixed-activation-env-')
-    );
+    const storeRoot = createTestTempRoot('project02-chat-mixed-activation-env-');
     const plugin = createRequiredSecretAndConfigPlugin('chat.mixed-config');
     const layout = createLocalRuntimeStorageLayout({ storeRoot });
     const envVar = 'PROJECT02_CHAT_MIXED_SECRET_3452532128';
@@ -1133,7 +1153,7 @@ describe('chat CLI plugin lifecycle', () => {
   });
 
   it('preserves an injected plugin host when configured plugin activation would fail', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-injected-host-'));
+    const storeRoot = createTestTempRoot('project02-chat-injected-host-');
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         'character-state': {
@@ -1193,7 +1213,7 @@ describe('chat CLI plugin lifecycle', () => {
   });
 
   it('constructs configured manifest-backed plugins once during chat startup', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-configured-host-'));
+    const storeRoot = createTestTempRoot('project02-chat-configured-host-');
     const sessionId = 'configured-host-session';
     const configuredPlugin = createSessionEndPlugin(() => {});
     const sessionEndContexts: RuntimePluginContext[] = [];
@@ -1238,7 +1258,7 @@ describe('chat CLI plugin lifecycle', () => {
   });
 
   it('closes configured plugins when a fatal chat turn exits before /exit', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-fatal-cleanup-'));
+    const storeRoot = createTestTempRoot('project02-chat-fatal-cleanup-');
     const sessionId = 'fatal-cleanup-session';
     const configuredPlugin = createSessionEndPlugin(() => {}, {
       pluginId: 'chat.session-end.fatal-cleanup.fixture',
@@ -1307,7 +1327,7 @@ describe('chat CLI plugin lifecycle', () => {
   });
 
   it('closes configured pre-session plugins read-only when later session creation fails', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-cleanup-'));
+    const storeRoot = createTestTempRoot('project02-chat-cleanup-');
     const sessionId = 'pre-session-cleanup';
     const sessionEndContexts: RuntimePluginContext[] = [];
     const cleanupWriteBlocked: boolean[] = [];
@@ -1396,9 +1416,7 @@ describe('chat CLI plugin lifecycle', () => {
   });
 
   it('preserves formatted startup storage errors when cleanup file-store setup fails', async () => {
-    const configRoot = mkdtempSync(
-      join(tmpdir(), 'project02-chat-invalid-store-cleanup-')
-    );
+    const configRoot = createTestTempRoot('project02-chat-invalid-store-cleanup-');
     const invalidStoreRoot = join(configRoot, 'store-root-file');
     const sessionId = 'invalid-store-cleanup';
     const sessionEndContexts: RuntimePluginContext[] = [];
@@ -1451,7 +1469,7 @@ describe('chat CLI plugin lifecycle', () => {
   });
 
   it('aborts manifest-backed factory construction failures before creating a durable session', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-factory-failure-'));
+    const storeRoot = createTestTempRoot('project02-chat-factory-failure-');
     const sessionId = 'manifest-factory-failure';
     const layout = createLocalRuntimeStorageLayout({ storeRoot });
     const configuredPlugin = createSessionEndPlugin(() => {});
@@ -1506,7 +1524,7 @@ describe('chat CLI plugin lifecycle', () => {
   });
 
   it('aborts startup when configured plugin activation reports errors', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-activation-error-'));
+    const storeRoot = createTestTempRoot('project02-chat-activation-error-');
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         'character-state': {
@@ -1541,7 +1559,7 @@ describe('chat CLI plugin lifecycle', () => {
   });
 
   it('persists session-end hook failures when stdin closes normally', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-chat-session-end-'));
+    const storeRoot = createTestTempRoot('project02-chat-session-end-');
     const sessionId = 'session-end-failure';
     await createLocalRuntimeSessionStore({ storeRoot }).createSession({
       sessionId,
@@ -1884,18 +1902,6 @@ function createRequiredSecretAndConfigPlugin(pluginId: string): RuntimePlugin {
   });
 }
 
-function writeRuntimeConfig(
-  path: string,
-  config: Readonly<Record<string, unknown>>
-): string {
-  writeFileSync(
-    path,
-    `${JSON.stringify({ version: runtimeConfigVersion, ...config }, null, 2)}\n`,
-    'utf8'
-  );
-  return path;
-}
-
 function writeRuntimeEnv(storeRoot: string, content: string): void {
   writeFileSync(
     createLocalRuntimeStorageLayout({ storeRoot }).envPath,
@@ -1911,15 +1917,6 @@ function restoreProcessEnvValue(name: string, value: string | undefined): void {
   }
 
   process.env[name] = value;
-}
-
-function collect(write: (chunk: string) => void): Writable {
-  return new Writable({
-    write(chunk, _encoding, callback) {
-      write(String(chunk));
-      callback();
-    }
-  });
 }
 
 function createTerminalRawEventAppendFailingLogStore(): RuntimeLogStore {
@@ -1941,6 +1938,9 @@ function createTerminalRawEventAppendFailingLogStore(): RuntimeLogStore {
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
+    },
+    readSessionEvidence() {
+      return logStore.readSessionEvidence();
     },
     traceEntries() {
       return logStore.traceEntries();
@@ -1981,6 +1981,9 @@ function createToolTraceFailingLogStore(
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
+    },
+    readSessionEvidence() {
+      return logStore.readSessionEvidence();
     },
     traceEntries() {
       return logStore.traceEntries();

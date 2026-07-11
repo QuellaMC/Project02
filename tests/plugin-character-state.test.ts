@@ -1,6 +1,6 @@
-import { mkdtempSync, unlinkSync } from 'node:fs';
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { performance } from 'node:perf_hooks';
 
 import { describe, expect, it } from 'vitest';
 
@@ -23,11 +23,19 @@ import {
 } from '../src/plugins/types.ts';
 import type {
   RuntimePluginFileStore,
-  RuntimePluginJsonObject
+  RuntimePluginJsonObject,
+  RuntimePluginJsonValue
 } from '../src/plugins/types.ts';
 import {
-  createRuntimePluginFileStore
+  createRuntimePluginFileStore,
+  createRuntimePluginFileStoreTransaction
 } from '../src/plugins/file-store.ts';
+import {
+  durablePathModesFileName,
+  durableRevisionFileName
+} from '../src/plugins/file-store/shared.ts';
+import { createLocalRuntimePluginPaths } from '../src/runtime/storage/layout.ts';
+import { createTestTempRoot } from './support/temp-root.ts';
 
 describe('Character State plugin', () => {
   it('writes valid patches during handleToolCall', async () => {
@@ -62,9 +70,11 @@ describe('Character State plugin', () => {
       }
     });
     expect(fileStore.readJsonl('events.jsonl')).toHaveLength(1);
-    expect(fileStore.readJson('current.json')).toMatchObject({
+    expect(fileStore.readJson('checkpoint.json')).toMatchObject({
       current: {
-        mood: 'curious'
+        current: {
+          mood: 'curious'
+        }
       }
     });
   });
@@ -94,7 +104,7 @@ describe('Character State plugin', () => {
   });
 
   it('rebuilds current state from events.jsonl when the cache is missing', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-character-state-'));
+    const storeRoot = createTestTempRoot('project02-character-state-');
     const { plugin, context } = createCharacterStateHarness(
       'session-character-state',
       storeRoot
@@ -118,7 +128,7 @@ describe('Character State plugin', () => {
         'session-character-state',
         'plugins',
         characterStatePluginId,
-        'current.json'
+        'checkpoint.json'
       )
     );
 
@@ -129,55 +139,53 @@ describe('Character State plugin', () => {
     expect(beforeResult?.contextItems[0]?.text).toContain('energy=high');
   });
 
-  it('recovers current state from events when current snapshot write fails after append', async () => {
-    const { plugin, context, fileStore } =
-      createCharacterStateHarness('session-character-state-split-write');
+  it('leaves no partial patch when checkpoint staging fails', async () => {
+    const sessionIdentity = {};
+    const options = {
+      sessionId: 'session-character-state-checkpoint-failure',
+      sessionIdentity,
+      pluginId: characterStatePluginId
+    };
+    const baseFileStore = createRuntimePluginFileStore(options);
+    const plugin = createCharacterStatePlugin();
+    const baseContext = createCharacterStateContext({
+      sessionId: options.sessionId,
+      fileStore: baseFileStore
+    });
 
-    fileStore.writeJsonAtomic('current.json', createDefaultCharacterRuntimeState());
+    await plugin.lifecycleHooks.beforeRoleModelCall?.(baseContext);
 
-    const result = await plugin.lifecycleHooks.handleToolCall?.(
-      {
-        ...testIdentity(),
-        pluginId: characterStatePluginId,
-        toolName: characterStatePatchModelToolName,
-        input: {
-          mood: 'curious'
-        }
-      },
-      {
-        ...context,
-        fileStore: createCurrentWriteFailingFileStore(fileStore)
-      }
-    );
+    const transaction = createRuntimePluginFileStoreTransaction();
+    const transactionalStore = transaction.fileStoreFor(options);
 
-    expect(result).toMatchObject({
-      status: 'accepted',
-      output: {
-        current: {
-          mood: 'curious'
+    expect(() =>
+      plugin.lifecycleHooks.handleToolCall?.(
+        {
+          ...testIdentity(),
+          pluginId: characterStatePluginId,
+          toolName: characterStatePatchModelToolName,
+          input: {
+            mood: 'curious'
+          }
         },
-        warnings: ['Character State current snapshot write failed: current snapshot write failed']
-      }
-    });
-    expect(
-      result?.evidence.some(
-        (evidence) =>
-          evidence.evidenceKind === 'tool_invocation' &&
-          evidence.status === 'degraded'
+        createCharacterStateContext({
+          sessionId: options.sessionId,
+          fileStore: createCheckpointWriteFailingFileStore(transactionalStore)
+        })
       )
-    ).toBe(true);
-    expect(fileStore.readJsonl('events.jsonl')).toHaveLength(1);
-    expect(fileStore.readJson('current.json')).toMatchObject({
+    ).toThrow(/checkpoint write failed/iu);
+
+    transaction.rollback();
+
+    expect(baseFileStore.readJsonl('events.jsonl')).toEqual([]);
+    expect(baseFileStore.readJson('checkpoint.json')).toMatchObject({
+      eventCount: 0,
       current: {
-        mood: 'steady'
+        current: {
+          mood: 'steady'
+        }
       }
     });
-
-    const beforeResult = await plugin.lifecycleHooks.beforeRoleModelCall?.(
-      context
-    );
-
-    expect(beforeResult?.contextItems[0]?.text).toContain('mood=curious');
   });
 
   it('records and replays accepted no-op identities', async () => {
@@ -244,12 +252,106 @@ describe('Character State plugin', () => {
       reason: 'character_state_idempotency_conflict'
     });
     expect(fileStore.readJsonl('events.jsonl')).toHaveLength(2);
-    expect(fileStore.readJson('current.json')).toMatchObject({
+    expect(fileStore.readJson('checkpoint.json')).toMatchObject({
       current: {
-        mood: 'curious'
+        current: {
+          mood: 'curious'
+        }
       }
     });
   });
+
+  it('migrates a legacy event log once and keeps later prompts and patches off the log', async () => {
+    const legacyEvents = createLegacyPatchEvents(1_000);
+    const instrumented = createInstrumentedCharacterStateFileStore(legacyEvents);
+    const { plugin, context } = createCharacterStateHarness(
+      'session-character-state-checkpoint',
+      undefined,
+      instrumented.fileStore
+    );
+
+    const firstContext = await plugin.lifecycleHooks.beforeRoleModelCall?.(
+      context
+    );
+
+    expect(firstContext?.contextItems[0]?.text).toContain('mood=steady');
+    expect(instrumented.eventLogReadCount()).toBe(1);
+
+    for (let index = 0; index < 100; index += 1) {
+      if (index % 2 === 0) {
+        await plugin.lifecycleHooks.beforeRoleModelCall?.(context);
+        continue;
+      }
+
+      const identity = createRuntimeEventIdentity({
+        eventId: `evt_character_state_fast_${String(index)}`,
+        traceId: `trace_character_state_fast_${String(index)}`,
+        createdAt: new Date(
+          Date.parse('2026-06-16T00:00:00.000Z') + index * 1_000
+        ).toISOString()
+      });
+      const result = await plugin.lifecycleHooks.handleToolCall?.(
+        {
+          ...identity,
+          pluginId: characterStatePluginId,
+          toolName: characterStatePatchModelToolName,
+          input: {
+            mood: index % 4 === 1 ? 'curious' : 'steady'
+          }
+        },
+        context
+      );
+
+      expect(result?.status).toBe('accepted');
+    }
+
+    expect(instrumented.eventLogReadCount()).toBe(1);
+    expect(instrumented.jsonPaths()).toContain('checkpoint.json');
+    expect(
+      instrumented
+        .jsonPaths()
+        .filter((path) => /^idempotency\/[0-9a-f]{64}\.json$/u.test(path))
+    ).toHaveLength(1_050);
+  });
+
+  it('fails closed on an unknown checkpoint version', () => {
+    const { plugin, context, fileStore } = createCharacterStateHarness(
+      'session-character-state-unknown-checkpoint'
+    );
+
+    fileStore.writeJsonAtomic('checkpoint.json', {
+      kind: 'character_state.checkpoint',
+      version: 99,
+      eventCount: 0,
+      storeRevision: 1,
+      current: createDefaultCharacterRuntimeState()
+    });
+
+    expect(() =>
+      plugin.lifecycleHooks.beforeRoleModelCall?.(context)
+    ).toThrow(/Character State checkpoint is malformed/iu);
+    expect(fileStore.readJsonl('events.jsonl')).toEqual([]);
+  });
+
+  it(
+    'keeps durable checkpoint reads bounded as idempotency paths grow',
+    async () => {
+      const small = await measureDurableCharacterStatePromptReads({
+        pathCount: 8,
+        sessionId: 'session-character-state-scale-small'
+      });
+      const large = await measureDurableCharacterStatePromptReads({
+        pathCount: 8_000,
+        sessionId: 'session-character-state-scale-large'
+      });
+
+      expect(
+        large,
+        `durable Character State prompt reads scaled from ${small.toFixed(1)}ms to ${large.toFixed(1)}ms`
+      ).toBeLessThan(small * 8 + 100);
+    },
+    15_000
+  );
 
   it('rejects malformed persisted appliedChanges instead of recomputing them', () => {
     const { plugin, context, fileStore } =
@@ -300,6 +402,27 @@ describe('Character State plugin', () => {
         context
       )
     ).toThrow(/stored Character State plugin event field/iu);
+  });
+
+  it('rejects non-canonical persisted event timestamps', () => {
+    const { plugin, context, fileStore } = createCharacterStateHarness(
+      'session-character-state-noncanonical-timestamp'
+    );
+    const initial = createDefaultCharacterRuntimeState();
+    const result = acceptedPatchResult(initial, { mood: 'curious' });
+
+    fileStore.appendJsonl('events.jsonl', {
+      type: 'character_state.patch',
+      eventId: 'evt_character_state_noncanonical',
+      traceId: 'trace_character_state_noncanonical',
+      createdAt: '2026-06-15T00:00:00Z',
+      input: { mood: 'curious' },
+      result
+    });
+
+    expect(() =>
+      plugin.lifecycleHooks.beforeRoleModelCall?.(context)
+    ).toThrow(/Character State plugin event is malformed/iu);
   });
 
   it('rejects a discontinuous authoritative event chain', () => {
@@ -455,25 +578,21 @@ describe('Character State plugin', () => {
   });
 });
 
-function createCharacterStateHarness(sessionId: string, storeRoot?: string) {
-  const fileStore = createRuntimePluginFileStore({
-    ...(storeRoot === undefined ? {} : { storeRoot }),
-    sessionId,
-    pluginId: characterStatePluginId
-  });
-  const context = {
-    ...createRuntimePluginContext({
-      ...testIdentity(),
+function createCharacterStateHarness(
+  sessionId: string,
+  storeRoot?: string,
+  injectedFileStore?: RuntimePluginFileStore
+) {
+  const fileStore =
+    injectedFileStore ??
+    createRuntimePluginFileStore({
+      ...(storeRoot === undefined ? {} : { storeRoot }),
       sessionId,
-      eventType: 'USER_MESSAGE',
-      currentUserMessage: 'hello',
-      character: {
-        id: 'mira',
-        displayName: 'Mira'
-      }
-    }),
-    pluginId: characterStatePluginId,
-    fileStore
+      ...(storeRoot === undefined ? { sessionIdentity: {} } : {}),
+      pluginId: characterStatePluginId
+    });
+  const context = {
+    ...createCharacterStateContext({ sessionId, fileStore })
   };
 
   return {
@@ -483,7 +602,161 @@ function createCharacterStateHarness(sessionId: string, storeRoot?: string) {
   };
 }
 
-function createCurrentWriteFailingFileStore(
+function createCharacterStateContext(options: {
+  readonly sessionId: string;
+  readonly fileStore: RuntimePluginFileStore;
+}) {
+  return {
+    ...createRuntimePluginContext({
+      ...testIdentity(),
+      sessionId: options.sessionId,
+      eventType: 'USER_MESSAGE',
+      currentUserMessage: 'hello',
+      character: {
+        id: 'mira',
+        displayName: 'Mira'
+      }
+    }),
+    pluginId: characterStatePluginId,
+    fileStore: options.fileStore
+  };
+}
+
+function createLegacyPatchEvents(
+  count: number
+): readonly RuntimePluginJsonObject[] {
+  const events: RuntimePluginJsonObject[] = [];
+  let current = createDefaultCharacterRuntimeState();
+
+  for (let index = 0; index < count; index += 1) {
+    const input = {
+      mood: index % 2 === 0 ? 'curious' : 'steady'
+    } as const;
+    const result = acceptedPatchResult(current, input);
+
+    events.push({
+      type: 'character_state.patch',
+      ...createRuntimeEventIdentity({
+        eventId: `evt_character_state_legacy_${String(index)}`,
+        traceId: `trace_character_state_legacy_${String(index)}`,
+        createdAt: new Date(
+          Date.parse('2026-06-15T00:00:00.000Z') + index * 1_000
+        ).toISOString()
+      }),
+      input,
+      result
+    });
+    current = result.after;
+  }
+
+  return Object.freeze(events);
+}
+
+function createInstrumentedCharacterStateFileStore(
+  initialEvents: readonly RuntimePluginJsonObject[]
+): {
+  readonly fileStore: RuntimePluginFileStore;
+  readonly eventLogReadCount: () => number;
+  readonly jsonPaths: () => readonly string[];
+} {
+  const jsonFiles = new Map<string, RuntimePluginJsonValue>();
+  const events: RuntimePluginJsonValue[] = [...initialEvents];
+  let eventLogReads = 0;
+  let revision = events.length;
+
+  return {
+    fileStore: Object.freeze({
+      readJson(path) {
+        return jsonFiles.get(path);
+      },
+      readJsonl(path) {
+        if (path !== 'events.jsonl') {
+          return Object.freeze([]);
+        }
+
+        eventLogReads += 1;
+        return Object.freeze([...events]);
+      },
+      writeJsonAtomic(path, value) {
+        jsonFiles.set(path, value);
+        revision += 1;
+      },
+      appendJsonl(path, value) {
+        if (path !== 'events.jsonl') {
+          throw new TypeError(`Unexpected JSONL path "${path}".`);
+        }
+
+        events.push(value);
+        revision += 1;
+      },
+      revision() {
+        return revision;
+      }
+    } satisfies RuntimePluginFileStore),
+    eventLogReadCount: () => eventLogReads,
+    jsonPaths: () => Object.freeze([...jsonFiles.keys()])
+  };
+}
+
+async function measureDurableCharacterStatePromptReads(options: {
+  readonly pathCount: number;
+  readonly sessionId: string;
+}): Promise<number> {
+  const storeRoot = createTestTempRoot('project02-character-state-scale-');
+  const pluginRoot = createLocalRuntimePluginPaths({
+    storeRoot,
+    sessionId: options.sessionId,
+    pluginId: characterStatePluginId
+  }).pluginRoot;
+  const pathModes: Record<string, 'json'> = {
+    'checkpoint.json': 'json'
+  };
+
+  for (let index = 0; index < options.pathCount; index += 1) {
+    pathModes[`idempotency/${String(index).padStart(64, '0')}.json`] =
+      'json';
+  }
+
+  mkdirSync(pluginRoot, { recursive: true });
+  writeFileSync(
+    join(pluginRoot, 'checkpoint.json'),
+    `${JSON.stringify({
+      kind: 'character_state.checkpoint',
+      version: 1,
+      eventCount: 0,
+      storeRevision: 1,
+      current: createDefaultCharacterRuntimeState()
+    })}\n`,
+    'utf8'
+  );
+  writeFileSync(
+    join(pluginRoot, durablePathModesFileName),
+    `${JSON.stringify(pathModes)}\n`,
+    'utf8'
+  );
+  writeFileSync(
+    join(pluginRoot, durableRevisionFileName),
+    '1\n',
+    'utf8'
+  );
+
+  const { plugin, context } = createCharacterStateHarness(
+    options.sessionId,
+    storeRoot
+  );
+
+  await plugin.lifecycleHooks.beforeRoleModelCall?.(context);
+
+  const startedAt = performance.now();
+
+  for (let index = 0; index < 100; index += 1) {
+    await plugin.lifecycleHooks.beforeRoleModelCall?.(context);
+  }
+
+  return performance.now() - startedAt;
+}
+
+function createCheckpointWriteFailingFileStore(
   fileStore: RuntimePluginFileStore
 ): RuntimePluginFileStore {
   return Object.freeze({
@@ -494,8 +767,8 @@ function createCurrentWriteFailingFileStore(
       return fileStore.readJsonl(path);
     },
     writeJsonAtomic(path, value) {
-      if (path === 'current.json') {
-        throw new Error('current snapshot write failed');
+      if (path === 'checkpoint.json') {
+        throw new Error('checkpoint write failed');
       }
 
       fileStore.writeJsonAtomic(path, value);

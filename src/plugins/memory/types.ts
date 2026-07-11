@@ -1,6 +1,6 @@
 import type {
   RuntimePluginSourceReference
-} from '../types.ts';
+} from '../plugin-types.ts';
 
 export type MemoryRecallRequest = {
   readonly sessionId: string;

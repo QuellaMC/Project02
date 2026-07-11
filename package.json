@@ -18,12 +18,14 @@
     "lint": "eslint --max-warnings=0 --no-error-on-unmatched-pattern \"src/**/*.ts\" \"tests/**/*.ts\" \"vitest.config.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "check": "pnpm lint && pnpm typecheck && pnpm test"
+    "check": "pnpm lint && pnpm typecheck && pnpm test:coverage"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.12.4",
+    "@vitest/coverage-v8": "4.1.7",
     "eslint": "^10.4.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.60.0",

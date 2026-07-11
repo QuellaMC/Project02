@@ -2,7 +2,7 @@ export const oneLineMessageMissingErrorMessage = 'Provide exactly one non-empty 
 export const oneLineMessageMultilineErrorMessage =
   'Provide exactly one non-empty single-line message.';
 
-const lineBreakPattern = /[\r\n]/u;
+const lineBreakPattern = /[\r\n\u2028\u2029]/u;
 
 export type OneLineMessageValidationReason = 'empty' | 'multiline';
 export type VisibleMessageTextValidationReason = 'empty';
@@ -32,13 +32,14 @@ export class VisibleMessageTextValidationError extends Error {
 }
 
 export function normalizeOneLineMessage(message: string | undefined): string {
-  const normalizedMessage = message?.trim() ?? '';
+  const rawMessage = message ?? '';
+  const normalizedMessage = rawMessage.trim();
 
   if (normalizedMessage.length === 0) {
     throw new OneLineMessageValidationError('empty');
   }
 
-  if (lineBreakPattern.test(normalizedMessage)) {
+  if (lineBreakPattern.test(rawMessage)) {
     throw new OneLineMessageValidationError('multiline');
   }
 

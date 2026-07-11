@@ -97,7 +97,10 @@ describe('plugin tool description redaction', () => {
       throw new Error('Expected memory.secret_search to render as a chat tool.');
     }
 
-    expect(renderedTool.function.description).toBe(toolDefinition.description);
+    expect(renderedTool.function.description).toContain(toolDefinition.description);
+    expect(renderedTool.function.description).toContain(
+      'Optional for this user turn; at most 1 call per user turn.'
+    );
     expectCredentialBearingTextToHaveNoRawSecrets(
       JSON.stringify(renderedTool)
     );

@@ -8,7 +8,7 @@ import {
 } from './contract.ts';
 import type {
   RuntimePlugin
-} from './validation.ts';
+} from './plugin-types.ts';
 
 export const runtimePluginDiscoveryPluginId =
   'runtime.plugin_discovery';

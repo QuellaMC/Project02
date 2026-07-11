@@ -27,7 +27,8 @@ import type {
   RedactedPluginRuntimeConfig,
   ResolvedPluginRuntimeConfig,
   ResolvedProject02RuntimeConfig,
-  RuntimeConfigDiagnostic
+  RuntimeConfigDiagnostic,
+  RuntimeConfigDiagnosticPluginMetadata
 } from './types.ts';
 import {
   diagnosticsHaveErrors,
@@ -85,6 +86,13 @@ export type Project02ConfiguredPluginActivation = {
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly activation: RuntimePluginActivationResult;
 };
+
+export type PreparedProject02PluginActivationPlan =
+  Project02ConfiguredPluginActivation & {
+    readonly factories: Readonly<
+      Record<string, RuntimePluginFactoryDefinition>
+    >;
+  };
 
 const configuredPluginConstructionCleanupSessionId =
   'configured-plugin-construction-cleanup';
@@ -153,17 +161,17 @@ function composeRuntimePluginFactories(
   });
 }
 
-export function resolveConfiguredProject02PluginActivation(options: {
+export function prepareConfiguredProject02PluginActivation(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly storeRoot?: string;
   readonly strictUnknownPlugins?: boolean;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-}): Project02ConfiguredPluginActivation {
+}): PreparedProject02PluginActivationPlan {
   const composition = composeRuntimePluginFactories(
     options.factories ?? defaultRuntimePluginFactories()
   );
-  const factories = composition.factories;
+  const factories = Object.freeze({ ...composition.factories });
   const pluginManifests = activationPluginManifestsForFactories(factories);
   const resolvedConfig = resolveProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
@@ -180,8 +188,24 @@ export function resolveConfiguredProject02PluginActivation(options: {
   });
 
   return Object.freeze({
+    factories,
     resolvedConfig,
     activation
+  } satisfies PreparedProject02PluginActivationPlan);
+}
+
+export function resolveConfiguredProject02PluginActivation(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly storeRoot?: string;
+  readonly strictUnknownPlugins?: boolean;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
+}): Project02ConfiguredPluginActivation {
+  const plan = prepareConfiguredProject02PluginActivation(options);
+
+  return Object.freeze({
+    resolvedConfig: plan.resolvedConfig,
+    activation: plan.activation
   } satisfies Project02ConfiguredPluginActivation);
 }
 
@@ -195,16 +219,34 @@ export async function createConfiguredProject02PluginHost(options: {
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly constructionCleanup?: RuntimePluginSessionEndOptions;
 }): Promise<Project02ConfiguredPluginHost> {
-  const factories = composeRuntimePluginFactories(
-    options.factories ?? defaultRuntimePluginFactories()
-  ).factories;
-  const activationPlan = resolveConfiguredProject02PluginActivation({
+  const activationPlan = prepareConfiguredProject02PluginActivation({
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
     strictUnknownPlugins: options.strictUnknownPlugins === true,
     ...(options.env === undefined ? {} : { env: options.env }),
-    factories
+    ...(options.factories === undefined ? {} : { factories: options.factories })
   });
+
+  return createConfiguredProject02PluginHostFromPlan({
+    activationPlan,
+    ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
+    ...(options.sessionIdentity === undefined
+      ? {}
+      : { sessionIdentity: options.sessionIdentity }),
+    ...(options.constructionCleanup === undefined
+      ? {}
+      : { constructionCleanup: options.constructionCleanup })
+  });
+}
+
+export async function createConfiguredProject02PluginHostFromPlan(options: {
+  readonly activationPlan: PreparedProject02PluginActivationPlan;
+  readonly sessionId?: string;
+  readonly sessionIdentity?: object;
+  readonly constructionCleanup?: RuntimePluginSessionEndOptions;
+}): Promise<Project02ConfiguredPluginHost> {
+  const { activationPlan } = options;
+  const { factories } = activationPlan;
 
   if (diagnosticsHaveErrors(activationPlan.activation.diagnostics)) {
     const plugins: readonly RuntimePlugin[] = Object.freeze([]);
@@ -739,7 +781,8 @@ function unknownPluginDiagnostics(options: {
         options.strict ? 'error' : 'warning',
         'runtime_config_unknown_plugin',
         `Runtime config references unknown plugin "${pluginId}".`,
-        path
+        path,
+        { pluginId }
       )
     )
   );
@@ -830,7 +873,7 @@ function defaultMemoryProviderDecision(options: {
             `Default memory provider "${options.configDefaultMemoryProvider}" is not active.`,
             'defaultMemoryProvider',
             knownMemoryProvider === undefined
-              ? {}
+              ? undefined
               : { pluginId: knownMemoryProvider.id }
           )
         ]
@@ -914,19 +957,23 @@ function diagnostic(
   code: string,
   message: string,
   path: string,
-  metadata: {
-    readonly pluginId?: string;
-    readonly pluginConfigField?: string;
-  } = {}
+  metadata?: RuntimeConfigDiagnosticPluginMetadata
 ): RuntimeConfigDiagnostic {
-  return Object.freeze({
+  const base = {
     severity,
     code,
     message,
-    path,
-    ...(metadata.pluginId === undefined ? {} : { pluginId: metadata.pluginId }),
-    ...(metadata.pluginConfigField === undefined
-      ? {}
-      : { pluginConfigField: metadata.pluginConfigField })
-  } satisfies RuntimeConfigDiagnostic);
+    path
+  } as const;
+
+  return metadata === undefined
+    ? Object.freeze({ ...base, scope: 'global' })
+    : Object.freeze({
+        ...base,
+        scope: 'plugin',
+        pluginId: metadata.pluginId,
+        ...(metadata.pluginConfigField === undefined
+          ? {}
+          : { pluginConfigField: metadata.pluginConfigField })
+      });
 }

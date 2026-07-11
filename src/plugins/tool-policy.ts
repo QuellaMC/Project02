@@ -1,6 +1,7 @@
 import { isBuiltInModelToolName } from '../role-model/model-tools.ts';
 import type { RoleModelPluginToolDefinition } from '../role-model/contracts.ts';
 import { isFirstPartyModelToolsPlugin } from './builtin/model-tools.ts';
+import { isModelFacingRuntimePluginTool } from './tool-contract.ts';
 import {
   runtimePluginAccessFor,
   runtimePluginAccessForPlugin,
@@ -9,9 +10,8 @@ import {
 } from './access-control.ts';
 import type {
   RuntimePlugin,
-  RuntimePluginManifest,
   RuntimePluginProvidedTool
-} from './validation.ts';
+} from './plugin-types.ts';
 import type {
   RuntimePluginAccessSnapshot,
   RuntimePluginSideEffectLevel
@@ -193,14 +193,10 @@ export function isModelFacingPluginTool(options: {
   readonly plugin: RuntimePlugin;
   readonly tool: RuntimePluginProvidedTool;
 }): boolean {
-  return (
-    !isBuiltInModelToolName(options.tool.name) &&
-    options.tool.validationOwner === 'plugin_host' &&
-    !toolRequiresConfirmation(options) &&
-    (options.tool.sideEffectLevel === 'none' ||
-      options.tool.sideEffectLevel === 'runtime_read' ||
-      options.tool.sideEffectLevel === 'local_memory_write')
-  );
+  return isModelFacingRuntimePluginTool({
+    manifest: options.plugin.manifest,
+    tool: options.tool
+  });
 }
 
 export function isModelVisiblePluginTool(options: {
@@ -220,31 +216,6 @@ export function isModelVisiblePluginTool(options: {
     options.plugin.lifecycleHooks.handleToolCall !== undefined &&
     isModelFacingPluginTool(options)
   );
-}
-
-export function validateRuntimePluginModelFacingToolAccess(options: {
-  readonly manifest: RuntimePluginManifest;
-  readonly providedTools: readonly RuntimePluginProvidedTool[];
-}): void {
-  const hasModelFacingTool = options.providedTools.some((tool) =>
-    isModelFacingPluginTool({
-      plugin: {
-        manifest: options.manifest,
-        providedTools: options.providedTools,
-        lifecycleHooks: {}
-      },
-      tool
-    })
-  );
-
-  if (
-    hasModelFacingTool &&
-    options.manifest.requestedAccess.model_input !== 'write'
-  ) {
-    throw new TypeError(
-      'Model-facing tools require requestedAccess.model_input = "write".'
-    );
-  }
 }
 
 export function toolAllowsFileStoreWrites(
