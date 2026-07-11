@@ -9,7 +9,7 @@ import {
   type LoadedProject02RuntimeConfig,
   type Project02ConfiguredPluginActivation,
   type RuntimeConfigDiagnostic,
-  type RuntimePluginFactory
+  type RuntimePluginFactoryDefinition
 } from '../runtime/config/index.ts';
 
 export class RuntimeEnvFileError extends Error {
@@ -62,15 +62,12 @@ export function resolveRuntimeConfigActivationBeforeEnvFile(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly storeRoot?: string;
   readonly env: NodeJS.ProcessEnv;
-  readonly diagnoseUncheckedLegacyFactories?: boolean;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 }): Project02ConfiguredPluginActivation | undefined {
   const configured = resolveConfiguredProject02PluginActivation({
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
     env: options.env,
-    diagnoseUncheckedLegacyFactories:
-      options.diagnoseUncheckedLegacyFactories === true,
     ...(options.factories === undefined ? {} : { factories: options.factories })
   });
 

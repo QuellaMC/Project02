@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Architecture and Maintainability Audit</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172026; background: #f7f8f5; line-height: 1.55; }
+    main { max-width: 1040px; margin: 0 auto; padding: 44px 24px; }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { margin-top: 34px; font-size: 1.25rem; border-bottom: 1px solid #d9ded6; padding-bottom: 8px; }
+    h3 { margin-top: 24px; font-size: 1rem; }
+    p { margin: 0 0 14px; }
+    ul, ol { padding-left: 22px; }
+    li { margin-bottom: 7px; }
+    code { background: #e9ece7; border-radius: 4px; padding: 1px 5px; }
+    pre { overflow-x: auto; background: #202923; color: #f3f7f1; border-radius: 8px; padding: 16px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; }
+    th, td { border: 1px solid #d9ded6; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #edf1eb; }
+    .status { display: inline-block; border: 1px solid #aebbad; border-radius: 999px; padding: 2px 10px; background: #fff; font-size: 0.9rem; }
+    .meta { color: #4a5651; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Architecture and Maintainability Audit</h1>
+    <p><span class="status">Status: implementation-scoped audit</span></p>
+    <p class="meta">
+      Reviewed: 2026-07-11. Implementation branch:
+      <code>fix/plugin-activation-policy</code>.
+    </p>
+    <p class="meta">
+      Source references describe the pre-refactor <code>main</code> baseline at
+      <code>7c5673340271fa3ec4c7e10f5dab01f2f7bef5ba</code>; branch line numbers shift
+      as the bounded corrections remove obsolete paths.
+    </p>
+
+    <h2>Executive summary</h2>
+    <p>
+      The architecture is generally coherent around one user-turn runtime, one plugin host, and
+      explicit runtime commit and storage boundaries. The main risk is not a missing framework; it
+      is that policy, activation, inspection, and durable evidence each have a second path that can
+      disagree with the intended owner.
+    </p>
+    <p>
+      The highest-impact issues are a direct plugin-host dispatch path that can bypass the same
+      confirmation and side-effect eligibility used for model-facing discovery, an inspect path
+      that constructs plugins and invokes a synthetic session-end lifecycle, and a file-log read
+      path that returns terminal trace entries that were never persisted. Default plugin activation
+      also relies on parallel factory shapes, repeated ID lists, and factory-instance identity.
+    </p>
+    <p>
+      This PR intentionally implements only three corrections: enforce the existing dispatch gate
+      inside <code>RuntimePluginHost</code>, make default/catalog activation manifest-backed and
+      independent of factory object identity or WeakSet-style instance tracking, and make inspect a
+      pure read path that does not construct or close plugins. Historical inspect labeling, durable
+      evidence provenance, and storage module splitting remain sequenced follow-ups.
+    </p>
+
+    <h2>Architecture and execution-flow overview</h2>
+    <p>The primary paths are:</p>
+    <pre><code>chat input
+  -&gt; config load and activation
+  -&gt; plugin construction and RuntimePluginHost
+  -&gt; role-model loop
+  -&gt; host tool dispatch
+  -&gt; runtime validation and commit
+  -&gt; trace, raw-event, conversation, and plugin evidence
+
+inspect request
+  -&gt; config load and activation projection
+  -&gt; session and durable evidence reads
+  -&gt; JSON output
+
+relay input
+  -&gt; in-memory session and log store
+  -&gt; the same runLocalUserMessageEvent runtime
+  -&gt; one visible reply</code></pre>
+    <p>
+      The user-turn runtime is the useful convergence point. Divergence appears before it in config
+      and plugin composition, inside direct host dispatch, and after it in inspection and durable
+      evidence projection. The corrections below reuse those existing boundaries rather than add a
+      runtime kernel or another registry.
+    </p>
+
+    <h2>Findings</h2>
+
+    <h3>High: direct plugin-host dispatch can bypass model-facing tool eligibility</h3>
+    <p>
+      <strong>Responsibility:</strong> confirmation and side-effect eligibility for plugin tools.
+      <code>src/plugins/tool-policy.ts</code> lines 192-203 define the accepted model-facing subset:
+      the tool must be plugin-host validated, require no confirmation, and have only an allowed
+      side-effect level. The direct dispatch path in <code>src/plugins/hook-runner.ts</code> lines
+      628-745 locates a plugin and declared tool, checks access, validates input, and calls the hook.
+      Before this PR, it did not require the tool to remain in the shared routable set.
+    </p>
+    <p>
+      This is a policy bypass rather than cosmetic duplication: a caller with a
+      <code>RuntimePluginHost</code> could directly invoke a confirmation-required or externally
+      side-effecting tool that discovery and the role-model route correctly withheld. The likely
+      cause was treating discovery filtering and execution authorization as separate concerns.
+    </p>
+    <ul>
+      <li><strong>Smallest correction:</strong> reuse the existing routability predicate inside host dispatch and return the existing rejected tool-call/evidence shape.</li>
+      <li><strong>Behavior to preserve:</strong> identity checks, access grants, input validation, timeouts, evidence redaction, and valid local-memory-write tools.</li>
+      <li><strong>Compatibility decision:</strong> no compatibility shim for direct calls that policy already classifies as ineligible; they should now fail closed.</li>
+    </ul>
+
+    <h3>High: inspect constructs plugins and invokes synthetic session-end hooks</h3>
+    <p>
+      <strong>Responsibility:</strong> read-only inspection. In
+      <code>src/cli/inspect.ts</code> lines 541-588, inspect can call configured host construction,
+      which runs plugin factories. Lines 607-624 then invoke <code>onSessionEnd</code> with a
+      synthetic <code>USER_MESSAGE</code> context solely to clean up those constructed plugins.
+      File-store writes are disabled, but constructors, provider setup, close hooks, and other
+      lifecycle behavior still run during a nominal read.
+    </p>
+    <p>
+      This makes inspect an execution entry point and forces it to own lifecycle cleanup. A new
+      plugin can therefore make inspect slower, unavailable, or externally observable even when
+      all required output already exists in manifests, activation diagnostics, and stored evidence.
+    </p>
+    <ul>
+      <li><strong>Smallest correction:</strong> resolve inspect output from manifest-backed activation metadata without calling factory <code>create</code>, building a host, or invoking lifecycle hooks.</li>
+      <li><strong>Behavior to preserve:</strong> config validation, secret redaction, activation reasons, granted access, session listing, and stored turn evidence.</li>
+      <li><strong>Compatibility decision:</strong> because runtime config is unreleased, remove manifest-less function factories and the parallel <code>enabledPlugins</code> input; use <code>plugins.&lt;id&gt;.enabled</code> exclusively, with <code>defaultMemoryProvider</code> limited to selecting an already-active provider.</li>
+    </ul>
+
+    <h3>High: public file-log reads synthesize terminal trace entries that are not durable</h3>
+    <p>
+      <strong>Responsibility:</strong> truthful durable evidence. In
+      <code>src/runtime/storage/file-runtime-log-store.ts</code> lines 123-177,
+      <code>reconcileTerminalRawTraceEvidence</code> derives
+      <code>raw_event_log_appended</code> and terminal trace steps from a terminal raw event. Public
+      reads return those entries without writing them to <code>trace.jsonl</code>. The direct tests
+      deliberately verify both the synthesized return value and the unchanged file.
+    </p>
+    <p>
+      Recovery from a terminal raw-event commit is valid, but the current API does not distinguish
+      stored trace evidence from a derived projection. Read-only inspection can therefore report a
+      trace step that the audit file does not contain, while the surrounding cross-file validators
+      otherwise claim disagreement is corruption.
+    </p>
+    <ul>
+      <li><strong>Smallest correction:</strong> return one coherent session-evidence result that separates stored entries, derived recovery state, and diagnostics; stop silently adding derived entries to the ordinary stored trace view.</li>
+      <li><strong>Behavior to preserve:</strong> non-mutating reads, recovery when a terminal raw event is durable, and fail-closed conversation/raw-event consistency.</li>
+      <li><strong>Compatibility decision:</strong> retain schema-1 decoding through an explicit versioned path; do not apply legacy conversion implicitly to every current-schema read.</li>
+      <li><strong>PR scope:</strong> deferred; the dispatch and inspect fixes do not change storage format or recovery behavior.</li>
+    </ul>
+
+    <h3>Medium-high: default activation is represented by parallel factory and identity mechanisms</h3>
+    <p>
+      <strong>Responsibility:</strong> the built-in plugin catalog and default-enabled policy.
+      <code>src/plugins/catalog.ts</code> lines 29-53 define a catalog factory type plus separate
+      first-party, host-scoped, and default-enabled ID arrays. <code>src/runtime/config/activation.ts</code>
+      lines 113-148 convert that type into another factory definition, then determine defaults by
+      comparing factory objects. Lines 856-863 repeat reference identity to recognize canonical
+      host-scoped defaults. A fresh registry returned by the public catalog therefore loses policy
+      even though it carries the same catalog-defined entries. Bare injected wrappers are
+      intentionally not host-owned and should remain opt-in through config.
+    </p>
+    <p>
+      Adding or changing one built-in can require edits to the catalog definitions, multiple ID
+      lists, activation conversion, and identity checks. Object identity is an unstable source of
+      product policy and makes equivalent factories behave differently.
+    </p>
+    <ul>
+      <li><strong>Smallest correction:</strong> use one manifest-backed catalog definition with explicit ownership and construction scope, and canonicalize all host-owned entries before their manifest defaults or factories are consumed.</li>
+      <li><strong>Behavior to preserve:</strong> explicit config disable wins, bare injected factories remain supported but opt-in, unknown IDs remain diagnosable, and configured plugins construct only after activation succeeds.</li>
+      <li><strong>Compatibility decision:</strong> require manifest-backed factories, remove the unreleased <code>enabledPlugins</code> compatibility route, keep <code>defaultMemoryProvider</code> selection-only, and replace reference identity with catalog-shaped composition whose host-owned entries are always replaced by canonical definitions before activation or construction.</li>
+    </ul>
+
+    <h3>Medium: historical inspect combines current config with persisted activation evidence</h3>
+    <p>
+      <strong>Responsibility:</strong> historical truth. <code>src/runtime/log.ts</code> lines 204-253
+      persist a per-turn plugin registry, enabled state, access grants, health, and any declared
+      manifest fingerprint, but not the effective runtime-config fingerprint or activation reasons.
+      However, <code>src/cli/inspect.ts</code> lines 479-520 and 541 onward also resolve
+      and display the current runtime config and current activation when inspecting an old session.
+      After config changes, the output can present current activation beside an old turn without a
+      clear temporal label.
+    </p>
+    <ul>
+      <li><strong>Smallest correction:</strong> label current config/activation explicitly and use the persisted turn snapshot as the owner of historical plugin state.</li>
+      <li><strong>Behavior to preserve:</strong> current config diagnostics remain useful for operators, while old turn evidence remains readable without re-running plugins.</li>
+      <li><strong>Compatibility decision:</strong> change labels and projection ownership without changing the persisted turn-evidence format.</li>
+      <li><strong>PR scope:</strong> deferred until pure inspect construction is established.</li>
+    </ul>
+
+    <h3>Medium: the storage layout module also owns all persisted record codecs</h3>
+    <p>
+      <strong>Responsibility:</strong> filesystem layout versus stored record validation.
+      <code>src/runtime/storage/layout.ts</code> lines 1-94 import conversation, role-model, and
+      plugin constructors and validators. Lines 301-350 contain the actual root, session, and
+      plugin path layout. From line 412 onward, the same file encodes, decodes, normalizes, and
+      semantically validates every trace, raw-event, conversation, provider, role-model, and plugin
+      evidence shape.
+    </p>
+    <ul>
+      <li><strong>Smallest correction:</strong> keep path names and ID normalization in <code>layout.ts</code>; move storage errors/schema metadata and runtime record codecs into focused storage modules.</li>
+      <li><strong>Behavior to preserve:</strong> one central path owner, exact error codes, strict persisted-evidence validation, and schema-1 compatibility.</li>
+      <li><strong>Compatibility decision:</strong> update imports mechanically without changing file names, record formats, schema markers, or readable versions.</li>
+      <li><strong>PR scope:</strong> deferred as a mechanical, behavior-neutral follow-up.</li>
+    </ul>
+
+    <h3>Medium, uncertain: relay retains a parallel composition path</h3>
+    <p>
+      <strong>Responsibility:</strong> CLI dependency composition. <code>src/cli/relay.ts</code>
+      lines 23-50 creates an in-memory session and log store directly, while
+      <code>src/cli/chat.ts</code> lines 206-294 loads config, resolves activation, constructs a
+      configured host, and prepares durable runtime dependencies. Both converge on
+      <code>runLocalUserMessageEvent</code>, so core runtime behavior is shared, but relay does not
+      exercise configured plugins, provider selection, or durable storage.
+    </p>
+    <p>
+      This may be architectural drift, but repository instructions explicitly retain relay as the
+      narrow MVP smoke and compatibility path. Do not fold it into chat until the product no longer
+      needs that deterministic, dependency-light entry point.
+    </p>
+
+    <h2>Duplicate-route and ownership summary</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Responsibility</th>
+          <th>Current competing routes</th>
+          <th>Canonical owner</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Tool eligibility</td>
+          <td>Discovery filtering and direct host dispatch</td>
+          <td><code>src/plugins/tool-policy.ts</code>, enforced again at host dispatch</td>
+        </tr>
+        <tr>
+          <td>Default plugin policy</td>
+          <td>Catalog types and ID arrays, activation factory conversion, object/WeakSet-style identity</td>
+          <td>One manifest-backed catalog definition consumed by activation and construction</td>
+        </tr>
+        <tr>
+          <td>Inspect activation</td>
+          <td>Pure activation metadata and constructed plugin-host lifecycle</td>
+          <td>Pure activation projection; construction remains a runtime/chat concern</td>
+        </tr>
+        <tr>
+          <td>Historical plugin state</td>
+          <td>Current config activation and persisted per-turn activation</td>
+          <td>Persisted snapshot for historical turns, with current config clearly labeled</td>
+        </tr>
+        <tr>
+          <td>Terminal trace truth</td>
+          <td>Stored trace entries and unmarked entries derived from raw events</td>
+          <td>A coherent evidence reader with explicit provenance</td>
+        </tr>
+        <tr>
+          <td>Storage structure</td>
+          <td>Path layout and deep record codecs in one module</td>
+          <td><code>layout.ts</code> for paths; focused storage contract and codec modules for records</td>
+        </tr>
+        <tr>
+          <td>CLI composition</td>
+          <td>Full chat composition and minimal relay composition</td>
+          <td>The shared local runtime; retain relay as an explicit compatibility wrapper</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Minimal target architecture</h2>
+    <ul>
+      <li>One manifest-backed plugin catalog owns factory, ownership metadata, construction scope, and default-enabled metadata; host-owned composition is canonicalized before use.</li>
+      <li>One pure activation resolver turns config plus catalog metadata into activation snapshots and diagnostics.</li>
+      <li>Plugin construction happens only after successful activation and only on execution paths that need live plugins.</li>
+      <li><code>RuntimePluginHost</code> is the final authorization boundary and reuses the shared routability policy before every plugin hook dispatch.</li>
+      <li>Inspect reads config metadata and stored evidence without constructing plugins or invoking lifecycle hooks.</li>
+      <li>Historical inspect uses persisted turn activation as historical truth and labels current operator config separately.</li>
+      <li>Durable evidence reads distinguish stored records from derived recovery state.</li>
+      <li>Storage path layout remains centralized while record codecs move to focused storage-owned files.</li>
+    </ul>
+    <p>
+      This target uses current boundaries. It does not add a component registry, dependency
+      injection framework, runtime kernel, migration framework, or second plugin host.
+    </p>
+
+    <h2>Refactoring sequence</h2>
+    <ol>
+      <li>
+        In this PR, enforce the shared routability gate in direct host dispatch, replace
+        object/WeakSet-style default-factory recognition with canonical host catalog composition plus manifest-backed activation metadata,
+        and make inspect resolve activation without constructing or closing plugins. Add focused
+        regression tests for each route.
+      </li>
+      <li>
+        Label current config and persisted per-turn activation separately in inspect. Keep the
+        current activation diagnostics, but never present them as the historical state of an old
+        turn.
+      </li>
+      <li>
+        Add a coherent durable session-evidence read shape with stored-versus-derived provenance.
+        Update public trace consumers, then remove unmarked public-read synthesis.
+      </li>
+      <li>
+        Split <code>src/runtime/storage/layout.ts</code> mechanically into path layout, storage
+        contract, and persisted record codec ownership without changing formats or validators.
+      </li>
+      <li>
+        Reassess relay only after repository policy removes its smoke/compatibility role. Until
+        then, keep its shared runtime call and small dependency surface.
+      </li>
+    </ol>
+
+    <h2>Rejected or uncertain concerns</h2>
+    <ul>
+      <li><code>visible_reply</code> remains a terminal built-in model tool. Routing it through plugin-host dispatch would blur the commit boundary and is not a cleanup.</li>
+      <li>Provider adapters are justified external boundaries. Their request/response mapping should remain separate from role-model policy and runtime commit.</li>
+      <li>Cross-file trace, raw-event, and conversation validators remain necessary under the current three-file storage layout. Do not delete them as a shortcut.</li>
+      <li>Schema-1 storage reads remain an explicitly tested persistence contract. The unreleased runtime-config <code>enabledPlugins</code> route is not retained; all configuration and tests use <code>plugins.&lt;id&gt;.enabled</code>, while <code>defaultMemoryProvider</code> only chooses among active providers.</li>
+      <li><code>src/plugins/adapter-proofs/</code> contains test and compatibility proof mapping, not a second production plugin runtime.</li>
+      <li>The relay composition difference is intentional for now because the repository retains it as a narrow smoke path.</li>
+      <li>Splitting the large user-turn runtime orchestration is deferred. No independent duplicate runtime route was proven, and a broad runtime framework would exceed the evidence in this audit.</li>
+    </ul>
+  </main>
+</body>
+</html>

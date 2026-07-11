@@ -11,7 +11,7 @@ import {
   RuntimeConfigMutationError,
   storeRootForLoadedDefaultConfigPath,
   type LoadedProject02RuntimeConfig,
-  type RuntimePluginFactory,
+  type RuntimePluginFactoryDefinition,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue
 } from '../runtime/config/index.ts';
@@ -39,7 +39,7 @@ type RuntimeConfigCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
   readonly env?: NodeJS.ProcessEnv;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactory>>;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 };
 
 class RuntimeConfigCliUsageError extends Error {
@@ -116,7 +116,6 @@ function runRuntimeConfigCliFromArgsSync(
             ? {}
             : { storeRoot: parsed.location.storeRoot }),
           env: cliEnv.configEnv,
-          diagnoseUncheckedLegacyFactories: true,
           ...(options.factories === undefined ? {} : { factories: options.factories })
         }) ??
         resolveConfiguredProject02PluginActivation({
@@ -137,7 +136,6 @@ function runRuntimeConfigCliFromArgsSync(
                   location: parsed.location
                 })
               }),
-          diagnoseUncheckedLegacyFactories: true,
           ...(options.factories === undefined ? {} : { factories: options.factories })
         });
 
