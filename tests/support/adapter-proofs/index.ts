@@ -25,19 +25,19 @@ import {
   type RuntimePluginToolCallResult,
   type RuntimePluginToolValidationOwner,
   type RuntimePluginContext
-} from '../types.ts';
+} from '../../../src/plugins/types.ts';
 import {
   createFirstPartyModelToolsPlugin
-} from '../builtin/model-tools.ts';
+} from '../../../src/plugins/builtin/model-tools.ts';
 import {
   modelToolInputFieldValueTypes
-} from '../../role-model/model-tools.ts';
-import { isModelFacingPluginTool } from '../tool-policy.ts';
+} from '../../../src/role-model/model-tools.ts';
+import { isModelFacingPluginTool } from '../../../src/plugins/tool-policy.ts';
 import type {
   ModelToolInputFieldValueType,
   ModelToolInputContract,
   ModelToolInputField
-} from '../../role-model/model-tools.ts';
+} from '../../../src/role-model/model-tools.ts';
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 
@@ -259,7 +259,6 @@ export function mapTencentDbMemoryGatewayFixture(
 
         return Object.freeze({
           contextItems: Object.freeze([contextItem]),
-          runtimeNotes: Object.freeze([]),
           evidence: Object.freeze([
             createEvidence({
               pluginId: manifestId,
@@ -450,7 +449,6 @@ export function mapHermesMemoryProviderFixture(
 
         return Object.freeze({
           contextItems: Object.freeze([contextItem]),
-          runtimeNotes: Object.freeze([]),
           evidence: Object.freeze([
             createEvidence({
               pluginId: manifestId,
@@ -650,7 +648,6 @@ export function mapMcpToolsResourcesFixture(
 
         return Object.freeze({
           contextItems: Object.freeze(contextItems),
-          runtimeNotes: Object.freeze([]),
           evidence: Object.freeze([
             createEvidence({
               pluginId: manifestId,

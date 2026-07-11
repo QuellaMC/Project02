@@ -33,16 +33,25 @@ import {
   type RuntimeTraceStepName,
   type RuntimeTurnStatus
 } from '../runtime/log.ts';
-import { createFileRuntimeLogStore } from '../runtime/storage/file-runtime-log-store.ts';
+import {
+  createFileRuntimeLogStore,
+  durableRuntimeSessionCharacterProfile
+} from '../runtime/storage/file-runtime-log-store.ts';
 import {
   createLocalRuntimeStorageLayout,
   LocalRuntimeStorageContractError,
   normalizeLocalRuntimeSessionId
 } from '../runtime/storage/layout.ts';
 import {
+  acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore,
-  LocalRuntimeSessionStoreError
+  LocalRuntimeSessionStoreError,
+  type LocalRuntimeSessionConversationEvidence
 } from '../runtime/storage/session-store.ts';
+import {
+  createLocalRuntimeMutationLockOwnerToken,
+  type LocalRuntimeMutationLockLease
+} from '../runtime/storage/mutation-lock.ts';
 import {
   createDefaultProject02PluginHost,
   createRuntimePluginHost,
@@ -55,12 +64,13 @@ import {
   type RuntimePluginSessionEndOptions
 } from '../plugins/host.ts';
 import {
-  createConfiguredProject02PluginHost,
+  createConfiguredProject02PluginHostFromPlan,
   diagnosticsHaveErrors,
   loadProject02RuntimeConfig,
+  prepareConfiguredProject02PluginActivation,
   roleModelProviderEnvVarName,
-  resolveConfiguredProject02PluginActivation,
   resolveProject02RuntimeConfig,
+  type PreparedProject02PluginActivationPlan,
   type RuntimeConfigDiagnostic,
   type RuntimePluginFactoryDefinition
 } from '../runtime/config/index.ts';
@@ -153,10 +163,11 @@ type TraceIdentity = {
 type DurableChatRuntime = {
   readonly session: ConversationSession;
   readonly logStore: RuntimeLogStore;
+  readonly writerLease: LocalRuntimeMutationLockLease;
 };
 
 type ConfiguredChatPluginHost = Awaited<
-  ReturnType<typeof createConfiguredProject02PluginHost>
+  ReturnType<typeof createConfiguredProject02PluginHostFromPlan>
 >;
 
 const exitCommand = '/exit';
@@ -237,9 +248,9 @@ export async function runChatCliFromArgs(
     });
     const selectedArgs = selectChatProvider(parsedArgs, runtimeEnv);
 
-    const configuredActivation =
+    const preparedActivationPlan =
       options.pluginHost === undefined
-        ? resolveConfiguredProject02PluginActivation({
+        ? prepareConfiguredProject02PluginActivation({
             loadedConfig,
             ...(selectedArgs.storeRoot === undefined
               ? {}
@@ -249,15 +260,15 @@ export async function runChatCliFromArgs(
           })
         : undefined;
     const resolvedRuntimeConfig =
-      configuredActivation?.resolvedConfig ??
+      preparedActivationPlan?.resolvedConfig ??
       resolveProject02RuntimeConfig({
         loadedConfig,
         ...(selectedArgs.storeRoot === undefined ? {} : { storeRoot: selectedArgs.storeRoot }),
         env: runtimeEnv
       });
-    if (configuredActivation !== undefined) {
+    if (preparedActivationPlan !== undefined) {
       assertNoRuntimeConfigErrors(
-        configuredActivation.activation.diagnostics,
+        preparedActivationPlan.activation.diagnostics,
         'Runtime config activation failed'
       );
     }
@@ -268,14 +279,11 @@ export async function runChatCliFromArgs(
 
     validateDurableSessionArgs(runtimeArgs);
     const configuredHost =
-      options.pluginHost === undefined
-        ? await createConfiguredChatPluginHostBeforeSession({
-            loadedConfig,
-            storeRoot: resolvedRuntimeConfig.storeRoot,
-            env: runtimeEnv,
-            ...(options.factories === undefined ? {} : { factories: options.factories })
-          })
-        : undefined;
+      preparedActivationPlan === undefined
+        ? undefined
+        : await createConfiguredChatPluginHostBeforeSession({
+            activationPlan: preparedActivationPlan
+          });
     if (configuredHost !== undefined) {
       assertNoRuntimeConfigErrors(
         configuredHost.activation.diagnostics,
@@ -339,26 +347,31 @@ async function runChatCliAfterConfiguredHost(options: {
     throw error;
   }
 
-  const exitCode = await runChatCli({
-    ...options.options,
-    ...durableRuntime,
-    ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
-    ...(pluginHost === undefined ? {} : { pluginHost }),
-    traceMode: options.options.traceMode === true || options.parsedTraceMode
-  });
-
-  if (
-    exitCode !== 0 &&
-    options.configuredHost !== undefined &&
-    pluginHost !== undefined
-  ) {
-    await cleanupConfiguredChatPluginHostAfterFatalExit({
-      configuredHost: options.configuredHost,
-      session: durableRuntime.session
+  try {
+    const exitCode = await runChatCli({
+      ...options.options,
+      session: durableRuntime.session,
+      logStore: durableRuntime.logStore,
+      ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
+      ...(pluginHost === undefined ? {} : { pluginHost }),
+      traceMode: options.options.traceMode === true || options.parsedTraceMode
     });
-  }
 
-  return exitCode;
+    if (
+      exitCode !== 0 &&
+      options.configuredHost !== undefined &&
+      pluginHost !== undefined
+    ) {
+      await cleanupConfiguredChatPluginHostAfterFatalExit({
+        configuredHost: options.configuredHost,
+        session: durableRuntime.session
+      });
+    }
+
+    return exitCode;
+  } finally {
+    await durableRuntime.writerLease.release();
+  }
 }
 
 async function cleanupConfiguredChatPluginHostAfterFatalExit(options: {
@@ -426,15 +439,10 @@ async function runBestEffortConfiguredChatPluginSessionEndCleanup(options: {
 }
 
 async function createConfiguredChatPluginHostBeforeSession(options: {
-  readonly loadedConfig: Parameters<
-    typeof createConfiguredProject02PluginHost
-  >[0]['loadedConfig'];
-  readonly storeRoot: string;
-  readonly env: NodeJS.ProcessEnv;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
+  readonly activationPlan: PreparedProject02PluginActivationPlan;
 }): Promise<ConfiguredChatPluginHost> {
   try {
-    return await createConfiguredProject02PluginHost(options);
+    return await createConfiguredProject02PluginHostFromPlan(options);
   } catch {
     throw new ChatCliStartupError(
       'Configured plugin construction failed before creating a durable session.'
@@ -488,6 +496,90 @@ function formatRuntimeConfigDiagnosticError(
 }
 
 export async function runChatCli(options: ChatCliOptions): Promise<number> {
+  const configuredLogStore = options.logStore;
+  const sessionPaths = configuredLogStore?.localRuntimeSessionPaths;
+
+  if (configuredLogStore === undefined || sessionPaths === undefined) {
+    return await runChatCliWithActiveWriter(options);
+  }
+
+  const writerOwnerToken =
+    configuredLogStore.localRuntimeWriterLockOwnerToken ??
+    createLocalRuntimeMutationLockOwnerToken();
+  const writerLease = await acquireLocalRuntimeSessionWriterLease({
+    storeRoot: sessionPaths.storeRoot,
+    sessionId: sessionPaths.sessionId,
+    ownerToken: writerOwnerToken
+  });
+  const activeLogStore =
+    configuredLogStore.localRuntimeWriterLockOwnerToken === undefined
+      ? runtimeLogStoreWithWriterOwner(configuredLogStore, writerOwnerToken)
+      : configuredLogStore;
+
+  try {
+    activeLogStore.recoverAbandonedWriterEvidence?.();
+    return await runChatCliWithActiveWriter({
+      ...options,
+      logStore: activeLogStore
+    });
+  } finally {
+    await writerLease.release();
+  }
+}
+
+function runtimeLogStoreWithWriterOwner(
+  logStore: RuntimeLogStore,
+  ownerToken: ReturnType<typeof createLocalRuntimeMutationLockOwnerToken>
+): RuntimeLogStore {
+  return Object.freeze({
+    ...(logStore.localRuntimeSessionPaths === undefined
+      ? {}
+      : { localRuntimeSessionPaths: logStore.localRuntimeSessionPaths }),
+    localRuntimeWriterLockOwnerToken: ownerToken,
+    appendTrace(entry) {
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      return logStore.appendRawEvent(record);
+    },
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
+    },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
+    },
+    ...(logStore.checkpointWriterEvidence === undefined
+      ? {}
+      : {
+          checkpointWriterEvidence() {
+            logStore.checkpointWriterEvidence?.();
+          }
+        }),
+    ...(logStore.recoverAbandonedWriterEvidence === undefined
+      ? {}
+      : {
+          recoverAbandonedWriterEvidence() {
+            return logStore.recoverAbandonedWriterEvidence?.() ?? false;
+          }
+        }),
+    readSessionEvidence() {
+      return logStore.readSessionEvidence();
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
+async function runChatCliWithActiveWriter(
+  options: ChatCliOptions
+): Promise<number> {
   const session = options.session ?? createConversationSession();
   const logStore = options.logStore ?? createRuntimeLogStore();
   const lines = createInterface({
@@ -742,10 +834,12 @@ async function handleUserMessageThroughRuntime(
         throw error;
       }
 
+      const evidence = options.logStore.readSessionEvidence().stored;
+
       return mapUnexpectedRuntimeFailureResult(
         identity,
-        traceEntriesForIdentity(options.logStore, identity),
-        rawEventsForIdentity(options.logStore, identity)
+        evidence.traceEntries.filter((entry) => sameTraceIdentity(entry, identity)),
+        evidence.rawEvents.filter((event) => sameTraceIdentity(event, identity))
       );
     }
   } catch (error: unknown) {
@@ -909,31 +1003,13 @@ function mapUnexpectedRuntimeFailureResult(
   };
 }
 
-function traceEntriesForIdentity(
-  logStore: RuntimeLogStore,
+function sameTraceIdentity(
+  evidence: TraceIdentity,
   identity: TraceIdentity
-): readonly RuntimeTraceEntry[] {
-  return Object.freeze(
-    logStore
-      .traceEntries()
-      .filter(
-        (entry) =>
-          entry.eventId === identity.eventId && entry.traceId === identity.traceId
-      )
-  );
-}
-
-function rawEventsForIdentity(
-  logStore: RuntimeLogStore,
-  identity: TraceIdentity
-): readonly RawEventLogRecord[] {
-  return Object.freeze(
-    logStore
-      .rawEvents()
-      .filter(
-        (event) =>
-          event.eventId === identity.eventId && event.traceId === identity.traceId
-      )
+): boolean {
+  return (
+    evidence.eventId === identity.eventId &&
+    evidence.traceId === identity.traceId
   );
 }
 
@@ -1313,14 +1389,6 @@ async function createDurableChatRuntime(
     args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot };
   const sessionStore = createLocalRuntimeSessionStore({
     ...storageOptions,
-    conversationLogReader: {
-      readConversationMessages(selectedSessionId) {
-        return createFileRuntimeLogStore({
-          ...storageOptions,
-          sessionId: selectedSessionId
-        }).conversationMessages();
-      }
-    },
     sessionReadinessValidator: {
       assertSessionReadable(selectedSessionId) {
         const logStore = createFileRuntimeLogStore({
@@ -1328,28 +1396,62 @@ async function createDurableChatRuntime(
           sessionId: selectedSessionId
         });
 
-        logStore.traceEntries();
-        logStore.rawEvents();
-        logStore.conversationMessages();
+        logStore.readSessionEvidence();
       }
     }
   });
+  const ownerToken = createLocalRuntimeMutationLockOwnerToken();
+  const writerLease = await acquireLocalRuntimeSessionWriterLease({
+    ...storageOptions,
+    sessionId,
+    ownerToken
+  });
 
-  if (args.newSessionId !== undefined) {
-    await sessionStore.createSession({ sessionId });
-  } else if (args.sessionId !== undefined) {
-    await sessionStore.selectSession(sessionId);
-  } else {
-    await selectOrCreateDefaultSession(sessionStore, sessionId);
+  try {
+    if (args.newSessionId !== undefined) {
+      await sessionStore.createSession({ sessionId });
+    } else if (args.sessionId !== undefined) {
+      await sessionStore.selectSession(sessionId);
+    } else {
+      await selectOrCreateDefaultSession(sessionStore, sessionId);
+    }
+
+    const logStore = createFileRuntimeLogStore({
+      ...storageOptions,
+      sessionId,
+      writerLockOwnerToken: ownerToken
+    });
+    logStore.recoverAbandonedWriterEvidence?.();
+
+    return Object.freeze({
+      session: await sessionStore.rehydrateConversationSession(sessionId, {
+        conversationLogReader: {
+          readConversationMessages() {
+            return readDurableConversationEvidence(logStore).messages;
+          },
+          readConversationEvidence() {
+            return readDurableConversationEvidence(logStore);
+          }
+        }
+      }),
+      logStore,
+      writerLease
+    } satisfies DurableChatRuntime);
+  } catch (error: unknown) {
+    await writerLease.release();
+    throw error;
   }
+}
+
+function readDurableConversationEvidence(
+  logStore: RuntimeLogStore
+): LocalRuntimeSessionConversationEvidence {
+  const evidence = logStore.readSessionEvidence().stored;
 
   return Object.freeze({
-    session: await sessionStore.rehydrateConversationSession(sessionId),
-    logStore: createFileRuntimeLogStore({
-      ...storageOptions,
-      sessionId
-    })
-  } satisfies DurableChatRuntime);
+    character: durableRuntimeSessionCharacterProfile(evidence),
+    messages: evidence.conversationMessages
+  } satisfies LocalRuntimeSessionConversationEvidence);
 }
 
 async function selectOrCreateDefaultSession(

@@ -106,4 +106,42 @@ describe('runtime config loader secret reference validation', () => {
       justification: 'test-only override'
     });
   });
+
+  it('deeply snapshots accepted nested config values', () => {
+    const nested = {
+      object: { value: 'before' },
+      array: [{ value: 'before' }]
+    };
+    const result = validateProject02RuntimeConfig({
+      version: runtimeConfigVersion,
+      plugins: {
+        foo: {
+          config: { nested }
+        }
+      }
+    });
+
+    nested.object.value = 'after';
+    const firstArrayItem = nested.array[0];
+
+    if (firstArrayItem === undefined) {
+      throw new Error('Expected nested config array fixture item.');
+    }
+
+    firstArrayItem.value = 'after';
+
+    const stored = result.config?.plugins?.['foo']?.config?.['nested'];
+
+    expect(stored).toEqual({
+      object: { value: 'before' },
+      array: [{ value: 'before' }]
+    });
+    expect(Object.isFrozen(stored)).toBe(true);
+    expect(
+      typeof stored === 'object' &&
+        stored !== null &&
+        !Array.isArray(stored) &&
+        Object.isFrozen(Reflect.get(stored, 'object'))
+    ).toBe(true);
+  });
 });

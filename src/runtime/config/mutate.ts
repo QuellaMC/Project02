@@ -1,18 +1,24 @@
 import {
-  chmodSync,
   existsSync,
   lstatSync,
-  mkdirSync,
   readlinkSync,
   readFileSync,
   realpathSync,
-  renameSync,
   unlinkSync,
-  writeFileSync
 } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 
 import { createLocalRuntimeStorageLayout } from '../storage/layout.ts';
+import {
+  atomicReplaceFileSync,
+  cleanupAbandonedAtomicReplacementFilesSync
+} from '../storage/atomic-file.ts';
+import {
+  acquireLocalRuntimeMutationLockSync,
+  defaultLocalRuntimeMutationLockWaitTimeoutMs,
+  type LocalRuntimeMutationLocksLeaseSync,
+  type LocalRuntimeMutationLockLeaseSync
+} from '../storage/mutation-lock.ts';
 import {
   isRuntimeControlEnvVarName,
   runtimeConfigEnvVarName,
@@ -54,6 +60,14 @@ export class RuntimeConfigMutationError extends Error {
 export function applyRuntimeConfigMutation(
   options: ApplyRuntimeConfigMutationOptions
 ): RuntimeConfigMutationResult {
+  return applyRuntimeConfigMutationWithLocks(options);
+}
+
+function applyRuntimeConfigMutationWithLocks(
+  options: ApplyRuntimeConfigMutationOptions,
+  anticipatedEnvPath?: string,
+  retryCount: number = 0
+): RuntimeConfigMutationResult {
   const locationLayout = createLocalRuntimeStorageLayout(
     options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }
   );
@@ -62,12 +76,55 @@ export function applyRuntimeConfigMutation(
     options.configPath ??
     (options.storeRoot === undefined ? runtimeConfigPathFromEnv(env) : undefined) ??
     locationLayout.configPath;
+  const canonicalSelectedConfigPath = canonicalMutationPath(configPath.trim());
+  const canonicalAnticipatedEnvPath =
+    anticipatedEnvPath === undefined
+      ? undefined
+      : canonicalMutationPath(anticipatedEnvPath);
+  const mutationLease =
+    canonicalAnticipatedEnvPath === undefined
+      ? acquireRuntimeConfigFileLock({
+          path: canonicalSelectedConfigPath,
+          displayPath: configPath.trim(),
+          kind: 'config'
+        })
+      : acquireRuntimeConfigFileLocks({
+          configPath: canonicalSelectedConfigPath,
+          displayConfigPath: configPath.trim(),
+          envPath: canonicalAnticipatedEnvPath,
+          displayEnvPath: anticipatedEnvPath ?? canonicalAnticipatedEnvPath
+        });
+
+  try {
+  cleanupRuntimeConfigAtomicTemps(
+    canonicalSelectedConfigPath,
+    configPath.trim(),
+    'config'
+  );
+  if (canonicalAnticipatedEnvPath !== undefined) {
+    cleanupRuntimeConfigAtomicTemps(
+      canonicalAnticipatedEnvPath,
+      anticipatedEnvPath ?? canonicalAnticipatedEnvPath,
+      'env'
+    );
+  }
   const loaded = loadProject02RuntimeConfig({
     configPath,
     ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
   });
   const selectedConfigPath = loaded.path ?? configPath;
+  const canonicalLoadedConfigPath = canonicalMutationPath(selectedConfigPath);
+
+  if (canonicalLoadedConfigPath !== canonicalSelectedConfigPath) {
+    return retryRuntimeConfigMutationAfterPathChange({
+      options,
+      anticipatedEnvPath,
+      retryCount,
+      mutationLease
+    });
+  }
+
   const selectedStoreRoot =
     options.storeRoot ?? storeRootForSelectedDefaultConfigPath(selectedConfigPath);
   const bootstrapStoreRoot =
@@ -99,30 +156,46 @@ export function applyRuntimeConfigMutation(
     nextEffectiveStoreRoot === undefined ? {} : { storeRoot: nextEffectiveStoreRoot }
   );
   const envPath = nextEffectiveLayout.envPath;
+  const canonicalEnvPath = canonicalMutationPath(envPath);
 
   if (
     options.operation.kind === 'secret_set' &&
-    pathsAlias(selectedConfigPath, envPath)
+    canonicalSelectedConfigPath === canonicalEnvPath
   ) {
     throw new TypeError(
       'Cannot write runtime config secret because the selected config path and runtime env path resolve to the same file.'
     );
   }
 
+  if (
+    options.operation.kind === 'secret_set' &&
+    (canonicalAnticipatedEnvPath === undefined ||
+      canonicalAnticipatedEnvPath !== canonicalEnvPath)
+  ) {
+    return retryRuntimeConfigMutationAfterPathChange({
+      options,
+      anticipatedEnvPath: envPath,
+      retryCount,
+      mutationLease
+    });
+  }
+
   const secretWrite =
     options.operation.kind === 'secret_set'
       ? prepareEnvSecretWrite(
-          envPath,
+          canonicalEnvPath,
           options.operation.envVar,
           options.operation.secretValue
         )
       : undefined;
   if (secretWrite === undefined) {
-    writeJsonAtomic(selectedConfigPath, nextConfig, 0o600);
+    writeJsonAtomic(canonicalSelectedConfigPath, nextConfig, 0o600);
   } else {
-    const previousConfigState = snapshotPreviousConfigState(selectedConfigPath);
+    const previousConfigState = snapshotPreviousConfigState(
+      canonicalSelectedConfigPath
+    );
 
-    writeJsonAtomic(selectedConfigPath, nextConfig, 0o600);
+    writeJsonAtomic(canonicalSelectedConfigPath, nextConfig, 0o600);
 
     try {
       writePreparedEnvSecret(secretWrite);
@@ -151,6 +224,49 @@ export function applyRuntimeConfigMutation(
     envPath,
     config: nextConfig
   } satisfies RuntimeConfigMutationResult);
+  } finally {
+    mutationLease.release();
+  }
+}
+
+function cleanupRuntimeConfigAtomicTemps(
+  path: string,
+  displayPath: string,
+  kind: 'config' | 'env'
+): void {
+  try {
+    cleanupAbandonedAtomicReplacementFilesSync(path);
+  } catch (error: unknown) {
+    throw mutationFileAccessError(
+      kind === 'config'
+        ? `Could not write runtime config file at ${displayPath}.`
+        : `Could not write runtime config env file at ${displayPath}.`,
+      error
+    );
+  }
+}
+
+function retryRuntimeConfigMutationAfterPathChange(options: {
+  readonly options: ApplyRuntimeConfigMutationOptions;
+  readonly anticipatedEnvPath: string | undefined;
+  readonly retryCount: number;
+  readonly mutationLease:
+    | LocalRuntimeMutationLocksLeaseSync
+    | LocalRuntimeMutationLockLeaseSync;
+}): RuntimeConfigMutationResult {
+  options.mutationLease.release();
+
+  if (options.retryCount >= 8) {
+    throw new RuntimeConfigMutationError(
+      'Runtime config mutation paths kept changing while acquiring filesystem locks.'
+    );
+  }
+
+  return applyRuntimeConfigMutationWithLocks(
+    options.options,
+    options.anticipatedEnvPath,
+    options.retryCount + 1
+  );
 }
 
 function bootstrapRuntimeConfig(options: {
@@ -825,21 +941,139 @@ function writeJsonAtomic(
 }
 
 function writeTextAtomic(path: string, value: string, mode: number): void {
-  const targetPath = canonicalMutationPath(path);
-  const tmpPath = `${targetPath}.${String(process.pid)}.${String(Date.now())}.tmp`;
-
-  mkdirSync(dirname(targetPath), { recursive: true });
-  writeFileSync(tmpPath, value, { encoding: 'utf8', mode });
-  chmodIfSupported(tmpPath, mode);
-  renameSync(tmpPath, targetPath);
-  chmodIfSupported(targetPath, mode);
+  atomicReplaceFileSync({
+    targetPath: path,
+    content: value,
+    mode
+  });
 }
 
-function chmodIfSupported(path: string, mode: number): void {
+function acquireRuntimeConfigFileLock(options: {
+  readonly path: string;
+  readonly displayPath: string;
+  readonly kind: 'config' | 'env';
+}): LocalRuntimeMutationLocksLeaseSync {
   try {
-    chmodSync(path, mode);
-  } catch {
-    // Some filesystems do not support chmod; config redaction remains enforced.
+    return acquireRuntimeControlPathLocks([options.path]);
+  } catch (error: unknown) {
+    throw mutationFileAccessError(
+      options.kind === 'config'
+        ? `Could not write runtime config file at ${options.displayPath}.`
+        : `Could not write runtime config env file at ${options.displayPath}.`,
+      error
+    );
+  }
+}
+
+function acquireRuntimeConfigFileLocks(options: {
+  readonly configPath: string;
+  readonly displayConfigPath: string;
+  readonly envPath: string;
+  readonly displayEnvPath: string;
+}): LocalRuntimeMutationLocksLeaseSync {
+  try {
+    return acquireRuntimeControlPathLocks([
+      options.configPath,
+      options.envPath
+    ]);
+  } catch (error: unknown) {
+    const pathError =
+      error instanceof RuntimeControlPathLockError ? error : undefined;
+
+    throw mutationFileAccessError(
+      pathError?.path === options.envPath
+        ? `Could not write runtime config env file at ${options.displayEnvPath}.`
+        : `Could not write runtime config file at ${options.displayConfigPath}.`,
+      error
+    );
+  }
+}
+
+class RuntimeControlPathLockError extends Error {
+  readonly path: string;
+
+  constructor(path: string, options?: ErrorOptions) {
+    super(`Could not acquire runtime control path lock for ${path}.`, options);
+    this.name = 'RuntimeControlPathLockError';
+    this.path = path;
+  }
+}
+
+function acquireRuntimeControlPathLocks(
+  paths: readonly string[]
+): LocalRuntimeMutationLocksLeaseSync {
+  const canonicalPaths = Object.freeze(
+    [...new Set(paths.map(canonicalMutationPath))].sort(compareCodeUnits)
+  );
+  const leases: LocalRuntimeMutationLockLeaseSync[] = [];
+  const startedAt = Date.now();
+
+  try {
+    for (const path of canonicalPaths) {
+      try {
+        leases.push(
+          acquireLocalRuntimeMutationLockSync({
+            locksRoot: createLocalRuntimeStorageLayout({
+              storeRoot: dirname(path)
+            }).locksRoot,
+            resourceKey: `runtime-control-file:${path}`,
+            waitTimeoutMs: Math.max(
+              0,
+              defaultLocalRuntimeMutationLockWaitTimeoutMs -
+                (Date.now() - startedAt)
+            )
+          })
+        );
+      } catch (error: unknown) {
+        throw new RuntimeControlPathLockError(path, { cause: error });
+      }
+    }
+  } catch (error: unknown) {
+    releaseRuntimeControlPathLocks(leases);
+    throw error;
+  }
+
+  let released = false;
+
+  return Object.freeze({
+    resourceKeys: Object.freeze(
+      canonicalPaths.map((path) => `runtime-control-file:${path}`)
+    ),
+    release() {
+      if (released) {
+        return;
+      }
+
+      released = true;
+      releaseRuntimeControlPathLocks(leases);
+    }
+  } satisfies LocalRuntimeMutationLocksLeaseSync);
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function releaseRuntimeControlPathLocks(
+  leases: readonly LocalRuntimeMutationLockLeaseSync[]
+): void {
+  let firstError: unknown;
+
+  for (const lease of [...leases].reverse()) {
+    try {
+      lease.release();
+    } catch (error: unknown) {
+      firstError ??= error;
+    }
+  }
+
+  if (firstError !== undefined) {
+    throw firstError instanceof Error
+      ? firstError
+      : new RuntimeConfigMutationError(
+          'Could not release all runtime config path locks.',
+          { cause: firstError }
+        );
   }
 }
 

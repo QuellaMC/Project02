@@ -50,12 +50,25 @@ export type Project02RuntimePluginConfig = {
 export type RuntimeConfigSource = 'none' | 'default' | 'path' | 'env';
 export type RuntimeConfigDiagnosticSeverity = 'warning' | 'error';
 
-export type RuntimeConfigDiagnostic = {
+type RuntimeConfigDiagnosticBase = {
   readonly severity: RuntimeConfigDiagnosticSeverity;
   readonly code: string;
   readonly message: string;
   readonly path?: string;
-  readonly pluginId?: string;
+};
+
+export type RuntimeConfigDiagnostic =
+  | (RuntimeConfigDiagnosticBase & {
+      readonly scope: 'global';
+    })
+  | (RuntimeConfigDiagnosticBase & {
+      readonly scope: 'plugin';
+      readonly pluginId: string;
+      readonly pluginConfigField?: string;
+    });
+
+export type RuntimeConfigDiagnosticPluginMetadata = {
+  readonly pluginId: string;
   readonly pluginConfigField?: string;
 };
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import * as project02 from '../src/index.ts';
+
 import {
   createConversationSession,
   createDeterministicLocalRoleModelAdapter,
@@ -7,18 +9,23 @@ import {
   createRuntimeLogStore,
   createUserMessageRuntimeEvent,
   parseRoleModelDecision,
-  projectHealth,
   roleModelDecisionContractVersion,
   runLocalUserMessageEvent,
   visibleReplyModelToolName
 } from '../src/index.ts';
 
-describe('projectHealth', () => {
-  it('reports the TypeScript baseline is callable', () => {
-    expect(projectHealth()).toEqual({
-      status: 'ok',
-      runtime: 'typescript'
-    });
+describe('root public surface', () => {
+  it('does not expose partial conversation mutation helpers', () => {
+    expect(project02).not.toHaveProperty('appendCharacterVisibleMessage');
+  });
+
+  it('exposes prepared plugin activation-plan APIs', () => {
+    expect(project02.prepareConfiguredProject02PluginActivation).toBeTypeOf(
+      'function'
+    );
+    expect(project02.createConfiguredProject02PluginHostFromPlan).toBeTypeOf(
+      'function'
+    );
   });
 });
 

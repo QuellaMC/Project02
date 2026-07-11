@@ -5,11 +5,15 @@ import {
   createRuntimePluginManifest,
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
+  createRuntimePluginHealthSnapshot,
+  createRuntimePluginListingSnapshot,
+  createRuntimePluginToolInvocationSnapshot,
   isFirstPartyBuiltInModelTool,
   normalizeRuntimePluginAccessMap,
   runtimePluginAccessFor,
   runtimePluginAccessAllows,
   runtimePluginContractVersion,
+  validateRuntimePluginContextItem,
   type RuntimePluginAccessMap
 } from '../src/plugins/types.ts';
 import {
@@ -20,6 +24,318 @@ import {
 } from '../src/plugins/validation.ts';
 
 describe('runtime plugin source references', () => {
+  it('bounds every public context, evidence, and health string as one result', () => {
+    const exact = 'x'.repeat(16 * 1_024);
+    const over = `${exact}x`;
+    const context = (sourceReferences: readonly unknown[]) => ({
+      pluginId: 'memory.boundary.fixture',
+      id: 'bounded-context',
+      kind: 'memory',
+      text: 'safe',
+      budget: { estimatedTokens: 1, priority: 1 },
+      sourceReferences,
+      redactionLabels: []
+    });
+    const evidence = (sourceReferences: readonly unknown[]) => ({
+      eventId: 'evt_bounded_evidence',
+      traceId: 'trace_bounded_evidence',
+      createdAt: '2026-07-11T00:00:00.000Z',
+      kind: 'runtime_plugin_evidence_snapshot',
+      pluginId: 'memory.boundary.fixture',
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      summary: 'safe',
+      sourceReferences,
+      redactionLabels: []
+    });
+    const health = (summary: string) => ({
+      pluginId: 'memory.boundary.fixture',
+      status: 'ok',
+      checkedAt: '2026-07-11T00:00:00.000Z',
+      summary,
+      redactionLabels: []
+    });
+
+    expect(
+      createRuntimePluginContextItem(
+        context([{ kind: 'memory', id: 'source', title: exact }])
+      ).sourceReferences[0]?.title
+    ).toBe(exact);
+    expect(() =>
+      createRuntimePluginContextItem(
+        context([{ kind: 'memory', id: 'source', title: over }])
+      )
+    ).toThrow('exceeds the JSON string byte limit.');
+    expect(
+      validateRuntimePluginContextItem(
+        context([{ kind: 'memory', id: 'source', title: over }])
+      )
+    ).toMatchObject({
+      status: 'rejected',
+      reason: 'malformed_context_item'
+    });
+    expect(
+      createRuntimePluginEvidenceSnapshot(
+        evidence([{ kind: 'memory', id: exact }])
+      ).sourceReferences?.[0]?.id
+    ).toBe(exact);
+    expect(() =>
+      createRuntimePluginEvidenceSnapshot(
+        evidence([{ kind: 'memory', id: over }])
+      )
+    ).toThrow('exceeds the JSON string byte limit.');
+    expect(createRuntimePluginHealthSnapshot(health(exact)).summary).toBe(exact);
+    expect(() => createRuntimePluginHealthSnapshot(health(over))).toThrow(
+      'exceeds the JSON string byte limit.'
+    );
+    expect(() =>
+      createRuntimePluginContextItem(
+        context(
+          Array.from({ length: 32 }, (_value, index) => ({
+            kind: 'memory',
+            id: `${String(index)}-${'x'.repeat(2_200)}`
+          }))
+        )
+      )
+    ).toThrow('exceeds the aggregate JSON text limit.');
+  }, 20_000);
+
+  it('redacts credential-bearing redaction labels in public snapshots', () => {
+    const labels = [
+      'api_key=label-secret',
+      'Bearer label-token',
+      'Cookie: session=label-cookie'
+    ];
+    const contextItem = createRuntimePluginContextItem({
+      pluginId: 'memory.labels.fixture',
+      id: 'labels',
+      kind: 'memory',
+      text: 'safe',
+      budget: { estimatedTokens: 1, priority: 1 },
+      sourceReferences: [],
+      redactionLabels: labels
+    });
+    const evidence = createRuntimePluginEvidenceSnapshot({
+      eventId: 'evt_labels',
+      traceId: 'trace_labels',
+      createdAt: '2026-07-11T00:00:00.000Z',
+      kind: 'runtime_plugin_evidence_snapshot',
+      pluginId: 'memory.labels.fixture',
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      summary: 'safe',
+      redactionLabels: labels
+    });
+    const health = createRuntimePluginHealthSnapshot({
+      pluginId: 'memory.labels.fixture',
+      status: 'ok',
+      checkedAt: '2026-07-11T00:00:00.000Z',
+      summary: 'safe',
+      redactionLabels: labels
+    });
+    const manifest = createRuntimePluginManifest(
+      runtimePluginManifestFixture({
+        displayName: 'Authorization: ApiKey display-secret',
+        version: '1.0.0?token=version-secret',
+        runtimePolicy: {
+          requiredForTurn: false,
+          sideEffectLevel: 'runtime_read',
+          confirmation: 'not_required',
+          timeoutMs: 1_000,
+          sourceReferencesRequired: false,
+          redactionLabels: labels,
+          failureBehavior: {
+            beforeRoleModelCall: 'degrade',
+            handleToolCall: 'degrade',
+            afterTurnCommitted: 'log_failure',
+            health: 'degrade'
+          }
+        },
+        activation: {
+          defaultEnabled: false,
+          reasons: ['api_key=reason-secret']
+        }
+      })
+    );
+    const listing = createRuntimePluginListingSnapshot({
+      pluginId: manifest.id,
+      manifest,
+      providedTools: [],
+      registeredLifecycleHooks: [],
+      installed: true,
+      registered: true,
+      enabled: true,
+      availableForTurn: true,
+      redactionLabels: labels,
+      requestedAccess: {},
+      grantedAccess: {}
+    });
+    const serialized = JSON.stringify({ contextItem, evidence, health, listing });
+
+    for (const secret of [
+      'label-secret',
+      'label-token',
+      'label-cookie',
+      'display-secret',
+      'version-secret',
+      'reason-secret'
+    ]) {
+      expect(serialized).not.toContain(secret);
+    }
+    expect(listing.manifest).toMatchObject({
+      displayName: 'Authorization: [redacted]',
+      version: '1.0.0?token=[redacted]',
+      activation: { reasons: ['api_key=[redacted]'] }
+    });
+    for (const snapshotLabels of [
+      contextItem.redactionLabels,
+      evidence.redactionLabels,
+      health.redactionLabels,
+      listing.redactionLabels,
+      listing.manifest.runtimePolicy.redactionLabels
+    ]) {
+      expect(snapshotLabels).toEqual([
+        'api_key=[redacted]',
+        'Bearer [redacted]',
+        'Cookie: [redacted]'
+      ]);
+    }
+  });
+
+  it('enforces tool-result evidence and aggregate limits at the public constructor', () => {
+    const evidence = (count: number, summary = 'accepted') =>
+      Array.from({ length: count }, (_value, index) => ({
+        eventId: 'evt_bounded_tool_snapshot',
+        traceId: 'trace_bounded_tool_snapshot',
+        createdAt: '2026-07-11T00:00:00.000Z',
+        kind: 'runtime_plugin_evidence_snapshot' as const,
+        pluginId: 'memory.boundary.fixture',
+        evidenceKind: 'tool_invocation' as const,
+        status: 'accepted' as const,
+        summary: `${summary}${String(index)}`,
+        redactionLabels: []
+      }));
+    const invocation = (resultEvidence: readonly unknown[]) => ({
+      eventId: 'evt_bounded_tool_snapshot',
+      traceId: 'trace_bounded_tool_snapshot',
+      createdAt: '2026-07-11T00:00:00.000Z',
+      kind: 'runtime_plugin_tool_invocation_snapshot' as const,
+      pluginId: 'memory.boundary.fixture',
+      toolName: 'memory.search',
+      input: { query: 'Mira' },
+      result: {
+        status: 'accepted' as const,
+        output: { matched: true },
+        evidence: resultEvidence
+      }
+    });
+
+    expect(
+      createRuntimePluginToolInvocationSnapshot(invocation(evidence(64))).result
+        .evidence
+    ).toHaveLength(64);
+    expect(() =>
+      createRuntimePluginToolInvocationSnapshot(invocation(evidence(65)))
+    ).toThrow('Plugin tool result evidence exceeds the 64-record limit.');
+    expect(() =>
+      createRuntimePluginToolInvocationSnapshot(
+        invocation(evidence(5, 'x'.repeat(14 * 1_024)))
+      )
+    ).toThrow('Plugin tool result exceeds the aggregate JSON text limit.');
+  });
+
+  it('redacts credential-bearing source IDs and rejected tool reasons', () => {
+    const snapshot = createRuntimePluginToolInvocationSnapshot({
+      eventId: 'evt_redacted_tool_snapshot',
+      traceId: 'trace_redacted_tool_snapshot',
+      createdAt: '2026-07-11T00:00:00.000Z',
+      kind: 'runtime_plugin_tool_invocation_snapshot',
+      pluginId: 'memory.redaction.fixture',
+      toolName: 'memory.search',
+      input: { query: 'Authorization: Bearer input-secret' },
+      result: {
+        status: 'rejected',
+        reason: 'handler_failed token=reason-secret',
+        message: 'Cookie: session=message-secret',
+        evidence: [
+          {
+            eventId: 'evt_redacted_tool_snapshot',
+            traceId: 'trace_redacted_tool_snapshot',
+            createdAt: '2026-07-11T00:00:00.000Z',
+            kind: 'runtime_plugin_evidence_snapshot',
+            pluginId: 'memory.redaction.fixture',
+            evidenceKind: 'tool_invocation',
+            status: 'rejected',
+            summary: 'api_key=summary-secret',
+            sourceReferences: [
+              { kind: 'memory', id: 'token=source-secret' }
+            ],
+            redactionLabels: []
+          }
+        ]
+      }
+    });
+    const serialized = JSON.stringify(snapshot);
+
+    for (const secret of [
+      'input-secret',
+      'reason-secret',
+      'message-secret',
+      'summary-secret',
+      'source-secret'
+    ]) {
+      expect(serialized).not.toContain(secret);
+    }
+    expect(snapshot.result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed token=[redacted]',
+      message: 'Cookie: [redacted]'
+    });
+    expect(snapshot.result.evidence[0]?.sourceReferences?.[0]?.id).toBe(
+      'token=[redacted]'
+    );
+  });
+
+  it('enforces source-reference and context-text byte limits exactly', () => {
+    const references = Array.from({ length: 32 }, (_value, index) => ({
+      kind: 'memory' as const,
+      id: `source-${String(index)}`
+    }));
+    const exactText = '界'.repeat(Math.floor((16 * 1_024) / 3));
+    const base = {
+      pluginId: 'memory.boundary.fixture',
+      id: 'bounded-context',
+      kind: 'memory',
+      budget: { estimatedTokens: 1, priority: 1 },
+      redactionLabels: []
+    } as const;
+
+    expect(
+      createRuntimePluginContextItem({
+        ...base,
+        text: exactText,
+        sourceReferences: references
+      }).sourceReferences
+    ).toHaveLength(32);
+    expect(() =>
+      createRuntimePluginContextItem({
+        ...base,
+        text: `${exactText}界`,
+        sourceReferences: references
+      })
+    ).toThrow('Plugin context item.text exceeds the JSON string byte limit.');
+    expect(() =>
+      createRuntimePluginContextItem({
+        ...base,
+        text: 'safe',
+        sourceReferences: [
+          ...references,
+          { kind: 'memory' as const, id: 'source-over-limit' }
+        ]
+      })
+    ).toThrow('Plugin sourceReferences exceed the 32-record limit.');
+  });
+
   it('accepts external source reference IDs that are not plugin identifiers', () => {
     const references = [
       {
@@ -208,6 +524,44 @@ describe('runtime plugin access control', () => {
 });
 
 describe('runtime plugin model-facing tool policy', () => {
+  it('rejects credential-bearing legacy and JSON Schema enum values', () => {
+    expect(() =>
+      createRuntimePluginProvidedTool(
+        runtimePluginProvidedToolFixture({
+          inputContract: {
+            type: 'object',
+            fields: [
+              {
+                name: 'mode',
+                description: 'Mode.',
+                required: false,
+                allowedValues: ['api_key=legacy-enum-secret']
+              }
+            ],
+            additionalFields: false
+          }
+        })
+      )
+    ).toThrow(
+      'Model tool inputContract field allowedValues must not contain credential-bearing values.'
+    );
+    expect(() =>
+      createRuntimePluginProvidedToolWithJsonSchema({
+        type: 'object',
+        properties: {
+          mode: {
+            type: 'string',
+            enum: ['Authorization: ApiKey schema-enum-secret']
+          }
+        },
+        required: [],
+        additionalProperties: false
+      })
+    ).toThrow(
+      'Model tool inputContract.jsonSchema.properties.mode.enum must not contain credential-bearing values.'
+    );
+  });
+
   it('rejects unsupported root JSON Schema keywords with their field path', () => {
     expect(() =>
       createRuntimePluginProvidedToolWithJsonSchema({
@@ -297,6 +651,84 @@ describe('runtime plugin model-facing tool policy', () => {
     const tool = createRuntimePluginProvidedToolWithJsonSchema(jsonSchema);
 
     expect(tool.inputContract.jsonSchema).toEqual(jsonSchema);
+  });
+
+  it('preserves an explicitly declared __proto__ property as data', () => {
+    const jsonSchema = {
+      type: 'object',
+      properties: Object.fromEntries([
+        ['__proto__', { type: 'string' }]
+      ]),
+      required: ['__proto__'],
+      additionalProperties: false
+    };
+    const schema = createRuntimePluginProvidedToolWithJsonSchema(jsonSchema)
+      .inputContract.jsonSchema;
+
+    expect(schema?.properties === undefined).toBe(false);
+    expect(Object.hasOwn(schema?.properties ?? {}, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(schema?.properties ?? {})).toBe(
+      Object.prototype
+    );
+  });
+
+  it.each([
+    [
+      'duplicate required names',
+      {
+        type: 'object',
+        properties: { note: { type: 'string' } },
+        required: ['note', 'note'],
+        additionalProperties: false
+      },
+      'jsonSchema.required must not contain duplicates'
+    ],
+    [
+      'required names absent from properties',
+      {
+        type: 'object',
+        properties: { note: { type: 'string' } },
+        required: ['missing'],
+        additionalProperties: false
+      },
+      'jsonSchema.required includes "missing" outside properties'
+    ],
+    [
+      'required names inherited from Object.prototype',
+      {
+        type: 'object',
+        properties: {},
+        required: ['toString'],
+        additionalProperties: false
+      },
+      'jsonSchema.required includes "toString" outside properties'
+    ],
+    [
+      'duplicate union types',
+      {
+        type: 'object',
+        properties: { note: { type: ['string', 'string'] } },
+        required: ['note'],
+        additionalProperties: false
+      },
+      'jsonSchema.properties.note.type must not contain duplicates'
+    ],
+    [
+      'object keywords on non-object types',
+      {
+        type: 'object',
+        properties: {
+          note: { type: 'string', properties: {} }
+        },
+        required: ['note'],
+        additionalProperties: false
+      },
+      'jsonSchema.properties.note uses object keywords without object type'
+    ]
+  ])('rejects %s recursively', (_case, schema, message) => {
+    expect(() => createRuntimePluginProvidedToolWithJsonSchema(schema)).toThrow(
+      message
+    );
   });
 
   it('requires the scoped call-limit contract on provided tools', () => {

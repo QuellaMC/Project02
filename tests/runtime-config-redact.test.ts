@@ -1,15 +1,17 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Writable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
+
+import { createTestTempRoot } from './support/temp-root.ts';
+import {
+  collect,
+  writeRuntimeConfig
+} from './support/runtime-config.ts';
 
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
 import {
   loadProject02RuntimeConfig,
-  resolveProject02RuntimeConfig,
-  runtimeConfigVersion
+  resolveProject02RuntimeConfig
 } from '../src/runtime/config/index.ts';
 import {
   runtimePluginContractVersion,
@@ -19,7 +21,7 @@ import {
 describe('runtime config redaction', () => {
   it('redacts dotted credential field names in resolved config', () => {
     const configPath = writeRuntimeConfig(
-      join(mkdtempSync(join(tmpdir(), 'project02-config-dotted-redact-')), 'config.json'),
+      join(createTestTempRoot('project02-config-dotted-redact-'), 'config.json'),
       {
         plugins: {
           'memory.dotted-redaction': {
@@ -61,7 +63,7 @@ describe('runtime config redaction', () => {
 
   it('redacts nested credential object paths in resolved config', () => {
     const configPath = writeRuntimeConfig(
-      join(mkdtempSync(join(tmpdir(), 'project02-config-nested-redact-')), 'config.json'),
+      join(createTestTempRoot('project02-config-nested-redact-'), 'config.json'),
       {
         plugins: {
           'memory.dotted-redaction': {
@@ -125,7 +127,7 @@ describe('runtime config redaction', () => {
 
   it('redacts dotted credential keys from aggregate runtime-config get output', async () => {
     const configPath = writeRuntimeConfig(
-      join(mkdtempSync(join(tmpdir(), 'project02-config-dotted-get-redact-')), 'config.json'),
+      join(createTestTempRoot('project02-config-dotted-get-redact-'), 'config.json'),
       {
         plugins: {
           foo: {
@@ -171,7 +173,7 @@ describe('runtime config redaction', () => {
   it('redacts nested credential object paths from aggregate runtime-config get output', async () => {
     const configPath = writeRuntimeConfig(
       join(
-        mkdtempSync(join(tmpdir(), 'project02-config-nested-get-redact-')),
+        createTestTempRoot('project02-config-nested-get-redact-'),
         'config.json'
       ),
       {
@@ -307,25 +309,4 @@ function dottedConfigManifest(): RuntimePluginManifest {
     },
     requestedAccess: {}
   } satisfies RuntimePluginManifest);
-}
-
-function writeRuntimeConfig(
-  path: string,
-  config: Readonly<Record<string, unknown>>
-): string {
-  writeFileSync(
-    path,
-    `${JSON.stringify({ version: runtimeConfigVersion, ...config }, null, 2)}\n`,
-    'utf8'
-  );
-  return path;
-}
-
-function collect(write: (chunk: string) => void): Writable {
-  return new Writable({
-    write(chunk, _encoding, callback) {
-      write(String(chunk));
-      callback();
-    }
-  });
 }

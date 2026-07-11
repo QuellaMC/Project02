@@ -11,9 +11,11 @@ import {
   type Project02RuntimeConfig,
   type Project02RuntimePluginConfig,
   type RuntimeConfigDiagnostic,
+  type RuntimeConfigDiagnosticPluginMetadata,
   type RuntimeConfigSource,
   type RuntimeConfigValue
 } from './types.ts';
+import { createJsonBoundarySnapshot } from '../../shared/json-boundary.ts';
 
 const project02RuntimeConfigFields = Object.freeze([
   'version',
@@ -321,7 +323,14 @@ function optionalConfigRecord(
           return [];
         }
 
-        return [[key, item]];
+        return [
+          [
+            key,
+            createJsonBoundarySnapshot(item, {
+              field: `${path}.${key}`
+            })
+          ]
+        ];
       })
     )
   );
@@ -367,7 +376,7 @@ function pushUnknownFieldDiagnostics(options: {
   readonly pathForField: (field: string) => string;
   readonly metadataForField?: (
     field: string
-  ) => Pick<RuntimeConfigDiagnostic, 'pluginId' | 'pluginConfigField'>;
+  ) => RuntimeConfigDiagnosticPluginMetadata;
 }): void {
   const allowedFields = new Set(options.allowedFields);
 
@@ -507,18 +516,25 @@ function diagnostic(
   code: string,
   message: string,
   path?: string,
-  metadata?: Pick<RuntimeConfigDiagnostic, 'pluginId' | 'pluginConfigField'>
+  metadata?: RuntimeConfigDiagnosticPluginMetadata
 ): RuntimeConfigDiagnostic {
-  return Object.freeze({
+  const base = {
     severity,
     code,
     message,
-    ...(path === undefined ? {} : { path }),
-    ...(metadata?.pluginId === undefined ? {} : { pluginId: metadata.pluginId }),
-    ...(metadata?.pluginConfigField === undefined
-      ? {}
-      : { pluginConfigField: metadata.pluginConfigField })
-  } satisfies RuntimeConfigDiagnostic);
+    ...(path === undefined ? {} : { path })
+  } as const;
+
+  return metadata === undefined
+    ? Object.freeze({ ...base, scope: 'global' })
+    : Object.freeze({
+        ...base,
+        scope: 'plugin',
+        pluginId: metadata.pluginId,
+        ...(metadata.pluginConfigField === undefined
+          ? {}
+          : { pluginConfigField: metadata.pluginConfigField })
+      });
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

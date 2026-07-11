@@ -5,10 +5,15 @@ import {
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
 import {
+  createAcceptedRoleModelDecisionResult,
   createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
+  createParsedRoleModelDecisionSnapshot,
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
+  createRoleModelIOSnapshot,
+  createRoleModelToolObservation,
+  createVisibleReplyCharacterDecision,
   isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
@@ -26,6 +31,79 @@ import {
 } from '../src/runtime/event.ts';
 
 describe('role-model contracts', () => {
+  it.each([
+    ['input', Number.NaN],
+    ['output', Number.POSITIVE_INFINITY]
+  ] as const)(
+    'rejects non-finite tool observation %s at the public constructor',
+    (surface, nonFiniteValue) => {
+      expect(() =>
+        createRoleModelToolObservation({
+          round: 1,
+          pluginId: 'memory',
+          toolName: 'memory.search',
+          input: {
+            query: 'Mira',
+            ...(surface === 'input' ? { score: nonFiniteValue } : {})
+          },
+          result: {
+            status: 'accepted',
+            output:
+              surface === 'output'
+                ? { score: nonFiniteValue }
+                : { summary: 'found' }
+          }
+        })
+      ).toThrow('must be finite JSON.');
+    }
+  );
+
+  it('redacts credentials in public tool observations', () => {
+    const observation = createRoleModelToolObservation({
+      round: 1,
+      pluginId: 'memory',
+      toolName: 'memory.search',
+      input: {
+        query: 'Authorization: ApiKey input-secret',
+        authorization: 'Bearer input-token',
+        aws_secret_access_key: 'aws-secret',
+        ssh_private_key_pem: 'ssh-secret',
+        oauth_client_secret_value: 'oauth-secret',
+        endpoint: 'cockroachdb://user:pass@example.test/db'
+      },
+      result: {
+        status: 'rejected',
+        reason: 'handler_failed token=reason-secret',
+        message: 'Cookie: session=message-secret'
+      }
+    });
+    const serialized = JSON.stringify(observation);
+
+    expect(serialized).not.toContain('input-secret');
+    expect(serialized).not.toContain('input-token');
+    expect(serialized).not.toContain('reason-secret');
+    expect(serialized).not.toContain('message-secret');
+    expect(serialized).not.toContain('aws-secret');
+    expect(serialized).not.toContain('ssh-secret');
+    expect(serialized).not.toContain('oauth-secret');
+    expect(serialized).not.toContain('user:pass');
+    expect(observation).toMatchObject({
+      input: {
+        query: 'Authorization: [redacted]',
+        authorization: '[redacted]',
+        aws_secret_access_key: '[redacted]',
+        ssh_private_key_pem: '[redacted]',
+        oauth_client_secret_value: '[redacted]',
+        endpoint: 'cockroachdb://[redacted]@example.test/db'
+      },
+      result: {
+        status: 'rejected',
+        reason: 'handler_failed token=[redacted]',
+        message: 'Cookie: [redacted]'
+      }
+    });
+  });
+
   it.each([
     'Adapter raw output must include string rawOutputText.',
     'Role-model adapter provider exchange is malformed.',
@@ -78,6 +156,110 @@ describe('role-model contracts', () => {
       scope: 'model_response',
       maxCalls: 1
     });
+  });
+
+  it('redacts credentials throughout shared provider exchange snapshots', () => {
+    const identity = createRuntimeEventIdentity({
+      eventId: 'evt_provider_exchange_redaction',
+      traceId: 'trace_provider_exchange_redaction',
+      createdAt: '2026-07-11T00:00:00.000Z'
+    });
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', identity),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-provider-exchange-redaction',
+        characterSnapshot: { id: 'mira', displayName: 'Mira' }
+      })
+    });
+    const snapshot = createRoleModelIOSnapshot({
+      ...identity,
+      sessionId: 'session-provider-exchange-redaction',
+      inputEnvelope,
+      rawOutputText: JSON.stringify({
+        toolCalls: [
+          {
+            name: visibleReplyModelToolName,
+            input: { text: 'api_key=raw-output-secret' }
+          }
+        ]
+      }),
+      providerExchange: {
+        provider: {
+          name: 'nvidia',
+          model: 'model?token=model-secret',
+          endpoint: 'https://user:pass@example.test/chat'
+        },
+        capabilities: {
+          supportsNativeTools: true,
+          supportsDeveloperOrSystemContext: true,
+          preferredModelContextRole: 'developer',
+          supportsStrictToolSchema: true,
+          supportsReasoning: false,
+          reasoningParameterStyle: 'none',
+          requiresReasoningBlockRoundTrip: false,
+          supportsToolChoice: true,
+          supportsParallelToolCalls: false
+        },
+        reasoning: { mode: 'none', params: {} },
+        renderedMessages: [
+          { role: 'user', content: 'Authorization: Bearer message-secret' }
+        ],
+        renderedTools: [],
+        toolNameMappings: [],
+        requestBody: { cookie: 'session=request-secret' },
+        nativeToolResultMessages: [],
+        responseBody: { access_token: 'response-secret' }
+      }
+    });
+    const serialized = JSON.stringify(snapshot.providerExchange);
+
+    expect(snapshot.rawOutputText).toContain('api_key=[redacted]');
+    expect(snapshot.rawOutputText).not.toContain('raw-output-secret');
+    expect(serialized).toContain('[redacted]');
+    for (const secret of [
+      'model-secret',
+      'user:pass',
+      'message-secret',
+      'request-secret',
+      'response-secret'
+    ]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
+  it('redacts accepted decision text at the public snapshot constructor', () => {
+    const identity = createRuntimeEventIdentity({
+      eventId: 'evt_decision_constructor_redaction',
+      traceId: 'trace_decision_constructor_redaction',
+      createdAt: '2026-07-11T00:00:00.000Z'
+    });
+    const snapshot = createParsedRoleModelDecisionSnapshot({
+      ...identity,
+      sessionId: 'session-decision-constructor-redaction',
+      result: createAcceptedRoleModelDecisionResult(
+        createVisibleReplyCharacterDecision(
+          'Authorization: ApiKey decision-secret'
+        ),
+        { nonCommittedText: 'api_key=snapshot-secret' }
+      )
+    });
+    const serialized = JSON.stringify(snapshot);
+
+    expect(serialized).toContain('Authorization: [redacted]');
+    expect(serialized).not.toContain('decision-secret');
+    expect(serialized).not.toContain('snapshot-secret');
+  });
+
+  it('redacts non-committed text at the public result constructor', () => {
+    const result = createAcceptedRoleModelDecisionResult(
+      createVisibleReplyCharacterDecision('hello'),
+      {
+        nonCommittedText: 'Authorization: ApiKey folded-secret'
+      }
+    );
+
+    expect(result.nonCommittedText).toBe('Authorization: [redacted]');
+    expect(JSON.stringify(result)).not.toContain('folded-secret');
   });
 
   it('rejects duplicate explicit allowed tools', () => {
@@ -235,6 +417,21 @@ describe('role-model contracts', () => {
       },
       nonCommittedText: 'folded model note'
     });
+  });
+
+  it('redacts credentials in parsed top-level text', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        toolCalls: [],
+        text: 'api_key=parsed-secret'
+      })
+    );
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      nonCommittedText: 'api_key=[redacted]'
+    });
+    expect(JSON.stringify(result)).not.toContain('parsed-secret');
   });
 
   it('rejects empty top-level text when no tool calls are present', () => {
