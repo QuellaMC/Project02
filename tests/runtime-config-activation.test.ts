@@ -9,6 +9,10 @@ import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
 import { createConversationSession } from '../src/core/conversation.ts';
 import { roleModelPluginListToolName } from '../src/role-model/contracts.ts';
 import {
+  characterStatePatchModelToolName,
+  visibleReplyModelToolName
+} from '../src/role-model/model-tools.ts';
+import {
   createConfiguredProject02PluginHost,
   loadProject02RuntimeConfig,
   runtimeConfigVersion
@@ -20,6 +24,7 @@ import {
   createRuntimePlugin,
   createCharacterStatePlugin,
   createCharacterStatePluginManifest,
+  defaultRuntimePluginCatalogFactoryDefinitions,
   firstPartyModelToolsPluginId,
   memorySearchTool,
   runtimePluginDiscoveryPluginId,
@@ -64,6 +69,45 @@ describe('runtime config activation diagnostics', () => {
         pluginId: runtimePluginDiscoveryPluginId,
         name: roleModelPluginListToolName
       })
+    );
+  });
+
+  it('accepts fresh catalog factory definitions without duplicating host-scoped manifests', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-fresh-catalog-definitions-')
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: defaultRuntimePluginCatalogFactoryDefinitions()
+    });
+    const registeredPluginIds = configured.host
+      .registrySnapshot()
+      .plugins.map((plugin) => plugin.manifest.id);
+    const toolNames = configured.host
+      .pluginToolDefinitions()
+      .map((tool) => tool.name);
+
+    expect(configured.activation.diagnostics).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      characterStatePluginId
+    ]);
+    expect(registeredPluginIds).toEqual([
+      runtimePluginDiscoveryPluginId,
+      firstPartyModelToolsPluginId,
+      characterStatePluginId
+    ]);
+    expect(new Set(registeredPluginIds).size).toBe(registeredPluginIds.length);
+    expect(toolNames).toEqual(
+      expect.arrayContaining([
+        roleModelPluginListToolName,
+        visibleReplyModelToolName,
+        characterStatePatchModelToolName
+      ])
     );
   });
 
@@ -209,130 +253,6 @@ describe('runtime config activation diagnostics', () => {
     expect(logStore.conversationMessages()).toEqual([]);
   });
 
-  it('fails check for config-enabled legacy function factories without constructing them', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-legacy-unchecked-')
-    );
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        'legacy.required': {
-          enabled: true
-        }
-      }
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'legacy.required': () => {
-            factoryCalls += 1;
-            throw new Error('runtime-config check must not construct legacy plugins');
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(1);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_legacy_factory_unchecked',
-          path: 'plugins.legacy.required.enabled',
-          pluginId: 'legacy.required'
-        })
-      ])
-    );
-  });
-
-  it('keeps unreferenced default-disabled legacy function factories passing check', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-legacy-unreferenced-')
-    );
-    const plugin = firstPartyPlugin('legacy.optional', { defaultEnabled: false });
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'legacy.optional': () => {
-            factoryCalls += 1;
-
-            return plugin;
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_legacy_factory_unchecked'
-    );
-    expect(nonHostScopedActivationPlugins(output)).toEqual([]);
-  });
-
-  it('fails check for default-memory legacy function factories without constructing them', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-legacy-default-memory-unchecked-')
-    );
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      defaultMemoryProvider: 'legacy.memory'
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'legacy.memory': () => {
-            factoryCalls += 1;
-            throw new Error('runtime-config check must not construct legacy plugins');
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(1);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_legacy_factory_unchecked',
-          path: 'defaultMemoryProvider',
-          pluginId: 'legacy.memory'
-        })
-      ])
-    );
-  });
-
   it('loads runtime env before reporting mixed check activation diagnostics', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-check-mixed-env-')
@@ -385,49 +305,6 @@ describe('runtime config activation diagnostics', () => {
     );
     expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_required_secret_missing'
-    );
-  });
-
-  it('keeps explicitly disabled legacy function factories passing check', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-legacy-disabled-')
-    );
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      enabledPlugins: ['legacy.required'],
-      plugins: {
-        'legacy.required': {
-          enabled: false
-        }
-      }
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'legacy.required': () => {
-            factoryCalls += 1;
-            throw new Error('disabled legacy plugins must not be constructed');
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_legacy_factory_unchecked'
-    );
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_unknown_plugin'
     );
   });
 
@@ -593,72 +470,94 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
-  it('keeps unselected registered legacy plugin config wrappers known during strict activation', async () => {
+  it('does not trust caller-forged catalog provenance for host defaults', async () => {
     const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-unselected-legacy-wrapper-strict-')
+      join(tmpdir(), 'project02-config-character-state-forged-catalog-')
     );
-    const configPath = join(storeRoot, 'config.json');
+    const plugin = createCharacterStatePlugin();
     let factoryCalls = 0;
+    const factories = {
+      [characterStatePluginId]: {
+        catalogOwner: 'project02_host' as const,
+        construction: 'factory' as const,
+        manifest: plugin.manifest,
+        create() {
+          factoryCalls += 1;
 
-    writeRuntimeConfig(configPath, {
-      plugins: {
-        legacy: {
-          config: {
-            mode: 'inactive'
+          return plugin;
+        }
+      }
+    };
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories
+    });
+
+    expect(factoryCalls).toBe(0);
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        enabled: false,
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: {}
+      })
+    );
+  });
+
+  it('canonicalizes host definitions copied from the public catalog', async () => {
+    const storeRoot = mkdtempSync(
+      join(tmpdir(), 'project02-config-character-state-copied-catalog-')
+    );
+    const catalog = defaultRuntimePluginCatalogFactoryDefinitions();
+    const characterDefinition = catalog[characterStatePluginId];
+    const spoofedPlugin = fileStoreSessionEndPlugin(
+      characterStatePluginId,
+      () => {}
+    );
+    let spoofedFactoryCalls = 0;
+
+    if (characterDefinition === undefined) {
+      throw new Error('Expected Character State in the runtime plugin catalog.');
+    }
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      factories: {
+        ...catalog,
+        [characterStatePluginId]: {
+          ...characterDefinition,
+          manifest: spoofedPlugin.manifest,
+          create() {
+            spoofedFactoryCalls += 1;
+
+            return spoofedPlugin;
           }
         }
       }
     });
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ configPath }),
-      storeRoot,
-      strictUnknownPlugins: true,
-      factories: {
-        legacy: () => {
-          factoryCalls += 1;
-          throw new Error('unselected legacy factory must not be constructed');
-        }
-      }
+    expect(spoofedFactoryCalls).toBe(0);
+    expect(configured.activation.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: characterStatePluginId,
+        enabled: true,
+        requestedAccess: { file_store: 'write', model_input: 'write' },
+        grantedAccess: { file_store: 'write', model_input: 'write' }
+      })
+    );
+    expect(
+      configured.plugins.find(
+        (plugin) => plugin.manifest.id === characterStatePluginId
+      )?.manifest
+    ).toMatchObject({
+      id: characterStatePluginId,
+      requestedAccess: { file_store: 'write', model_input: 'write' }
     });
-
-    expect(factoryCalls).toBe(0);
-    expect(configured.plugins).toEqual([]);
-    expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_unknown_plugin'
-    );
-    expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_legacy_factory_unchecked'
-    );
-  });
-
-  it('keeps disabled unknown plugin wrappers strict when selected by enabledPlugins', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-disabled-unknown-enabled-list-')
-    );
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      enabledPlugins: ['old'],
-      plugins: {
-        old: {
-          enabled: false
-        }
-      }
-    });
-
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
-      strictUnknownPlugins: true
-    });
-
-    expect(configured.activation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_unknown_plugin'
-        })
-      ])
-    );
   });
 
   it('keeps disabled unknown plugin wrappers strict when selected by defaultMemoryProvider', async () => {
@@ -687,60 +586,6 @@ describe('runtime config activation diagnostics', () => {
           code: 'runtime_config_unknown_plugin'
         })
       ])
-    );
-  });
-
-  it('fails check when the default memory provider targets a disabled legacy function factory', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-legacy-disabled-default-')
-    );
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      enabledPlugins: ['legacy.required'],
-      defaultMemoryProvider: 'legacy.required',
-      plugins: {
-        'legacy.required': {
-          enabled: false
-        }
-      }
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'legacy.required': () => {
-            factoryCalls += 1;
-            throw new Error('disabled legacy plugins must not be constructed');
-          }
-        }
-      }
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(1);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider',
-          pluginId: 'legacy.required'
-        })
-      ])
-    );
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_legacy_factory_unchecked'
-    );
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_unknown_plugin'
     );
   });
 
@@ -819,7 +664,7 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
-  it('activates helper memory providers selected only by defaultMemoryProvider', async () => {
+  it('does not activate memory providers selected only by defaultMemoryProvider', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-helper-default-memory-')
     );
@@ -853,27 +698,30 @@ describe('runtime config activation diagnostics', () => {
       (item) => item.pluginId === plugin.manifest.id
     );
 
-    expect(factoryCalls).toBe(1);
-    expect(configured.plugins.map((item) => item.manifest.id)).toEqual([
-      plugin.manifest.id
-    ]);
-    expect(configured.activation.enabledPluginIds).toEqual([
-      runtimePluginDiscoveryPluginId,
-      firstPartyModelToolsPluginId,
-      plugin.manifest.id
-    ]);
-    expect(configured.activation.defaultMemoryProvider).toBe(plugin.manifest.id);
-    expect(configured.activation.diagnostics).toEqual([]);
+    expect(factoryCalls).toBe(0);
+    expect(configured.plugins).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.defaultMemoryProvider).toBeUndefined();
+    expect(configured.activation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
+          path: 'defaultMemoryProvider',
+          pluginId: plugin.manifest.id
+        })
+      ])
+    );
     expect(activation).toMatchObject({
       pluginId: plugin.manifest.id,
       kind: 'memory_provider',
-      enabled: true,
-      activationStatus: 'active'
+      enabled: false,
+      activationStatus: 'disabled'
     });
     expect(activation?.activationReasons).toEqual(
       expect.arrayContaining([
         'memory_provider_factory',
-        'selected_as_default_memory_provider'
+        'not_enabled'
       ])
     );
   });
@@ -943,7 +791,7 @@ describe('runtime config activation diagnostics', () => {
     );
   });
 
-  it('validates required config for default-disabled memory providers selected by defaultMemoryProvider', async () => {
+  it('does not validate required config for inactive default memory providers', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-default-memory-required-')
     );
@@ -976,23 +824,25 @@ describe('runtime config activation diagnostics', () => {
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
-          code: 'runtime_config_required_secret_missing',
-          path: `plugins.${plugin.manifest.id}.config.apiKey`,
-          pluginId: plugin.manifest.id,
-          pluginConfigField: 'apiKey'
+          code: 'default_memory_provider_unavailable',
+          path: 'defaultMemoryProvider',
+          pluginId: plugin.manifest.id
         })
       ])
+    );
+    expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
+      'runtime_config_required_secret_missing'
     );
     expect(configured.activation.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: plugin.manifest.id,
         enabled: false,
-        activationStatus: 'blocked'
+        activationStatus: 'disabled'
       })
     );
   });
 
-  it('skips required config validation for unselected default-enabled memory providers', async () => {
+  it('skips required config validation for unselected memory providers', async () => {
     const storeRoot = mkdtempSync(
       join(tmpdir(), 'project02-config-memory-default-selected-')
     );
@@ -1006,6 +856,7 @@ describe('runtime config activation diagnostics', () => {
       defaultMemoryProvider: selectedPlugin.manifest.id,
       plugins: {
         [selectedPlugin.manifest.id]: {
+          enabled: true,
           config: {
             apiKey: { $env: envVar }
           }
@@ -1144,13 +995,13 @@ describe('runtime config activation diagnostics', () => {
       join(tmpdir(), 'project02-config-manifest-backed-check-')
     );
     const envVar = 'PROJECT02_MANIFEST_BACKED_CHECK_SECRET_3448479333';
-    const plugin = requiredSecretPlugin('legacy.required');
+    const plugin = requiredSecretPlugin('memory.required');
     let stdout = '';
     let factoryCalls = 0;
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
-        'legacy.required': {
+        'memory.required': {
           enabled: true,
           config: {
             apiKey: { $env: envVar }
@@ -1170,7 +1021,7 @@ describe('runtime config activation diagnostics', () => {
           [envVar]: 'manifest-backed-secret'
         },
         factories: {
-          'legacy.required': {
+          'memory.required': {
             manifest: plugin.manifest,
             create() {
               factoryCalls += 1;
@@ -1184,12 +1035,9 @@ describe('runtime config activation diagnostics', () => {
 
     expect(exitCode).toBe(0);
     expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_legacy_factory_unchecked'
-    );
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
-        pluginId: 'legacy.required',
+        pluginId: 'memory.required',
         activationStatus: 'active',
         enabled: true
       })
@@ -1260,9 +1108,6 @@ describe('runtime config activation diagnostics', () => {
 
     expect(exitCode).toBe(0);
     expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_legacy_factory_unchecked'
-    );
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
@@ -1640,6 +1485,7 @@ describe('runtime config activation diagnostics', () => {
       defaultMemoryProvider: 'memory.selected',
       plugins: {
         'memory.selected': {
+          enabled: true,
           config: {
             apiKey: { $env: envVar }
           }
@@ -1770,66 +1616,6 @@ describe('runtime config activation diagnostics', () => {
       ])
     );
     expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
-  });
-
-  it('skips unselected legacy function factories during host preparation', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-unselected-legacy-host-')
-    );
-    const configPath = join(storeRoot, 'config.json');
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(configPath, {});
-
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ configPath }),
-      storeRoot,
-      sessionId: 'unselected-legacy-host-session',
-      factories: {
-        'legacy.optional': () => {
-          factoryCalls += 1;
-          throw new Error('unselected legacy factory must not be constructed');
-        }
-      }
-    });
-
-    expect(factoryCalls).toBe(0);
-    expect(configured.plugins).toEqual([]);
-    expect(configured.activation.diagnostics).toEqual([]);
-    expect(configured.activation.plugins.map((plugin) => plugin.pluginId)).toEqual([
-      runtimePluginDiscoveryPluginId,
-      firstPartyModelToolsPluginId
-    ]);
-  });
-
-  it('skips later unselected legacy factory failures during host preparation', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-config-legacy-prepare-skip-')
-    );
-    const configPath = join(storeRoot, 'config.json');
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(configPath, {});
-
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ configPath }),
-      storeRoot,
-      sessionId: 'legacy-prepare-skip-session',
-      factories: {
-        'legacy.prepare-cleanup': () => {
-          factoryCalls += 1;
-          return sessionEndPlugin('legacy.prepare-cleanup', () => {});
-        },
-        'legacy.prepare-failure': () => {
-          factoryCalls += 1;
-          throw new Error('later legacy factory failed during preparation');
-        }
-      }
-    });
-
-    expect(factoryCalls).toBe(0);
-    expect(configured.plugins).toEqual([]);
-    expect(configured.activation.diagnostics).toEqual([]);
   });
 
   it('fails check for manifest ids reserved by the host discovery plugin', async () => {

@@ -38,7 +38,6 @@ export type RuntimeConfigValue =
 export type Project02RuntimeConfig = {
   readonly version: typeof runtimeConfigVersion;
   readonly storeRoot?: string;
-  readonly enabledPlugins?: readonly string[];
   readonly defaultMemoryProvider?: string;
   readonly plugins?: Readonly<Record<string, Project02RuntimePluginConfig>>;
 };

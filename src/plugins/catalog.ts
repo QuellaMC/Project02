@@ -25,11 +25,15 @@ import type {
   RuntimePlugin,
   RuntimePluginManifest
 } from './validation.ts';
+import type {
+  RuntimePluginFactoryDefinition
+} from './factory.ts';
 
-export type RuntimePluginCatalogFactoryDefinition = {
-  readonly manifest: RuntimePluginManifest;
-  readonly create: () => RuntimePlugin;
-};
+export type RuntimePluginCatalogFactoryDefinition =
+  RuntimePluginFactoryDefinition<() => RuntimePlugin> & {
+    readonly catalogOwner: 'project02_host';
+    readonly construction: 'host_scoped' | 'factory';
+  };
 
 export type RuntimePluginDiscoveryHostState = () => {
   readonly plugins: readonly RuntimePlugin[];
@@ -37,36 +41,13 @@ export type RuntimePluginDiscoveryHostState = () => {
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
 };
 
-export const hostFirstPartyRuntimePluginIds = Object.freeze([
-  runtimePluginDiscoveryPluginId,
-  firstPartyModelToolsPluginId,
-  characterStatePluginId
-] as const);
-
-export const hostScopedFirstPartyRuntimePluginIds = Object.freeze([
-  runtimePluginDiscoveryPluginId,
-  firstPartyModelToolsPluginId
-] as const);
-
-export const defaultEnabledFirstPartyRuntimePluginIds = Object.freeze([
-  ...hostFirstPartyRuntimePluginIds
-] as const);
-
-const hostFirstPartyRuntimePluginIdSet = new Set<string>(
-  hostFirstPartyRuntimePluginIds
-);
-const hostScopedFirstPartyRuntimePluginIdSet = new Set<string>(
-  hostScopedFirstPartyRuntimePluginIds
-);
-const defaultEnabledFirstPartyRuntimePluginIdSet = new Set<string>(
-  defaultEnabledFirstPartyRuntimePluginIds
-);
-
 export function defaultRuntimePluginCatalogFactoryDefinitions(): Readonly<
   Record<string, RuntimePluginCatalogFactoryDefinition>
 > {
   return Object.freeze({
     [runtimePluginDiscoveryPluginId]: Object.freeze({
+      catalogOwner: 'project02_host',
+      construction: 'host_scoped',
       manifest: createRuntimePluginDiscoveryPluginManifest(),
       create: () =>
         createRuntimePluginDiscoveryPlugin(() => ({
@@ -76,14 +57,51 @@ export function defaultRuntimePluginCatalogFactoryDefinitions(): Readonly<
         }))
     } satisfies RuntimePluginCatalogFactoryDefinition),
     [firstPartyModelToolsPluginId]: Object.freeze({
+      catalogOwner: 'project02_host',
+      construction: 'host_scoped',
       manifest: createFirstPartyModelToolsPluginManifest(),
       create: () => createFirstPartyModelToolsPlugin()
     } satisfies RuntimePluginCatalogFactoryDefinition),
     [characterStatePluginId]: Object.freeze({
+      catalogOwner: 'project02_host',
+      construction: 'factory',
       manifest: createCharacterStatePluginManifest(),
       create: () => createCharacterStatePlugin()
     } satisfies RuntimePluginCatalogFactoryDefinition)
   });
+}
+
+export const hostFirstPartyRuntimePluginIds = Object.freeze(
+  Object.values(defaultRuntimePluginCatalogFactoryDefinitions()).map(
+    (definition) => definition.manifest.id
+  )
+);
+
+export const hostScopedFirstPartyRuntimePluginIds = Object.freeze(
+  Object.values(defaultRuntimePluginCatalogFactoryDefinitions())
+    .filter((definition) => definition.construction === 'host_scoped')
+    .map((definition) => definition.manifest.id)
+);
+
+const hostFirstPartyRuntimePluginIdSet = new Set<string>(
+  hostFirstPartyRuntimePluginIds
+);
+const hostScopedFirstPartyRuntimePluginIdSet = new Set<string>(
+  hostScopedFirstPartyRuntimePluginIds
+);
+
+export function hasRuntimePluginCatalogFactoryMetadata(
+  definition: RuntimePluginFactoryDefinition
+): definition is RuntimePluginCatalogFactoryDefinition {
+  if (!('catalogOwner' in definition) || !('construction' in definition)) {
+    return false;
+  }
+
+  return (
+    definition.catalogOwner === 'project02_host' &&
+    (definition.construction === 'host_scoped' ||
+      definition.construction === 'factory')
+  );
 }
 
 export function defaultRuntimePluginCatalogManifests(): readonly RuntimePluginManifest[] {
@@ -109,12 +127,6 @@ export function isHostOwnedFirstPartyRuntimePluginId(pluginId: string): boolean 
 
 export function isHostScopedFirstPartyRuntimePluginId(pluginId: string): boolean {
   return hostScopedFirstPartyRuntimePluginIdSet.has(pluginId);
-}
-
-export function isDefaultEnabledFirstPartyRuntimePluginId(
-  pluginId: string
-): boolean {
-  return defaultEnabledFirstPartyRuntimePluginIdSet.has(pluginId);
 }
 
 export function isHostOwnedFirstPartyRuntimePlugin(

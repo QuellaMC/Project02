@@ -18,7 +18,6 @@ import {
 const project02RuntimeConfigFields = Object.freeze([
   'version',
   'storeRoot',
-  'enabledPlugins',
   'defaultMemoryProvider',
   'plugins'
 ]);
@@ -196,11 +195,6 @@ function parseProject02RuntimeConfig(value: unknown): {
   }
 
   const storeRoot = optionalString(value['storeRoot'], 'storeRoot', diagnostics);
-  const enabledPlugins = optionalStringArray(
-    value['enabledPlugins'],
-    'enabledPlugins',
-    diagnostics
-  );
   const defaultMemoryProvider = optionalString(
     value['defaultMemoryProvider'],
     'defaultMemoryProvider',
@@ -218,7 +212,6 @@ function parseProject02RuntimeConfig(value: unknown): {
     config: Object.freeze({
       version: runtimeConfigVersion,
       ...(storeRoot === undefined ? {} : { storeRoot }),
-      ...(enabledPlugins === undefined ? {} : { enabledPlugins }),
       ...(defaultMemoryProvider === undefined ? {} : { defaultMemoryProvider }),
       ...(plugins === undefined ? {} : { plugins })
     } satisfies Project02RuntimeConfig),
@@ -470,33 +463,6 @@ function optionalString(
   }
 
   return value;
-}
-
-function optionalStringArray(
-  value: unknown,
-  path: string,
-  diagnostics: RuntimeConfigDiagnostic[]
-): readonly string[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (
-    !Array.isArray(value) ||
-    value.some((item) => typeof item !== 'string' || item.trim().length === 0)
-  ) {
-    diagnostics.push(
-      diagnostic(
-        'error',
-        'runtime_config_string_array_invalid',
-        'Runtime config field must be an array of non-empty strings.',
-        path
-      )
-    );
-    return undefined;
-  }
-
-  return Object.freeze(value.map((item) => String(item)));
 }
 
 function optionalBoolean(

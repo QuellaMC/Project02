@@ -452,14 +452,6 @@ function shouldValidatePluginConfig(options: {
     return true;
   }
 
-  if (options.config?.enabledPlugins?.includes(options.manifest.id) === true) {
-    return true;
-  }
-
-  if (isSelectedDefaultMemoryProvider(options)) {
-    return true;
-  }
-
   if (!options.manifest.activation.defaultEnabled) {
     return false;
   }
@@ -660,7 +652,6 @@ function effectiveFingerprintInput(options: {
   return Object.freeze({
     version: options.config?.version ?? 'none',
     storeRoot: options.storeRoot,
-    enabledPlugins: Object.freeze([...(options.config?.enabledPlugins ?? [])]),
     defaultMemoryProvider: options.config?.defaultMemoryProvider ?? null,
     plugins: options.redactedPluginConfigs,
     ...(pluginActivation === undefined ? {} : { pluginActivation })

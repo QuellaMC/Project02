@@ -620,6 +620,64 @@ describe('runtime plugin host', () => {
     expect(JSON.stringify(result.output)).not.toContain('memory.search');
   });
 
+  it('rejects direct calls to confirmation-required tools without executing them', async () => {
+    let handlerCalls = 0;
+    const plugin = createConfirmationRequiredMemorySearchPlugin(() => {
+      handlerCalls += 1;
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: { query: 'private memory' }
+      },
+      testPluginContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'tool_not_routable'
+    });
+    expect(result.evidence).toContainEqual(
+      expect.objectContaining({
+        policyOutcome: 'disallowed_tool_call'
+      })
+    );
+    expect(handlerCalls).toBe(0);
+  });
+
+  it('rejects direct calls to external-side-effect tools without executing them', async () => {
+    let handlerCalls = 0;
+    const plugin = createExternalReadMemorySearchPlugin(() => {
+      handlerCalls += 1;
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: { query: 'remote memory' }
+      },
+      testPluginContext()
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'tool_not_routable'
+    });
+    expect(result.evidence).toContainEqual(
+      expect.objectContaining({
+        policyOutcome: 'disallowed_tool_call'
+      })
+    );
+    expect(handlerCalls).toBe(0);
+  });
+
   it('turns handler failures into redacted rejected tool observations', async () => {
     const plugin = createMemorySearchPlugin(
       'memory.failing',
@@ -2440,7 +2498,9 @@ function createDegradableMemorySearchPlugin(onHandle: () => void): RuntimePlugin
   });
 }
 
-function createConfirmationRequiredMemorySearchPlugin(): RuntimePlugin {
+function createConfirmationRequiredMemorySearchPlugin(
+  onHandle: () => void = () => {}
+): RuntimePlugin {
   const id = 'memory.confirmation-required.fixture';
   const manifest = memorySearchPluginManifest(id);
 
@@ -2455,6 +2515,42 @@ function createConfirmationRequiredMemorySearchPlugin(): RuntimePlugin {
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
       handleToolCall(call, context) {
+        onHandle();
+        const query = call.input['query'];
+
+        if (typeof query !== 'string') {
+          throw new Error('Expected query string.');
+        }
+
+        return createAcceptedMemorySearchResult({
+          pluginId: id,
+          query,
+          context
+        });
+      }
+    }
+  });
+}
+
+function createExternalReadMemorySearchPlugin(onHandle: () => void): RuntimePlugin {
+  const id = 'memory.external-read.fixture';
+  const manifest = memorySearchPluginManifest(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...manifest,
+      runtimePolicy: {
+        ...manifest.runtimePolicy,
+        sideEffectLevel: 'external_read'
+      }
+    },
+    providedTools: memorySearchProvidedTools().map((tool) => ({
+      ...tool,
+      sideEffectLevel: 'external_read' as const
+    })),
+    lifecycleHooks: {
+      handleToolCall(call, context) {
+        onHandle();
         const query = call.input['query'];
 
         if (typeof query !== 'string') {

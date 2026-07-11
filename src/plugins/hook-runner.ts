@@ -32,9 +32,9 @@ import {
 } from './access-control.ts';
 import {
   createHostScopedFirstPartyRuntimePlugins,
+  isHostOwnedFirstPartyRuntimePlugin,
   isHostScopedFirstPartyRuntimePluginId
 } from './catalog.ts';
-import { isHostDefaultEnabledRuntimePlugin } from './default-enabled.ts';
 import { createPluginHookContext } from './hook-context.ts';
 import {
   createRuntimePluginFileStoreTransaction,
@@ -686,6 +686,22 @@ async function runHandleToolCall(options: {
       message: `Plugin "${plugin.manifest.id}" did not declare file_store write access for local-memory-write tool "${providedTool.name}".`,
       evidenceStatus: failureDegrades ? 'degraded' : 'rejected',
       policyOutcome: failureDegrades ? 'optional_degraded' : 'disallowed_tool_call'
+    });
+  }
+
+  if (
+    hook !== undefined &&
+    !routableModelFacingPluginTools({ plugin, access }).some(
+      (tool) => tool.name === providedTool.name
+    )
+  ) {
+    return createRejectedToolCallResult({
+      call: options.call,
+      context: options.context,
+      reason: 'tool_not_routable',
+      message: `Plugin "${plugin.manifest.id}" tool "${providedTool.name}" is not routable for model execution under current plugin policy.`,
+      evidenceStatus: 'rejected',
+      policyOutcome: 'disallowed_tool_call'
     });
   }
 
@@ -1703,7 +1719,11 @@ function enabledPluginIdsForHost(options: {
   if (options.enabledPluginIds === undefined) {
     return Object.freeze(
       options.plugins
-        .filter(isHostDefaultEnabledRuntimePlugin)
+        .filter(
+          (plugin) =>
+            isHostOwnedFirstPartyRuntimePlugin(plugin) &&
+            plugin.manifest.activation.defaultEnabled
+        )
         .map((plugin) => plugin.manifest.id)
     );
   }
