@@ -19,48 +19,67 @@ import {
   type RuntimePluginTurnEvidenceSnapshot
 } from '../plugins/types.ts';
 import type { RuntimePluginHost } from '../plugins/host.ts';
-import type { RuntimeEventIdentity, RuntimeEventType } from './event.ts';
+import {
+  assertCanonicalRuntimeTimestamp,
+  type RuntimeEventIdentity,
+  type RuntimeEventType
+} from './event.ts';
 import type { LocalRuntimeSessionPaths } from './storage/layout.ts';
+import type { LocalRuntimeMutationLockOwnerToken } from './storage/mutation-lock.ts';
+import {
+  createJsonBoundaryObjectSnapshot,
+  createJsonBoundarySnapshot
+} from '../shared/json-boundary.ts';
 
-export type RuntimeTurnStatus =
-  | 'completed'
-  | 'completed_with_failures'
-  | 'rejected';
+export const runtimeTurnStatusValues = [
+  'completed',
+  'completed_with_failures',
+  'rejected'
+] as const;
 
-export type RuntimeTraceStepName =
-  | 'runtime_event_received'
-  | 'runtime_event_normalized'
-  | 'runtime_turn_started'
-  | 'plugin_before_role_model_call_rejected'
-  | 'tool_call_started'
-  | 'tool_call_finished'
-  | 'interim_visible_reply_emitted'
-  | 'visible_reply_committed'
-  | 'input_validation_rejected'
-  | 'character_reply_rejected'
-  | 'commit_validation_rejected'
-  | 'raw_event_log_appended'
-  | 'runtime_turn_completed'
-  | 'runtime_turn_rejected';
+export type RuntimeTurnStatus = (typeof runtimeTurnStatusValues)[number];
+
+export const runtimeTraceStepValues = [
+  'runtime_event_received',
+  'runtime_event_normalized',
+  'runtime_turn_started',
+  'plugin_before_role_model_call_rejected',
+  'tool_call_started',
+  'tool_call_finished',
+  'interim_visible_reply_emitted',
+  'visible_reply_committed',
+  'input_validation_rejected',
+  'character_reply_rejected',
+  'commit_validation_rejected',
+  'raw_event_log_appended',
+  'runtime_turn_completed',
+  'runtime_turn_rejected'
+] as const;
+
+export type RuntimeTraceStepName = (typeof runtimeTraceStepValues)[number];
 
 export type RuntimeTraceEntry = RuntimeEventIdentity & {
   readonly step: RuntimeTraceStepName;
 };
 
+export const rawEventLogRecordKindValues = [
+  'runtime_event_received',
+  'runtime_event_normalized',
+  'plugin_before_role_model_call_rejected',
+  'tool_call_started',
+  'tool_call_finished',
+  'interim_visible_reply_emitted',
+  'visible_reply_committed',
+  'input_validation_rejected',
+  'character_reply_rejected',
+  'commit_validation_rejected',
+  'runtime_turn_completed',
+  'after_turn_committed',
+  'runtime_turn_rejected'
+] as const;
+
 export type RawEventLogRecordKind =
-  | 'runtime_event_received'
-  | 'runtime_event_normalized'
-  | 'plugin_before_role_model_call_rejected'
-  | 'tool_call_started'
-  | 'tool_call_finished'
-  | 'interim_visible_reply_emitted'
-  | 'visible_reply_committed'
-  | 'input_validation_rejected'
-  | 'character_reply_rejected'
-  | 'commit_validation_rejected'
-  | 'runtime_turn_completed'
-  | 'after_turn_committed'
-  | 'runtime_turn_rejected';
+  (typeof rawEventLogRecordKindValues)[number];
 
 export type RawEventLogPayloadSummary = {
   readonly rawInput?: string;
@@ -127,12 +146,41 @@ export type ConversationLogRecordInput = VisibleMessage &
     readonly committedAt: string;
   };
 
+export type RuntimeDerivedTraceEntry = RuntimeTraceEntry & {
+  readonly provenance: {
+    readonly source: 'terminal_raw_event';
+    readonly reason: 'missing_persisted_trace_entry';
+    readonly rawEventAnchor: RuntimeEventIdentity & {
+      readonly kind: 'runtime_turn_completed' | 'runtime_turn_rejected';
+    };
+  };
+};
+
+export type RuntimeStoredSessionEvidence = {
+  readonly traceEntries: readonly RuntimeTraceEntry[];
+  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly conversationMessages: readonly ConversationLogRecord[];
+};
+
+export type RuntimeDerivedSessionEvidence = {
+  readonly traceEntries: readonly RuntimeDerivedTraceEntry[];
+};
+
+export type RuntimeSessionEvidenceSnapshot = {
+  readonly stored: RuntimeStoredSessionEvidence;
+  readonly derived: RuntimeDerivedSessionEvidence;
+};
+
 export type RuntimeLogStore = {
   readonly localRuntimeSessionPaths?: LocalRuntimeSessionPaths;
+  readonly localRuntimeWriterLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
   appendTrace(entry: RuntimeTraceEntryInput): RuntimeTraceEntry;
   appendRawEvent(record: RawEventLogRecordInput): RawEventLogRecord;
   appendConversationMessage(record: ConversationLogRecordInput): ConversationLogRecord;
   removeConversationMessages(messageIds: readonly string[]): void;
+  checkpointWriterEvidence?(): void;
+  recoverAbandonedWriterEvidence?(): boolean;
+  readSessionEvidence(): RuntimeSessionEvidenceSnapshot;
   traceEntries(): readonly RuntimeTraceEntry[];
   rawEvents(): readonly RawEventLogRecord[];
   conversationMessages(): readonly ConversationLogRecord[];
@@ -170,7 +218,10 @@ export function createRoleModelCommitValidationSnapshot(
   return Object.freeze({
     eventId: options.eventId,
     traceId: options.traceId,
-    createdAt: options.createdAt,
+    createdAt: assertCanonicalRuntimeTimestamp(
+      options.createdAt,
+      'Role-model commit validation createdAt'
+    ),
     kind: 'role_model_commit_validation_snapshot',
     sessionId: options.sessionId,
     result: freezeRoleModelCommitValidationResult(options.result)
@@ -292,6 +343,13 @@ export function createRuntimeLogStore(): RuntimeLogStore {
         }
       }
     },
+    readSessionEvidence() {
+      return createRuntimeSessionEvidenceSnapshot({
+        traceEntries,
+        rawEvents,
+        conversationMessages
+      });
+    },
     traceEntries() {
       return Object.freeze([...traceEntries]);
     },
@@ -304,11 +362,31 @@ export function createRuntimeLogStore(): RuntimeLogStore {
   } satisfies RuntimeLogStore);
 }
 
+function createRuntimeSessionEvidenceSnapshot(options: {
+  readonly traceEntries: readonly RuntimeTraceEntry[];
+  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly conversationMessages: readonly ConversationLogRecord[];
+}): RuntimeSessionEvidenceSnapshot {
+  return Object.freeze({
+    stored: Object.freeze({
+      traceEntries: Object.freeze([...options.traceEntries]),
+      rawEvents: Object.freeze([...options.rawEvents]),
+      conversationMessages: Object.freeze([...options.conversationMessages])
+    }),
+    derived: Object.freeze({
+      traceEntries: Object.freeze([])
+    })
+  } satisfies RuntimeSessionEvidenceSnapshot);
+}
+
 function freezeTraceEntry(entry: RuntimeTraceEntryInput): RuntimeTraceEntry {
   return Object.freeze({
     eventId: entry.eventId,
     traceId: entry.traceId,
-    createdAt: entry.createdAt,
+    createdAt: assertCanonicalRuntimeTimestamp(
+      entry.createdAt,
+      'Runtime trace createdAt'
+    ),
     step: entry.step
   } satisfies RuntimeTraceEntry);
 }
@@ -339,11 +417,21 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
   const runtimePluginTurnEvidence = freezeRuntimePluginTurnEvidenceSnapshot(
     record.runtimePluginTurnEvidence
   );
+  const toolInput =
+    record.toolInput === undefined
+      ? undefined
+      : createJsonBoundaryObjectSnapshot(record.toolInput, {
+          field: 'Runtime tool input'
+        });
+  const toolResult = freezeRuntimePluginToolCallResult(record.toolResult);
 
   return Object.freeze({
     eventId: record.eventId,
     traceId: record.traceId,
-    createdAt: record.createdAt,
+    createdAt: assertCanonicalRuntimeTimestamp(
+      record.createdAt,
+      'Raw runtime event createdAt'
+    ),
     kind: record.kind,
     eventType: record.eventType,
     ...(record.status === undefined ? {} : { status: record.status }),
@@ -359,8 +447,8 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
     ...(record.toolPluginId === undefined
       ? {}
       : { toolPluginId: record.toolPluginId }),
-    ...(record.toolInput === undefined ? {} : { toolInput: record.toolInput }),
-    ...(record.toolResult === undefined ? {} : { toolResult: record.toolResult }),
+    ...(toolInput === undefined ? {} : { toolInput }),
+    ...(toolResult === undefined ? {} : { toolResult }),
     ...(record.pluginStoreRevision === undefined
       ? {}
       : { pluginStoreRevision: record.pluginStoreRevision }),
@@ -377,6 +465,34 @@ function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord
       ? {}
       : { runtimePluginTurnEvidence })
   } satisfies RawEventLogRecord);
+}
+
+function freezeRuntimePluginToolCallResult(
+  result: RuntimePluginToolCallResult | undefined
+): RuntimePluginToolCallResult | undefined {
+  if (result === undefined) {
+    return undefined;
+  }
+
+  const evidence =
+    freezeRuntimePluginEvidenceSnapshots(result.evidence) ?? Object.freeze([]);
+
+  if (result.status === 'accepted') {
+    return Object.freeze({
+      status: 'accepted',
+      output: createJsonBoundarySnapshot(result.output, {
+        field: 'Runtime tool result'
+      }),
+      evidence
+    } satisfies RuntimePluginToolCallResult);
+  }
+
+  return Object.freeze({
+    status: 'rejected',
+    reason: result.reason,
+    message: result.message,
+    evidence
+  } satisfies RuntimePluginToolCallResult);
 }
 
 function freezeRawEventPayloadSummary(
@@ -405,13 +521,19 @@ function freezeConversationLogRecord(
   return Object.freeze({
     eventId: record.eventId,
     traceId: record.traceId,
-    createdAt: record.createdAt,
+    createdAt: assertCanonicalRuntimeTimestamp(
+      record.createdAt,
+      'Conversation log createdAt'
+    ),
     id: record.id,
     role: record.role,
     speakerId: record.speakerId,
     speakerName: record.speakerName,
     text: record.text,
-    committedAt: record.committedAt
+    committedAt: assertCanonicalRuntimeTimestamp(
+      record.committedAt,
+      'Conversation log committedAt'
+    )
   } satisfies ConversationLogRecord);
 }
 

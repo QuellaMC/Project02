@@ -109,6 +109,26 @@ describe('local runtime session store', () => {
     expect(await reopened.listSessions()).toEqual([selected, second]);
   });
 
+  it('rejects a non-canonical creation clock without bricking the store', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const invalid = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['not-a-time'])
+    });
+
+    await expect(
+      invalid.createSession({ sessionId: 'bad-time' })
+    ).rejects.toMatchObject({ code: 'malformed_schema_marker' });
+
+    const valid = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['2026-07-11T00:00:00.000Z'])
+    });
+    const created = await valid.createSession({ sessionId: 'good-time' });
+
+    await expect(valid.readSession('good-time')).resolves.toEqual(created);
+  });
+
   it('fails loudly when a cataloged session directory is missing before listing sessions', async () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({

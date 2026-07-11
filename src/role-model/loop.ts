@@ -60,7 +60,6 @@ import {
 } from './prompt.ts';
 import {
   createRuntimePluginEvidenceSnapshot,
-  isRuntimePluginCredentialKey,
   redactRuntimePluginText,
   type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
@@ -73,6 +72,11 @@ import type {
   RuntimePluginPolicyOutcome
 } from '../plugins/contract.ts';
 import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from '../runtime/event.ts';
+import {
+  createJsonBoundaryObjectSnapshot,
+  createJsonBoundarySnapshot,
+  redactJsonTextPreservingStructure
+} from '../shared/json-boundary.ts';
 
 export { parseRoleModelDecision } from './contracts.ts';
 
@@ -111,7 +115,6 @@ export type RunRoleModelLoopOptions = {
   readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
   readonly pluginToolHost?: RoleModelPluginToolHost;
   readonly resolveToolPluginId?: (toolName: string) => string | undefined;
-  readonly maxPluginToolRounds?: number;
   readonly maxToolRounds?: number;
   readonly onPluginToolCallStarted?: (
     event: RoleModelPluginToolCallStartedEvent
@@ -208,8 +211,6 @@ export type RoleModelLoopResult =
   | RejectedRoleModelLoopResult;
 
 export const defaultRoleModelMaxToolRounds = 99;
-export const defaultRoleModelMaxPluginToolRounds =
-  defaultRoleModelMaxToolRounds;
 
 export function createDeterministicLocalRoleModelAdapter(): RoleModelAdapter {
   return createRoleModelAdapterFromCharacterAgent(
@@ -251,10 +252,7 @@ export async function runRoleModelLoop(
   options: RunRoleModelLoopOptions
 ): Promise<RoleModelLoopResult> {
   const adapter = options.adapter ?? createDeterministicLocalRoleModelAdapter();
-  const maxToolRounds =
-    options.maxToolRounds ??
-    options.maxPluginToolRounds ??
-    defaultRoleModelMaxToolRounds;
+  const maxToolRounds = normalizeMaxToolRounds(options.maxToolRounds);
   const identity = createSnapshotIdentity(options.event);
   const sessionId = options.decisionContext.sessionId;
   const rounds: RoleModelLoopRound[] = [];
@@ -514,6 +512,18 @@ export async function runRoleModelLoop(
       )
     ]);
   }
+}
+
+function normalizeMaxToolRounds(value: number | undefined): number {
+  const maxToolRounds = value ?? defaultRoleModelMaxToolRounds;
+
+  if (!Number.isSafeInteger(maxToolRounds) || maxToolRounds < 0) {
+    throw new TypeError(
+      'maxToolRounds must be a non-negative safe integer.'
+    );
+  }
+
+  return maxToolRounds;
 }
 
 type PluginToolRoutingResult = {
@@ -965,7 +975,9 @@ async function routeExecutableToolCalls(options: {
     let frozenHostResult: RuntimePluginToolCallResult;
 
     try {
-      frozenHostResult = freezeRuntimePluginToolCallResult(hostResult);
+      frozenHostResult = freezeRuntimePluginToolCallResult(hostResult, {
+        call: routedCall
+      });
     } catch (error: unknown) {
       const routingEvidence = createRejectedToolRoutingEvidence({
         callId,
@@ -1021,6 +1033,7 @@ function createRejectedToolRoutingEvidence(options: {
   readonly evidenceStatus?: RuntimePluginEvidenceStatus;
   readonly policyOutcome?: RuntimePluginPolicyOutcome;
 }): RoleModelPluginToolRoutingEvidence {
+  const reason = redactRuntimePluginText(options.reason);
   const message = redactRuntimePluginText(options.message);
 
   return Object.freeze({
@@ -1029,7 +1042,7 @@ function createRejectedToolRoutingEvidence(options: {
     dispatchedToHost: options.dispatchedToHost,
     result: Object.freeze({
       status: 'rejected',
-      reason: options.reason,
+      reason,
       message,
       evidence:
         options.context === undefined
@@ -1132,111 +1145,133 @@ function createToolCallId(options: {
 }
 
 function freezeRuntimePluginToolCallResult(
-  result: RuntimePluginToolCallResult
+  result: RuntimePluginToolCallResult,
+  options: { readonly call: RuntimePluginToolCall }
 ): RuntimePluginToolCallResult {
-  if (result.status === 'accepted') {
+  const boundedResult = snapshotRoutedPluginToolResult(result);
+
+  if (!isJsonRecord(boundedResult)) {
+    throw new TypeError('Plugin tool result must be a JSON object.');
+  }
+
+  const evidence = freezeRoutedPluginEvidence(
+    boundedResult['evidence'],
+    options.call
+  );
+
+  if (boundedResult['status'] === 'accepted') {
     return Object.freeze({
       status: 'accepted',
-      output: freezeRuntimePluginToolOutputValue(result.output),
-      evidence: Object.freeze([...result.evidence])
+      output: freezeRuntimePluginToolOutputValue(boundedResult['output']),
+      evidence
     } satisfies RuntimePluginToolCallResult);
+  }
+
+  if (
+    boundedResult['status'] !== 'rejected' ||
+    typeof boundedResult['reason'] !== 'string' ||
+    typeof boundedResult['message'] !== 'string'
+  ) {
+    throw new TypeError('Plugin tool result status is malformed.');
   }
 
   return Object.freeze({
     status: 'rejected',
-    reason: result.reason,
-    message: redactRuntimePluginText(result.message),
-    evidence: Object.freeze([...result.evidence])
+    reason: redactRuntimePluginText(boundedResult['reason']),
+    message: redactRuntimePluginText(boundedResult['message']),
+    evidence
   } satisfies RuntimePluginToolCallResult);
 }
 
-function freezeRuntimePluginToolOutputObject(
-  value: Readonly<Record<string, unknown>>
-): RuntimePluginJsonObject {
-  const snapshotEntries: Array<readonly [string, RuntimePluginJsonValue]> = [];
-
-  for (const [key, item] of Object.entries(value)) {
-    snapshotEntries.push([
-      key,
-      isRuntimePluginCredentialKey(key)
-        ? '[redacted]'
-        : freezeRuntimePluginToolOutputValue(item)
-    ]);
+function freezeRoutedPluginEvidence(
+  evidence: unknown,
+  call: RuntimePluginToolCall
+): readonly RuntimePluginToolCallResult['evidence'][number][] {
+  if (!Array.isArray(evidence) || evidence.length > 64) {
+    throw new TypeError('Plugin tool evidence exceeds the record limit.');
   }
 
-  return Object.freeze(Object.fromEntries(snapshotEntries));
+  return Object.freeze(
+    evidence.map((item) => {
+      const snapshot = createRuntimePluginEvidenceSnapshot(item);
+
+      if (
+        snapshot.eventId !== call.eventId ||
+        snapshot.traceId !== call.traceId ||
+        snapshot.createdAt !== call.createdAt ||
+        snapshot.pluginId !== call.pluginId
+      ) {
+        throw new TypeError(
+          'Plugin tool evidence identity must match the routed call.'
+        );
+      }
+
+      return snapshot;
+    })
+  );
+}
+
+function snapshotRoutedPluginToolResult(
+  result: unknown
+): RuntimePluginJsonValue {
+  try {
+    return createJsonBoundarySnapshot(result, {
+      field: 'Plugin tool result',
+      redact: true
+    });
+  } catch (error: unknown) {
+    if (error instanceof TypeError && error.message.includes('finite JSON')) {
+      throw new TypeError('Plugin tool output must be finite JSON.', {
+        cause: error
+      });
+    }
+    if (
+      error instanceof TypeError &&
+      error.message.includes('JSON serializable')
+    ) {
+      throw new TypeError('Plugin tool output must be JSON serializable.', {
+        cause: error
+      });
+    }
+
+    throw error;
+  }
 }
 
 function freezeRuntimePluginToolOutputValue(
   value: unknown
 ): RuntimePluginJsonValue {
-  if (value === null || typeof value === 'boolean') {
-    return value;
-  }
-
-  if (typeof value === 'string') {
-    return redactRuntimePluginText(value);
-  }
-
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      throw new TypeError('Plugin tool output must be finite JSON.');
+  try {
+    return createJsonBoundarySnapshot(value, {
+      field: 'Plugin tool output',
+      redact: true
+    });
+  } catch (error: unknown) {
+    if (error instanceof TypeError && error.message.includes('finite JSON')) {
+      throw new TypeError('Plugin tool output must be finite JSON.', {
+        cause: error
+      });
+    }
+    if (
+      error instanceof TypeError &&
+      error.message.includes('JSON serializable')
+    ) {
+      throw new TypeError('Plugin tool output must be JSON serializable.', {
+        cause: error
+      });
     }
 
-    return value;
+    throw error;
   }
-
-  if (Array.isArray(value)) {
-    return Object.freeze(value.map(freezeRuntimePluginToolOutputValue));
-  }
-
-  if (isJsonRecord(value)) {
-    return freezeRuntimePluginToolOutputObject(value);
-  }
-
-  throw new TypeError('Plugin tool output must be JSON serializable.');
 }
 
 function freezeRuntimePluginJsonObject(
   value: Readonly<Record<string, unknown>>
 ): RuntimePluginJsonObject {
-  const snapshotEntries: Array<readonly [string, RuntimePluginJsonValue]> = [];
-
-  for (const [key, item] of Object.entries(value)) {
-    snapshotEntries.push([key, freezeRuntimePluginJsonValue(item)]);
-  }
-
-  return Object.freeze(Object.fromEntries(snapshotEntries));
-}
-
-function freezeRuntimePluginJsonValue(
-  value: unknown
-): RuntimePluginJsonValue {
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'boolean'
-  ) {
-    return value;
-  }
-
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      throw new TypeError('Plugin tool output must be finite JSON.');
-    }
-
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return Object.freeze(value.map(freezeRuntimePluginJsonValue));
-  }
-
-  if (isJsonRecord(value)) {
-    return freezeRuntimePluginJsonObject(value);
-  }
-
-  throw new TypeError('Plugin tool output must be JSON serializable.');
+  return createJsonBoundaryObjectSnapshot(value, {
+    field: 'Plugin tool input',
+    redact: true
+  });
 }
 
 function createRoleModelAdapterRawOutput(
@@ -1274,11 +1309,15 @@ function validateRoleModelAdapterRawOutput(
     return createMalformedAdapterRawOutputResult();
   }
 
-  const rawOutputText = rawOutput['rawOutputText'];
+  const rawOutputTextValue = rawOutput['rawOutputText'];
 
-  if (typeof rawOutputText !== 'string') {
+  if (typeof rawOutputTextValue !== 'string') {
     return createMalformedAdapterRawOutputResult();
   }
+  const rawOutputText = redactJsonTextPreservingStructure(
+    rawOutputTextValue,
+    'Role-model adapter raw output'
+  );
 
   const providerMetadataResult = optionalProviderMetadata(
     rawOutput['providerMetadata']
@@ -1440,7 +1479,7 @@ function optionalRoleModelNativeToolCallArgumentErrors(
       Object.freeze({
         executableIndex,
         toolName,
-        reason,
+        reason: redactRuntimePluginText(reason),
         message: redactRuntimePluginText(message)
       } satisfies RoleModelNativeToolCallArgumentError)
     );
@@ -1465,7 +1504,7 @@ function optionalRoleModelAssistantChatMessage(
 
   return Object.freeze({
     role: 'assistant',
-    content,
+    content: typeof content === 'string' ? redactRuntimePluginText(content) : null,
     ...(toolCalls === undefined ? {} : { tool_calls: toolCalls })
   } satisfies RoleModelAssistantChatMessage);
 }
@@ -1523,7 +1562,10 @@ function optionalRoleModelChatToolCall(
     type: 'function',
     function: Object.freeze({
       name,
-      arguments: args
+      arguments: redactJsonTextPreservingStructure(
+        args,
+        'Role-model native tool-call arguments'
+      )
     })
   } satisfies RoleModelChatToolCall);
 }
@@ -1672,7 +1714,10 @@ function optionalProviderErrorMetadata(
     return undefined;
   }
 
-  return Object.freeze({ code, message });
+  return Object.freeze({
+    code: redactRuntimePluginText(code),
+    message: redactRuntimePluginText(message)
+  });
 }
 
 function optionalRoleModelDecisionRejection(
@@ -1691,7 +1736,9 @@ function optionalRoleModelDecisionRejection(
 
   return Object.freeze({
     reason,
-    ...(typeof details === 'string' ? { details } : {})
+    ...(typeof details === 'string'
+      ? { details: redactRuntimePluginText(details) }
+      : {})
   } satisfies RoleModelDecisionRejection);
 }
 

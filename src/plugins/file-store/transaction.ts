@@ -2,10 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
 import type { RuntimeEventIdentity } from '../../runtime/event.ts';
+import {
+  createLocalRuntimeMutationLockOwnerToken,
+  type LocalRuntimeMutationLockOwnerToken
+} from '../../runtime/storage/mutation-lock.ts';
 import type { RuntimePluginFileStore } from '../types.ts';
 import { createRuntimePluginFileStore } from './base-store.ts';
+import { createDurableRuntimePluginFileStore } from './durable-store.ts';
 import type {
   CreateRuntimePluginFileStoreOptions,
+  InMemoryRuntimePluginFileStoreOptions,
   InMemoryPluginStoreState,
   RuntimePluginFileStorePathMode,
   RuntimePluginFileStorePreparedTransaction,
@@ -17,8 +23,9 @@ import {
   canonicalDurablePluginStoreRoot,
   durablePluginRoot,
   hashOptionalFileContent,
-  readDurablePathModes,
-  readOptionalRegularFile
+  readDurablePathMode,
+  readOptionalRegularFile,
+  withDurablePluginStoreMutation
 } from './durable-primitives.ts';
 import {
   applyInMemoryPluginFileStoreOperation,
@@ -32,17 +39,21 @@ import {
   normalizeRuntimePluginFileStorePath
 } from './shared.ts';
 import {
+  type DurablePluginFileStoreFaultInjector,
   prepareDurablePluginFileStoreTransaction,
+  recoverDirectDurablePluginFileStoreMutation,
   recoverPreparedDurablePluginFileStoreTransactions
 } from './wal.ts';
 
 const transactionSessionIdentityKeys = new WeakMap<object, string>();
 
 type TransactionalPluginStoreOverlay = {
-  readonly base: RuntimePluginFileStore;
+  base?: RuntimePluginFileStore;
   readonly options: CreateRuntimePluginFileStoreOptions;
+  readonly ownerToken: LocalRuntimeMutationLockOwnerToken;
   readonly pathModes: Map<string, RuntimePluginFileStorePathMode>;
   readonly pathSnapshots: Map<string, TransactionalPluginStorePathSnapshot>;
+  durableRecoveryComplete: boolean;
 };
 
 type TransactionalPluginStorePathSnapshot = {
@@ -56,13 +67,15 @@ type PreparedInMemoryPluginFileStoreOperation =
     readonly afterHash: string;
   };
 
-export function createRuntimePluginFileStoreTransaction(): RuntimePluginFileStoreTransaction {
+export function createRuntimePluginFileStoreTransaction(
+  dependencies: {
+    readonly durableFaultInjector?: DurablePluginFileStoreFaultInjector;
+  } = {}
+): RuntimePluginFileStoreTransaction {
   const overlays = new Map<string, TransactionalPluginStoreOverlay>();
   const operations: StagedPluginFileStoreOperation[] = [];
-  let inMemorySessionBoundary:
-    | { readonly kind: 'object'; readonly identity: object }
-    | { readonly kind: 'text'; readonly sessionId: string }
-    | undefined;
+  const durableOwnerToken = createLocalRuntimeMutationLockOwnerToken();
+  let inMemorySessionBoundary: object | undefined;
   let closed = false;
 
   function overlayFor(
@@ -71,21 +84,9 @@ export function createRuntimePluginFileStoreTransaction(): RuntimePluginFileStor
     assertTransactionOpen(closed);
 
     if (options.storeRoot === undefined) {
-      const nextBoundary =
-        options.sessionIdentity === undefined
-          ? ({ kind: 'text', sessionId: options.sessionId } as const)
-          : ({ kind: 'object', identity: options.sessionIdentity } as const);
-
       if (inMemorySessionBoundary === undefined) {
-        inMemorySessionBoundary = nextBoundary;
-      } else if (
-        inMemorySessionBoundary.kind !== nextBoundary.kind ||
-        (nextBoundary.kind === 'object'
-          ? inMemorySessionBoundary.kind !== 'object' ||
-            inMemorySessionBoundary.identity !== nextBoundary.identity
-          : inMemorySessionBoundary.kind !== 'text' ||
-            inMemorySessionBoundary.sessionId !== nextBoundary.sessionId)
-      ) {
+        inMemorySessionBoundary = options.sessionIdentity;
+      } else if (inMemorySessionBoundary !== options.sessionIdentity) {
         throw new TypeError(
           'Plugin fileStore transaction cannot mix distinct in-memory session identities.'
         );
@@ -96,24 +97,14 @@ export function createRuntimePluginFileStoreTransaction(): RuntimePluginFileStor
     let overlay = overlays.get(key);
 
     if (overlay === undefined) {
-      const storeRoot =
-        options.storeRoot === undefined
-          ? undefined
-          : canonicalDurablePluginStoreRoot(options.storeRoot);
-      const frozenOptions = Object.freeze({
-        ...(storeRoot === undefined ? {} : { storeRoot }),
-        sessionId: options.sessionId,
-        ...(options.sessionIdentity === undefined
-          ? {}
-          : { sessionIdentity: options.sessionIdentity }),
-        pluginId: options.pluginId
-      } satisfies CreateRuntimePluginFileStoreOptions);
+      const frozenOptions = freezePluginFileStoreOptions(options);
 
       overlay = {
-        base: createRuntimePluginFileStore(frozenOptions),
         options: frozenOptions,
+        ownerToken: durableOwnerToken,
         pathModes: new Map(),
-        pathSnapshots: new Map()
+        pathSnapshots: new Map(),
+        durableRecoveryComplete: false
       };
       overlays.set(key, overlay);
     }
@@ -127,6 +118,7 @@ export function createRuntimePluginFileStoreTransaction(): RuntimePluginFileStor
 
       return Object.freeze({
         readJson(path) {
+          assertTransactionOpen(closed);
           const safePath = normalizeRuntimePluginFileStorePath(path);
 
           assertJsonPathMode(overlay.pathModes.get(safePath));
@@ -146,9 +138,10 @@ export function createRuntimePluginFileStoreTransaction(): RuntimePluginFileStor
             return freezeRuntimePluginFileStoreJsonValue(stagedWrite.value);
           }
 
-          return overlay.base.readJson(safePath);
+          return runtimePluginFileStoreForOverlay(overlay).readJson(safePath);
         },
         readJsonl(path) {
+          assertTransactionOpen(closed);
           const safePath = normalizeRuntimePluginFileStorePath(path);
 
           assertJsonlPathMode(overlay.pathModes.get(safePath));
@@ -165,16 +158,16 @@ export function createRuntimePluginFileStoreTransaction(): RuntimePluginFileStor
           );
 
           return Object.freeze([
-            ...overlay.base.readJsonl(safePath),
+            ...runtimePluginFileStoreForOverlay(overlay).readJsonl(safePath),
             ...appends.map((operation) =>
               freezeRuntimePluginFileStoreJsonValue(operation.value)
             )
           ]);
         },
         writeJsonAtomic(path, value) {
+          assertTransactionOpen(closed);
           const safePath = normalizeRuntimePluginFileStorePath(path);
 
-          assertTransactionOpen(closed);
           assertJsonPathMode(overlay.pathModes.get(safePath));
           const expectedBeforeHash = captureTransactionalPluginStorePathHash(
             overlay,
@@ -195,9 +188,9 @@ export function createRuntimePluginFileStoreTransaction(): RuntimePluginFileStor
           overlay.pathModes.set(safePath, 'json');
         },
         appendJsonl(path, value) {
+          assertTransactionOpen(closed);
           const safePath = normalizeRuntimePluginFileStorePath(path);
 
-          assertTransactionOpen(closed);
           assertJsonlPathMode(overlay.pathModes.get(safePath));
           const expectedBeforeHash = captureTransactionalPluginStorePathHash(
             overlay,
@@ -218,8 +211,9 @@ export function createRuntimePluginFileStoreTransaction(): RuntimePluginFileStor
           overlay.pathModes.set(safePath, 'jsonl');
         },
         revision() {
+          assertTransactionOpen(closed);
           return (
-            overlay.base.revision() +
+            runtimePluginFileStoreForOverlay(overlay).revision() +
             operations.filter(
               (operation) =>
                 operation.storeKey === transactionStoreKey(overlay.options)
@@ -233,7 +227,11 @@ export function createRuntimePluginFileStoreTransaction(): RuntimePluginFileStor
       closed = true;
       return prepareRuntimePluginFileStoreOperations({
         identity,
-        operations: Object.freeze([...operations])
+        operations: Object.freeze([...operations]),
+        ownerToken: durableOwnerToken,
+        ...(dependencies.durableFaultInjector === undefined
+          ? {}
+          : { faultInjector: dependencies.durableFaultInjector })
       });
     },
     rollback() {
@@ -248,9 +246,47 @@ export function createRuntimePluginFileStoreTransaction(): RuntimePluginFileStor
   } satisfies RuntimePluginFileStoreTransaction);
 }
 
+function runtimePluginFileStoreForOverlay(
+  overlay: TransactionalPluginStoreOverlay
+): RuntimePluginFileStore {
+  if (overlay.base === undefined) {
+    if (overlay.options.storeRoot === undefined) {
+      overlay.base = createRuntimePluginFileStore(overlay.options);
+    } else {
+      ensureDurableTransactionalPluginStoreReady(overlay);
+      overlay.base = createDurableRuntimePluginFileStore(overlay.options, {
+        skipInitialCleanup: true,
+        skipPreparedTransactionRecovery: true
+      });
+    }
+  }
+
+  return overlay.base;
+}
+
+function ensureDurableTransactionalPluginStoreReady(
+  overlay: TransactionalPluginStoreOverlay
+): void {
+  if (
+    overlay.options.storeRoot === undefined ||
+    overlay.durableRecoveryComplete
+  ) {
+    return;
+  }
+
+  recoverPreparedDurablePluginFileStoreTransactions(
+    overlay.options,
+    overlay.ownerToken,
+    { recoverDirectMutation: false }
+  );
+  overlay.durableRecoveryComplete = true;
+}
+
 function prepareRuntimePluginFileStoreOperations(options: {
   readonly identity: RuntimeEventIdentity;
   readonly operations: readonly StagedPluginFileStoreOperation[];
+  readonly ownerToken: LocalRuntimeMutationLockOwnerToken;
+  readonly faultInjector?: DurablePluginFileStoreFaultInjector;
 }): RuntimePluginFileStorePreparedTransaction {
   const firstOperation = options.operations[0];
 
@@ -283,11 +319,21 @@ function prepareRuntimePluginFileStoreOperations(options: {
 
   const storeRoot = firstOperation.options.storeRoot;
 
+  recoverPreparedDurablePluginFileStoreTransactions(
+    { ...firstOperation.options, storeRoot },
+    options.ownerToken,
+    { recoverDirectMutation: false }
+  );
+
   return prepareDurablePluginFileStoreTransaction({
     identity: options.identity,
     operations: options.operations,
+    ownerToken: options.ownerToken,
     sessionId: firstOperation.options.sessionId,
-    storeRoot
+    storeRoot,
+    ...(options.faultInjector === undefined
+      ? {}
+      : { faultInjector: options.faultInjector })
   });
 }
 
@@ -310,10 +356,13 @@ function captureTransactionalPluginStorePathHash(
     return existing.hash;
   }
 
+  ensureDurableTransactionalPluginStoreReady(overlay);
+
   const snapshot = currentPluginFileStorePathSnapshot(
     overlay.options,
     path,
-    kind
+    kind,
+    overlay.ownerToken
   );
 
   overlay.pathSnapshots.set(path, snapshot);
@@ -323,10 +372,13 @@ function captureTransactionalPluginStorePathHash(
 function currentPluginFileStorePathSnapshot(
   options: CreateRuntimePluginFileStoreOptions,
   path: string,
-  kind: StagedPluginFileStoreOperation['kind']
+  kind: StagedPluginFileStoreOperation['kind'],
+  ownerToken: LocalRuntimeMutationLockOwnerToken
 ): TransactionalPluginStorePathSnapshot {
   if (options.storeRoot === undefined) {
-    const state = inMemoryPluginStoreState(options);
+    const state = inMemoryPluginStoreState(
+      options satisfies InMemoryRuntimePluginFileStoreOptions
+    );
     const mode = state.pathModes.get(path);
 
     assertOperationPathMode(kind, mode);
@@ -348,15 +400,28 @@ function currentPluginFileStorePathSnapshot(
     pluginId: durableOptions.pluginId
   });
 
-  recoverPreparedDurablePluginFileStoreTransactions(durableOptions);
-  assertSafeDurablePluginPath(root, path);
-  const mode = readDurablePathModes(root).get(path);
+  return withDurablePluginStoreMutation(
+    { storeRoot: durableOptions.storeRoot, root, ownerToken },
+    () => {
+      recoverDirectDurablePluginFileStoreMutation({
+        storeRoot: durableOptions.storeRoot,
+        sessionId: durableOptions.sessionId,
+        pluginId: durableOptions.pluginId,
+        root,
+        ownerToken
+      });
+      assertSafeDurablePluginPath(root, path);
+      const mode = readDurablePathMode(root, path);
 
-  assertOperationPathMode(kind, mode);
-  return Object.freeze({
-    hash: hashOptionalFileContent(readOptionalRegularFile(join(root, path))),
-    mode
-  });
+      assertOperationPathMode(kind, mode);
+      return Object.freeze({
+        hash: hashOptionalFileContent(
+          readOptionalRegularFile(join(root, path))
+        ),
+        mode
+      });
+    }
+  );
 }
 
 function assertOperationPathMode(
@@ -402,7 +467,9 @@ function createPreparedInMemoryPluginFileStoreTransaction(
         let states = nextStates.get(operation.storeKey);
 
         if (states === undefined) {
-          const actual = inMemoryPluginStoreState(operation.options);
+          const actual = inMemoryPluginStoreState(
+            requireInMemoryPluginFileStoreOptions(operation.options)
+          );
 
           states = {
             actual,
@@ -459,7 +526,9 @@ function materializeInMemoryPluginFileStoreOperations(
       let state = virtualStates.get(operation.storeKey);
 
       if (state === undefined) {
-        const actual = inMemoryPluginStoreState(operation.options);
+        const actual = inMemoryPluginStoreState(
+          requireInMemoryPluginFileStoreOptions(operation.options)
+        );
 
         state = {
           files: new Map(actual.files),
@@ -502,11 +571,42 @@ function transactionStoreKey(
 ): string {
   const rootKey =
     options.storeRoot ??
-    (options.sessionIdentity === undefined
-      ? '<memory>'
-      : `<memory:${transactionSessionIdentityKey(options.sessionIdentity)}>`);
+    `<memory:${transactionSessionIdentityKey(options.sessionIdentity)}>`;
 
   return [rootKey, options.sessionId, options.pluginId].join('\u0000');
+}
+
+function freezePluginFileStoreOptions(
+  options: CreateRuntimePluginFileStoreOptions
+): CreateRuntimePluginFileStoreOptions {
+  if (options.storeRoot === undefined) {
+    return Object.freeze({
+      sessionId: options.sessionId,
+      sessionIdentity: options.sessionIdentity,
+      pluginId: options.pluginId
+    } satisfies InMemoryRuntimePluginFileStoreOptions);
+  }
+
+  return Object.freeze({
+    storeRoot: canonicalDurablePluginStoreRoot(options.storeRoot),
+    sessionId: options.sessionId,
+    ...(options.sessionIdentity === undefined
+      ? {}
+      : { sessionIdentity: options.sessionIdentity }),
+    pluginId: options.pluginId
+  } satisfies CreateRuntimePluginFileStoreOptions);
+}
+
+function requireInMemoryPluginFileStoreOptions(
+  options: CreateRuntimePluginFileStoreOptions
+): InMemoryRuntimePluginFileStoreOptions {
+  if (options.storeRoot !== undefined) {
+    throw new TypeError(
+      'Expected an in-memory plugin fileStore operation.'
+    );
+  }
+
+  return options;
 }
 
 function transactionSessionIdentityKey(identity: object): string {

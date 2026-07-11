@@ -1,7 +1,7 @@
 import type {
   RuntimePlugin,
   RuntimePluginManifest
-} from './validation.ts';
+} from './plugin-types.ts';
 
 export type RuntimePluginFactoryCreate = (
   ...args: never[]

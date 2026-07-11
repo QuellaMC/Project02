@@ -1,6 +1,6 @@
 import type { RuntimePluginFileStore } from '../types.ts';
 import type {
-  CreateRuntimePluginFileStoreOptions,
+  InMemoryRuntimePluginFileStoreOptions,
   InMemoryPluginStoreState,
   StagedPluginFileStoreOperation
 } from './contracts.ts';
@@ -12,14 +12,13 @@ import {
   normalizeRuntimePluginFileStorePath
 } from './shared.ts';
 
-const inMemoryPluginStoresByKey = new Map<string, InMemoryPluginStoreState>();
 const inMemoryPluginStoresBySessionIdentity = new WeakMap<
   object,
   Map<string, InMemoryPluginStoreState>
 >();
 
 export function createInMemoryRuntimePluginFileStore(
-  options: CreateRuntimePluginFileStoreOptions
+  options: InMemoryRuntimePluginFileStoreOptions
 ): RuntimePluginFileStore {
   const state = inMemoryPluginStoreState(options);
 
@@ -84,24 +83,19 @@ export function createInMemoryRuntimePluginFileStore(
 }
 
 export function inMemoryPluginStoreState(
-  options: CreateRuntimePluginFileStoreOptions
+  options: InMemoryRuntimePluginFileStoreOptions
 ): InMemoryPluginStoreState {
   const key = `${options.sessionId}\u0000${options.pluginId}`;
+  let stores = inMemoryPluginStoresBySessionIdentity.get(
+    options.sessionIdentity
+  );
 
-  if (options.sessionIdentity !== undefined) {
-    let stores = inMemoryPluginStoresBySessionIdentity.get(
-      options.sessionIdentity
-    );
-
-    if (stores === undefined) {
-      stores = new Map<string, InMemoryPluginStoreState>();
-      inMemoryPluginStoresBySessionIdentity.set(options.sessionIdentity, stores);
-    }
-
-    return pluginStoreStateForKey(stores, key);
+  if (stores === undefined) {
+    stores = new Map<string, InMemoryPluginStoreState>();
+    inMemoryPluginStoresBySessionIdentity.set(options.sessionIdentity, stores);
   }
 
-  return pluginStoreStateForKey(inMemoryPluginStoresByKey, key);
+  return pluginStoreStateForKey(stores, key);
 }
 
 function pluginStoreStateForKey(

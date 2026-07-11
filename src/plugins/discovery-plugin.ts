@@ -14,14 +14,16 @@ import {
 } from './tool-policy.ts';
 import {
   createRuntimePlugin,
-  createRuntimePluginEvidenceSnapshot,
-  createRuntimePluginManifest,
-  type RuntimePlugin,
-  type RuntimePluginJsonObject,
-  type RuntimePluginJsonValue,
-  type RuntimePluginManifest,
-  type RuntimePluginProvidedTool
-} from './validation.ts';
+  createRuntimePluginEvidenceSnapshot
+} from './constructors.ts';
+import { createRuntimePluginManifest } from './manifest-validation.ts';
+import type {
+  RuntimePlugin,
+  RuntimePluginJsonObject,
+  RuntimePluginJsonValue,
+  RuntimePluginManifest,
+  RuntimePluginProvidedTool
+} from './plugin-types.ts';
 
 const runtimePluginDiscoveryMaxPlugins = 16;
 const runtimePluginDiscoveryMaxToolsPerPlugin = 8;

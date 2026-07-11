@@ -68,7 +68,6 @@ export {
 export {
   createDeterministicLocalRoleModelAdapter,
   createRoleModelAdapterFromCharacterAgent,
-  defaultRoleModelMaxPluginToolRounds,
   defaultRoleModelMaxToolRounds,
   runRoleModelLoop,
   type AcceptedRoleModelLoopResult,
@@ -91,6 +90,7 @@ export {
   createNvidiaRoleModelProviderConfigFromEnv,
   defaultNvidiaChatCompletionsEndpoint,
   defaultNvidiaRoleModelReasoningBudget,
+  defaultNvidiaRoleModelRequestTimeoutMs,
   defaultNvidiaRoleModelName,
   nvidiaApiKeyEnvName,
   nvidiaModelEnvName,

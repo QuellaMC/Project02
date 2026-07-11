@@ -24,7 +24,7 @@ import {
 import type {
   RuntimePlugin,
   RuntimePluginManifest
-} from './validation.ts';
+} from './plugin-types.ts';
 import type {
   RuntimePluginFactoryDefinition
 } from './factory.ts';

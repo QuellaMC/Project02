@@ -7,25 +7,44 @@ export const durableRevisionFileName =
   '.project02-plugin-store-revision';
 export const durablePathModesFileName =
   '.project02-plugin-store-modes.json';
+export const durableDirectMutationJournalFileName =
+  '.project02-plugin-store-direct-mutation.json';
 
 export function normalizeRuntimePluginFileStorePath(path: string): string {
   const normalized = path.trim();
+  const parts = normalized.split('/');
 
   if (
     normalized.length === 0 ||
-    normalized === durableRevisionFileName ||
-    normalized === durablePathModesFileName ||
     normalized.startsWith('/') ||
     normalized.includes('\\') ||
-    normalized
-      .split('/')
-      .some((part) => part.length === 0 || part === '.' || part === '..') ||
-    normalized.split('/').some((part) => part.includes(sep) && sep !== '/')
+    parts.some(
+      (part) =>
+        part.length === 0 ||
+        part === '.' ||
+        part === '..' ||
+        part === durableRevisionFileName ||
+        part === durablePathModesFileName ||
+        part === durableDirectMutationJournalFileName ||
+        durablePluginAtomicTempFileOwnerPid(part) !== undefined
+    ) ||
+    parts.some((part) => part.includes(sep) && sep !== '/')
   ) {
     throw new TypeError('Plugin file path must be a safe relative path.');
   }
 
   return normalized;
+}
+
+export function durablePluginAtomicTempFileOwnerPid(
+  name: string
+): number | undefined {
+  const match = /^\..+\.(\d+)\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/iu.exec(
+    name
+  );
+  const parsed = match?.[1] === undefined ? Number.NaN : Number(match[1]);
+
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 export function freezeRuntimePluginFileStoreJsonValue(

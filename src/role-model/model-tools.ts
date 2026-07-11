@@ -1,3 +1,8 @@
+import {
+  createJsonBoundaryObjectSnapshot,
+  redactJsonBoundaryText
+} from '../shared/json-boundary.ts';
+
 export const visibleReplyModelToolName = 'visible_reply';
 export const characterStatePatchModelToolName = 'character_state.patch';
 
@@ -154,7 +159,7 @@ export function createVisibleReplyModelToolCall(
   return Object.freeze({
     name: visibleReplyModelToolName,
     input: Object.freeze({
-      text
+      text: redactJsonBoundaryText(text)
     } satisfies VisibleReplyToolInput)
   } satisfies VisibleReplyModelToolCall);
 }
@@ -164,7 +169,10 @@ export function createCharacterStatePatchModelToolCall(
 ): CharacterStatePatchModelToolCall {
   return Object.freeze({
     name: characterStatePatchModelToolName,
-    input: freezeJsonRecord(input)
+    input: createJsonBoundaryObjectSnapshot(input, {
+      field: 'Character State patch tool input',
+      redact: true
+    })
   } satisfies CharacterStatePatchModelToolCall);
 }
 
@@ -243,7 +251,10 @@ export function freezeModelToolCall(call: ModelToolCall): ModelToolCall {
 
   return Object.freeze({
     name: call.name,
-    input: freezeJsonRecord(call.input)
+    input: createJsonBoundaryObjectSnapshot(call.input, {
+      field: `Model tool "${call.name}" input`,
+      redact: true
+    })
   } satisfies PluginModelToolCall);
 }
 

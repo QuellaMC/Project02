@@ -1,12 +1,19 @@
+import { createHash } from 'node:crypto';
+
+import { assertCanonicalRuntimeTimestamp } from '../../../runtime/event.ts';
+
 import {
-  createRuntimePlugin,
-  createRuntimePluginManifest,
-  createRuntimePluginEvidenceSnapshot,
+  createRuntimePlugin
+} from '../../constructors.ts';
+import {
   createRuntimePluginContextItem,
-  runtimePluginContractVersion,
-  type RuntimePluginContext,
-  type RuntimePluginJsonObject
-} from '../../types.ts';
+  createRuntimePluginManifest
+} from '../../manifest-validation.ts';
+import { runtimePluginContractVersion } from '../../contract.ts';
+import type {
+  RuntimePluginContext,
+  RuntimePluginJsonObject
+} from '../../plugin-types.ts';
 import {
   characterStatePatchModelToolName,
   type ModelToolInputContract
@@ -32,12 +39,14 @@ import type {
   RuntimePluginBeforeRoleModelCallResult,
   RuntimePluginFileStore,
   RuntimePluginManifest
-} from '../../types.ts';
+} from '../../plugin-types.ts';
 
 export const characterStatePluginId = 'character-state';
 
 const characterStateEventsPath = 'events.jsonl';
-const characterStateCurrentPath = 'current.json';
+const characterStateCheckpointPath = 'checkpoint.json';
+const characterStateCheckpointVersion = 1;
+const characterStateIdempotencyRecordVersion = 1;
 const characterStatePluginInstances = new WeakSet<RuntimePlugin>();
 
 const characterStatePatchInputContract = Object.freeze({
@@ -143,7 +152,9 @@ export function createCharacterStatePlugin(): RuntimePlugin {
     ],
     lifecycleHooks: {
       beforeRoleModelCall(context) {
-        const state = readCurrentCharacterState(requiredFileStore(context));
+        const state = readCharacterStateStore(
+          requiredFileStore(context)
+        ).current;
         const brief = createLivingStateBrief(state);
 
         return Object.freeze({
@@ -162,7 +173,6 @@ export function createCharacterStatePlugin(): RuntimePlugin {
               redactionLabels: context.privacy.redactionLabels
             })
           ],
-          runtimeNotes: [],
           evidence: [
             createPluginContextEvidence({
               context,
@@ -191,11 +201,9 @@ export function createCharacterStatePlugin(): RuntimePlugin {
         }
 
         const fileStore = requiredFileStore(context);
-        const eventLog = decodeCharacterStateEventLog(
-          fileStore.readJsonl(characterStateEventsPath)
-        );
-        const duplicateEvent = findCharacterStatePatchEvent({
-          events: eventLog.events,
+        const store = readCharacterStateStore(fileStore);
+        const duplicateEvent = readCharacterStatePatchIdempotencyRecord({
+          fileStore,
           eventId: call.eventId,
           traceId: call.traceId,
           createdAt: call.createdAt,
@@ -243,7 +251,7 @@ export function createCharacterStatePlugin(): RuntimePlugin {
           };
         }
 
-        const before = readCurrentCharacterState(fileStore, eventLog);
+        const before = store.current;
         const result = planCharacterStatePatch({
           before,
           patchInput: call.input
@@ -275,85 +283,15 @@ export function createCharacterStatePlugin(): RuntimePlugin {
           result
         } satisfies RuntimePluginJsonObject);
 
-        try {
-          fileStore.appendJsonl(characterStateEventsPath, event);
-        } catch (error: unknown) {
-          const message = `Character State event append failed: ${characterStateErrorMessage(error)}`;
-
-          return {
-            status: 'rejected',
-            reason: 'character_state_event_write_failed',
-            message,
-            evidence: [
-              createRuntimePluginEvidenceSnapshot({
-                eventId: context.eventId,
-                traceId: context.traceId,
-                createdAt: context.timestamp,
-                kind: 'runtime_plugin_evidence_snapshot',
-                pluginId: characterStatePluginId,
-                evidenceKind: 'tool_invocation',
-                status: 'failed',
-                summary: message,
-                policyOutcome: 'handler_rejected',
-                redactionLabels: context.privacy.redactionLabels
-              })
-            ]
-          };
-        }
-
-        if (result.appliedChanges.length === 0) {
-          return {
-            status: 'accepted',
-            output: Object.freeze({
-              status: 'accepted',
-              current: result.after.current,
-              appliedChanges: result.appliedChanges
-            }),
-            evidence: [
-              createPluginToolEvidence({
-                context,
-                pluginId: characterStatePluginId,
-                status: 'accepted',
-                summary: 'Recorded no-op Character State patch identity.'
-              })
-            ]
-          };
-        }
-
-        try {
-          fileStore.writeJsonAtomic(characterStateCurrentPath, result.after);
-        } catch (error: unknown) {
-          const warning = `Character State current snapshot write failed: ${characterStateErrorMessage(error)}`;
-
-          return {
-            status: 'accepted',
-            output: Object.freeze({
-              status: 'accepted',
-              current: result.after.current,
-              appliedChanges: result.appliedChanges,
-              warnings: [warning]
-            }),
-            evidence: [
-              createPluginToolEvidence({
-                context,
-                pluginId: characterStatePluginId,
-                status: 'accepted',
-                summary: `Applied ${String(result.appliedChanges.length)} Character State changes.`
-              }),
-              createRuntimePluginEvidenceSnapshot({
-                eventId: context.eventId,
-                traceId: context.traceId,
-                createdAt: context.timestamp,
-                kind: 'runtime_plugin_evidence_snapshot',
-                pluginId: characterStatePluginId,
-                evidenceKind: 'tool_invocation',
-                status: 'degraded',
-                summary: warning,
-                redactionLabels: context.privacy.redactionLabels
-              })
-            ]
-          };
-        }
+        fileStore.appendJsonl(characterStateEventsPath, event);
+        writeCharacterStatePatchIdempotencyRecord(
+          fileStore,
+          decodeStoredCharacterStatePatchEvent(event)
+        );
+        writeCharacterStateCheckpoint(fileStore, {
+          eventCount: store.eventCount + 1,
+          current: result.after
+        });
 
         return {
           status: 'accepted',
@@ -363,12 +301,15 @@ export function createCharacterStatePlugin(): RuntimePlugin {
             appliedChanges: result.appliedChanges
           }),
           evidence: [
-            createPluginToolEvidence({
-              context,
-              pluginId: characterStatePluginId,
-              status: 'accepted',
-              summary: `Applied ${String(result.appliedChanges.length)} Character State changes.`
-            })
+              createPluginToolEvidence({
+                context,
+                pluginId: characterStatePluginId,
+                status: 'accepted',
+                summary:
+                  result.appliedChanges.length === 0
+                    ? 'Recorded no-op Character State patch identity.'
+                    : `Applied ${String(result.appliedChanges.length)} Character State changes.`
+              })
           ]
         };
       }
@@ -379,21 +320,44 @@ export function createCharacterStatePlugin(): RuntimePlugin {
   return plugin;
 }
 
-function findCharacterStatePatchEvent(options: {
-  readonly events: readonly DecodedCharacterStatePatchEvent[];
+function readCharacterStatePatchIdempotencyRecord(options: {
+  readonly fileStore: RuntimePluginFileStore;
   readonly eventId: string;
   readonly traceId: string;
   readonly createdAt: string;
   readonly toolCallId?: string;
 }): DecodedCharacterStatePatchEvent | undefined {
-  return options.events.find((event) => {
-    return (
-      event.eventId === options.eventId &&
-      event.traceId === options.traceId &&
-      event.createdAt === options.createdAt &&
-      event.toolCallId === options.toolCallId
+  const path = characterStateIdempotencyPath(options);
+  const record = options.fileStore.readJson(path);
+
+  if (record === undefined) {
+    return undefined;
+  }
+
+  if (
+    !isJsonObject(record) ||
+    record['kind'] !== 'character_state.patch_idempotency' ||
+    record['version'] !== characterStateIdempotencyRecordVersion
+  ) {
+    throw new TypeError(
+      'Stored Character State idempotency record is malformed.'
     );
-  });
+  }
+
+  const event = decodeStoredCharacterStatePatchEvent(record['event']);
+
+  if (
+    event.eventId !== options.eventId ||
+    event.traceId !== options.traceId ||
+    event.createdAt !== options.createdAt ||
+    event.toolCallId !== options.toolCallId
+  ) {
+    throw new TypeError(
+      'Stored Character State idempotency record identity is malformed.'
+    );
+  }
+
+  return event;
 }
 
 type DecodedCharacterStatePatchEvent = {
@@ -407,6 +371,12 @@ type DecodedCharacterStatePatchEvent = {
 
 type DecodedCharacterStateEventLog = {
   readonly events: readonly DecodedCharacterStatePatchEvent[];
+  readonly current: CharacterRuntimeState;
+};
+
+type CharacterStateCheckpoint = {
+  readonly eventCount: number;
+  readonly storeRevision: number;
   readonly current: CharacterRuntimeState;
 };
 
@@ -503,6 +473,17 @@ function requiredStoredEventIdentityField(
     throw new TypeError('Stored Character State plugin event is malformed.');
   }
 
+  if (field === 'createdAt') {
+    try {
+      return assertCanonicalRuntimeTimestamp(
+        value,
+        'Stored Character State plugin event createdAt'
+      );
+    } catch {
+      throw new TypeError('Stored Character State plugin event is malformed.');
+    }
+  }
+
   return value;
 }
 
@@ -528,27 +509,121 @@ export function isCharacterStatePlugin(plugin: RuntimePlugin): boolean {
   return characterStatePluginInstances.has(plugin);
 }
 
-function readCurrentCharacterState(
-  fileStore: RuntimePluginFileStore,
-  decodedEventLog?: DecodedCharacterStateEventLog
-): CharacterRuntimeState {
-  const current = fileStore.readJson(characterStateCurrentPath);
-  const eventLog =
-    decodedEventLog ??
-    decodeCharacterStateEventLog(fileStore.readJsonl(characterStateEventsPath));
-  const rebuilt = eventLog.current;
+function readCharacterStateStore(
+  fileStore: RuntimePluginFileStore
+): CharacterStateCheckpoint {
+  const storedCheckpoint = fileStore.readJson(characterStateCheckpointPath);
 
-  if (current === undefined) {
-    return rebuilt;
+  if (storedCheckpoint !== undefined) {
+    const checkpoint = decodeCharacterStateCheckpoint(storedCheckpoint);
+
+    if (checkpoint.storeRevision === fileStore.revision()) {
+      return checkpoint;
+    }
   }
 
-  const cached = decodeCharacterRuntimeState(current, (field) => {
-    throw new TypeError(`Stored Character State plugin field "${field}" is malformed.`);
+  const eventLog = decodeCharacterStateEventLog(
+    fileStore.readJsonl(characterStateEventsPath)
+  );
+
+  for (const event of eventLog.events) {
+    writeCharacterStatePatchIdempotencyRecord(fileStore, event);
+  }
+
+  return writeCharacterStateCheckpoint(fileStore, {
+    eventCount: eventLog.events.length,
+    current: eventLog.current
+  });
+}
+
+function decodeCharacterStateCheckpoint(
+  value: unknown
+): CharacterStateCheckpoint {
+  if (
+    !isJsonObject(value) ||
+    value['kind'] !== 'character_state.checkpoint' ||
+    value['version'] !== characterStateCheckpointVersion ||
+    !isNonNegativeSafeInteger(value['eventCount']) ||
+    !isNonNegativeSafeInteger(value['storeRevision'])
+  ) {
+    throw new TypeError('Stored Character State checkpoint is malformed.');
+  }
+
+  const current = decodeCharacterRuntimeState(value['current'], (field) => {
+    throw new TypeError(
+      `Stored Character State checkpoint field "${field}" is malformed.`
+    );
   });
 
-  // The event log is authoritative; current.json is a cache that may lag if a
-  // prior commit appended the event and then failed to write the snapshot.
-  return characterRuntimeStatesEqual(cached, rebuilt) ? cached : rebuilt;
+  return Object.freeze({
+    eventCount: value['eventCount'],
+    storeRevision: value['storeRevision'],
+    current
+  } satisfies CharacterStateCheckpoint);
+}
+
+function writeCharacterStateCheckpoint(
+  fileStore: RuntimePluginFileStore,
+  value: Pick<CharacterStateCheckpoint, 'eventCount' | 'current'>
+): CharacterStateCheckpoint {
+  const checkpoint = Object.freeze({
+    kind: 'character_state.checkpoint',
+    version: characterStateCheckpointVersion,
+    eventCount: value.eventCount,
+    storeRevision: fileStore.revision() + 1,
+    current: value.current
+  } satisfies RuntimePluginJsonObject);
+
+  fileStore.writeJsonAtomic(characterStateCheckpointPath, checkpoint);
+  return decodeCharacterStateCheckpoint(checkpoint);
+}
+
+function writeCharacterStatePatchIdempotencyRecord(
+  fileStore: RuntimePluginFileStore,
+  decodedEvent: DecodedCharacterStatePatchEvent
+): void {
+  fileStore.writeJsonAtomic(
+    characterStateIdempotencyPath(decodedEvent),
+    Object.freeze({
+      kind: 'character_state.patch_idempotency',
+      version: characterStateIdempotencyRecordVersion,
+      event: Object.freeze({
+        type: 'character_state.patch',
+        eventId: decodedEvent.eventId,
+        traceId: decodedEvent.traceId,
+        ...(decodedEvent.toolCallId === undefined
+          ? {}
+          : { toolCallId: decodedEvent.toolCallId }),
+        createdAt: decodedEvent.createdAt,
+        input: decodedEvent.input,
+        result: decodedEvent.result
+      })
+    } satisfies RuntimePluginJsonObject)
+  );
+}
+
+function characterStateIdempotencyPath(identity: {
+  readonly eventId: string;
+  readonly traceId: string;
+  readonly createdAt: string;
+  readonly toolCallId?: string;
+}): string {
+  const digest = createHash('sha256')
+    .update(
+      JSON.stringify([
+        identity.eventId,
+        identity.traceId,
+        identity.createdAt,
+        identity.toolCallId ?? null
+      ])
+    )
+    .digest('hex');
+
+  return `idempotency/${digest}.json`;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && typeof value === 'number' && value >= 0;
 }
 
 function requiredFileStore(context: RuntimePluginContext): RuntimePluginFileStore {
@@ -561,12 +636,4 @@ function requiredFileStore(context: RuntimePluginContext): RuntimePluginFileStor
 
 function isJsonObject(value: unknown): value is RuntimePluginJsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function characterStateErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-
-  return 'Character State write failed.';
 }

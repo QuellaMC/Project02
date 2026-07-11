@@ -1,9 +1,13 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { Writable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
+
+import { createTestTempRoot } from './support/temp-root.ts';
+import {
+  collect,
+  writeRuntimeConfig
+} from './support/runtime-config.ts';
 
 import {
   createConversationSession
@@ -48,7 +52,7 @@ import {
 
 describe('inspect CLI plugin evidence', () => {
   it('shows model rounds and per-tool plugin events', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-'));
+    const storeRoot = createTestTempRoot('project02-inspect-');
     await createLocalRuntimeSessionStore({ storeRoot }).createSession({
       sessionId: 'session-inspect',
       createdAt: '2026-06-15T00:00:00.000Z'
@@ -83,8 +87,19 @@ describe('inspect CLI plugin evidence', () => {
       }
     );
     const output = JSON.parse(stdout) as {
+      readonly evidenceScopes: {
+        readonly runtimeConfig: string;
+        readonly activation: string;
+        readonly storedSessionEvidence: string;
+        readonly derivedTraceEvidence: string;
+      };
+      readonly counts: {
+        readonly traceEntries: number;
+        readonly derivedTraceEntries: number;
+      };
       readonly turns: readonly [
         {
+          readonly derivedSteps: readonly unknown[];
           readonly modelRounds: readonly {
             readonly rawEventKind: string;
             readonly roleModelEvidence: {
@@ -118,6 +133,14 @@ describe('inspect CLI plugin evidence', () => {
     };
 
     expect(exitCode).toBe(0);
+    expect(output.evidenceScopes).toEqual({
+      runtimeConfig: 'current_at_inspection',
+      activation: 'current_at_inspection',
+      storedSessionEvidence: 'stored_history',
+      derivedTraceEvidence: 'derived_not_persisted'
+    });
+    expect(output.counts.derivedTraceEntries).toBe(0);
+    expect(output.turns[0].derivedSteps).toEqual([]);
     expect(output.turns[0].modelRounds).toHaveLength(2);
     expect(output.turns[0].modelRounds.map((round) => round.rawEventKind)).toEqual([
       'tool_call_started',
@@ -162,7 +185,7 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('shows runtime config source and configured plugin activation', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-config-'));
+    const storeRoot = createTestTempRoot('project02-inspect-config-');
     const configPath = join(storeRoot, 'config.json');
 
     writeRuntimeConfig(configPath, {
@@ -235,8 +258,8 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('uses cwd dotenv runtime config selectors for unflagged inspect', async () => {
-    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-cwd-env-'));
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-cwd-store-'));
+    const cwdRoot = createTestTempRoot('project02-inspect-cwd-env-');
+    const storeRoot = createTestTempRoot('project02-inspect-cwd-store-');
     const configPath = writeRuntimeConfig(join(cwdRoot, 'config.json'), {
       storeRoot
     });
@@ -291,13 +314,9 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('ignores process and cwd dotenv runtime config selectors when --store is explicit', async () => {
-    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-cwd-store-'));
-    const defaultStoreRoot = mkdtempSync(
-      join(tmpdir(), 'project02-inspect-default-store-')
-    );
-    const selectedStoreRoot = mkdtempSync(
-      join(tmpdir(), 'project02-inspect-selected-store-')
-    );
+    const cwdRoot = createTestTempRoot('project02-inspect-cwd-store-');
+    const defaultStoreRoot = createTestTempRoot('project02-inspect-default-store-');
+    const selectedStoreRoot = createTestTempRoot('project02-inspect-selected-store-');
     const defaultConfigPath = writeRuntimeConfig(join(cwdRoot, 'config.json'), {
       storeRoot: defaultStoreRoot
     });
@@ -353,10 +372,8 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('uses an explicit store before reading an unrelated cwd dotenv', async () => {
-    const cwdRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-cwd-dotenv-error-'));
-    const selectedStoreRoot = mkdtempSync(
-      join(tmpdir(), 'project02-inspect-selected-dotenv-error-')
-    );
+    const cwdRoot = createTestTempRoot('project02-inspect-cwd-dotenv-error-');
+    const selectedStoreRoot = createTestTempRoot('project02-inspect-selected-dotenv-error-');
     const previousCwd = process.cwd();
     const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stdout = '';
@@ -409,15 +426,9 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('uses a process-env selected runtime config before reading an unrelated cwd dotenv', async () => {
-    const cwdRoot = mkdtempSync(
-      join(tmpdir(), 'project02-inspect-env-cwd-dotenv-error-')
-    );
-    const selectedStoreRoot = mkdtempSync(
-      join(tmpdir(), 'project02-inspect-env-selected-store-')
-    );
-    const configRoot = mkdtempSync(
-      join(tmpdir(), 'project02-inspect-env-selected-config-')
-    );
+    const cwdRoot = createTestTempRoot('project02-inspect-env-cwd-dotenv-error-');
+    const selectedStoreRoot = createTestTempRoot('project02-inspect-env-selected-store-');
+    const configRoot = createTestTempRoot('project02-inspect-env-selected-config-');
     const configPath = writeRuntimeConfig(
       join(configRoot, 'runtime-config.json'),
       {
@@ -477,7 +488,7 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('uses declared plugin manifests for inspect without constructing plugins', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-factory-'));
+    const storeRoot = createTestTempRoot('project02-inspect-factory-');
     const plugin = createInspectFixturePlugin();
     let stdout = '';
     let factoryCalls = 0;
@@ -543,9 +554,7 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('reports config load errors before runtime env file errors', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-inspect-load-error-before-env-')
-    );
+    const storeRoot = createTestTempRoot('project02-inspect-load-error-before-env-');
     let stdout = '';
     let stderr = '';
 
@@ -570,9 +579,7 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('reports env-independent activation errors before runtime env file errors', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-inspect-activation-before-env-')
-    );
+    const storeRoot = createTestTempRoot('project02-inspect-activation-before-env-');
     const plugin = createInspectRequiredConfigFixturePlugin(
       'inspect.required-config'
     );
@@ -632,9 +639,7 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('loads runtime env before reporting mixed inspect activation diagnostics', async () => {
-    const storeRoot = mkdtempSync(
-      join(tmpdir(), 'project02-inspect-mixed-activation-env-')
-    );
+    const storeRoot = createTestTempRoot('project02-inspect-mixed-activation-env-');
     const plugin = createInspectRequiredSecretAndConfigFixturePlugin(
       'inspect.mixed-config'
     );
@@ -701,7 +706,7 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('does not invoke plugin lifecycle hooks while listing sessions', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-close-'));
+    const storeRoot = createTestTempRoot('project02-inspect-close-');
     const sessionEndContexts: RuntimePluginContext[] = [];
     const plugin = createInspectSessionEndFixturePlugin((context) => {
       sessionEndContexts.push(context);
@@ -763,7 +768,7 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('does not invoke plugin lifecycle hooks when a session read fails', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-close-failure-'));
+    const storeRoot = createTestTempRoot('project02-inspect-close-failure-');
     const missingSessionId = 'missing-session';
     const sessionEndContexts: RuntimePluginContext[] = [];
     const plugin = createInspectSessionEndFixturePlugin((context) => {
@@ -811,7 +816,7 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('preserves formatted store read errors without constructing plugins', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'project02-inspect-invalid-store-'));
+    const root = createTestTempRoot('project02-inspect-invalid-store-');
     const storeRoot = join(root, 'store-root-file');
     const configPath = join(root, 'config.json');
     const plugin = createInspectFixturePlugin('inspect.invalid-store.fixture');
@@ -854,7 +859,7 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('loads the runtime env file for inspect without mutating process env', async () => {
-    const storeRoot = mkdtempSync(join(tmpdir(), 'project02-inspect-env-'));
+    const storeRoot = createTestTempRoot('project02-inspect-env-');
     const configPath = join(storeRoot, 'config.json');
     const envVar = 'PROJECT02_INSPECT_ENV_FILE_SECRET_3448711012';
     const previousEnvValue = process.env[envVar];
@@ -970,18 +975,6 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
       };
     }
   };
-}
-
-function writeRuntimeConfig(
-  path: string,
-  config: Readonly<Record<string, unknown>>
-): string {
-  writeFileSync(
-    path,
-    `${JSON.stringify({ version: runtimeConfigVersion, ...config }, null, 2)}\n`,
-    'utf8'
-  );
-  return path;
 }
 
 function createInspectFixturePlugin(pluginId = 'inspect.custom'): RuntimePlugin {
@@ -1134,13 +1127,4 @@ function restoreProcessEnvValue(name: string, value: string | undefined): void {
   }
 
   process.env[name] = value;
-}
-
-function collect(write: (chunk: string) => void): Writable {
-  return new Writable({
-    write(chunk, _encoding, callback) {
-      write(String(chunk));
-      callback();
-    }
-  });
 }

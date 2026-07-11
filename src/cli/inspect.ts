@@ -2,10 +2,11 @@ import { pathToFileURL } from 'node:url';
 
 import type { RoleModelDecisionResult } from '../role-model/contracts.ts';
 import {
-  isTerminalRawEventLogRecord,
+  isTerminalRawEventLogRecordKind,
   type ConversationLogRecord,
   type RawEventLogRecord,
   type RoleModelCommitValidationResult,
+  type RuntimeDerivedTraceEntry,
   type RuntimeTraceEntry,
   type RuntimeTurnStatus
 } from '../runtime/log.ts';
@@ -83,8 +84,15 @@ type InspectSessionOutput = {
   readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
   readonly plugins: readonly InspectConfiguredPlugin[];
   readonly session: LocalRuntimeSessionMetadata;
+  readonly evidenceScopes: {
+    readonly runtimeConfig: 'current_at_inspection';
+    readonly activation: 'current_at_inspection';
+    readonly storedSessionEvidence: 'stored_history';
+    readonly derivedTraceEvidence: 'derived_not_persisted';
+  };
   readonly counts: {
     readonly traceEntries: number;
+    readonly derivedTraceEntries: number;
     readonly rawEvents: number;
     readonly conversationMessages: number;
   };
@@ -115,6 +123,17 @@ type InspectTurnEvidence = {
   readonly traceId: string;
   readonly status: RuntimeTurnStatus;
   readonly steps: readonly string[];
+  readonly derivedSteps: readonly {
+    readonly step: string;
+    readonly source: 'terminal_raw_event';
+    readonly reason: 'missing_persisted_trace_entry';
+    readonly rawEventAnchor: {
+      readonly eventId: string;
+      readonly traceId: string;
+      readonly createdAt: string;
+      readonly kind: 'runtime_turn_completed' | 'runtime_turn_rejected';
+    };
+  }[];
   readonly visibleMessages: readonly InspectVisibleMessage[];
   readonly modelRounds: readonly InspectRoleModelRoundEvidence[];
   readonly toolEvents: readonly InspectToolCallEvent[];
@@ -482,9 +501,8 @@ async function writeSessionEvidence(
     ...storage,
     sessionId: session.sessionId
   });
-  const traceEntries = logStore.traceEntries();
-  const rawEvents = logStore.rawEvents();
-  const conversationMessages = logStore.conversationMessages();
+  const evidence = logStore.readSessionEvidence();
+  const { traceEntries, rawEvents, conversationMessages } = evidence.stored;
 
   writeJson(stdout, {
     runtimeConfig: createRuntimeConfigInspectShape(runtimeConfig.resolvedConfig),
@@ -493,13 +511,21 @@ async function writeSessionEvidence(
     ]),
     plugins: inspectConfiguredPlugins(runtimeConfig),
     session,
+    evidenceScopes: Object.freeze({
+      runtimeConfig: 'current_at_inspection',
+      activation: 'current_at_inspection',
+      storedSessionEvidence: 'stored_history',
+      derivedTraceEvidence: 'derived_not_persisted'
+    }),
     counts: {
       traceEntries: traceEntries.length,
+      derivedTraceEntries: evidence.derived.traceEntries.length,
       rawEvents: rawEvents.length,
       conversationMessages: conversationMessages.length
     },
     turns: createTurnEvidence({
       conversationMessages,
+      derivedTraceEntries: evidence.derived.traceEntries,
       rawEvents,
       traceEntries
     })
@@ -576,65 +602,283 @@ function inspectConfiguredPlugins(
 
 function createTurnEvidence(options: {
   readonly conversationMessages: readonly ConversationLogRecord[];
+  readonly derivedTraceEntries: readonly RuntimeDerivedTraceEntry[];
   readonly rawEvents: readonly RawEventLogRecord[];
   readonly traceEntries: readonly RuntimeTraceEntry[];
 }): readonly InspectTurnEvidence[] {
+  const indexes = createInspectEvidenceIndexes(options);
+
   return Object.freeze(
-    options.rawEvents
-      .filter(isTerminalTurnRawEvent)
-      .map((rawEvent) =>
-        createTurnEvidenceEntry({
-          conversationMessages: options.conversationMessages,
-          rawEvents: options.rawEvents,
-          rawEvent,
-          traceEntries: options.traceEntries
-        })
-      )
+    indexes.terminalRawEvents.map((terminalRawEvent) =>
+      createTurnEvidenceEntry({
+        indexes,
+        terminalRawEvent
+      })
+    )
   );
 }
 
-function createTurnEvidenceEntry(options: {
-  readonly conversationMessages: readonly ConversationLogRecord[];
-  readonly rawEvents: readonly RawEventLogRecord[];
+type InspectEvidenceIndexes = {
+  readonly conversationById: ReadonlyMap<string, ConversationLogRecord>;
+  readonly derivedTraceByIdentity: ReadonlyMap<
+    string,
+    readonly RuntimeDerivedTraceEntry[]
+  >;
+  readonly terminalRawEvents: readonly InspectTerminalRawEvent[];
+  readonly turnProjectionsByIdentity: ReadonlyMap<
+    string,
+    InspectTurnRawEventProjection
+  >;
+  readonly traceEntriesByIdentity: ReadonlyMap<
+    string,
+    readonly RuntimeTraceEntry[]
+  >;
+};
+
+type InspectTerminalRawEvent = {
   readonly rawEvent: RawEventLogRecord;
+  readonly roleModelEvidence: {
+    readonly roleModelEvidence?: InspectRoleModelEvidence;
+  };
+};
+
+type InspectTurnRawEventProjection = {
+  readonly modelRounds: readonly InspectRoleModelRoundEvidence[];
+  readonly simplePluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
+  readonly toolEvents: readonly InspectToolCallEvent[];
+};
+
+type MutableInspectTurnRawEventProjection = {
+  readonly modelRounds: InspectRoleModelRoundEvidence[];
+  readonly seenModelRoundEvidenceKeys: Set<string>;
+  readonly simplePluginEvidence: RuntimePluginEvidenceSnapshot[];
+  readonly toolEvents: InspectToolCallEvent[];
+};
+
+function createInspectEvidenceIndexes(options: {
+  readonly conversationMessages: readonly ConversationLogRecord[];
+  readonly derivedTraceEntries: readonly RuntimeDerivedTraceEntry[];
+  readonly rawEvents: readonly RawEventLogRecord[];
   readonly traceEntries: readonly RuntimeTraceEntry[];
-}): InspectTurnEvidence {
-  const visibleMessageIds = options.rawEvent.visibleMessageIds ?? [];
+}): InspectEvidenceIndexes {
+  const rawEventIndexes = createInspectRawEventIndexes(options.rawEvents);
 
   return Object.freeze({
-    eventId: options.rawEvent.eventId,
-    traceId: options.rawEvent.traceId,
-    status: terminalTurnStatus(options.rawEvent),
+    conversationById: new Map(
+      options.conversationMessages.map((message) => [message.id, message])
+    ),
+    derivedTraceByIdentity: groupEvidenceByIdentity(
+      options.derivedTraceEntries
+    ),
+    terminalRawEvents: rawEventIndexes.terminalRawEvents,
+    turnProjectionsByIdentity: rawEventIndexes.turnProjectionsByIdentity,
+    traceEntriesByIdentity: groupEvidenceByIdentity(options.traceEntries)
+  });
+}
+
+function createInspectRawEventIndexes(
+  rawEvents: readonly RawEventLogRecord[]
+): Pick<
+  InspectEvidenceIndexes,
+  'terminalRawEvents' | 'turnProjectionsByIdentity'
+> {
+  const terminalRawEvents: InspectTerminalRawEvent[] = [];
+  const mutableProjections = new Map<
+    string,
+    MutableInspectTurnRawEventProjection
+  >();
+
+  for (const rawEvent of rawEvents) {
+    const identityKey = inspectEvidenceIdentityKey(rawEvent);
+    const rawEventKind = rawEvent.kind;
+    const projection = mutableInspectTurnProjection(
+      mutableProjections,
+      identityKey
+    );
+    const roleModelEvidence = roleModelEvidenceForRawEvent(rawEvent);
+
+    appendInspectModelRound({
+      projection,
+      rawEventKind,
+      roleModelEvidence
+    });
+
+    if (
+      rawEvent.toolCallId !== undefined &&
+      (rawEventKind === 'tool_call_started' ||
+        rawEventKind === 'tool_call_finished')
+    ) {
+      projection.toolEvents.push(inspectToolCallEvent(rawEvent));
+    }
+
+    if (
+      rawEventKind === 'after_turn_committed' ||
+      isTerminalRawEventLogRecordKind(rawEventKind)
+    ) {
+      projection.simplePluginEvidence.push(
+        ...(rawEvent.runtimePluginEvidence ?? [])
+      );
+    }
+
+    if (isTerminalRawEventLogRecordKind(rawEventKind)) {
+      terminalRawEvents.push(
+        Object.freeze({
+          rawEvent,
+          roleModelEvidence
+        } satisfies InspectTerminalRawEvent)
+      );
+    }
+  }
+
+  return Object.freeze({
+    terminalRawEvents: Object.freeze(terminalRawEvents),
+    turnProjectionsByIdentity: freezeInspectTurnProjections(mutableProjections)
+  });
+}
+
+function mutableInspectTurnProjection(
+  projections: Map<string, MutableInspectTurnRawEventProjection>,
+  identityKey: string
+): MutableInspectTurnRawEventProjection {
+  const existing = projections.get(identityKey);
+
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  const created: MutableInspectTurnRawEventProjection = {
+    modelRounds: [],
+    seenModelRoundEvidenceKeys: new Set(),
+    simplePluginEvidence: [],
+    toolEvents: []
+  };
+  projections.set(identityKey, created);
+  return created;
+}
+
+function appendInspectModelRound(options: {
+  readonly projection: MutableInspectTurnRawEventProjection;
+  readonly rawEventKind: RawEventLogRecord['kind'];
+  readonly roleModelEvidence: {
+    readonly roleModelEvidence?: InspectRoleModelEvidence;
+  };
+}): void {
+  const evidence = options.roleModelEvidence.roleModelEvidence;
+
+  if (evidence === undefined) {
+    return;
+  }
+
+  const evidenceKey = roleModelRoundEvidenceKey(evidence);
+
+  if (options.projection.seenModelRoundEvidenceKeys.has(evidenceKey)) {
+    return;
+  }
+
+  options.projection.seenModelRoundEvidenceKeys.add(evidenceKey);
+  options.projection.modelRounds.push(
+    Object.freeze({
+      rawEventKind: options.rawEventKind,
+      roleModelEvidence: evidence
+    } satisfies InspectRoleModelRoundEvidence)
+  );
+}
+
+function freezeInspectTurnProjections(
+  mutableProjections: ReadonlyMap<
+    string,
+    MutableInspectTurnRawEventProjection
+  >
+): ReadonlyMap<string, InspectTurnRawEventProjection> {
+  const projections = new Map<string, InspectTurnRawEventProjection>();
+
+  for (const [identityKey, projection] of mutableProjections) {
+    projections.set(
+      identityKey,
+      Object.freeze({
+        modelRounds: Object.freeze(projection.modelRounds),
+        simplePluginEvidence: Object.freeze(projection.simplePluginEvidence),
+        toolEvents: Object.freeze(projection.toolEvents)
+      } satisfies InspectTurnRawEventProjection)
+    );
+  }
+
+  return projections;
+}
+
+function groupEvidenceByIdentity<T extends {
+  readonly eventId: string;
+  readonly traceId: string;
+  readonly createdAt: string;
+}>(records: readonly T[]): ReadonlyMap<string, readonly T[]> {
+  const grouped = new Map<string, T[]>();
+
+  for (const record of records) {
+    const key = inspectEvidenceIdentityKey(record);
+    const group = grouped.get(key) ?? [];
+    group.push(record);
+    grouped.set(key, group);
+  }
+
+  return grouped;
+}
+
+function inspectEvidenceIdentityKey(identity: {
+  readonly eventId: string;
+  readonly traceId: string;
+  readonly createdAt: string;
+}): string {
+  return `${identity.eventId}\u0000${identity.traceId}\u0000${identity.createdAt}`;
+}
+
+function createTurnEvidenceEntry(options: {
+  readonly indexes: InspectEvidenceIndexes;
+  readonly terminalRawEvent: InspectTerminalRawEvent;
+}): InspectTurnEvidence {
+  const { rawEvent, roleModelEvidence } = options.terminalRawEvent;
+  const visibleMessageIds = rawEvent.visibleMessageIds ?? [];
+  const identityKey = inspectEvidenceIdentityKey(rawEvent);
+  const projection = options.indexes.turnProjectionsByIdentity.get(identityKey);
+  const storedTraceEntries =
+    options.indexes.traceEntriesByIdentity.get(identityKey) ?? [];
+  const derivedTraceEntries =
+    options.indexes.derivedTraceByIdentity.get(identityKey) ?? [];
+
+  return Object.freeze({
+    eventId: rawEvent.eventId,
+    traceId: rawEvent.traceId,
+    status: terminalTurnStatus(rawEvent),
     steps: Object.freeze(
-      options.traceEntries
-        .filter(
-          (entry) =>
-            entry.eventId === options.rawEvent.eventId &&
-            entry.traceId === options.rawEvent.traceId
-        )
-        .map((entry) => entry.step)
+      storedTraceEntries.map((entry) => entry.step)
+    ),
+    derivedSteps: Object.freeze(
+      derivedTraceEntries.map((entry) =>
+        Object.freeze({
+          step: entry.step,
+          source: entry.provenance.source,
+          reason: entry.provenance.reason,
+          rawEventAnchor: entry.provenance.rawEventAnchor
+        })
+      )
     ),
     visibleMessages: Object.freeze(
       visibleMessageIds.flatMap((messageId) =>
-        visibleMessagesForId(options.conversationMessages, messageId)
+        visibleMessagesForId(options.indexes.conversationById, messageId)
       )
     ),
-    modelRounds: modelRoundsForTurn({
-      rawEvents: options.rawEvents,
-      terminalRawEvent: options.rawEvent
-    }),
+    modelRounds: projection?.modelRounds ?? Object.freeze([]),
     toolEvents: toolEventsForTurn({
-      rawEvents: options.rawEvents,
-      terminalRawEvent: options.rawEvent
+      toolEvents: projection?.toolEvents ?? [],
+      terminalRawEvent: rawEvent
     }),
-    ...roleModelEvidenceForRawEvent(options.rawEvent),
+    ...roleModelEvidence,
     ...pluginEvidenceForTurn({
-      rawEvents: options.rawEvents,
-      terminalRawEvent: options.rawEvent
+      simpleEvidence: projection?.simplePluginEvidence ?? [],
+      turnEvidence: rawEvent.runtimePluginTurnEvidence
     }),
-    ...(options.rawEvent.reason === undefined
+    ...(rawEvent.reason === undefined
       ? {}
-      : { reason: options.rawEvent.reason })
+      : { reason: rawEvent.reason })
   } satisfies InspectTurnEvidence);
 }
 
@@ -709,45 +953,6 @@ function roleModelEvidenceForRawEvent(
   };
 }
 
-function modelRoundsForTurn(options: {
-  readonly rawEvents: readonly RawEventLogRecord[];
-  readonly terminalRawEvent: RawEventLogRecord;
-}): readonly InspectRoleModelRoundEvidence[] {
-  const seenEvidenceKeys = new Set<string>();
-  const rounds: InspectRoleModelRoundEvidence[] = [];
-
-  for (const rawEvent of options.rawEvents) {
-    if (
-      rawEvent.eventId !== options.terminalRawEvent.eventId ||
-      rawEvent.traceId !== options.terminalRawEvent.traceId
-    ) {
-      continue;
-    }
-
-    const evidence = roleModelEvidenceForRawEvent(rawEvent).roleModelEvidence;
-
-    if (evidence === undefined) {
-      continue;
-    }
-
-    const evidenceKey = roleModelRoundEvidenceKey(evidence);
-
-    if (seenEvidenceKeys.has(evidenceKey)) {
-      continue;
-    }
-
-    seenEvidenceKeys.add(evidenceKey);
-    rounds.push(
-      Object.freeze({
-        rawEventKind: rawEvent.kind,
-        roleModelEvidence: evidence
-      } satisfies InspectRoleModelRoundEvidence)
-    );
-  }
-
-  return Object.freeze(rounds);
-}
-
 function roleModelRoundEvidenceKey(
   evidence: InspectRoleModelEvidence
 ): string {
@@ -759,7 +964,7 @@ function roleModelRoundEvidenceKey(
 }
 
 function toolEventsForTurn(options: {
-  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly toolEvents: readonly InspectToolCallEvent[];
   readonly terminalRawEvent: RawEventLogRecord;
 }): readonly InspectToolCallEvent[] {
   const referencedCallIds = new Set(options.terminalRawEvent.toolCallIds ?? []);
@@ -769,82 +974,52 @@ function toolEventsForTurn(options: {
   }
 
   return Object.freeze(
-    options.rawEvents
-      .filter(
-        (rawEvent) =>
-          rawEvent.eventId === options.terminalRawEvent.eventId &&
-          rawEvent.traceId === options.terminalRawEvent.traceId &&
-          rawEvent.toolCallId !== undefined &&
-          referencedCallIds.has(rawEvent.toolCallId) &&
-          (rawEvent.kind === 'tool_call_started' ||
-            rawEvent.kind === 'tool_call_finished')
-      )
-      .map((rawEvent) =>
-        Object.freeze({
-          callId: rawEvent.toolCallId ?? '',
-          round: rawEvent.toolRound ?? 0,
-          toolName: rawEvent.toolName ?? '',
-          pluginId: rawEvent.toolPluginId ?? '',
-          ...(rawEvent.toolInput === undefined ? {} : { input: rawEvent.toolInput }),
-          ...(rawEvent.toolResult === undefined
-            ? {}
-            : { result: pluginToolInvocationResult(rawEvent.toolResult) }),
-          ...(rawEvent.pluginStoreRevision === undefined
-            ? {}
-            : { pluginStoreRevision: rawEvent.pluginStoreRevision })
-        } satisfies InspectToolCallEvent)
-      )
+    options.toolEvents.filter((toolEvent) => referencedCallIds.has(toolEvent.callId))
   );
 }
 
-function pluginEvidenceForTurn(options: {
-  readonly rawEvents: readonly RawEventLogRecord[];
-  readonly terminalRawEvent: RawEventLogRecord;
-}): { readonly pluginEvidence?: InspectPluginEvidence } {
-  const turnEvidence = options.terminalRawEvent.runtimePluginTurnEvidence;
-  const simpleEvidence = options.rawEvents
-    .filter((rawEvent) =>
-      sameTurnPluginEvidenceRawEvent({
-        rawEvent,
-        terminalRawEvent: options.terminalRawEvent
-      })
-    )
-    .flatMap((rawEvent) => rawEvent.runtimePluginEvidence ?? []);
+function inspectToolCallEvent(rawEvent: RawEventLogRecord): InspectToolCallEvent {
+  return Object.freeze({
+    callId: rawEvent.toolCallId ?? '',
+    round: rawEvent.toolRound ?? 0,
+    toolName: rawEvent.toolName ?? '',
+    pluginId: rawEvent.toolPluginId ?? '',
+    ...(rawEvent.toolInput === undefined ? {} : { input: rawEvent.toolInput }),
+    ...(rawEvent.toolResult === undefined
+      ? {}
+      : { result: pluginToolInvocationResult(rawEvent.toolResult) }),
+    ...(rawEvent.pluginStoreRevision === undefined
+      ? {}
+      : { pluginStoreRevision: rawEvent.pluginStoreRevision })
+  } satisfies InspectToolCallEvent);
+}
 
-  if (turnEvidence === undefined && simpleEvidence.length === 0) {
+function pluginEvidenceForTurn(options: {
+  readonly simpleEvidence: readonly RuntimePluginEvidenceSnapshot[];
+  readonly turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined;
+}): { readonly pluginEvidence?: InspectPluginEvidence } {
+  if (options.turnEvidence === undefined && options.simpleEvidence.length === 0) {
     return {};
   }
 
   const evidence = uniquePluginEvidenceSnapshots([
-    ...simpleEvidence,
-    ...(turnEvidence?.evidence ?? [])
+    ...options.simpleEvidence,
+    ...(options.turnEvidence?.evidence ?? [])
   ]);
 
   return {
     pluginEvidence: Object.freeze({
-      ...(turnEvidence === undefined
+      ...(options.turnEvidence === undefined
         ? {}
-        : { contractVersion: turnEvidence.contractVersion }),
-      plugins: pluginListings(turnEvidence),
-      contextItems: pluginContextItems(turnEvidence),
-      toolInvocations: pluginToolInvocations(turnEvidence),
+        : { contractVersion: options.turnEvidence.contractVersion }),
+      plugins: pluginListings(options.turnEvidence),
+      contextItems: pluginContextItems(options.turnEvidence),
+      toolInvocations: pluginToolInvocations(options.turnEvidence),
       evidence: Object.freeze(evidence.map(pluginEvidenceSnapshot)),
       policyOutcomes: policyOutcomes(evidence),
-      health: pluginHealthSnapshots(turnEvidence)
+      health: pluginHealthSnapshots(options.turnEvidence)
     } satisfies InspectPluginEvidence)
   };
-}
-
-function sameTurnPluginEvidenceRawEvent(options: {
-  readonly rawEvent: RawEventLogRecord;
-  readonly terminalRawEvent: RawEventLogRecord;
-}): boolean {
-  return (
-    options.rawEvent.eventId === options.terminalRawEvent.eventId &&
-    options.rawEvent.traceId === options.terminalRawEvent.traceId &&
-    (options.rawEvent === options.terminalRawEvent ||
-      options.rawEvent.kind === 'after_turn_committed')
-  );
 }
 
 function pluginListings(
@@ -919,27 +1094,7 @@ function pluginContextItemsFromSnapshots(
 function pluginContextItems(
   turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined
 ): readonly InspectPluginContextItem[] {
-  if (turnEvidence === undefined) {
-    return Object.freeze([]);
-  }
-
-  return Object.freeze(
-    turnEvidence.contextItems.map((item) =>
-      Object.freeze({
-        pluginId: item.pluginId,
-        id: item.id,
-        kind: item.kind,
-        text: item.text,
-        budget: Object.freeze({
-          estimatedTokens: item.budget.estimatedTokens,
-          priority: item.budget.priority
-        }),
-        sourceReferences: sourceReferences(item.sourceReferences),
-        redactionLabels: Object.freeze([...item.redactionLabels]),
-        ...(item.confidence === undefined ? {} : { confidence: item.confidence })
-      } satisfies InspectPluginContextItem)
-    )
-  );
+  return pluginContextItemsFromSnapshots(turnEvidence?.contextItems ?? []);
 }
 
 function pluginToolInvocations(
@@ -1148,10 +1303,6 @@ function roleModelCommitValidation(
   } satisfies InspectRoleModelCommitValidation);
 }
 
-function isTerminalTurnRawEvent(record: RawEventLogRecord): boolean {
-  return isTerminalRawEventLogRecord(record);
-}
-
 function terminalTurnStatus(record: RawEventLogRecord): RuntimeTurnStatus {
   if (record.status !== undefined) {
     return record.status;
@@ -1164,10 +1315,10 @@ function terminalTurnStatus(record: RawEventLogRecord): RuntimeTurnStatus {
 }
 
 function visibleMessagesForId(
-  conversationMessages: readonly ConversationLogRecord[],
+  conversationById: ReadonlyMap<string, ConversationLogRecord>,
   messageId: string
 ): readonly InspectVisibleMessage[] {
-  const message = conversationMessages.find((candidate) => candidate.id === messageId);
+  const message = conversationById.get(messageId);
 
   if (message === undefined) {
     return [];

@@ -4,12 +4,26 @@ import type {
   RuntimePluginJsonValue
 } from '../types.ts';
 
-export type CreateRuntimePluginFileStoreOptions = {
-  readonly storeRoot?: string;
+type RuntimePluginFileStoreIdentity = {
   readonly sessionId: string;
-  readonly sessionIdentity?: object;
   readonly pluginId: string;
 };
+
+export type DurableRuntimePluginFileStoreOptions =
+  RuntimePluginFileStoreIdentity & {
+    readonly storeRoot: string;
+    readonly sessionIdentity?: object;
+  };
+
+export type InMemoryRuntimePluginFileStoreOptions =
+  RuntimePluginFileStoreIdentity & {
+    readonly storeRoot?: undefined;
+    readonly sessionIdentity: object;
+  };
+
+export type CreateRuntimePluginFileStoreOptions =
+  | DurableRuntimePluginFileStoreOptions
+  | InMemoryRuntimePluginFileStoreOptions;
 
 export type RuntimePluginFileStoreTransaction = {
   fileStoreFor(

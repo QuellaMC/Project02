@@ -1,6 +1,6 @@
 import type {
   RuntimePluginProvidedTool
-} from '../validation.ts';
+} from '../plugin-types.ts';
 
 export function memorySearchTool(name: string): RuntimePluginProvidedTool {
   return Object.freeze({

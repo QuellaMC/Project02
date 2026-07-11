@@ -1,24 +1,30 @@
-import { createHash, randomUUID, type Hash } from 'node:crypto';
+import { createHash, type Hash } from 'node:crypto';
 import {
-  appendFileSync,
   type Dirent,
   lstatSync,
-  mkdirSync,
   readFileSync,
   realpathSync,
   readdirSync,
-  renameSync,
-  rmSync,
-  writeFileSync
+  rmSync
 } from 'node:fs';
 import { basename, dirname, join, parse, resolve, sep } from 'node:path';
 
-import { createLocalRuntimePluginPaths } from '../../runtime/storage/layout.ts';
+import { atomicReplaceFileSync } from '../../runtime/storage/atomic-file.ts';
+import {
+  createLocalRuntimePluginPaths,
+  createLocalRuntimeStorageLayout
+} from '../../runtime/storage/layout.ts';
+import {
+  acquireLocalRuntimeMutationLocksSync,
+  type LocalRuntimeMutationLockOwnerToken
+} from '../../runtime/storage/mutation-lock.ts';
 import type { RuntimePluginJsonValue } from '../types.ts';
 import type { RuntimePluginFileStorePathMode } from './contracts.ts';
 import {
   assertJsonlPathMode,
   assertJsonPathMode,
+  durableDirectMutationJournalFileName,
+  durablePluginAtomicTempFileOwnerPid,
   durablePathModesFileName,
   durableRevisionFileName,
   isMissingFileError,
@@ -28,7 +34,14 @@ import {
   parseRuntimePluginJsonlContent
 } from './shared.ts';
 
-const durablePluginStoreMutationRoots = new Set<string>();
+const durablePathModeCacheMaxRoots = 128;
+const durablePathModeCache = new Map<
+  string,
+  {
+    readonly fileStamp: string;
+    readonly modes: ReadonlyMap<string, RuntimePluginFileStorePathMode>;
+  }
+>();
 
 export type DurablePluginFileStoreOperation = {
   readonly pluginId?: string;
@@ -45,59 +58,78 @@ export function durablePluginRoot(options: {
   return createLocalRuntimePluginPaths(options).pluginRoot;
 }
 
-export function applyDurablePluginFileStoreOperation(options: {
-  readonly root: string;
-  readonly kind: 'append_jsonl' | 'write_json';
-  readonly path: string;
-  readonly value: RuntimePluginJsonValue;
-}): void {
-  withDurablePluginStoreMutation(options.root, () => {
-    assertSafeDurablePluginPath(options.root, options.path);
-    const filePath = join(options.root, options.path);
-    const pathModes = readDurablePathModes(options.root);
-
-    assertDurableOperationPathMode({
-      filePath,
-      mode: pathModes.get(options.path),
-      operation: options
-    });
-
-    const beforeRevision = readDurableRevision(options.root);
-
-    if (options.kind === 'write_json') {
-      writeTextAtomic(
-        filePath,
-        durableOperationAfterContent({
-          beforeContent: readOptionalRegularFile(filePath),
-          operation: options
-        })
-      );
-    } else {
-      mkdirSync(dirname(filePath), { recursive: true });
-      appendFileSync(filePath, `${JSON.stringify(options.value)}\n`, 'utf8');
-    }
-
-    pathModes.set(options.path, options.kind === 'write_json' ? 'json' : 'jsonl');
-    writeDurablePathModes(options.root, pathModes);
-    writeDurableRevision(options.root, beforeRevision + 1);
-  });
-}
-
 export function withDurablePluginStoreMutation<T>(
-  root: string,
+  options: {
+    readonly resourceKeys?: readonly string[];
+    readonly storeRoot: string;
+    readonly root: string;
+    readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
+    readonly yieldAfterRelease?: boolean;
+  },
   operation: () => T
 ): T {
-  if (durablePluginStoreMutationRoots.has(root)) {
-    throw new Error('Plugin fileStore mutation is already active for this root.');
-  }
+  return withDurablePluginStoreMutations(
+    {
+      storeRoot: options.storeRoot,
+      roots: [options.root],
+      ...(options.resourceKeys === undefined
+        ? {}
+        : { resourceKeys: options.resourceKeys }),
+      ...(options.yieldAfterRelease === undefined
+        ? {}
+        : { yieldAfterRelease: options.yieldAfterRelease }),
+      ...(options.ownerToken === undefined
+        ? {}
+        : { ownerToken: options.ownerToken })
+    },
+    operation
+  );
+}
 
-  durablePluginStoreMutationRoots.add(root);
+export function withDurablePluginStoreMutations<T>(
+  options: {
+    readonly resourceKeys?: readonly string[];
+    readonly storeRoot: string;
+    readonly roots: readonly string[];
+    readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
+    readonly yieldAfterRelease?: boolean;
+  },
+  operation: () => T
+): T {
+  const lease = acquireLocalRuntimeMutationLocksSync({
+    locksRoot: createLocalRuntimeStorageLayout({
+      storeRoot: options.storeRoot
+    }).locksRoot,
+    resourceKeys: [
+      ...options.roots.map(durablePluginStoreMutationResourceKey),
+      ...(options.resourceKeys ?? [])
+    ],
+    ...(options.ownerToken === undefined
+      ? {}
+      : { ownerToken: options.ownerToken })
+  });
 
   try {
     return operation();
   } finally {
-    durablePluginStoreMutationRoots.delete(root);
+    lease.release();
+
+    if (options.yieldAfterRelease === true) {
+      yieldDurablePluginMutationLock();
+    }
   }
+}
+
+function yieldDurablePluginMutationLock(): void {
+  // Synchronous writers can otherwise release and immediately reacquire the
+  // same root until another process exhausts the bounded 10-second wait.
+  const signal = new Int32Array(new SharedArrayBuffer(4));
+
+  Atomics.wait(signal, 0, 0, 2);
+}
+
+export function durablePluginStoreMutationResourceKey(root: string): string {
+  return `plugin:${canonicalDurablePluginStoreRoot(root)}`;
 }
 
 export function canonicalDurablePluginStoreRoot(storeRoot: string): string {
@@ -236,17 +268,11 @@ export function readOptionalRegularFileBuffer(path: string): Buffer | undefined 
 }
 
 export function writeTextAtomic(path: string, content: string): void {
-  const tmpPath = `${path}.${String(process.pid)}.${randomUUID()}.tmp`;
-
-  mkdirSync(dirname(path), { recursive: true });
-
-  try {
-    writeFileSync(tmpPath, content, 'utf8');
-    renameSync(tmpPath, path);
-  } catch (error: unknown) {
-    rmSync(tmpPath, { force: true });
-    throw error;
-  }
+  atomicReplaceFileSync({
+    targetPath: path,
+    content,
+    mode: 0o600
+  });
 }
 
 export function hashOptionalFileContent(
@@ -316,15 +342,6 @@ export function processIsAlive(pid: number): boolean {
   }
 }
 
-export function durableTransactionTempFileOwnerPid(
-  name: string
-): number | undefined {
-  const match = /\.json\.(\d+)\.[^.]+\.tmp$/u.exec(name);
-  const parsed = match?.[1] === undefined ? Number.NaN : Number(match[1]);
-
-  return isPositiveSafeInteger(parsed) ? parsed : undefined;
-}
-
 export function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -365,6 +382,42 @@ export function writeDurableRevision(root: string, revision: number): void {
 export function readDurablePathModes(
   root: string
 ): Map<string, RuntimePluginFileStorePathMode> {
+  return new Map(readCachedDurablePathModes(root));
+}
+
+export function readDurablePathMode(
+  root: string,
+  path: string
+): RuntimePluginFileStorePathMode | undefined {
+  return readCachedDurablePathModes(root).get(path);
+}
+
+function readCachedDurablePathModes(
+  root: string
+): ReadonlyMap<string, RuntimePluginFileStorePathMode> {
+  const beforeStamp = durablePathModesFileStamp(root);
+  const cached = durablePathModeCache.get(root);
+
+  if (cached?.fileStamp === beforeStamp) {
+    touchDurablePathModeCache(root, cached);
+    return cached.modes;
+  }
+
+  const pathModes = readDurablePathModesFile(root);
+  const afterStamp = durablePathModesFileStamp(root);
+
+  if (beforeStamp === afterStamp) {
+    cacheDurablePathModes(root, afterStamp, pathModes);
+  } else {
+    durablePathModeCache.delete(root);
+  }
+
+  return pathModes;
+}
+
+function readDurablePathModesFile(
+  root: string
+): ReadonlyMap<string, RuntimePluginFileStorePathMode> {
   const modesPath = join(root, durablePathModesFileName);
 
   try {
@@ -408,6 +461,67 @@ export function writeDurablePathModes(
     join(root, durablePathModesFileName),
     `${JSON.stringify(Object.fromEntries(sortedPathModes))}\n`
   );
+  cacheDurablePathModes(
+    root,
+    durablePathModesFileStamp(root),
+    new Map(pathModes)
+  );
+}
+
+function durablePathModesFileStamp(root: string): string {
+  try {
+    const stat = lstatSync(join(root, durablePathModesFileName), {
+      bigint: true
+    });
+
+    return [
+      stat.dev,
+      stat.ino,
+      stat.size,
+      stat.mtimeNs,
+      stat.ctimeNs
+    ].join(':');
+  } catch (error: unknown) {
+    if (isMissingFileError(error)) {
+      return 'missing';
+    }
+
+    throw error;
+  }
+}
+
+function cacheDurablePathModes(
+  root: string,
+  fileStamp: string,
+  modes: ReadonlyMap<string, RuntimePluginFileStorePathMode>
+): void {
+  const entry = Object.freeze({
+    fileStamp,
+    modes: new Map(modes)
+  });
+
+  touchDurablePathModeCache(root, entry);
+
+  while (durablePathModeCache.size > durablePathModeCacheMaxRoots) {
+    const oldestRoot = durablePathModeCache.keys().next().value;
+
+    if (oldestRoot === undefined) {
+      break;
+    }
+
+    durablePathModeCache.delete(oldestRoot);
+  }
+}
+
+function touchDurablePathModeCache(
+  root: string,
+  entry: {
+    readonly fileStamp: string;
+    readonly modes: ReadonlyMap<string, RuntimePluginFileStorePathMode>;
+  }
+): void {
+  durablePathModeCache.delete(root);
+  durablePathModeCache.set(root, entry);
 }
 
 function initialDurableRevision(root: string): number {
@@ -446,21 +560,12 @@ export function cleanupDurablePluginStoreAtomicTempFiles(
       continue;
     }
 
-    const ownerPid = durableAtomicTempFileOwnerPid(entry.name);
+    const ownerPid = durablePluginAtomicTempFileOwnerPid(entry.name);
 
     if (entry.isFile() && ownerPid !== undefined && !processIsAlive(ownerPid)) {
       rmSync(entryPath, { force: true });
     }
   }
-}
-
-function durableAtomicTempFileOwnerPid(name: string): number | undefined {
-  const match = /\.(\d+)\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/iu.exec(
-    name
-  );
-  const parsed = match?.[1] === undefined ? Number.NaN : Number(match[1]);
-
-  return isPositiveSafeInteger(parsed) ? parsed : undefined;
 }
 
 function countDurableStoreEntries(directory: string): number {
@@ -469,14 +574,15 @@ function countDurableStoreEntries(directory: string): number {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (
       entry.name === durableRevisionFileName ||
-      entry.name === durablePathModesFileName
+      entry.name === durablePathModesFileName ||
+      entry.name === durableDirectMutationJournalFileName
     ) {
       continue;
     }
 
     const entryPath = join(directory, entry.name);
 
-    if (durableAtomicTempFileOwnerPid(entry.name) !== undefined) {
+    if (durablePluginAtomicTempFileOwnerPid(entry.name) !== undefined) {
       continue;
     }
 

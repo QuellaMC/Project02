@@ -46,6 +46,8 @@ export type DurablePluginFileStoreJournal = {
   readonly eventId: string;
   readonly traceId: string;
   readonly createdAt: string;
+  readonly ownerHostname: string;
+  readonly ownerNonce: string;
   readonly ownerPid: number;
   readonly sessionId: string;
   readonly operations: readonly DurablePluginFileStoreJournalOperation[];
@@ -54,13 +56,15 @@ export type DurablePluginFileStoreJournal = {
 export function durablePluginFileStoreTransactionJournalPath(options: {
   readonly storeRoot: string;
   readonly sessionId: string;
-  readonly identity: Pick<RuntimeEventIdentity, 'eventId' | 'traceId'>;
+  readonly identity: RuntimeEventIdentity;
 }): string {
   const sessionPaths = createLocalRuntimeSessionPaths(options);
   const key = createHash('sha256')
     .update(options.identity.eventId)
     .update('\u0000')
     .update(options.identity.traceId)
+    .update('\u0000')
+    .update(options.identity.createdAt)
     .digest('hex');
 
   return join(
@@ -117,6 +121,8 @@ export function readDurablePluginFileStoreJournal(
   const eventId = value['eventId'];
   const traceId = value['traceId'];
   const createdAt = value['createdAt'];
+  const ownerHostname = value['ownerHostname'];
+  const ownerNonce = value['ownerNonce'];
   const ownerPid = value['ownerPid'];
   const sessionId = value['sessionId'];
   const rawOperations = value['operations'];
@@ -125,7 +131,9 @@ export function readDurablePluginFileStoreJournal(
     version !== durableTransactionJournalVersion ||
     !isNonEmptyString(eventId) ||
     !isNonEmptyString(traceId) ||
-    !isNonEmptyString(createdAt) ||
+    !isCanonicalIsoTimestamp(createdAt) ||
+    !isNonEmptyString(ownerHostname) ||
+    !isOwnerNonce(ownerNonce) ||
     !isPositiveSafeInteger(ownerPid) ||
     !isNonEmptyString(sessionId) ||
     !Array.isArray(rawOperations)
@@ -142,10 +150,33 @@ export function readDurablePluginFileStoreJournal(
     eventId,
     traceId,
     createdAt,
+    ownerHostname,
+    ownerNonce,
     ownerPid,
     sessionId,
     operations: Object.freeze(operations)
   } satisfies DurablePluginFileStoreJournal);
+}
+
+function isCanonicalIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  try {
+    return new Date(value).toISOString() === value;
+  } catch {
+    return false;
+  }
+}
+
+function isOwnerNonce(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+      value
+    )
+  );
 }
 
 function decodeDurablePluginFileStoreJournalOperation(
@@ -161,13 +192,15 @@ function decodeDurablePluginFileStoreJournalOperation(
   const path = value['path'];
   const kind = value['kind'];
   const status = value['status'];
+  const expectedBeforeHash = value['expectedBeforeHash'];
 
   if (
     index !== expectedIndex ||
     !isNonEmptyString(pluginId) ||
     !isNonEmptyString(path) ||
     (kind !== 'append_jsonl' && kind !== 'write_json') ||
-    (status !== 'pending' && status !== 'planned' && status !== 'applied')
+    (status !== 'pending' && status !== 'planned' && status !== 'applied') ||
+    typeof expectedBeforeHash !== 'string'
   ) {
     throw new TypeError('Plugin fileStore transaction operation is malformed.');
   }
@@ -180,6 +213,7 @@ function decodeDurablePluginFileStoreJournalOperation(
     kind,
     value: freezeRuntimePluginFileStoreJsonValue(value['value']),
     status,
+    expectedBeforeHash,
     ...decodePlannedJournalOperationFields(value, kind, status)
   } satisfies DurablePluginFileStoreJournalOperation;
 

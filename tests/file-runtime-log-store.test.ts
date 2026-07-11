@@ -1,14 +1,15 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
+
+import { createTestTempRoot } from './support/temp-root.ts';
 
 import {
   createFileRuntimeLogStore,
   findValidatedTerminalRawEventForSession
 } from '../src/runtime/storage/file-runtime-log-store.ts';
 import {
+  acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore
 } from '../src/runtime/storage/session-store.ts';
 import {
@@ -65,7 +66,89 @@ import {
 } from '../src/role-model/prompt.ts';
 
 describe('file runtime log store plugin tool event validation', () => {
-  it('reconciles a missing terminal trace in memory without mutating public reads', async () => {
+  it('rejects low-level durable mutation without the active session writer lease', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-low-level-writer';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+
+    expect(() =>
+      logStore.appendTrace({
+        ...identity('evt_low_level_writer'),
+        step: 'runtime_event_received'
+      })
+    ).toThrow(
+      expect.objectContaining({
+        code: 'session_busy'
+      })
+    );
+    expect(logStore.readSessionEvidence().stored.traceEntries).toEqual([]);
+  });
+
+  it('rejects canonical timestamps that disagree across evidence streams', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-created-at-agreement';
+    const eventIdentity = identity('evt_created_at_agreement');
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: eventIdentity.createdAt
+    });
+    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    writeJsonLines(paths.tracePath, [
+      { ...eventIdentity, step: 'runtime_event_received' }
+    ]);
+    writeJsonLines(paths.rawEventsPath, [
+      {
+        ...eventIdentity,
+        createdAt: '2026-06-15T00:00:01.000Z',
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE'
+      }
+    ]);
+
+    expect(() => logStore.readSessionEvidence()).toThrow(
+      'Runtime evidence for one event identity must share one createdAt timestamp.'
+    );
+  });
+
+  it('rejects non-canonical timestamps decoded from durable evidence', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-canonical-created-at';
+    const eventIdentity = identity('evt_canonical_created_at');
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: eventIdentity.createdAt
+    });
+    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    writeJsonLines(paths.tracePath, [
+      {
+        ...eventIdentity,
+        createdAt: '2026-06-15T00:00:00Z',
+        step: 'runtime_event_received'
+      }
+    ]);
+
+    expect(() => logStore.readSessionEvidence()).toThrow(
+      'Stored local runtime field "createdAt" must be a canonical UTC ISO timestamp.'
+    );
+  });
+
+  it('reports a missing terminal trace as anchored derived evidence without changing stored reads', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-read-only-terminal-trace-reconciliation';
     const eventIdentity = identity('evt_legacy_schema1_patch');
@@ -106,10 +189,39 @@ describe('file runtime log store plugin tool event validation', () => {
     const traceBeforePublicReads = readFileSync(paths.tracePath, 'utf8');
     const rawEventsBeforePublicReads = readFileSync(paths.rawEventsPath, 'utf8');
 
+    const evidence = logStore.readSessionEvidence();
+
+    expect(evidence.stored.traceEntries.map((entry) => entry.step)).toEqual([
+      'runtime_event_received'
+    ]);
+    expect(evidence.derived.traceEntries).toEqual([
+      {
+        ...eventIdentity,
+        step: 'raw_event_log_appended',
+        provenance: {
+          source: 'terminal_raw_event',
+          reason: 'missing_persisted_trace_entry',
+          rawEventAnchor: {
+            ...eventIdentity,
+            kind: 'runtime_turn_completed'
+          }
+        }
+      },
+      {
+        ...eventIdentity,
+        step: 'runtime_turn_completed',
+        provenance: {
+          source: 'terminal_raw_event',
+          reason: 'missing_persisted_trace_entry',
+          rawEventAnchor: {
+            ...eventIdentity,
+            kind: 'runtime_turn_completed'
+          }
+        }
+      }
+    ]);
     expect(logStore.traceEntries().map((entry) => entry.step)).toEqual([
-      'runtime_event_received',
-      'raw_event_log_appended',
-      'runtime_turn_completed'
+      'runtime_event_received'
     ]);
     expect(logStore.rawEvents().at(-1)?.kind).toBe('runtime_turn_completed');
     expect(logStore.conversationMessages()).toEqual([]);
@@ -119,7 +231,7 @@ describe('file runtime log store plugin tool event validation', () => {
     );
   });
 
-  it('reconciles rejected terminal trace evidence in memory without writing it', async () => {
+  it('keeps rejected terminal trace compatibility evidence separate from stored trace', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-read-only-rejected-trace-reconciliation';
     const eventIdentity = identity('evt_read_only_rejected_trace_reconciliation');
@@ -156,11 +268,20 @@ describe('file runtime log store plugin tool event validation', () => {
     ]);
     const traceBeforePublicRead = readFileSync(paths.tracePath, 'utf8');
 
+    const evidence = logStore.readSessionEvidence();
+
     expect(logStore.traceEntries().map((entry) => entry.step)).toEqual([
-      'runtime_event_received',
+      'runtime_event_received'
+    ]);
+    expect(evidence.derived.traceEntries.map((entry) => entry.step)).toEqual([
       'raw_event_log_appended',
       'runtime_turn_rejected'
     ]);
+    expect(
+      evidence.derived.traceEntries.map(
+        (entry) => entry.provenance.rawEventAnchor.kind
+      )
+    ).toEqual(['runtime_turn_rejected', 'runtime_turn_rejected']);
     expect(readFileSync(paths.tracePath, 'utf8')).toBe(traceBeforePublicRead);
   });
 
@@ -776,22 +897,32 @@ describe('file runtime log store plugin tool event validation', () => {
       storeRoot,
       sessionId: 'session-tools'
     });
-
-    appendTurnPrefix(logStore);
-    logStore.appendRawEvent({
-      ...identity(),
-      kind: 'tool_call_started',
-      eventType: 'USER_MESSAGE',
-      toolCallId: 'round-1.1.memory.search',
-      toolRound: 1,
-      toolName: 'memory.search',
-      toolPluginId: 'memory.fixture',
-      toolInput: {
-        query: 'Mira'
-      }
+    const writerLease = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot,
+      sessionId: 'session-tools'
     });
 
-    expect(() => logStore.rawEvents()).toThrow(LocalRuntimeStorageContractError);
+    try {
+      appendTurnPrefix(logStore);
+      logStore.appendRawEvent({
+        ...identity(),
+        kind: 'tool_call_started',
+        eventType: 'USER_MESSAGE',
+        toolCallId: 'round-1.1.memory.search',
+        toolRound: 1,
+        toolName: 'memory.search',
+        toolPluginId: 'memory.fixture',
+        toolInput: {
+          query: 'Mira'
+        }
+      });
+
+      expect(() => logStore.rawEvents()).toThrow(
+        LocalRuntimeStorageContractError
+      );
+    } finally {
+      await writerLease.release();
+    }
   });
 
   it('allows a rejected terminal turn to close an unfinished tool call start', async () => {
@@ -805,36 +936,44 @@ describe('file runtime log store plugin tool event validation', () => {
       sessionId: 'session-tools-rejected'
     });
     const eventId = 'evt_tool_finish_log_failed';
-
-    appendTurnPrefix(logStore, eventId);
-    logStore.appendRawEvent({
-      ...identity(eventId),
-      kind: 'tool_call_started',
-      eventType: 'USER_MESSAGE',
-      toolCallId: 'round-1.1.memory.write',
-      toolRound: 1,
-      toolName: 'memory.write',
-      toolPluginId: 'memory.fixture',
-      toolInput: {
-        value: 'planned'
-      }
-    });
-    logStore.appendRawEvent({
-      ...identity(eventId),
-      kind: 'runtime_turn_rejected',
-      eventType: 'USER_MESSAGE',
-      status: 'rejected',
-      reason: 'Runtime turn failed before producing a reply.'
-    });
-    logStore.appendTrace({
-      ...identity(eventId),
-      step: 'runtime_turn_rejected'
+    const writerLease = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot,
+      sessionId: 'session-tools-rejected'
     });
 
-    expect(logStore.rawEvents().at(-1)).toMatchObject({
-      kind: 'runtime_turn_rejected',
-      status: 'rejected'
-    });
+    try {
+      appendTurnPrefix(logStore, eventId);
+      logStore.appendRawEvent({
+        ...identity(eventId),
+        kind: 'tool_call_started',
+        eventType: 'USER_MESSAGE',
+        toolCallId: 'round-1.1.memory.write',
+        toolRound: 1,
+        toolName: 'memory.write',
+        toolPluginId: 'memory.fixture',
+        toolInput: {
+          value: 'planned'
+        }
+      });
+      logStore.appendRawEvent({
+        ...identity(eventId),
+        kind: 'runtime_turn_rejected',
+        eventType: 'USER_MESSAGE',
+        status: 'rejected',
+        reason: 'Runtime turn failed before producing a reply.'
+      });
+      logStore.appendTrace({
+        ...identity(eventId),
+        step: 'runtime_turn_rejected'
+      });
+
+      expect(logStore.rawEvents().at(-1)).toMatchObject({
+        kind: 'runtime_turn_rejected',
+        status: 'rejected'
+      });
+    } finally {
+      await writerLease.release();
+    }
   });
 
   it('rejects terminal events that reference unfinished tool calls', async () => {
@@ -847,22 +986,30 @@ describe('file runtime log store plugin tool event validation', () => {
       storeRoot,
       sessionId: 'session-terminal-tools'
     });
+    const writerLease = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot,
+      sessionId: 'session-terminal-tools'
+    });
 
-    appendTurnPrefix(logStore, 'evt_terminal_tool_ref');
-    expect(() =>
-      logStore.appendRawEvent({
-        ...identity('evt_terminal_tool_ref'),
-        kind: 'runtime_turn_completed',
-        eventType: 'USER_MESSAGE',
-        status: 'completed',
-        toolCallIds: ['round-1.1.memory.search']
-      })
-    ).toThrow(LocalRuntimeStorageContractError);
+    try {
+      appendTurnPrefix(logStore, 'evt_terminal_tool_ref');
+      expect(() =>
+        logStore.appendRawEvent({
+          ...identity('evt_terminal_tool_ref'),
+          kind: 'runtime_turn_completed',
+          eventType: 'USER_MESSAGE',
+          status: 'completed',
+          toolCallIds: ['round-1.1.memory.search']
+        })
+      ).toThrow(LocalRuntimeStorageContractError);
+    } finally {
+      await writerLease.release();
+    }
   });
 });
 
 function createStoreRoot(): string {
-  return mkdtempSync(join(tmpdir(), 'project02-log-store-'));
+  return createTestTempRoot('project02-log-store-');
 }
 
 function identity(eventId = 'evt_tool_events') {
