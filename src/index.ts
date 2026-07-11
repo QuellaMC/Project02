@@ -112,18 +112,31 @@ export {
 export * from './runtime/event.ts';
 export * from './runtime/local.ts';
 export * from './runtime/log.ts';
+export {
+  createConfiguredProject02PluginHostFromPlan,
+  prepareConfiguredProject02PluginActivation,
+  type PreparedProject02PluginActivationPlan
+} from './runtime/config/activation.ts';
 export * from './runtime/storage/file-runtime-log-store.ts';
 export * from './runtime/storage/layout.ts';
+export {
+  acquireLocalRuntimeMutationLock,
+  acquireLocalRuntimeMutationLocks,
+  acquireLocalRuntimeMutationLockSync,
+  acquireLocalRuntimeMutationLocksSync,
+  createLocalRuntimeMutationLockOwnerToken,
+  defaultLocalRuntimeMutationLockHeartbeatIntervalMs,
+  defaultLocalRuntimeMutationLockIncompleteGraceMs,
+  defaultLocalRuntimeMutationLockWaitTimeoutMs,
+  localRuntimeMutationLockOwnerOwnsResource,
+  localRuntimeMutationLockResourceIsOwnedByCurrentProcess,
+  LocalRuntimeMutationLockBusyError,
+  type AcquireLocalRuntimeMutationLockOptions,
+  type AcquireLocalRuntimeMutationLocksOptions,
+  type LocalRuntimeMutationLockLease,
+  type LocalRuntimeMutationLockLeaseSync,
+  type LocalRuntimeMutationLockOwnerToken,
+  type LocalRuntimeMutationLocksLease,
+  type LocalRuntimeMutationLocksLeaseSync
+} from './runtime/storage/mutation-lock.ts';
 export * from './runtime/storage/session-store.ts';
-
-export type ProjectHealth = {
-  readonly status: 'ok';
-  readonly runtime: 'typescript';
-};
-
-export function projectHealth(): ProjectHealth {
-  return {
-    status: 'ok',
-    runtime: 'typescript'
-  };
-}

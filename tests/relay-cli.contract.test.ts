@@ -1,9 +1,8 @@
-import { Writable } from 'node:stream';
-
 import { describe, expect, it } from 'vitest';
 
 import type { CharacterAgent } from '../src/core/conversation.ts';
 import { runRelayCli } from '../src/cli/relay.ts';
+import { collect } from './support/runtime-config.ts';
 
 describe('relay CLI compatibility wrapper', () => {
   it('prints exactly one non-interactive reply line', async () => {
@@ -107,17 +106,4 @@ function createEchoAgent(observedMessages: string[]): CharacterAgent {
       };
     }
   };
-}
-
-function collect(onWrite: (chunk: string) => void): Writable {
-  return new Writable({
-    write(
-      chunk: Buffer | string,
-      _encoding: BufferEncoding,
-      callback: (error?: Error | null) => void
-    ) {
-      onWrite(Buffer.isBuffer(chunk) ? chunk.toString('utf8') : chunk);
-      callback();
-    }
-  });
 }
