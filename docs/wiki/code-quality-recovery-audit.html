@@ -34,10 +34,15 @@
 <body>
   <main>
     <h1>Code Quality Recovery Audit</h1>
-    <p><span class="status">Verdict: request changes</span></p>
+    <p><span class="status">Verdict: remediated</span></p>
     <p class="meta">
-      Reviewed: 2026-07-11. Branch: <code>main</code>. Commit:
+      Baseline reviewed: 2026-07-11. Branch: <code>main</code>. Commit:
       <code>9333e77b6afde4b1ab798b5e7f2917a2699b4c87</code>.
+    </p>
+    <p class="meta">
+      Remediated: 2026-07-11. Branch: <code>fix/code-quality-stabilization</code>.
+      Resolving commits: <code>7b5d225</code>, <code>045fac8</code>,
+      <code>9cf74c3</code>, and <code>c0c653b</code>.
     </p>
     <p class="meta">
       Scope: 64 production TypeScript files (34,099 lines), 30 test files
@@ -59,10 +64,15 @@
         capability surface until the high-severity data-integrity and security findings are
         fixed with regression tests.
       </p>
+      <p>
+        The stabilization branch now closes all 37 findings. The original finding descriptions
+        below remain as the baseline record; the closeout table maps each one to its resolving
+        commit and regression or deletion evidence.
+      </p>
     </div>
 
     <div class="callout good">
-      <p><strong>Verified strengths:</strong></p>
+      <p><strong>Baseline verified strengths:</strong></p>
       <ul>
         <li><code>pnpm check</code> passed: lint, typecheck, and 592 tests across 30 files.</li>
         <li>Strict unused-symbol TypeScript validation passed.</li>
@@ -71,6 +81,64 @@
         <li>The prior plugin dispatch/activation bypasses documented in the earlier architecture audit are fixed on this commit and are not re-reported.</li>
       </ul>
     </div>
+
+    <h2>Remediation closeout</h2>
+    <p>
+      The changes are split into signed commits: shared validation primitives
+      (<code>7b5d225</code>), runtime/model/plugin safety and state recovery
+      (<code>045fac8</code>), obsolete-surface and fixture removal
+      (<code>9cf74c3</code>), and the final coverage/writer gate
+      (<code>c0c653b</code>).
+    </p>
+    <table class="compact">
+      <thead>
+        <tr><th>ID</th><th>Resolving commit</th><th>Regression or deletion evidence</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>H-01</td><td><code>045fac8</code></td><td><code>mutation-lock.test.ts</code>, <code>session-store-concurrency.test.ts</code>, <code>runtime-session-writer.test.ts</code></td></tr>
+        <tr><td>H-02</td><td><code>045fac8</code></td><td><code>runtime-log-cache.test.ts</code>, <code>inspect-cli-operation-count.test.ts</code></td></tr>
+        <tr><td>H-03</td><td><code>045fac8</code></td><td><code>atomic-file.test.ts</code>, <code>runtime-conversation-rollback.test.ts</code>, <code>runtime-writer-recovery.test.ts</code></td></tr>
+        <tr><td>H-04</td><td><code>045fac8</code></td><td><code>runtime-config-concurrency.test.ts</code>, <code>runtime-config-path-locking.test.ts</code></td></tr>
+        <tr><td>H-05</td><td><code>045fac8</code></td><td><code>role-model-loop-boundaries.test.ts</code> counts accepted, rejected, failed, and invalid-output attempts</td></tr>
+        <tr><td>H-06</td><td><code>7b5d225</code>, <code>045fac8</code></td><td><code>json-boundary.test.ts</code>, <code>role-model-loop-boundaries.test.ts</code>, <code>role-model-contracts.test.ts</code></td></tr>
+        <tr><td>H-07</td><td><code>045fac8</code></td><td><code>plugin-host-output.test.ts</code> validates identity and redacts custom-host evidence</td></tr>
+        <tr><td>H-08</td><td><code>045fac8</code></td><td><code>role-model-prompt.test.ts</code>, <code>memory-provider-contract.test.ts</code></td></tr>
+        <tr><td>H-09</td><td><code>045fac8</code></td><td><code>nvidia-role-model-provider.test.ts</code> rejects missing/null/invalid terminal reasons</td></tr>
+        <tr><td>H-10</td><td><code>7b5d225</code>, <code>045fac8</code></td><td><code>json-boundary.test.ts</code>, <code>plugin-host-output.test.ts</code>, plugin redaction suites</td></tr>
+        <tr><td>H-11</td><td><code>045fac8</code></td><td><code>plugin-file-store-concurrency.test.ts</code> covers shared-root child-process writers and exact revisions</td></tr>
+        <tr><td>M-01</td><td><code>045fac8</code></td><td><code>atomic-file.test.ts</code>, <code>runtime-config-mutation-errors.test.ts</code>, <code>runtime-config-temp-cleanup.test.ts</code></td></tr>
+        <tr><td>M-02</td><td><code>045fac8</code></td><td><code>file-runtime-log-store.test.ts</code>, <code>inspect-cli.contract.test.ts</code>, <code>inspect-cli-operation-count.test.ts</code></td></tr>
+        <tr><td>M-03</td><td><code>7b5d225</code>, <code>045fac8</code></td><td><code>runtime-event.test.ts</code>, <code>canonical-timestamp-boundaries.test.ts</code></td></tr>
+        <tr><td>M-04</td><td><code>7b5d225</code>, <code>045fac8</code></td><td><code>json-boundary.test.ts</code>, <code>runtime-log.test.ts</code>, <code>runtime-config-load.test.ts</code></td></tr>
+        <tr><td>M-05</td><td><code>045fac8</code></td><td><code>session-store-concurrency.test.ts</code>, <code>session-store-mutation-errors.test.ts</code>, <code>session-store.test.ts</code></td></tr>
+        <tr><td>M-06</td><td><code>045fac8</code></td><td><code>chat-cli.contract.test.ts</code>, <code>runtime-config-activation.test.ts</code>, <code>runtime-config-activation-check.test.ts</code></td></tr>
+        <tr><td>M-07</td><td><code>045fac8</code></td><td><code>role-model-loop-boundaries.test.ts</code> covers sequential satisfaction of multiple required tools</td></tr>
+        <tr><td>M-08</td><td><code>045fac8</code></td><td><code>role-model-loop-boundaries.test.ts</code> rejects non-safe and negative round limits before adapter invocation</td></tr>
+        <tr><td>M-09</td><td><code>045fac8</code></td><td><code>nvidia-role-model-provider.test.ts</code> covers fetch and body-decode deadlines</td></tr>
+        <tr><td>M-10</td><td><code>045fac8</code></td><td><code>conversation.test.ts</code> and runtime commit tests enforce one atomic user/character pair</td></tr>
+        <tr><td>M-11</td><td><code>045fac8</code></td><td><code>role-model-contracts.test.ts</code> rejects non-finite observation input/output</td></tr>
+        <tr><td>M-12</td><td><code>045fac8</code>, <code>9cf74c3</code></td><td>Plugin contracts/validation/construction were split by dependency direction; <code>plugin-barrel-startup.test.ts</code> covers root imports</td></tr>
+        <tr><td>M-13</td><td><code>045fac8</code></td><td><code>plugin-hook-boundaries.test.ts</code>, <code>plugin-host-output.test.ts</code> cover exact output limits and normalization deadlines</td></tr>
+        <tr><td>M-14</td><td><code>045fac8</code></td><td><code>plugin-character-state-durable-migration.test.ts</code>, <code>plugin-character-state.test.ts</code></td></tr>
+        <tr><td>M-15</td><td><code>045fac8</code></td><td><code>plugin-file-store.test.ts</code> covers discriminated durable/in-memory ownership and required session identity</td></tr>
+        <tr><td>M-16</td><td><code>045fac8</code></td><td><code>plugin-types.test.ts</code> recursively rejects missing or duplicate required properties</td></tr>
+        <tr><td>M-17</td><td><code>045fac8</code>, <code>9cf74c3</code></td><td>Turn, storage-codec, and plugin-validation modules were split; ESLint enforces complexity 20 and 200-line turn functions</td></tr>
+        <tr><td>M-18</td><td><code>045fac8</code>, <code>9cf74c3</code></td><td>Adapter proofs moved to <code>tests/support</code>; four zero-reference manifest fixtures were deleted</td></tr>
+        <tr><td>M-19</td><td><code>045fac8</code></td><td><code>tests/support/temp-root.ts</code> owns tracked cleanup; two isolated full-suite runs left zero entries</td></tr>
+        <tr><td>M-20</td><td><code>045fac8</code>, <code>9cf74c3</code></td><td>Config, plugin-host, and tool-loop mega-suites were split by behavior; no test file exceeds 2,000 lines</td></tr>
+        <tr><td>L-01</td><td><code>7b5d225</code></td><td><code>runtime-event.test.ts</code> and message-validation coverage reject U+2028/U+2029</td></tr>
+        <tr><td>L-02</td><td><code>045fac8</code></td><td><code>role-model/reasoning.ts</code> is shared by contracts and NVIDIA; both suites cover it</td></tr>
+        <tr><td>L-03</td><td><code>045fac8</code></td><td><code>runtime-config-diagnostics.test.ts</code> requires explicit global or exact-plugin scope</td></tr>
+        <tr><td>L-04</td><td><code>045fac8</code></td><td>Storage codecs consume canonical contract value tuples; durable codec regressions cover accepted and rejected values</td></tr>
+        <tr><td>L-05</td><td><code>045fac8</code></td><td><code>inspect-cli.contract.test.ts</code>, <code>inspect-cli-operation-count.test.ts</code> share one context-item mapper</td></tr>
+        <tr><td>L-06</td><td><code>9cf74c3</code></td><td><code>projectHealth</code>/<code>ProjectHealth</code> and their placeholder smoke test were deleted</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Commit <code>c0c653b</code> adds <code>@vitest/coverage-v8@4.1.7</code>, the
+      coverage-gated <code>pnpm check</code>, the four frozen thresholds, a four-worker stability
+      cap, and the final session-writer regression suite.
+    </p>
 
     <h2>What "slop" means in this report</h2>
     <p>
@@ -606,17 +674,19 @@
       </li>
     </ol>
 
-    <h2>Verification and limitations</h2>
+    <h2>Final verification and remaining limitations</h2>
     <ul>
-      <li><code>pnpm check</code>: passed.</li>
+      <li><code>pnpm check</code>: passed from a detached worktree, including lint, typecheck, and coverage-gated tests.</li>
       <li><code>pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters</code>: passed.</li>
-      <li>Full Vitest suite: 30 files passed, 592 tests passed.</li>
-      <li>Focused subsystem suites: role-model/core 96 tests, runtime/CLI 286 tests, plugins 207 tests; all passed.</li>
-      <li>Direct local repros were used for concurrency, data corruption, lost updates, secret leakage, prompt rendering, malformed completion, invalid limits, scaling, memory retention, and stale fixture reachability.</li>
+      <li>Full Vitest suite: 60 files passed, 744 tests passed.</li>
+      <li>Coverage: 85.34% statements, 79.17% branches, 94.42% functions, and 85.30% lines.</li>
+      <li>Two full-suite runs with isolated temporary roots passed and left zero entries.</li>
+      <li>Detached commit checks passed independently: 608 tests for <code>7b5d225</code>, 736 for <code>045fac8</code>, 740 for <code>9cf74c3</code>, and the full 744-test coverage gate for <code>c0c653b</code>.</li>
+      <li>The four-by-150 rejected-turn benchmark completed in 1,460.5 ms; block timings were 330.3, 312.4, 377.2, and 440.5 ms, with block four below the required 595.4 ms bound.</li>
+      <li>A 1,000-event legacy Character State store replayed once; the next 100 turns performed zero event-log reads.</li>
+      <li>Strict diff whitespace checks, root-barrel startup coverage, child-process concurrency regressions, and the independent integrated review passed.</li>
       <li>No live model provider or external service was called.</li>
       <li>No production dependency is declared. A live registry vulnerability audit was not completed because sending private dependency metadata to the registry was not authorized; dev-dependency advisory status is therefore unverified.</li>
-      <li>No coverage provider or threshold is configured, so line/branch coverage is unknown despite the strong test count.</li>
-      <li>This audit changed only this report. No production or test behavior was modified.</li>
     </ul>
   </main>
 </body>
