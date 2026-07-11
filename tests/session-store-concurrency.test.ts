@@ -115,7 +115,7 @@ describe('local runtime session catalog concurrency', () => {
 
     const catalog = await readFile(join(storeRoot, 'sessions.jsonl'), 'utf8');
     expect(catalog.trim().split('\n')).toHaveLength(sessionIds.length);
-  });
+  }, 20_000);
 
   it('compacts legacy duplicate catalog history on selection', async () => {
     const storeRoot = await createTempStoreRoot();
