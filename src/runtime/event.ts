@@ -6,7 +6,9 @@ import {
   type OneLineMessageValidationReason
 } from '../core/message-validation.ts';
 
-export type RuntimeEventType = 'USER_MESSAGE';
+export const runtimeEventTypeValues = ['USER_MESSAGE'] as const;
+
+export type RuntimeEventType = (typeof runtimeEventTypeValues)[number];
 
 export type RuntimeEvent = UserMessageRuntimeEvent;
 
@@ -57,6 +59,23 @@ export function createRuntimeEventIdentity(
   });
 }
 
+export function assertCanonicalRuntimeTimestamp(
+  value: unknown,
+  field: string
+): string {
+  if (typeof value !== 'string') {
+    throw new TypeError(`${field} must be a canonical UTC ISO timestamp.`);
+  }
+
+  const parsed = new Date(value);
+
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) {
+    throw new TypeError(`${field} must be a canonical UTC ISO timestamp.`);
+  }
+
+  return value;
+}
+
 export function createUserMessageRuntimeEvent(
   message: string | undefined,
   identity: RuntimeEventIdentity = createRuntimeEventIdentity()
@@ -92,6 +111,9 @@ function freezeRuntimeEventIdentity(identity: RuntimeEventIdentity): RuntimeEven
   return Object.freeze({
     eventId: identity.eventId,
     traceId: identity.traceId,
-    createdAt: identity.createdAt
+    createdAt: assertCanonicalRuntimeTimestamp(
+      identity.createdAt,
+      'Runtime event createdAt'
+    )
   } satisfies RuntimeEventIdentity);
 }
