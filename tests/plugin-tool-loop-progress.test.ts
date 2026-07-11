@@ -92,7 +92,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
           {
             name: 'visible_reply',
             input: {
-              text: 'checking'
+              text: 'Authorization: Bearer interim-secret'
             }
           },
           {
@@ -137,7 +137,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
       {
         kind: 'visible_reply',
         final: false,
-        text: 'checking'
+        text: 'Authorization: Bearer interim-secret'
       },
       {
         kind: 'tool_calls_requested',
@@ -157,6 +157,13 @@ describe('plugin-driven tool loop progress and evidence', () => {
       }
     ]);
     const reloadedRawEvents = reloadedLogStore.rawEvents();
+    const serializedEvidence = JSON.stringify({
+      rawEvents: reloadedRawEvents,
+      traceEntries: reloadedLogStore.traceEntries()
+    });
+
+    expect(serializedEvidence).toContain('Authorization: [redacted]');
+    expect(serializedEvidence).not.toContain('interim-secret');
     const interimEvent = reloadedRawEvents.find(
       (event) => event.kind === 'interim_visible_reply_emitted'
     );

@@ -20,7 +20,7 @@ import {
   roleModelAdapterRejectionNotReplayableDetails,
   roleModelAdapterProviderExchangeMalformedDetails,
   normalizeReplayableRejectedRoleModelDecisionResult,
-  parseRoleModelDecision,
+  parseRoleModelExecutionDecision,
   roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelDecisionRejectionReasons,
   roleModelMalformedOutputRejectionReason,
@@ -74,8 +74,7 @@ import type {
 import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from '../runtime/event.ts';
 import {
   createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot,
-  redactJsonTextPreservingStructure
+  createJsonBoundarySnapshot
 } from '../shared/json-boundary.ts';
 
 export { parseRoleModelDecision } from './contracts.ts';
@@ -212,6 +211,29 @@ export type RoleModelLoopResult =
 
 export const defaultRoleModelMaxToolRounds = 99;
 
+const executionDecisionByLoopResult = new WeakMap<
+  AcceptedRoleModelLoopResult,
+  CharacterDecision
+>();
+
+export function getRoleModelExecutionVisibleReplyText(
+  result: AcceptedRoleModelLoopResult
+): string | undefined {
+  const decision = executionDecisionByLoopResult.get(result) ?? result.decision;
+  return executionVisibleReplyText(decision);
+}
+
+function executionVisibleReplyText(
+  decision: CharacterDecision
+): string | undefined {
+  const visibleReply = decision.toolCalls.find(
+    (call) => call.name === visibleReplyModelToolName
+  );
+  const text = visibleReply?.input['text'];
+
+  return typeof text === 'string' ? text : undefined;
+}
+
 export function createDeterministicLocalRoleModelAdapter(): RoleModelAdapter {
   return createRoleModelAdapterFromCharacterAgent(
     createDeterministicCharacterAgent()
@@ -303,7 +325,7 @@ export async function runRoleModelLoop(
     });
     const decisionResult =
       rawOutputValidation.status === 'accepted'
-        ? parseRoleModelDecision(
+        ? parseRoleModelExecutionDecision(
             rawOutputValidation.rawOutputText,
             inputEnvelope.allowedTools,
             inputEnvelope.pluginToolDefinitions,
@@ -396,16 +418,27 @@ export async function runRoleModelLoop(
 
       rounds.push(loopRound);
 
-      return Object.freeze({
+      const publicDecisionResult = parsedDecisionSnapshot.result;
+
+      if (publicDecisionResult.status !== 'accepted') {
+        throw new TypeError(
+          'Accepted role-model execution decision must produce accepted public evidence.'
+        );
+      }
+
+      const result = Object.freeze({
         status: 'accepted',
         inputEnvelope,
         ioSnapshot,
         parsedDecisionSnapshot,
-        decisionResult,
-        decision: decisionResult.decision,
+        decisionResult: publicDecisionResult,
+        decision: publicDecisionResult.decision,
         pluginToolResults: Object.freeze([...allPluginToolResults]),
         rounds: Object.freeze([...rounds])
       } satisfies AcceptedRoleModelLoopResult);
+
+      executionDecisionByLoopResult.set(result, decisionResult.decision);
+      return result;
     }
 
     if (toolRounds >= maxToolRounds) {
@@ -433,12 +466,14 @@ export async function runRoleModelLoop(
       });
     }
 
-    const visibleReply = getVisibleReplyToolCall(decisionResult.decision);
+    const interimVisibleReplyText = executionVisibleReplyText(
+      decisionResult.decision
+    );
 
-    if (visibleReply !== undefined) {
+    if (interimVisibleReplyText !== undefined) {
       await options.onInterimVisibleReply?.({
         round,
-        text: visibleReply.input.text,
+        text: interimVisibleReplyText,
         inputEnvelope,
         ioSnapshot,
         parsedDecisionSnapshot
@@ -681,7 +716,7 @@ function nativeAssistantMessageForAcceptedDecision(options: {
     return undefined;
   }
 
-  const nativeDecisionResult = parseRoleModelDecision(
+  const nativeDecisionResult = parseRoleModelExecutionDecision(
     JSON.stringify({
       toolCalls: normalizedNativeToolCalls
     }),
@@ -887,6 +922,12 @@ async function routeExecutableToolCalls(options: {
       pluginId: pluginId ?? undeclaredToolPluginId(toolCall.name),
       toolCall
     });
+    const executionCall = createRuntimePluginExecutionToolCall({
+      callId,
+      identity: options.identity,
+      pluginId: pluginId ?? undeclaredToolPluginId(toolCall.name),
+      toolCall
+    });
 
     await options.onPluginToolCallStarted?.({
       callId,
@@ -950,7 +991,7 @@ async function routeExecutableToolCalls(options: {
 
     try {
       hostResult = await options.pluginToolHost.handleToolCall(
-        routedCall,
+        executionCall,
         options.runtimePluginContext
       );
     } catch (error: unknown) {
@@ -976,7 +1017,7 @@ async function routeExecutableToolCalls(options: {
 
     try {
       frozenHostResult = freezeRuntimePluginToolCallResult(hostResult, {
-        call: routedCall
+        call: executionCall
       });
     } catch (error: unknown) {
       const routingEvidence = createRejectedToolRoutingEvidence({
@@ -1123,6 +1164,25 @@ function createRuntimePluginToolCall(options: {
     pluginId: options.pluginId,
     toolName: options.toolCall.name,
     input: freezeRuntimePluginJsonObject(options.toolCall.input)
+  } satisfies RuntimePluginToolCall);
+}
+
+function createRuntimePluginExecutionToolCall(options: {
+  readonly callId: string;
+  readonly identity: RuntimeEventIdentity;
+  readonly pluginId: string;
+  readonly toolCall: ModelToolCall;
+}): RuntimePluginToolCall {
+  return Object.freeze({
+    toolCallId: options.callId,
+    eventId: options.identity.eventId,
+    traceId: options.identity.traceId,
+    createdAt: options.identity.createdAt,
+    pluginId: options.pluginId,
+    toolName: options.toolCall.name,
+    input: createJsonBoundaryObjectSnapshot(options.toolCall.input, {
+      field: 'Plugin tool execution input'
+    })
   } satisfies RuntimePluginToolCall);
 }
 
@@ -1314,10 +1374,7 @@ function validateRoleModelAdapterRawOutput(
   if (typeof rawOutputTextValue !== 'string') {
     return createMalformedAdapterRawOutputResult();
   }
-  const rawOutputText = redactJsonTextPreservingStructure(
-    rawOutputTextValue,
-    'Role-model adapter raw output'
-  );
+  const rawOutputText = rawOutputTextValue;
 
   const providerMetadataResult = optionalProviderMetadata(
     rawOutput['providerMetadata']
@@ -1504,7 +1561,7 @@ function optionalRoleModelAssistantChatMessage(
 
   return Object.freeze({
     role: 'assistant',
-    content: typeof content === 'string' ? redactRuntimePluginText(content) : null,
+    content: typeof content === 'string' ? content : null,
     ...(toolCalls === undefined ? {} : { tool_calls: toolCalls })
   } satisfies RoleModelAssistantChatMessage);
 }
@@ -1562,10 +1619,7 @@ function optionalRoleModelChatToolCall(
     type: 'function',
     function: Object.freeze({
       name,
-      arguments: redactJsonTextPreservingStructure(
-        args,
-        'Role-model native tool-call arguments'
-      )
+      arguments: args
     })
   } satisfies RoleModelChatToolCall);
 }

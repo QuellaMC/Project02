@@ -510,6 +510,40 @@ export function parseRoleModelDecision(
     createDefaultRoleModelPluginToolDefinitions(),
   toolObservations: readonly RoleModelToolObservation[] = []
 ): RoleModelDecisionResult {
+  return parseRoleModelDecisionForBoundary(
+    rawOutputText,
+    allowedTools,
+    pluginToolDefinitions,
+    toolObservations,
+    'public_snapshot'
+  );
+}
+
+export function parseRoleModelExecutionDecision(
+  rawOutputText: string,
+  allowedTools: readonly RoleModelAllowedToolName[] = roleModelAllowedToolNames,
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[] =
+    createDefaultRoleModelPluginToolDefinitions(),
+  toolObservations: readonly RoleModelToolObservation[] = []
+): RoleModelDecisionResult {
+  return parseRoleModelDecisionForBoundary(
+    rawOutputText,
+    allowedTools,
+    pluginToolDefinitions,
+    toolObservations,
+    'execution'
+  );
+}
+
+type RoleModelDecisionBoundary = 'execution' | 'public_snapshot';
+
+function parseRoleModelDecisionForBoundary(
+  rawOutputText: string,
+  allowedTools: readonly RoleModelAllowedToolName[],
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
+  toolObservations: readonly RoleModelToolObservation[],
+  boundary: RoleModelDecisionBoundary
+): RoleModelDecisionResult {
   let parsedOutput: unknown;
 
   try {
@@ -522,7 +556,8 @@ export function parseRoleModelDecision(
     parsedOutput,
     allowedTools,
     pluginToolDefinitions,
-    toolObservations
+    toolObservations,
+    boundary
   );
 }
 
@@ -752,7 +787,8 @@ function parseRoleModelDecisionObject(
   parsedOutput: unknown,
   allowedTools: readonly RoleModelAllowedToolName[],
   pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
-  toolObservations: readonly RoleModelToolObservation[]
+  toolObservations: readonly RoleModelToolObservation[],
+  boundary: RoleModelDecisionBoundary
 ): RoleModelDecisionResult {
   const frozenPluginToolDefinitions = createRoleModelPluginToolDefinitions(
     pluginToolDefinitions
@@ -804,7 +840,8 @@ function parseRoleModelDecisionObject(
   for (const [index, rawToolCall] of rawToolCalls.entries()) {
     const parsedToolCall = parseModelToolCall({
       index,
-      rawToolCall
+      rawToolCall,
+      boundary
     });
 
     if (parsedToolCall.status === 'rejected') {
@@ -855,9 +892,11 @@ function parseRoleModelDecisionObject(
     );
   }
 
-  return createAcceptedRoleModelDecisionResult(createCharacterDecision(toolCalls), {
-    ...(topLevelText === undefined ? {} : { nonCommittedText: topLevelText })
-  });
+  return boundary === 'execution'
+    ? createExecutionRoleModelDecisionResult(toolCalls, topLevelText)
+    : createAcceptedRoleModelDecisionResult(createCharacterDecision(toolCalls), {
+        ...(topLevelText === undefined ? {} : { nonCommittedText: topLevelText })
+      });
 }
 
 type ParsedToolCallResult =
@@ -871,6 +910,7 @@ type ParsedToolCallResult =
     };
 
 function parseModelToolCall(options: {
+  readonly boundary: RoleModelDecisionBoundary;
   readonly index: number;
   readonly rawToolCall: unknown;
 }): ParsedToolCallResult {
@@ -921,7 +961,11 @@ function parseModelToolCall(options: {
   }
 
   if (name === visibleReplyModelToolName) {
-    return parseVisibleReplyToolCallInput(input, options.index);
+    return parseVisibleReplyToolCallInput(
+      input,
+      options.index,
+      options.boundary
+    );
   }
 
   const jsonInputValidation = validateModelToolInputAgainstContract({
@@ -941,22 +985,35 @@ function parseModelToolCall(options: {
   if (name === characterStatePatchModelToolName) {
     return {
       status: 'accepted',
-      toolCall: createCharacterStatePatchModelToolCall(jsonInputValidation.input)
+      toolCall:
+        options.boundary === 'execution'
+          ? freezeExecutionModelToolCall({
+              name,
+              input: jsonInputValidation.input
+            })
+          : createCharacterStatePatchModelToolCall(jsonInputValidation.input)
     };
   }
 
   return {
     status: 'accepted',
-    toolCall: freezeModelToolCall({
-      name,
-      input: jsonInputValidation.input
-    })
+    toolCall:
+      options.boundary === 'execution'
+        ? freezeExecutionModelToolCall({
+            name,
+            input: jsonInputValidation.input
+          })
+        : freezeModelToolCall({
+            name,
+            input: jsonInputValidation.input
+          })
   };
 }
 
 function parseVisibleReplyToolCallInput(
   input: Readonly<Record<string, unknown>>,
-  index: number
+  index: number,
+  boundary: RoleModelDecisionBoundary
 ): ParsedToolCallResult {
   const text = input['text'];
 
@@ -990,8 +1047,51 @@ function parseVisibleReplyToolCallInput(
 
   return {
     status: 'accepted',
-    toolCall: createVisibleReplyModelToolCall(scrubbedText.text)
+    toolCall:
+      boundary === 'execution'
+        ? createExecutionVisibleReplyModelToolCall(scrubbedText.text)
+        : createVisibleReplyModelToolCall(scrubbedText.text)
   };
+}
+
+function createExecutionRoleModelDecisionResult(
+  toolCalls: readonly ModelToolCall[],
+  nonCommittedText: string | undefined
+): AcceptedRoleModelDecisionResult {
+  return Object.freeze({
+    status: 'accepted',
+    decision: Object.freeze({
+      version: roleModelDecisionContractVersion,
+      toolCalls: Object.freeze(toolCalls.map(freezeExecutionModelToolCall))
+    } satisfies CharacterDecision),
+    ...(nonCommittedText === undefined ? {} : { nonCommittedText })
+  } satisfies AcceptedRoleModelDecisionResult);
+}
+
+function createExecutionVisibleReplyModelToolCall(
+  text: string
+): VisibleReplyModelToolCall {
+  return Object.freeze({
+    name: visibleReplyModelToolName,
+    input: Object.freeze({ text })
+  } satisfies VisibleReplyModelToolCall);
+}
+
+function freezeExecutionModelToolCall(call: ModelToolCall): ModelToolCall {
+  if (call.name === visibleReplyModelToolName) {
+    const text = call.input['text'];
+
+    return createExecutionVisibleReplyModelToolCall(
+      typeof text === 'string' ? text : ''
+    );
+  }
+
+  return Object.freeze({
+    name: call.name,
+    input: createJsonBoundaryObjectSnapshot(call.input, {
+      field: `Model tool "${call.name}" execution input`
+    })
+  } satisfies ModelToolCall);
 }
 
 function rejectToolCall(details: string): ParsedToolCallResult {

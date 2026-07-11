@@ -33,7 +33,10 @@ import {
   type RuntimeTraceStepName,
   type RuntimeTurnStatus
 } from '../runtime/log.ts';
-import { createFileRuntimeLogStore } from '../runtime/storage/file-runtime-log-store.ts';
+import {
+  createFileRuntimeLogStore,
+  durableRuntimeSessionCharacterProfile
+} from '../runtime/storage/file-runtime-log-store.ts';
 import {
   createLocalRuntimeStorageLayout,
   LocalRuntimeStorageContractError,
@@ -42,7 +45,8 @@ import {
 import {
   acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore,
-  LocalRuntimeSessionStoreError
+  LocalRuntimeSessionStoreError,
+  type LocalRuntimeSessionConversationEvidence
 } from '../runtime/storage/session-store.ts';
 import {
   createLocalRuntimeMutationLockOwnerToken,
@@ -538,8 +542,8 @@ function runtimeLogStoreWithWriterOwner(
     appendRawEvent(record) {
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -1385,14 +1389,6 @@ async function createDurableChatRuntime(
     args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot };
   const sessionStore = createLocalRuntimeSessionStore({
     ...storageOptions,
-    conversationLogReader: {
-      readConversationMessages(selectedSessionId) {
-        return createFileRuntimeLogStore({
-          ...storageOptions,
-          sessionId: selectedSessionId
-        }).readSessionEvidence().stored.conversationMessages;
-      }
-    },
     sessionReadinessValidator: {
       assertSessionReadable(selectedSessionId) {
         const logStore = createFileRuntimeLogStore({
@@ -1431,7 +1427,10 @@ async function createDurableChatRuntime(
       session: await sessionStore.rehydrateConversationSession(sessionId, {
         conversationLogReader: {
           readConversationMessages() {
-            return logStore.readSessionEvidence().stored.conversationMessages;
+            return readDurableConversationEvidence(logStore).messages;
+          },
+          readConversationEvidence() {
+            return readDurableConversationEvidence(logStore);
           }
         }
       }),
@@ -1442,6 +1441,17 @@ async function createDurableChatRuntime(
     await writerLease.release();
     throw error;
   }
+}
+
+function readDurableConversationEvidence(
+  logStore: RuntimeLogStore
+): LocalRuntimeSessionConversationEvidence {
+  const evidence = logStore.readSessionEvidence().stored;
+
+  return Object.freeze({
+    character: durableRuntimeSessionCharacterProfile(evidence),
+    messages: evidence.conversationMessages
+  } satisfies LocalRuntimeSessionConversationEvidence);
 }
 
 async function selectOrCreateDefaultSession(

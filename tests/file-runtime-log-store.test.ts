@@ -6,6 +6,7 @@ import { createTestTempRoot } from './support/temp-root.ts';
 
 import {
   createFileRuntimeLogStore,
+  durableRuntimeSessionCharacterProfile,
   findValidatedTerminalRawEventForSession
 } from '../src/runtime/storage/file-runtime-log-store.ts';
 import {
@@ -22,6 +23,7 @@ import {
 import {
   runLocalUserMessageEvent
 } from '../src/runtime/local.ts';
+import type { RuntimeLogStore } from '../src/runtime/log.ts';
 import {
   roleModelCommitValidationFailureRejectionReason
 } from '../src/role-model/contracts.ts';
@@ -720,6 +722,218 @@ describe('file runtime log store plugin tool event validation', () => {
     expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
       'list tools',
       'I can use:\n- plugin.list\n- character_state.patch'
+    ]);
+  });
+
+  it('preserves a custom session character in durable conversation evidence', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-custom-character';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const session = createConversationSession({
+      id: sessionId,
+      character: {
+        id: 'nova',
+        displayName: 'Nova'
+      }
+    });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'show me the stars',
+        identity('evt_custom_character')
+      ),
+      session,
+      logStore: createFileRuntimeLogStore({ storeRoot, sessionId }),
+      roleModelAdapter: createMultilineVisibleReplyAdapter()
+    });
+
+    expect(result.status).toBe('completed');
+    const durableStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+
+    expect(
+      durableStore
+        .conversationMessages()
+        .map(({ role, speakerId, speakerName }) => ({
+          role,
+          speakerId,
+          speakerName
+        }))
+    ).toEqual([
+      {
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You'
+      },
+      {
+        role: 'character',
+        speakerId: 'nova',
+        speakerName: 'Nova'
+      }
+    ]);
+
+    const rehydrated = await createLocalRuntimeSessionStore({
+      storeRoot,
+      conversationLogReader: {
+        readConversationMessages() {
+          return durableStore.readSessionEvidence().stored.conversationMessages;
+        },
+        readConversationEvidence() {
+          const evidence = durableStore.readSessionEvidence().stored;
+
+          return {
+            character: durableRuntimeSessionCharacterProfile(evidence),
+            messages: evidence.conversationMessages
+          };
+        }
+      }
+    }).rehydrateConversationSession(sessionId);
+
+    expect(rehydrated.character).toEqual({
+      id: 'nova',
+      displayName: 'Nova'
+    });
+    expect(rehydrated.visibleTranscript).toHaveLength(2);
+
+    const paths = durableStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    const conversationRecords = readFileSync(paths.conversationPath, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    for (const conversationRecord of conversationRecords) {
+      if (conversationRecord['role'] === 'character') {
+        conversationRecord['speakerName'] = 'Not Nova';
+      }
+    }
+    writeJsonLines(paths.conversationPath, conversationRecords);
+
+    expect(() =>
+      createFileRuntimeLogStore({ storeRoot, sessionId }).conversationMessages()
+    ).toThrow(
+      'Durable character speaker metadata must match recorded role-model character evidence.'
+    );
+
+    for (const conversationRecord of conversationRecords) {
+      if (conversationRecord['role'] === 'character') {
+        conversationRecord['speakerName'] = 'Nova';
+      }
+    }
+    writeJsonLines(paths.conversationPath, conversationRecords);
+
+    const resumedResult = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'keep looking',
+        identity('evt_custom_character_resumed')
+      ),
+      session: rehydrated,
+      logStore: createFileRuntimeLogStore({ storeRoot, sessionId }),
+      roleModelAdapter: createMultilineVisibleReplyAdapter()
+    });
+
+    expect(resumedResult.status).toBe('completed');
+    expect(
+      createFileRuntimeLogStore({ storeRoot, sessionId })
+        .conversationMessages()
+        .at(-1)
+    ).toMatchObject({
+      role: 'character',
+      speakerId: 'nova',
+      speakerName: 'Nova'
+    });
+  });
+
+  it('rolls back a custom first turn when visible-reply raw evidence fails before append', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-custom-character-raw-rollback';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const underlying = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const appendFailure = new Error('visible reply raw append failed');
+    let failedVisibleReplyAppend = false;
+    const failingStore = Object.freeze({
+      ...(underlying.localRuntimeSessionPaths === undefined
+        ? {}
+        : { localRuntimeSessionPaths: underlying.localRuntimeSessionPaths }),
+      appendTrace: (entry) => underlying.appendTrace(entry),
+      appendRawEvent(record) {
+        if (
+          !failedVisibleReplyAppend &&
+          record.kind === 'visible_reply_committed'
+        ) {
+          failedVisibleReplyAppend = true;
+          throw appendFailure;
+        }
+
+        return underlying.appendRawEvent(record);
+      },
+      appendConversationMessage: (record, expectedCharacter) =>
+        underlying.appendConversationMessage(record, expectedCharacter),
+      removeConversationMessages: (messageIds) => {
+        underlying.removeConversationMessages(messageIds);
+      },
+      checkpointWriterEvidence: () => underlying.checkpointWriterEvidence?.(),
+      recoverAbandonedWriterEvidence: () =>
+        underlying.recoverAbandonedWriterEvidence?.() ?? false,
+      readSessionEvidence: () => underlying.readSessionEvidence(),
+      traceEntries: () => underlying.traceEntries(),
+      rawEvents: () => underlying.rawEvents(),
+      conversationMessages: () => underlying.conversationMessages()
+    } satisfies RuntimeLogStore);
+    const failedSession = createConversationSession({
+      id: sessionId,
+      character: { id: 'nova', displayName: 'Nova' }
+    });
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent(
+          'show me the stars',
+          identity('evt_custom_character_raw_rollback')
+        ),
+        session: failedSession,
+        logStore: failingStore,
+        roleModelAdapter: createMultilineVisibleReplyAdapter()
+      })
+    ).rejects.toBe(appendFailure);
+
+    expect(failedSession.visibleTranscript).toEqual([]);
+    const reopened = createFileRuntimeLogStore({ storeRoot, sessionId });
+    expect(reopened.readSessionEvidence().stored.conversationMessages).toEqual([]);
+    expect(reopened.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected'
+    });
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent(
+          'try again',
+          identity('evt_custom_character_raw_retry')
+        ),
+        session: createConversationSession({
+          id: sessionId,
+          character: { id: 'nova', displayName: 'Nova' }
+        }),
+        logStore: reopened,
+        roleModelAdapter: createMultilineVisibleReplyAdapter()
+      })
+    ).resolves.toMatchObject({ status: 'completed' });
+
+    expect(reopened.conversationMessages()).toEqual([
+      expect.objectContaining({ role: 'user', text: 'try again' }),
+      expect.objectContaining({
+        role: 'character',
+        speakerId: 'nova',
+        speakerName: 'Nova'
+      })
     ]);
   });
 

@@ -22,7 +22,11 @@ import {
 import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
 import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-log-store.ts';
-import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
+import {
+  acquireLocalRuntimeSessionWriterLease,
+  createLocalRuntimeSessionStore
+} from '../src/runtime/storage/session-store.ts';
+import { createLocalRuntimeMutationLockOwnerToken } from '../src/runtime/storage/mutation-lock.ts';
 
 afterEach(() => {
   vi.mocked(fs.readFileSync).mockClear();
@@ -190,6 +194,95 @@ describe('file runtime log store evidence cache', () => {
     reader.readSessionEvidence();
     expect(evidenceFileReads()).toEqual([]);
     expect(coldValidations).toBe(2);
+  });
+
+  it('does not trust another store cache under the current process writer lease', async () => {
+    const storeRoot = createTestTempRoot('project02-log-stale-writer-cache-');
+    const sessionId = 'stale-writer-cache-session';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-07-11T00:00:00.000Z'
+    });
+    const writerOwnerToken = createLocalRuntimeMutationLockOwnerToken();
+    const writerStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      writerLockOwnerToken: writerOwnerToken
+    });
+    const staleStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const writerLease = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot,
+      sessionId,
+      ownerToken: writerOwnerToken
+    });
+
+    try {
+      staleStore.readSessionEvidence();
+      await runTurn(
+        createConversationSession({ id: sessionId }),
+        writerStore,
+        0
+      );
+      const firstTraceEntry = writerStore.traceEntries()[0];
+
+      if (firstTraceEntry === undefined) {
+        throw new Error('Expected the writer to persist trace evidence.');
+      }
+
+      expect(() => staleStore.appendTrace(firstTraceEntry)).toThrow(
+        expect.objectContaining({ code: 'malformed_record' })
+      );
+      expect(
+        createFileRuntimeLogStore({ storeRoot, sessionId }).traceEntries()
+      ).toEqual(writerStore.traceEntries());
+    } finally {
+      await writerLease.release();
+    }
+  });
+
+  it('refreshes cached evidence when the store reacquires a later writer lease', async () => {
+    const storeRoot = createTestTempRoot('project02-log-writer-generation-');
+    const sessionId = 'writer-generation-session';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-07-11T00:00:00.000Z'
+    });
+    const staleStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const firstLease = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot,
+      sessionId
+    });
+
+    try {
+      staleStore.readSessionEvidence();
+    } finally {
+      await firstLease.release();
+    }
+
+    const currentStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    await runTurn(
+      createConversationSession({ id: sessionId }),
+      currentStore,
+      0
+    );
+    const firstTraceEntry = currentStore.traceEntries()[0];
+
+    if (firstTraceEntry === undefined) {
+      throw new Error('Expected the writer to persist trace evidence.');
+    }
+
+    const secondLease = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot,
+      sessionId
+    });
+
+    try {
+      expect(() => staleStore.appendTrace(firstTraceEntry)).toThrow(
+        expect.objectContaining({ code: 'malformed_record' })
+      );
+    } finally {
+      await secondLease.release();
+    }
   });
 });
 

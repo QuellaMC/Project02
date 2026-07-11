@@ -20,7 +20,6 @@ import {
 import {
   createDecisionContext,
   createRejectedRoleModelDecisionResult,
-  getVisibleReplyToolCall,
   roleModelCommitValidationFailureRejectionReason,
   type DecisionContext,
   type RoleModelDecisionRejection,
@@ -28,6 +27,7 @@ import {
 } from '../../role-model/contracts.ts';
 import {
   createRoleModelAdapterFromCharacterAgent,
+  getRoleModelExecutionVisibleReplyText,
   runRoleModelLoop,
   type RoleModelAdapter,
   type RoleModelInterimVisibleReplyEvent,
@@ -413,9 +413,8 @@ async function validateAndCommitRuntimeModelResult(
     });
   }
 
-  const visibleReplyText = getVisibleReplyToolCall(
-    roleModelResult.decision
-  )?.input.text;
+  const visibleReplyText =
+    getRoleModelExecutionVisibleReplyText(roleModelResult);
   const visibleReplyRejection = validateVisibleReplyText(visibleReplyText);
 
   if (visibleReplyRejection !== undefined) {

@@ -103,6 +103,51 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ]);
   });
 
+  it('commits authoritative visible reply text while durable evidence stays redacted', async () => {
+    const sessionId = 'session-authoritative-visible';
+    const storeRoot = createTestTempRoot('project02-authoritative-visible-');
+
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+
+    const session = createConversationSession({ id: sessionId });
+    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const replyText = 'Authorization: Bearer committed-reply-secret';
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: { text: replyText }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('show the exact value', 'evt_authoritative_visible'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    expect(result.status).toBe('completed');
+    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+      'show the exact value',
+      replyText
+    ]);
+
+    const serializedEvidence = JSON.stringify({
+      rawEvents: logStore.rawEvents(),
+      traces: logStore.traceEntries()
+    });
+
+    expect(serializedEvidence).toContain('Authorization: [redacted]');
+    expect(serializedEvidence).not.toContain('committed-reply-secret');
+  });
+
   it('rolls back visible session messages when conversation log append fails', async () => {
     const session = createConversationSession();
     const logStore = createConversationAppendFailingLogStore();

@@ -37,9 +37,7 @@ import {
 } from '../../plugins/types.ts';
 import {
   createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot,
-  redactJsonBoundaryText,
-  redactJsonTextPreservingStructure
+  createJsonBoundarySnapshot
 } from '../../shared/json-boundary.ts';
 import { scrubReasoningBlocks } from '../reasoning.ts';
 
@@ -852,10 +850,6 @@ function parseNvidiaResponseMessage(
     return rawOutputResult;
   }
 
-  const sanitizedToolCalls = Object.freeze(
-    toolCalls.map(sanitizeNvidiaResponseToolCall)
-  );
-
   return Object.freeze({
     status: 'accepted',
     rawOutputText: rawOutputResult.rawOutputText,
@@ -869,7 +863,7 @@ function parseNvidiaResponseMessage(
       content,
       ...(toolCalls.length === 0
         ? {}
-        : { tool_calls: sanitizedToolCalls })
+        : { tool_calls: toolCalls })
     } satisfies RoleModelAssistantChatMessage),
     ...nativeToolCallArgumentErrorsOption(
       rawOutputResult.nativeToolCallArgumentErrors
@@ -933,7 +927,7 @@ function parseOptionalNvidiaMessageContent(
     );
   }
 
-  const scrubbed = scrubReasoningBlocks(redactJsonBoundaryText(value));
+  const scrubbed = scrubReasoningBlocks(value);
 
   if (scrubbed.status === 'rejected') {
     return rejectResponse(
@@ -1052,23 +1046,6 @@ function parseNvidiaToolCall(
       })
     } satisfies RoleModelChatToolCall)
   } satisfies ParsedNvidiaToolCall);
-}
-
-function sanitizeNvidiaResponseToolCall(
-  toolCall: RoleModelChatToolCall,
-  index: number
-): RoleModelChatToolCall {
-  return Object.freeze({
-    id: redactJsonBoundaryText(toolCall.id),
-    type: 'function',
-    function: Object.freeze({
-      name: redactJsonBoundaryText(toolCall.function.name),
-      arguments: redactJsonTextPreservingStructure(
-        toolCall.function.arguments,
-        `NVIDIA response message.tool_calls[${String(index)}].function.arguments`
-      )
-    })
-  } satisfies RoleModelChatToolCall);
 }
 
 type NvidiaRawOutputTextResult =
@@ -1247,8 +1224,7 @@ function parseNvidiaToolCallArguments(options: {
   return Object.freeze({
     status: 'accepted',
     input: createJsonBoundaryObjectSnapshot(validatedInput.input, {
-      field: `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments`,
-      redact: true
+      field: `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments`
     })
   } satisfies ParsedNvidiaToolCallArguments);
 }

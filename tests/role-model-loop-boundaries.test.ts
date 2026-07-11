@@ -98,7 +98,7 @@ describe('role-model loop evidence and boundary validation', () => {
     expect(serialized).not.toContain('message-sentinel');
   });
 
-  it('redacts credential-bearing tool input before host dispatch and loop exposure', async () => {
+  it('preserves credential-bearing tool input for host dispatch while redacting loop evidence', async () => {
     let dispatchedInput: Readonly<Record<string, unknown>> | undefined;
     const result = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_secret_tool_input'),
@@ -130,15 +130,24 @@ describe('role-model loop evidence and boundary validation', () => {
       }),
       runtimePluginContext: createTestPluginContext('evt_secret_tool_input')
     });
-    const serialized = JSON.stringify({ dispatchedInput, result });
+    const serializedEvidence = JSON.stringify({
+      ioSnapshot: result.ioSnapshot,
+      parsedDecisionSnapshot: result.parsedDecisionSnapshot,
+      pluginToolResults: result.pluginToolResults,
+      rounds: result.rounds
+    });
 
     expect(result.status).toBe('accepted');
     expect(dispatchedInput).toEqual({
+      query: 'Authorization: Bearer input-secret',
+      access_token: 'structured-secret'
+    });
+    expect(result.pluginToolResults[0]?.call.input).toEqual({
       query: 'Authorization: [redacted]',
       access_token: '[redacted]'
     });
-    expect(serialized).not.toContain('input-secret');
-    expect(serialized).not.toContain('structured-secret');
+    expect(serializedEvidence).not.toContain('input-secret');
+    expect(serializedEvidence).not.toContain('structured-secret');
   });
 
   it.each(['rejected', 'failed'] as const)(

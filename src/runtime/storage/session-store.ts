@@ -11,6 +11,7 @@ import { join } from 'node:path';
 
 import {
   createConversationSession,
+  type CharacterProfile,
   type ConversationSession,
   type VisibleMessage
 } from '../../core/conversation.ts';
@@ -55,6 +56,16 @@ export type LocalRuntimeSessionConversationLogReader = {
   readConversationMessages(
     sessionId: string
   ): Promise<readonly ConversationLogRecord[]> | readonly ConversationLogRecord[];
+  readConversationEvidence?(
+    sessionId: string
+  ):
+    | Promise<LocalRuntimeSessionConversationEvidence>
+    | LocalRuntimeSessionConversationEvidence;
+};
+
+export type LocalRuntimeSessionConversationEvidence = {
+  readonly character: CharacterProfile;
+  readonly messages: readonly ConversationLogRecord[];
 };
 
 export type LocalRuntimeSessionReadinessValidator = {
@@ -278,12 +289,19 @@ export function createLocalRuntimeSessionStore(
       );
     }
 
-    const persistedMessages = await conversationLogReader.readConversationMessages(
-      metadata.sessionId
-    );
+    const conversationEvidence =
+      await conversationLogReader.readConversationEvidence?.(
+        metadata.sessionId
+      );
+    const persistedMessages =
+      conversationEvidence?.messages ??
+      (await conversationLogReader.readConversationMessages(metadata.sessionId));
 
     return createConversationSession({
       id: metadata.sessionId,
+      ...(conversationEvidence === undefined
+        ? {}
+        : { character: conversationEvidence.character }),
       visibleTranscript: persistedMessages.map((message) =>
         toVisibleMessage(message)
       )

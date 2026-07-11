@@ -244,20 +244,26 @@ async function commitFinalVisibleReply(
   );
   const visibleMessages = appendConversationTurn(state, turn);
 
+  try {
+    appendRawEvent(state, {
+      ...state.identity,
+      kind: 'visible_reply_committed',
+      eventType: state.event.type,
+      visibleMessageIds: visibleMessages.map((message) => message.id),
+      payloadSummary: state.payloadSummary,
+      roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
+      parsedRoleModelDecisionSnapshot:
+        optionsForReply.parsedRoleModelDecisionSnapshot,
+      commitValidation,
+      ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence)
+    });
+  } catch (error: unknown) {
+    rollbackFailedConversationCommit(state, turn, error);
+    throw error;
+  }
+
   state.userConversationMessage = visibleMessages[0];
   state.committedVisibleMessages.push(...visibleMessages);
-  appendRawEvent(state, {
-    ...state.identity,
-    kind: 'visible_reply_committed',
-    eventType: state.event.type,
-    visibleMessageIds: visibleMessages.map((message) => message.id),
-    payloadSummary: state.payloadSummary,
-    roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
-    parsedRoleModelDecisionSnapshot:
-      optionsForReply.parsedRoleModelDecisionSnapshot,
-    commitValidation,
-    ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence)
-  });
   appendTrace(state, 'visible_reply_committed');
   return turn;
 }
@@ -272,16 +278,22 @@ function appendConversationTurn(
   let characterRecord: ConversationLogRecord;
 
   try {
-    userRecord = state.options.logStore.appendConversationMessage({
-      ...turn.userMessage,
-      ...state.identity,
-      committedAt
-    });
-    characterRecord = state.options.logStore.appendConversationMessage({
-      ...turn.characterMessage,
-      ...state.identity,
-      committedAt
-    });
+    userRecord = state.options.logStore.appendConversationMessage(
+      {
+        ...turn.userMessage,
+        ...state.identity,
+        committedAt
+      },
+      state.options.session.character
+    );
+    characterRecord = state.options.logStore.appendConversationMessage(
+      {
+        ...turn.characterMessage,
+        ...state.identity,
+        committedAt
+      },
+      state.options.session.character
+    );
   } catch (error: unknown) {
     rollbackFailedConversationCommit(state, turn, error);
     throw error;

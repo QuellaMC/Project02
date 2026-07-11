@@ -1,4 +1,5 @@
 import type { ConversationLogRecord, RawEventLogRecord, RuntimeTraceEntry } from '../log.ts';
+import type { CharacterProfile } from '../../core/conversation.ts';
 
 export type RuntimeLogReadMode =
   | 'append'
@@ -68,6 +69,8 @@ export type RuntimeEvidenceIncrementalState = {
   readonly unfinishedToolCallIdsByIdentity: Map<string, Set<string>>;
   readonly messagesById: Map<string, ConversationLogRecord>;
   readonly messageIdsByIdentity: Map<string, string[]>;
+  roleModelCharacter: CharacterProfile | undefined;
+  conversationCharacter: CharacterProfile | undefined;
   openRawIdentity: string | undefined;
   openTurnConversationStart: number;
 };

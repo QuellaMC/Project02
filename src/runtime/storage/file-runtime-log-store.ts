@@ -52,7 +52,10 @@ import {
   removeConversationLogRecords
 } from './runtime-evidence-recovery.ts';
 
-export { findValidatedTerminalRawEventForSession } from './runtime-evidence-validation.ts';
+export {
+  durableRuntimeSessionCharacterProfile,
+  findValidatedTerminalRawEventForSession
+} from './runtime-evidence-validation.ts';
 
 export type CreateFileRuntimeLogStoreOptions = LocalRuntimeSessionPathsOptions & {
   readonly writerLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
@@ -70,6 +73,7 @@ export function createFileRuntimeLogStore(
 ): RuntimeLogStore {
   const paths = createLocalRuntimeSessionPaths(options);
   const layout = createLocalRuntimeStorageLayout({ storeRoot: paths.storeRoot });
+  const writerResourceKey = `session-writer:${paths.sessionId}`;
   let cachedEvidence: CachedRuntimeSessionEvidence | undefined;
   let incrementalState: RuntimeEvidenceIncrementalState | undefined;
   let writerRecoveryChecked = false;
@@ -90,7 +94,7 @@ export function createFileRuntimeLogStore(
     if (
       localRuntimeMutationLockResourceIsOwnedByCurrentProcess({
         locksRoot: layout.locksRoot,
-        resourceKey: `session-writer:${paths.sessionId}`
+        resourceKey: writerResourceKey
       })
     ) {
       return;
@@ -123,16 +127,12 @@ export function createFileRuntimeLogStore(
   const readStoredEvidence = (): DurableRuntimeSessionEvidence => {
     const writerIsActive = localRuntimeMutationLockResourceIsOwnedByCurrentProcess({
       locksRoot: layout.locksRoot,
-      resourceKey: `session-writer:${paths.sessionId}`
+      resourceKey: writerResourceKey
     });
 
     if (writerIsActive && !temporaryFilesScavenged) {
       scavengeAbandonedRuntimeEvidenceTemporaryFiles(paths);
       temporaryFilesScavenged = true;
-    }
-
-    if (writerIsActive && cachedEvidence !== undefined) {
-      return cachedEvidence.evidence;
     }
 
     return refreshStoredEvidence();
@@ -153,6 +153,16 @@ export function createFileRuntimeLogStore(
       stamps: readRuntimeEvidenceFileStamps(paths)
     };
     incrementalState = undefined;
+  };
+  const checkpointCachedEvidenceStamps = (): void => {
+    if (cachedEvidence === undefined) {
+      return;
+    }
+
+    cachedEvidence = {
+      evidence: cachedEvidence.evidence,
+      stamps: readRuntimeEvidenceFileStamps(paths)
+    };
   };
   const invalidateCachedEvidence = (): void => {
     cachedEvidence = undefined;
@@ -180,6 +190,7 @@ export function createFileRuntimeLogStore(
         appendJsonLine(paths.tracePath, encodeRuntimeTraceEntry(storedEntry));
         cachedEvidence?.evidence.traceEntries.push(storedEntry);
         applyIncrementalTraceAppend(state, storedEntry);
+        checkpointCachedEvidenceStamps();
       } catch (error: unknown) {
         invalidateCachedEvidence();
         throw error;
@@ -211,6 +222,7 @@ export function createFileRuntimeLogStore(
           state,
           record: storedRecord
         });
+        checkpointCachedEvidenceStamps();
       } catch (error: unknown) {
         invalidateCachedEvidence();
         throw error;
@@ -218,7 +230,7 @@ export function createFileRuntimeLogStore(
 
       return storedRecord;
     },
-    appendConversationMessage(record) {
+    appendConversationMessage(record, expectedCharacter) {
       const encoded = encodeConversationLogRecord(record);
       const storedRecord = decodeConversationLogRecord(encoded);
       const evidence = readStoredEvidence();
@@ -231,7 +243,8 @@ export function createFileRuntimeLogStore(
         paths,
         state,
         evidence,
-        record: storedRecord
+        record: storedRecord,
+        ...(expectedCharacter === undefined ? {} : { expectedCharacter })
       });
 
       try {
@@ -241,6 +254,7 @@ export function createFileRuntimeLogStore(
         );
         cachedEvidence?.evidence.conversationMessages.push(storedRecord);
         applyIncrementalConversationAppend(state, storedRecord);
+        checkpointCachedEvidenceStamps();
       } catch (error: unknown) {
         invalidateCachedEvidence();
         throw error;
@@ -306,13 +320,7 @@ export function createFileRuntimeLogStore(
     },
     checkpointWriterEvidence() {
       assertWriterOwnership();
-
-      if (cachedEvidence !== undefined) {
-        cachedEvidence = {
-          evidence: cachedEvidence.evidence,
-          stamps: readRuntimeEvidenceFileStamps(paths)
-        };
-      }
+      checkpointCachedEvidenceStamps();
 
       writerRecoveryChecked = false;
     },

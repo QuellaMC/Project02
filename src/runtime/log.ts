@@ -1,4 +1,7 @@
-import type { VisibleMessage } from '../core/conversation.ts';
+import type {
+  CharacterProfile,
+  VisibleMessage
+} from '../core/conversation.ts';
 import {
   createParsedRoleModelDecisionSnapshot,
   createRoleModelIOSnapshot,
@@ -28,7 +31,8 @@ import type { LocalRuntimeSessionPaths } from './storage/layout.ts';
 import type { LocalRuntimeMutationLockOwnerToken } from './storage/mutation-lock.ts';
 import {
   createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot
+  createJsonBoundarySnapshot,
+  redactJsonBoundaryText
 } from '../shared/json-boundary.ts';
 
 export const runtimeTurnStatusValues = [
@@ -176,7 +180,10 @@ export type RuntimeLogStore = {
   readonly localRuntimeWriterLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
   appendTrace(entry: RuntimeTraceEntryInput): RuntimeTraceEntry;
   appendRawEvent(record: RawEventLogRecordInput): RawEventLogRecord;
-  appendConversationMessage(record: ConversationLogRecordInput): ConversationLogRecord;
+  appendConversationMessage(
+    record: ConversationLogRecordInput,
+    expectedCharacter?: CharacterProfile
+  ): ConversationLogRecord;
   removeConversationMessages(messageIds: readonly string[]): void;
   checkpointWriterEvidence?(): void;
   recoverAbandonedWriterEvidence?(): boolean;
@@ -599,7 +606,11 @@ function freezeRoleModelCommitValidationResult(
       status: 'accepted',
       ...(result.acceptedVisibleReplyText === undefined
         ? {}
-        : { acceptedVisibleReplyText: result.acceptedVisibleReplyText })
+        : {
+            acceptedVisibleReplyText: redactJsonBoundaryText(
+              result.acceptedVisibleReplyText
+            )
+          })
     } satisfies AcceptedRoleModelCommitValidationResult);
   }
 
