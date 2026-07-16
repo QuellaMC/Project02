@@ -6,7 +6,8 @@ import {
 import {
   createJsonBoundaryObjectSnapshot,
   createJsonBoundarySnapshot,
-  jsonBoundaryUtf8ByteLength
+  jsonBoundaryUtf8ByteLength,
+  ownJsonRecordValue
 } from '../shared/json-boundary.ts';
 import { normalizeRuntimePluginAccessMap } from './access-control.ts';
 import {
@@ -25,6 +26,7 @@ import {
   createRuntimePluginProvidedTool,
   requiredDeclarationList
 } from './manifest-validation.ts';
+import { assertUniqueRuntimePluginIds } from './plugin-identity.ts';
 import type {
   CreateRuntimePluginAfterTurnCommittedContextOptions,
   CreateRuntimePluginContextOptions,
@@ -39,6 +41,7 @@ import type {
   RuntimePluginLifecycleHooks,
   RuntimePluginListingSnapshot,
   RuntimePluginManifest,
+  PreparedRuntimePluginConfigEffect,
   RuntimePluginProvidedTool,
   RuntimePluginRegistrationSnapshot,
   RuntimePluginRegistrySnapshot,
@@ -70,6 +73,12 @@ import {
 export function createRuntimePluginContext(
   options: CreateRuntimePluginContextOptions
 ): RuntimePluginContext {
+  const deadlineAt = options.deadlineAt ?? Number.MAX_SAFE_INTEGER;
+
+  if (!Number.isSafeInteger(deadlineAt) || deadlineAt <= 0) {
+    throw new TypeError('Plugin context deadlineAt must be a positive safe integer.');
+  }
+
   return Object.freeze({
     sessionId: requirePlainNonEmptyString(options.sessionId, 'sessionId'),
     turnId: options.eventId,
@@ -80,6 +89,8 @@ export function createRuntimePluginContext(
       options.createdAt,
       'Plugin context createdAt'
     ),
+    deadlineAt,
+    signal: options.signal ?? new AbortController().signal,
     currentUserMessage: requirePlainNonEmptyString(
       options.currentUserMessage,
       'currentUserMessage'
@@ -192,8 +203,10 @@ export function createRuntimePluginRegistrySnapshot(
   assertUniqueRuntimePluginIds(plugins);
 
   for (const plugin of plugins) {
-    const resolvedAccess =
-      options.accessByPluginId?.[plugin.manifest.id];
+    const resolvedAccess = ownJsonRecordValue(
+      options.accessByPluginId,
+      plugin.manifest.id
+    );
     const access = pluginAccessSnapshot({
       manifest: plugin.manifest,
       ...(resolvedAccess?.grantedAccess === undefined
@@ -215,22 +228,6 @@ export function createRuntimePluginRegistrySnapshot(
     contractVersion: runtimePluginContractVersion,
     plugins: Object.freeze(registrations)
   } satisfies RuntimePluginRegistrySnapshot);
-}
-
-export function assertUniqueRuntimePluginIds(
-  plugins: readonly RuntimePlugin[]
-): void {
-  const seenIds = new Set<string>();
-
-  for (const plugin of plugins) {
-    if (seenIds.has(plugin.manifest.id)) {
-      throw new TypeError(
-        `Duplicate plugin id "${plugin.manifest.id}" is not allowed.`
-      );
-    }
-
-    seenIds.add(plugin.manifest.id);
-  }
 }
 
 function pluginAccessSnapshot(options: {
@@ -397,11 +394,127 @@ export function createRuntimePluginToolInvocationSnapshot(
       'toolName'
     ),
     input: createRuntimePluginJsonObject(options['input'], 'input'),
-    result: createRuntimePluginToolCallResult(options['result'])
+    result: createRuntimePluginToolCallResultSnapshot(options['result'])
   } satisfies RuntimePluginToolInvocationSnapshot);
 }
 
-function createRuntimePluginToolCallResult(
+export function createPreparedRuntimePluginConfigEffect(
+  options: unknown
+): PreparedRuntimePluginConfigEffect {
+  if (!isRecord(options)) {
+    throw new TypeError('Prepared plugin config effect must be an object.');
+  }
+
+  if (options['kind'] !== 'runtime_plugin_config_effect') {
+    throw new TypeError('Prepared plugin config effect kind is not supported.');
+  }
+
+  const operation = options['operation'];
+
+  if (!isRecord(operation)) {
+    throw new TypeError(
+      'Prepared plugin config effect operation must be an object.'
+    );
+  }
+
+  const normalizedOperation =
+    operation['kind'] === 'set'
+      ? Object.freeze({
+          kind: 'set' as const,
+          value: createJsonBoundarySnapshot(operation['value'], {
+            field: 'Prepared plugin config effect value'
+          })
+        })
+      : operation['kind'] === 'unset'
+        ? Object.freeze({ kind: 'unset' as const })
+        : undefined;
+
+  if (normalizedOperation === undefined) {
+    throw new TypeError(
+      'Prepared plugin config effect operation is not supported.'
+    );
+  }
+
+  return Object.freeze({
+    eventId: requirePlainNonEmptyRecordString(options, 'eventId'),
+    traceId: requirePlainNonEmptyRecordString(options, 'traceId'),
+    createdAt: assertCanonicalRuntimeTimestamp(
+      requirePlainNonEmptyRecordString(options, 'createdAt'),
+      'Prepared plugin config effect createdAt'
+    ),
+    kind: 'runtime_plugin_config_effect',
+    effectId: requirePlainNonEmptyRecordString(options, 'effectId'),
+    targetPluginId: requirePlainNonEmptyRecordString(
+      options,
+      'targetPluginId'
+    ),
+    targetConfigPath: requirePlainNonEmptyRecordString(
+      options,
+      'targetConfigPath'
+    ),
+    fieldName: requirePlainNonEmptyRecordString(options, 'fieldName'),
+    expectedFingerprint: requirePlainNonEmptyRecordString(
+      options,
+      'expectedFingerprint'
+    ),
+    resultFingerprint: requirePlainNonEmptyRecordString(
+      options,
+      'resultFingerprint'
+    ),
+    operation: normalizedOperation
+  } satisfies PreparedRuntimePluginConfigEffect);
+}
+
+export function preparedRuntimePluginConfigEffectHasApprovalEvidence(options: {
+  readonly effect: PreparedRuntimePluginConfigEffect;
+  readonly eventIdentity: RuntimeEventIdentity;
+  readonly inputIdentity: RuntimeEventIdentity;
+  readonly inputPluginId: string | undefined;
+  readonly inputToolName: string | undefined;
+  readonly toolCallId: string | undefined;
+  readonly dispatchedToHost: boolean | undefined;
+  readonly pluginId: string | undefined;
+  readonly toolName: string | undefined;
+  readonly result: RuntimePluginToolCallResult | undefined;
+}): boolean {
+  const { effect, result } = options;
+
+  if (
+    options.toolCallId !== effect.effectId ||
+    options.dispatchedToHost !== true ||
+    options.inputPluginId === undefined ||
+    options.inputPluginId !== options.pluginId ||
+    options.inputToolName === undefined ||
+    options.inputToolName !== options.toolName ||
+    options.eventIdentity.eventId !== effect.eventId ||
+    options.eventIdentity.traceId !== effect.traceId ||
+    options.eventIdentity.createdAt !== effect.createdAt ||
+    options.inputIdentity.eventId !== effect.eventId ||
+    options.inputIdentity.traceId !== effect.traceId ||
+    options.inputIdentity.createdAt !== effect.createdAt ||
+    result?.status !== 'accepted'
+  ) {
+    return false;
+  }
+
+  return result.evidence.some(
+    (evidence) =>
+      evidence.eventId === effect.eventId &&
+      evidence.traceId === effect.traceId &&
+      evidence.createdAt === effect.createdAt &&
+      evidence.pluginId === options.pluginId &&
+      evidence.evidenceKind === 'policy' &&
+      evidence.status === 'accepted' &&
+      evidence.policyOutcome === 'user_approved' &&
+      evidence.sourceReferences?.some(
+        (reference) =>
+          reference.kind === 'runtime' && reference.id === effect.effectId
+      ) === true &&
+      evidence.configFingerprint === effect.resultFingerprint
+  );
+}
+
+export function createRuntimePluginToolCallResultSnapshot(
   value: unknown
 ): RuntimePluginToolCallResult {
   const boundedValue = createJsonBoundarySnapshot(value, {
@@ -683,6 +796,16 @@ function validatePluginDeclarationsAgainstRuntime(options: {
   }
 
   if (
+    options.lifecycleHooks.onShutdown !== undefined &&
+    !options.manifest.declaredPlugins.includes('on_shutdown')
+  ) {
+    return reject(
+      'missing_required_declaration',
+      'onShutdown hooks must declare on_shutdown.'
+    );
+  }
+
+  if (
     options.lifecycleHooks.health !== undefined &&
     !options.manifest.declaredPlugins.includes('health')
   ) {
@@ -718,6 +841,10 @@ function registeredLifecycleHooks(
 
   if (plugin.lifecycleHooks.onSessionEnd !== undefined) {
     hooks.push('on_session_end');
+  }
+
+  if (plugin.lifecycleHooks.onShutdown !== undefined) {
+    hooks.push('on_shutdown');
   }
 
   if (plugin.lifecycleHooks.health !== undefined) {
@@ -801,6 +928,7 @@ function freezeLifecycleHooks(
   const handleToolCall = hooks.handleToolCall;
   const afterTurnCommitted = hooks.afterTurnCommitted;
   const onSessionEnd = hooks.onSessionEnd;
+  const onShutdown = hooks.onShutdown;
   const health = hooks.health;
 
   return Object.freeze({
@@ -823,6 +951,11 @@ function freezeLifecycleHooks(
       ? {}
       : {
           onSessionEnd: (context) => onSessionEnd(context)
+        }),
+    ...(onShutdown === undefined
+      ? {}
+      : {
+          onShutdown: (context) => onShutdown(context)
         }),
     ...(health === undefined
       ? {}

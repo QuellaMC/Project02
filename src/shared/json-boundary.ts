@@ -10,6 +10,15 @@ export type JsonBoundaryObject = {
   readonly [key: string]: JsonBoundaryValue;
 };
 
+export function ownJsonRecordValue<T>(
+  record: Readonly<Record<string, T>> | undefined,
+  key: string
+): T | undefined {
+  return record !== undefined && Object.hasOwn(record, key)
+    ? record[key]
+    : undefined;
+}
+
 export type JsonBoundaryLimits = {
   readonly maxDepth: number;
   readonly maxEntriesPerContainer: number;

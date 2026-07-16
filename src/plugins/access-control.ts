@@ -9,9 +9,9 @@ import {
 import type {
   RuntimePlugin
 } from './plugin-types.ts';
-
-export const runtimePluginDiscoveryPluginId =
-  'runtime.plugin_discovery';
+import { assertUniqueRuntimePluginIds } from './plugin-identity.ts';
+import { isRecord } from './validation-primitives.ts';
+import { ownJsonRecordValue } from '../shared/json-boundary.ts';
 
 export type RuntimePluginAccessMapByPluginId = Readonly<
   Record<string, RuntimePluginAccessSnapshot>
@@ -21,7 +21,7 @@ export function resolveRuntimePluginAccessForPlugins(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly enabledPluginIds: readonly string[];
 }): RuntimePluginAccessMapByPluginId {
-  assertUniqueRuntimePluginAccessIds(options.plugins);
+  assertUniqueRuntimePluginIds(options.plugins);
 
   const enabledPluginIds = new Set(options.enabledPluginIds);
 
@@ -42,8 +42,10 @@ export function runtimePluginAccessForPlugin(options: {
   readonly plugin: RuntimePlugin;
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
 }): RuntimePluginAccessSnapshot {
-  const access =
-    options.accessByPluginId[options.plugin.manifest.id];
+  const access = ownJsonRecordValue(
+    options.accessByPluginId,
+    options.plugin.manifest.id
+  );
 
   if (access === undefined) {
     throw new TypeError(
@@ -178,25 +180,6 @@ export function normalizeRuntimePluginAccessMap(
   return Object.freeze(accessMap);
 }
 
-function assertUniqueRuntimePluginAccessIds(
-  plugins: readonly RuntimePlugin[]
-): void {
-  const seenIds = new Set<string>();
-
-  for (const plugin of plugins) {
-    if (seenIds.has(plugin.manifest.id)) {
-      throw new TypeError(
-        `Duplicate plugin id "${plugin.manifest.id}" is not allowed.`
-      );
-    }
-
-    seenIds.add(plugin.manifest.id);
-  }
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function isOneOf<T extends string>(
   value: unknown,

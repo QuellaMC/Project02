@@ -1,11 +1,10 @@
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createTestTempRoot } from './support/temp-root.ts';
 import {
   defaultRuntimeConfigPath,
-  runtimeConfigEnvVarName,
-  runtimeConfigVersion
+  runtimeConfigEnvVarName
 } from '../src/runtime/config/index.ts';
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
 import {
@@ -19,141 +18,6 @@ import {
 } from './support/runtime-config-fixtures.ts';
 
 describe('runtime config CLI reads and checks', () => {
-  it('sets and unsets plugin config fields named enabled literally', async () => {
-    const storeRoot = createTestTempRoot('project02-config-enabled-field-');
-    const seededStoreRoot = realpathSync.native(storeRoot);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'plugin', 'enable', 'memory'], {
-        stdout: collect(() => {}),
-        stderr: collect(() => {})
-      })
-    ).toBe(0);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'set', 'plugins.memory.config.enabled', 'true'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    const afterSet: unknown = JSON.parse(
-      readFileSync(join(storeRoot, 'config.json'), 'utf8')
-    );
-
-    expect(afterSet).toMatchObject({
-      plugins: {
-        memory: {
-          enabled: true,
-          config: {
-            enabled: true
-          }
-        }
-      }
-    });
-    expect(JSON.stringify(afterSet)).not.toContain('"memory.config"');
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'unset', 'plugins.memory.config.enabled'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    const afterUnset: unknown = JSON.parse(
-      readFileSync(join(storeRoot, 'config.json'), 'utf8')
-    );
-
-    expect(afterUnset).toEqual({
-      version: runtimeConfigVersion,
-      storeRoot: seededStoreRoot,
-      plugins: {
-        memory: {
-          enabled: true
-        }
-      }
-    });
-  });
-
-  it('drops empty plugin wrappers after unsetting the last plugin field', async () => {
-    const storeRoot = createTestTempRoot('project02-config-unset-empty-');
-    const seededStoreRoot = realpathSync.native(storeRoot);
-    let enabledUnsetCheckStdout = '';
-    let configUnsetCheckStdout = '';
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'plugin', 'enable', 'typo'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'unset', 'plugins.typo.enabled'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    expect(JSON.parse(readFileSync(join(storeRoot, 'config.json'), 'utf8')) as unknown)
-      .toEqual({ version: runtimeConfigVersion, storeRoot: seededStoreRoot });
-
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect((chunk) => {
-          enabledUnsetCheckStdout += chunk;
-        }),
-        stderr: collect(() => {})
-      })
-    ).toBe(0);
-    expect(enabledUnsetCheckStdout).not.toContain('runtime_config_unknown_plugin');
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'set', 'plugins.typo.config.backend', 'local'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'unset', 'plugins.typo.config.backend'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    expect(JSON.parse(readFileSync(join(storeRoot, 'config.json'), 'utf8')) as unknown)
-      .toEqual({ version: runtimeConfigVersion, storeRoot: seededStoreRoot });
-
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect((chunk) => {
-          configUnsetCheckStdout += chunk;
-        }),
-        stderr: collect(() => {})
-      })
-    ).toBe(0);
-    expect(configUnsetCheckStdout).not.toContain('runtime_config_unknown_plugin');
-  });
-
   it('reports activation warnings from runtime config check', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-');
     let stdout = '';
@@ -215,11 +79,11 @@ describe('runtime config CLI reads and checks', () => {
     expect(stderr).toBe('');
     expect(output.runtimeConfig.diagnostics[0]).toMatchObject({
       code: 'runtime_config_string_invalid',
-      path: 'storeRoot'
+      path: 'project02.storeRoot'
     });
     expect(output.activationDiagnostics[0]).toMatchObject({
       code: 'runtime_config_string_invalid',
-      path: 'storeRoot'
+      path: 'project02.storeRoot'
     });
     expect(stdout).not.toContain('Could not load runtime config env file');
     expect(stderr).not.toContain('Could not load runtime config env file');
@@ -332,11 +196,11 @@ describe('runtime config CLI reads and checks', () => {
         expect(stderr).toBe('');
         expect(output.runtimeConfig.diagnostics[0]).toMatchObject({
           code: 'runtime_config_string_invalid',
-          path: 'storeRoot'
+          path: 'project02.storeRoot'
         });
         expect(output.activationDiagnostics[0]).toMatchObject({
           code: 'runtime_config_string_invalid',
-          path: 'storeRoot'
+          path: 'project02.storeRoot'
         });
         expect(stdout).not.toContain('Could not load .env file');
         expect(stderr).not.toContain('Could not load .env file');
@@ -391,11 +255,11 @@ describe('runtime config CLI reads and checks', () => {
       expect(stderr).toBe('');
       expect(output.runtimeConfig.diagnostics[0]).toMatchObject({
         code: 'runtime_config_string_invalid',
-        path: 'storeRoot'
+        path: 'project02.storeRoot'
       });
       expect(output.activationDiagnostics[0]).toMatchObject({
         code: 'runtime_config_string_invalid',
-        path: 'storeRoot'
+        path: 'project02.storeRoot'
       });
       expect(stdout).not.toContain('Could not load .env file');
       expect(stderr).not.toContain('Could not load .env file');
@@ -841,124 +705,4 @@ describe('runtime config CLI reads and checks', () => {
     }
   });
 
-  it('redacts get secrets while preserving non-secret values', async () => {
-    const rawSecret = 'runtime-config-get-plaintext-secret';
-    const rawLegacySecret = 'runtime-config-get-legacy-secret';
-    const rawExactPluginSecret = 'runtime-config-get-exact-plugin-secret';
-    const configPath = writeRuntimeConfig(
-      join(createTestTempRoot('project02-config-get-secret-'), 'config.json'),
-      {
-        plugins: {
-          foo: {
-            config: {
-              apiKey: {
-                $plaintextSecret: rawSecret,
-                allowPlaintextSecret: true,
-                justification: 'test-only plaintext override'
-              },
-              legacyApiKey: rawLegacySecret,
-              backend: 'local'
-            }
-          },
-          'memory.config.api': {
-            enabled: true,
-            config: {
-              apiKey: rawExactPluginSecret,
-              backend: 'remote'
-            }
-          }
-        }
-      }
-    );
-    let secretStdout = '';
-    let legacySecretStdout = '';
-    let backendStdout = '';
-    let configStdout = '';
-    let exactPluginStdout = '';
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--config', configPath, 'get', 'plugins.foo.config.apiKey'],
-        {
-          stdout: collect((chunk) => {
-            secretStdout += chunk;
-          }),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    expect(JSON.parse(secretStdout) as unknown).toBe('[redacted]');
-    expect(secretStdout).not.toContain(rawSecret);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--config', configPath, 'get', 'plugins.foo.config.legacyApiKey'],
-        {
-          stdout: collect((chunk) => {
-            legacySecretStdout += chunk;
-          }),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    expect(JSON.parse(legacySecretStdout) as unknown).toBe('[redacted]');
-    expect(legacySecretStdout).not.toContain(rawLegacySecret);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--config', configPath, 'get', 'plugins.foo.config.backend'],
-        {
-          stdout: collect((chunk) => {
-            backendStdout += chunk;
-          }),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    expect(JSON.parse(backendStdout) as unknown).toBe('local');
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--config', configPath, 'get', 'plugins.foo.config'],
-        {
-          stdout: collect((chunk) => {
-            configStdout += chunk;
-          }),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    expect(JSON.parse(configStdout) as unknown).toEqual({
-      apiKey: '[redacted]',
-      legacyApiKey: '[redacted]',
-      backend: 'local'
-    });
-    expect(configStdout).not.toContain(rawSecret);
-    expect(configStdout).not.toContain(rawLegacySecret);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--config', configPath, 'get', 'plugins.memory.config.api'],
-        {
-          stdout: collect((chunk) => {
-            exactPluginStdout += chunk;
-          }),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    expect(JSON.parse(exactPluginStdout) as unknown).toEqual({
-      enabled: true,
-      config: {
-        apiKey: '[redacted]',
-        backend: 'remote'
-      }
-    });
-    expect(exactPluginStdout).not.toContain(rawExactPluginSecret);
-  });
 });

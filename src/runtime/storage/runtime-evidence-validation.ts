@@ -9,6 +9,7 @@ import {
 } from '../../core/conversation.ts';
 import {
   LocalRuntimeStorageContractError,
+  normalizeLocalRuntimeSessionId,
   type LocalRuntimeSessionPaths
 } from './layout-contract.ts';
 import { decodeConversationLogRecord } from './conversation-codec.ts';
@@ -24,8 +25,16 @@ import type {
   RuntimeTraceEntry
 } from '../log.ts';
 import { isTerminalRawEventLogRecord } from '../log.ts';
-import type { RuntimeEventIdentity } from '../event.ts';
+import {
+  runtimeEventIdentityKey,
+  type RuntimeEventIdentity
+} from '../event.ts';
+import {
+  CompleteJsonLinesError,
+  splitCompleteJsonLines
+} from '../../shared/json-lines.ts';
 import { assertLocalRuntimeSessionReadable } from './session-store.ts';
+import { preparedRuntimePluginConfigEffectHasApprovalEvidence } from '../../plugins/validation.ts';
 import type {
   DurableRuntimeSessionEvidence,
   RuntimeEvidenceIncrementalState,
@@ -93,17 +102,10 @@ export function deriveTerminalRawTraceEvidence(
 }
 
 export function createRuntimeEvidenceIncrementalState(
-  paths: LocalRuntimeSessionPaths,
   evidence: DurableRuntimeSessionEvidence
 ): RuntimeEvidenceIncrementalState {
   const derivedTraceEntries = deriveTerminalRawTraceEvidence(evidence);
   const evidenceForValidation = reconcileTerminalRawTraceEvidence(evidence);
-
-  assertDurableRuntimeSessionEvidence({
-    paths,
-    evidence: evidenceForValidation,
-    mode: 'public'
-  });
 
   const state: RuntimeEvidenceIncrementalState = {
     createdAtByIdentity: new Map(),
@@ -231,14 +233,29 @@ export function applyIncrementalTraceAppend(
 }
 
 export function assertIncrementalRawEventAppend(options: {
-  readonly paths: LocalRuntimeSessionPaths;
   readonly evidence: DurableRuntimeSessionEvidence;
+  readonly sessionId?: string;
   readonly state: RuntimeEvidenceIncrementalState;
   readonly record: RawEventLogRecord;
 }): void {
   const { record, state } = options;
   assertIncrementalIdentityTimestamp(state, record);
   const identityKey = runtimeEventIdentityKey(record);
+  assertIncrementalRawSequence(state, record, identityKey);
+
+  assertIncrementalToolCallAppend(state, record);
+  assertIncrementalRawCrossLogEvidence(options);
+
+  if (isTerminalRawEventLogRecord(record)) {
+    assertIncrementalTerminalRawEvent(state, record, identityKey);
+  }
+}
+
+function assertIncrementalRawSequence(
+  state: RuntimeEvidenceIncrementalState,
+  record: RawEventLogRecord,
+  identityKey: string
+): void {
   const priorKinds = state.rawKindsByIdentity.get(identityKey);
   const terminalKind = state.terminalRawByIdentity.get(identityKey);
 
@@ -286,59 +303,80 @@ export function assertIncrementalRawEventAppend(options: {
       'Raw event log contains terminal turn evidence before start evidence.'
     );
   }
+}
 
-  assertIncrementalToolCallAppend(state, record);
+function assertIncrementalRawCrossLogEvidence(options: {
+  readonly evidence: DurableRuntimeSessionEvidence;
+  readonly sessionId?: string;
+  readonly state: RuntimeEvidenceIncrementalState;
+  readonly record: RawEventLogRecord;
+}): void {
+  const { record, state } = options;
+
+  if (record.runtimeConfigEffects !== undefined) {
+    assertRuntimeConfigEffectsHaveApprovedToolEvidence([
+      ...options.evidence.rawEvents,
+      record
+    ]);
+  }
   assertIncrementalRawVisibleReferences(state, record);
   assertIncrementalCharacterEvidence(state, record);
   assertRoleModelInputTextMatchesCommittedUserMessage({
     messagesById: state.messagesById,
     rawEvent: record
   });
-  assertRoleModelEvidenceMatchesSessionPath({
-    paths: options.paths,
-    rawEvents: [record]
-  });
+  if (options.sessionId !== undefined) {
+    assertRoleModelEvidenceMatchesSessionId({
+      sessionId: options.sessionId,
+      rawEvents: [record]
+    });
+  }
   assertIncrementalRoleModelRecentContext({
     evidence: options.evidence,
     state,
     record
   });
+}
 
-  if (isTerminalRawEventLogRecord(record)) {
-    const unfinished = state.unfinishedToolCallIdsByIdentity.get(identityKey);
-    const turnMessageIds = state.messageIdsByIdentity.get(identityKey) ?? [];
+function assertIncrementalTerminalRawEvent(
+  state: RuntimeEvidenceIncrementalState,
+  record: RawEventLogRecord,
+  identityKey: string
+): void {
+  const unfinished = state.unfinishedToolCallIdsByIdentity.get(identityKey);
+  const turnMessageIds = state.messageIdsByIdentity.get(identityKey) ?? [];
 
-    if (turnMessageIds.length !== 0 && turnMessageIds.length !== 2) {
+  if (turnMessageIds.length !== 0 && turnMessageIds.length !== 2) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'A terminal runtime turn must commit exactly one user/character message pair.'
+    );
+  }
+
+  if (record.kind === 'runtime_turn_completed' && (unfinished?.size ?? 0) > 0) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `Tool call started without finish: ${unfinished?.values().next().value ?? 'unknown'}.`
+    );
+  }
+
+  for (const callId of record.toolCallIds ?? []) {
+    if (!state.finishedToolCalls.has(callId)) {
       throw new LocalRuntimeStorageContractError(
         'malformed_record',
-        'A terminal runtime turn must commit exactly one user/character message pair.'
+        `Terminal raw event references unfinished tool call: ${callId}.`
       );
     }
+  }
 
-    if (record.kind === 'runtime_turn_completed' && (unfinished?.size ?? 0) > 0) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        `Tool call started without finish: ${unfinished?.values().next().value ?? 'unknown'}.`
-      );
-    }
-
-    for (const callId of record.toolCallIds ?? []) {
-      if (!state.finishedToolCalls.has(callId)) {
-        throw new LocalRuntimeStorageContractError(
-          'malformed_record',
-          `Terminal raw event references unfinished tool call: ${callId}.`
-        );
-      }
-    }
-
-    if (record.kind === 'runtime_turn_completed') {
-      if (!sameOrderedValues(record.visibleMessageIds ?? [], turnMessageIds)) {
-        throw new LocalRuntimeStorageContractError(
-          'malformed_record',
-          'Completed terminal raw-event evidence must exactly match the visible conversation messages for that turn.'
-        );
-      }
-    }
+  if (
+    record.kind === 'runtime_turn_completed' &&
+    !sameOrderedValues(record.visibleMessageIds ?? [], turnMessageIds)
+  ) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Completed terminal raw-event evidence must exactly match the visible conversation messages for that turn.'
+    );
   }
 }
 
@@ -527,8 +565,8 @@ function assertIncrementalRoleModelRecentContext(options: {
 }
 
 export function assertIncrementalConversationAppend(options: {
-  readonly paths: LocalRuntimeSessionPaths;
   readonly evidence: DurableRuntimeSessionEvidence;
+  readonly sessionId?: string;
   readonly state: RuntimeEvidenceIncrementalState;
   readonly record: ConversationLogRecord;
   readonly expectedCharacter?: CharacterProfile;
@@ -544,13 +582,28 @@ export function assertIncrementalConversationAppend(options: {
   }
 
   const messageNumber = options.evidence.conversationMessages.length + 1;
-  const expectedId = `${options.paths.sessionId}:message-${String(messageNumber)}`;
+  const expectedId = incrementalConversationMessageId({
+    state: options.state,
+    candidateId: options.record.id,
+    ...(options.sessionId === undefined
+      ? {}
+      : { sessionId: options.sessionId }),
+    messageNumber
+  });
+  const expectedIdSuffix = `:message-${String(messageNumber)}`;
   const expectedRole = messageNumber % 2 === 1 ? 'user' : 'character';
 
-  if (options.record.id !== expectedId || options.record.role !== expectedRole) {
+  if (
+    (expectedId === undefined
+      ? !options.record.id.endsWith(expectedIdSuffix)
+      : options.record.id !== expectedId) ||
+    options.record.role !== expectedRole
+  ) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
-      `Restored visible message must have sequential ID "${expectedId}" and preserve user/character commit order.`
+      expectedId === undefined
+        ? 'Restored visible message must have a sequential session message ID and preserve user/character commit order.'
+        : `Restored visible message must have sequential ID "${expectedId}" and preserve user/character commit order.`
     );
   }
 
@@ -606,6 +659,51 @@ export function applyIncrementalConversationAppend(
       id: record.speakerId,
       displayName: record.speakerName
     } satisfies CharacterProfile);
+  }
+}
+
+function incrementalConversationMessageId(options: {
+  readonly state: RuntimeEvidenceIncrementalState;
+  readonly candidateId: string;
+  readonly sessionId?: string;
+  readonly messageNumber: number;
+}): string | undefined {
+  if (options.sessionId !== undefined) {
+    return `${options.sessionId}:message-${String(options.messageNumber)}`;
+  }
+
+  const firstMessage = options.state.messagesById.values().next().value;
+  const sourceMessageId = firstMessage?.id ?? options.candidateId;
+  const sourceMessageSuffix =
+    firstMessage === undefined
+      ? `:message-${String(options.messageNumber)}`
+      : ':message-1';
+
+  if (!sourceMessageId.endsWith(sourceMessageSuffix)) {
+    return undefined;
+  }
+
+  const inferredSessionId = sourceMessageId.slice(
+    0,
+    -sourceMessageSuffix.length
+  );
+
+  try {
+    const normalizedSessionId = normalizeLocalRuntimeSessionId(inferredSessionId);
+    return `${normalizedSessionId}:message-${String(options.messageNumber)}`;
+  } catch (error: unknown) {
+    if (
+      error instanceof LocalRuntimeStorageContractError &&
+      error.code === 'invalid_session_id'
+    ) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Restored visible message must contain a valid local runtime session ID.',
+        { cause: error }
+      );
+    }
+
+    throw error;
   }
 }
 
@@ -764,6 +862,7 @@ function findValidatedTerminalRawEventForIdentity(
     mode: 'appendRawEvent',
     rawEvents
   });
+  assertRuntimeConfigEffectsHaveApprovedToolEvidence(rawEvents);
 
   const matchingIdentityKey = runtimeEventIdentityKey(identity);
   const createdAtByIdentity = new Map<string, string>();
@@ -927,6 +1026,7 @@ export function assertDurableRuntimeSessionEvidence(options: {
     mode: options.mode,
     rawEvents
   });
+  assertRuntimeConfigEffectsHaveApprovedToolEvidence(rawEvents);
 
   if (options.mode === 'public') {
     assertRawEventTurnTerminalCompleteness(rawEvents);
@@ -937,8 +1037,8 @@ export function assertDurableRuntimeSessionEvidence(options: {
     messages: conversationMessages,
     rawEvents
   });
-  assertRoleModelEvidenceMatchesSessionPath({
-    paths: options.paths,
+  assertRoleModelEvidenceMatchesSessionId({
+    sessionId: options.paths.sessionId,
     rawEvents
   });
   const character = durableCharacterProfile({
@@ -1075,6 +1175,57 @@ function assertToolCallRawEventsAreComplete(options: {
         'malformed_record',
         `Terminal raw event references unfinished tool call: ${callId}.`
       );
+    }
+  }
+}
+
+function assertRuntimeConfigEffectsHaveApprovedToolEvidence(
+  rawEvents: readonly RawEventLogRecord[]
+): void {
+  const startedByCallId = new Map<string, RawEventLogRecord>();
+  const finishedByCallId = new Map<string, RawEventLogRecord>();
+
+  for (const rawEvent of rawEvents) {
+    if (rawEvent.kind === 'tool_call_started' && rawEvent.toolCallId !== undefined) {
+      startedByCallId.set(rawEvent.toolCallId, rawEvent);
+    } else if (
+      rawEvent.kind === 'tool_call_finished' &&
+      rawEvent.toolCallId !== undefined
+    ) {
+      finishedByCallId.set(rawEvent.toolCallId, rawEvent);
+    }
+  }
+
+  for (const terminal of rawEvents) {
+    if (terminal.kind !== 'runtime_turn_completed') {
+      continue;
+    }
+
+    for (const effect of terminal.runtimeConfigEffects ?? []) {
+      const started = startedByCallId.get(effect.effectId);
+      const finished = finishedByCallId.get(effect.effectId);
+
+      if (
+        started === undefined ||
+        finished === undefined ||
+        !preparedRuntimePluginConfigEffectHasApprovalEvidence({
+          effect,
+          eventIdentity: finished,
+          inputIdentity: started,
+          inputPluginId: started.toolPluginId,
+          inputToolName: started.toolName,
+          toolCallId: finished.toolCallId,
+          dispatchedToHost: finished.dispatchedToHost,
+          pluginId: finished.toolPluginId,
+          toolName: finished.toolName,
+          result: finished.toolResult
+        })
+      ) {
+        throw new LocalRuntimeStorageContractError(
+          'malformed_record',
+          `Runtime config effect "${effect.effectId}" is missing matching approved config-update tool evidence.`
+        );
+      }
     }
   }
 }
@@ -2000,8 +2151,8 @@ function visibleConversationMessagesForRawEvent(options: {
     });
 }
 
-function assertRoleModelEvidenceMatchesSessionPath(options: {
-  readonly paths: LocalRuntimeSessionPaths;
+function assertRoleModelEvidenceMatchesSessionId(options: {
+  readonly sessionId: string;
   readonly rawEvents: readonly RawEventLogRecord[];
 }): void {
   for (const rawEvent of options.rawEvents) {
@@ -2013,7 +2164,7 @@ function assertRoleModelEvidenceMatchesSessionPath(options: {
     ];
 
     for (const sessionId of sessionIds) {
-      if (sessionId === undefined || sessionId === options.paths.sessionId) {
+      if (sessionId === undefined || sessionId === options.sessionId) {
         continue;
       }
 
@@ -2136,14 +2287,6 @@ function traceStepEvidenceKey(entry: {
   return `${runtimeEventIdentityKey(entry)}\u0000${entry.step}`;
 }
 
-export function runtimeEventIdentityKey(identity: {
-  readonly eventId: string;
-  readonly traceId: string;
-  readonly createdAt: string;
-}): string {
-  return `${identity.eventId}\u0000${identity.traceId}\u0000${identity.createdAt}`;
-}
-
 function visibleMessageEvidenceKey(
   identity: {
     readonly eventId: string;
@@ -2216,27 +2359,23 @@ function readJsonLines<T>(options: {
     return [];
   }
 
-  if (!content.endsWith('\n')) {
-    throw new LocalRuntimeStorageContractError(
-      'partial_write',
-      `Local runtime log file ended without a complete JSONL record: ${options.filePath}.`
-    );
-  }
-
-  const lines = content.split('\n');
-  const records: T[] = [];
-
-  for (const [index, line] of lines.entries()) {
-    const normalizedLine = line.endsWith('\r') ? line.slice(0, -1) : line;
-
-    if (index === lines.length - 1 && normalizedLine.length === 0) {
-      continue;
+  try {
+    return splitCompleteJsonLines(content).map(options.decodeLine);
+  } catch (error: unknown) {
+    if (error instanceof CompleteJsonLinesError) {
+      throw new LocalRuntimeStorageContractError(
+        error.reason === 'missing_terminal_newline'
+          ? 'partial_write'
+          : 'malformed_record',
+        error.reason === 'missing_terminal_newline'
+          ? `Local runtime log file ended without a complete JSONL record: ${options.filePath}.`
+          : `Local runtime log file contains a blank JSONL record: ${options.filePath}.`,
+        { cause: error }
+      );
     }
 
-    records.push(options.decodeLine(normalizedLine));
+    throw error;
   }
-
-  return records;
 }
 
 function rawEventsRequireConversationLog(paths: LocalRuntimeSessionPaths): boolean {

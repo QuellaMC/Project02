@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createConversationSession } from '../src/core/conversation.ts';
+import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import { createRuntimeLogStore } from '../src/runtime/log.ts';
-import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
 import type { RoleModelAdapter } from '../src/role-model/loop.ts';
 import type { RoleModelChatMessage } from '../src/role-model/prompt.ts';
 import {
@@ -9,7 +9,8 @@ import {
   createNativeVisibleReplyAndPluginListAdapter,
   createPluginStoreRevisionFixtureHost,
   createSequencedAdapter,
-  createTestEvent
+  createTestEvent,
+  runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent
 } from './support/plugin-tool-loop-fixtures.ts';
 
 describe('plugin-driven native tool loop routing', () => {
@@ -51,9 +52,9 @@ describe('plugin-driven native tool loop routing', () => {
       content: 'Checking plugins.',
       tool_calls: [
         {
-          id: 'call_plugin_list',
+          id: 'call_runtime_plugin_list',
           function: {
-            name: 'plugin.list',
+            name: 'runtime.plugin.list',
             arguments: '{}'
           }
         }
@@ -61,9 +62,9 @@ describe('plugin-driven native tool loop routing', () => {
     });
     expect(messagesByRound[1]?.[5]).toMatchObject({
       role: 'tool',
-      tool_call_id: 'call_plugin_list'
+      tool_call_id: 'call_runtime_plugin_list'
     });
-    expect(messagesByRound[1]?.[5]?.content).toContain('"toolName":"plugin.list"');
+    expect(messagesByRound[1]?.[5]?.content).toContain('"toolName":"runtime.plugin.list"');
     expect(messagesByRound[1]?.[5]?.content).toContain('"status":"accepted"');
   });
 
@@ -107,9 +108,9 @@ describe('plugin-driven native tool loop routing', () => {
           }
         },
         {
-          id: 'call_plugin_list_with_visible',
+          id: 'call_runtime_plugin_list_with_visible',
           function: {
-            name: 'plugin.list',
+            name: 'runtime.plugin.list',
             arguments: '{}'
           }
         }
@@ -124,9 +125,9 @@ describe('plugin-driven native tool loop routing', () => {
     );
     expect(messagesByRound[1]?.[6]).toMatchObject({
       role: 'tool',
-      tool_call_id: 'call_plugin_list_with_visible'
+      tool_call_id: 'call_runtime_plugin_list_with_visible'
     });
-    expect(messagesByRound[1]?.[6]?.content).toContain('"toolName":"plugin.list"');
+    expect(messagesByRound[1]?.[6]?.content).toContain('"toolName":"runtime.plugin.list"');
     expect(messagesByRound[1]?.[6]?.content).toContain('"status":"accepted"');
   });
 
@@ -145,7 +146,7 @@ describe('plugin-driven native tool loop routing', () => {
             rawOutputText: JSON.stringify({
               toolCalls: [
                 {
-                  name: 'plugin.list',
+                  name: 'runtime.plugin.list',
                   input: {}
                 }
               ]
@@ -158,7 +159,7 @@ describe('plugin-driven native tool loop routing', () => {
                   id: 'call_bad_args',
                   type: 'function',
                   function: {
-                    name: 'plugin.list',
+                    name: 'runtime.plugin.list',
                     arguments: '{"score":1e999}'
                   }
                 }
@@ -167,9 +168,9 @@ describe('plugin-driven native tool loop routing', () => {
             nativeToolCallArgumentErrors: [
               {
                 executableIndex: 0,
-                toolName: 'plugin.list',
+                toolName: 'runtime.plugin.list',
                 reason: 'invalid_native_tool_arguments',
-                message: 'plugin.list arguments must contain finite JSON values.'
+                message: 'runtime.plugin.list arguments must contain finite JSON values.'
               }
             ]
           };
@@ -219,7 +220,7 @@ describe('plugin-driven native tool loop routing', () => {
       logStore.rawEvents().find((event) => event.kind === 'tool_call_finished')
     ).toMatchObject({
       dispatchedToHost: false,
-      toolName: 'plugin.list',
+      toolName: 'runtime.plugin.list',
       toolResult: {
         status: 'rejected',
         reason: 'invalid_native_tool_arguments'
@@ -256,6 +257,39 @@ describe('plugin-driven native tool loop routing', () => {
       message: 'Decision requested disallowed tool memory.unknown.'
     });
     expect(logStore.conversationMessages()).toEqual([]);
+    expect(
+      logStore.rawEvents().some((event) => event.kind.startsWith('tool_call'))
+    ).toBe(false);
+  });
+
+  it('does not synthesize Character State when the injected host omits it', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+    const pluginHost = createRuntimePluginHost({ plugins: [] });
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'character_state.patch',
+            input: { mood: 'curious' }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('update state', 'evt_character_state_omitted'),
+      session,
+      logStore,
+      roleModelAdapter: adapter,
+      pluginHost
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'disallowed_tool',
+      message: 'Decision requested disallowed tool character_state.patch.'
+    });
     expect(
       logStore.rawEvents().some((event) => event.kind.startsWith('tool_call'))
     ).toBe(false);

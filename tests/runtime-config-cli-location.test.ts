@@ -9,8 +9,17 @@ import {
   writeRuntimeConfig
 } from './support/runtime-config.ts';
 import {
+  requiredSecretPlugin,
   restoreProcessEnvValue
 } from './support/runtime-config-fixtures.ts';
+
+const installedSecretPlugin = requiredSecretPlugin('mem0-local');
+const installedSecretFactories = Object.freeze({
+  [installedSecretPlugin.manifest.id]: Object.freeze({
+    manifest: installedSecretPlugin.manifest,
+    create: () => installedSecretPlugin
+  })
+});
 
 describe('runtime config CLI location selection', () => {
   it('prints the env-selected config path from PROJECT02_RUNTIME_CONFIG', async () => {
@@ -93,13 +102,9 @@ describe('runtime config CLI location selection', () => {
     const configPath = writeRuntimeConfig(
       join(configRoot, 'runtime.json'),
       {
-        storeRoot,
-        plugins: {
-          foo: {
-            config: {
-              backend: 'selected'
-            }
-          }
+        project02: {
+          storeRoot,
+          roleModelProvider: 'local'
         }
       }
     );
@@ -117,7 +122,7 @@ describe('runtime config CLI location selection', () => {
       process.chdir(cwdRoot);
 
       expect(
-        await runRuntimeConfigCliFromArgs(['get', 'plugins.foo.config.backend'], {
+        await runRuntimeConfigCliFromArgs(['get', 'project02.roleModelProvider'], {
           stdout: collect((chunk) => {
             getStdout += chunk;
           }),
@@ -126,12 +131,12 @@ describe('runtime config CLI location selection', () => {
           })
         })
       ).toBe(0);
-      expect(JSON.parse(getStdout) as unknown).toBe('selected');
+      expect(JSON.parse(getStdout) as unknown).toBe('local');
       expect(getStderr).toBe('');
 
       expect(
         await runRuntimeConfigCliFromArgs(
-          ['set', 'plugins.foo.config.backend', 'remote'],
+          ['set', 'project02.roleModelProvider', 'nvidia'],
           {
             stdout: collect((chunk) => {
               setStdout += chunk;
@@ -149,12 +154,8 @@ describe('runtime config CLI location selection', () => {
       });
       expect(setStderr).toBe('');
       expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
-        plugins: {
-          foo: {
-            config: {
-              backend: 'remote'
-            }
-          }
+        project02: {
+          roleModelProvider: 'nvidia'
         }
       });
     } finally {
@@ -187,14 +188,15 @@ describe('runtime config CLI location selection', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(
-          ['secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+          ['secret', 'set', 'mem0-local', 'apiKey', envVar],
           {
             stdout: collect((chunk) => {
               stdout += chunk;
             }),
             stderr: collect((chunk) => {
               stderr += chunk;
-            })
+            }),
+            factories: installedSecretFactories
           }
         )
       ).toBe(0);
@@ -208,7 +210,7 @@ describe('runtime config CLI location selection', () => {
         plugins: {
           'mem0-local': {
             config: {
-              cloudApiKey: { $env: envVar }
+              apiKey: { $env: envVar }
             }
           }
         }
@@ -246,14 +248,15 @@ describe('runtime config CLI location selection', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(
-          ['secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+          ['secret', 'set', 'mem0-local', 'apiKey', envVar],
           {
             stdout: collect((chunk) => {
               stdout += chunk;
             }),
             stderr: collect((chunk) => {
               stderr += chunk;
-            })
+            }),
+            factories: installedSecretFactories
           }
         )
       ).toBe(0);
@@ -316,14 +319,15 @@ describe('runtime config CLI location selection', () => {
 
         expect(
           await runRuntimeConfigCliFromArgs(
-            [...example.args, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+            [...example.args, 'secret', 'set', 'mem0-local', 'apiKey', envVar],
             {
               stdout: collect((chunk) => {
                 stdout += chunk;
               }),
               stderr: collect((chunk) => {
                 stderr += chunk;
-              })
+              }),
+              factories: installedSecretFactories
             }
           )
         ).toBe(0);
@@ -337,7 +341,7 @@ describe('runtime config CLI location selection', () => {
           plugins: {
             'mem0-local': {
               config: {
-                cloudApiKey: { $env: envVar }
+                apiKey: { $env: envVar }
               }
             }
           }
@@ -394,14 +398,15 @@ describe('runtime config CLI location selection', () => {
 
         expect(
           await runRuntimeConfigCliFromArgs(
-            [...example.args, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+            [...example.args, 'secret', 'set', 'mem0-local', 'apiKey', envVar],
             {
               stdout: collect((chunk) => {
                 stdout += chunk;
               }),
               stderr: collect((chunk) => {
                 stderr += chunk;
-              })
+              }),
+              factories: installedSecretFactories
             }
           )
         ).toBe(0);
@@ -427,13 +432,9 @@ describe('runtime config CLI location selection', () => {
     const cwdRoot = createTestTempRoot('project02-config-cli-cwd-env-');
     const storeRoot = createTestTempRoot('project02-config-cli-cwd-store-');
     const configPath = writeRuntimeConfig(join(cwdRoot, 'runtime.json'), {
-      storeRoot,
-      plugins: {
-        foo: {
-          config: {
-            backend: 'local'
-          }
-        }
+      project02: {
+        storeRoot,
+        roleModelProvider: 'local'
       }
     });
     const previousCwd = process.cwd();
@@ -474,7 +475,7 @@ describe('runtime config CLI location selection', () => {
       expect(envPathStdout).toBe(`${join(storeRoot, '.env')}\n`);
 
       expect(
-        await runRuntimeConfigCliFromArgs(['get', 'plugins.foo.config.backend'], {
+        await runRuntimeConfigCliFromArgs(['get', 'project02.roleModelProvider'], {
           stdout: collect((chunk) => {
             getStdout += chunk;
           }),
@@ -485,7 +486,7 @@ describe('runtime config CLI location selection', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(
-          ['set', 'plugins.foo.config.backend', 'remote'],
+          ['set', 'project02.roleModelProvider', 'nvidia'],
           {
             stdout: collect((chunk) => {
               setStdout += chunk;
@@ -506,12 +507,8 @@ describe('runtime config CLI location selection', () => {
         envPath: join(storeRoot, '.env')
       });
       expect(afterSet).toMatchObject({
-        plugins: {
-          foo: {
-            config: {
-              backend: 'remote'
-            }
-          }
+        project02: {
+          roleModelProvider: 'nvidia'
         }
       });
     } finally {
@@ -557,7 +554,7 @@ describe('runtime config CLI location selection', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(
-          ['--config', explicitConfigPath, 'get', 'storeRoot'],
+          ['--config', explicitConfigPath, 'get', 'project02.storeRoot'],
           {
             stdout: collect((chunk) => {
               explicitGetStdout += chunk;
@@ -580,7 +577,13 @@ describe('runtime config CLI location selection', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(
-          ['--config', explicitConfigPath, 'set', 'storeRoot', explicitNextStoreRoot],
+          [
+            '--config',
+            explicitConfigPath,
+            'set',
+            'project02.storeRoot',
+            explicitNextStoreRoot
+          ],
           {
             stdout: collect((chunk) => {
               explicitSetStdout += chunk;
@@ -595,7 +598,13 @@ describe('runtime config CLI location selection', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(
-          ['--store', selectedStoreRoot, 'set', 'storeRoot', selectedNextStoreRoot],
+          [
+            '--store',
+            selectedStoreRoot,
+            'set',
+            'project02.storeRoot',
+            selectedNextStoreRoot
+          ],
           {
             stdout: collect((chunk) => {
               storeSetStdout += chunk;
@@ -610,22 +619,22 @@ describe('runtime config CLI location selection', () => {
 
       expect(JSON.parse(readFileSync(explicitConfigPath, 'utf8')) as unknown).toMatchObject(
         {
-          storeRoot: explicitNextStoreRoot
+          project02: { storeRoot: explicitNextStoreRoot }
         }
       );
       expect(JSON.parse(readFileSync(selectedConfigPath, 'utf8')) as unknown).toMatchObject(
         {
-          storeRoot: selectedNextStoreRoot
+          project02: { storeRoot: selectedNextStoreRoot }
         }
       );
       expect(JSON.parse(readFileSync(dotenvConfigPath, 'utf8')) as unknown).toMatchObject(
         {
-          storeRoot: dotenvStoreRoot
+          project02: { storeRoot: dotenvStoreRoot }
         }
       );
       expect(JSON.parse(readFileSync(processConfigPath, 'utf8')) as unknown).toMatchObject(
         {
-          storeRoot: processStoreRoot
+          project02: { storeRoot: processStoreRoot }
         }
       );
     } finally {
@@ -711,7 +720,7 @@ describe('runtime config CLI location selection', () => {
           '--store',
           storeRoot,
           'set',
-          'plugins.foo.config.prompt',
+          'project02.defaultMemoryProvider',
           'hello',
           'world'
         ],
@@ -749,12 +758,12 @@ describe('runtime config CLI location selection', () => {
     },
     {
       label: 'get',
-      args: ['get', 'storeRoot', 'extra'] as const,
+      args: ['get', 'project02.storeRoot', 'extra'] as const,
       message: 'get does not accept extra arguments.'
     },
     {
       label: 'unset',
-      args: ['unset', 'storeRoot', 'extra'] as const,
+      args: ['unset', 'project02.storeRoot', 'extra'] as const,
       message: 'unset does not accept extra arguments.'
     },
     {
@@ -865,128 +874,4 @@ describe('runtime config CLI location selection', () => {
     expect(stdout).toBe(`${join(storeRoot, '.env')}\n`);
   });
 
-  it('sets and unsets dotted plugin IDs through generic config paths', async () => {
-    const storeRoot = createTestTempRoot('project02-config-dotted-set-');
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'set', 'plugins.memory.recall.config.backend', 'local'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    const afterSet = readFileSync(join(storeRoot, 'config.json'), 'utf8');
-
-    expect(afterSet).toContain('"memory.recall"');
-    expect(afterSet).toContain('"backend": "local"');
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'unset', 'plugins.memory.recall.config.backend'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    const afterUnset = readFileSync(join(storeRoot, 'config.json'), 'utf8');
-
-    expect(afterUnset).not.toContain('"memory.recall"');
-    expect(afterUnset).not.toContain('"backend"');
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'plugin', 'enable', 'memory.config'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'set', 'plugins.memory.config.config.backend', 'local'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
-      )
-    ).toBe(0);
-
-    const afterConfigSegmentSet: unknown = JSON.parse(
-      readFileSync(join(storeRoot, 'config.json'), 'utf8')
-    );
-
-    expect(afterConfigSegmentSet).toMatchObject({
-      plugins: {
-        'memory.config': {
-          enabled: true,
-          config: {
-            backend: 'local'
-          }
-        }
-      }
-    });
-    expect(JSON.stringify(afterConfigSegmentSet)).not.toContain('"config.backend"');
-  });
-
-  it('rejects exact wrapper mutation paths before fallback parsing', async () => {
-    for (const example of [
-      {
-        exactPluginId: 'memory.enabled',
-        args: ['set', 'plugins.memory.enabled', 'false']
-      },
-      {
-        exactPluginId: 'memory.enabled',
-        args: ['unset', 'plugins.memory.enabled']
-      },
-      {
-        exactPluginId: 'memory.config.api',
-        args: ['set', 'plugins.memory.config.api', 'remote']
-      }
-    ] as const) {
-      const storeRoot = createTestTempRoot('project02-config-exact-wrapper-mutation-');
-      let stderr = '';
-
-      expect(
-        await runRuntimeConfigCliFromArgs(
-          ['--store', storeRoot, 'plugin', 'enable', example.exactPluginId],
-          {
-            stdout: collect(() => {}),
-            stderr: collect(() => {})
-          }
-        )
-      ).toBe(0);
-
-      expect(
-        await runRuntimeConfigCliFromArgs(['--store', storeRoot, ...example.args], {
-          stdout: collect(() => {}),
-          stderr: collect((chunk) => {
-            stderr += chunk;
-          })
-        })
-      ).toBe(1);
-
-      expect(stderr).toContain('Ambiguous runtime config plugin path');
-      expect(stderr).toContain(example.args[1]);
-      expect(stderr).toContain(example.exactPluginId);
-
-      const configText = readFileSync(join(storeRoot, 'config.json'), 'utf8');
-      const config: unknown = JSON.parse(configText);
-
-      expect(config).toMatchObject({
-        plugins: {
-          [example.exactPluginId]: {
-            enabled: true
-          }
-        }
-      });
-      expect(configText).not.toContain('"memory":');
-    }
-  });
 });

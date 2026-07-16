@@ -196,7 +196,7 @@ describe('file runtime log store evidence cache', () => {
     expect(coldValidations).toBe(2);
   });
 
-  it('does not trust another store cache under the current process writer lease', async () => {
+  it('does not authorize another store cache under a different owner lease', async () => {
     const storeRoot = createTestTempRoot('project02-log-stale-writer-cache-');
     const sessionId = 'stale-writer-cache-session';
     await createLocalRuntimeSessionStore({ storeRoot }).createSession({
@@ -230,7 +230,7 @@ describe('file runtime log store evidence cache', () => {
       }
 
       expect(() => staleStore.appendTrace(firstTraceEntry)).toThrow(
-        expect.objectContaining({ code: 'malformed_record' })
+        expect.objectContaining({ code: 'session_busy' })
       );
       expect(
         createFileRuntimeLogStore({ storeRoot, sessionId }).traceEntries()
@@ -250,7 +250,8 @@ describe('file runtime log store evidence cache', () => {
     const staleStore = createFileRuntimeLogStore({ storeRoot, sessionId });
     const firstLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
-      sessionId
+      sessionId,
+      ownerToken: fileLogStoreWriterOwnerToken(staleStore)
     });
 
     try {
@@ -273,7 +274,8 @@ describe('file runtime log store evidence cache', () => {
 
     const secondLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
-      sessionId
+      sessionId,
+      ownerToken: fileLogStoreWriterOwnerToken(staleStore)
     });
 
     try {
@@ -314,4 +316,16 @@ function evidenceFileReads(): readonly string[] {
     .mocked(fs.readFileSync)
     .mock.calls.map((call) => String(call[0]).split('/').at(-1) ?? '')
     .filter((fileName) => evidenceFileNames.has(fileName));
+}
+
+function fileLogStoreWriterOwnerToken(
+  logStore: ReturnType<typeof createFileRuntimeLogStore>
+) {
+  const ownerToken = logStore.localRuntimeWriterLockOwnerToken;
+
+  if (ownerToken === undefined) {
+    throw new Error('Expected file runtime log store writer owner token.');
+  }
+
+  return ownerToken;
 }

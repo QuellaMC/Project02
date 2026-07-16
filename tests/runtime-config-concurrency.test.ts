@@ -92,7 +92,7 @@ async function runConfigMutationChild(options: {
     'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
     'applyRuntimeConfigMutation({',
     '  storeRoot: process.argv[1],',
-    "  operation: { kind: 'set', path: `plugins.${process.argv[3]}.enabled`, value: true }",
+    "  operation: { kind: 'plugin_enable', pluginId: process.argv[3] }",
     '});'
   ].join('\n');
 

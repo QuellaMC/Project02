@@ -22,6 +22,10 @@ import {
 import {
   createRuntimePluginProvidedTool
 } from '../src/plugins/validation.ts';
+import {
+  isApprovalGatedRuntimePluginTool,
+  isModelFacingRuntimePluginTool
+} from '../src/plugins/tool-contract.ts';
 
 describe('runtime plugin source references', () => {
   it('bounds every public context, evidence, and health string as one result', () => {
@@ -796,10 +800,47 @@ describe('runtime plugin model-facing tool policy', () => {
     expect(plugin.providedTools).toHaveLength(1);
   });
 
+  it('classifies approval-gated config writes by policy instead of plugin identity', () => {
+    const manifest = createRuntimePluginManifest(
+      runtimePluginManifestFixture({
+        id: 'settings.arbitrary.fixture',
+        requestedAccess: { model_input: 'write' }
+      })
+    );
+    const tool = createRuntimePluginProvidedTool(
+      runtimePluginProvidedToolFixture({
+        name: 'settings.arbitrary.update',
+        sideEffectLevel: 'runtime_config_write',
+        requiresConfirmation: true
+      })
+    );
+
+    expect(isApprovalGatedRuntimePluginTool(tool)).toBe(true);
+    expect(isModelFacingRuntimePluginTool({ manifest, tool })).toBe(true);
+    expect(
+      isModelFacingRuntimePluginTool({
+        manifest: createRuntimePluginManifest(
+          runtimePluginManifestFixture({
+            id: 'settings.arbitrary.fixture',
+            requestedAccess: { model_input: 'write' },
+            runtimePolicy: {
+              ...manifest.runtimePolicy,
+              confirmation: 'required'
+            }
+          })
+        ),
+        tool
+      })
+    ).toBe(false);
+  });
+
   it('accepts non-model-facing tools without model_input write', () => {
     for (const tool of [
-      runtimePluginProvidedToolFixture({ requiresConfirmation: true }),
-      runtimePluginProvidedToolFixture({ sideEffectLevel: 'external_write' })
+      runtimePluginProvidedToolFixture({ sideEffectLevel: 'external_write' }),
+      runtimePluginProvidedToolFixture({
+        sideEffectLevel: 'runtime_config_write',
+        requiresConfirmation: false
+      })
     ]) {
       expect(() =>
         createRuntimePlugin({
@@ -820,6 +861,19 @@ describe('runtime plugin model-facing tool policy', () => {
         })
       ).not.toThrow();
     }
+  });
+
+  it('requires shutdown hooks to declare the shutdown lifecycle', () => {
+    expect(() =>
+      createRuntimePlugin({
+        manifest: runtimePluginManifestFixture(),
+        lifecycleHooks: {
+          onShutdown() {
+            return { status: 'completed', evidence: [] };
+          }
+        }
+      })
+    ).toThrow('onShutdown hooks must declare on_shutdown.');
   });
 
   it('recognizes first-party built-in model tools only from the real host-owned instance', () => {
@@ -884,6 +938,8 @@ describe('runtime plugin config metadata', () => {
               valueType: 'enum',
               defaultValueSummary: 'local',
               allowedValues: ['local', 'cloud'],
+              agentMutable: true,
+              reloadRequired: true,
               redactionLabels: [],
               configFingerprint: 'declared-backend-v1'
             },
@@ -926,10 +982,34 @@ describe('runtime plugin config metadata', () => {
       name: 'backend',
       valueType: 'enum',
       allowedValues: ['local', 'cloud'],
+      agentMutable: true,
+      reloadRequired: true,
       configFingerprint: 'declared-backend-v1'
     });
     expect(JSON.stringify(plugin.manifest)).not.toContain('resolvedConfig');
     expect(JSON.stringify(plugin.manifest)).not.toContain('MEMORY_API_KEY=');
+  });
+
+  it('rejects manifest metadata that makes a secret field agent-mutable', () => {
+    expect(() =>
+      createRuntimePluginManifest(
+        runtimePluginManifestFixture({
+          config: {
+            fields: [
+              {
+                name: 'apiKey',
+                description: 'API key.',
+                required: false,
+                secret: true,
+                valueType: 'secret',
+                agentMutable: true,
+                redactionLabels: ['secret']
+              }
+            ]
+          }
+        })
+      )
+    ).toThrow('Secret plugin config fields cannot allow agent mutation.');
   });
 });
 

@@ -3,19 +3,18 @@ import { parseEnv } from 'node:util';
 
 import {
   defaultRuntimeConfigEnvPath,
-  resolveConfiguredProject02PluginActivation,
   runtimeConfigEnvVarName,
   storeRootForLoadedDefaultConfigPath,
-  type LoadedProject02RuntimeConfig,
-  type Project02ConfiguredPluginActivation,
-  type RuntimeConfigDiagnostic,
-  type RuntimePluginFactoryDefinition
+  type LoadedProject02RuntimeConfig
 } from '../runtime/config/index.ts';
 
 export class RuntimeEnvFileError extends Error {
-  constructor(message: string) {
+  readonly path: string | undefined;
+
+  constructor(message: string, path?: string) {
     super(message);
     this.name = 'RuntimeEnvFileError';
+    this.path = path;
   }
 }
 
@@ -24,7 +23,7 @@ export function runtimeConfigEnvPathForLocation(options: {
   readonly storeRoot?: string;
 }): string {
   return defaultRuntimeConfigEnvPath(
-    options.loadedConfig.config?.storeRoot ??
+    options.loadedConfig.config?.project02?.storeRoot ??
       options.storeRoot ??
       storeRootForLoadedDefaultConfigPath(options.loadedConfig)
   );
@@ -53,48 +52,10 @@ export function loadRuntimeConfigEnvFile(options: {
     throw new RuntimeEnvFileError(
       `Could not load runtime config env file "${envPath}": ${
         error instanceof Error ? error.message : 'unknown error'
-      }.`
+      }.`,
+      envPath
     );
   }
-}
-
-export function resolveRuntimeConfigActivationBeforeEnvFile(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
-  readonly env: NodeJS.ProcessEnv;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-}): Project02ConfiguredPluginActivation | undefined {
-  const configured = resolveConfiguredProject02PluginActivation({
-    loadedConfig: options.loadedConfig,
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-    env: options.env,
-    ...(options.factories === undefined ? {} : { factories: options.factories })
-  });
-
-  return diagnosticsCanBypassRuntimeEnvFile(configured.activation.diagnostics)
-    ? configured
-    : undefined;
-}
-
-function diagnosticsCanBypassRuntimeEnvFile(
-  diagnostics: readonly RuntimeConfigDiagnostic[]
-): boolean {
-  const errors = diagnostics.filter(
-    (diagnostic) => diagnostic.severity === 'error'
-  );
-
-  return (
-    errors.length > 0 &&
-    errors.every(
-      (diagnostic) => !runtimeConfigDiagnosticRequiresEnvFile(diagnostic)
-    )
-  );
-}
-
-function runtimeConfigDiagnosticRequiresEnvFile(
-  diagnostic: RuntimeConfigDiagnostic
-): boolean {
-  return diagnostic.code === 'runtime_config_required_secret_missing';
 }
 
 export function readDefaultDotEnvFile(): NodeJS.ProcessEnv {

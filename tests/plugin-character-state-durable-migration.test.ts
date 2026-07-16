@@ -4,15 +4,15 @@ import { performance } from 'node:perf_hooks';
 
 import { describe, expect, it } from 'vitest';
 
-import { characterStatePatchModelToolName } from '../src/role-model/model-tools.ts';
+import { characterStatePatchModelToolName } from '../src/plugins/packages/character-state/contract.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin
-} from '../src/plugins/builtin/character-state/index.ts';
+} from '../src/plugins/packages/character-state/plugin.ts';
 import {
   createDefaultCharacterRuntimeState,
   planCharacterStatePatch
-} from '../src/plugins/builtin/character-state/schema.ts';
+} from '../src/plugins/packages/character-state/schema.ts';
 import {
   createRuntimePluginFileStoreTransaction
 } from '../src/plugins/file-store.ts';
@@ -186,11 +186,11 @@ async function runCharacterStateTransaction(options: {
 
   const hookMs = performance.now() - hookStartedAt;
   const prepareStartedAt = performance.now();
-  const prepared = transaction.prepare(options.identity);
+  const prepared = await transaction.prepare(options.identity);
   const prepareMs = performance.now() - prepareStartedAt;
   const finalizeStartedAt = performance.now();
 
-  prepared.finalize();
+  await prepared.finalize();
   return Object.freeze({
     hookMs,
     prepareMs,

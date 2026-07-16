@@ -2,8 +2,7 @@ import type { createConfiguredProject02PluginHost } from '../../src/runtime/conf
 import {
   createMemoryProviderRuntimePlugin,
   createRuntimePlugin,
-  firstPartyModelToolsPluginId,
-  runtimePluginDiscoveryPluginId,
+  hostScopedFirstPartyRuntimePluginIds,
   runtimePluginContractVersion
 } from '../../src/plugins/index.ts';
 
@@ -167,10 +166,7 @@ export function activationPluginById(
 export function nonHostScopedActivationPlugins(
   plugins: readonly ActivationPluginSnapshot[]
 ): readonly ActivationPluginSnapshot[] {
-  const hostScopedPluginIds = new Set([
-    runtimePluginDiscoveryPluginId,
-    firstPartyModelToolsPluginId
-  ]);
+  const hostScopedPluginIds = new Set(hostScopedFirstPartyRuntimePluginIds);
 
   return Object.freeze(
     plugins.filter((plugin) => !hostScopedPluginIds.has(plugin.pluginId))

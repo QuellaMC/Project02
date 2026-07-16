@@ -1,6 +1,7 @@
-import { pathToFileURL } from 'node:url';
+import { canonicalJsonStringify } from '../shared/canonical-json.ts';
 
 import type { RoleModelDecisionResult } from '../role-model/contracts.ts';
+import { runtimeEventIdentityKey } from '../runtime/event.ts';
 import {
   isTerminalRawEventLogRecordKind,
   type ConversationLogRecord,
@@ -30,27 +31,20 @@ import {
 } from '../runtime/terminal-errors.ts';
 import {
   createRuntimeConfigInspectShape,
-  diagnosticsHaveErrors,
-  loadProject02RuntimeConfig,
-  resolveConfiguredProject02PluginActivation,
   type Project02ConfiguredPluginActivation,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigInspectShape,
   type RuntimePluginFactoryDefinition
 } from '../runtime/config/index.ts';
+import { ownJsonRecordValue } from '../shared/json-boundary.ts';
 import {
   parseRuntimeLocationFlag,
   RuntimeLocationCliUsageError,
   type RuntimeLocationCliState
 } from './runtime-location.ts';
-import {
-  defaultDotEnvForRuntimeLocation,
-  loadRuntimeConfigEnvFile,
-  readDefaultDotEnvFile,
-  resolveRuntimeConfigActivationBeforeEnvFile,
-  RuntimeEnvFileError,
-  shouldReadDefaultDotEnvForRuntimeLocation
-} from './runtime-env.ts';
+import { RuntimeEnvFileError } from './runtime-env.ts';
+import { isMainModule } from './main-module.ts';
+import { resolveRuntimeCliStartup } from './startup.ts';
 
 type InspectCliOptions = {
   readonly stdout: NodeJS.WritableStream;
@@ -109,13 +103,6 @@ type InspectConfiguredPlugin = {
   readonly activationReasons: readonly string[];
   readonly diagnostics: readonly unknown[];
   readonly config?: unknown;
-};
-
-type InspectRuntimeOptions = {
-  readonly configEnv: NodeJS.ProcessEnv;
-  readonly runtimeEnv: NodeJS.ProcessEnv;
-  readonly runtimeEnvDefaults?: NodeJS.ProcessEnv;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 };
 
 type InspectTurnEvidence = {
@@ -332,29 +319,34 @@ export async function runInspectCliFromArgs(
         : options.env;
     const parsedArgs = parseInspectCliArgs(args);
     validateInspectCliArgs(parsedArgs);
-    const defaultEnv =
-      explicitEnv === undefined &&
-      shouldReadDefaultDotEnvForRuntimeLocation({
-        location: parsedArgs,
-        env: process.env
-      })
-        ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), parsedArgs)
-        : undefined;
-    const runtimeOptions = {
-      configEnv: explicitEnv ?? { ...(defaultEnv ?? {}), ...process.env },
-      runtimeEnv: explicitEnv ?? process.env,
-      ...(defaultEnv === undefined
+    const startup = resolveRuntimeCliStartup({
+      location: parsedArgs,
+      ...(explicitEnv === undefined ? {} : { env: explicitEnv }),
+      ...(options.factories === undefined
         ? {}
-        : { runtimeEnvDefaults: defaultEnv }),
-      ...(options.factories === undefined ? {} : { factories: options.factories })
-    } satisfies InspectRuntimeOptions;
+        : { factories: options.factories })
+    });
+
+    if (startup.status === 'config_invalid') {
+      throw new InspectCliUsageError(
+        startup.loadedConfig.diagnostics[0]?.message ??
+          'Runtime config is invalid.'
+      );
+    }
 
     if (parsedArgs.mode === 'sessions') {
-      await writeSessionList(parsedArgs, options.stdout, runtimeOptions);
+      await writeSessionList(
+        options.stdout,
+        startup.activationPlan
+      );
       return 0;
     }
 
-    await writeSessionEvidence(parsedArgs, options.stdout, runtimeOptions);
+    await writeSessionEvidence(
+      parsedArgs,
+      options.stdout,
+      startup.activationPlan
+    );
     return 0;
   } catch (error: unknown) {
     if (
@@ -466,13 +458,11 @@ function validateInspectCliArgs(args: InspectCliArgs): void {
 }
 
 async function writeSessionList(
-  args: InspectCliArgs & { readonly mode: 'sessions' },
   stdout: NodeJS.WritableStream,
-  runtimeOptions: InspectRuntimeOptions
+  runtimeConfig: Project02ConfiguredPluginActivation
 ): Promise<void> {
-  const runtimeConfig = inspectRuntimeConfig(args, runtimeOptions);
   const sessionStore = createLocalRuntimeSessionStore({
-    storeRoot: runtimeConfig.resolvedConfig.storeRoot
+    storeRoot: runtimeConfig.resolvedConfig.project02.storeRoot
   });
   const sessions = await sessionStore.listSessions();
 
@@ -489,11 +479,10 @@ async function writeSessionList(
 async function writeSessionEvidence(
   args: InspectCliArgs & { readonly mode: 'session' },
   stdout: NodeJS.WritableStream,
-  runtimeOptions: InspectRuntimeOptions
+  runtimeConfig: Project02ConfiguredPluginActivation
 ): Promise<void> {
-  const runtimeConfig = inspectRuntimeConfig(args, runtimeOptions);
   const storage = {
-    storeRoot: runtimeConfig.resolvedConfig.storeRoot
+    storeRoot: runtimeConfig.resolvedConfig.project02.storeRoot
   };
   const sessionStore = createLocalRuntimeSessionStore(storage);
   const session = await sessionStore.readSession(args.sessionId);
@@ -532,55 +521,17 @@ async function writeSessionEvidence(
   } satisfies InspectSessionOutput);
 }
 
-function inspectRuntimeConfig(args: {
-  readonly storeRoot?: string;
-  readonly configPath?: string;
-}, options: InspectRuntimeOptions): Project02ConfiguredPluginActivation {
-  const loadedConfig = loadProject02RuntimeConfig({
-    ...args,
-    env: options.configEnv
-  });
-
-  if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
-    throw new InspectCliUsageError(
-      loadedConfig.diagnostics[0]?.message ?? 'Runtime config is invalid.'
-    );
-  }
-
-  const activationBeforeEnv = resolveRuntimeConfigActivationBeforeEnvFile({
-    loadedConfig,
-    ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
-    env: options.configEnv,
-    ...(options.factories === undefined ? {} : { factories: options.factories })
-  });
-
-  if (activationBeforeEnv !== undefined) {
-    return activationBeforeEnv;
-  }
-
-  const runtimeEnv = loadRuntimeConfigEnvFile({
-    loadedConfig,
-    ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
-    env: options.runtimeEnv,
-    ...(options.runtimeEnvDefaults === undefined
-      ? {}
-      : { envDefaults: options.runtimeEnvDefaults })
-  });
-
-  return resolveConfiguredProject02PluginActivation({
-    loadedConfig,
-    ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
-    env: runtimeEnv,
-    ...(options.factories === undefined ? {} : { factories: options.factories })
-  });
-}
-
 function inspectConfiguredPlugins(
   runtimeConfig: Project02ConfiguredPluginActivation
 ): readonly InspectConfiguredPlugin[] {
   return Object.freeze(
-    runtimeConfig.activation.plugins.map((plugin) =>
-      Object.freeze({
+    runtimeConfig.activation.plugins.map((plugin) => {
+      const config = ownJsonRecordValue(
+        runtimeConfig.resolvedConfig.redactedPluginConfigs,
+        plugin.pluginId
+      );
+
+      return Object.freeze({
         pluginId: plugin.pluginId,
         kind: plugin.kind,
         enabled: plugin.enabled,
@@ -589,14 +540,9 @@ function inspectConfiguredPlugins(
         activationStatus: plugin.activationStatus,
         activationReasons: Object.freeze([...plugin.activationReasons]),
         diagnostics: Object.freeze([...plugin.diagnostics]),
-        ...(runtimeConfig.resolvedConfig.redactedPluginConfigs[plugin.pluginId] === undefined
-          ? {}
-          : {
-              config:
-                runtimeConfig.resolvedConfig.redactedPluginConfigs[plugin.pluginId]
-            })
-      } satisfies InspectConfiguredPlugin)
-    )
+        ...(config === undefined ? {} : { config })
+      } satisfies InspectConfiguredPlugin);
+    })
   );
 }
 
@@ -689,7 +635,7 @@ function createInspectRawEventIndexes(
   >();
 
   for (const rawEvent of rawEvents) {
-    const identityKey = inspectEvidenceIdentityKey(rawEvent);
+    const identityKey = runtimeEventIdentityKey(rawEvent);
     const rawEventKind = rawEvent.kind;
     const projection = mutableInspectTurnProjection(
       mutableProjections,
@@ -814,7 +760,7 @@ function groupEvidenceByIdentity<T extends {
   const grouped = new Map<string, T[]>();
 
   for (const record of records) {
-    const key = inspectEvidenceIdentityKey(record);
+    const key = runtimeEventIdentityKey(record);
     const group = grouped.get(key) ?? [];
     group.push(record);
     grouped.set(key, group);
@@ -823,21 +769,13 @@ function groupEvidenceByIdentity<T extends {
   return grouped;
 }
 
-function inspectEvidenceIdentityKey(identity: {
-  readonly eventId: string;
-  readonly traceId: string;
-  readonly createdAt: string;
-}): string {
-  return `${identity.eventId}\u0000${identity.traceId}\u0000${identity.createdAt}`;
-}
-
 function createTurnEvidenceEntry(options: {
   readonly indexes: InspectEvidenceIndexes;
   readonly terminalRawEvent: InspectTerminalRawEvent;
 }): InspectTurnEvidence {
   const { rawEvent, roleModelEvidence } = options.terminalRawEvent;
   const visibleMessageIds = rawEvent.visibleMessageIds ?? [];
-  const identityKey = inspectEvidenceIdentityKey(rawEvent);
+  const identityKey = runtimeEventIdentityKey(rawEvent);
   const projection = options.indexes.turnProjectionsByIdentity.get(identityKey);
   const storedTraceEntries =
     options.indexes.traceEntriesByIdentity.get(identityKey) ?? [];
@@ -956,7 +894,7 @@ function roleModelEvidenceForRawEvent(
 function roleModelRoundEvidenceKey(
   evidence: InspectRoleModelEvidence
 ): string {
-  return JSON.stringify({
+  return canonicalJsonStringify({
     input: evidence.input,
     output: evidence.output,
     parsedDecision: evidence.parsedDecision
@@ -1179,7 +1117,7 @@ function uniquePluginEvidenceSnapshots(
 function pluginEvidenceSnapshotKey(
   snapshot: RuntimePluginEvidenceSnapshot
 ): string {
-  return JSON.stringify({
+  return canonicalJsonStringify({
     eventId: snapshot.eventId,
     traceId: snapshot.traceId,
     createdAt: snapshot.createdAt,
@@ -1368,16 +1306,6 @@ function formatTerminalErrorMessage(
   }
 
   return formatLocalRuntimeTerminalError(error);
-}
-
-function isMainModule(moduleUrl: string): boolean {
-  const scriptPath = process.argv[1];
-
-  if (scriptPath === undefined) {
-    return false;
-  }
-
-  return pathToFileURL(scriptPath).href === moduleUrl;
 }
 
 if (isMainModule(import.meta.url)) {

@@ -1,45 +1,48 @@
-import { pathToFileURL } from 'node:url';
-
 import {
   applyRuntimeConfigControlOperation,
+  applyRuntimePluginConfigControlOperation,
   createRuntimeConfigInspectShape,
   defaultRuntimeConfigPath,
   diagnosticsHaveErrors,
   getRedactedRuntimeConfigValueAtPath,
-  loadProject02RuntimeConfig,
-  resolveConfiguredProject02PluginActivation,
+  inspectRuntimePluginConfig,
   RuntimeConfigMutationError,
   storeRootForLoadedDefaultConfigPath,
   type LoadedProject02RuntimeConfig,
+  type RuntimeConfigControlOperation,
+  type RuntimeConfigMutationResult,
   type RuntimePluginFactoryDefinition,
-  type RuntimeConfigMutationOperation,
   type RuntimeConfigValue
 } from '../runtime/config/index.ts';
+import type { RuntimePluginCatalogEntry } from '../plugins/catalog.ts';
+import { ownJsonRecordValue } from '../shared/json-boundary.ts';
 import {
   formatLocalRuntimeTerminalError,
   isLocalRuntimeTerminalError
 } from '../runtime/terminal-errors.ts';
 import {
-  hasExplicitRuntimeLocation,
   parseRuntimeLocationFlag,
   RuntimeLocationCliUsageError,
   type RuntimeLocationCliState
 } from './runtime-location.ts';
 import {
-  defaultDotEnvForRuntimeLocation,
-  loadRuntimeConfigEnvFile,
-  readDefaultDotEnvFile,
-  resolveRuntimeConfigActivationBeforeEnvFile,
   runtimeConfigEnvPathForLocation,
-  RuntimeEnvFileError,
-  shouldReadDefaultDotEnvForRuntimeLocation
+  RuntimeEnvFileError
 } from './runtime-env.ts';
+import {
+  runRuntimeConfigConsole,
+  type RuntimeConfigConsolePromptAdapter
+} from './config-console.ts';
+import { isMainModule } from './main-module.ts';
+import { resolveRuntimeCliStartup } from './startup.ts';
 
 type RuntimeConfigCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
+  readonly stdin?: NodeJS.ReadableStream;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
+  readonly prompt?: RuntimeConfigConsolePromptAdapter;
 };
 
 class RuntimeConfigCliUsageError extends Error {
@@ -53,7 +56,40 @@ export function runRuntimeConfigCliFromArgs(
   args: readonly string[],
   options: RuntimeConfigCliOptions
 ): Promise<number> {
-  return Promise.resolve().then(() => runRuntimeConfigCliFromArgsSync(args, options));
+  return Promise.resolve()
+    .then(() => {
+      const parsedArgs = parseRuntimeConfigCliArgs(args);
+
+      if (parsedArgs.commandArgs[0] !== 'ui') {
+        return runRuntimeConfigCliFromArgsSync(args, options);
+      }
+
+      assertNoExtraArgs(parsedArgs.commandArgs, 0, 'ui');
+      const startup = resolveRuntimeCliStartup({
+        location: parsedArgs.location,
+        ...(options.env === undefined ? {} : { env: options.env }),
+        ...(options.factories === undefined
+          ? {}
+          : { factories: options.factories }),
+        continueAfterActivationErrors: true
+      });
+
+      return runRuntimeConfigConsole({
+        stdout: options.stdout,
+        ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
+        env: startup.configEnv,
+        runtimeEnv:
+          startup.status === 'resolved'
+            ? startup.runtimeEnv
+            : startup.configEnv,
+        ...parsedArgs.location,
+        ...(options.factories === undefined
+          ? {}
+          : { factories: options.factories }),
+        ...(options.prompt === undefined ? {} : { prompt: options.prompt })
+      });
+    })
+    .catch((error: unknown) => handleRuntimeConfigCliError(error, options));
 }
 
 function runRuntimeConfigCliFromArgsSync(
@@ -62,136 +98,161 @@ function runRuntimeConfigCliFromArgsSync(
 ): number {
   try {
     const parsedArgs = parseRuntimeConfigCliArgs(args);
-    const cliEnv = runtimeConfigCliEnvForLocation({
-      location: parsedArgs.location,
-      readDefaultDotEnv: shouldReadDefaultDotEnvForCommand(
-        parsedArgs,
-        options.env ?? process.env
-      ),
-      ...(options.env === undefined ? {} : { env: options.env })
-    });
-    const parsed: RuntimeConfigCliArgs = {
-      location: parsedArgs.location,
-      command: parseRuntimeConfigCommand(parsedArgs.commandArgs, cliEnv.configEnv)
-    };
 
-    if (parsed.command.kind === 'path') {
-      const loaded = loadProject02RuntimeConfig({
-        ...parsed.location,
-        env: cliEnv.configEnv
-      });
-
-      options.stdout.write(
-        `${loaded.path ?? defaultRuntimeConfigPath(parsed.location.storeRoot)}\n`
-      );
-      return 0;
+    if (parsedArgs.commandArgs[0] === 'check') {
+      return runRuntimeConfigCheckCommand(parsedArgs, options);
     }
 
-    if (parsed.command.kind === 'env_path') {
-      const loaded = loadProject02RuntimeConfig({
-        ...parsed.location,
-        env: cliEnv.configEnv
-      });
-      assertRuntimeConfigLoadedForEnvPath(loaded);
-      options.stdout.write(
-        `${runtimeConfigEnvPathForLocation({
-          loadedConfig: loaded,
-          ...(parsed.location.storeRoot === undefined
-            ? {}
-            : { storeRoot: parsed.location.storeRoot })
-        })}\n`
-      );
-      return 0;
+    const secretSetCommand =
+      parsedArgs.commandArgs[0] === 'secret' &&
+      parsedArgs.commandArgs[1] === 'set';
+    const cwdDotEnv = runtimeConfigCwdDotEnvModeForCommand(
+      parsedArgs,
+      options.env ?? process.env
+    );
+
+    if (secretSetCommand) {
+      return runRuntimePluginSecretSetCommand(parsedArgs, options, cwdDotEnv);
     }
 
-    if (parsed.command.kind === 'check') {
-      const loaded = loadProject02RuntimeConfig({
-        ...parsed.location,
-        env: cliEnv.configEnv
-      });
-      const configured =
-        resolveRuntimeConfigActivationBeforeEnvFile({
-          loadedConfig: loaded,
-          ...(parsed.location.storeRoot === undefined
-            ? {}
-            : { storeRoot: parsed.location.storeRoot }),
-          env: cliEnv.configEnv,
-          ...(options.factories === undefined ? {} : { factories: options.factories })
-        }) ??
-        resolveConfiguredProject02PluginActivation({
-          loadedConfig: loaded,
-          ...(parsed.location.storeRoot === undefined
-            ? {}
-            : { storeRoot: parsed.location.storeRoot }),
-          env: diagnosticsHaveErrors(loaded.diagnostics)
-            ? cliEnv.configEnv
-            : loadRuntimeConfigEnvFile({
-                loadedConfig: loaded,
-                ...(parsed.location.storeRoot === undefined
-                  ? {}
-                  : { storeRoot: parsed.location.storeRoot }),
-                env: cliEnv.suppliedEnv,
-                envDefaults: checkDefaultEnvForLocation({
-                  cliEnv,
-                  location: parsed.location
-                })
-              }),
-          ...(options.factories === undefined ? {} : { factories: options.factories })
-        });
-
-      writeJson(options.stdout, {
-        runtimeConfig: createRuntimeConfigInspectShape(configured.resolvedConfig),
-        activationDiagnostics: configured.activation.diagnostics,
-        plugins: configured.activation.plugins
-      });
-      return configured.activation.diagnostics.some((item) => item.severity === 'error')
-        ? 1
-        : 0;
-    }
-
-    if (parsed.command.kind === 'get') {
-      const loaded = loadProject02RuntimeConfig({
-        ...parsed.location,
-        env: cliEnv.configEnv
-      });
-      assertRuntimeConfigLoaded(loaded);
-      const value = getRedactedRuntimeConfigValueAtPath(
-        loaded.config,
-        parsed.command.path
-      );
-
-      writeJson(options.stdout, value ?? null);
-      return 0;
-    }
-
-    const result = applyRuntimeConfigControlOperation({
-      ...parsed.location,
-      env: cliEnv.configEnv,
-      operation: parsed.command.operation
-    });
-
-    writeJson(options.stdout, {
-      configPath: result.configPath,
-      envPath: result.envPath,
-      version: result.config.version
-    });
-    return 0;
+    return runRuntimeConfigDocumentCommand(parsedArgs, options, cwdDotEnv);
   } catch (error: unknown) {
-    if (
-      error instanceof RuntimeConfigCliUsageError ||
-      error instanceof RuntimeLocationCliUsageError ||
-      error instanceof RuntimeEnvFileError ||
-      error instanceof RuntimeConfigMutationError ||
-      error instanceof AggregateError ||
-      error instanceof TypeError ||
-      isLocalRuntimeTerminalError(error)
-    ) {
-      options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
-      return 1;
-    }
-
-    throw error;
+    return handleRuntimeConfigCliError(error, options);
   }
+}
+
+function runRuntimeConfigCheckCommand(
+  parsedArgs: RuntimeConfigCliParsedArgs,
+  options: RuntimeConfigCliOptions
+): number {
+  const startup = resolveRuntimeCliStartup({
+    location: parsedArgs.location,
+    ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.factories === undefined
+      ? {}
+      : { factories: options.factories })
+  });
+  const command = parseRuntimeConfigCommand(
+    parsedArgs.commandArgs,
+    startup.configEnv
+  );
+
+  if (command.kind !== 'check') {
+    throw new TypeError('Runtime config check command parsing drifted.');
+  }
+
+  writeJson(options.stdout, {
+    runtimeConfig: createRuntimeConfigInspectShape(
+      startup.activationPlan.resolvedConfig
+    ),
+    activationDiagnostics: startup.activationPlan.activation.diagnostics,
+    plugins: startup.activationPlan.activation.plugins
+  });
+
+  return diagnosticsHaveErrors(startup.activationPlan.activation.diagnostics)
+    ? 1
+    : 0;
+}
+
+function runRuntimePluginSecretSetCommand(
+  parsedArgs: RuntimeConfigCliParsedArgs,
+  options: RuntimeConfigCliOptions,
+  cwdDotEnv: 'always' | 'auto'
+): number {
+  const startup = resolveRuntimeConfigCliActivationStartup({
+    parsedArgs,
+    options,
+    cwdDotEnv
+  });
+  const command = parseRuntimeConfigCommand(
+    parsedArgs.commandArgs,
+    startup.configEnv
+  );
+
+  if (command.kind !== 'secret_set') {
+    throw new TypeError('Runtime config secret-set command parsing drifted.');
+  }
+
+  const result = applyRuntimePluginSecretSetCommand({
+    location: parsedArgs.location,
+    runtimeEnv:
+      startup.status === 'resolved' ? startup.runtimeEnv : startup.configEnv,
+    catalogEntries: startup.activationPlan.catalogEntries,
+    operation: command.operation
+  });
+
+  writeRuntimeConfigMutationResult(options.stdout, result);
+  return 0;
+}
+
+function runRuntimeConfigDocumentCommand(
+  parsedArgs: RuntimeConfigCliParsedArgs,
+  options: RuntimeConfigCliOptions,
+  cwdDotEnv: 'always' | 'auto'
+): number {
+  const startup = resolveRuntimeCliStartup({
+    stage: 'config',
+    location: parsedArgs.location,
+    cwdDotEnv,
+    ...(options.env === undefined ? {} : { env: options.env })
+  });
+  const parsed: RuntimeConfigCliArgs = {
+    location: parsedArgs.location,
+    command: parseRuntimeConfigCommand(
+      parsedArgs.commandArgs,
+      startup.configEnv
+    )
+  };
+
+  if (parsed.command.kind === 'path') {
+    options.stdout.write(
+      `${
+        startup.loadedConfig.path ??
+        defaultRuntimeConfigPath(parsed.location.storeRoot)
+      }\n`
+    );
+    return 0;
+  }
+
+  if (parsed.command.kind === 'env_path') {
+    assertRuntimeConfigLoadedForEnvPath(startup.loadedConfig);
+    options.stdout.write(
+      `${runtimeConfigEnvPathForLocation({
+        loadedConfig: startup.loadedConfig,
+        ...(parsed.location.storeRoot === undefined
+          ? {}
+          : { storeRoot: parsed.location.storeRoot })
+      })}\n`
+    );
+    return 0;
+  }
+
+  if (parsed.command.kind === 'get') {
+    assertRuntimeConfigLoaded(startup.loadedConfig);
+    const value = getRedactedRuntimeConfigValueAtPath(
+      startup.loadedConfig.config,
+      parsed.command.path
+    );
+
+    writeJson(options.stdout, value ?? null);
+    return 0;
+  }
+
+  if (
+    parsed.command.kind === 'check' ||
+    parsed.command.kind === 'secret_set'
+  ) {
+    throw new TypeError('Runtime config command routing drifted.');
+  }
+
+  const result = applyRuntimeConfigControlOperation({
+    ...parsed.location,
+    env: startup.configEnv,
+    operation: parsed.command.operation
+  });
+
+  writeRuntimeConfigMutationResult(options.stdout, result);
+  return 0;
 }
 
 type RuntimeConfigCliArgs = {
@@ -201,7 +262,17 @@ type RuntimeConfigCliArgs = {
     | { readonly kind: 'env_path' }
     | { readonly kind: 'check' }
     | { readonly kind: 'get'; readonly path: string }
-    | { readonly kind: 'mutate'; readonly operation: RuntimeConfigMutationOperation };
+    | { readonly kind: 'mutate'; readonly operation: RuntimeConfigControlOperation }
+    | {
+        readonly kind: 'secret_set';
+        readonly operation: {
+          readonly kind: 'secret_set';
+          readonly pluginId: string;
+          readonly fieldName: string;
+          readonly envVar: string;
+          readonly secretValue: string;
+        };
+      };
 };
 
 type RuntimeConfigCliParsedArgs = {
@@ -268,63 +339,21 @@ function runtimeConfigCommandArgsFrom(
   return commandArgs;
 }
 
-function runtimeConfigCliEnvForLocation(options: {
-  readonly location: RuntimeLocationCliState;
-  readonly readDefaultDotEnv: boolean;
-  readonly env?: NodeJS.ProcessEnv;
-}): {
-  readonly suppliedEnv: NodeJS.ProcessEnv;
-  readonly defaultEnv: NodeJS.ProcessEnv;
-  readonly configEnv: NodeJS.ProcessEnv;
-} {
-  const suppliedEnv = options.env ?? process.env;
-  const defaultEnv =
-    options.readDefaultDotEnv &&
-    (options.env === undefined || options.env === process.env)
-      ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), options.location)
-      : {};
-
-  return {
-    suppliedEnv,
-    defaultEnv,
-    configEnv: { ...defaultEnv, ...suppliedEnv }
-  };
-}
-
-function shouldReadDefaultDotEnvForCommand(
+function runtimeConfigCwdDotEnvModeForCommand(
   parsedArgs: RuntimeConfigCliParsedArgs,
   suppliedEnv: NodeJS.ProcessEnv
-): boolean {
-  const command = parsedArgs.commandArgs[0];
-
-  if (command === 'secret' && parsedArgs.commandArgs[1] === 'set') {
-    return shouldReadDefaultDotEnvForSecretSetCommand(parsedArgs, suppliedEnv);
-  }
-
-  if (!hasExplicitRuntimeLocation(parsedArgs.location)) {
-    return shouldReadDefaultDotEnvForRuntimeLocation({
-      location: parsedArgs.location,
-      env: suppliedEnv
-    });
-  }
-
-  return command === 'secret';
-}
-
-function shouldReadDefaultDotEnvForSecretSetCommand(
-  parsedArgs: RuntimeConfigCliParsedArgs,
-  suppliedEnv: NodeJS.ProcessEnv
-): boolean {
+): 'always' | 'auto' {
   const envVar = secretSetEnvVarNameFromArgs(parsedArgs.commandArgs);
 
-  if (envVar === undefined || !envHasNonEmptyValue(suppliedEnv, envVar)) {
-    return true;
+  if (
+    parsedArgs.commandArgs[0] === 'secret' &&
+    parsedArgs.commandArgs[1] === 'set' &&
+    (envVar === undefined || !envHasNonEmptyValue(suppliedEnv, envVar))
+  ) {
+    return 'always';
   }
 
-  return shouldReadDefaultDotEnvForRuntimeLocation({
-    location: parsedArgs.location,
-    env: suppliedEnv
-  });
+  return 'auto';
 }
 
 function secretSetEnvVarNameFromArgs(args: readonly string[]): string | undefined {
@@ -341,15 +370,91 @@ function envHasNonEmptyValue(env: NodeJS.ProcessEnv, name: string): boolean {
   return (env[name]?.length ?? 0) > 0;
 }
 
-function checkDefaultEnvForLocation(options: {
-  readonly cliEnv: ReturnType<typeof runtimeConfigCliEnvForLocation>;
+function resolveRuntimeConfigCliActivationStartup(options: {
+  readonly parsedArgs: RuntimeConfigCliParsedArgs;
+  readonly options: RuntimeConfigCliOptions;
+  readonly cwdDotEnv: 'always' | 'auto';
+}): ReturnType<typeof resolveRuntimeCliStartup> {
+  try {
+    return resolveRuntimeCliStartup({
+      location: options.parsedArgs.location,
+      cwdDotEnv: options.cwdDotEnv,
+      ...(options.options.factories === undefined
+        ? {}
+        : { factories: options.options.factories }),
+      ...(options.options.env === undefined
+        ? {}
+        : { env: options.options.env }),
+      continueAfterActivationErrors: true
+    });
+  } catch (error: unknown) {
+    if (!(error instanceof RuntimeEnvFileError) || error.path === undefined) {
+      throw error;
+    }
+
+    throw new RuntimeConfigMutationError(
+      `Could not read runtime config env file at ${error.path}.`
+    );
+  }
+}
+
+function applyRuntimePluginSecretSetCommand(options: {
   readonly location: RuntimeLocationCliState;
-}): NodeJS.ProcessEnv {
-  if (!hasExplicitRuntimeLocation(options.location)) {
-    return options.cliEnv.defaultEnv;
+  readonly runtimeEnv: NodeJS.ProcessEnv;
+  readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
+  readonly operation: Extract<
+    RuntimeConfigCliArgs['command'],
+    { readonly kind: 'secret_set' }
+  >['operation'];
+}) {
+  const definition = ownJsonRecordValue(
+    options.catalogEntries,
+    options.operation.pluginId
+  );
+
+  if (
+    definition === undefined ||
+    definition.manifest.id !== options.operation.pluginId
+  ) {
+    throw new RuntimeConfigCliUsageError(
+      `Plugin "${options.operation.pluginId}" is not installed.`
+    );
   }
 
-  return {};
+  const runtimeEnv = {
+    ...options.runtimeEnv,
+    [options.operation.envVar]: options.operation.secretValue
+  };
+  const inspected = inspectRuntimePluginConfig({
+    ...options.location,
+    env: runtimeEnv,
+    manifest: definition.manifest
+  });
+
+  return applyRuntimePluginConfigControlOperation({
+    ...options.location,
+    env: runtimeEnv,
+    manifest: definition.manifest,
+    actor: 'operator',
+    expectedFingerprint: inspected.fingerprint,
+    operation: {
+      kind: 'secret_set',
+      fieldName: options.operation.fieldName,
+      envVar: options.operation.envVar,
+      secretValue: options.operation.secretValue
+    }
+  });
+}
+
+function writeRuntimeConfigMutationResult(
+  stdout: NodeJS.WritableStream,
+  result: RuntimeConfigMutationResult
+): void {
+  writeJson(stdout, {
+    configPath: result.configPath,
+    envPath: result.envPath,
+    version: result.config.version
+  });
 }
 
 function parseRuntimeConfigCommand(
@@ -459,7 +564,7 @@ function parseRuntimeConfigCommand(
     }
 
     return {
-      kind: 'mutate',
+      kind: 'secret_set',
       operation: {
         kind: 'secret_set',
         pluginId: requiredArg(args, 2, 'secret set requires a plugin id.'),
@@ -471,7 +576,7 @@ function parseRuntimeConfigCommand(
   }
 
   throw new RuntimeConfigCliUsageError(
-    'Use path, env-path, check, get, set, unset, plugin enable, plugin disable, default-memory-provider, or secret set.'
+    'Use ui, path, env-path, check, get, set, unset, plugin enable, plugin disable, default-memory-provider, or secret set.'
   );
 }
 
@@ -542,6 +647,26 @@ function writeJson(stdout: NodeJS.WritableStream, value: unknown): void {
   stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+function handleRuntimeConfigCliError(
+  error: unknown,
+  options: RuntimeConfigCliOptions
+): number {
+  if (
+    error instanceof RuntimeConfigCliUsageError ||
+    error instanceof RuntimeLocationCliUsageError ||
+    error instanceof RuntimeEnvFileError ||
+    error instanceof RuntimeConfigMutationError ||
+    error instanceof AggregateError ||
+    error instanceof TypeError ||
+    isLocalRuntimeTerminalError(error)
+  ) {
+    options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
+    return 1;
+  }
+
+  throw error;
+}
+
 function formatTerminalErrorMessage(
   error:
     | RuntimeConfigCliUsageError
@@ -566,17 +691,7 @@ function formatTerminalErrorMessage(
   return formatLocalRuntimeTerminalError(error);
 }
 
-function isMainModule(): boolean {
-  const scriptPath = process.argv[1];
-
-  if (scriptPath === undefined) {
-    return false;
-  }
-
-  return import.meta.url === pathToFileURL(scriptPath).href;
-}
-
-if (isMainModule()) {
+if (isMainModule(import.meta.url)) {
   const exitCode = await runRuntimeConfigCliFromArgs(process.argv.slice(2), {
     stdout: process.stdout,
     stderr: process.stderr

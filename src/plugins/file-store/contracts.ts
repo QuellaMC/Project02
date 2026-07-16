@@ -31,14 +31,14 @@ export type RuntimePluginFileStoreTransaction = {
   ): RuntimePluginFileStore;
   prepare(
     identity: RuntimeEventIdentity
-  ): RuntimePluginFileStorePreparedTransaction;
+  ): Promise<RuntimePluginFileStorePreparedTransaction>;
   rollback(): void;
   hasPendingWrites(): boolean;
 };
 
 export type RuntimePluginFileStorePreparedTransaction = {
-  discard(): void;
-  finalize(): void;
+  discard(): Promise<void>;
+  finalize(): Promise<void>;
 };
 
 export type RuntimePluginFileStorePathMode = 'json' | 'jsonl';

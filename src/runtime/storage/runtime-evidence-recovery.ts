@@ -15,13 +15,13 @@ import {
   isTerminalRawEventLogRecord,
   type RuntimeSessionEvidenceSnapshot
 } from '../log.ts';
+import { runtimeEventIdentityKey } from '../event.ts';
 import { atomicReplaceFileSync } from './atomic-file.ts';
 import type { DurableRuntimeSessionEvidence } from './runtime-evidence-contract.ts';
 import {
   assertDurableRuntimeSessionEvidence,
   deriveTerminalRawTraceEvidence,
   reconcileTerminalRawTraceEvidence,
-  runtimeEventIdentityKey,
   startedRawEventIdentitiesWithoutTerminal
 } from './runtime-evidence-validation.ts';
 

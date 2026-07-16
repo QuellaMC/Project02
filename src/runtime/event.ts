@@ -10,13 +10,17 @@ export const runtimeEventTypeValues = ['USER_MESSAGE'] as const;
 
 export type RuntimeEventType = (typeof runtimeEventTypeValues)[number];
 
-export type RuntimeEvent = UserMessageRuntimeEvent;
-
 export type RuntimeEventIdentity = {
   readonly eventId: string;
   readonly traceId: string;
   readonly createdAt: string;
 };
+
+export function runtimeEventIdentityKey(
+  identity: RuntimeEventIdentity
+): string {
+  return `${identity.eventId}\u0000${identity.traceId}\u0000${identity.createdAt}`;
+}
 
 export type UserMessageRuntimeEventPayload = {
   readonly currentUserMessage: string;
@@ -45,14 +49,14 @@ export class RuntimeEventInputError extends Error {
     );
     this.name = 'RuntimeEventInputError';
     this.reason = reason;
-    this.identity = freezeRuntimeEventIdentity(identity);
+    this.identity = createRuntimeEventIdentitySnapshot(identity);
   }
 }
 
 export function createRuntimeEventIdentity(
   options: RuntimeEventIdentityOptions = {}
 ): RuntimeEventIdentity {
-  return freezeRuntimeEventIdentity({
+  return createRuntimeEventIdentitySnapshot({
     eventId: options.eventId ?? `evt_${crypto.randomUUID()}`,
     traceId: options.traceId ?? `trace_${crypto.randomUUID()}`,
     createdAt: options.createdAt ?? new Date().toISOString()
@@ -80,7 +84,7 @@ export function createUserMessageRuntimeEvent(
   message: string | undefined,
   identity: RuntimeEventIdentity = createRuntimeEventIdentity()
 ): UserMessageRuntimeEvent {
-  const runtimeIdentity = freezeRuntimeEventIdentity(identity);
+  const runtimeIdentity = createRuntimeEventIdentitySnapshot(identity);
 
   try {
     return Object.freeze({
@@ -99,13 +103,15 @@ export function createUserMessageRuntimeEvent(
   }
 }
 
-function freezeRuntimeEventIdentity(identity: RuntimeEventIdentity): RuntimeEventIdentity {
+export function createRuntimeEventIdentitySnapshot(
+  identity: RuntimeEventIdentity
+): RuntimeEventIdentity {
   if (identity.eventId.trim().length === 0 || identity.traceId.trim().length === 0) {
-    throw new Error('Runtime event identity requires non-empty event and trace IDs.');
+    throw new TypeError('Runtime event identity requires non-empty event and trace IDs.');
   }
 
   if (identity.eventId === identity.traceId) {
-    throw new Error('Runtime event identity requires separate event and trace IDs.');
+    throw new TypeError('Runtime event identity requires separate event and trace IDs.');
   }
 
   return Object.freeze({

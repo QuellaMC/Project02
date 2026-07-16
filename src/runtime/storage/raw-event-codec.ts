@@ -46,19 +46,23 @@ import {
   type RoleModelToolObservation
 } from '../../role-model/contracts.ts';
 import {
-  characterStatePatchModelToolName,
-  createCharacterStatePatchModelToolCall,
   createVisibleReplyModelToolCall,
   visibleReplyModelToolName,
   type PluginModelToolCall,
   type ModelToolCall
 } from '../../role-model/model-tools.ts';
 import {
+  characterStatePatchModelToolName
+} from '../../plugins/packages/character-state/contract.ts';
+import {
+  createPreparedRuntimePluginConfigEffect,
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginProvidedTool,
+  createRuntimePluginToolCallResultSnapshot,
   createRuntimePluginTurnEvidenceSnapshot,
   type RuntimePluginContextItem,
+  type PreparedRuntimePluginConfigEffect,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
@@ -93,9 +97,11 @@ import {
 import {
   isOneOf,
   requiredNormalizedVisibleMessageText,
+  requiredRuntimeEventIdentity,
   requiredVisibleMessageRole,
   throwMalformedRecord
 } from './codec-primitives.ts';
+import { assertToolRawEventSemantics } from './raw-event-tool-semantics.ts';
 import {
   LocalRuntimeStorageContractError,
   isRecord,
@@ -139,13 +145,7 @@ export function encodeRawEventLogRecord(record: RawEventLogRecord): string {
 
 export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const record = parseJsonObject(line, 'malformed_record');
-  const eventId = requiredRecordString(record, 'eventId', 'malformed_record');
-  const traceId = requiredRecordString(record, 'traceId', 'malformed_record');
-  const createdAt = requiredRecordCanonicalTimestamp(
-    record,
-    'createdAt',
-    'malformed_record'
-  );
+  const { eventId, traceId, createdAt } = requiredRuntimeEventIdentity(record);
   const kind = requiredRawEventKind(record['kind']);
   const eventType = requiredRuntimeEventType(record['eventType']);
   const status = optionalRuntimeTurnStatus(record['status']);
@@ -189,6 +189,9 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const runtimePluginTurnEvidence = optionalRuntimePluginTurnEvidenceSnapshot(
     record['runtimePluginTurnEvidence']
   );
+  const runtimeConfigEffects = optionalPreparedRuntimePluginConfigEffects(
+    record['runtimeConfigEffects']
+  );
 
   assertTerminalRawEventSemantics({
     kind,
@@ -196,6 +199,11 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     visibleMessageIds
   });
   assertToolRawEventSemantics({
+    identity: {
+      eventId,
+      traceId,
+      createdAt
+    },
     kind,
     toolCallId,
     dispatchedToHost,
@@ -228,6 +236,12 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     runtimePluginEvidence,
     runtimePluginTurnEvidence
   });
+  assertRuntimeConfigEffectSemantics({
+    identity: { eventId, traceId, createdAt },
+    kind,
+    toolCallIds,
+    runtimeConfigEffects
+  });
 
   return Object.freeze({
     eventId,
@@ -258,7 +272,8 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
       : { runtimePluginEvidence }),
     ...(runtimePluginTurnEvidence === undefined
       ? {}
-      : { runtimePluginTurnEvidence })
+      : { runtimePluginTurnEvidence }),
+    ...(runtimeConfigEffects === undefined ? {} : { runtimeConfigEffects })
   } satisfies RawEventLogRecord);
 }
 
@@ -455,58 +470,6 @@ function assertTerminalRawEventSemantics(options: {
   }
 }
 
-function assertToolRawEventSemantics(options: {
-  readonly kind: RawEventLogRecordKind;
-  readonly toolCallId: string | undefined;
-  readonly dispatchedToHost: boolean | undefined;
-  readonly toolRound: number | undefined;
-  readonly toolName: string | undefined;
-  readonly toolPluginId: string | undefined;
-  readonly toolInput: RuntimePluginJsonObject | undefined;
-  readonly toolResult: RuntimePluginToolCallResult | undefined;
-}): void {
-  if (options.kind !== 'tool_call_started' && options.kind !== 'tool_call_finished') {
-    if (
-      options.toolCallId !== undefined ||
-      options.dispatchedToHost !== undefined ||
-      options.toolRound !== undefined ||
-      options.toolName !== undefined ||
-      options.toolPluginId !== undefined ||
-      options.toolInput !== undefined ||
-      options.toolResult !== undefined
-    ) {
-      throwMalformedRecord('toolCallId');
-    }
-
-    return;
-  }
-
-  if (
-    options.toolCallId === undefined ||
-    options.toolRound === undefined ||
-    options.toolName === undefined ||
-    options.toolPluginId === undefined
-  ) {
-    throwMalformedRecord('toolCallId');
-  }
-
-  if (options.kind === 'tool_call_started') {
-    if (options.dispatchedToHost !== undefined) {
-      throwMalformedRecord('dispatchedToHost');
-    }
-
-    if (options.toolInput === undefined || options.toolResult !== undefined) {
-      throwMalformedRecord('toolInput');
-    }
-
-    return;
-  }
-
-  if (options.toolResult === undefined || options.toolInput !== undefined) {
-    throwMalformedRecord('toolResult');
-  }
-}
-
 function optionalStringArray(value: unknown, key: string): readonly string[] | undefined {
   if (value === undefined) {
     return undefined;
@@ -700,36 +663,15 @@ function optionalRuntimePluginToolCallResult(
     return undefined;
   }
 
-  if (!isRecord(value)) {
-    throwMalformedRecord('toolResult');
-  }
+  try {
+    return createRuntimePluginToolCallResultSnapshot(value);
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      throwMalformedRecord('toolResult');
+    }
 
-  if (value['status'] === 'accepted') {
-    return Object.freeze({
-      status: 'accepted',
-      output: freezeJsonValue(value['output']),
-      evidence: Object.freeze(
-        requiredArray(value['evidence'], 'toolResult.evidence').map(
-          requiredRuntimePluginEvidenceSnapshot
-        )
-      )
-    } satisfies RuntimePluginToolCallResult);
+    throw error;
   }
-
-  if (value['status'] === 'rejected') {
-    return Object.freeze({
-      status: 'rejected',
-      reason: requiredRecordString(value, 'reason', 'malformed_record'),
-      message: requiredRecordString(value, 'message', 'malformed_record'),
-      evidence: Object.freeze(
-        requiredArray(value['evidence'], 'toolResult.evidence').map(
-          requiredRuntimePluginEvidenceSnapshot
-        )
-      )
-    } satisfies RuntimePluginToolCallResult);
-  }
-
-  throwMalformedRecord('toolResult.status');
 }
 
 function optionalRuntimePluginTurnEvidenceSnapshot(
@@ -747,6 +689,62 @@ function optionalRuntimePluginTurnEvidenceSnapshot(
     }
 
     throw error;
+  }
+}
+
+function optionalPreparedRuntimePluginConfigEffects(
+  value: unknown
+): readonly PreparedRuntimePluginConfigEffect[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  try {
+    const items = requiredArray(value, 'runtimeConfigEffects');
+
+    if (items.length === 0 || items.length > 16) {
+      throw new TypeError(
+        'runtimeConfigEffects must contain between 1 and 16 records.'
+      );
+    }
+
+    return Object.freeze(
+      items.map((item) => createPreparedRuntimePluginConfigEffect(item))
+    );
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      throwMalformedRecord('runtimeConfigEffects');
+    }
+
+    throw error;
+  }
+}
+
+function assertRuntimeConfigEffectSemantics(options: {
+  readonly identity: RuntimeEventIdentity;
+  readonly kind: RawEventLogRecordKind;
+  readonly toolCallIds: readonly string[] | undefined;
+  readonly runtimeConfigEffects:
+    | readonly PreparedRuntimePluginConfigEffect[]
+    | undefined;
+}): void {
+  if (options.runtimeConfigEffects === undefined) {
+    return;
+  }
+
+  if (options.kind !== 'runtime_turn_completed') {
+    throwMalformedRecord('runtimeConfigEffects');
+  }
+
+  for (const effect of options.runtimeConfigEffects) {
+    if (
+      effect.eventId !== options.identity.eventId ||
+      effect.traceId !== options.identity.traceId ||
+      effect.createdAt !== options.identity.createdAt ||
+      !options.toolCallIds?.includes(effect.effectId)
+    ) {
+      throwMalformedRecord('runtimeConfigEffects');
+    }
   }
 }
 
@@ -1804,10 +1802,6 @@ function requiredModelToolCall(value: unknown): ModelToolCall {
     );
 
     return createVisibleReplyModelToolCall(text);
-  }
-
-  if (name === characterStatePatchModelToolName) {
-    return createCharacterStatePatchModelToolCall(freezeJsonRecord(input));
   }
 
   return Object.freeze({

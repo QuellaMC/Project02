@@ -28,9 +28,8 @@ import {
 import {
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
-import {
-  createDefaultProject02PluginHost
-} from '../src/plugins/host.ts';
+import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
+import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimePluginContextItem
 } from '../src/plugins/types.ts';
@@ -240,7 +239,7 @@ describe('NVIDIA role-model provider', () => {
       requiresConfirmation: false,
       sourceReferencesRequired: false
     } satisfies RoleModelPluginToolDefinition);
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent(
         'use the supplied credential',
         'evt_nvidia_authoritative_arguments'
@@ -409,7 +408,7 @@ describe('NVIDIA role-model provider', () => {
     expect(serializedOutput).not.toContain('user:pass');
     expect(serializedOutput).not.toContain('endpoint-secret');
 
-    const loopResult = await runRoleModelLoop({
+    const { publicResult: loopResult } = await runRoleModelLoop({
       event: inputEnvelope.event,
       decisionContext: inputEnvelope.decisionContext,
       pluginToolDefinitions: inputEnvelope.pluginToolDefinitions,
@@ -508,7 +507,7 @@ describe('NVIDIA role-model provider', () => {
       'not user commands'
     );
     expect(messages[1]?.content).toContain(
-      'call plugin.list'
+      'call runtime.plugin.list'
     );
     expect(messages[0]?.content).toContain('Refer to extensions as plugins');
     expect(messages[2]?.content).toContain('Model-only runtime context');
@@ -548,7 +547,7 @@ describe('NVIDIA role-model provider', () => {
 
     expect(tools.map((tool) => tool.function.name)).toEqual([
       visibleReplyModelToolName,
-      'plugin_list',
+      'runtime_plugin_list',
       'character_state_patch'
     ]);
     expect(tools.every((tool) => /^[A-Za-z][A-Za-z0-9_-]*$/u.test(tool.function.name))).toBe(
@@ -566,7 +565,7 @@ describe('NVIDIA role-model provider', () => {
         ?.function.description
     ).toContain('from you');
     expect(
-      tools.find((tool) => tool.function.name === 'plugin_list')
+      tools.find((tool) => tool.function.name === 'runtime_plugin_list')
         ?.function.description
     ).toContain('available to you');
     expect(
@@ -574,13 +573,31 @@ describe('NVIDIA role-model provider', () => {
         ?.function.description
     ).toContain("Mira's internal Character State");
     expect(
-      tools.find((tool) => tool.function.name === 'plugin_list')
+      tools.find((tool) => tool.function.name === 'runtime_plugin_list')
         ?.function.parameters.additionalProperties
     ).toBe(false);
     expect(
-      tools.find((tool) => tool.function.name === 'plugin_list')
+      tools.find((tool) => tool.function.name === 'runtime_plugin_list')
         ?.function.strict
     ).toBe(true);
+  });
+
+  it('uses canonical provider-safe names for every runtime plugin management tool', () => {
+    const pluginHost = createRuntimePluginHost({
+      pluginConfigControl: { pluginManifests: [] },
+      toolConfirmationHandler: () => ({ status: 'approved' })
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope(
+      'hello',
+      pluginHost.pluginToolDefinitions()
+    );
+
+    expect(renderNvidiaTools(inputEnvelope).map((tool) => tool.function.name)).toEqual([
+      visibleReplyModelToolName,
+      'runtime_plugin_list',
+      'runtime_plugin_config',
+      'runtime_plugin_config_update'
+    ]);
   });
 
   it('keeps provider tool aliases globally unique for sanitized runtime collisions', async () => {
@@ -741,7 +758,7 @@ describe('NVIDIA role-model provider', () => {
                 finish_reason: 'stop',
                 message: {
                   role: 'assistant',
-                  content: 'Hello from assistant content.\n- plugin.list'
+                  content: 'Hello from assistant content.\n- runtime.plugin.list'
                 }
               }
             ]
@@ -789,14 +806,14 @@ describe('NVIDIA role-model provider', () => {
         {
           name: visibleReplyModelToolName,
           input: {
-            text: 'Hello from assistant content.\n- plugin.list'
+            text: 'Hello from assistant content.\n- runtime.plugin.list'
           }
         }
       ]
     });
     expect(output.nativeAssistantMessage).toMatchObject({
       role: 'assistant',
-      content: 'Hello from assistant content.\n- plugin.list'
+      content: 'Hello from assistant content.\n- runtime.plugin.list'
     });
     expect(output.providerExchange?.reasoning).toEqual({
       mode: 'enabled',
@@ -1218,10 +1235,10 @@ describe('NVIDIA role-model provider', () => {
                 content: 'Checking the available plugins.',
                 tool_calls: [
                   {
-                    id: 'call_plugin_list',
+                    id: 'call_runtime_plugin_list',
                     type: 'function',
                     function: {
-                      name: 'plugin_list',
+                      name: 'runtime_plugin_list',
                       arguments: '{}'
                     }
                   },
@@ -1257,7 +1274,7 @@ describe('NVIDIA role-model provider', () => {
     expect(rawDecision).toEqual({
       toolCalls: [
         {
-          name: 'plugin.list',
+          name: 'runtime.plugin.list',
           input: {}
         },
         {
@@ -1275,9 +1292,9 @@ describe('NVIDIA role-model provider', () => {
     });
     expect(output.nativeAssistantMessage?.tool_calls).toMatchObject([
       {
-        id: 'call_plugin_list',
+        id: 'call_runtime_plugin_list',
         function: {
-          name: 'plugin_list',
+          name: 'runtime_plugin_list',
           arguments: '{}'
         }
       },
@@ -1359,10 +1376,10 @@ describe('NVIDIA role-model provider', () => {
                 content: 'Checking the available plugins.',
                 tool_calls: [
                   {
-                    id: 'call_plugin_list',
+                    id: 'call_runtime_plugin_list',
                     type: 'function',
                     function: {
-                      name: 'plugin_list',
+                      name: 'runtime_plugin_list',
                       arguments: '{"score":1e999}'
                     }
                   }
@@ -1388,7 +1405,7 @@ describe('NVIDIA role-model provider', () => {
     expect(JSON.parse(output.rawOutputText)).toEqual({
       toolCalls: [
         {
-          name: 'plugin.list',
+          name: 'runtime.plugin.list',
           input: {}
         }
       ]
@@ -1397,10 +1414,10 @@ describe('NVIDIA role-model provider', () => {
     expect(output.nativeToolCallArgumentErrors).toEqual([
       {
         executableIndex: 0,
-        toolName: 'plugin.list',
+        toolName: 'runtime.plugin.list',
         reason: 'invalid_native_tool_arguments',
         message:
-          'NVIDIA response message.tool_calls[0].function.arguments must contain JSON-compatible finite values: plugin.list input field "score" must be finite JSON.'
+          'NVIDIA response message.tool_calls[0].function.arguments must contain JSON-compatible finite values: runtime.plugin.list input field "score" must be finite JSON.'
       }
     ]);
     expect(output.providerMetadata?.error).toBeUndefined();
@@ -1409,7 +1426,10 @@ describe('NVIDIA role-model provider', () => {
   });
 });
 
-function createNvidiaTestInputEnvelope(userMessage = 'hello') {
+function createNvidiaTestInputEnvelope(
+  userMessage = 'hello',
+  pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[]
+) {
   const pluginHost = createDefaultProject02PluginHost();
 
   return createRoleModelInputEnvelope({
@@ -1461,7 +1481,8 @@ function createNvidiaTestInputEnvelope(userMessage = 'hello') {
         })
       ]
     }),
-    pluginToolDefinitions: pluginHost.pluginToolDefinitions()
+    pluginToolDefinitions:
+      pluginToolDefinitions ?? pluginHost.pluginToolDefinitions()
   });
 }
 

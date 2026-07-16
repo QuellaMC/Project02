@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createConversationSession } from '../src/core/conversation.ts';
+import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
@@ -35,6 +36,12 @@ describe('runtime conversation rollback failures', () => {
       ...(underlying.localRuntimeSessionPaths === undefined
         ? {}
         : { localRuntimeSessionPaths: underlying.localRuntimeSessionPaths }),
+      ...(underlying.localRuntimeWriterLockOwnerToken === undefined
+        ? {}
+        : {
+            localRuntimeWriterLockOwnerToken:
+              underlying.localRuntimeWriterLockOwnerToken
+          }),
       appendTrace: (entry) => underlying.appendTrace(entry),
       appendRawEvent: (record) => underlying.appendRawEvent(record),
       appendConversationMessage(record) {
@@ -67,6 +74,7 @@ describe('runtime conversation rollback failures', () => {
         event: createUserMessageRuntimeEvent('failed input', failedIdentity),
         session: failedSession,
         logStore: failingStore,
+        pluginHost: createRuntimePluginHost(),
         agent: { reply: () => ({ text: 'failed reply' }) }
       });
     } catch (error: unknown) {
@@ -90,6 +98,7 @@ describe('runtime conversation rollback failures', () => {
         }),
         session: recoveredSession,
         logStore: reopened,
+        pluginHost: createRuntimePluginHost(),
         agent: { reply: () => ({ text: 'next reply' }) }
       })
     ).resolves.toMatchObject({ status: 'completed' });
@@ -132,6 +141,12 @@ describe('runtime conversation rollback failures', () => {
       ...(underlying.localRuntimeSessionPaths === undefined
         ? {}
         : { localRuntimeSessionPaths: underlying.localRuntimeSessionPaths }),
+      ...(underlying.localRuntimeWriterLockOwnerToken === undefined
+        ? {}
+        : {
+            localRuntimeWriterLockOwnerToken:
+              underlying.localRuntimeWriterLockOwnerToken
+          }),
       appendTrace: (entry) => underlying.appendTrace(entry),
       appendRawEvent: (record) => underlying.appendRawEvent(record),
       appendConversationMessage(record) {
@@ -164,6 +179,7 @@ describe('runtime conversation rollback failures', () => {
         event: createUserMessageRuntimeEvent('failed input', failedIdentity),
         session: failedSession,
         logStore: failingStore,
+        pluginHost: createRuntimePluginHost(),
         agent: { reply: () => ({ text: 'failed reply' }) }
       });
     } catch (error: unknown) {
@@ -187,6 +203,7 @@ describe('runtime conversation rollback failures', () => {
         }),
         session: recoveredSession,
         logStore: reopened,
+        pluginHost: createRuntimePluginHost(),
         agent: { reply: () => ({ text: 'next reply' }) }
       })
     ).resolves.toMatchObject({ status: 'completed' });
@@ -219,6 +236,12 @@ describe('runtime conversation rollback failures', () => {
       ...(underlying.localRuntimeSessionPaths === undefined
         ? {}
         : { localRuntimeSessionPaths: underlying.localRuntimeSessionPaths }),
+      ...(underlying.localRuntimeWriterLockOwnerToken === undefined
+        ? {}
+        : {
+            localRuntimeWriterLockOwnerToken:
+              underlying.localRuntimeWriterLockOwnerToken
+          }),
       appendTrace: (entry) => underlying.appendTrace(entry),
       appendRawEvent: (record) => underlying.appendRawEvent(record),
       appendConversationMessage(record) {
@@ -247,6 +270,7 @@ describe('runtime conversation rollback failures', () => {
         event: createUserMessageRuntimeEvent('hello', createRuntimeEventIdentity()),
         session: createConversationSession({ id: sessionId }),
         logStore,
+        pluginHost: createRuntimePluginHost(),
         agent: { reply: () => ({ text: 'hello back' }) }
       })
     ).rejects.toThrow('user append persisted then failed');
@@ -290,6 +314,7 @@ describe('runtime conversation rollback failures', () => {
         event: createUserMessageRuntimeEvent('hello', createRuntimeEventIdentity()),
         session,
         logStore,
+        pluginHost: createRuntimePluginHost(),
         agent: { reply: () => ({ text: 'hello back' }) }
       })
     ).rejects.toThrow('character append persisted then failed');
@@ -344,6 +369,7 @@ describe('runtime conversation rollback failures', () => {
         ),
         session,
         logStore,
+        pluginHost: createRuntimePluginHost(),
         agent: { reply: () => ({ text: 'hello back' }) }
       });
     } catch (error: unknown) {

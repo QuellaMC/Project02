@@ -28,7 +28,7 @@ describe('runtime config canonical path locking', () => {
       targetA,
       `${JSON.stringify({
         version: runtimeConfigVersion,
-        storeRoot: root,
+        project02: { storeRoot: root },
         plugins: { alpha: { enabled: true } }
       })}\n`,
       'utf8'
@@ -37,7 +37,7 @@ describe('runtime config canonical path locking', () => {
       targetB,
       `${JSON.stringify({
         version: runtimeConfigVersion,
-        storeRoot: root,
+        project02: { storeRoot: root },
         plugins: { beta: { enabled: true } }
       })}\n`,
       'utf8'
@@ -74,9 +74,8 @@ describe('runtime config canonical path locking', () => {
     applyRuntimeConfigMutation({
       configPath: configAlias,
       operation: {
-        kind: 'set',
-        path: 'plugins.gamma.enabled',
-        value: true
+        kind: 'plugin_enable',
+        pluginId: 'gamma'
       }
     });
 

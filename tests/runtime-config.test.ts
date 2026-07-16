@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createTestTempRoot } from './support/temp-root.ts';
 import {
   createConfiguredProject02PluginHost,
+  createRuntimeConfigInspectShape,
   defaultRuntimeConfigPath,
   loadProject02RuntimeConfig,
   resolveProject02RuntimeConfig,
@@ -12,11 +13,13 @@ import {
   runtimeConfigVersion
 } from '../src/runtime/config/index.ts';
 import {
-  createCharacterStatePlugin,
-  createCharacterStatePluginManifest,
-  firstPartyModelToolsPluginId,
-  runtimePluginDiscoveryPluginId
+  hostScopedFirstPartyRuntimePluginIds,
+  runtimePluginId
 } from '../src/plugins/index.ts';
+import {
+  createCharacterStatePlugin,
+  createCharacterStatePluginManifest
+} from '../src/plugins/packages/character-state/plugin.ts';
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
 import {
   collect,
@@ -39,7 +42,16 @@ describe('runtime config loading and resolution', () => {
     const resolved = resolveProject02RuntimeConfig({ loadedConfig: loaded, storeRoot });
 
     expect(loaded.source).toBe('none');
-    expect(resolved.storeRoot).toBe(storeRoot);
+    expect(resolved.project02.storeRoot).toBe(storeRoot);
+    expect(Object.hasOwn(resolved, 'storeRoot')).toBe(false);
+    expect(Object.hasOwn(resolved, 'defaultMemoryProvider')).toBe(false);
+    expect(Object.hasOwn(resolved, 'roleModelProvider')).toBe(false);
+    const inspection = createRuntimeConfigInspectShape(resolved);
+
+    expect(inspection.project02.storeRoot).toBe(storeRoot);
+    expect(Object.hasOwn(inspection, 'storeRoot')).toBe(false);
+    expect(Object.hasOwn(inspection, 'defaultMemoryProvider')).toBe(false);
+    expect(Object.hasOwn(inspection, 'roleModelProvider')).toBe(false);
     expect(resolved.diagnostics).toEqual([]);
   });
 
@@ -60,7 +72,7 @@ describe('runtime config loading and resolution', () => {
     const resolved = resolveProject02RuntimeConfig({ loadedConfig: loaded });
 
     expect(loaded.source).toBe('path');
-    expect(resolved.storeRoot).toBe('explicit-store');
+    expect(resolved.project02.storeRoot).toBe('explicit-store');
   });
 
   it('includes plugin enablement in the effective config fingerprint', () => {
@@ -122,7 +134,7 @@ describe('runtime config loading and resolution', () => {
       source: 'default',
       path: selectedPath
     });
-    expect(resolved.storeRoot).toBe(selectedStoreRoot);
+    expect(resolved.project02.storeRoot).toBe(selectedStoreRoot);
   });
 
   it('infers store root from existing store-default config selected by path or env', () => {
@@ -139,14 +151,15 @@ describe('runtime config loading and resolution', () => {
       }
     });
 
-    expect(explicitLoaded.config?.storeRoot).toBeUndefined();
-    expect(envLoaded.config?.storeRoot).toBeUndefined();
+    expect(explicitLoaded.config?.project02?.storeRoot).toBeUndefined();
+    expect(envLoaded.config?.project02?.storeRoot).toBeUndefined();
     expect(
-      resolveProject02RuntimeConfig({ loadedConfig: explicitLoaded }).storeRoot
+      resolveProject02RuntimeConfig({ loadedConfig: explicitLoaded }).project02
+        .storeRoot
     ).toBe(seededStoreRoot);
-    expect(resolveProject02RuntimeConfig({ loadedConfig: envLoaded }).storeRoot).toBe(
-      seededStoreRoot
-    );
+    expect(
+      resolveProject02RuntimeConfig({ loadedConfig: envLoaded }).project02.storeRoot
+    ).toBe(seededStoreRoot);
   });
 
   it('infers store root from canonical symlink targets for store-default configs selected by path or env', () => {
@@ -168,14 +181,15 @@ describe('runtime config loading and resolution', () => {
       }
     });
 
-    expect(explicitLoaded.config?.storeRoot).toBeUndefined();
-    expect(envLoaded.config?.storeRoot).toBeUndefined();
+    expect(explicitLoaded.config?.project02?.storeRoot).toBeUndefined();
+    expect(envLoaded.config?.project02?.storeRoot).toBeUndefined();
     expect(
-      resolveProject02RuntimeConfig({ loadedConfig: explicitLoaded }).storeRoot
+      resolveProject02RuntimeConfig({ loadedConfig: explicitLoaded }).project02
+        .storeRoot
     ).toBe(seededStoreRoot);
-    expect(resolveProject02RuntimeConfig({ loadedConfig: envLoaded }).storeRoot).toBe(
-      seededStoreRoot
-    );
+    expect(
+      resolveProject02RuntimeConfig({ loadedConfig: envLoaded }).project02.storeRoot
+    ).toBe(seededStoreRoot);
   });
 
   it('rejects unknown top-level config fields and blocks default activation', async () => {
@@ -346,7 +360,7 @@ describe('runtime config loading and resolution', () => {
 
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     const characterStateActivation = activationPluginById(
       configured.activation.plugins,
       'character-state'
@@ -425,7 +439,7 @@ describe('runtime config loading and resolution', () => {
 
     expect(manifestBackedFactoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(characterActivation).toMatchObject({
       pluginId: 'character-state',
       enabled: false,
@@ -1065,6 +1079,49 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
+  it.each(['constructor', 'toString'] as const)(
+    'reports prototype-named required plugin config field %s as missing',
+    async (fieldName) => {
+      const pluginId = 'memory.prototype-field';
+      const plugin = requiredDottedConfigPlugin(pluginId, fieldName);
+      const configPath = writeRuntimeConfig(
+        join(createTestTempRoot('project02-config-prototype-field-'), 'config.json'),
+        {
+          plugins: {
+            [pluginId]: {
+              config: {}
+            }
+          }
+        }
+      );
+      let factoryCalls = 0;
+
+      const configured = await createConfiguredProject02PluginHost({
+        loadedConfig: loadProject02RuntimeConfig({ configPath }),
+        factories: {
+          [pluginId]: {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+              return plugin;
+            }
+          }
+        }
+      });
+
+      expect(factoryCalls).toBe(0);
+      expect(configured.activation.diagnostics).toContainEqual(
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_required_value_missing',
+          path: `plugins.${pluginId}.config.${fieldName}`,
+          pluginId,
+          pluginConfigField: fieldName
+        })
+      );
+    }
+  );
+
   it('blocks all plugin factory creation when activation diagnostics contain plugin errors', async () => {
     const characterPlugin = createCharacterStatePlugin();
     const memoryPlugin = requiredSecretPlugin();
@@ -1115,7 +1172,7 @@ describe('runtime config loading and resolution', () => {
     expect(characterFactoryCalls).toBe(0);
     expect(memoryFactoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1313,8 +1370,7 @@ describe('runtime config loading and resolution', () => {
       }
     ]);
     expect(configured.activation.enabledPluginIds).toEqual([
-      runtimePluginDiscoveryPluginId,
-      firstPartyModelToolsPluginId,
+      ...hostScopedFirstPartyRuntimePluginIds,
       'memory.required'
     ]);
   });
@@ -1415,7 +1471,7 @@ describe('runtime config loading and resolution', () => {
     });
 
     expect(factoryStoreRoot).toBe(configuredStoreRoot);
-    expect(configured.resolvedConfig.storeRoot).toBe(configuredStoreRoot);
+    expect(configured.resolvedConfig.project02.storeRoot).toBe(configuredStoreRoot);
   });
 
   it('fails activation checks when multiple explicitly enabled memory providers are ambiguous', async () => {
@@ -1449,13 +1505,13 @@ describe('runtime config loading and resolution', () => {
       factories
     });
 
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'ambiguous_memory_provider_selection',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         })
       ])
     );
@@ -1526,13 +1582,13 @@ describe('runtime config loading and resolution', () => {
 
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         })
       ])
     );
@@ -1580,13 +1636,13 @@ describe('runtime config loading and resolution', () => {
     });
 
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'default_memory_provider_not_memory_provider',
-          path: 'defaultMemoryProvider',
+          path: 'project02.defaultMemoryProvider',
           pluginId: 'character-state'
         })
       ])
@@ -1644,13 +1700,13 @@ describe('runtime config loading and resolution', () => {
       factories
     });
 
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         })
       ])
     );
@@ -1720,13 +1776,13 @@ describe('runtime config loading and resolution', () => {
 
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         })
       ])
     );
@@ -1760,6 +1816,13 @@ describe('runtime config loading and resolution', () => {
 
   it('writes non-secret and secret-ref config through the shared mutation path', async () => {
     const storeRoot = createTestTempRoot('project02-config-cli-');
+    const secretPlugin = requiredSecretPlugin('mem0-local');
+    const factories = {
+      [secretPlugin.manifest.id]: {
+        manifest: secretPlugin.manifest,
+        create: () => secretPlugin
+      }
+    };
     let stdout = '';
 
     expect(
@@ -1792,12 +1855,13 @@ describe('runtime config loading and resolution', () => {
           'secret',
           'set',
           'mem0-local',
-          'cloudApiKey',
+          'apiKey',
           'MEM0_API_KEY'
         ],
         {
           stdout: collect(() => {}),
           stderr: collect(() => {}),
+          factories,
           env: { MEM0_API_KEY: 'super-secret' }
         }
       )
@@ -1813,7 +1877,7 @@ describe('runtime config loading and resolution', () => {
         'character-state': { enabled: false },
         'memory.recall': { enabled: true },
         'mem0-local': {
-          config: { cloudApiKey: { $env: 'MEM0_API_KEY' } }
+          config: { apiKey: { $env: 'MEM0_API_KEY' } }
         }
       }
     });

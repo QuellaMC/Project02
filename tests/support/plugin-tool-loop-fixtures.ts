@@ -1,12 +1,14 @@
 import { createConversationSession } from '../../src/core/conversation.ts';
-import { characterStatePluginId } from '../../src/plugins/builtin/character-state/index.ts';
+import { characterStatePluginId } from '../../src/plugins/contract.ts';
 import { createRuntimePluginFileStore } from '../../src/plugins/file-store.ts';
-import { createRuntimePluginHost, runtimePluginDiscoveryPluginId } from '../../src/plugins/host.ts';
+import { createDefaultProject02PluginHost } from './default-plugin-host.ts';
+import { createRuntimePluginHost } from '../../src/plugins/host.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
   firstPartyModelToolsPluginId,
+  runtimePluginId,
   runtimePluginContractVersion
 } from '../../src/plugins/types.ts';
 import {
@@ -17,9 +19,34 @@ import { createFileRuntimeLogStore } from '../../src/runtime/storage/file-runtim
 import { createLocalRuntimeSessionStore } from '../../src/runtime/storage/session-store.ts';
 import { createRuntimeLogStore } from '../../src/runtime/log.ts';
 import type { RuntimeLogStore } from '../../src/runtime/log.ts';
+import {
+  runLocalUserMessageEvent as runLocalUserMessageEventWithExplicitHost,
+  type RunLocalUserMessageEventOptions
+} from '../../src/runtime/local.ts';
 import type { RoleModelAdapter } from '../../src/role-model/loop.ts';
 import type { RoleModelChatMessage } from '../../src/role-model/prompt.ts';
 import { createTestTempRoot } from './temp-root.ts';
+
+export function runLocalUserMessageEventWithDefaultTestHost(
+  options: Omit<RunLocalUserMessageEventOptions, 'pluginHost'> &
+    Partial<Pick<RunLocalUserMessageEventOptions, 'pluginHost'>>
+) {
+  const sessionPaths = options.logStore.localRuntimeSessionPaths;
+  const pluginHost =
+    options.pluginHost ??
+    createDefaultProject02PluginHost({
+      ...(sessionPaths === undefined
+        ? {}
+        : { storeRoot: sessionPaths.storeRoot }),
+      sessionId: sessionPaths?.sessionId ?? options.session.id,
+      sessionIdentity: options.session
+    });
+
+  return runLocalUserMessageEventWithExplicitHost({
+    ...options,
+    pluginHost
+  });
+}
 
 export function createNativePluginListAdapter(
   messagesByRound: RoleModelChatMessage[][]
@@ -36,7 +63,7 @@ export function createNativePluginListAdapter(
           rawOutputText: JSON.stringify({
             toolCalls: [
               {
-                name: 'plugin.list',
+                name: 'runtime.plugin.list',
                 input: {}
               }
             ]
@@ -46,10 +73,10 @@ export function createNativePluginListAdapter(
             content: 'Checking plugins.',
             tool_calls: [
               {
-                id: 'call_plugin_list',
+                id: 'call_runtime_plugin_list',
                 type: 'function',
                 function: {
-                  name: 'plugin.list',
+                  name: 'runtime.plugin.list',
                   arguments: '{}'
                 }
               }
@@ -95,7 +122,7 @@ export function createNativeVisibleReplyAndPluginListAdapter(
                 }
               },
               {
-                name: 'plugin.list',
+                name: 'runtime.plugin.list',
                 input: {}
               }
             ]
@@ -113,10 +140,10 @@ export function createNativeVisibleReplyAndPluginListAdapter(
                 }
               },
               {
-                id: 'call_plugin_list_with_visible',
+                id: 'call_runtime_plugin_list_with_visible',
                 type: 'function',
                 function: {
-                  name: 'plugin.list',
+                  name: 'runtime.plugin.list',
                   arguments: '{}'
                 }
               }
@@ -347,9 +374,9 @@ export function createOneShotTerminalTraceAppendFailingLogStore(
   } satisfies RuntimeLogStore);
 }
 
-export function createAfterTurnCommittedAppendFailingLogStore(): RuntimeLogStore {
-  const logStore = createRuntimeLogStore();
-
+export function createAfterTurnCommittedAppendFailingLogStore(
+  logStore: RuntimeLogStore = createRuntimeLogStore()
+): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
     appendTrace(entry) {
@@ -364,6 +391,42 @@ export function createAfterTurnCommittedAppendFailingLogStore(): RuntimeLogStore
     },
     appendConversationMessage(record) {
       return logStore.appendConversationMessage(record);
+    },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
+    },
+    readSessionEvidence() {
+      return logStore.readSessionEvidence();
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
+export function createTurnCompletedAppendFailingLogStore(
+  logStore: RuntimeLogStore
+): RuntimeLogStore {
+  return Object.freeze({
+    ...delegateRuntimeLogStoreLifecycle(logStore),
+    appendTrace(entry) {
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      if (record.kind === 'runtime_turn_completed') {
+        throw new Error('runtime_turn_completed raw event append failed');
+      }
+
+      return logStore.appendRawEvent(record);
+    },
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -743,7 +806,7 @@ export function createAfterTurnCommittedProbeHost(
       })
     ],
     enabledPluginIds: [
-      runtimePluginDiscoveryPluginId,
+      runtimePluginId,
       firstPartyModelToolsPluginId,
       pluginId
     ]
@@ -811,7 +874,7 @@ export function createPluginStoreRevisionFixtureHost() {
       })
     ],
     enabledPluginIds: [
-      runtimePluginDiscoveryPluginId,
+      runtimePluginId,
       firstPartyModelToolsPluginId,
       pluginId
     ]

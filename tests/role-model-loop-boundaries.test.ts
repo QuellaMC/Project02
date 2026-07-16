@@ -10,6 +10,7 @@ import {
   type RoleModelProviderMetadata
 } from '../src/role-model/contracts.ts';
 import {
+  type PreparedRuntimePluginConfigEffect,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginToolCallResult
 } from '../src/plugins/validation.ts';
@@ -40,6 +41,117 @@ import {
 } from './support/role-model-loop-fixtures.ts';
 
 describe('role-model loop evidence and boundary validation', () => {
+  it('keeps prepared config effects internal to bounded turn execution state', async () => {
+    const eventId = 'evt_prepared_effect_boundary';
+    const messagesByRound: RoleModelChatMessage[][] = [];
+    const completedResults: RuntimePluginToolCallResult[] = [];
+    const preparedConfigEffectsByToolCallId = new Map<
+      string,
+      PreparedRuntimePluginConfigEffect
+    >();
+    let round = 0;
+    const adapter: RoleModelAdapter = Object.freeze({
+      invoke(_inputEnvelope, invocation) {
+        round += 1;
+        messagesByRound.push([...invocation.turnContext.messages]);
+
+        if (round === 1) {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                { name: 'memory.search', input: { query: 'Mira' } }
+              ]
+            }),
+            nativeAssistantMessage: {
+              role: 'assistant',
+              content: 'Preparing the update.',
+              tool_calls: [
+                {
+                  id: 'call_prepared_config_effect',
+                  type: 'function',
+                  function: {
+                    name: 'memory.search',
+                    arguments: '{"query":"Mira"}'
+                  }
+                }
+              ]
+            }
+          };
+        }
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              { name: 'visible_reply', input: { text: 'Update prepared.' } }
+            ]
+          })
+        };
+      }
+    });
+    const { publicResult: result } = await runRoleModelLoop({
+      event: createTestEvent('update config', eventId),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolHost: Object.freeze({
+        handleToolCall(call) {
+          return Object.freeze({
+            status: 'accepted',
+            output: Object.freeze({ status: 'approved_pending_commit' }),
+            evidence: Object.freeze([]),
+            preparedConfigEffect: Object.freeze({
+              eventId: call.eventId,
+              traceId: call.traceId,
+              createdAt: call.createdAt,
+              kind: 'runtime_plugin_config_effect',
+              effectId: call.toolCallId ?? 'missing-tool-call-id',
+              targetPluginId: 'config.target.fixture',
+              targetConfigPath: '/tmp/project02-config.json',
+              fieldName: 'tone',
+              expectedFingerprint: 'before-fingerprint',
+              resultFingerprint: 'after-fingerprint',
+              operation: Object.freeze({ kind: 'set', value: 'warm' })
+            })
+          });
+        }
+      }),
+      preparedConfigEffectsByToolCallId,
+      runtimePluginContext: createTestPluginContext(eventId),
+      onPluginToolCallCompleted(event) {
+        completedResults.push(event.result);
+      }
+    });
+    const nativeToolResult = messagesByRound[1]?.find(
+      (message) => message.role === 'tool'
+    );
+    const publicSurfaces = JSON.stringify({
+      result,
+      completedResults,
+      nativeToolResult
+    });
+    const capturedEffects = [...preparedConfigEffectsByToolCallId.values()];
+
+    expect(result.status).toBe('accepted');
+    expect(capturedEffects).toMatchObject([
+      {
+        targetPluginId: 'config.target.fixture',
+        fieldName: 'tone',
+        operation: { kind: 'set', value: 'warm' }
+      }
+    ]);
+    expect(completedResults).toMatchObject([
+      {
+        status: 'accepted',
+        output: { status: 'approved_pending_commit' }
+      }
+    ]);
+    expect(nativeToolResult).toMatchObject({ role: 'tool' });
+    expect(publicSurfaces).not.toContain('preparedConfigEffect');
+    expect(publicSurfaces).not.toContain('runtime_plugin_config_effect');
+    expect(publicSurfaces).not.toContain('before-fingerprint');
+    expect(publicSurfaces).not.toContain('after-fingerprint');
+  });
+
   it('redacts native argument-error reasons across loop and callback surfaces', async () => {
     let round = 0;
     const completedResults: RuntimePluginToolCallResult[] = [];
@@ -74,7 +186,7 @@ describe('role-model loop evidence and boundary validation', () => {
         };
       }
     });
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_native_argument_secret'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -100,7 +212,7 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('preserves credential-bearing tool input for host dispatch while redacting loop evidence', async () => {
     let dispatchedInput: Readonly<Record<string, unknown>> | undefined;
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_secret_tool_input'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter([
@@ -150,6 +262,43 @@ describe('role-model loop evidence and boundary validation', () => {
     expect(serializedEvidence).not.toContain('structured-secret');
   });
 
+  it('keeps execution reply text explicit and constructs public evidence independently', async () => {
+    const executionResult = await runRoleModelLoop({
+      event: createTestEvent('reply safely', 'evt_execution_reply_boundary'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: visibleReplyModelToolName,
+              input: { text: 'api_key=execution-reply-secret' }
+            }
+          ]
+        }
+      ], () => undefined),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
+    });
+
+    expect(executionResult.status).toBe('accepted');
+    if (executionResult.status !== 'accepted') {
+      throw new Error('Expected an accepted role-model loop result.');
+    }
+
+    const publicResult = executionResult.publicResult;
+    const clonedPublicResult = structuredClone(publicResult);
+
+    expect(executionResult.visibleReplyText).toBe(
+      'api_key=execution-reply-secret'
+    );
+    expect(clonedPublicResult).toEqual(publicResult);
+    expect(JSON.stringify(publicResult)).not.toContain(
+      'execution-reply-secret'
+    );
+    expect(JSON.stringify(clonedPublicResult)).not.toContain(
+      'execution-reply-secret'
+    );
+  });
+
   it.each(['rejected', 'failed'] as const)(
     'converts accepted plugin tool results with %s tool invocation evidence into rejected observations',
     async (evidenceStatus) => {
@@ -191,7 +340,7 @@ describe('role-model loop evidence and boundary validation', () => {
         }
       });
 
-      const result = await runRoleModelLoop({
+      const { publicResult: result } = await runRoleModelLoop({
         event: createTestEvent(
           'search memory',
           `evt_accepted_${evidenceStatus}_evidence_plugin_tool`
@@ -260,7 +409,7 @@ describe('role-model loop evidence and boundary validation', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_degraded_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -307,7 +456,7 @@ describe('role-model loop evidence and boundary validation', () => {
       enabledPluginIds: [plugin.manifest.id]
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_host_degraded_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -382,7 +531,7 @@ describe('role-model loop evidence and boundary validation', () => {
         }
       });
 
-      const result = await runRoleModelLoop({
+      const { publicResult: result } = await runRoleModelLoop({
         event: createTestEvent('search memory', eventId),
         decisionContext: createTestDecisionContext(),
         adapter,
@@ -506,7 +655,7 @@ describe('role-model loop evidence and boundary validation', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_custom_host_secret_output'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -612,7 +761,7 @@ describe('role-model loop evidence and boundary validation', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_custom_host_secret_reject'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -659,7 +808,7 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('rejects custom-host evidence that does not match the routed call identity', async () => {
     const eventId = 'evt_custom_host_evidence_identity';
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -727,7 +876,7 @@ describe('role-model loop evidence and boundary validation', () => {
       redactionLabels: []
     } satisfies RuntimePluginEvidenceSnapshot;
     Reflect.deleteProperty(malformedEvidence, 'kind');
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -802,7 +951,7 @@ describe('role-model loop evidence and boundary validation', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_required_observed'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -854,7 +1003,7 @@ describe('role-model loop evidence and boundary validation', () => {
       ],
       () => undefined
     );
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_sequential_required_tools'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -914,7 +1063,7 @@ describe('role-model loop evidence and boundary validation', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_repeated_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -956,7 +1105,7 @@ describe('role-model loop evidence and boundary validation', () => {
       ],
       () => undefined
     );
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_rejected_attempt_limit'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -977,7 +1126,7 @@ describe('role-model loop evidence and boundary validation', () => {
     'counts %s host attempts before rejecting a retry',
     async (failureMode) => {
       let hostCalls = 0;
-      const result = await runRoleModelLoop({
+      const { publicResult: result } = await runRoleModelLoop({
         event: createTestEvent(
           'search memory',
           `evt_${failureMode}_attempt_limit`
@@ -1038,7 +1187,7 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('rejects an over-capacity batch before dispatching any member', async () => {
     let hostCalls = 0;
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_batch_attempt_limit'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -1071,16 +1220,20 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('stores a rejected parsed snapshot for terminal empty toolCalls output', async () => {
-    const result = await runRoleModelLoop({
+    const executionResult = await runRoleModelLoop({
       event: createTestEvent('hello', 'evt_empty_tool_calls'),
       decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
       adapter: createSequencedAdapter([
         {
           toolCalls: []
         }
       ], () => undefined)
     });
+    const result = executionResult.publicResult;
 
+    expect(executionResult.status).toBe('rejected');
+    expect(executionResult).not.toHaveProperty('visibleReplyText');
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
@@ -1120,9 +1273,10 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('redacts adapter-supplied provider endpoints before IO snapshots expose them', async () => {
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('hello', 'evt_provider_endpoint_redaction'),
       decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
       adapter: createProviderMetadataAdapter(
         Object.freeze({
           provider: 'local',
@@ -1156,9 +1310,10 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('rejects non-finite provider request metadata before snapshots can serialize it', async () => {
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('hello', 'evt_non_finite_provider_request'),
       decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
       adapter: createProviderMetadataAdapter(
         Object.freeze({
           provider: 'local',
@@ -1182,9 +1337,10 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('rejects non-finite provider response metadata before snapshots can serialize it', async () => {
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('hello', 'evt_non_finite_provider_response'),
       decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
       adapter: createProviderMetadataAdapter(
         Object.freeze({
           provider: 'local',
@@ -1207,9 +1363,10 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('rejects malformed provider exchange evidence at the adapter boundary', async () => {
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('hello', 'evt_malformed_provider_exchange'),
       decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
       adapter: Object.freeze({
         invoke(_inputEnvelope, invocation) {
           const providerExchange: RoleModelProviderExchangeSnapshot = {
@@ -1263,9 +1420,10 @@ describe('role-model loop evidence and boundary validation', () => {
   ])(
     'rejects provider exchange tool schemas with %s',
     async (_case, required) => {
-      const result = await runRoleModelLoop({
+      const { publicResult: result } = await runRoleModelLoop({
         event: createTestEvent('hello', `evt_bad_schema_${required.join('_')}`),
         decisionContext: createTestDecisionContext(),
+        pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
         adapter: Object.freeze({
           invoke(_inputEnvelope, invocation) {
             const renderedTools = invocation.turnContext.tools.map(
@@ -1318,9 +1476,10 @@ describe('role-model loop evidence and boundary validation', () => {
   );
 
   it('accepts a nested provider schema with an empty required array', async () => {
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('hello', 'evt_valid_nested_empty_required'),
       decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
       adapter: Object.freeze({
         invoke(_inputEnvelope, invocation) {
           const renderedTools = invocation.turnContext.tools.map(

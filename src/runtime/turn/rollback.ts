@@ -60,7 +60,7 @@ export async function appendRejectedResult(
     healthResult.evidence
   );
 
-  rollbackPluginFileStoreTransaction(state);
+  await rollbackPluginFileStoreTransaction(state);
   appendTrace(state, optionsForRejection.traceStep);
   appendRawEvent(state, {
     ...state.identity,
@@ -197,7 +197,7 @@ export async function handleRuntimeTurnFailure(
     });
   }
 
-  rollbackPluginFileStoreTransaction(state);
+  await rollbackPluginFileStoreTransaction(state);
   appendRawEvent(state, {
     ...state.identity,
     kind: 'runtime_turn_rejected',

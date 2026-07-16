@@ -554,6 +554,14 @@ function requiredConfigField(
     value['allowedValues'] === undefined
       ? accept(undefined)
       : requiredStringArray(value['allowedValues'], 'allowedValues');
+  const agentMutable =
+    value['agentMutable'] === undefined
+      ? accept(undefined)
+      : requiredBoolean(value['agentMutable'], 'agentMutable');
+  const reloadRequired =
+    value['reloadRequired'] === undefined
+      ? accept(undefined)
+      : requiredBoolean(value['reloadRequired'], 'reloadRequired');
   const redactionLabels = requiredStringArray(
     value['redactionLabels'],
     'redactionLabels'
@@ -563,56 +571,94 @@ function requiredConfigField(
     'configFingerprint'
   );
 
-  if (
-    name.status === 'rejected' ||
-    description.status === 'rejected' ||
-    required.status === 'rejected' ||
-    secret.status === 'rejected' ||
-    valueType.status === 'rejected' ||
-    defaultValueSummary.status === 'rejected' ||
-    envVar.status === 'rejected' ||
-    allowedValues.status === 'rejected' ||
-    redactionLabels.status === 'rejected' ||
-    configFingerprint.status === 'rejected'
-  ) {
-    return firstRejected([
-      name,
-      description,
-      required,
-      secret,
-      valueType,
-      defaultValueSummary,
-      envVar,
-      allowedValues,
-      redactionLabels,
-      configFingerprint
-    ]);
+  if (name.status === 'rejected') return name;
+  if (description.status === 'rejected') return description;
+  if (required.status === 'rejected') return required;
+  if (secret.status === 'rejected') return secret;
+  if (valueType.status === 'rejected') return valueType;
+  if (defaultValueSummary.status === 'rejected') return defaultValueSummary;
+  if (envVar.status === 'rejected') return envVar;
+  if (allowedValues.status === 'rejected') return allowedValues;
+  if (agentMutable.status === 'rejected') return agentMutable;
+  if (reloadRequired.status === 'rejected') return reloadRequired;
+  if (redactionLabels.status === 'rejected') return redactionLabels;
+  if (configFingerprint.status === 'rejected') return configFingerprint;
+
+  if (secret.value && agentMutable.value === true) {
+    return reject(
+      'malformed_manifest',
+      'Secret plugin config fields cannot allow agent mutation.'
+    );
   }
 
+  return acceptRuntimePluginConfigField({
+    name: name.value,
+    description: description.value,
+    required: required.value,
+    secret: secret.value,
+    valueType: valueType.value,
+    defaultValueSummary: defaultValueSummary.value,
+    envVar: envVar.value,
+    allowedValues: allowedValues.value,
+    agentMutable: agentMutable.value,
+    reloadRequired: reloadRequired.value,
+    redactionLabels: redactionLabels.value,
+    configFingerprint: configFingerprint.value
+  });
+}
+
+function acceptRuntimePluginConfigField(options: {
+  readonly name: string;
+  readonly description: string;
+  readonly required: boolean;
+  readonly secret: boolean;
+  readonly valueType: RuntimePluginConfigValueType | undefined;
+  readonly defaultValueSummary: string | undefined;
+  readonly envVar: string | undefined;
+  readonly allowedValues: readonly string[] | undefined;
+  readonly agentMutable: boolean | undefined;
+  readonly reloadRequired: boolean | undefined;
+  readonly redactionLabels: readonly string[];
+  readonly configFingerprint: string | undefined;
+}): RuntimePluginValidationResult<RuntimePluginConfigField> {
   return accept(
     Object.freeze({
-      name: name.value,
-      description: redactRuntimePluginText(description.value),
-      required: required.value,
-      secret: secret.value,
-      ...(valueType.value === undefined ? {} : { valueType: valueType.value }),
-      ...(defaultValueSummary.value === undefined
+      name: options.name,
+      description: redactRuntimePluginText(options.description),
+      required: options.required,
+      secret: options.secret,
+      ...(options.valueType === undefined ? {} : { valueType: options.valueType }),
+      ...(options.defaultValueSummary === undefined
         ? {}
-        : { defaultValueSummary: redactRuntimePluginText(defaultValueSummary.value) }),
-      ...(envVar.value === undefined
+        : {
+            defaultValueSummary: redactRuntimePluginText(
+              options.defaultValueSummary
+            )
+          }),
+      ...(options.envVar === undefined
         ? {}
-        : { envVar: redactRuntimePluginText(envVar.value) }),
-      ...(allowedValues.value === undefined
+        : { envVar: redactRuntimePluginText(options.envVar) }),
+      ...(options.allowedValues === undefined
         ? {}
         : {
             allowedValues: Object.freeze(
-              allowedValues.value.map(redactRuntimePluginText)
+              options.allowedValues.map(redactRuntimePluginText)
             )
           }),
-      redactionLabels: freezeRedactedStrings(redactionLabels.value),
-      ...(configFingerprint.value === undefined
+      ...(options.agentMutable === undefined
         ? {}
-        : { configFingerprint: redactRuntimePluginText(configFingerprint.value) })
+        : { agentMutable: options.agentMutable }),
+      ...(options.reloadRequired === undefined
+        ? {}
+        : { reloadRequired: options.reloadRequired }),
+      redactionLabels: freezeRedactedStrings(options.redactionLabels),
+      ...(options.configFingerprint === undefined
+        ? {}
+        : {
+            configFingerprint: redactRuntimePluginText(
+              options.configFingerprint
+            )
+          })
     } satisfies RuntimePluginConfigField)
   );
 }
