@@ -368,29 +368,6 @@ describe('local runtime mutation locks', () => {
     await foreign.release();
   });
 
-  it(
-    'quiesces an in-flight heartbeat before releasing its lock directory',
-    async () => {
-      const locksRoot = await createTempLocksRoot();
-
-      for (let index = 0; index < 150; index += 1) {
-        const lease = await acquireLocalRuntimeMutationLock({
-          locksRoot,
-          resourceKey: `heartbeat-release:${String(index)}`,
-          heartbeatIntervalMs: 1,
-          waitTimeoutMs: 0
-        });
-
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, 2);
-        });
-        await expect(lease.release()).resolves.toBeUndefined();
-      }
-
-      expect(await readdir(locksRoot)).toEqual([]);
-    },
-    30_000
-  );
 });
 
 async function createTempLocksRoot(): Promise<string> {

@@ -1,0 +1,52 @@
+{
+  "format": "project02.plugin.v1",
+  "entry": "./index.ts",
+  "manifest": {
+    "id": "character-state",
+    "displayName": "Character State",
+    "version": "1.0.0",
+    "kind": "first_party",
+    "description": "First-party assistant-owned Character State context and patch tool for Mira's internal state.",
+    "contractVersion": "mvp-008.runtime_plugin.v2",
+    "compatibility": {
+      "hostContractVersions": [
+        "mvp-008.runtime_plugin.v2"
+      ],
+      "sourceSystem": "project02",
+      "externalContract": "character_state_plugin"
+    },
+    "declaredPlugins": [
+      "tool_provider",
+      "before_role_model_call",
+      "handle_tool_call"
+    ],
+    "config": {
+      "fields": []
+    },
+    "localTrustLevel": "first_party",
+    "runtimePolicy": {
+      "requiredForTurn": true,
+      "sideEffectLevel": "local_memory_write",
+      "confirmation": "not_required",
+      "timeoutMs": 1000,
+      "sourceReferencesRequired": false,
+      "redactionLabels": [],
+      "failureBehavior": {
+        "beforeRoleModelCall": "reject_turn",
+        "handleToolCall": "reject_tool_call",
+        "afterTurnCommitted": "log_failure",
+        "health": "degrade"
+      }
+    },
+    "activation": {
+      "defaultEnabled": true,
+      "reasons": [
+        "built_in_character_state"
+      ]
+    },
+    "requestedAccess": {
+      "file_store": "write",
+      "model_input": "write"
+    }
+  }
+}

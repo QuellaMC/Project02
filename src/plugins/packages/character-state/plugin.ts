@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import { assertCanonicalRuntimeTimestamp } from '../../../runtime/event.ts';
+import { canonicalJsonStringify } from '../../../shared/canonical-json.ts';
 
 import {
   createRuntimePlugin
@@ -9,15 +11,15 @@ import {
   createRuntimePluginContextItem,
   createRuntimePluginManifest
 } from '../../manifest-validation.ts';
-import { runtimePluginContractVersion } from '../../contract.ts';
+import type { RuntimePluginFactoryInput } from '../../factory.ts';
 import type {
   RuntimePluginContext,
   RuntimePluginJsonObject
 } from '../../plugin-types.ts';
 import {
-  characterStatePatchModelToolName,
   type ModelToolInputContract
 } from '../../../role-model/model-tools.ts';
+import { characterStatePatchModelToolName } from './contract.ts';
 import {
   characterAttentionValues,
   characterCurrentActivityValues,
@@ -40,14 +42,20 @@ import type {
   RuntimePluginFileStore,
   RuntimePluginManifest
 } from '../../plugin-types.ts';
+import { characterStatePluginId } from '../../contract.ts';
 
-export const characterStatePluginId = 'character-state';
+export { characterStatePluginId } from '../../contract.ts';
 
+const characterStatePluginDescriptorFormat = 'project02.plugin.v1';
+const characterStatePluginEntry = './index.ts';
+const characterStatePluginDescriptorUrl = new URL(
+  './project02.plugin.json',
+  import.meta.url
+);
 const characterStateEventsPath = 'events.jsonl';
 const characterStateCheckpointPath = 'checkpoint.json';
 const characterStateCheckpointVersion = 1;
 const characterStateIdempotencyRecordVersion = 1;
-const characterStatePluginInstances = new WeakSet<RuntimePlugin>();
 
 const characterStatePatchInputContract = Object.freeze({
   type: 'object',
@@ -87,52 +95,29 @@ const characterStatePatchInputContract = Object.freeze({
 } satisfies ModelToolInputContract);
 
 export function createCharacterStatePluginManifest(): RuntimePluginManifest {
-  return createRuntimePluginManifest({
-    id: characterStatePluginId,
-    displayName: 'Character State',
-    version: '1.0.0',
-    kind: 'first_party',
-    description: "First-party assistant-owned Character State context and patch tool for Mira's internal state.",
-    contractVersion: runtimePluginContractVersion,
-    compatibility: {
-      hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'project02',
-      externalContract: 'character_state_plugin'
-    },
-    declaredPlugins: [
-      'tool_provider',
-      'before_role_model_call',
-      'handle_tool_call'
-    ],
-    config: {
-      fields: []
-    },
-    localTrustLevel: 'first_party',
-    runtimePolicy: {
-      requiredForTurn: true,
-      sideEffectLevel: 'local_memory_write',
-      confirmation: 'not_required',
-      timeoutMs: 1000,
-      sourceReferencesRequired: false,
-      redactionLabels: [],
-      failureBehavior: {
-        beforeRoleModelCall: 'reject_turn',
-        handleToolCall: 'reject_tool_call',
-        afterTurnCommitted: 'log_failure',
-        health: 'degrade'
-      }
-    },
-    activation: {
-      defaultEnabled: true,
-      reasons: ['built_in_character_state']
-    },
-    requestedAccess: { file_store: 'write', model_input: 'write' }
-  });
+  const descriptor = readCharacterStatePluginDescriptor();
+
+  return createRuntimePluginManifest(descriptor['manifest']);
 }
 
 export function createCharacterStatePlugin(): RuntimePlugin {
+  return createCharacterStatePluginFromManifest(
+    createCharacterStatePluginManifest()
+  );
+}
+
+// Package entry adapters and direct embedder constructors share this implementation.
+export function createProject02Plugin(
+  input: RuntimePluginFactoryInput
+): RuntimePlugin {
+  return createCharacterStatePluginFromManifest(input.manifest);
+}
+
+function createCharacterStatePluginFromManifest(
+  manifest: RuntimePluginManifest
+): RuntimePlugin {
   const plugin = createRuntimePlugin({
-    manifest: createCharacterStatePluginManifest(),
+    manifest,
     providedTools: [
       Object.freeze({
         name: characterStatePatchModelToolName,
@@ -316,8 +301,36 @@ export function createCharacterStatePlugin(): RuntimePlugin {
     }
   });
 
-  characterStatePluginInstances.add(plugin);
   return plugin;
+}
+
+function readCharacterStatePluginDescriptor(): RuntimePluginJsonObject {
+  let descriptor: unknown;
+
+  try {
+    descriptor = JSON.parse(
+      readFileSync(characterStatePluginDescriptorUrl, 'utf8')
+    ) as unknown;
+  } catch (error: unknown) {
+    throw new TypeError(
+      'Character State plugin descriptor could not be read.',
+      { cause: error }
+    );
+  }
+
+  if (
+    !isJsonObject(descriptor) ||
+    descriptor['format'] !== characterStatePluginDescriptorFormat ||
+    descriptor['entry'] !== characterStatePluginEntry ||
+    !Object.hasOwn(descriptor, 'manifest') ||
+    Object.keys(descriptor).some(
+      (key) => key !== 'format' && key !== 'entry' && key !== 'manifest'
+    )
+  ) {
+    throw new TypeError('Character State plugin descriptor is malformed.');
+  }
+
+  return descriptor;
 }
 
 function readCharacterStatePatchIdempotencyRecord(options: {
@@ -389,12 +402,7 @@ function decodeCharacterStateEventLog(
 
   for (const rawEvent of events) {
     const event = decodeStoredCharacterStatePatchEvent(rawEvent);
-    const identity = JSON.stringify([
-      event.eventId,
-      event.traceId,
-      event.createdAt,
-      event.toolCallId ?? null
-    ]);
+    const identity = characterStatePatchIdentityKey(event);
 
     if (identities.has(identity)) {
       throw new TypeError(
@@ -505,10 +513,6 @@ function jsonObjectEntriesEqual(left: object, right: object): boolean {
   );
 }
 
-export function isCharacterStatePlugin(plugin: RuntimePlugin): boolean {
-  return characterStatePluginInstances.has(plugin);
-}
-
 function readCharacterStateStore(
   fileStore: RuntimePluginFileStore
 ): CharacterStateCheckpoint {
@@ -609,17 +613,24 @@ function characterStateIdempotencyPath(identity: {
   readonly toolCallId?: string;
 }): string {
   const digest = createHash('sha256')
-    .update(
-      JSON.stringify([
-        identity.eventId,
-        identity.traceId,
-        identity.createdAt,
-        identity.toolCallId ?? null
-      ])
-    )
+    .update(characterStatePatchIdentityKey(identity))
     .digest('hex');
 
   return `idempotency/${digest}.json`;
+}
+
+function characterStatePatchIdentityKey(identity: {
+  readonly eventId: string;
+  readonly traceId: string;
+  readonly createdAt: string;
+  readonly toolCallId?: string;
+}): string {
+  return canonicalJsonStringify([
+    identity.eventId,
+    identity.traceId,
+    identity.createdAt,
+    identity.toolCallId ?? null
+  ]);
 }
 
 function isNonNegativeSafeInteger(value: unknown): value is number {

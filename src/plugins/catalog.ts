@@ -1,85 +1,81 @@
 import {
-  characterStatePluginId,
-  createCharacterStatePlugin,
-  createCharacterStatePluginManifest,
-  isCharacterStatePlugin
-} from './builtin/character-state/index.ts';
-import {
   createFirstPartyModelToolsPlugin,
   createFirstPartyModelToolsPluginManifest,
   isFirstPartyModelToolsPlugin
 } from './builtin/model-tools.ts';
 import {
-  firstPartyModelToolsPluginId
+  createRuntimePluginManagementPlugin,
+  createRuntimePluginManagementPluginManifest,
+  isRuntimePluginManagementPlugin,
+  type RuntimePluginListHostState,
+  type RuntimePluginConfigControlHostState
+} from './builtin/runtime-plugin/index.ts';
+import {
+  characterStatePluginId,
+  firstPartyModelToolsPluginId,
+  runtimePluginId
 } from './contract.ts';
-import {
-  runtimePluginDiscoveryPluginId,
-  type RuntimePluginAccessMapByPluginId
-} from './access-control.ts';
-import {
-  createRuntimePluginDiscoveryPlugin,
-  createRuntimePluginDiscoveryPluginManifest,
-  isRuntimePluginDiscoveryPlugin
-} from './discovery-plugin.ts';
 import type {
   RuntimePlugin,
   RuntimePluginManifest
 } from './plugin-types.ts';
-import type {
-  RuntimePluginFactoryDefinition
-} from './factory.ts';
+import type { RuntimePluginPackageCatalogEntry } from './factory.ts';
 
-export type RuntimePluginCatalogFactoryDefinition =
-  RuntimePluginFactoryDefinition<() => RuntimePlugin> & {
-    readonly catalogOwner: 'project02_host';
-    readonly construction: 'host_scoped' | 'factory';
-  };
-
-export type RuntimePluginDiscoveryHostState = () => {
-  readonly plugins: readonly RuntimePlugin[];
-  readonly enabledPlugins: readonly RuntimePlugin[];
-  readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
+export type RuntimePluginHostServiceBootstrapInput = {
+  readonly hostStateForTurn: RuntimePluginListHostState;
+  readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
+  readonly storeRoot?: string;
 };
 
-export function defaultRuntimePluginCatalogFactoryDefinitions(): Readonly<
-  Record<string, RuntimePluginCatalogFactoryDefinition>
+export type RuntimePluginHostServiceCatalogEntry = {
+  readonly catalogKind: 'host_service';
+  readonly manifest: RuntimePluginManifest;
+  readonly bootstrap: (
+    input: RuntimePluginHostServiceBootstrapInput
+  ) => RuntimePlugin;
+};
+
+export type RuntimePluginCatalogEntry =
+  | RuntimePluginHostServiceCatalogEntry
+  | RuntimePluginPackageCatalogEntry;
+
+export function defaultRuntimePluginHostServiceCatalogEntries(): Readonly<
+  Record<string, RuntimePluginHostServiceCatalogEntry>
 > {
   return Object.freeze({
-    [runtimePluginDiscoveryPluginId]: Object.freeze({
-      catalogOwner: 'project02_host',
-      construction: 'host_scoped',
-      manifest: createRuntimePluginDiscoveryPluginManifest(),
-      create: () =>
-        createRuntimePluginDiscoveryPlugin(() => ({
-          plugins: Object.freeze([]),
-          enabledPlugins: Object.freeze([]),
-          accessByPluginId: Object.freeze({})
-        }))
-    } satisfies RuntimePluginCatalogFactoryDefinition),
+    [runtimePluginId]: Object.freeze({
+      catalogKind: 'host_service',
+      manifest: createRuntimePluginManagementPluginManifest(),
+      bootstrap: (input) =>
+        createRuntimePluginManagementPlugin({
+          hostStateForTurn: input.hostStateForTurn,
+          ...(input.pluginConfigControl === undefined
+            ? {}
+            : { pluginConfigControl: input.pluginConfigControl }),
+          ...(input.storeRoot === undefined
+            ? {}
+            : { storeRoot: input.storeRoot })
+        })
+    } satisfies RuntimePluginHostServiceCatalogEntry),
     [firstPartyModelToolsPluginId]: Object.freeze({
-      catalogOwner: 'project02_host',
-      construction: 'host_scoped',
+      catalogKind: 'host_service',
       manifest: createFirstPartyModelToolsPluginManifest(),
-      create: () => createFirstPartyModelToolsPlugin()
-    } satisfies RuntimePluginCatalogFactoryDefinition),
-    [characterStatePluginId]: Object.freeze({
-      catalogOwner: 'project02_host',
-      construction: 'factory',
-      manifest: createCharacterStatePluginManifest(),
-      create: () => createCharacterStatePlugin()
-    } satisfies RuntimePluginCatalogFactoryDefinition)
+      bootstrap: () => createFirstPartyModelToolsPlugin()
+    } satisfies RuntimePluginHostServiceCatalogEntry)
   });
 }
 
 export const hostFirstPartyRuntimePluginIds = Object.freeze(
-  Object.values(defaultRuntimePluginCatalogFactoryDefinitions()).map(
-    (definition) => definition.manifest.id
-  )
+  [
+    ...Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(
+      (definition) => definition.manifest.id
+    ),
+    characterStatePluginId
+  ]
 );
 
 export const hostScopedFirstPartyRuntimePluginIds = Object.freeze(
-  Object.values(defaultRuntimePluginCatalogFactoryDefinitions())
-    .filter((definition) => definition.construction === 'host_scoped')
+  Object.values(defaultRuntimePluginHostServiceCatalogEntries())
     .map((definition) => definition.manifest.id)
 );
 
@@ -90,35 +86,16 @@ const hostScopedFirstPartyRuntimePluginIdSet = new Set<string>(
   hostScopedFirstPartyRuntimePluginIds
 );
 
-export function hasRuntimePluginCatalogFactoryMetadata(
-  definition: RuntimePluginFactoryDefinition
-): definition is RuntimePluginCatalogFactoryDefinition {
-  if (!('catalogOwner' in definition) || !('construction' in definition)) {
-    return false;
-  }
-
-  return (
-    definition.catalogOwner === 'project02_host' &&
-    (definition.construction === 'host_scoped' ||
-      definition.construction === 'factory')
-  );
-}
-
-export function defaultRuntimePluginCatalogManifests(): readonly RuntimePluginManifest[] {
+export function createHostScopedFirstPartyRuntimePlugins(options: {
+  readonly hostStateForTurn: RuntimePluginListHostState;
+  readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
+  readonly storeRoot?: string;
+}): readonly RuntimePlugin[] {
   return Object.freeze(
-    Object.values(defaultRuntimePluginCatalogFactoryDefinitions()).map(
-      (definition) => definition.manifest
+    Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(
+      (entry) => entry.bootstrap(options)
     )
   );
-}
-
-export function createHostScopedFirstPartyRuntimePlugins(options: {
-  readonly discoveryHostState: RuntimePluginDiscoveryHostState;
-}): readonly RuntimePlugin[] {
-  return Object.freeze([
-    createRuntimePluginDiscoveryPlugin(options.discoveryHostState),
-    createFirstPartyModelToolsPlugin()
-  ]);
 }
 
 export function isHostOwnedFirstPartyRuntimePluginId(pluginId: string): boolean {
@@ -133,17 +110,7 @@ export function isHostOwnedFirstPartyRuntimePlugin(
   plugin: RuntimePlugin
 ): boolean {
   return (
-    isRuntimePluginDiscoveryPlugin(plugin) ||
-    isFirstPartyModelToolsPlugin(plugin) ||
-    isCharacterStatePlugin(plugin)
-  );
-}
-
-export function isHostScopedFirstPartyRuntimePlugin(
-  plugin: RuntimePlugin
-): boolean {
-  return (
-    isRuntimePluginDiscoveryPlugin(plugin) ||
+    isRuntimePluginManagementPlugin(plugin) ||
     isFirstPartyModelToolsPlugin(plugin)
   );
 }

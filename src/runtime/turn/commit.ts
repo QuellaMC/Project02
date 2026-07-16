@@ -9,6 +9,7 @@ import {
 } from '../../core/conversation.ts';
 import {
   createRuntimePluginAfterTurnCommittedContext,
+  type PreparedRuntimePluginConfigEffect,
   type RuntimePluginContextItem,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginToolCall,
@@ -19,6 +20,12 @@ import type {
   RuntimePluginHealthHostResult,
   RuntimePluginHost
 } from '../../plugins/index.ts';
+import {
+  assertRuntimeConfigEffectsCanCommit,
+  reconcileCompletedRuntimeConfigEffects,
+  runtimeConfigEffectsForCompletedTurn,
+  runtimePostCommitFailureMessage
+} from './config-effects.ts';
 import {
   createRoleModelCommitValidationSnapshot,
   runtimePluginEvidenceOption,
@@ -44,6 +51,7 @@ import type {
   LocalRuntimeUserMessageCompletedResult,
   RuntimeTurnState
 } from './contracts.ts';
+import { roleModelIOSnapshotSessionId } from './contracts.ts';
 
 type AcceptedRoleModelLoopResult = Extract<
   RoleModelLoopResult,
@@ -134,37 +142,39 @@ export function beginPluginFileStoreTransaction(
     pluginHost.beginFileStoreTransaction !== undefined;
 }
 
-export function preparePluginFileStoreTransaction(
+export async function preparePluginFileStoreTransaction(
   state: RuntimeTurnState
-): void {
+): Promise<void> {
   if (!state.pluginFileStoreTransactionActive) {
     return;
   }
 
-  state.preparedPluginFileStoreTransaction =
+  state.preparedPluginFileStoreTransaction = await
     state.runtimePluginHostForTurn?.prepareFileStoreTransaction?.(
       state.identity
     );
   state.pluginFileStoreTransactionActive = false;
 }
 
-export function rollbackPluginFileStoreTransaction(
+export async function rollbackPluginFileStoreTransaction(
   state: RuntimeTurnState
-): void {
+): Promise<void> {
   if (state.pluginFileStoreTransactionActive) {
     state.runtimePluginHostForTurn?.rollbackFileStoreTransaction?.();
     state.pluginFileStoreTransactionActive = false;
   }
 
-  state.preparedPluginFileStoreTransaction?.discard();
+  await state.preparedPluginFileStoreTransaction?.discard();
   state.preparedPluginFileStoreTransaction = undefined;
 }
 
-function finalizePluginFileStoreTransaction(state: RuntimeTurnState): void {
+async function finalizePluginFileStoreTransaction(
+  state: RuntimeTurnState
+): Promise<void> {
   const prepared = state.preparedPluginFileStoreTransaction;
 
   state.preparedPluginFileStoreTransaction = undefined;
-  prepared?.finalize();
+  await prepared?.finalize();
 }
 
 export async function appendVisibleReplyForDecision(
@@ -228,7 +238,7 @@ async function commitFinalVisibleReply(
 ): Promise<CharacterTurnResult> {
   const commitValidation = createRoleModelCommitValidationSnapshot({
     ...state.identity,
-    sessionId: decisionContextSessionIdFromEvidence(
+    sessionId: roleModelIOSnapshotSessionId(
       optionsForReply.roleModelIOSnapshot
     ),
     result: {
@@ -391,8 +401,15 @@ export async function completeRuntimeTurn(
   options: CompleteRuntimeTurnOptions
 ): Promise<LocalRuntimeUserMessageCompletedResult> {
   const { state } = options;
+  const runtimeConfigEffects = runtimeConfigEffectsForCompletedTurn(options);
 
-  preparePluginFileStoreTransaction(state);
+  assertRuntimeConfigEffectsCanCommit({
+    state,
+    pluginHost: options.pluginHost,
+    effects: runtimeConfigEffects
+  });
+
+  await preparePluginFileStoreTransaction(state);
   const turn = await commitTerminalVisibleReply(options);
   const terminalPluginEvidence = Object.freeze([
     ...options.roleModelPluginEvidence,
@@ -401,14 +418,24 @@ export async function completeRuntimeTurn(
   const terminalAppend = appendCompletedTerminalRawEvent({
     ...options,
     terminalPluginEvidence,
+    runtimeConfigEffects,
     turn
   });
-  const durability = finalizeCompletedDurability(
+  const durability = await finalizeCompletedDurability(
     state,
     terminalAppend.terminalAppendFailure
   );
+  const configEffectEvidence = reconcileCompletedRuntimeConfigEffects({
+    pluginHost: options.pluginHost,
+    effects: runtimeConfigEffects,
+    postCommitFailures: durability.postCommitFailures
+  });
 
-  await recordAfterTurnCommitted(options, durability.postCommitFailures);
+  await recordAfterTurnCommitted(
+    options,
+    durability.postCommitFailures,
+    configEffectEvidence
+  );
 
   return Object.freeze({
     status: 'completed',
@@ -449,6 +476,7 @@ async function commitTerminalVisibleReply(
 function appendCompletedTerminalRawEvent(
   options: CompleteRuntimeTurnOptions & {
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
+    readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
     readonly turn: CharacterTurnResult | undefined;
   }
 ): {
@@ -471,6 +499,7 @@ function appendCompletedTerminalRawEvent(
 function createTerminalRawEventInput(
   options: CompleteRuntimeTurnOptions & {
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
+    readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
     readonly turn: CharacterTurnResult | undefined;
   }
 ): RawEventLogRecordInput {
@@ -487,6 +516,9 @@ function createTerminalRawEventInput(
     roleModelIOSnapshot: options.roleModelResult.ioSnapshot,
     parsedRoleModelDecisionSnapshot:
       options.roleModelResult.parsedDecisionSnapshot,
+    ...(options.runtimeConfigEffects.length === 0
+      ? {}
+      : { runtimeConfigEffects: options.runtimeConfigEffects }),
     commitValidation: createRoleModelCommitValidationSnapshot({
       ...state.identity,
       sessionId: options.decisionContext.sessionId,
@@ -550,19 +582,19 @@ function recoverCompletedTerminalRawEvent(
   };
 }
 
-function finalizeCompletedDurability(
+async function finalizeCompletedDurability(
   state: RuntimeTurnState,
   terminalAppendFailure: string | undefined
-): {
+): Promise<{
   readonly pluginFileStoreRecoveryPending: boolean;
   readonly postCommitFailures: string[];
-} {
+}> {
   const postCommitFailures =
     terminalAppendFailure === undefined ? [] : [terminalAppendFailure];
   let pluginFileStoreRecoveryPending = false;
 
   try {
-    finalizePluginFileStoreTransaction(state);
+    await finalizePluginFileStoreTransaction(state);
   } catch (error: unknown) {
     pluginFileStoreRecoveryPending = true;
     postCommitFailures.push(runtimePostCommitFailureMessage(error));
@@ -647,9 +679,16 @@ function restoreTerminalTraceEntry(
 
 async function recordAfterTurnCommitted(
   options: CompleteRuntimeTurnOptions,
-  postCommitFailures: string[]
+  postCommitFailures: string[],
+  configEffectEvidence: readonly RuntimePluginEvidenceSnapshot[]
 ): Promise<void> {
   const { state } = options;
+  let afterCommitResult:
+    | {
+        readonly status: 'completed' | 'completed_with_failures';
+        readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
+      }
+    | undefined;
 
   try {
     const afterCommitPluginContext =
@@ -663,25 +702,44 @@ async function recordAfterTurnCommitted(
           state.options.committedAt ?? state.options.event.createdAt,
         visibleMessages: state.committedVisibleMessages
       });
-    const afterCommitResult = await options.pluginHost.afterTurnCommitted(
+    afterCommitResult = await options.pluginHost.afterTurnCommitted(
       afterCommitPluginContext
     );
-
-    if (shouldRecordAfterTurnCommittedEvent(afterCommitResult)) {
-      appendRawEvent(state, {
-        ...state.identity,
-        kind: 'after_turn_committed',
-        eventType: state.event.type,
-        status: afterCommitResult.status,
-        ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
-        toolCallIds: Object.freeze([...state.finishedToolCallIds]),
-        payloadSummary: state.payloadSummary,
-        ...runtimePluginEvidenceOption(afterCommitResult.evidence)
-      });
-    }
   } catch (error: unknown) {
     // The completed turn is already durable; follow-up work cannot change the
     // terminal decision or append a contradictory rejection.
+    postCommitFailures.push(runtimePostCommitFailureMessage(error));
+  }
+
+  const evidence = Object.freeze([
+    ...(afterCommitResult?.evidence ?? []),
+    ...configEffectEvidence
+  ]);
+  const status =
+    afterCommitResult?.status ??
+    (configEffectEvidence.length === 0
+      ? undefined
+      : 'completed_with_failures');
+
+  if (
+    status === undefined ||
+    !shouldRecordAfterTurnCommittedEvent({ status, evidence })
+  ) {
+    return;
+  }
+
+  try {
+    appendRawEvent(state, {
+      ...state.identity,
+      kind: 'after_turn_committed',
+      eventType: state.event.type,
+      status,
+      ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
+      toolCallIds: Object.freeze([...state.finishedToolCallIds]),
+      payloadSummary: state.payloadSummary,
+      ...runtimePluginEvidenceOption(evidence)
+    });
+  } catch (error: unknown) {
     postCommitFailures.push(runtimePostCommitFailureMessage(error));
   }
 }
@@ -734,20 +792,6 @@ function shouldRecordAfterTurnCommittedEvent(afterCommitResult: {
     afterCommitResult.status === 'completed_with_failures' ||
     afterCommitResult.evidence.length > 0
   );
-}
-
-function runtimePostCommitFailureMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-
-  return 'Runtime post-commit work failed.';
-}
-
-function decisionContextSessionIdFromEvidence(
-  snapshot: RoleModelIOSnapshot
-): string {
-  return snapshot.inputEnvelope.decisionContext.sessionId;
 }
 
 function createFixedReplyAgent(replyText: string): CharacterAgent {

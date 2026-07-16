@@ -30,3 +30,4 @@ temp/
 docs/develop-journal/
 docs/plan/
 scripts/manual-runtime-store.sh
+docs/wiki/*audit*

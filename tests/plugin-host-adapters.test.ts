@@ -13,7 +13,7 @@ import { visibleReplyModelToolName } from '../src/role-model/model-tools.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin
-} from '../src/plugins/builtin/character-state/index.ts';
+} from '../src/plugins/packages/character-state/plugin.ts';
 import {
   createExplicitlyEnabledRuntimePluginHost,
   createLowPriorityBudgetPressurePlugin,

@@ -1,6 +1,12 @@
 export const runtimePluginContractVersion =
   'mvp-008.runtime_plugin.v2';
 export const firstPartyModelToolsPluginId = 'first_party.model_tools';
+export const runtimePluginId = 'runtime.plugin';
+export const characterStatePluginId = 'character-state';
+export const runtimePluginListToolName = 'runtime.plugin.list';
+export const runtimePluginConfigReadToolName = 'runtime.plugin.config';
+export const runtimePluginConfigUpdateToolName =
+  'runtime.plugin.config.update';
 
 export const runtimePluginKindValues = [
   'first_party',
@@ -17,6 +23,7 @@ export const runtimePluginDeclarationValues = [
   'handle_tool_call',
   'after_turn_committed',
   'on_session_end',
+  'on_shutdown',
   'health',
   'plugin_discovery'
 ] as const;
@@ -35,13 +42,10 @@ export const runtimePluginAccessNameValues = [
 
 export const runtimePluginAccessLevelValues = ['none', 'read', 'write'] as const;
 
-export const runtimePluginAccessNames = Object.freeze([
-  ...runtimePluginAccessNameValues
-]);
-
 export const runtimePluginSideEffectLevelValues = [
   'none',
   'runtime_read',
+  'runtime_config_write',
   'local_memory_write',
   'external_read',
   'external_write'
@@ -89,6 +93,7 @@ export const runtimePluginEvidenceKindValues = [
   'tool_invocation',
   'after_turn_committed',
   'session_end',
+  'shutdown',
   'health',
   'policy'
 ] as const;
@@ -107,6 +112,7 @@ export const runtimePluginPolicyOutcomeValues = [
   'required_rejected',
   'disallowed_tool_call',
   'handler_rejected',
+  'user_approved',
   'timeout',
   'health_degraded',
   'after_commit_failed'

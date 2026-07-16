@@ -3,6 +3,7 @@ import type {
   RuntimePluginContextBudget,
   RuntimePluginSourceReference
 } from '../plugins/validation.ts';
+import { runtimePluginListToolName } from '../plugins/contract.ts';
 import type { RoleModelInputEnvelope } from './contracts.ts';
 import type {
   ModelToolDefinition,
@@ -13,7 +14,11 @@ import type {
   ModelToolJsonSchemaType,
   ModelToolObjectJsonSchema
 } from './model-tools.ts';
-import { visibleReplyModelToolName } from './model-tools.ts';
+import {
+  freezeModelToolJsonSchemaType,
+  isModelToolJsonSchemaTypeArray,
+  visibleReplyModelToolName
+} from './model-tools.ts';
 
 export type RoleModelSystemChatMessage = {
   readonly role: 'system';
@@ -180,8 +185,7 @@ const roleModelVisibleReplyProtocolPromptText =
 
 const roleModelNativeToolProtocolPromptParts = Object.freeze([
   'Use provided function tools when runtime/plugin state is needed.',
-  'Tools are assistant-owned runtime functions, not user commands.',
-  'Tool names are callable functions, not a full plugin inventory; call plugin.list for inventory facts.'
+  'Tools are assistant-owned runtime functions, not user commands.'
 ]);
 
 const roleModelNativeParallelToolProtocolPromptParts = Object.freeze([
@@ -421,6 +425,9 @@ function createRoleModelPromptFrames(
       'developer_protocol',
       createProtocolMessage({
         ...options,
+        availableToolNames: inputEnvelope.toolDefinitions.map(
+          (definition) => definition.name
+        ),
         visibleReplyAvailable: inputEnvelope.allowedTools.includes(
           visibleReplyModelToolName
         )
@@ -490,6 +497,7 @@ function createPromptFrame(
 }
 
 function createProtocolMessage(options: {
+  readonly availableToolNames: readonly string[];
   readonly capabilities: RoleModelProviderCapabilities;
   readonly outputMode: 'native_tools' | 'json_fallback';
   readonly visibleReplyAvailable: boolean;
@@ -510,12 +518,20 @@ function createProtocolMessage(options: {
 
 function createRoleModelNativeToolProtocolPromptText(
   options: {
+    readonly availableToolNames: readonly string[];
     readonly capabilities: RoleModelProviderCapabilities;
     readonly visibleReplyAvailable: boolean;
   }
 ): string {
   return [
     ...roleModelNativeToolProtocolPromptParts,
+    ...(options.availableToolNames.includes(runtimePluginListToolName)
+      ? [
+          `Tool names are callable functions, not a full plugin inventory; call ${runtimePluginListToolName} for inventory facts.`
+        ]
+      : [
+          'The provided tool definitions are the complete callable set for this response.'
+        ]),
     ...(options.capabilities.supportsParallelToolCalls
       ? roleModelNativeParallelToolProtocolPromptParts
       : []),
@@ -802,17 +818,7 @@ function modelToolJsonSchemaToRoleModelSchema(
 function freezeRoleModelJsonSchemaType(
   type: ModelToolJsonSchema['type']
 ): ModelToolJsonSchema['type'] {
-  if (type === undefined) {
-    return undefined;
-  }
-
-  return isModelToolJsonSchemaTypeArray(type) ? Object.freeze([...type]) : type;
-}
-
-function isModelToolJsonSchemaTypeArray(
-  value: NonNullable<ModelToolJsonSchema['type']>
-): value is readonly ModelToolJsonSchemaType[] {
-  return Array.isArray(value);
+  return type === undefined ? undefined : freezeModelToolJsonSchemaType(type);
 }
 
 function modelToolInputFieldToJsonSchema(

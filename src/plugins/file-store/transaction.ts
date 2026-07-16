@@ -222,10 +222,10 @@ export function createRuntimePluginFileStoreTransaction(
         }
       } satisfies RuntimePluginFileStore);
     },
-    prepare(identity) {
+    async prepare(identity) {
       assertTransactionOpen(closed);
       closed = true;
-      return prepareRuntimePluginFileStoreOperations({
+      return await prepareRuntimePluginFileStoreOperations({
         identity,
         operations: Object.freeze([...operations]),
         ownerToken: durableOwnerToken,
@@ -282,12 +282,12 @@ function ensureDurableTransactionalPluginStoreReady(
   overlay.durableRecoveryComplete = true;
 }
 
-function prepareRuntimePluginFileStoreOperations(options: {
+async function prepareRuntimePluginFileStoreOperations(options: {
   readonly identity: RuntimeEventIdentity;
   readonly operations: readonly StagedPluginFileStoreOperation[];
   readonly ownerToken: LocalRuntimeMutationLockOwnerToken;
   readonly faultInjector?: DurablePluginFileStoreFaultInjector;
-}): RuntimePluginFileStorePreparedTransaction {
+}): Promise<RuntimePluginFileStorePreparedTransaction> {
   const firstOperation = options.operations[0];
 
   if (firstOperation === undefined) {
@@ -319,13 +319,7 @@ function prepareRuntimePluginFileStoreOperations(options: {
 
   const storeRoot = firstOperation.options.storeRoot;
 
-  recoverPreparedDurablePluginFileStoreTransactions(
-    { ...firstOperation.options, storeRoot },
-    options.ownerToken,
-    { recoverDirectMutation: false }
-  );
-
-  return prepareDurablePluginFileStoreTransaction({
+  return await prepareDurablePluginFileStoreTransaction({
     identity: options.identity,
     operations: options.operations,
     ownerToken: options.ownerToken,
@@ -339,8 +333,8 @@ function prepareRuntimePluginFileStoreOperations(options: {
 
 function createNoopPreparedPluginFileStoreTransaction(): RuntimePluginFileStorePreparedTransaction {
   return Object.freeze({
-    discard() {},
-    finalize() {}
+    async discard() {},
+    async finalize() {}
   } satisfies RuntimePluginFileStorePreparedTransaction);
 }
 
@@ -442,18 +436,24 @@ function createPreparedInMemoryPluginFileStoreTransaction(
   const preparedOperations = materializeInMemoryPluginFileStoreOperations(
     operations
   );
-  let state: 'discarded' | 'finalized' | 'prepared' = 'prepared';
+  let state: 'discarded' | 'finalized' | 'finalizing' | 'prepared' = 'prepared';
 
   return Object.freeze({
-    discard() {
+    async discard() {
       if (state === 'prepared') {
         state = 'discarded';
       }
+
+      await Promise.resolve();
     },
-    finalize() {
+    async finalize() {
       if (state !== 'prepared') {
         return;
       }
+
+      state = 'finalizing';
+      await Promise.resolve();
+      state = 'prepared';
 
       const nextStates = new Map<
         string,

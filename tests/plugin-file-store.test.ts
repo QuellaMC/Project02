@@ -84,7 +84,7 @@ describe('runtime plugin file store', () => {
     writeFileSync(join(root, 'current.json'), '{"value":"existing"}\n', 'utf8');
     writeFileSync(
       join(root, 'events.jsonl'),
-      '{"value":1}\n\n{"value":2}\n',
+      '{"value":1}\n{"value":2}\n',
       'utf8'
     );
 
@@ -366,6 +366,52 @@ describe('runtime plugin file store', () => {
     }).toThrow(/finite JSON/iu);
     expect(durable.readJsonl('events.jsonl')).toEqual([]);
     expect(durable.revision()).toBe(0);
+  });
+
+  it('applies the shared JSON boundary limits to plugin file values', () => {
+    const store = createRuntimePluginFileStore({
+      sessionId: 'session-json-boundary',
+      sessionIdentity: {},
+      pluginId: 'plugin.json-boundary'
+    });
+    const cyclic: RuntimePluginJsonObject = {};
+    Object.defineProperty(cyclic, 'self', {
+      value: cyclic,
+      enumerable: true
+    });
+    let deep: RuntimePluginJsonObject = {};
+
+    for (let depth = 0; depth < 20; depth += 1) {
+      deep = { value: deep };
+    }
+
+    expect(() => {
+      store.writeJsonAtomic('cycle.json', cyclic);
+    }).toThrow(/cycle/iu);
+    expect(() => {
+      store.writeJsonAtomic('deep.json', deep);
+    }).toThrow(/depth/iu);
+    expect(store.revision()).toBe(0);
+  });
+
+  it.each([
+    ['a missing terminal newline', '{"value":1}'],
+    ['an interior blank record', '{"value":1}\n\n{"value":2}\n']
+  ])('rejects durable JSONL containing %s', (_description, content) => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-jsonl-framing';
+    const pluginId = 'plugin.jsonl-framing';
+    const root = pluginRoot(storeRoot, sessionId, pluginId);
+
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, 'events.jsonl'), content, 'utf8');
+    const store = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId
+    });
+
+    expect(() => store.readJsonl('events.jsonl')).toThrow(/JSONL/iu);
   });
 
   it('rejects JSONL reads and appends on paths that already store JSON', () => {
@@ -682,7 +728,7 @@ describe('runtime plugin file store', () => {
     ]);
   });
 
-  it('keeps ordered durable operations prepared until finalization', () => {
+  it('keeps ordered durable operations prepared until finalization', async () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-ordered-transaction-finalize';
     const pluginId = 'plugin.ordered-transaction-finalize';
@@ -707,7 +753,7 @@ describe('runtime plugin file store', () => {
     store.appendJsonl('events.jsonl', { step: 2 });
     store.writeJsonAtomic('state.json', { value: 'after-2' });
 
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
 
     const beforeFinalize = createRuntimePluginFileStore({
       storeRoot,
@@ -719,7 +765,7 @@ describe('runtime plugin file store', () => {
     expect(beforeFinalize.readJsonl('events.jsonl')).toEqual([{ step: 0 }]);
     expect(beforeFinalize.revision()).toBe(2);
 
-    prepared.finalize();
+    await prepared.finalize();
 
     expect(beforeFinalize.readJson('state.json')).toEqual({ value: 'after-2' });
     expect(beforeFinalize.readJsonl('events.jsonl')).toEqual([
@@ -730,7 +776,7 @@ describe('runtime plugin file store', () => {
     expect(beforeFinalize.revision()).toBe(6);
   });
 
-  it('keeps append journals independent of existing JSONL history size', () => {
+  it('keeps append journals independent of existing JSONL history size', async () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-bounded-append-journal';
     const pluginId = 'plugin.bounded-append-journal';
@@ -748,7 +794,7 @@ describe('runtime plugin file store', () => {
       'events.jsonl',
       { value: 'next' }
     );
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
     const journalText = readFileSync(
       preparedJournalPath(storeRoot, sessionId),
       'utf8'
@@ -765,10 +811,10 @@ describe('runtime plugin file store', () => {
       afterLength: Buffer.byteLength(existingHistory) + 17
     });
 
-    prepared.discard();
+    await prepared.discard();
   });
 
-  it('keeps in-memory operations prepared until finalization', () => {
+  it('keeps in-memory operations prepared until finalization', async () => {
     const sessionIdentity = {};
     const options = {
       sessionId: 'session-memory-transaction-finalize',
@@ -785,21 +831,21 @@ describe('runtime plugin file store', () => {
     transactionalStore.writeJsonAtomic('state.json', { value: 'after' });
     transactionalStore.appendJsonl('events.jsonl', { value: 'after' });
 
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
 
     expect(base.readJson('state.json')).toEqual({ value: 'before' });
     expect(base.readJsonl('events.jsonl')).toEqual([]);
     expect(base.revision()).toBe(1);
 
-    prepared.finalize();
-    prepared.finalize();
+    await prepared.finalize();
+    await prepared.finalize();
 
     expect(base.readJson('state.json')).toEqual({ value: 'after' });
     expect(base.readJsonl('events.jsonl')).toEqual([{ value: 'after' }]);
     expect(base.revision()).toBe(3);
   });
 
-  it('fails closed instead of overwriting an in-memory same-path write after preparation', () => {
+  it('fails closed instead of overwriting an in-memory same-path write after preparation', async () => {
     const sessionIdentity = {};
     const options = {
       sessionId: 'session-memory-prepared-write-conflict',
@@ -814,18 +860,16 @@ describe('runtime plugin file store', () => {
     const staged = transaction.fileStoreFor(options);
 
     staged.writeJsonAtomic('state.json', { value: 'prepared' });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
 
     base.writeJsonAtomic('state.json', { value: 'later' });
 
-    expect(() => {
-      prepared.finalize();
-    }).toThrow(/transaction conflict/iu);
+    await expect(prepared.finalize()).rejects.toThrow(/transaction conflict/iu);
     expect(base.readJson('state.json')).toEqual({ value: 'later' });
     expect(base.revision()).toBe(2);
   });
 
-  it('fails closed when an in-memory same-path write races staged work before preparation', () => {
+  it('fails closed when an in-memory same-path write races staged work before preparation', async () => {
     const sessionIdentity = {};
     const options = {
       sessionId: 'session-memory-staged-write-conflict',
@@ -842,7 +886,7 @@ describe('runtime plugin file store', () => {
     staged.writeJsonAtomic('state.json', { value: 'staged' });
     base.writeJsonAtomic('state.json', { value: 'later' });
 
-    expect(() => transaction.prepare(testTransactionIdentity())).toThrow(
+    await expect(transaction.prepare(testTransactionIdentity())).rejects.toThrow(
       /transaction conflict/iu
     );
     expect(base.readJson('state.json')).toEqual({ value: 'later' });
@@ -883,18 +927,16 @@ describe('runtime plugin file store', () => {
     const staged = transaction.fileStoreFor(options);
 
     staged.writeJsonAtomic('state.json', { value: 'prepared' });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
 
     base.writeJsonAtomic('state.json', { value: 'later' });
 
-    expect(() => {
-      prepared.finalize();
-    }).toThrow(/transaction conflict/iu);
+    await expect(prepared.finalize()).rejects.toThrow(/transaction conflict/iu);
     expect(base.readJson('state.json')).toEqual({ value: 'later' });
     expect(base.revision()).toBe(2);
   });
 
-  it('fails closed when a durable same-path write races staged work before preparation', () => {
+  it('fails closed when a durable same-path write races staged work before preparation', async () => {
     const options = {
       storeRoot: createTempRoot(),
       sessionId: 'session-durable-staged-write-conflict',
@@ -910,14 +952,14 @@ describe('runtime plugin file store', () => {
     staged.writeJsonAtomic('state.json', { value: 'staged' });
     base.writeJsonAtomic('state.json', { value: 'later' });
 
-    expect(() => transaction.prepare(testTransactionIdentity())).toThrow(
+    await expect(transaction.prepare(testTransactionIdentity())).rejects.toThrow(
       /transaction conflict/iu
     );
     expect(base.readJson('state.json')).toEqual({ value: 'later' });
     expect(base.revision()).toBe(2);
   });
 
-  it('keeps a planned recovery journal when preflight rejects before mutation', () => {
+  it('keeps a planned recovery journal when preflight rejects before mutation', async () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-partial-finalize-recovery';
     const pluginId = 'plugin.partial-finalize-recovery';
@@ -932,16 +974,14 @@ describe('runtime plugin file store', () => {
 
     staged.writeJsonAtomic('first.json', { value: 'prepared' });
     staged.writeJsonAtomic('second.json', { value: 'prepared' });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
     const journalPath = preparedJournalPath(storeRoot, sessionId);
 
     base.writeJsonAtomic('second.json', { value: 'later' });
 
-    expect(() => {
-      prepared.finalize();
-    }).toThrow(/transaction conflict/iu);
+    await expect(prepared.finalize()).rejects.toThrow(/transaction conflict/iu);
 
-    prepared.discard();
+    await prepared.discard();
 
     expect(readFileSync(journalPath, 'utf8')).toContain('"status":"planned"');
     expect(
@@ -967,7 +1007,7 @@ describe('runtime plugin file store', () => {
 
     staged.writeJsonAtomic('first.json', { value: 'transaction' });
     staged.writeJsonAtomic('second.json', { value: 'transaction' });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
 
     base.writeJsonAtomic('second.json', { value: 'direct' });
     writeCompletedRuntimeEvidence(
@@ -975,9 +1015,7 @@ describe('runtime plugin file store', () => {
       testTransactionIdentity()
     );
 
-    expect(() => {
-      prepared.finalize();
-    }).toThrow(/transaction conflict/iu);
+    await expect(prepared.finalize()).rejects.toThrow(/transaction conflict/iu);
     expect(
       JSON.parse(
         readFileSync(
@@ -1023,15 +1061,15 @@ describe('runtime plugin file store', () => {
 
     staged.writeJsonAtomic('first.json', { value: 'after' });
     staged.writeJsonAtomic('second.json', { value: 'after' });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
     writeCompletedRuntimeEvidence(
       createLocalRuntimeSessionPaths({ storeRoot, sessionId }),
       testTransactionIdentity()
     );
 
-    expect(() => {
-      prepared.finalize();
-    }).toThrow(/injected batched progress failure/iu);
+    await expect(prepared.finalize()).rejects.toThrow(
+      /injected batched progress failure/iu
+    );
 
     const recovered = createRuntimePluginFileStore(options);
 
@@ -1056,13 +1094,11 @@ describe('runtime plugin file store', () => {
 
     staged.writeJsonAtomic('first.json', { value: 'prepared' });
     staged.writeJsonAtomic('second.json', { value: 'prepared' });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
     const journalPath = preparedJournalPath(storeRoot, sessionId);
 
     base.writeJsonAtomic('second.json', { value: 'later' });
-    expect(() => {
-      prepared.finalize();
-    }).toThrow(/transaction conflict/iu);
+    await expect(prepared.finalize()).rejects.toThrow(/transaction conflict/iu);
 
     const recovered = createRuntimePluginFileStore(options);
 
@@ -1080,8 +1116,8 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const prepared = await transaction.prepare(testTransactionIdentity());
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     const root = pluginRoot(storeRoot, sessionId, pluginId);
 
     mkdirSync(root, { recursive: true });
@@ -1108,10 +1144,10 @@ describe('runtime plugin file store', () => {
     transaction
       .fileStoreFor(options)
       .writeJsonAtomic('state.json', { value: 'same' });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
 
     base.writeJsonAtomic('state.json', { value: 'same' });
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
 
     expect(() => createRuntimePluginFileStore(options)).toThrow(
       /partially applied.*terminal evidence/iu
@@ -1133,10 +1169,10 @@ describe('runtime plugin file store', () => {
     transaction
       .fileStoreFor(options)
       .writeJsonAtomic('state.json', { value: 'same' });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
 
     base.writeJsonAtomic('state.json', { value: 'same' });
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     writeRejectedRuntimeEvidence(
       createLocalRuntimeSessionPaths({ storeRoot, sessionId }),
       testTransactionIdentity()
@@ -1164,13 +1200,11 @@ describe('runtime plugin file store', () => {
 
     staged.writeJsonAtomic('first.json', { value: 'prepared' });
     staged.writeJsonAtomic('second.json', { value: 'prepared' });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
     const journalPath = preparedJournalPath(storeRoot, sessionId);
 
     base.writeJsonAtomic('second.json', { value: 'later' });
-    expect(() => {
-      prepared.finalize();
-    }).toThrow(/transaction conflict/iu);
+    await expect(prepared.finalize()).rejects.toThrow(/transaction conflict/iu);
 
     const sessionPaths = createLocalRuntimeSessionPaths({ storeRoot, sessionId });
     writeRejectedRuntimeEvidence(sessionPaths, testTransactionIdentity());
@@ -1220,7 +1254,7 @@ describe('runtime plugin file store', () => {
       .toThrow();
   });
 
-  it('canonicalizes a store-root alias without discarding its live prepared journal', () => {
+  it('canonicalizes a store-root alias without discarding its live prepared journal', async () => {
     const storeRoot = createTempRoot();
     const aliasParent = createTempRoot();
     const aliasRoot = join(aliasParent, 'store-alias');
@@ -1230,7 +1264,7 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
     const journalPath = preparedJournalPath(storeRoot, sessionId);
 
     symlinkSync(storeRoot, aliasRoot, 'dir');
@@ -1244,10 +1278,10 @@ describe('runtime plugin file store', () => {
     expect(aliasedStore.readJsonl('events.jsonl')).toEqual([]);
     expect(readFileSync(journalPath, 'utf8')).toContain('"status":"planned"');
 
-    prepared.discard();
+    await prepared.discard();
   });
 
-  it('rejects a symlinked transaction-journal ancestor without writing outside', () => {
+  it('rejects a symlinked transaction-journal ancestor without writing outside', async () => {
     const storeRoot = createTempRoot();
     const outsideRoot = createTempRoot();
     const sessionId = 'session-journal-ancestor-symlink';
@@ -1266,13 +1300,13 @@ describe('runtime plugin file store', () => {
       'dir'
     );
 
-    expect(() => transaction.prepare(testTransactionIdentity())).toThrow(
+    await expect(transaction.prepare(testTransactionIdentity())).rejects.toThrow(
       /symlink/iu
     );
     expect(readdirSync(outsideRoot)).toEqual([]);
   });
 
-  it('keeps transaction journal identities distinct by createdAt', () => {
+  it('keeps transaction journal identities distinct by createdAt', async () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-created-at-journal-identity';
     const firstTransaction = createRuntimePluginFileStoreTransaction();
@@ -1293,8 +1327,8 @@ describe('runtime plugin file store', () => {
       })
       .appendJsonl('events.jsonl', { value: 2 });
 
-    const first = firstTransaction.prepare(testTransactionIdentity());
-    const second = secondTransaction.prepare({
+    const first = await firstTransaction.prepare(testTransactionIdentity());
+    const second = await secondTransaction.prepare({
       ...testTransactionIdentity(),
       createdAt: '2026-06-15T00:00:01.000Z'
     });
@@ -1307,11 +1341,40 @@ describe('runtime plugin file store', () => {
       readdirSync(journalRoot).filter((name) => name.endsWith('.json'))
     ).toHaveLength(2);
 
-    first.discard();
-    second.discard();
+    await first.discard();
+    await second.discard();
   });
 
-  it('rejects a journal whose persisted identity does not match its path', () => {
+  it('allows only one prepared journal for the same full event identity', async () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-shared-journal-identity';
+    const firstTransaction = createRuntimePluginFileStoreTransaction();
+    const secondTransaction = createRuntimePluginFileStoreTransaction();
+
+    firstTransaction
+      .fileStoreFor({
+        storeRoot,
+        sessionId,
+        pluginId: 'plugin.claim-first'
+      })
+      .appendJsonl('events.jsonl', { value: 1 });
+    secondTransaction
+      .fileStoreFor({
+        storeRoot,
+        sessionId,
+        pluginId: 'plugin.claim-second'
+      })
+      .appendJsonl('events.jsonl', { value: 2 });
+
+    const first = await firstTransaction.prepare(testTransactionIdentity());
+
+    await expect(
+      secondTransaction.prepare(testTransactionIdentity())
+    ).rejects.toThrow(/already exists/iu);
+    await first.discard();
+  });
+
+  it('rejects a journal whose persisted identity does not match its path', async () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-journal-path-identity';
     const pluginId = 'plugin.journal-path-identity';
@@ -1319,8 +1382,8 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
-    const journal = abandonPreparedJournal({
+    const prepared = await transaction.prepare(testTransactionIdentity());
+    const journal = await abandonPreparedJournal({
       storeRoot,
       sessionId,
       prepared,
@@ -1335,7 +1398,7 @@ describe('runtime plugin file store', () => {
     );
   });
 
-  it('never recovers or removes a journal owned on another host', () => {
+  it('never recovers or removes a journal owned on another host', async () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-foreign-journal-owner';
     const pluginId = 'plugin.foreign-journal-owner';
@@ -1343,8 +1406,8 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
-    const journal = abandonPreparedJournal({
+    const prepared = await transaction.prepare(testTransactionIdentity());
+    const journal = await abandonPreparedJournal({
       storeRoot,
       sessionId,
       prepared,
@@ -1387,7 +1450,7 @@ describe('runtime plugin file store', () => {
     );
   });
 
-  it('rejects malformed journal owner nonces', () => {
+  it('rejects malformed journal owner nonces', async () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-malformed-journal-owner';
     const pluginId = 'plugin.malformed-journal-owner';
@@ -1395,9 +1458,9 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
 
-    abandonPreparedJournal({
+    await abandonPreparedJournal({
       storeRoot,
       sessionId,
       prepared,
@@ -1418,8 +1481,8 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const prepared = await transaction.prepare(testTransactionIdentity());
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     const sessionPaths = createLocalRuntimeSessionPaths({ storeRoot, sessionId });
 
     writeCompletedRuntimeEvidence(
@@ -1443,13 +1506,13 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
     const root = pluginRoot(storeRoot, sessionId, pluginId);
 
     mkdirSync(root, { recursive: true });
     writeFileSync(join(root, 'events.jsonl'), '{"value":1}\n', 'utf8');
 
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     const sessionPaths = createLocalRuntimeSessionPaths({ storeRoot, sessionId });
     writeCompletedRuntimeEvidence(sessionPaths, testTransactionIdentity());
 
@@ -1469,13 +1532,13 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
     const root = pluginRoot(storeRoot, sessionId, pluginId);
 
     mkdirSync(root, { recursive: true });
     writeFileSync(join(root, 'events.jsonl'), '{"value":', 'utf8');
 
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     const sessionPaths = createLocalRuntimeSessionPaths({ storeRoot, sessionId });
     writeCompletedRuntimeEvidence(sessionPaths, testTransactionIdentity());
 
@@ -1497,7 +1560,7 @@ describe('runtime plugin file store', () => {
     transaction
       .fileStoreFor(options)
       .appendJsonl('events.jsonl', { value: '雪' });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
     const root = pluginRoot(storeRoot, sessionId, pluginId);
     const appendedLine = Buffer.from('{"value":"雪"}\n', 'utf8');
     const multibyteStart = appendedLine.indexOf(Buffer.from('雪', 'utf8'));
@@ -1508,7 +1571,7 @@ describe('runtime plugin file store', () => {
       appendedLine.subarray(0, multibyteStart + 1)
     );
 
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     const sessionPaths = createLocalRuntimeSessionPaths({ storeRoot, sessionId });
     writeCompletedRuntimeEvidence(sessionPaths, testTransactionIdentity());
 
@@ -1528,13 +1591,13 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
+    const prepared = await transaction.prepare(testTransactionIdentity());
     const root = pluginRoot(storeRoot, sessionId, pluginId);
 
     mkdirSync(root, { recursive: true });
     writeFileSync(join(root, 'events.jsonl'), '{"foreign":true}\n', 'utf8');
 
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     const sessionPaths = createLocalRuntimeSessionPaths({ storeRoot, sessionId });
     writeCompletedRuntimeEvidence(sessionPaths, testTransactionIdentity());
 
@@ -1556,8 +1619,8 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const prepared = await transaction.prepare(testTransactionIdentity());
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     const sessionPaths = createLocalRuntimeSessionPaths({ storeRoot, sessionId });
 
     writeRawEventFixtures(sessionPaths.rawEventsPath, [
@@ -1588,8 +1651,8 @@ describe('runtime plugin file store', () => {
     };
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const prepared = await transaction.prepare(testTransactionIdentity());
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     const sessionPaths = createLocalRuntimeSessionPaths({ storeRoot, sessionId });
 
     writeCompletedRuntimeEvidence(sessionPaths, staleIdentity);
@@ -1610,8 +1673,8 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const prepared = await transaction.prepare(testTransactionIdentity());
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     const recovered = createRuntimePluginFileStore(options);
 
     expect(recovered.readJsonl('events.jsonl')).toEqual([]);
@@ -1630,8 +1693,8 @@ describe('runtime plugin file store', () => {
 
     staged.appendJsonl('events.jsonl', { value: 1 });
     staged.appendJsonl('events.jsonl', { value: 2 });
-    const prepared = transaction.prepare(testTransactionIdentity());
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const prepared = await transaction.prepare(testTransactionIdentity());
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
 
     const recovered = createRuntimePluginFileStore(options);
 
@@ -1649,8 +1712,8 @@ describe('runtime plugin file store', () => {
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const prepared = await transaction.prepare(testTransactionIdentity());
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     const sessionPaths = createLocalRuntimeSessionPaths({ storeRoot, sessionId });
 
     writeRejectedRuntimeEvidence(sessionPaths, testTransactionIdentity());
@@ -1673,8 +1736,8 @@ describe('runtime plugin file store', () => {
 
     staged.writeJsonAtomic('state.json', { value: 1 });
     staged.writeJsonAtomic('state.json', { value: 2 });
-    const prepared = transaction.prepare(testTransactionIdentity());
-    const journal = abandonPreparedJournal({ storeRoot, sessionId, prepared });
+    const prepared = await transaction.prepare(testTransactionIdentity());
+    const journal = await abandonPreparedJournal({ storeRoot, sessionId, prepared });
     const sessionPaths = createLocalRuntimeSessionPaths({ storeRoot, sessionId });
     writeRejectedRuntimeEvidence(sessionPaths, testTransactionIdentity());
 
@@ -1703,8 +1766,8 @@ describe('runtime plugin file store', () => {
     }
 
     transaction.fileStoreFor(options).appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testTransactionIdentity());
-    const journal = abandonPreparedJournal({
+    const prepared = await transaction.prepare(testTransactionIdentity());
+    const journal = await abandonPreparedJournal({
       storeRoot,
       sessionId,
       prepared,
@@ -1833,15 +1896,15 @@ function testTransactionIdentity() {
   };
 }
 
-function abandonPreparedJournal(options: {
+async function abandonPreparedJournal(options: {
   readonly storeRoot: string;
   readonly sessionId: string;
-  readonly prepared: { discard(): void };
+  readonly prepared: { discard(): Promise<void> };
   readonly createdAt?: string;
   readonly ownerHostname?: string;
   readonly ownerNonce?: string;
   readonly ownerPid?: number;
-}): { readonly path: string } {
+}): Promise<{ readonly path: string }> {
   const path = preparedJournalPath(options.storeRoot, options.sessionId);
   const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
 
@@ -1849,7 +1912,7 @@ function abandonPreparedJournal(options: {
     throw new Error('Expected plugin transaction journal object.');
   }
 
-  options.prepared.discard();
+  await options.prepared.discard();
   writeFileSync(
     path,
     `${JSON.stringify({

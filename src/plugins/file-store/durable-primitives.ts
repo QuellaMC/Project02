@@ -9,12 +9,17 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, parse, resolve, sep } from 'node:path';
 
-import { atomicReplaceFileSync } from '../../runtime/storage/atomic-file.ts';
+import {
+  atomicReplaceFileSync,
+  isAbandonedAtomicReplacementFile,
+  parseAtomicReplacementFileName
+} from '../../runtime/storage/atomic-file.ts';
 import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout
 } from '../../runtime/storage/layout.ts';
 import {
+  acquireLocalRuntimeMutationLocks,
   acquireLocalRuntimeMutationLocksSync,
   type LocalRuntimeMutationLockOwnerToken
 } from '../../runtime/storage/mutation-lock.ts';
@@ -24,7 +29,6 @@ import {
   assertJsonlPathMode,
   assertJsonPathMode,
   durableDirectMutationJournalFileName,
-  durablePluginAtomicTempFileOwnerPid,
   durablePathModesFileName,
   durableRevisionFileName,
   isMissingFileError,
@@ -64,7 +68,6 @@ export function withDurablePluginStoreMutation<T>(
     readonly storeRoot: string;
     readonly root: string;
     readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
-    readonly yieldAfterRelease?: boolean;
   },
   operation: () => T
 ): T {
@@ -75,9 +78,6 @@ export function withDurablePluginStoreMutation<T>(
       ...(options.resourceKeys === undefined
         ? {}
         : { resourceKeys: options.resourceKeys }),
-      ...(options.yieldAfterRelease === undefined
-        ? {}
-        : { yieldAfterRelease: options.yieldAfterRelease }),
       ...(options.ownerToken === undefined
         ? {}
         : { ownerToken: options.ownerToken })
@@ -92,7 +92,6 @@ export function withDurablePluginStoreMutations<T>(
     readonly storeRoot: string;
     readonly roots: readonly string[];
     readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
-    readonly yieldAfterRelease?: boolean;
   },
   operation: () => T
 ): T {
@@ -104,6 +103,7 @@ export function withDurablePluginStoreMutations<T>(
       ...options.roots.map(durablePluginStoreMutationResourceKey),
       ...(options.resourceKeys ?? [])
     ],
+    waitTimeoutMs: 0,
     ...(options.ownerToken === undefined
       ? {}
       : { ownerToken: options.ownerToken })
@@ -113,19 +113,37 @@ export function withDurablePluginStoreMutations<T>(
     return operation();
   } finally {
     lease.release();
-
-    if (options.yieldAfterRelease === true) {
-      yieldDurablePluginMutationLock();
-    }
   }
 }
 
-function yieldDurablePluginMutationLock(): void {
-  // Synchronous writers can otherwise release and immediately reacquire the
-  // same root until another process exhausts the bounded 10-second wait.
-  const signal = new Int32Array(new SharedArrayBuffer(4));
+export async function withDurablePluginStoreMutationsAsync<T>(
+  options: {
+    readonly resourceKeys?: readonly string[];
+    readonly storeRoot: string;
+    readonly roots: readonly string[];
+    readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
+  },
+  operation: () => T | Promise<T>
+): Promise<T> {
+  const lease = await acquireLocalRuntimeMutationLocks({
+    locksRoot: createLocalRuntimeStorageLayout({
+      storeRoot: options.storeRoot
+    }).locksRoot,
+    resourceKeys: [
+      ...options.roots.map(durablePluginStoreMutationResourceKey),
+      ...(options.resourceKeys ?? [])
+    ],
+    waitTimeoutMs: 0,
+    ...(options.ownerToken === undefined
+      ? {}
+      : { ownerToken: options.ownerToken })
+  });
 
-  Atomics.wait(signal, 0, 0, 2);
+  try {
+    return await operation();
+  } finally {
+    await lease.release();
+  }
 }
 
 export function durablePluginStoreMutationResourceKey(root: string): string {
@@ -313,33 +331,6 @@ export function isNonNegativeSafeInteger(value: unknown): value is number {
 
 export function isPositiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && typeof value === 'number' && value > 0;
-}
-
-export function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: unknown) {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'ESRCH'
-    ) {
-      return false;
-    }
-
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'EPERM'
-    ) {
-      return true;
-    }
-
-    throw error;
-  }
 }
 
 export function isNonEmptyString(value: unknown): value is string {
@@ -560,9 +551,7 @@ export function cleanupDurablePluginStoreAtomicTempFiles(
       continue;
     }
 
-    const ownerPid = durablePluginAtomicTempFileOwnerPid(entry.name);
-
-    if (entry.isFile() && ownerPid !== undefined && !processIsAlive(ownerPid)) {
+    if (entry.isFile() && isAbandonedAtomicReplacementFile(entry.name)) {
       rmSync(entryPath, { force: true });
     }
   }
@@ -582,7 +571,7 @@ function countDurableStoreEntries(directory: string): number {
 
     const entryPath = join(directory, entry.name);
 
-    if (durablePluginAtomicTempFileOwnerPid(entry.name) !== undefined) {
+    if (parseAtomicReplacementFileName(entry.name) !== undefined) {
       continue;
     }
 
@@ -596,9 +585,7 @@ function countDurableStoreEntries(directory: string): number {
     }
 
     if (entry.name.endsWith('.jsonl')) {
-      count += readFileSync(entryPath, 'utf8')
-        .split('\n')
-        .filter((line) => line.trim().length > 0).length;
+      count += readFileSync(entryPath, 'utf8').match(/\n/gu)?.length ?? 0;
       continue;
     }
 

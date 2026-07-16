@@ -2,6 +2,7 @@ import type { ConversationSession } from '../core/conversation.ts';
 import { LocalRuntimeStorageContractError } from './storage/layout.ts';
 import { acquireLocalRuntimeSessionWriterLease } from './storage/session-store.ts';
 import { runSerializedLocalUserMessageEvent } from './turn/model.ts';
+import { recoverPendingRuntimeConfigEffects } from './turn/config-effects.ts';
 import type {
   LocalRuntimeUserMessageResult,
   RunLocalUserMessageEventOptions
@@ -48,6 +49,10 @@ async function runLocalUserMessageEventWithWriterLease(
 
   try {
     options.logStore.recoverAbandonedWriterEvidence?.();
+    recoverPendingRuntimeConfigEffects({
+      logStore: options.logStore,
+      pluginHost: options.pluginHost
+    });
     assertDurableTranscriptIsCurrent(options);
     return await runSerializedLocalUserMessageEvent(options);
   } finally {

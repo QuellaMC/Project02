@@ -4,11 +4,8 @@ import {
 } from '../shared/json-boundary.ts';
 
 export const visibleReplyModelToolName = 'visible_reply';
-export const characterStatePatchModelToolName = 'character_state.patch';
 
 export type VisibleReplyModelToolName = typeof visibleReplyModelToolName;
-export type CharacterStatePatchModelToolName =
-  typeof characterStatePatchModelToolName;
 export type BuiltInModelToolName = VisibleReplyModelToolName;
 
 export const modelToolInputFieldValueTypes = Object.freeze([
@@ -30,13 +27,26 @@ export type ModelToolInputField = {
   readonly allowedValues?: readonly string[];
 };
 
+export const modelToolJsonSchemaTypeValues = Object.freeze([
+  'string',
+  'number',
+  'boolean',
+  'object',
+  'array',
+  'null'
+] as const);
+
 export type ModelToolJsonSchemaType =
-  | 'string'
-  | 'number'
-  | 'boolean'
-  | 'object'
-  | 'array'
-  | 'null';
+  (typeof modelToolJsonSchemaTypeValues)[number];
+
+export function isModelToolJsonSchemaType(
+  value: unknown
+): value is ModelToolJsonSchemaType {
+  return (
+    typeof value === 'string' &&
+    modelToolJsonSchemaTypeValues.some((allowedValue) => allowedValue === value)
+  );
+}
 
 export type ModelToolJsonSchema = {
   readonly type?: ModelToolJsonSchemaType | readonly ModelToolJsonSchemaType[];
@@ -95,8 +105,6 @@ export type VisibleReplyToolInput = {
   readonly text: string;
 };
 
-export type CharacterStatePatchToolInput = Readonly<Record<string, unknown>>;
-
 export type VisibleReplyModelToolCall = {
   readonly name: VisibleReplyModelToolName;
   readonly input: VisibleReplyToolInput;
@@ -107,20 +115,12 @@ export type PluginModelToolCall = {
   readonly input: Readonly<Record<string, unknown>>;
 };
 
-export type CharacterStatePatchModelToolCall = PluginModelToolCall & {
-  readonly name: CharacterStatePatchModelToolName;
-  readonly input: CharacterStatePatchToolInput;
-};
-
 export type BuiltInModelToolCall = VisibleReplyModelToolCall;
 
 export type ModelToolCall = BuiltInModelToolCall | PluginModelToolCall;
 
 export const userTurnBuiltInModelToolNames = Object.freeze([
   visibleReplyModelToolName
-] satisfies readonly BuiltInModelToolName[]);
-
-export const requiredUserTurnBuiltInModelToolNames = Object.freeze([
 ] satisfies readonly BuiltInModelToolName[]);
 
 export const builtInModelToolDefinitions = Object.freeze([
@@ -164,28 +164,10 @@ export function createVisibleReplyModelToolCall(
   } satisfies VisibleReplyModelToolCall);
 }
 
-export function createCharacterStatePatchModelToolCall(
-  input: CharacterStatePatchToolInput
-): CharacterStatePatchModelToolCall {
-  return Object.freeze({
-    name: characterStatePatchModelToolName,
-    input: createJsonBoundaryObjectSnapshot(input, {
-      field: 'Character State patch tool input',
-      redact: true
-    })
-  } satisfies CharacterStatePatchModelToolCall);
-}
-
 export function freezeBuiltInModelToolCall(
   call: BuiltInModelToolCall
 ): BuiltInModelToolCall {
   return createVisibleReplyModelToolCall(call.input.text);
-}
-
-export function freezeBuiltInModelToolCalls(
-  calls: readonly BuiltInModelToolCall[]
-): readonly BuiltInModelToolCall[] {
-  return Object.freeze(calls.map(freezeBuiltInModelToolCall));
 }
 
 export function findVisibleReplyModelToolCall(
@@ -206,20 +188,6 @@ export function findVisibleReplyModelToolCall(
   return createVisibleReplyModelToolCall(text);
 }
 
-export function findCharacterStatePatchModelToolCall(
-  calls: readonly ModelToolCall[]
-): CharacterStatePatchModelToolCall | undefined {
-  const call = calls.find(
-    (candidate) => candidate.name === characterStatePatchModelToolName
-  );
-
-  if (call === undefined) {
-    return undefined;
-  }
-
-  return createCharacterStatePatchModelToolCall(call.input);
-}
-
 export function freezeModelToolDefinition(
   definition: ModelToolDefinition
 ): ModelToolDefinition {
@@ -232,21 +200,11 @@ export function freezeModelToolDefinition(
   } satisfies ModelToolDefinition);
 }
 
-export function freezeModelToolDefinitions(
-  definitions: readonly ModelToolDefinition[]
-): readonly ModelToolDefinition[] {
-  return Object.freeze(definitions.map(freezeModelToolDefinition));
-}
-
 export function freezeModelToolCall(call: ModelToolCall): ModelToolCall {
   if (call.name === visibleReplyModelToolName) {
     const text = call.input['text'];
 
     return createVisibleReplyModelToolCall(typeof text === 'string' ? text : '');
-  }
-
-  if (call.name === characterStatePatchModelToolName) {
-    return createCharacterStatePatchModelToolCall(call.input);
   }
 
   return Object.freeze({
@@ -690,7 +648,7 @@ function modelToolJsonSchemaTypes(
     : Object.freeze([type]);
 }
 
-function isModelToolJsonSchemaTypeArray(
+export function isModelToolJsonSchemaTypeArray(
   value: NonNullable<ModelToolJsonSchema['type']>
 ): value is readonly ModelToolJsonSchemaType[] {
   return Array.isArray(value);
@@ -749,7 +707,7 @@ function freezeModelToolJsonSchema(
   } satisfies ModelToolJsonSchema);
 }
 
-function freezeModelToolJsonSchemaType(
+export function freezeModelToolJsonSchemaType(
   type: NonNullable<ModelToolJsonSchema['type']>
 ): NonNullable<ModelToolJsonSchema['type']> {
   return isModelToolJsonSchemaTypeArray(type) ? Object.freeze([...type]) : type;

@@ -49,6 +49,7 @@ export type LocalRuntimeStorageLayout = {
   readonly envPath: string;
   readonly schemaPath: string;
   readonly locksRoot: string;
+  readonly pluginPackagesRoot: string;
   readonly sessionCatalogPath: string;
   readonly sessionsRoot: string;
 };
@@ -141,6 +142,7 @@ export function createLocalRuntimeStorageLayout(
     envPath: join(storeRoot, envFileName),
     schemaPath: join(storeRoot, schemaFileName),
     locksRoot: join(storeRoot, locksDirectoryName),
+    pluginPackagesRoot: join(storeRoot, pluginsDirectoryName),
     sessionCatalogPath: join(storeRoot, sessionCatalogFileName),
     sessionsRoot
   } satisfies LocalRuntimeStorageLayout);

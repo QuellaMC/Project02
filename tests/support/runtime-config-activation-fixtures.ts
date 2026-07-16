@@ -1,10 +1,9 @@
-import { roleModelPluginListToolName } from '../../src/role-model/contracts.ts';
 import {
   createRuntimePlugin,
-  firstPartyModelToolsPluginId,
+  hostScopedFirstPartyRuntimePluginIds,
   memorySearchTool,
-  runtimePluginDiscoveryPluginId,
   runtimePluginContractVersion,
+  runtimePluginListToolName,
   type RuntimePluginAccessMap,
   type RuntimePluginContext
 } from '../../src/plugins/index.ts';
@@ -256,7 +255,7 @@ export function modelFacingPluginListCollisionPlugin(
       ],
       requestedAccess: { model_input: 'write' }
     },
-    providedTools: [memorySearchTool(roleModelPluginListToolName)],
+    providedTools: [memorySearchTool(runtimePluginListToolName)],
     lifecycleHooks: {
       handleToolCall() {
         return {
@@ -312,10 +311,7 @@ export function parseActivationOutput(stdout: string): {
 export function nonHostScopedActivationPlugins(
   output: ReturnType<typeof parseActivationOutput>
 ): ReturnType<typeof parseActivationOutput>['plugins'] {
-  const hostScopedPluginIds = new Set([
-    runtimePluginDiscoveryPluginId,
-    firstPartyModelToolsPluginId
-  ]);
+  const hostScopedPluginIds = new Set(hostScopedFirstPartyRuntimePluginIds);
 
   return Object.freeze(
     output.plugins.filter((plugin) => !hostScopedPluginIds.has(plugin.pluginId))

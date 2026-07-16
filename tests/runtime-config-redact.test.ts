@@ -14,6 +14,7 @@ import {
   resolveProject02RuntimeConfig
 } from '../src/runtime/config/index.ts';
 import {
+  createRuntimePlugin,
   runtimePluginContractVersion,
   type RuntimePluginManifest
 } from '../src/plugins/index.ts';
@@ -125,127 +126,76 @@ describe('runtime config redaction', () => {
     expect(JSON.stringify(redacted)).not.toContain('array-api-key-secret');
   });
 
-  it('redacts dotted credential keys from aggregate runtime-config get output', async () => {
+  it('fails closed for manifest-declared auth secrets on runtime-config get', async () => {
+    const manifest = authSecretConfigManifest();
+    const plugin = createRuntimePlugin({ manifest });
+    const plaintextSecret = 'plaintext-auth-secret';
     const configPath = writeRuntimeConfig(
-      join(createTestTempRoot('project02-config-dotted-get-redact-'), 'config.json'),
+      join(createTestTempRoot('project02-config-auth-get-'), 'config.json'),
       {
         plugins: {
-          foo: {
-            enabled: true,
-            config: {
-              'api.key': 'aggregate-api-key-secret',
-              'display.name': 'visible aggregate display name',
-              nested: {
-                'api.key': 'nested-aggregate-api-key-secret',
-                'display.name': 'nested visible aggregate display name'
-              }
-            }
+          [manifest.id]: {
+            config: { auth: plaintextSecret }
           }
         }
       }
     );
     let stdout = '';
+    let stderr = '';
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--config', configPath, 'get', 'plugins.foo'], {
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--config', configPath, 'get', `plugins.${manifest.id}.config.auth`],
+      {
         stdout: collect((chunk) => {
           stdout += chunk;
         }),
-        stderr: collect(() => {})
-      })
-    ).toBe(0);
-
-    expect(JSON.parse(stdout) as unknown).toEqual({
-      enabled: true,
-      config: {
-        'api.key': '[redacted]',
-        'display.name': 'visible aggregate display name',
-        nested: {
-          'api.key': '[redacted]',
-          'display.name': 'nested visible aggregate display name'
-        }
-      }
-    });
-    expect(stdout).not.toContain('aggregate-api-key-secret');
-    expect(stdout).not.toContain('nested-aggregate-api-key-secret');
-  });
-
-  it('redacts nested credential object paths from aggregate runtime-config get output', async () => {
-    const configPath = writeRuntimeConfig(
-      join(
-        createTestTempRoot('project02-config-nested-get-redact-'),
-        'config.json'
-      ),
-      {
-        plugins: {
-          foo: {
-            enabled: true,
-            config: {
-              settings: {
-                api: {
-                  key: 'aggregate-nested-api-key-secret',
-                  url: 'visible aggregate api url'
-                },
-                ordinary: {
-                  key: 'visible aggregate ordinary key'
-                },
-                providers: [
-                  {
-                    api: {
-                      key: 'aggregate-array-api-key-secret',
-                      url: 'visible aggregate array api url'
-                    },
-                    ordinary: {
-                      key: 'visible aggregate array ordinary key'
-                    }
-                  }
-                ]
-              }
-            }
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [manifest.id]: {
+            manifest,
+            create: () => plugin
           }
         }
       }
     );
-    let stdout = '';
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--config', configPath, 'get', 'plugins.foo'], {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {})
-      })
-    ).toBe(0);
-
-    expect(JSON.parse(stdout) as unknown).toEqual({
-      enabled: true,
-      config: {
-        settings: {
-          api: {
-            key: '[redacted]',
-            url: 'visible aggregate api url'
-          },
-          ordinary: {
-            key: 'visible aggregate ordinary key'
-          },
-          providers: [
-            {
-              api: {
-                key: '[redacted]',
-                url: 'visible aggregate array api url'
-              },
-              ordinary: {
-                key: 'visible aggregate array ordinary key'
-              }
-            }
-          ]
-        }
-      }
+    expect({
+      exitCode,
+      stdout,
+      leakedSecret: `${stdout}${stderr}`.includes(plaintextSecret)
+    }).toEqual({
+      exitCode: 1,
+      stdout: '',
+      leakedSecret: false
     });
-    expect(stdout).not.toContain('aggregate-nested-api-key-secret');
-    expect(stdout).not.toContain('aggregate-array-api-key-secret');
   });
 });
+
+function authSecretConfigManifest(): RuntimePluginManifest {
+  const base = dottedConfigManifest();
+
+  return Object.freeze({
+    ...base,
+    id: 'memory.auth-secret',
+    displayName: 'Auth Secret',
+    description: 'Test manifest for a secret field outside name heuristics.',
+    declaredPlugins: ['plugin_discovery'],
+    config: {
+      fields: [
+        {
+          name: 'auth',
+          description: 'Authentication material.',
+          required: false,
+          secret: true,
+          valueType: 'secret',
+          redactionLabels: ['secret']
+        }
+      ]
+    }
+  } satisfies RuntimePluginManifest);
+}
 
 function dottedConfigManifest(): RuntimePluginManifest {
   return Object.freeze({

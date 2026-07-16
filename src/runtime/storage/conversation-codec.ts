@@ -1,6 +1,7 @@
 import type { ConversationLogRecord } from '../log.ts';
 import {
   requiredNormalizedVisibleMessageText,
+  requiredRuntimeEventIdentity,
   requiredVisibleMessageRole
 } from './codec-primitives.ts';
 import {
@@ -15,15 +16,10 @@ export function encodeConversationLogRecord(record: ConversationLogRecord): stri
 
 export function decodeConversationLogRecord(line: string): ConversationLogRecord {
   const record = parseJsonObject(line, 'malformed_record');
+  const identity = requiredRuntimeEventIdentity(record);
 
   return Object.freeze({
-    eventId: requiredRecordString(record, 'eventId', 'malformed_record'),
-    traceId: requiredRecordString(record, 'traceId', 'malformed_record'),
-    createdAt: requiredRecordCanonicalTimestamp(
-      record,
-      'createdAt',
-      'malformed_record'
-    ),
+    ...identity,
     id: requiredRecordString(record, 'id', 'malformed_record'),
     role: requiredVisibleMessageRole(record['role']),
     speakerId: requiredRecordString(record, 'speakerId', 'malformed_record'),

@@ -12,7 +12,7 @@ import { createLocalRuntimePluginPaths } from '../src/runtime/storage/layout.ts'
 import { createTestTempRoot } from './support/temp-root.ts';
 
 describe('runtime plugin file store transaction lifecycle', () => {
-  it('fails every staged file-store method closed after prepare and finalize', () => {
+  it('fails every staged file-store method closed after prepare and finalize', async () => {
     const transaction = createRuntimePluginFileStoreTransaction();
     const fileStore = transaction.fileStoreFor({
       sessionId: 'session-closed-after-prepare',
@@ -21,10 +21,10 @@ describe('runtime plugin file store transaction lifecycle', () => {
     });
 
     fileStore.appendJsonl('events.jsonl', { value: 1 });
-    const prepared = transaction.prepare(testIdentity());
+    const prepared = await transaction.prepare(testIdentity());
 
     expectFileStoreClosed(fileStore);
-    prepared.finalize();
+    await prepared.finalize();
     expectFileStoreClosed(fileStore);
   });
 

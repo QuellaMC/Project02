@@ -10,22 +10,20 @@ import {
   runtimePluginContractVersion
 } from '../src/plugins/types.ts';
 import {
+  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot
 } from '../src/role-model/contracts.ts';
 import {
   createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent
+  createUserMessageRuntimeEvent,
+  runtimeEventIdentityKey
 } from '../src/runtime/event.ts';
 import {
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeStorageSchemaMarker
 } from '../src/runtime/storage/layout.ts';
-import {
-  runtimeEventIdentityKey
-} from '../src/runtime/storage/runtime-evidence-validation.ts';
-
 const nonCanonicalTimestamp = '2026-07-11T08:00:00+08:00';
 const canonicalTimestamp = '2026-07-11T00:00:00.000Z';
 
@@ -179,6 +177,7 @@ function canonicalInputEnvelope() {
     decisionContext: createDecisionContext({
       sessionId: 'session-canonical-time',
       characterSnapshot: { id: 'mira', displayName: 'Mira' }
-    })
+    }),
+    pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
   });
 }

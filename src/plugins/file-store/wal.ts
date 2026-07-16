@@ -14,7 +14,10 @@ import {
 import { dirname, join } from 'node:path';
 import { hostname } from 'node:os';
 
+import { canonicalJsonStringify } from '../../shared/canonical-json.ts';
+import { processIsAlive } from '../../shared/process-liveness.ts';
 import type { RuntimeEventIdentity } from '../../runtime/event.ts';
+import { parseAtomicReplacementFileName } from '../../runtime/storage/atomic-file.ts';
 import { findValidatedTerminalRawEventForSession } from '../../runtime/storage/file-runtime-log-store.ts';
 import {
   createLocalRuntimeSessionPaths,
@@ -22,6 +25,7 @@ import {
 } from '../../runtime/storage/layout.ts';
 import {
   createLocalRuntimeMutationLockOwnerToken,
+  LocalRuntimeMutationLockBusyError,
   type LocalRuntimeMutationLockOwnerToken
 } from '../../runtime/storage/mutation-lock.ts';
 import type {
@@ -40,7 +44,6 @@ import {
   durableOperationAfterContent,
   durablePluginRoot,
   hashOptionalFileContent,
-  processIsAlive,
   readDurablePathModes,
   readDurableRevision,
   readOptionalRegularFile,
@@ -48,6 +51,7 @@ import {
   readPersistedDurableRevision,
   requiredJournalOperationRevision,
   requiredJournalOperationString,
+  withDurablePluginStoreMutationsAsync,
   withDurablePluginStoreMutation,
   withDurablePluginStoreMutations,
   writeDurablePathModes,
@@ -57,10 +61,13 @@ import {
 import type { RuntimePluginJsonValue } from '../types.ts';
 import {
   durableDirectMutationJournalFileName,
-  durablePluginAtomicTempFileOwnerPid,
-  isMissingFileError,
-  isPlainObject
+  isMissingFileError
 } from './shared.ts';
+import {
+  durableTransactionProgressVersion,
+  parseDurablePluginFileStoreTransactionProgress,
+  type DurablePluginFileStoreTransactionProgress
+} from './wal-progress.ts';
 import {
   assertDurableTransactionJournalDoesNotExist,
   durablePluginFileStoreTransactionJournalPath,
@@ -73,23 +80,7 @@ import {
 
 const durableTransactionDirectoryName = '.plugin-transactions';
 const durableTransactionProgressSuffix = '.progress';
-const durableTransactionProgressVersion =
-  'project02.plugin_transaction_progress.v1';
 const activeDurableTransactionJournalPaths = new Set<string>();
-
-type DurablePluginFileStoreTransactionProgress = {
-  readonly version: typeof durableTransactionProgressVersion;
-  readonly eventId: string;
-  readonly traceId: string;
-  readonly createdAt: string;
-  readonly ownerNonce: string;
-  readonly sessionId: string;
-  readonly baseRevisions: readonly {
-    readonly pluginId: string;
-    readonly revision: number;
-  }[];
-  readonly appliedCount: number;
-};
 
 export type DurablePluginFileStoreFaultPoint =
   'after_content_persisted';
@@ -132,8 +123,7 @@ export function applyRecoverableDurablePluginFileStoreOperation(options: {
     {
       storeRoot: options.storeRoot,
       root: options.root,
-      ownerToken: options.ownerToken,
-      yieldAfterRelease: true
+      ownerToken: options.ownerToken
     },
     () => {
       recoverDirectDurablePluginFileStoreMutationLocked(options);
@@ -191,14 +181,14 @@ export function applyRecoverableDurablePluginFileStoreOperation(options: {
   );
 }
 
-export function prepareDurablePluginFileStoreTransaction(options: {
+export async function prepareDurablePluginFileStoreTransaction(options: {
   readonly identity: RuntimeEventIdentity;
   readonly operations: readonly StagedPluginFileStoreOperation[];
   readonly ownerToken: LocalRuntimeMutationLockOwnerToken;
   readonly sessionId: string;
   readonly storeRoot: string;
   readonly faultInjector?: DurablePluginFileStoreFaultInjector;
-}): RuntimePluginFileStorePreparedTransaction {
+}): Promise<RuntimePluginFileStorePreparedTransaction> {
   const journalPath = durablePluginFileStoreTransactionJournalPath({
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
@@ -237,7 +227,7 @@ export function prepareDurablePluginFileStoreTransaction(options: {
     operations: options.operations
   });
 
-  withDurablePluginStoreMutations(
+  await withDurablePluginStoreMutationsAsync(
     {
       storeRoot: options.storeRoot,
       roots,
@@ -264,18 +254,25 @@ export function prepareDurablePluginFileStoreTransaction(options: {
 
   let state:
     | 'discarded'
+    | 'discarding'
     | 'finalized'
     | 'finalizing'
     | 'prepared'
     | 'recovery_required' = 'prepared';
+  let activeTransition: Promise<void> | undefined;
 
   return Object.freeze({
     discard() {
-      if (state !== 'prepared') {
-        return;
+      if (state === 'discarding' || state === 'finalizing') {
+        return activeTransition ?? Promise.resolve();
       }
 
-      withDurablePluginStoreMutations(
+      if (state !== 'prepared') {
+        return Promise.resolve();
+      }
+
+      state = 'discarding';
+      const transition = withDurablePluginStoreMutationsAsync(
         {
           storeRoot: options.storeRoot,
           roots,
@@ -302,47 +299,70 @@ export function prepareDurablePluginFileStoreTransaction(options: {
           });
           rmSync(journalPath, { force: true });
         }
+      ).then(
+        () => {
+          state = 'discarded';
+          activeTransition = undefined;
+        },
+        (error: unknown) => {
+          state = 'prepared';
+          activeTransition = undefined;
+          throw error;
+        }
       );
-      state = 'discarded';
+
+      activeTransition = transition;
+      return transition;
     },
     finalize() {
-      if (
-        state === 'discarded' ||
-        state === 'finalized' ||
-        state === 'finalizing'
-      ) {
-        return;
+      if (state === 'discarding' || state === 'finalizing') {
+        return activeTransition ?? Promise.resolve();
       }
 
-      activeDurableTransactionJournalPaths.delete(journalPath);
+      if (state === 'discarded' || state === 'finalized') {
+        return Promise.resolve();
+      }
+
       state = 'finalizing';
+      const transition = finalizeDurablePluginFileStoreJournal({
+        storeRoot: options.storeRoot,
+        journalPath,
+        expectedJournalIdentity: pendingJournal,
+        ownerToken: options.ownerToken,
+        ...(options.faultInjector === undefined
+          ? {}
+          : { faultInjector: options.faultInjector })
+      }).then(
+        () => {
+          activeDurableTransactionJournalPaths.delete(journalPath);
+          state = 'finalized';
+          activeTransition = undefined;
+        },
+        (error: unknown) => {
+          if (error instanceof LocalRuntimeMutationLockBusyError) {
+            state = 'prepared';
+          } else {
+            activeDurableTransactionJournalPaths.delete(journalPath);
+            state = 'recovery_required';
+          }
+          activeTransition = undefined;
+          throw error;
+        }
+      );
 
-      try {
-        finalizeDurablePluginFileStoreJournal({
-          storeRoot: options.storeRoot,
-          journalPath,
-          expectedJournalIdentity: pendingJournal,
-          ownerToken: options.ownerToken,
-          ...(options.faultInjector === undefined
-            ? {}
-            : { faultInjector: options.faultInjector })
-        });
-        state = 'finalized';
-      } catch (error: unknown) {
-        state = 'recovery_required';
-        throw error;
-      }
+      activeTransition = transition;
+      return transition;
     }
   } satisfies RuntimePluginFileStorePreparedTransaction);
 }
 
-function finalizeDurablePluginFileStoreJournal(options: {
+async function finalizeDurablePluginFileStoreJournal(options: {
   readonly storeRoot: string;
   readonly journalPath: string;
   readonly expectedJournalIdentity: DurablePluginFileStoreJournal;
   readonly ownerToken: LocalRuntimeMutationLockOwnerToken;
   readonly faultInjector?: DurablePluginFileStoreFaultInjector;
-}): void {
+}): Promise<void> {
   const initialJournal = readDurablePluginFileStoreJournalIfPresent(
     options.journalPath
   );
@@ -368,7 +388,7 @@ function finalizeDurablePluginFileStoreJournal(options: {
     identity: initialJournal
   });
 
-  withDurablePluginStoreMutations(
+  await withDurablePluginStoreMutationsAsync(
     {
       storeRoot: options.storeRoot,
       roots,
@@ -794,97 +814,7 @@ function readDurablePluginFileStoreTransactionProgress(
     throw error;
   }
 
-  const lines = content.split('\n');
-
-  if (lines.at(-1) !== '' || lines.length < 2) {
-    throw new TypeError('Plugin fileStore transaction progress is malformed.');
-  }
-
-  let header: unknown;
-
-  try {
-    header = JSON.parse(lines[0] ?? '') as unknown;
-  } catch (error: unknown) {
-    throw new TypeError(
-      'Plugin fileStore transaction progress is malformed.',
-      { cause: error }
-    );
-  }
-
-  if (
-    !isPlainObject(header) ||
-    header['version'] !== durableTransactionProgressVersion ||
-    header['eventId'] !== journal.eventId ||
-    header['traceId'] !== journal.traceId ||
-    header['createdAt'] !== journal.createdAt ||
-    header['ownerNonce'] !== journal.ownerNonce ||
-    header['sessionId'] !== journal.sessionId ||
-    header['appliedCount'] !== 0 ||
-    !Array.isArray(header['baseRevisions']) ||
-    journal.operations.some((operation) => operation.status !== 'planned')
-  ) {
-    throw new TypeError('Plugin fileStore transaction progress is malformed.');
-  }
-
-  const expectedPluginIds = [
-    ...new Set(journal.operations.map((operation) => operation.pluginId))
-  ].sort((left, right) => left.localeCompare(right));
-  const baseRevisions = header['baseRevisions'].map((value, index) => {
-    const pluginId = expectedPluginIds[index];
-
-    if (
-      pluginId === undefined ||
-      !isPlainObject(value) ||
-      value['pluginId'] !== pluginId ||
-      !isNonNegativeSafeInteger(value['revision'])
-    ) {
-      throw new TypeError(
-        'Plugin fileStore transaction progress is malformed.'
-      );
-    }
-
-    return Object.freeze({
-      pluginId,
-      revision: value['revision']
-    });
-  });
-
-  if (baseRevisions.length !== expectedPluginIds.length) {
-    throw new TypeError('Plugin fileStore transaction progress is malformed.');
-  }
-
-  let appliedCount = 0;
-
-  for (const line of lines.slice(1, -1)) {
-    const nextAppliedCount = Number(line);
-
-    if (
-      !isNonNegativeSafeInteger(nextAppliedCount) ||
-      nextAppliedCount <= appliedCount ||
-      line !== String(nextAppliedCount)
-    ) {
-      throw new TypeError(
-        'Plugin fileStore transaction progress is malformed.'
-      );
-    }
-
-    appliedCount = nextAppliedCount;
-  }
-
-  if (appliedCount > journal.operations.length) {
-    throw new TypeError('Plugin fileStore transaction progress is malformed.');
-  }
-
-  return Object.freeze({
-    version: durableTransactionProgressVersion,
-    eventId: journal.eventId,
-    traceId: journal.traceId,
-    createdAt: journal.createdAt,
-    ownerNonce: journal.ownerNonce,
-    sessionId: journal.sessionId,
-    baseRevisions: Object.freeze(baseRevisions),
-    appliedCount
-  } satisfies DurablePluginFileStoreTransactionProgress);
+  return parseDurablePluginFileStoreTransactionProgress(content, journal);
 }
 
 function appendDurablePluginFileStoreTransactionProgress(
@@ -1030,10 +960,6 @@ function persistBatchedDurablePluginFileStoreMetadata(options: {
     writeDurablePathModes(root, pathModes);
     writeDurableRevision(root, base.revision + operations.length);
   }
-}
-
-function isNonNegativeSafeInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
 function materializeDurablePluginFileStoreJournal(options: {
@@ -1611,7 +1537,7 @@ function assertJournalIdentityUnchanged(
 function immutableJournalOperationsKey(
   journal: DurablePluginFileStoreJournal
 ): string {
-  return JSON.stringify(
+  return canonicalJsonStringify(
     journal.operations.map((operation) => ({
       index: operation.index,
       pluginId: operation.pluginId,
@@ -1669,7 +1595,7 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
     const journalPath = join(journalsRoot, entry.name);
 
     if (entry.isFile() && entry.name.endsWith('.tmp')) {
-      if (durablePluginAtomicTempFileOwnerPid(entry.name) === undefined) {
+      if (parseAtomicReplacementFileName(entry.name) === undefined) {
         throw new TypeError(
           'Plugin fileStore transaction directory contains an unsupported temp file.'
         );

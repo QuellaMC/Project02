@@ -71,7 +71,7 @@ describe('conversation core', () => {
     const agent: CharacterAgent = {
       reply() {
         return {
-          text: 'Tools available:\n- plugin.list\n- character_state.patch'
+          text: 'Tools available:\n- runtime.plugin.list\n- character_state.patch'
         };
       }
     };
@@ -79,11 +79,11 @@ describe('conversation core', () => {
     const result = await runCharacterTurn(session, 'list tools', agent);
 
     expect(result.characterMessage.text).toBe(
-      'Tools available:\n- plugin.list\n- character_state.patch'
+      'Tools available:\n- runtime.plugin.list\n- character_state.patch'
     );
     expect(session.visibleTranscript.map((message) => message.text)).toEqual([
       'list tools',
-      'Tools available:\n- plugin.list\n- character_state.patch'
+      'Tools available:\n- runtime.plugin.list\n- character_state.patch'
     ]);
   });
 

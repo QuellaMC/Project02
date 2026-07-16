@@ -4,7 +4,11 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { atomicReplaceFile } from '../src/runtime/storage/atomic-file.ts';
+import {
+  atomicReplacementFileBelongsToTarget,
+  atomicReplaceFile,
+  parseAtomicReplacementFileName
+} from '../src/runtime/storage/atomic-file.ts';
 
 const tempRoots: string[] = [];
 
@@ -43,6 +47,22 @@ describe('atomic file replacement', () => {
     ).rejects.toThrow();
 
     expect(await readdir(root)).toEqual(['config.json']);
+  });
+
+  it('owns atomic replacement temp-name parsing for every storage caller', () => {
+    const fileName =
+      '.trace.jsonl.4242.00000000-0000-4000-8000-000000000000.tmp';
+
+    expect(parseAtomicReplacementFileName(fileName)).toEqual({
+      targetName: 'trace.jsonl',
+      ownerPid: 4242
+    });
+    expect(
+      atomicReplacementFileBelongsToTarget(fileName, '/runtime/trace.jsonl')
+    ).toBe(true);
+    expect(
+      atomicReplacementFileBelongsToTarget(fileName, '/runtime/raw-events.jsonl')
+    ).toBe(false);
   });
 });
 

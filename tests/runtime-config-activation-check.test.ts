@@ -8,14 +8,16 @@ import {
   loadProject02RuntimeConfig
 } from '../src/runtime/config/index.ts';
 import {
-  characterStatePluginId,
   createRuntimePluginFileStore,
   createRuntimePlugin,
-  createCharacterStatePlugin,
-  createCharacterStatePluginManifest,
-  runtimePluginDiscoveryPluginId,
+  runtimePluginId,
   type RuntimePluginContext
 } from '../src/plugins/index.ts';
+import {
+  characterStatePluginId,
+  createCharacterStatePlugin,
+  createCharacterStatePluginManifest
+} from '../src/plugins/packages/character-state/plugin.ts';
 import {
   collect,
   writeRuntimeConfig
@@ -254,7 +256,11 @@ describe('runtime config activation checks and construction', () => {
         })
       ])
     );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
+    expect(
+      output.plugins
+        .filter((plugin) => plugin.enabled)
+        .map((plugin) => plugin.pluginId)
+    ).toEqual([runtimePluginId]);
     expect(stdout).not.toContain('duplicate-manifest-secret');
   });
 
@@ -378,7 +384,11 @@ describe('runtime config activation checks and construction', () => {
         })
       ])
     );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
+    expect(
+      output.plugins
+        .filter((plugin) => plugin.enabled)
+        .map((plugin) => plugin.pluginId)
+    ).toEqual([runtimePluginId]);
   });
 
   it('keeps explicitly disabled duplicate manifest ids passing check', async () => {
@@ -584,18 +594,22 @@ describe('runtime config activation checks and construction', () => {
         })
       ])
     );
-    expect(output.plugins.filter((plugin) => plugin.enabled)).toEqual([]);
+    expect(
+      output.plugins
+        .filter((plugin) => plugin.enabled)
+        .map((plugin) => plugin.pluginId)
+    ).toEqual([runtimePluginId]);
   });
 
-  it('fails check for manifest ids reserved by the host discovery plugin', async () => {
-    const storeRoot = createTestTempRoot('project02-config-reserved-discovery-id-');
-    const plugin = firstPartyPlugin(runtimePluginDiscoveryPluginId);
+  it('fails check for manifest ids reserved by the host management plugin', async () => {
+    const storeRoot = createTestTempRoot('project02-config-reserved-management-id-');
+    const plugin = firstPartyPlugin(runtimePluginId);
     let stdout = '';
     let factoryCalls = 0;
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
-        [runtimePluginDiscoveryPluginId]: {
+        [runtimePluginId]: {
           enabled: true
         }
       }
@@ -628,14 +642,14 @@ describe('runtime config activation checks and construction', () => {
         expect.objectContaining({
           severity: 'error',
           code: 'runtime_config_duplicate_plugin_manifest_id',
-          path: `plugins.${runtimePluginDiscoveryPluginId}`,
-          pluginId: runtimePluginDiscoveryPluginId
+          path: `plugins.${runtimePluginId}`,
+          pluginId: runtimePluginId
         })
       ])
     );
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
-        pluginId: runtimePluginDiscoveryPluginId,
+        pluginId: runtimePluginId,
         activationStatus: 'blocked',
         enabled: false
       })
@@ -687,7 +701,7 @@ describe('runtime config activation checks and construction', () => {
         }
       })
     ).rejects.toThrow(
-      'Plugin factory "memory.contract" returned a manifest that differs from its declared manifest "memory.contract".'
+      'Plugin package loader "memory.contract" returned a manifest that differs from its declared manifest "memory.contract".'
     );
     expect(cleanupCalls).toBe(1);
   });
@@ -1013,7 +1027,7 @@ describe('runtime config activation checks and construction', () => {
     expect(cleanupStore.readJson('cleanup.json')).toBeUndefined();
   });
 
-  it('runs cleanup for partial plugins that collide with host plugin.list', async () => {
+  it('runs cleanup for partial plugins that collide with host runtime.plugin.list', async () => {
     const storeRoot = createTestTempRoot('project02-config-plugin-list-cleanup-');
     const configPath = join(storeRoot, 'config.json');
     const cleanupContexts: RuntimePluginContext[] = [];
@@ -1044,7 +1058,7 @@ describe('runtime config activation checks and construction', () => {
           }
         }
       })
-    ).rejects.toThrow('Plugin tool "plugin.list" is declared more than once.');
+    ).rejects.toThrow('Plugin tool "runtime.plugin.list" is declared more than once.');
 
     expect(cleanupContexts).toHaveLength(1);
     expect(cleanupContexts[0]).toMatchObject({

@@ -4,26 +4,28 @@ import {
   createRuntimePluginAfterTurnCommittedContext
 } from '../src/plugins/types.ts';
 import {
-  defaultRuntimePluginCatalogFactoryDefinitions,
+  defaultRuntimePluginHostServiceCatalogEntries,
   hostFirstPartyRuntimePluginIds
 } from '../src/plugins/catalog.ts';
-import { firstPartyModelToolsPluginId } from '../src/plugins/contract.ts';
 import {
-  createDefaultProject02PluginHost,
-  createRuntimePluginHost,
-  runtimePluginDiscoveryPluginId
-} from '../src/plugins/host.ts';
-import { roleModelPluginListToolName } from '../src/role-model/contracts.ts';
+  firstPartyModelToolsPluginId,
+  runtimePluginId,
+  runtimePluginListToolName
+} from '../src/plugins/contract.ts';
+import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
+import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
-  characterStatePatchModelToolName,
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
+import {
+  characterStatePatchModelToolName
+} from '../src/plugins/packages/character-state/contract.ts';
 import { createRuntimePluginFileStore } from '../src/plugins/file-store.ts';
-import { createRuntimePluginDiscoveryPlugin } from '../src/plugins/discovery-plugin.ts';
+import { createRuntimePluginManagementPlugin } from '../src/plugins/index.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin
-} from '../src/plugins/builtin/character-state/index.ts';
+} from '../src/plugins/packages/character-state/plugin.ts';
 import {
   callFileStoreAvailabilityProbe,
   createConfirmationRequiredMemorySearchPlugin,
@@ -58,48 +60,64 @@ describe('runtime plugin host catalog and routing', () => {
 
     expect(host.enabledPluginIds()).toEqual([]);
     expect(host.pluginToolDefinitions()).toEqual([]);
-    expect(host.resolveToolPluginId(roleModelPluginListToolName)).toBeUndefined();
   });
 
   it('rejects caller-supplied host-scoped plugin instances', () => {
-    const callerDiscovery = createRuntimePluginDiscoveryPlugin(() => ({
-      plugins: Object.freeze([]),
-      enabledPlugins: Object.freeze([]),
-      accessByPluginId: Object.freeze({})
-    }));
+    const callerManagement = createRuntimePluginManagementPlugin({
+      hostStateForTurn: () => ({
+        plugins: Object.freeze([]),
+        enabledPlugins: Object.freeze([]),
+        accessByPluginId: Object.freeze({}),
+        confirmationAvailable: false
+      })
+    });
 
     expect(() =>
       createRuntimePluginHost({
-        plugins: [callerDiscovery]
+        plugins: [callerManagement]
       })
     ).toThrow(
-      'Plugin "runtime.plugin_discovery" is host-owned and cannot be supplied by callers.'
+      'Plugin "runtime.plugin" is host-owned and cannot be supplied by callers.'
     );
   });
 
-  it('declares the canonical host first-party plugin catalog', () => {
-    const catalog = defaultRuntimePluginCatalogFactoryDefinitions();
+  it('keeps real bootstrap constructors separate from ordinary package loaders', () => {
+    const catalog = defaultRuntimePluginHostServiceCatalogEntries();
 
     expect([...hostFirstPartyRuntimePluginIds]).toEqual([
-      runtimePluginDiscoveryPluginId,
+      runtimePluginId,
       firstPartyModelToolsPluginId,
       characterStatePluginId
     ]);
     expect(Object.keys(catalog).sort()).toEqual(
       [
-        runtimePluginDiscoveryPluginId,
-        firstPartyModelToolsPluginId,
-        characterStatePluginId
+        runtimePluginId,
+        firstPartyModelToolsPluginId
       ].sort((left, right) => left.localeCompare(right))
+    );
+    expect(Object.values(catalog)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          catalogKind: 'host_service'
+        })
+      ])
+    );
+    expect(
+      Object.values(catalog).every(
+        (entry) => typeof entry.bootstrap === 'function'
+      )
+    ).toBe(true);
+    expect(Object.values(catalog).every((entry) => !('create' in entry))).toBe(
+      true
     );
   });
 
-  it('routes plugin.list through the host-owned discovery plugin', async () => {
+  it('routes runtime.plugin.list through the host-owned management plugin', async () => {
     const plugin = createMemorySearchPlugin();
     const host = createRuntimePluginHost({
       plugins: [plugin],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         firstPartyModelToolsPluginId,
         plugin.manifest.id
       ]
@@ -109,8 +127,8 @@ describe('runtime plugin host catalog and routing', () => {
     const result = await host.handleToolCall(
       {
         ...testIdentity(),
-        pluginId: runtimePluginDiscoveryPluginId,
-        toolName: roleModelPluginListToolName,
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
         input: {}
       },
       context
@@ -118,13 +136,13 @@ describe('runtime plugin host catalog and routing', () => {
 
     expect(result.status).toBe('accepted');
     if (result.status !== 'accepted') {
-      throw new Error('Expected plugin.list to be accepted.');
+      throw new Error('Expected runtime.plugin.list to be accepted.');
     }
 
     expect(result.output).toMatchObject({
       plugins: [
         {
-          id: runtimePluginDiscoveryPluginId
+          id: runtimePluginId
         },
         {
           id: firstPartyModelToolsPluginId
@@ -143,8 +161,8 @@ describe('runtime plugin host catalog and routing', () => {
     const result = await host.handleToolCall(
       {
         ...testIdentity(),
-        pluginId: runtimePluginDiscoveryPluginId,
-        toolName: roleModelPluginListToolName,
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
         input: {}
       },
       testPluginContext()
@@ -152,7 +170,7 @@ describe('runtime plugin host catalog and routing', () => {
 
     expect(result.status).toBe('accepted');
     if (result.status !== 'accepted') {
-      throw new Error('Expected plugin.list to be accepted.');
+      throw new Error('Expected runtime.plugin.list to be accepted.');
     }
 
     const exposedToolNames = Object.freeze(
@@ -163,7 +181,7 @@ describe('runtime plugin host catalog and routing', () => {
 
     expect(pluginDiscoveryToolNames(result.output)).toEqual(exposedToolNames);
     expect(exposedToolNames).toEqual(
-      expect.arrayContaining([roleModelPluginListToolName, 'memory.search'])
+      expect.arrayContaining([runtimePluginListToolName, 'memory.search'])
     );
   });
 
@@ -296,7 +314,6 @@ describe('runtime plugin host catalog and routing', () => {
         maxCalls: 1
       }
     });
-    expect(host.resolveToolPluginId(visibleReplyModelToolName)).toBeUndefined();
     expect(characterStatePatch).toMatchObject({
       pluginId: characterStatePluginId,
       validationOwner: 'plugin_host',
@@ -305,9 +322,6 @@ describe('runtime plugin host catalog and routing', () => {
         maxCalls: 1
       }
     });
-    expect(host.resolveToolPluginId(characterStatePatchModelToolName)).toBe(
-      characterStatePluginId
-    );
   });
 
   it('lists enabled plugins by default and includes disabled plugins for all scope', async () => {
@@ -315,14 +329,14 @@ describe('runtime plugin host catalog and routing', () => {
     const disabledPlugin = createMemorySearchPlugin('memory.disabled.fixture');
     const host = createRuntimePluginHost({
       plugins: [enabledPlugin, disabledPlugin],
-      enabledPluginIds: [runtimePluginDiscoveryPluginId, enabledPlugin.manifest.id]
+      enabledPluginIds: [runtimePluginId, enabledPlugin.manifest.id]
     });
 
     const defaultResult = await host.handleToolCall(
       {
         ...testIdentity(),
-        pluginId: runtimePluginDiscoveryPluginId,
-        toolName: roleModelPluginListToolName,
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
         input: {}
       },
       testPluginContext()
@@ -330,8 +344,8 @@ describe('runtime plugin host catalog and routing', () => {
     const allResult = await host.handleToolCall(
       {
         ...testIdentity(),
-        pluginId: runtimePluginDiscoveryPluginId,
-        toolName: roleModelPluginListToolName,
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
         input: {
           scope: 'all'
         }
@@ -343,7 +357,7 @@ describe('runtime plugin host catalog and routing', () => {
     expect(allResult.status).toBe('accepted');
 
     if (defaultResult.status !== 'accepted' || allResult.status !== 'accepted') {
-      throw new Error('Expected plugin.list calls to be accepted.');
+      throw new Error('Expected runtime.plugin.list calls to be accepted.');
     }
 
     const defaultPluginIds = pluginDiscoveryPluginSummaries(
@@ -381,11 +395,114 @@ describe('runtime plugin host catalog and routing', () => {
     );
   });
 
+  it('lists cold installed manifests without activation metadata as disabled', async () => {
+    const coldPlugin = createMemorySearchPlugin('memory.cold.fixture');
+    const host = createRuntimePluginHost({
+      pluginInventoryState: {
+        pluginManifests: [coldPlugin.manifest]
+      }
+    });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
+        input: { scope: 'all' }
+      },
+      testPluginContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected runtime.plugin.list scope=all to be accepted.');
+    }
+
+    expect(
+      pluginDiscoveryPluginSummaries(result.output).find(
+        (summary) => summary['id'] === coldPlugin.manifest.id
+      )
+    ).toMatchObject({
+      id: coldPlugin.manifest.id,
+      enabled: false,
+      availableForTurn: false,
+      activationStatus: 'disabled',
+      grantedAccess: {},
+      registeredLifecycleHooks: [],
+      providedTools: []
+    });
+  });
+
+  it('preserves plugin and per-plugin tool truncation bounds', async () => {
+    const baseTool = memorySearchProvidedTools()[0];
+
+    if (baseTool === undefined) {
+      throw new TypeError('Expected the memory search tool fixture.');
+    }
+
+    const plugins = Array.from({ length: 17 }, (_, pluginIndex) => {
+      const pluginId = `memory.inventory.${String(pluginIndex).padStart(2, '0')}`;
+      const toolCount = pluginIndex === 0 ? 9 : 1;
+
+      return createRuntimePlugin({
+        manifest: memorySearchPluginManifest(pluginId),
+        providedTools: Array.from({ length: toolCount }, (_, toolIndex) => ({
+          ...baseTool,
+          name: `${pluginId}.tool.${String(toolIndex)}`
+        })),
+        lifecycleHooks: {
+          handleToolCall() {
+            return {
+              status: 'rejected',
+              reason: 'inventory_boundary_fixture',
+              message: 'Inventory boundary fixture tools are not invoked.',
+              evidence: []
+            };
+          }
+        }
+      });
+    });
+    const firstPlugin = plugins[0];
+
+    if (firstPlugin === undefined) {
+      throw new TypeError('Expected an inventory boundary plugin.');
+    }
+
+    const host = createRuntimePluginHost({
+      plugins,
+      enabledPluginIds: [runtimePluginId, firstPlugin.manifest.id]
+    });
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
+        input: { scope: 'all' }
+      },
+      testPluginContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected bounded runtime plugin inventory.');
+    }
+
+    const summaries = pluginDiscoveryPluginSummaries(result.output);
+    const firstPluginSummary = summaries.find(
+      (summary) => summary['id'] === firstPlugin.manifest.id
+    );
+
+    expect(result.output).toMatchObject({ truncated: true });
+    expect(summaries).toHaveLength(16);
+    expect(firstPluginSummary).toMatchObject({ toolsTruncated: true });
+    expect(firstPluginSummary?.['providedTools']).toHaveLength(8);
+  });
+
   it('does not inject plugin discovery inventory before model calls', async () => {
     const plugin = createMemorySearchPlugin();
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [runtimePluginDiscoveryPluginId, plugin.manifest.id]
+      enabledPluginIds: [runtimePluginId, plugin.manifest.id]
     });
 
     const result = await host.beforeRoleModelCall(testPluginContext());
@@ -404,7 +521,7 @@ describe('runtime plugin host catalog and routing', () => {
           createMemorySearchPlugin('memory.two')
         ],
         enabledPluginIds: [
-          runtimePluginDiscoveryPluginId,
+          runtimePluginId,
           'memory.one',
           'memory.two'
         ]
@@ -471,14 +588,13 @@ describe('runtime plugin host catalog and routing', () => {
     ).toThrow(/provided tool "memory\.search" is declared more than once/iu);
   });
 
-  it('does not resolve tool-provider-only plugin tools as routable', () => {
+  it('does not expose tool-provider-only plugin tools as routable', () => {
     const plugin = createMemorySearchToolProviderOnlyPlugin();
     const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
       'memory.search'
     );
-    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
   });
 
   it('does not expose tools when the plugin manifest requires confirmation', async () => {
@@ -488,13 +604,12 @@ describe('runtime plugin host catalog and routing', () => {
     expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
       'memory.search'
     );
-    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
 
     const result = await host.handleToolCall(
       {
         ...testIdentity(),
-        pluginId: runtimePluginDiscoveryPluginId,
-        toolName: roleModelPluginListToolName,
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
         input: {}
       },
       testPluginContext()
@@ -502,7 +617,7 @@ describe('runtime plugin host catalog and routing', () => {
 
     expect(result.status).toBe('accepted');
     if (result.status !== 'accepted') {
-      throw new Error('Expected plugin.list to be accepted.');
+      throw new Error('Expected runtime.plugin.list to be accepted.');
     }
 
     expect(JSON.stringify(result.output)).toContain(
@@ -601,10 +716,16 @@ describe('runtime plugin host catalog and routing', () => {
   it('blocks fileStore writes attempted after handleToolCall timeout', async () => {
     const continueAfterTimeout = createDeferred<null>();
     const lateWrite = createDeferred<LateFileStoreWriteOutcome>();
+    let hookDeadlineAt: number | undefined;
+    let hookSignal: AbortSignal | undefined;
     const sessionIdentity = {};
     const plugin = createLateFileStoreWritePlugin({
       continueAfterTimeout: continueAfterTimeout.promise,
-      recordLateWriteOutcome: lateWrite.resolve
+      recordLateWriteOutcome: lateWrite.resolve,
+      recordExecutionScope(scope) {
+        hookDeadlineAt = scope.deadlineAt;
+        hookSignal = scope.signal;
+      }
     });
     const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
@@ -627,6 +748,8 @@ describe('runtime plugin host catalog and routing', () => {
       status: 'rejected',
       reason: 'handler_timeout'
     });
+    expect(hookDeadlineAt).toBeTypeOf('number');
+    expect(hookSignal?.aborted).toBe(true);
 
     continueAfterTimeout.resolve(null);
 
@@ -851,13 +974,12 @@ describe('runtime plugin host catalog and routing', () => {
     expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
       'memory.search'
     );
-    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
 
     const discovery = await host.handleToolCall(
       {
         ...testIdentity(),
-        pluginId: runtimePluginDiscoveryPluginId,
-        toolName: roleModelPluginListToolName,
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
         input: {}
       },
       testPluginContext()
@@ -894,13 +1016,12 @@ describe('runtime plugin host catalog and routing', () => {
     expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
       'memory.search'
     );
-    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
 
     const discovery = await host.handleToolCall(
       {
         ...testIdentity(),
-        pluginId: runtimePluginDiscoveryPluginId,
-        toolName: roleModelPluginListToolName,
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
         input: {}
       },
       testPluginContext()

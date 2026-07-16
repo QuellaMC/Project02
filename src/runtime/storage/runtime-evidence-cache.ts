@@ -1,9 +1,18 @@
 import { type Dirent, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { basename } from 'node:path';
 import {
+  CompleteJsonLinesError,
+  splitCompleteJsonLines
+} from '../../shared/json-lines.ts';
+import { isNodeErrorWithCode } from '../../shared/node-error.ts';
+import {
   LocalRuntimeStorageContractError,
   type LocalRuntimeSessionPaths
 } from './layout-contract.ts';
+import {
+  atomicReplacementFileBelongsToTarget,
+  isAbandonedAtomicReplacementFile
+} from './atomic-file.ts';
 import { decodeConversationLogRecord } from './conversation-codec.ts';
 import { decodeRawEventLogRecord } from './raw-event-codec.ts';
 import { decodeRuntimeTraceEntry } from './trace-codec.ts';
@@ -144,27 +153,25 @@ function decodeRuntimeEvidenceJsonLines<T>(options: {
     return Object.freeze([]);
   }
 
-  if (!options.content.endsWith('\n')) {
-    throw new LocalRuntimeStorageContractError(
-      'partial_write',
-      `Local runtime log file ended without a complete JSONL record: ${options.filePath}.`
+  try {
+    return Object.freeze(
+      splitCompleteJsonLines(options.content).map(options.decodeLine)
     );
-  }
-
-  const records: T[] = [];
-  const lines = options.content.split('\n');
-
-  for (const [index, line] of lines.entries()) {
-    const normalizedLine = line.endsWith('\r') ? line.slice(0, -1) : line;
-
-    if (index === lines.length - 1 && normalizedLine.length === 0) {
-      continue;
+  } catch (error: unknown) {
+    if (error instanceof CompleteJsonLinesError) {
+      throw new LocalRuntimeStorageContractError(
+        error.reason === 'missing_terminal_newline'
+          ? 'partial_write'
+          : 'malformed_record',
+        error.reason === 'missing_terminal_newline'
+          ? `Local runtime log file ended without a complete JSONL record: ${options.filePath}.`
+          : `Local runtime log file contains a blank JSONL record: ${options.filePath}.`,
+        { cause: error }
+      );
     }
 
-    records.push(options.decodeLine(normalizedLine));
+    throw error;
   }
-
-  return Object.freeze(records);
 }
 
 export function readRuntimeEvidenceFileStamps(
@@ -260,12 +267,11 @@ export function scavengeAbandonedRuntimeEvidenceTemporaryFiles(
       continue;
     }
 
-    const ownerPid = atomicTemporaryFileOwnerPid(entry.name, targetNames);
-
     if (
-      ownerPid === undefined ||
-      ownerPid === process.pid ||
-      isProcessAlive(ownerPid)
+      !targetNames.some((targetName) =>
+        atomicReplacementFileBelongsToTarget(entry.name, targetName)
+      ) ||
+      !isAbandonedAtomicReplacementFile(entry.name)
     ) {
       continue;
     }
@@ -282,42 +288,4 @@ export function scavengeAbandonedRuntimeEvidenceTemporaryFiles(
       }
     }
   }
-}
-
-function atomicTemporaryFileOwnerPid(
-  fileName: string,
-  targetNames: readonly string[]
-): number | undefined {
-  for (const targetName of targetNames) {
-    const escapedTargetName = targetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const match = new RegExp(
-      `^\\.${escapedTargetName}\\.(\\d+)\\.[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.tmp$`,
-      'i'
-    ).exec(fileName);
-
-    if (match?.[1] !== undefined) {
-      const pid = Number(match[1]);
-      return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
-    }
-  }
-
-  return undefined;
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: unknown) {
-    return !isNodeErrorWithCode(error, 'ESRCH');
-  }
-}
-
-function isNodeErrorWithCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === code
-  );
 }

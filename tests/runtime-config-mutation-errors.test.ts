@@ -24,7 +24,7 @@ describe('runtime config mutation error handling', () => {
 
       writeFileSync(
         configPath,
-        `${JSON.stringify({ version: 'project02.runtime_config.v1', storeRoot }, null, 2)}\n`,
+        `${JSON.stringify({ version: 'project02.config.v2', project02: { storeRoot } }, null, 2)}\n`,
         'utf8'
       );
 

@@ -3,7 +3,41 @@ import {
   VisibleMessageTextValidationError
 } from '../../core/message-validation.ts';
 import { visibleMessageRoleValues, type VisibleMessageRole } from '../../core/conversation.ts';
-import { LocalRuntimeStorageContractError, requiredRecordString } from './layout-contract.ts';
+import {
+  createRuntimeEventIdentitySnapshot,
+  type RuntimeEventIdentity
+} from '../event.ts';
+import {
+  LocalRuntimeStorageContractError,
+  requiredRecordCanonicalTimestamp,
+  requiredRecordString
+} from './layout-contract.ts';
+
+export function requiredRuntimeEventIdentity(
+  record: Record<string, unknown>
+): RuntimeEventIdentity {
+  try {
+    return createRuntimeEventIdentitySnapshot({
+      eventId: requiredRecordString(record, 'eventId', 'malformed_record'),
+      traceId: requiredRecordString(record, 'traceId', 'malformed_record'),
+      createdAt: requiredRecordCanonicalTimestamp(
+        record,
+        'createdAt',
+        'malformed_record'
+      )
+    });
+  } catch (error: unknown) {
+    if (error instanceof LocalRuntimeStorageContractError) {
+      throw error;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Stored local runtime event identity is malformed.',
+      { cause: error }
+    );
+  }
+}
 
 export function requiredNormalizedVisibleMessageText(
   record: Record<string, unknown>,
