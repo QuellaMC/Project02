@@ -10,9 +10,6 @@ import type {
   RuntimePlugin
 } from './plugin-types.ts';
 
-export const runtimePluginDiscoveryPluginId =
-  'runtime.plugin_discovery';
-
 export type RuntimePluginAccessMapByPluginId = Readonly<
   Record<string, RuntimePluginAccessSnapshot>
 >;

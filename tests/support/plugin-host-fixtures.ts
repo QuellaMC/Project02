@@ -10,11 +10,11 @@ import {
   createRuntimePluginHealthSnapshot,
   createRuntimePluginManifest,
   createRuntimePluginProvidedTool,
-  runtimePluginContractVersion
+  runtimePluginContractVersion,
+  runtimePluginId
 } from '../../src/plugins/types.ts';
 import {
   createRuntimePluginHost,
-  runtimePluginDiscoveryPluginId,
   type CreateRuntimePluginHostOptions,
   type RuntimePluginHost
 } from '../../src/plugins/host.ts';
@@ -55,7 +55,7 @@ export function createExplicitlyEnabledRuntimePluginHost(
   return createRuntimePluginHost({
     ...options,
     enabledPluginIds: options.enabledPluginIds ?? [
-      runtimePluginDiscoveryPluginId,
+      runtimePluginId,
       ...options.plugins.map((plugin) => plugin.manifest.id)
     ]
   });

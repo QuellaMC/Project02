@@ -56,7 +56,9 @@ describe('runtime config CLI mutation and storage', () => {
       envPath: join(seededStoreRoot, '.env')
     });
     expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
-      storeRoot: seededStoreRoot,
+      project02: {
+        storeRoot: seededStoreRoot
+      },
       plugins: {
         foo: {
           config: {
@@ -111,7 +113,9 @@ describe('runtime config CLI mutation and storage', () => {
         envPath: join(storeRoot, '.env')
       });
       expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
-        storeRoot,
+        project02: {
+          storeRoot
+        },
         plugins: {
           foo: {
             config: {
@@ -167,7 +171,9 @@ describe('runtime config CLI mutation and storage', () => {
       envPath: join(seededStoreRoot, '.env')
     });
     expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
-      storeRoot: seededStoreRoot,
+      project02: {
+        storeRoot: seededStoreRoot
+      },
       plugins: {
         foo: {
           config: {
@@ -289,7 +295,9 @@ describe('runtime config CLI mutation and storage', () => {
         envPath: join(seededStoreRoot, '.env')
       });
       expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
-        storeRoot: seededStoreRoot,
+        project02: {
+          storeRoot: seededStoreRoot
+        },
         plugins: {
           foo: {
             config: {
@@ -401,7 +409,9 @@ describe('runtime config CLI mutation and storage', () => {
     expect(stderr).toBe('');
     expect(JSON.parse(stdout) as unknown).toMatchObject({ configPath });
     expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
-      storeRoot: seededStoreRoot,
+      project02: {
+        storeRoot: seededStoreRoot
+      },
       plugins: {
         foo: {
           config: {
@@ -641,7 +651,9 @@ describe('runtime config CLI mutation and storage', () => {
       expect(readlinkSync(linkConfigPath)).toBe(targetConfigPath);
       expect(JSON.parse(readFileSync(targetConfigPath, 'utf8')) as unknown).toEqual({
         version: runtimeConfigVersion,
-        storeRoot: seededStoreRoot,
+        project02: {
+          storeRoot: seededStoreRoot
+        },
         plugins: {
           foo: {
             config: {
@@ -1137,7 +1149,7 @@ describe('runtime config CLI mutation and storage', () => {
       operation: { kind: 'set', path: 'storeRoot', value: nextStoreRoot }
     });
 
-    expect(setResult.config.storeRoot).toBe(nextStoreRoot);
+    expect(setResult.config.project02?.storeRoot).toBe(nextStoreRoot);
     expect(setResult.envPath).toBe(join(nextStoreRoot, '.env'));
 
     const unsetResult = applyRuntimeConfigMutation({
@@ -1146,7 +1158,7 @@ describe('runtime config CLI mutation and storage', () => {
       operation: { kind: 'unset', path: 'storeRoot' }
     });
 
-    expect(unsetResult.config.storeRoot).toBeUndefined();
+    expect(unsetResult.config.project02?.storeRoot).toBeUndefined();
     expect(unsetResult.envPath).toBe(join(initialStoreRoot, '.env'));
   });
 
@@ -1168,7 +1180,9 @@ describe('runtime config CLI mutation and storage', () => {
       const config: unknown = JSON.parse(readFileSync(configPath, 'utf8'));
 
       expect(result.configPath).toBe('runtime.json');
-      expect(config).toMatchObject({ storeRoot: 'next-store' });
+      expect(config).toMatchObject({
+        project02: { storeRoot: 'next-store' }
+      });
       expect(existsSync(join(configRoot, paddedConfigPath))).toBe(false);
     } finally {
       process.chdir(previousCwd);

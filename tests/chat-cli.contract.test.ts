@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createTestTempRoot } from './support/temp-root.ts';
 import {
@@ -13,16 +13,19 @@ import {
 import {
   createConversationSession
 } from '../src/core/conversation.ts';
-import {
-  createRuntimePluginHost,
-  runtimePluginDiscoveryPluginId
-} from '../src/plugins/host.ts';
+import { createDefaultProject02PluginHost } from '../src/plugins/default-host.ts';
+import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimePluginFileStore
 } from '../src/plugins/file-store.ts';
 import {
+  createRuntimePluginManagementPluginManifest
+} from '../src/plugins/index.ts';
+import {
   createRuntimePlugin,
   createRuntimePluginEvidenceSnapshot,
+  runtimePluginId,
+  runtimePluginConfigUpdateToolName,
   runtimePluginContractVersion,
   type RuntimePlugin,
   type RuntimePluginContext
@@ -31,7 +34,10 @@ import {
   createRuntimeLogStore,
   type RuntimeLogStore
 } from '../src/runtime/log.ts';
-import { runtimeConfigEnvVarName } from '../src/runtime/config/index.ts';
+import {
+  inspectRuntimePluginConfig,
+  runtimeConfigEnvVarName
+} from '../src/runtime/config/index.ts';
 import {
   createFileRuntimeLogStore
 } from '../src/runtime/storage/file-runtime-log-store.ts';
@@ -51,11 +57,13 @@ import { runChatCli, runChatCliFromArgs } from '../src/cli/chat.ts';
 import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
 
 const roleModelProviderEnvName = 'PROJECT02_ROLE_MODEL_PROVIDER';
+const realSetTimeout = globalThis.setTimeout;
 
 describe('chat CLI folded top-level model text', () => {
   it('hides top-level model text by default', async () => {
     let stdout = '';
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['hello\n/exit\n']),
       stdout: collect((chunk) => {
         stdout += chunk;
@@ -73,6 +81,7 @@ describe('chat CLI trace summary', () => {
   it('keeps provider and terminal tool evidence when terminal persistence fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['hello\n']),
       stdout: collect(() => {}),
       stderr: collect((chunk) => {
@@ -127,6 +136,7 @@ describe('chat CLI trace summary', () => {
     let adapterRound = 0;
     let stderr = '';
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
       stderr: collect((chunk) => {
@@ -145,7 +155,7 @@ describe('chat CLI trace summary', () => {
             rawOutputText: JSON.stringify({
               toolCalls: [
                 {
-                  name: 'plugin.list',
+                  name: 'runtime.plugin.list',
                   input: {}
                 }
               ]
@@ -175,8 +185,8 @@ describe('chat CLI trace summary', () => {
         model: 'trace-fixture',
         responseStatus: 200
       },
-      requestedToolCalls: ['plugin.list'],
-      executedToolCalls: ['plugin.list'],
+      requestedToolCalls: ['runtime.plugin.list'],
+      executedToolCalls: ['runtime.plugin.list'],
       terminalToolCalls: []
     });
   });
@@ -184,6 +194,7 @@ describe('chat CLI trace summary', () => {
   it('recovers requested calls from interim evidence when tool-start tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
       stderr: collect((chunk) => {
@@ -203,7 +214,7 @@ describe('chat CLI trace summary', () => {
                   }
                 },
                 {
-                  name: 'plugin.list',
+                  name: 'runtime.plugin.list',
                   input: {}
                 }
               ]
@@ -216,7 +227,7 @@ describe('chat CLI trace summary', () => {
     expect(exitCode).toBe(1);
     expect(JSON.parse(stderr.trim())).toMatchObject({
       status: 'rejected',
-      requestedToolCalls: ['visible_reply', 'plugin.list'],
+      requestedToolCalls: ['visible_reply', 'runtime.plugin.list'],
       executedToolCalls: [],
       terminalToolCalls: []
     });
@@ -225,6 +236,7 @@ describe('chat CLI trace summary', () => {
   it('keeps tool-only requested evidence when tool-start tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
       stderr: collect((chunk) => {
@@ -238,7 +250,7 @@ describe('chat CLI trace summary', () => {
             rawOutputText: JSON.stringify({
               toolCalls: [
                 {
-                  name: 'plugin.list',
+                  name: 'runtime.plugin.list',
                   input: {}
                 }
               ]
@@ -251,7 +263,7 @@ describe('chat CLI trace summary', () => {
     expect(exitCode).toBe(1);
     expect(JSON.parse(stderr.trim())).toMatchObject({
       status: 'rejected',
-      requestedToolCalls: ['plugin.list'],
+      requestedToolCalls: ['runtime.plugin.list'],
       executedToolCalls: [],
       terminalToolCalls: []
     });
@@ -260,6 +272,7 @@ describe('chat CLI trace summary', () => {
   it('keeps host-executed evidence when tool-finish tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
       stderr: collect((chunk) => {
@@ -273,7 +286,7 @@ describe('chat CLI trace summary', () => {
             rawOutputText: JSON.stringify({
               toolCalls: [
                 {
-                  name: 'plugin.list',
+                  name: 'runtime.plugin.list',
                   input: {}
                 }
               ]
@@ -286,8 +299,8 @@ describe('chat CLI trace summary', () => {
     expect(exitCode).toBe(1);
     expect(JSON.parse(stderr.trim())).toMatchObject({
       status: 'rejected',
-      requestedToolCalls: ['plugin.list'],
-      executedToolCalls: ['plugin.list'],
+      requestedToolCalls: ['runtime.plugin.list'],
+      executedToolCalls: ['runtime.plugin.list'],
       terminalToolCalls: []
     });
   });
@@ -295,6 +308,7 @@ describe('chat CLI trace summary', () => {
   it('keeps interim requested evidence when interim tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
       stderr: collect((chunk) => {
@@ -316,7 +330,7 @@ describe('chat CLI trace summary', () => {
                   }
                 },
                 {
-                  name: 'plugin.list',
+                  name: 'runtime.plugin.list',
                   input: {}
                 }
               ]
@@ -329,7 +343,7 @@ describe('chat CLI trace summary', () => {
     expect(exitCode).toBe(1);
     expect(JSON.parse(stderr.trim())).toMatchObject({
       status: 'rejected',
-      requestedToolCalls: ['visible_reply', 'plugin.list'],
+      requestedToolCalls: ['visible_reply', 'runtime.plugin.list'],
       executedToolCalls: [],
       terminalToolCalls: []
     });
@@ -345,6 +359,10 @@ describe('chat CLI trace summary', () => {
     const backingLogStore = createFileRuntimeLogStore({ storeRoot, sessionId });
     let stderr = '';
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost({
+        storeRoot,
+        sessionId
+      }),
       stdin: Readable.from(['hello\n']),
       stdout: collect(() => {}),
       stderr: collect((chunk) => {
@@ -408,7 +426,7 @@ describe('chat CLI trace summary', () => {
               ? {
                   toolCalls: [
                     {
-                      name: 'plugin.list',
+                      name: 'runtime.plugin.list',
                       input: {}
                     },
                     {
@@ -441,6 +459,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['check plugins\n/exit\n']),
       stdout: collect(() => {}),
       stderr: collect((chunk) => {
@@ -455,12 +474,12 @@ describe('chat CLI trace summary', () => {
     expect(JSON.parse(stderr.trim())).toMatchObject({
       status: 'completed',
       requestedToolCalls: [
-        'plugin.list',
+        'runtime.plugin.list',
         'visible_reply',
         'character_state.patch',
         'visible_reply'
       ],
-      executedToolCalls: ['plugin.list', 'character_state.patch'],
+      executedToolCalls: ['runtime.plugin.list', 'character_state.patch'],
       terminalToolCalls: ['visible_reply']
     });
     expect(JSON.parse(stderr.trim())).not.toHaveProperty('toolCalls');
@@ -489,6 +508,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['try an unavailable tool\n/exit\n']),
       stdout: collect(() => {}),
       stderr: collect((chunk) => {
@@ -520,7 +540,7 @@ describe('chat CLI trace summary', () => {
             rawOutputText: JSON.stringify({
               toolCalls: [
                 {
-                  name: 'plugin.list',
+                  name: 'runtime.plugin.list',
                   input: {}
                 }
               ]
@@ -530,10 +550,10 @@ describe('chat CLI trace summary', () => {
               content: null,
               tool_calls: [
                 {
-                  id: 'call_invalid_plugin_list_args',
+                  id: 'call_invalid_runtime_plugin_list_args',
                   type: 'function',
                   function: {
-                    name: 'plugin.list',
+                    name: 'runtime.plugin.list',
                     arguments: '{"score":1e999}'
                   }
                 }
@@ -542,10 +562,10 @@ describe('chat CLI trace summary', () => {
             nativeToolCallArgumentErrors: [
               {
                 executableIndex: 0,
-                toolName: 'plugin.list',
+                toolName: 'runtime.plugin.list',
                 reason: 'invalid_native_tool_arguments',
                 message:
-                  'plugin.list arguments must contain finite JSON values.'
+                  'runtime.plugin.list arguments must contain finite JSON values.'
               }
             ]
           };
@@ -567,6 +587,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['try invalid plugin arguments\n/exit\n']),
       stdout: collect(() => {}),
       stderr: collect((chunk) => {
@@ -579,7 +600,7 @@ describe('chat CLI trace summary', () => {
     expect(exitCode).toBe(0);
     expect(adapterRound).toBe(2);
     expect(JSON.parse(stderr.trim())).toMatchObject({
-      requestedToolCalls: ['plugin.list', 'visible_reply'],
+      requestedToolCalls: ['runtime.plugin.list', 'visible_reply'],
       executedToolCalls: [],
       terminalToolCalls: ['visible_reply']
     });
@@ -615,6 +636,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['try an invalid state patch\n/exit\n']),
       stdout: collect(() => {}),
       stderr: collect((chunk) => {
@@ -635,6 +657,65 @@ describe('chat CLI trace summary', () => {
 });
 
 describe('chat CLI provider selection', () => {
+  it('selects the chat provider from project02.roleModelProvider', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-provider-config-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {
+        roleModelProvider: 'nvidia'
+      }
+    });
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'configured-provider'],
+      {
+        stdin: Readable.from(['hello\n']),
+        stdout: collect(() => {}),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        env: {
+          [nvidiaApiKeyEnvName]: ''
+        },
+        pluginHost: createRuntimePluginHost({ plugins: [] })
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`NVIDIA provider requires ${nvidiaApiKeyEnvName}.`);
+  });
+
+  it('lets the runtime env provider override project02.roleModelProvider', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-provider-env-config-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {
+        roleModelProvider: 'nvidia'
+      }
+    });
+    writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=local\n`);
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'env-over-config-provider'],
+      {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        env: {
+          [nvidiaApiKeyEnvName]: ''
+        },
+        pluginHost: createRuntimePluginHost({ plugins: [] })
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+  });
+
   it('releases the durable writer lease when the provider turn fails', async () => {
     const storeRoot = createTestTempRoot('project02-chat-provider-failure-lease-');
     const sessionId = 'provider-failure-lease';
@@ -939,10 +1020,15 @@ describe('chat CLI provider selection', () => {
     expect(stderr).toBe('');
   });
 
-  it('lets --provider take precedence over the runtime store env', async () => {
+  it('lets --provider take precedence over the runtime store env and project02.roleModelProvider', async () => {
     const storeRoot = createTestTempRoot('project02-chat-provider-cli-');
     let stderr = '';
 
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {
+        roleModelProvider: 'nvidia'
+      }
+    });
     writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=not-a-provider\n`);
 
     const exitCode = await runChatCliFromArgs(
@@ -953,7 +1039,8 @@ describe('chat CLI provider selection', () => {
         stderr: collect((chunk) => {
           stderr += chunk;
         }),
-        env: {}
+        env: {},
+        pluginHost: createRuntimePluginHost({ plugins: [] })
       }
     );
 
@@ -1096,6 +1183,295 @@ describe('chat CLI provider selection', () => {
 });
 
 describe('chat CLI plugin lifecycle', () => {
+  it('uses the active chat input stream for one y/N plugin config approval', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-plugin-config-approval-');
+    const sessionId = 'plugin-config-approval-session';
+    const configurablePlugin = createChatConfigurablePlugin();
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    const fingerprint = inspectRuntimePluginConfig({
+      manifest: configurablePlugin.manifest,
+      pluginManifests: [configurablePlugin.manifest],
+      configPath,
+      storeRoot
+    }).fingerprint;
+    let adapterRound = 0;
+    let stdout = '';
+    let stderr = '';
+
+    const exitCode = await runChatCliFromArgs(
+      [
+        '--provider',
+        'local',
+        '--store',
+        storeRoot,
+        '--config',
+        configPath,
+        '--new-session',
+        sessionId
+      ],
+      {
+        stdin: Readable.from(['change the plugin tone\n', 'y\n', '/exit\n']),
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        factories: {
+          [configurablePlugin.manifest.id]: {
+            manifest: configurablePlugin.manifest,
+            create: () => configurablePlugin
+          }
+        },
+        roleModelAdapter: {
+          invoke() {
+            adapterRound += 1;
+
+            return {
+              rawOutputText: JSON.stringify({
+                toolCalls:
+                  adapterRound === 1
+                    ? [
+                        {
+                          name: runtimePluginConfigUpdateToolName,
+                          input: {
+                            pluginId: configurablePlugin.manifest.id,
+                            fieldName: 'tone',
+                            operation: 'set',
+                            value: 'warm',
+                            expectedFingerprint: fingerprint
+                          }
+                        }
+                      ]
+                    : [
+                        {
+                          name: 'visible_reply',
+                          input: { text: 'Plugin tone updated.' }
+                        }
+                      ]
+              })
+            };
+          }
+        }
+      }
+    );
+    const committed = inspectRuntimePluginConfig({
+      manifest: configurablePlugin.manifest,
+      pluginManifests: [configurablePlugin.manifest],
+      configPath,
+      storeRoot
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(adapterRound).toBe(2);
+    expect(stdout).toContain('Plugin config update requires your approval.');
+    expect(stdout).toContain('Approve this one exact change? [y/N] ');
+    expect(stdout).toContain('Mira: Plugin tone updated.');
+    expect(
+      committed.fields.find((field) => field.name === 'tone')?.authored.value
+    ).toBe('warm');
+  });
+
+  it('uses an injected plugin config confirmation handler without consuming chat input', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-plugin-config-injected-');
+    const sessionId = 'plugin-config-injected-session';
+    const configurablePlugin = createChatConfigurablePlugin();
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    const before = inspectRuntimePluginConfig({
+      manifest: configurablePlugin.manifest,
+      pluginManifests: [configurablePlugin.manifest],
+      configPath,
+      storeRoot
+    });
+    let adapterRound = 0;
+    let confirmationCalls = 0;
+    let stdout = '';
+
+    const exitCode = await runChatCliFromArgs(
+      [
+        '--provider',
+        'local',
+        '--store',
+        storeRoot,
+        '--config',
+        configPath,
+        '--new-session',
+        sessionId
+      ],
+      {
+        stdin: Readable.from(['change the plugin tone\n', '/exit\n']),
+        stdout: collect((chunk) => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        toolConfirmationHandler(request) {
+          confirmationCalls += 1;
+          expect(request.preview).toMatchObject({
+            targetPluginId: configurablePlugin.manifest.id,
+            fieldName: 'tone',
+            operation: 'set'
+          });
+          return { status: 'denied' };
+        },
+        factories: {
+          [configurablePlugin.manifest.id]: {
+            manifest: configurablePlugin.manifest,
+            create: () => configurablePlugin
+          }
+        },
+        roleModelAdapter: {
+          invoke() {
+            adapterRound += 1;
+
+            return {
+              rawOutputText: JSON.stringify({
+                toolCalls:
+                  adapterRound === 1
+                    ? [
+                        {
+                          name: runtimePluginConfigUpdateToolName,
+                          input: {
+                            pluginId: configurablePlugin.manifest.id,
+                            fieldName: 'tone',
+                            operation: 'set',
+                            value: 'warm',
+                            expectedFingerprint: before.fingerprint
+                          }
+                        }
+                      ]
+                    : [
+                        {
+                          name: 'visible_reply',
+                          input: { text: 'Plugin tone was not changed.' }
+                        }
+                      ]
+              })
+            };
+          }
+        }
+      }
+    );
+    const after = inspectRuntimePluginConfig({
+      manifest: configurablePlugin.manifest,
+      pluginManifests: [configurablePlugin.manifest],
+      configPath,
+      storeRoot
+    });
+
+    expect(exitCode).toBe(0);
+    expect(adapterRound).toBe(2);
+    expect(confirmationCalls).toBe(1);
+    expect(stdout).not.toContain('Approve this one exact change?');
+    expect(after.fingerprint).toBe(before.fingerprint);
+  });
+
+  it('returns chat input ownership after a terminal config approval times out', async () => {
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'Date']
+    });
+    const input = new PassThrough();
+
+    try {
+      const storeRoot = createTestTempRoot('project02-chat-plugin-config-timeout-');
+      const sessionId = 'plugin-config-timeout-session';
+      const configurablePlugin = createChatConfigurablePlugin();
+      const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+      const before = inspectRuntimePluginConfig({
+        manifest: configurablePlugin.manifest,
+        pluginManifests: [configurablePlugin.manifest],
+        configPath,
+        storeRoot
+      });
+      const approvalTimeoutMs =
+        createRuntimePluginManagementPluginManifest().runtimePolicy.timeoutMs;
+      let adapterRound = 0;
+      let stdout = '';
+      let stderr = '';
+      const run = runChatCliFromArgs(
+        [
+          '--provider',
+          'local',
+          '--store',
+          storeRoot,
+          '--config',
+          configPath,
+          '--new-session',
+          sessionId
+        ],
+        {
+          stdin: input,
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          }),
+          factories: {
+            [configurablePlugin.manifest.id]: {
+              manifest: configurablePlugin.manifest,
+              create: () => configurablePlugin
+            }
+          },
+          roleModelAdapter: {
+            invoke() {
+              adapterRound += 1;
+
+              return {
+                rawOutputText: JSON.stringify({
+                  toolCalls:
+                    adapterRound === 1
+                      ? [
+                          {
+                            name: runtimePluginConfigUpdateToolName,
+                            input: {
+                              pluginId: configurablePlugin.manifest.id,
+                              fieldName: 'tone',
+                              operation: 'set',
+                              value: 'warm',
+                              expectedFingerprint: before.fingerprint
+                            }
+                          }
+                        ]
+                      : [
+                          {
+                            name: 'visible_reply',
+                            input: { text: 'Plugin tone was not changed.' }
+                          }
+                        ]
+                })
+              };
+            }
+          }
+        }
+      );
+
+      input.write('change the plugin tone\n');
+      await waitForMicrotasks(() =>
+        stdout.includes('Approve this one exact change? [y/N] ')
+      );
+      await vi.advanceTimersByTimeAsync(approvalTimeoutMs);
+      input.write('/exit\n');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(await run).toBe(0);
+      expect(stderr).toBe('');
+      expect(adapterRound).toBe(2);
+      expect(stdout).toContain('Plugin tone was not changed.');
+      expect(
+        inspectRuntimePluginConfig({
+          manifest: configurablePlugin.manifest,
+          pluginManifests: [configurablePlugin.manifest],
+          configPath,
+          storeRoot
+        }).fingerprint
+      ).toBe(before.fingerprint);
+    } finally {
+      input.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   it('runs session-end hooks when /exit closes the chat', async () => {
     const sessionEndContexts: RuntimePluginContext[] = [];
     const logStore = createRuntimeLogStore();
@@ -1105,7 +1481,7 @@ describe('chat CLI plugin lifecycle', () => {
     const pluginHost = createRuntimePluginHost({
       plugins: [sessionEndPlugin],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         sessionEndPlugin.manifest.id
       ]
     });
@@ -1171,7 +1547,7 @@ describe('chat CLI plugin lifecycle', () => {
     const pluginHost = createRuntimePluginHost({
       plugins: [sessionEndPlugin],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         sessionEndPlugin.manifest.id
       ]
     });
@@ -1215,7 +1591,12 @@ describe('chat CLI plugin lifecycle', () => {
   it('constructs configured manifest-backed plugins once during chat startup', async () => {
     const storeRoot = createTestTempRoot('project02-chat-configured-host-');
     const sessionId = 'configured-host-session';
-    const configuredPlugin = createSessionEndPlugin(() => {});
+    const configuredPlugin = createSessionEndPlugin(() => {}, {
+      beforeRoleModelCall() {
+        return { contextItems: [], evidence: [] };
+      }
+    });
+    const beforeRoleModelCallContexts: RuntimePluginContext[] = [];
     const sessionEndContexts: RuntimePluginContext[] = [];
     let factoryCalls = 0;
 
@@ -1230,7 +1611,7 @@ describe('chat CLI plugin lifecycle', () => {
     const exitCode = await runChatCliFromArgs(
       ['--store', storeRoot, '--new-session', sessionId],
       {
-        stdin: Readable.from(['/exit\n']),
+        stdin: Readable.from(['hello\n/exit\n']),
         stdout: collect(() => {}),
         stderr: collect(() => {}),
         factories: {
@@ -1241,6 +1622,11 @@ describe('chat CLI plugin lifecycle', () => {
 
               return createSessionEndPlugin((context) => {
                 sessionEndContexts.push(context);
+              }, {
+                beforeRoleModelCall(context) {
+                  beforeRoleModelCallContexts.push(context);
+                  return { contextItems: [], evidence: [] };
+                }
               });
             }
           }
@@ -1250,6 +1636,11 @@ describe('chat CLI plugin lifecycle', () => {
 
     expect(exitCode).toBe(0);
     expect(factoryCalls).toBe(1);
+    expect(beforeRoleModelCallContexts).toHaveLength(1);
+    expect(beforeRoleModelCallContexts[0]).toMatchObject({
+      sessionId,
+      currentUserMessage: 'hello'
+    });
     expect(sessionEndContexts).toHaveLength(1);
     expect(sessionEndContexts[0]).toMatchObject({
       sessionId,
@@ -1572,7 +1963,7 @@ describe('chat CLI plugin lifecycle', () => {
     const pluginHost = createRuntimePluginHost({
       plugins: [createFailingSessionEndPlugin()],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         'chat.session-end.failure.fixture'
       ]
     });
@@ -1666,6 +2057,60 @@ function createTextOnlyAdapter(): RoleModelAdapter {
       };
     }
   };
+}
+
+function createChatConfigurablePlugin(): RuntimePlugin {
+  return createRuntimePlugin({
+    manifest: {
+      id: 'chat.configurable.fixture',
+      displayName: 'Chat configurable fixture',
+      version: '1.0.0',
+      kind: 'tool_provider',
+      description: 'Configurable plugin used by the chat approval contract test.',
+      contractVersion: runtimePluginContractVersion,
+      compatibility: {
+        hostContractVersions: [runtimePluginContractVersion],
+        sourceSystem: 'test'
+      },
+      declaredPlugins: ['tool_provider'],
+      config: {
+        fields: [
+          {
+            name: 'tone',
+            description: 'Configured reply tone.',
+            required: false,
+            secret: false,
+            valueType: 'string',
+            agentMutable: true,
+            reloadRequired: true,
+            redactionLabels: []
+          }
+        ]
+      },
+      localTrustLevel: 'test_fixture',
+      runtimePolicy: {
+        requiredForTurn: false,
+        sideEffectLevel: 'runtime_read',
+        confirmation: 'not_required',
+        timeoutMs: 1000,
+        sourceReferencesRequired: false,
+        redactionLabels: [],
+        failureBehavior: {
+          beforeRoleModelCall: 'degrade',
+          handleToolCall: 'reject_tool_call',
+          afterTurnCommitted: 'log_failure',
+          health: 'degrade'
+        }
+      },
+      activation: {
+        defaultEnabled: false,
+        reasons: ['test']
+      },
+      requestedAccess: {}
+    },
+    providedTools: [],
+    lifecycleHooks: {}
+  });
 }
 
 function createSessionEndPlugin(
@@ -1917,6 +2362,22 @@ function restoreProcessEnvValue(name: string, value: string | undefined): void {
   }
 
   process.env[name] = value;
+}
+
+async function waitForMicrotasks(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+
+    vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(0);
+    await new Promise<void>((resolve) => {
+      realSetTimeout(resolve, 0);
+    });
+  }
+
+  throw new Error('Expected asynchronous chat state was not reached.');
 }
 
 function createTerminalRawEventAppendFailingLogStore(): RuntimeLogStore {

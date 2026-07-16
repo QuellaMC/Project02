@@ -1,6 +1,12 @@
 export const runtimePluginContractVersion =
   'mvp-008.runtime_plugin.v2';
 export const firstPartyModelToolsPluginId = 'first_party.model_tools';
+export const runtimePluginId = 'runtime.plugin';
+export const characterStatePluginId = 'character-state';
+export const runtimePluginListToolName = 'runtime.plugin.list';
+export const runtimePluginConfigReadToolName = 'runtime.plugin.config';
+export const runtimePluginConfigUpdateToolName =
+  'runtime.plugin.config.update';
 
 export const runtimePluginKindValues = [
   'first_party',
@@ -42,6 +48,7 @@ export const runtimePluginAccessNames = Object.freeze([
 export const runtimePluginSideEffectLevelValues = [
   'none',
   'runtime_read',
+  'runtime_config_write',
   'local_memory_write',
   'external_read',
   'external_write'

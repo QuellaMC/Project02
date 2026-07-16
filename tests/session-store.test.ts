@@ -9,6 +9,7 @@ import {
   createConversationSession,
   runCharacterTurn
 } from '../src/core/conversation.ts';
+import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
@@ -165,7 +166,8 @@ describe('local runtime session store', () => {
         createdAt: '2026-06-04T00:00:00.000Z'
       }),
       session: originalSession,
-      logStore
+      logStore,
+      pluginHost: createRuntimePluginHost()
     });
 
     const reader = createConversationLogReader({

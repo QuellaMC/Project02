@@ -3,16 +3,19 @@ import { createConversationSession } from '../src/core/conversation.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin
-} from '../src/plugins/builtin/character-state/index.ts';
+} from '../src/plugins/packages/character-state/plugin.ts';
 import { createRuntimePluginFileStore } from '../src/plugins/file-store.ts';
-import { createRuntimePluginHost, runtimePluginDiscoveryPluginId } from '../src/plugins/host.ts';
-import { createRuntimePluginContext, firstPartyModelToolsPluginId } from '../src/plugins/types.ts';
+import { createRuntimePluginHost } from '../src/plugins/host.ts';
+import {
+  createRuntimePluginContext,
+  firstPartyModelToolsPluginId,
+  runtimePluginId
+} from '../src/plugins/types.ts';
 import { createRuntimeEventIdentity } from '../src/runtime/event.ts';
 import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-log-store.ts';
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
 import { createRuntimeLogStore } from '../src/runtime/log.ts';
 import { roleModelDuplicateToolCallRejectionReason } from '../src/role-model/contracts.ts';
-import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
 import type { RoleModelAdapter } from '../src/role-model/loop.ts';
 import type { RoleModelChatMessage } from '../src/role-model/prompt.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
@@ -21,6 +24,7 @@ import {
   createHealthRejectingPlugin,
   createSequencedAdapter,
   createTestEvent,
+  runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
   transactionIdentityFromContext
 } from './support/plugin-tool-loop-fixtures.ts';
 
@@ -451,7 +455,7 @@ describe('plugin-driven Character State tool loop', () => {
         createHealthRejectingPlugin()
       ],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         firstPartyModelToolsPluginId,
         characterStatePluginId,
         'health-reject.fixture'
@@ -515,7 +519,7 @@ describe('plugin-driven Character State tool loop', () => {
       sessionId,
       plugins: [createCharacterStatePlugin()],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         firstPartyModelToolsPluginId,
         characterStatePluginId
       ]
@@ -586,7 +590,7 @@ describe('plugin-driven Character State tool loop', () => {
       sessionId,
       plugins: [createCharacterStatePlugin()],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         firstPartyModelToolsPluginId,
         characterStatePluginId
       ]

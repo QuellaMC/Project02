@@ -12,11 +12,13 @@ import {
   runtimeConfigVersion
 } from '../src/runtime/config/index.ts';
 import {
-  createCharacterStatePlugin,
-  createCharacterStatePluginManifest,
-  firstPartyModelToolsPluginId,
-  runtimePluginDiscoveryPluginId
+  hostScopedFirstPartyRuntimePluginIds,
+  runtimePluginId
 } from '../src/plugins/index.ts';
+import {
+  createCharacterStatePlugin,
+  createCharacterStatePluginManifest
+} from '../src/plugins/packages/character-state/plugin.ts';
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
 import {
   collect,
@@ -139,8 +141,8 @@ describe('runtime config loading and resolution', () => {
       }
     });
 
-    expect(explicitLoaded.config?.storeRoot).toBeUndefined();
-    expect(envLoaded.config?.storeRoot).toBeUndefined();
+    expect(explicitLoaded.config?.project02?.storeRoot).toBeUndefined();
+    expect(envLoaded.config?.project02?.storeRoot).toBeUndefined();
     expect(
       resolveProject02RuntimeConfig({ loadedConfig: explicitLoaded }).storeRoot
     ).toBe(seededStoreRoot);
@@ -168,8 +170,8 @@ describe('runtime config loading and resolution', () => {
       }
     });
 
-    expect(explicitLoaded.config?.storeRoot).toBeUndefined();
-    expect(envLoaded.config?.storeRoot).toBeUndefined();
+    expect(explicitLoaded.config?.project02?.storeRoot).toBeUndefined();
+    expect(envLoaded.config?.project02?.storeRoot).toBeUndefined();
     expect(
       resolveProject02RuntimeConfig({ loadedConfig: explicitLoaded }).storeRoot
     ).toBe(seededStoreRoot);
@@ -346,7 +348,7 @@ describe('runtime config loading and resolution', () => {
 
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     const characterStateActivation = activationPluginById(
       configured.activation.plugins,
       'character-state'
@@ -425,7 +427,7 @@ describe('runtime config loading and resolution', () => {
 
     expect(manifestBackedFactoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(characterActivation).toMatchObject({
       pluginId: 'character-state',
       enabled: false,
@@ -1115,7 +1117,7 @@ describe('runtime config loading and resolution', () => {
     expect(characterFactoryCalls).toBe(0);
     expect(memoryFactoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1313,8 +1315,7 @@ describe('runtime config loading and resolution', () => {
       }
     ]);
     expect(configured.activation.enabledPluginIds).toEqual([
-      runtimePluginDiscoveryPluginId,
-      firstPartyModelToolsPluginId,
+      ...hostScopedFirstPartyRuntimePluginIds,
       'memory.required'
     ]);
   });
@@ -1449,13 +1450,13 @@ describe('runtime config loading and resolution', () => {
       factories
     });
 
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'ambiguous_memory_provider_selection',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         })
       ])
     );
@@ -1526,13 +1527,13 @@ describe('runtime config loading and resolution', () => {
 
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         })
       ])
     );
@@ -1580,13 +1581,13 @@ describe('runtime config loading and resolution', () => {
     });
 
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'default_memory_provider_not_memory_provider',
-          path: 'defaultMemoryProvider',
+          path: 'project02.defaultMemoryProvider',
           pluginId: 'character-state'
         })
       ])
@@ -1644,13 +1645,13 @@ describe('runtime config loading and resolution', () => {
       factories
     });
 
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         })
       ])
     );
@@ -1720,13 +1721,13 @@ describe('runtime config loading and resolution', () => {
 
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         })
       ])
     );

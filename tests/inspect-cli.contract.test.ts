@@ -44,11 +44,10 @@ import {
   type RuntimePluginContext
 } from '../src/plugins/types.ts';
 import {
-  runtimePluginDiscoveryPluginId
-} from '../src/plugins/access-control.ts';
-import {
-  firstPartyModelToolsPluginId
+  firstPartyModelToolsPluginId,
+  runtimePluginId
 } from '../src/plugins/contract.ts';
+import { createDefaultProject02PluginHost } from '../src/plugins/default-host.ts';
 
 describe('inspect CLI plugin evidence', () => {
   it('shows model rounds and per-tool plugin events', async () => {
@@ -61,6 +60,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot,
       sessionId: 'session-inspect'
     });
+    const session = createConversationSession({ id: 'session-inspect' });
 
     await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
@@ -71,8 +71,13 @@ describe('inspect CLI plugin evidence', () => {
           createdAt: '2026-06-15T00:00:00.000Z'
         })
       ),
-      session: createConversationSession({ id: 'session-inspect' }),
+      session,
       logStore,
+      pluginHost: createDefaultProject02PluginHost({
+        storeRoot,
+        sessionId: 'session-inspect',
+        sessionIdentity: session
+      }),
       roleModelAdapter: createPatchThenReplyAdapter()
     });
 
@@ -237,7 +242,7 @@ describe('inspect CLI plugin evidence', () => {
     expect(output.plugins).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          pluginId: runtimePluginDiscoveryPluginId,
+          pluginId: runtimePluginId,
           enabled: true,
           requestedAccess: { model_input: 'write' },
           grantedAccess: { model_input: 'write' }
@@ -869,7 +874,9 @@ describe('inspect CLI plugin evidence', () => {
       `${JSON.stringify(
         {
           version: runtimeConfigVersion,
-          storeRoot
+          project02: {
+            storeRoot
+          }
         },
         null,
         2

@@ -1,6 +1,10 @@
-export const runtimeConfigVersion = 'project02.runtime_config.v1';
+import type { RuntimePluginConfigValueType } from '../../plugins/contract.ts';
+
+export const legacyRuntimeConfigVersion = 'project02.runtime_config.v1';
+export const runtimeConfigVersion = 'project02.config.v2';
 export const runtimeConfigEnvVarName = 'PROJECT02_RUNTIME_CONFIG';
 export const roleModelProviderEnvVarName = 'PROJECT02_ROLE_MODEL_PROVIDER';
+export const project02RoleModelProviderValues = ['local', 'nvidia'] as const;
 export const runtimeControlEnvVarNames: readonly string[] = Object.freeze([
   runtimeConfigEnvVarName,
   roleModelProviderEnvVarName
@@ -35,8 +39,25 @@ export type RuntimeConfigValue =
   | readonly RuntimeConfigValue[]
   | RuntimeConfigObject;
 
+export type Project02RoleModelProvider =
+  (typeof project02RoleModelProviderValues)[number];
+
+export type Project02HostConfig = Readonly<
+  Record<string, RuntimeConfigValue | undefined>
+> & {
+  readonly storeRoot?: string;
+  readonly defaultMemoryProvider?: string;
+  readonly roleModelProvider?: Project02RoleModelProvider;
+};
+
 export type Project02RuntimeConfig = {
   readonly version: typeof runtimeConfigVersion;
+  readonly project02?: Project02HostConfig;
+  readonly plugins?: Readonly<Record<string, Project02RuntimePluginConfig>>;
+};
+
+export type LegacyProject02RuntimeConfig = {
+  readonly version: typeof legacyRuntimeConfigVersion;
   readonly storeRoot?: string;
   readonly defaultMemoryProvider?: string;
   readonly plugins?: Readonly<Record<string, Project02RuntimePluginConfig>>;
@@ -113,8 +134,14 @@ export type RedactedPluginRuntimeConfig = Readonly<
 export type ResolvedProject02RuntimeConfig = {
   readonly source: RuntimeConfigSource;
   readonly path?: string;
+  readonly project02: {
+    readonly storeRoot: string;
+    readonly defaultMemoryProvider?: string;
+    readonly roleModelProvider: Project02RoleModelProvider;
+  };
   readonly storeRoot: string;
   readonly defaultMemoryProvider?: string;
+  readonly roleModelProvider: Project02RoleModelProvider;
   readonly pluginConfigs: Readonly<Record<string, ResolvedPluginRuntimeConfig>>;
   readonly redactedPluginConfigs: Readonly<Record<string, RedactedPluginRuntimeConfig>>;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
@@ -124,8 +151,48 @@ export type ResolvedProject02RuntimeConfig = {
 export type RuntimeConfigInspectShape = {
   readonly source: RuntimeConfigSource;
   readonly path?: string;
+  readonly project02: {
+    readonly storeRoot: string;
+    readonly defaultMemoryProvider?: string;
+    readonly roleModelProvider: Project02RoleModelProvider;
+  };
   readonly storeRoot: string;
   readonly defaultMemoryProvider?: string;
+  readonly roleModelProvider: Project02RoleModelProvider;
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+  readonly fingerprint: string;
+};
+
+export type RuntimePluginConfigFieldInspectShape = {
+  readonly name: string;
+  readonly description: string;
+  readonly required: boolean;
+  readonly secret: boolean;
+  readonly valueType?: RuntimePluginConfigValueType;
+  readonly defaultValueSummary?: string;
+  readonly allowedValues?: readonly string[];
+  readonly agentMutable: boolean;
+  readonly reloadRequired: boolean;
+  readonly authored: {
+    readonly configured: boolean;
+    readonly value?: RuntimeConfigValue;
+  };
+  readonly effective: RedactedRuntimeConfigField;
+};
+
+export type RuntimePluginConfigActivationInspectShape = {
+  readonly enabled: boolean;
+  readonly status: 'active' | 'disabled' | 'blocked';
+  readonly reasons: readonly string[];
+};
+
+export type RuntimePluginConfigInspectShape = {
+  readonly pluginId: string;
+  readonly displayName: string;
+  readonly version: string;
+  readonly enabled: boolean;
+  readonly activation: RuntimePluginConfigActivationInspectShape;
+  readonly fields: readonly RuntimePluginConfigFieldInspectShape[];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
 };
@@ -151,6 +218,17 @@ export type RuntimeConfigMutationOperation =
   | {
       readonly kind: 'default_memory_provider';
       readonly pluginId?: string;
+    }
+  | {
+      readonly kind: 'plugin_config_set';
+      readonly pluginId: string;
+      readonly fieldName: string;
+      readonly value: RuntimeConfigValue;
+    }
+  | {
+      readonly kind: 'plugin_config_unset';
+      readonly pluginId: string;
+      readonly fieldName: string;
     }
   | {
       readonly kind: 'secret_set';

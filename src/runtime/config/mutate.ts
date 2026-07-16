@@ -23,6 +23,8 @@ import {
   isRuntimeControlEnvVarName,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
+  type LoadedProject02RuntimeConfig,
+  type Project02HostConfig,
   type Project02RuntimeConfig,
   type Project02RuntimePluginConfig,
   type RuntimeConfigMutationOperation,
@@ -36,24 +38,42 @@ import {
 import {
   redactRuntimeConfigValue
 } from './redact.ts';
+import {
+  createProject02RuntimeConfigFingerprint
+} from './fingerprint.ts';
+import {
+  type Project02ConfigFieldDefinition,
+  project02RuntimeConfigFieldDefinition,
+  runtimeConfigValueMatchesField
+} from './schema.ts';
 
 export type ApplyRuntimeConfigMutationOptions = {
   readonly configPath?: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly expectedFingerprint?: string;
   readonly storeRoot?: string;
   readonly operation: RuntimeConfigMutationOperation;
+  readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
 };
 
 export type RuntimeConfigMutationResult = {
   readonly configPath: string;
   readonly envPath: string;
   readonly config: Project02RuntimeConfig;
+  readonly fingerprint: string;
 };
 
 export class RuntimeConfigMutationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'RuntimeConfigMutationError';
+  }
+}
+
+export class RuntimeConfigConflictError extends RuntimeConfigMutationError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RuntimeConfigConflictError';
   }
 }
 
@@ -148,10 +168,23 @@ function applyRuntimeConfigMutationWithLocks(
       selectedConfigPath,
       ...(bootstrapStoreRoot === undefined ? {} : { storeRoot: bootstrapStoreRoot })
     });
+  const currentFingerprint =
+    createProject02RuntimeConfigFingerprint(currentConfig);
+
+  if (
+    options.expectedFingerprint !== undefined &&
+    options.expectedFingerprint !== currentFingerprint
+  ) {
+    throw new RuntimeConfigConflictError(
+      `Runtime config changed before the mutation could be committed. Expected ${options.expectedFingerprint}, found ${currentFingerprint}.`
+    );
+  }
   const nextConfig = validateMutatedRuntimeConfig(
     mutateConfig(currentConfig, options.operation)
   );
-  const nextEffectiveStoreRoot = nextConfig.storeRoot ?? selectedStoreRoot;
+  options.validateCandidate?.(nextConfig);
+  const nextEffectiveStoreRoot =
+    nextConfig.project02?.storeRoot ?? selectedStoreRoot;
   const nextEffectiveLayout = createLocalRuntimeStorageLayout(
     nextEffectiveStoreRoot === undefined ? {} : { storeRoot: nextEffectiveStoreRoot }
   );
@@ -222,7 +255,8 @@ function applyRuntimeConfigMutationWithLocks(
   return Object.freeze({
     configPath: selectedConfigPath,
     envPath,
-    config: nextConfig
+    config: nextConfig,
+    fingerprint: createProject02RuntimeConfigFingerprint(nextConfig)
   } satisfies RuntimeConfigMutationResult);
   } finally {
     mutationLease.release();
@@ -274,7 +308,10 @@ function bootstrapRuntimeConfig(options: {
   readonly storeRoot?: string;
 }): Project02RuntimeConfig {
   if (options.storeRoot !== undefined) {
-    return { version: runtimeConfigVersion, storeRoot: options.storeRoot };
+    return {
+      version: runtimeConfigVersion,
+      project02: Object.freeze({ storeRoot: options.storeRoot })
+    };
   }
 
   const selectedStoreRoot = storeRootForSelectedDefaultConfigPath(
@@ -283,7 +320,38 @@ function bootstrapRuntimeConfig(options: {
 
   return selectedStoreRoot === undefined
     ? { version: runtimeConfigVersion }
-    : { version: runtimeConfigVersion, storeRoot: selectedStoreRoot };
+    : {
+        version: runtimeConfigVersion,
+        project02: Object.freeze({ storeRoot: selectedStoreRoot })
+      };
+}
+
+export function createRuntimeConfigMutationBase(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly configPath?: string;
+  readonly storeRoot?: string;
+}): Project02RuntimeConfig {
+  if (options.loadedConfig.config !== undefined) {
+    return options.loadedConfig.config;
+  }
+
+  const selectedConfigPath =
+    options.loadedConfig.path ??
+    options.configPath ??
+    defaultRuntimeConfigPath(options.storeRoot);
+  const selectedStoreRoot =
+    options.storeRoot ?? storeRootForSelectedDefaultConfigPath(selectedConfigPath);
+  const bootstrapStoreRoot =
+    options.storeRoot === undefined
+      ? selectedStoreRoot
+      : canonicalMutationPath(
+          createLocalRuntimeStorageLayout({ storeRoot: options.storeRoot }).storeRoot
+        );
+
+  return bootstrapRuntimeConfig({
+    selectedConfigPath,
+    ...(bootstrapStoreRoot === undefined ? {} : { storeRoot: bootstrapStoreRoot })
+  });
 }
 
 export function storeRootForSelectedDefaultConfigPath(
@@ -340,6 +408,10 @@ function getRuntimeConfigValueForParts(
     return rootConfigValue(config, field);
   }
 
+  if (parts[0] === 'project02' && parts.length === 2) {
+    return project02ConfigValue(config, parts[1]);
+  }
+
   if (parts[0] !== 'plugins') {
     return undefined;
   }
@@ -378,6 +450,10 @@ function redactionKeyForRuntimeConfigPath(
     return parts[0];
   }
 
+  if (parts[0] === 'project02' && parts.length === 2) {
+    return parts[1];
+  }
+
   if (parts[0] !== 'plugins' || parts.length === 1) {
     return undefined;
   }
@@ -408,15 +484,40 @@ function rootConfigValue(
   switch (field) {
     case 'version':
       return config.version;
+    case 'project02':
+      return project02ConfigObject(config.project02);
     case 'storeRoot':
-      return config.storeRoot;
+      return config.project02?.storeRoot;
     case 'defaultMemoryProvider':
-      return config.defaultMemoryProvider;
+      return config.project02?.defaultMemoryProvider;
+    case 'roleModelProvider':
+      return config.project02?.roleModelProvider;
     case 'plugins':
       return config.plugins;
     default:
       return undefined;
   }
+}
+
+function project02ConfigObject(
+  config: Project02HostConfig | undefined
+): Readonly<Record<string, RuntimeConfigValue>> | undefined {
+  if (config === undefined) {
+    return undefined;
+  }
+
+  return frozenRuntimeConfigRecord(
+    Object.entries(config).flatMap(([name, value]) =>
+      value === undefined ? [] : [[name, value]]
+    )
+  );
+}
+
+function project02ConfigValue(
+  config: Project02RuntimeConfig,
+  field: string | undefined
+): RuntimeConfigValue | undefined {
+  return field === undefined ? undefined : config.project02?.[field];
 }
 
 function exactPluginConfigForParts(
@@ -469,8 +570,25 @@ function mutateConfig(
       return setPluginEnabled(config, operation.pluginId, false);
     case 'default_memory_provider':
       return operation.pluginId === undefined
-        ? unsetConfigPath(config, 'defaultMemoryProvider')
-        : setConfigPath(config, 'defaultMemoryProvider', operation.pluginId);
+        ? unsetConfigPath(config, 'project02.defaultMemoryProvider')
+        : setConfigPath(
+            config,
+            'project02.defaultMemoryProvider',
+            operation.pluginId
+          );
+    case 'plugin_config_set':
+      return setPluginConfigField(
+        config,
+        operation.pluginId,
+        operation.fieldName,
+        operation.value
+      );
+    case 'plugin_config_unset':
+      return unsetPluginConfigField(
+        config,
+        operation.pluginId,
+        operation.fieldName
+      );
     case 'secret_set':
       return setPluginConfigField(
         config,
@@ -540,25 +658,42 @@ function setPluginConfigField(
   return freezeConfig({ ...config, plugins });
 }
 
+function unsetPluginConfigField(
+  config: Project02RuntimeConfig,
+  pluginId: string,
+  fieldName: string
+): Project02RuntimeConfig {
+  const currentPlugin = config.plugins?.[pluginId];
+
+  if (currentPlugin === undefined) {
+    return config;
+  }
+
+  const plugins = { ...(config.plugins ?? {}) };
+  const nextPluginConfigEntries = Object.entries(currentPlugin.config ?? {}).filter(
+    ([name]) => name !== fieldName
+  );
+
+  return setOrDeletePluginWrapper(config, plugins, pluginId, {
+    ...(currentPlugin.enabled === undefined ? {} : { enabled: currentPlugin.enabled }),
+    ...(nextPluginConfigEntries.length === 0
+      ? {}
+      : {
+          config: frozenRuntimeConfigRecord(nextPluginConfigEntries)
+        })
+  });
+}
+
 function setConfigPath(
   config: Project02RuntimeConfig,
   path: string,
   value: RuntimeConfigValue
 ): Project02RuntimeConfig {
   const parts = parseConfigPath(path);
+  const project02Field = project02FieldForConfigPath(parts);
 
-  if (parts.length === 1) {
-    const [field] = parts;
-
-    if (field === 'storeRoot' && typeof value === 'string') {
-      return freezeConfig({ ...config, storeRoot: value });
-    }
-
-    if (field === 'defaultMemoryProvider' && typeof value === 'string') {
-      return freezeConfig({ ...config, defaultMemoryProvider: value });
-    }
-
-    throw new TypeError(`Unsupported runtime config path: ${path}.`);
+  if (project02Field !== undefined) {
+    return setProject02ConfigField(config, project02Field, value, path);
   }
 
   if (parts[0] !== 'plugins' || parts.length < 3) {
@@ -601,27 +736,10 @@ function unsetConfigPath(
   path: string
 ): Project02RuntimeConfig {
   const parts = parseConfigPath(path);
+  const project02Field = project02FieldForConfigPath(parts);
 
-  if (parts.length === 1) {
-    const [field] = parts;
-
-    if (field === 'storeRoot') {
-      return freezeConfig({
-        version: config.version,
-        ...(config.defaultMemoryProvider === undefined
-          ? {}
-          : { defaultMemoryProvider: config.defaultMemoryProvider }),
-        ...(config.plugins === undefined ? {} : { plugins: config.plugins })
-      });
-    }
-
-    if (field === 'defaultMemoryProvider') {
-      return freezeConfig({
-        version: config.version,
-        ...(config.storeRoot === undefined ? {} : { storeRoot: config.storeRoot }),
-        ...(config.plugins === undefined ? {} : { plugins: config.plugins })
-      });
-    }
+  if (project02Field !== undefined) {
+    return unsetProject02ConfigField(config, project02Field);
   }
 
   if (parts[0] !== 'plugins' || parts.length < 3) {
@@ -657,12 +775,82 @@ function unsetConfigPath(
     ...(nextPluginConfigEntries.length === 0
       ? {}
       : {
-          config: Object.freeze(
-            Object.fromEntries(nextPluginConfigEntries) as Readonly<
-              Record<string, RuntimeConfigValue>
-            >
-          )
+          config: frozenRuntimeConfigRecord(nextPluginConfigEntries)
         })
+  });
+}
+
+function frozenRuntimeConfigRecord(
+  entries: readonly (readonly [string, RuntimeConfigValue])[]
+): Readonly<Record<string, RuntimeConfigValue>> {
+  const record: Record<string, RuntimeConfigValue> = {};
+
+  for (const [name, value] of entries) {
+    record[name] = value;
+  }
+
+  return Object.freeze(record);
+}
+
+function project02FieldForConfigPath(
+  parts: readonly string[]
+): Project02ConfigFieldDefinition | undefined {
+  const fieldName =
+    parts.length === 1
+      ? parts[0]
+      : parts.length === 2 && parts[0] === 'project02'
+        ? parts[1]
+        : undefined;
+
+  return fieldName === undefined
+    ? undefined
+    : project02RuntimeConfigFieldDefinition(fieldName);
+}
+
+function setProject02ConfigField(
+  config: Project02RuntimeConfig,
+  field: Project02ConfigFieldDefinition,
+  value: RuntimeConfigValue,
+  path: string
+): Project02RuntimeConfig {
+  if (
+    !runtimeConfigValueMatchesField(value, field) ||
+    (typeof value === 'string' && value.trim().length === 0)
+  ) {
+    throw new TypeError(`${field.invalidValueMessage} Path: ${path}.`);
+  }
+
+  const current = config.project02 ?? {};
+  const project02: Project02HostConfig = Object.freeze({
+    ...current,
+    [field.name]: value
+  });
+
+  return freezeConfig({
+    ...config,
+    project02
+  });
+}
+
+function unsetProject02ConfigField(
+  config: Project02RuntimeConfig,
+  field: Project02ConfigFieldDefinition
+): Project02RuntimeConfig {
+  const project02 =
+    config.project02 === undefined
+      ? undefined
+      : Object.freeze(
+          Object.fromEntries(
+            Object.entries(config.project02).filter(([name]) => name !== field.name)
+          )
+        );
+  const hasProject02Fields =
+    project02 !== undefined && Object.keys(project02).length > 0;
+
+  return freezeConfig({
+    version: config.version,
+    ...(hasProject02Fields ? { project02: Object.freeze(project02) } : {}),
+    ...(config.plugins === undefined ? {} : { plugins: config.plugins })
   });
 }
 
@@ -1336,7 +1524,7 @@ function exactKnownPluginMutationPathError(
 function isKnownPluginId(config: Project02RuntimeConfig, pluginId: string): boolean {
   return (
     Object.hasOwn(config.plugins ?? {}, pluginId) ||
-    config.defaultMemoryProvider === pluginId
+    config.project02?.defaultMemoryProvider === pluginId
   );
 }
 
@@ -1442,10 +1630,7 @@ function freezeConfigWithPluginWrappers(
 
   return freezeConfig({
     version: config.version,
-    ...(config.storeRoot === undefined ? {} : { storeRoot: config.storeRoot }),
-    ...(config.defaultMemoryProvider === undefined
-      ? {}
-      : { defaultMemoryProvider: config.defaultMemoryProvider })
+    ...(config.project02 === undefined ? {} : { project02: config.project02 })
   });
 }
 

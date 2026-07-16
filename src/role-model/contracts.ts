@@ -2,7 +2,11 @@ import type { CharacterProfile, VisibleMessage } from '../core/conversation.ts';
 import {
   createFirstPartyModelToolsPlugin
 } from '../plugins/builtin/model-tools.ts';
-import { firstPartyModelToolsPluginId } from '../plugins/contract.ts';
+import {
+  firstPartyModelToolsPluginId,
+  runtimePluginConfigUpdateToolName,
+  runtimePluginId
+} from '../plugins/contract.ts';
 import {
   createRuntimePluginContextItem,
   createRuntimePluginProvidedTool,
@@ -12,10 +16,7 @@ import {
   type RuntimePluginProvidedTool
 } from '../plugins/validation.ts';
 import {
-  characterStatePatchModelToolName,
-  createCharacterStatePatchModelToolCall,
   createVisibleReplyModelToolCall,
-  findCharacterStatePatchModelToolCall,
   findVisibleReplyModelToolCall,
   freezeBuiltInModelToolCall,
   freezeModelToolCall,
@@ -27,7 +28,6 @@ import {
   visibleReplyModelToolName,
   type BuiltInModelToolCall,
   type BuiltInModelToolName,
-  type CharacterStatePatchModelToolCall,
   type ModelToolCall,
   type ModelToolDefinition,
   type VisibleReplyModelToolCall
@@ -52,10 +52,6 @@ import {
 import { scrubReasoningBlocks } from './reasoning.ts';
 
 export const roleModelDecisionContractVersion = 'mvp-006.tool_calls.v1';
-export const roleModelCharacterStatePatchToolName =
-  characterStatePatchModelToolName;
-export const roleModelPluginListToolName = 'plugin.list';
-
 export type RoleModelAllowedToolName = string;
 export type RoleModelToolDefinition = ModelToolDefinition;
 
@@ -777,12 +773,6 @@ export function getVisibleReplyToolCall(
   return findVisibleReplyModelToolCall(decision.toolCalls);
 }
 
-export function getCharacterStatePatchToolCall(
-  decision: CharacterDecision
-): CharacterStatePatchModelToolCall | undefined {
-  return findCharacterStatePatchModelToolCall(decision.toolCalls);
-}
-
 function parseRoleModelDecisionObject(
   parsedOutput: unknown,
   allowedTools: readonly RoleModelAllowedToolName[],
@@ -980,19 +970,6 @@ function parseModelToolCall(options: {
 
   if (jsonInputValidation.status === 'rejected') {
     return rejectToolCall(jsonInputValidation.details);
-  }
-
-  if (name === characterStatePatchModelToolName) {
-    return {
-      status: 'accepted',
-      toolCall:
-        options.boundary === 'execution'
-          ? freezeExecutionModelToolCall({
-              name,
-              input: jsonInputValidation.input
-            })
-          : createCharacterStatePatchModelToolCall(jsonInputValidation.input)
-    };
   }
 
   return {
@@ -1333,7 +1310,17 @@ export function createRoleModelPluginToolDefinitions(
       );
     }
 
-    if (!terminalBuiltInTool && providedTool.requiresConfirmation) {
+    const approvalGatedRuntimeConfigWrite =
+      pluginId === runtimePluginId &&
+      providedTool.name === runtimePluginConfigUpdateToolName &&
+      providedTool.requiresConfirmation &&
+      providedTool.sideEffectLevel === 'runtime_config_write';
+
+    if (
+      !terminalBuiltInTool &&
+      providedTool.requiresConfirmation &&
+      !approvalGatedRuntimeConfigWrite
+    ) {
       throw new TypeError(
         `Plugin tool "${providedTool.name}" requires confirmation and cannot be model-facing in CT-03.`
       );
@@ -1343,7 +1330,8 @@ export function createRoleModelPluginToolDefinitions(
       !terminalBuiltInTool &&
       providedTool.sideEffectLevel !== 'none' &&
       providedTool.sideEffectLevel !== 'runtime_read' &&
-      providedTool.sideEffectLevel !== 'local_memory_write'
+      providedTool.sideEffectLevel !== 'local_memory_write' &&
+      !approvalGatedRuntimeConfigWrite
     ) {
       throw new TypeError(
         `Plugin tool "${providedTool.name}" must be read-only or local-memory-only for CT-03.`
@@ -2071,6 +2059,5 @@ export { freezeBuiltInModelToolCall };
 export type {
   BuiltInModelToolCall,
   BuiltInModelToolName,
-  CharacterStatePatchModelToolCall,
   VisibleReplyModelToolCall
 };

@@ -3,6 +3,7 @@ import type {
   RuntimePluginContextBudget,
   RuntimePluginSourceReference
 } from '../plugins/validation.ts';
+import { runtimePluginListToolName } from '../plugins/contract.ts';
 import type { RoleModelInputEnvelope } from './contracts.ts';
 import type {
   ModelToolDefinition,
@@ -181,7 +182,7 @@ const roleModelVisibleReplyProtocolPromptText =
 const roleModelNativeToolProtocolPromptParts = Object.freeze([
   'Use provided function tools when runtime/plugin state is needed.',
   'Tools are assistant-owned runtime functions, not user commands.',
-  'Tool names are callable functions, not a full plugin inventory; call plugin.list for inventory facts.'
+  `Tool names are callable functions, not a full plugin inventory; call ${runtimePluginListToolName} for inventory facts.`
 ]);
 
 const roleModelNativeParallelToolProtocolPromptParts = Object.freeze([

@@ -610,22 +610,22 @@ describe('runtime config CLI location selection', () => {
 
       expect(JSON.parse(readFileSync(explicitConfigPath, 'utf8')) as unknown).toMatchObject(
         {
-          storeRoot: explicitNextStoreRoot
+          project02: { storeRoot: explicitNextStoreRoot }
         }
       );
       expect(JSON.parse(readFileSync(selectedConfigPath, 'utf8')) as unknown).toMatchObject(
         {
-          storeRoot: selectedNextStoreRoot
+          project02: { storeRoot: selectedNextStoreRoot }
         }
       );
       expect(JSON.parse(readFileSync(dotenvConfigPath, 'utf8')) as unknown).toMatchObject(
         {
-          storeRoot: dotenvStoreRoot
+          project02: { storeRoot: dotenvStoreRoot }
         }
       );
       expect(JSON.parse(readFileSync(processConfigPath, 'utf8')) as unknown).toMatchObject(
         {
-          storeRoot: processStoreRoot
+          project02: { storeRoot: processStoreRoot }
         }
       );
     } finally {

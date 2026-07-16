@@ -4,7 +4,7 @@ import type { RuntimePluginFileStore } from '../src/plugins/types.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin
-} from '../src/plugins/builtin/character-state/index.ts';
+} from '../src/plugins/packages/character-state/plugin.ts';
 import {
   callFileStoreAvailabilityProbe,
   createDegradableMemorySearchPlugin,
@@ -217,9 +217,12 @@ describe('runtime plugin host access and lifecycle', () => {
     expect(inheritedFileStore.readJson('read-only-write.json')).toBeUndefined();
   });
 
-  it('allows host-known Character State built-in file_store write access by default', async () => {
+  it('allows explicitly enabled Character State file_store write access', async () => {
     const plugin = createCharacterStatePlugin();
-    const host = createRuntimePluginHost({ plugins: [plugin] });
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [characterStatePluginId]
+    });
     const result = await host.beforeRoleModelCall(testPluginContext());
 
     expect(result.status).toBe('completed');

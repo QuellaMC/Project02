@@ -28,9 +28,11 @@ import {
   roleModelCommitValidationFailureRejectionReason
 } from '../src/role-model/contracts.ts';
 import {
-  characterStatePatchModelToolName,
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
+import {
+  characterStatePatchModelToolName
+} from '../src/plugins/packages/character-state/contract.ts';
 import {
   roleModelDecisionContractVersion
 } from '../src/role-model/contracts.ts';
@@ -42,9 +44,8 @@ import {
   LocalRuntimeStorageContractError,
   createLocalRuntimeStorageLayout
 } from '../src/runtime/storage/layout.ts';
-import {
-  createRuntimePluginHost
-} from '../src/plugins/host.ts';
+import { createDefaultProject02PluginHost } from '../src/plugins/default-host.ts';
+import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginHealthSnapshot
@@ -478,6 +479,7 @@ describe('file runtime log store plugin tool event validation', () => {
       ),
       session: createConversationSession({ id: sessionId }),
       logStore,
+      pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
       roleModelAdapter: createMalformedProviderExchangeAdapter()
     });
 
@@ -554,6 +556,7 @@ describe('file runtime log store plugin tool event validation', () => {
       ),
       session: createConversationSession({ id: sessionId }),
       logStore: createFileRuntimeLogStore({ storeRoot, sessionId }),
+      pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
       roleModelAdapter: createNvidiaRoleModelProviderAdapter({
         apiKey: 'secret',
         fetchClient
@@ -715,13 +718,17 @@ describe('file runtime log store plugin tool event validation', () => {
       ),
       session,
       logStore,
+      pluginHost: createDefaultProject02PluginHost({
+        storeRoot,
+        sessionId: 'session-multiline-visible'
+      }),
       roleModelAdapter: createMultilineVisibleReplyAdapter()
     });
 
     expect(result.status).toBe('completed');
     expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
       'list tools',
-      'I can use:\n- plugin.list\n- character_state.patch'
+      'I can use:\n- runtime.plugin.list\n- character_state.patch'
     ]);
   });
 
@@ -746,6 +753,7 @@ describe('file runtime log store plugin tool event validation', () => {
       ),
       session,
       logStore: createFileRuntimeLogStore({ storeRoot, sessionId }),
+      pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
       roleModelAdapter: createMultilineVisibleReplyAdapter()
     });
 
@@ -833,6 +841,7 @@ describe('file runtime log store plugin tool event validation', () => {
       ),
       session: rehydrated,
       logStore: createFileRuntimeLogStore({ storeRoot, sessionId }),
+      pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
       roleModelAdapter: createMultilineVisibleReplyAdapter()
     });
 
@@ -900,6 +909,7 @@ describe('file runtime log store plugin tool event validation', () => {
         ),
         session: failedSession,
         logStore: failingStore,
+        pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
         roleModelAdapter: createMultilineVisibleReplyAdapter()
       })
     ).rejects.toBe(appendFailure);
@@ -923,6 +933,7 @@ describe('file runtime log store plugin tool event validation', () => {
           character: { id: 'nova', displayName: 'Nova' }
         }),
         logStore: reopened,
+        pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
         roleModelAdapter: createMultilineVisibleReplyAdapter()
       })
     ).resolves.toMatchObject({ status: 'completed' });
@@ -1282,6 +1293,7 @@ async function persistedDisallowedToolRejectionRecord(
     ),
     session: createConversationSession({ id: sessionId }),
     logStore,
+    pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
     roleModelAdapter: Object.freeze({
       invoke() {
         return {
@@ -1502,7 +1514,7 @@ function createMultilineVisibleReplyAdapter(): RoleModelAdapter {
             {
               name: 'visible_reply',
               input: {
-                text: 'I can use:\n- plugin.list\n- character_state.patch'
+                text: 'I can use:\n- runtime.plugin.list\n- character_state.patch'
               }
             }
           ]

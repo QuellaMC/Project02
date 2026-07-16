@@ -1,7 +1,7 @@
 export * from './core/conversation.ts';
 export * from './core/message-validation.ts';
 export * from './plugins/index.ts';
-export * from './plugins/builtin/character-state/schema.ts';
+export * from './plugins/packages/character-state/schema.ts';
 export * from './role-model/decision-context.ts';
 export * from './role-model/model-tools.ts';
 export * from './role-model/prompt.ts';
@@ -16,7 +16,6 @@ export {
   createRoleModelPluginToolDefinitions,
   createRoleModelToolObservation,
   createVisibleReplyCharacterDecision,
-  getCharacterStatePatchToolCall,
   getRequiredVisibleReplyText,
   getVisibleReplyToolCall,
   isRoleModelAllowedToolName,
@@ -26,7 +25,6 @@ export {
   roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelAdapterRejectionNotReplayableDetails,
   roleModelAllowedToolNames,
-  roleModelCharacterStatePatchToolName,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
   roleModelDecisionOutputContract,
@@ -38,7 +36,6 @@ export {
   roleModelMalformedOutputRejectionReason,
   roleModelMalformedToolCallRejectionReason,
   roleModelMissingRequiredToolCallRejectionReason,
-  roleModelPluginListToolName,
   roleModelPluginToolRejectedRejectionReason,
   roleModelProviderErrorRejectionReason,
   roleModelUnsupportedEffectRejectionReason,

@@ -4,9 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createTestTempRoot } from './support/temp-root.ts';
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
 import { createConversationSession } from '../src/core/conversation.ts';
-import { roleModelPluginListToolName } from '../src/role-model/contracts.ts';
 import {
-  characterStatePatchModelToolName,
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
 import {
@@ -16,14 +14,19 @@ import {
   prepareConfiguredProject02PluginActivation
 } from '../src/runtime/config/index.ts';
 import {
-  characterStatePluginId,
   createMemoryProviderRuntimePlugin,
-  createCharacterStatePlugin,
-  createCharacterStatePluginManifest,
   defaultRuntimePluginCatalogFactoryDefinitions,
   firstPartyModelToolsPluginId,
-  runtimePluginDiscoveryPluginId
+  runtimePluginConfigReadToolName,
+  runtimePluginConfigUpdateToolName,
+  runtimePluginId,
+  runtimePluginListToolName
 } from '../src/plugins/index.ts';
+import {
+  characterStatePluginId,
+  createCharacterStatePlugin,
+  createCharacterStatePluginManifest
+} from '../src/plugins/packages/character-state/plugin.ts';
 import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/runtime/event.ts';
 import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
 import { createRuntimeLogStore } from '../src/runtime/log.ts';
@@ -38,6 +41,11 @@ import {
   requiredSecretAndEndpointPlugin,
   requiredSecretPlugin
 } from './support/runtime-config-activation-fixtures.ts';
+import {
+  pluginDiscoveryPluginSummaries,
+  testIdentity,
+  testPluginContext
+} from './support/plugin-host-fixtures.ts';
 
 describe('runtime config activation planning', () => {
   it('constructs the configured host from the exact prepared activation plan', async () => {
@@ -54,6 +62,18 @@ describe('runtime config activation planning', () => {
 
     expect(configured.resolvedConfig).toBe(activationPlan.resolvedConfig);
     expect(configured.activation).toBe(activationPlan.activation);
+    expect(activationPlan.pluginConfigControl.activationByPluginId).toEqual(
+      Object.fromEntries(
+        activationPlan.activation.plugins.map((plugin) => [
+          plugin.pluginId,
+          {
+            enabled: plugin.enabled,
+            status: plugin.activationStatus,
+            reasons: plugin.activationReasons
+          }
+        ])
+      )
+    );
     expect(configured.host.enabledPluginIds()).toEqual(
       activationPlan.activation.enabledPluginIds
     );
@@ -72,7 +92,7 @@ describe('runtime config activation planning', () => {
       configured.host.enabledPluginIds()
     );
     expect(configured.activation.enabledPluginIds).toEqual([
-      runtimePluginDiscoveryPluginId,
+      runtimePluginId,
       firstPartyModelToolsPluginId,
       characterStatePluginId
     ]);
@@ -83,8 +103,8 @@ describe('runtime config activation planning', () => {
     ).toEqual(configured.host.enabledPluginIds());
     expect(configured.host.pluginToolDefinitions()).toContainEqual(
       expect.objectContaining({
-        pluginId: runtimePluginDiscoveryPluginId,
-        name: roleModelPluginListToolName
+        pluginId: runtimePluginId,
+        name: runtimePluginListToolName
       })
     );
   });
@@ -107,21 +127,19 @@ describe('runtime config activation planning', () => {
 
     expect(configured.activation.diagnostics).toEqual([]);
     expect(configured.activation.enabledPluginIds).toEqual([
-      runtimePluginDiscoveryPluginId,
-      firstPartyModelToolsPluginId,
-      characterStatePluginId
+      runtimePluginId,
+      firstPartyModelToolsPluginId
     ]);
     expect(registeredPluginIds).toEqual([
-      runtimePluginDiscoveryPluginId,
-      firstPartyModelToolsPluginId,
-      characterStatePluginId
+      runtimePluginId,
+      firstPartyModelToolsPluginId
     ]);
     expect(new Set(registeredPluginIds).size).toBe(registeredPluginIds.length);
     expect(toolNames).toEqual(
       expect.arrayContaining([
-        roleModelPluginListToolName,
-        visibleReplyModelToolName,
-        characterStatePatchModelToolName
+        runtimePluginListToolName,
+        runtimePluginConfigReadToolName,
+        visibleReplyModelToolName
       ])
     );
   });
@@ -148,17 +166,17 @@ describe('runtime config activation planning', () => {
       factories: {}
     });
     const checkDiscovery = output.plugins.find(
-      (plugin) => plugin.pluginId === runtimePluginDiscoveryPluginId
+      (plugin) => plugin.pluginId === runtimePluginId
     );
     const hostDiscovery = configured.host
       .registrySnapshot()
       .plugins.find(
-        (plugin) => plugin.manifest.id === runtimePluginDiscoveryPluginId
+        (plugin) => plugin.manifest.id === runtimePluginId
       );
 
     expect(exitCode).toBe(0);
     expect(checkDiscovery).toMatchObject({
-      pluginId: runtimePluginDiscoveryPluginId,
+      pluginId: runtimePluginId,
       enabled: true,
       activationStatus: 'active',
       requestedAccess: { model_input: 'write' },
@@ -170,8 +188,8 @@ describe('runtime config activation planning', () => {
     });
     expect(configured.host.pluginToolDefinitions()).toContainEqual(
       expect.objectContaining({
-        pluginId: runtimePluginDiscoveryPluginId,
-        name: roleModelPluginListToolName
+        pluginId: runtimePluginId,
+        name: runtimePluginListToolName
       })
     );
   });
@@ -181,23 +199,111 @@ describe('runtime config activation planning', () => {
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
-        [runtimePluginDiscoveryPluginId]: {
+        [runtimePluginId]: {
           enabled: false
         }
       }
     });
 
     const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      toolConfirmationHandler: () => ({ status: 'approved' })
     });
 
     expect(configured.activation.enabledPluginIds).toEqual(
       configured.host.enabledPluginIds()
     );
     expect(configured.activation.enabledPluginIds).not.toContain(
-      runtimePluginDiscoveryPluginId
+      runtimePluginId
     );
-    expect(configured.host.resolveToolPluginId(roleModelPluginListToolName)).toBeUndefined();
+    for (const toolName of [
+      runtimePluginListToolName,
+      runtimePluginConfigReadToolName,
+      runtimePluginConfigUpdateToolName
+    ]) {
+      expect(configured.host.resolveToolPluginId(toolName)).toBeUndefined();
+    }
+  });
+
+  it('keeps inventory available for cold blocked-plugin discovery when config is invalid', async () => {
+    const storeRoot = createTestTempRoot('project02-config-invalid-inventory-recovery-');
+    const plugin = requiredSecretAndEndpointPlugin('memory.blocked-config');
+    const envVar = 'PROJECT02_BLOCKED_CONFIG_SECRET_3452542101';
+    let factoryCalls = 0;
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {
+            apiKey: { $env: envVar }
+          }
+        }
+      }
+    });
+
+    const configured = await createConfiguredProject02PluginHost({
+      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
+      env: {
+        [envVar]: 'blocked-config-secret'
+      },
+      toolConfirmationHandler: () => ({ status: 'approved' }),
+      factories: {
+        [plugin.manifest.id]: {
+          manifest: plugin.manifest,
+          create() {
+            factoryCalls += 1;
+            return plugin;
+          }
+        }
+      }
+    });
+    const inventoryResult = await configured.host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
+        input: { scope: 'all' }
+      },
+      testPluginContext()
+    );
+
+    expect(configured.activation.diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        code: 'runtime_config_required_value_missing',
+        pluginId: plugin.manifest.id
+      })
+    );
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
+    expect(configured.host.pluginToolDefinitions()).toEqual([
+      expect.objectContaining({
+        pluginId: runtimePluginId,
+        name: runtimePluginListToolName
+      })
+    ]);
+    expect(
+      configured.host.resolveToolPluginId(runtimePluginConfigReadToolName)
+    ).toBeUndefined();
+    expect(
+      configured.host.resolveToolPluginId(runtimePluginConfigUpdateToolName)
+    ).toBeUndefined();
+    expect(factoryCalls).toBe(0);
+    expect(inventoryResult.status).toBe('accepted');
+    if (inventoryResult.status !== 'accepted') {
+      throw new Error('Expected recovery inventory to be accepted.');
+    }
+    expect(
+      pluginDiscoveryPluginSummaries(inventoryResult.output).find(
+        (summary) => summary['id'] === plugin.manifest.id
+      )
+    ).toMatchObject({
+      id: plugin.manifest.id,
+      enabled: false,
+      availableForTurn: false,
+      activationStatus: 'blocked',
+      providedTools: []
+    });
   });
 
   it('keeps character-agent output non-committed when config disables visible_reply', async () => {
@@ -340,9 +446,8 @@ describe('runtime config activation planning', () => {
         }
       }
     });
-
     expect(configured.activation.enabledPluginIds).toEqual([
-      runtimePluginDiscoveryPluginId,
+      runtimePluginId,
       firstPartyModelToolsPluginId,
       plugin.manifest.id
     ]);
@@ -505,17 +610,17 @@ describe('runtime config activation planning', () => {
   });
 
   it('canonicalizes host definitions copied from the public catalog', async () => {
-    const storeRoot = createTestTempRoot('project02-config-character-state-copied-catalog-');
+    const storeRoot = createTestTempRoot('project02-config-runtime-plugin-copied-catalog-');
     const catalog = defaultRuntimePluginCatalogFactoryDefinitions();
-    const characterDefinition = catalog[characterStatePluginId];
+    const runtimeDefinition = catalog[runtimePluginId];
     const spoofedPlugin = fileStoreSessionEndPlugin(
-      characterStatePluginId,
+      runtimePluginId,
       () => {}
     );
     let spoofedFactoryCalls = 0;
 
-    if (characterDefinition === undefined) {
-      throw new Error('Expected Character State in the runtime plugin catalog.');
+    if (runtimeDefinition === undefined) {
+      throw new Error('Expected runtime.plugin in the runtime plugin catalog.');
     }
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
@@ -524,8 +629,8 @@ describe('runtime config activation planning', () => {
       loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
       factories: {
         ...catalog,
-        [characterStatePluginId]: {
-          ...characterDefinition,
+        [runtimePluginId]: {
+          ...runtimeDefinition,
           manifest: spoofedPlugin.manifest,
           create() {
             spoofedFactoryCalls += 1;
@@ -539,19 +644,19 @@ describe('runtime config activation planning', () => {
     expect(spoofedFactoryCalls).toBe(0);
     expect(configured.activation.plugins).toContainEqual(
       expect.objectContaining({
-        pluginId: characterStatePluginId,
+        pluginId: runtimePluginId,
         enabled: true,
-        requestedAccess: { file_store: 'write', model_input: 'write' },
-        grantedAccess: { file_store: 'write', model_input: 'write' }
+        requestedAccess: { model_input: 'write' },
+        grantedAccess: { model_input: 'write' }
       })
     );
     expect(
-      configured.plugins.find(
-        (plugin) => plugin.manifest.id === characterStatePluginId
+      configured.host.registrySnapshot().plugins.find(
+        (plugin) => plugin.manifest.id === runtimePluginId
       )?.manifest
     ).toMatchObject({
-      id: characterStatePluginId,
-      requestedAccess: { file_store: 'write', model_input: 'write' }
+      id: runtimePluginId,
+      requestedAccess: { model_input: 'write' }
     });
   });
 
@@ -595,18 +700,18 @@ describe('runtime config activation planning', () => {
     });
 
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'runtime_config_unknown_plugin',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         }),
         expect.objectContaining({
           severity: 'warning',
           code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         })
       ])
     );
@@ -640,7 +745,7 @@ describe('runtime config activation planning', () => {
         expect.objectContaining({
           severity: 'warning',
           code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         })
       ])
     );
@@ -687,14 +792,14 @@ describe('runtime config activation planning', () => {
 
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.defaultMemoryProvider).toBeUndefined();
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider',
+          path: 'project02.defaultMemoryProvider',
           pluginId: plugin.manifest.id
         })
       ])
@@ -751,14 +856,14 @@ describe('runtime config activation planning', () => {
 
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.defaultMemoryProvider).toBeUndefined();
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider'
+          path: 'project02.defaultMemoryProvider'
         })
       ])
     );
@@ -802,13 +907,13 @@ describe('runtime config activation planning', () => {
 
     expect(factoryCalls).toBe(0);
     expect(configured.plugins).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([]);
+    expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: 'error',
           code: 'default_memory_provider_unavailable',
-          path: 'defaultMemoryProvider',
+          path: 'project02.defaultMemoryProvider',
           pluginId: plugin.manifest.id
         })
       ])
@@ -825,7 +930,7 @@ describe('runtime config activation planning', () => {
     );
   });
 
-  it('skips required config validation for unselected memory providers', async () => {
+  it('skips config validation and cold-discovers unselected memory providers', async () => {
     const storeRoot = createTestTempRoot('project02-config-memory-default-selected-');
     const selectedPlugin = requiredSecretPlugin('memory.selected');
     const unselectedPlugin = requiredSecretPlugin('memory.unselected');
@@ -869,9 +974,18 @@ describe('runtime config activation planning', () => {
         }
       }
     });
+    const discoveryResult = await configured.host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
+        input: { scope: 'all' }
+      },
+      testPluginContext()
+    );
 
     expect(configured.activation.enabledPluginIds).toEqual([
-      runtimePluginDiscoveryPluginId,
+      runtimePluginId,
       firstPartyModelToolsPluginId,
       selectedPlugin.manifest.id
     ]);
@@ -880,6 +994,33 @@ describe('runtime config activation planning', () => {
     );
     expect(selectedFactoryCalls).toBe(1);
     expect(unselectedFactoryCalls).toBe(0);
+    expect(
+      configured.host
+        .registrySnapshot()
+        .plugins.map((registered) => registered.manifest.id)
+    ).not.toContain(unselectedPlugin.manifest.id);
+    expect(
+      configured.host
+        .pluginToolDefinitions()
+        .some((tool) => tool.pluginId === unselectedPlugin.manifest.id)
+    ).toBe(false);
+    expect(discoveryResult.status).toBe('accepted');
+    if (discoveryResult.status !== 'accepted') {
+      throw new Error('Expected runtime.plugin.list scope=all to be accepted.');
+    }
+    expect(
+      pluginDiscoveryPluginSummaries(discoveryResult.output).find(
+        (summary) => summary['id'] === unselectedPlugin.manifest.id
+      )
+    ).toMatchObject({
+      id: unselectedPlugin.manifest.id,
+      enabled: false,
+      availableForTurn: false,
+      activationStatus: 'disabled',
+      grantedAccess: {},
+      registeredLifecycleHooks: [],
+      providedTools: []
+    });
     expect(configured.activation.diagnostics.map((item) => item.code)).not.toContain(
       'runtime_config_required_secret_missing'
     );
@@ -944,7 +1085,7 @@ describe('runtime config activation planning', () => {
     );
 
     expect(configured.activation.enabledPluginIds).toEqual([
-      runtimePluginDiscoveryPluginId,
+      runtimePluginId,
       firstPartyModelToolsPluginId,
       selectedPlugin.manifest.id
     ]);

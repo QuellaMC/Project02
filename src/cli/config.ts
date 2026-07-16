@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import {
   applyRuntimeConfigControlOperation,
   createRuntimeConfigInspectShape,
+  createRuntimePluginFactoryCatalogSnapshot,
   defaultRuntimeConfigPath,
   diagnosticsHaveErrors,
   getRedactedRuntimeConfigValueAtPath,
@@ -34,12 +35,18 @@ import {
   RuntimeEnvFileError,
   shouldReadDefaultDotEnvForRuntimeLocation
 } from './runtime-env.ts';
+import {
+  runRuntimeConfigConsole,
+  type RuntimeConfigConsolePromptAdapter
+} from './config-console.ts';
 
 type RuntimeConfigCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
+  readonly stdin?: NodeJS.ReadableStream;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
+  readonly prompt?: RuntimeConfigConsolePromptAdapter;
 };
 
 class RuntimeConfigCliUsageError extends Error {
@@ -53,7 +60,45 @@ export function runRuntimeConfigCliFromArgs(
   args: readonly string[],
   options: RuntimeConfigCliOptions
 ): Promise<number> {
-  return Promise.resolve().then(() => runRuntimeConfigCliFromArgsSync(args, options));
+  return Promise.resolve()
+    .then(() => {
+      const parsedArgs = parseRuntimeConfigCliArgs(args);
+
+      if (parsedArgs.commandArgs[0] !== 'ui') {
+        return runRuntimeConfigCliFromArgsSync(args, options);
+      }
+
+      assertNoExtraArgs(parsedArgs.commandArgs, 0, 'ui');
+      const cliEnv = runtimeConfigCliEnvForLocation({
+        location: parsedArgs.location,
+        readDefaultDotEnv: shouldReadDefaultDotEnvForCommand(
+          parsedArgs,
+          options.env ?? process.env
+        ),
+        ...(options.env === undefined ? {} : { env: options.env })
+      });
+      const loaded = loadProject02RuntimeConfig({
+        ...parsedArgs.location,
+        env: cliEnv.configEnv
+      });
+
+      return runRuntimeConfigConsole({
+        stdout: options.stdout,
+        ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
+        env: cliEnv.configEnv,
+        runtimeEnv: runtimeConfigEnvForLoadedConfig({
+          loadedConfig: loaded,
+          cliEnv,
+          location: parsedArgs.location
+        }),
+        ...parsedArgs.location,
+        ...(options.factories === undefined
+          ? {}
+          : { factories: options.factories }),
+        ...(options.prompt === undefined ? {} : { prompt: options.prompt })
+      });
+    })
+    .catch((error: unknown) => handleRuntimeConfigCliError(error, options));
 }
 
 function runRuntimeConfigCliFromArgsSync(
@@ -109,6 +154,14 @@ function runRuntimeConfigCliFromArgsSync(
         ...parsed.location,
         env: cliEnv.configEnv
       });
+      const catalogSnapshot = options.factories === undefined
+        ? createRuntimePluginFactoryCatalogSnapshot({
+            loadedConfig: loaded,
+            ...(parsed.location.storeRoot === undefined
+              ? {}
+              : { storeRoot: parsed.location.storeRoot })
+          })
+        : undefined;
       const configured =
         resolveRuntimeConfigActivationBeforeEnvFile({
           loadedConfig: loaded,
@@ -116,27 +169,21 @@ function runRuntimeConfigCliFromArgsSync(
             ? {}
             : { storeRoot: parsed.location.storeRoot }),
           env: cliEnv.configEnv,
-          ...(options.factories === undefined ? {} : { factories: options.factories })
+          ...(options.factories === undefined ? {} : { factories: options.factories }),
+          ...(catalogSnapshot === undefined ? {} : { catalogSnapshot })
         }) ??
         resolveConfiguredProject02PluginActivation({
           loadedConfig: loaded,
           ...(parsed.location.storeRoot === undefined
             ? {}
             : { storeRoot: parsed.location.storeRoot }),
-          env: diagnosticsHaveErrors(loaded.diagnostics)
-            ? cliEnv.configEnv
-            : loadRuntimeConfigEnvFile({
-                loadedConfig: loaded,
-                ...(parsed.location.storeRoot === undefined
-                  ? {}
-                  : { storeRoot: parsed.location.storeRoot }),
-                env: cliEnv.suppliedEnv,
-                envDefaults: checkDefaultEnvForLocation({
-                  cliEnv,
-                  location: parsed.location
-                })
-              }),
-          ...(options.factories === undefined ? {} : { factories: options.factories })
+          env: runtimeConfigEnvForLoadedConfig({
+            loadedConfig: loaded,
+            cliEnv,
+            location: parsed.location
+          }),
+          ...(options.factories === undefined ? {} : { factories: options.factories }),
+          ...(catalogSnapshot === undefined ? {} : { catalogSnapshot })
         });
 
       writeJson(options.stdout, {
@@ -177,20 +224,7 @@ function runRuntimeConfigCliFromArgsSync(
     });
     return 0;
   } catch (error: unknown) {
-    if (
-      error instanceof RuntimeConfigCliUsageError ||
-      error instanceof RuntimeLocationCliUsageError ||
-      error instanceof RuntimeEnvFileError ||
-      error instanceof RuntimeConfigMutationError ||
-      error instanceof AggregateError ||
-      error instanceof TypeError ||
-      isLocalRuntimeTerminalError(error)
-    ) {
-      options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
-      return 1;
-    }
-
-    throw error;
+    return handleRuntimeConfigCliError(error, options);
   }
 }
 
@@ -341,6 +375,25 @@ function envHasNonEmptyValue(env: NodeJS.ProcessEnv, name: string): boolean {
   return (env[name]?.length ?? 0) > 0;
 }
 
+function runtimeConfigEnvForLoadedConfig(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly cliEnv: ReturnType<typeof runtimeConfigCliEnvForLocation>;
+  readonly location: RuntimeLocationCliState;
+}): NodeJS.ProcessEnv {
+  if (diagnosticsHaveErrors(options.loadedConfig.diagnostics)) {
+    return options.cliEnv.configEnv;
+  }
+
+  return loadRuntimeConfigEnvFile({
+    loadedConfig: options.loadedConfig,
+    ...(options.location.storeRoot === undefined
+      ? {}
+      : { storeRoot: options.location.storeRoot }),
+    env: options.cliEnv.suppliedEnv,
+    envDefaults: checkDefaultEnvForLocation(options)
+  });
+}
+
 function checkDefaultEnvForLocation(options: {
   readonly cliEnv: ReturnType<typeof runtimeConfigCliEnvForLocation>;
   readonly location: RuntimeLocationCliState;
@@ -471,7 +524,7 @@ function parseRuntimeConfigCommand(
   }
 
   throw new RuntimeConfigCliUsageError(
-    'Use path, env-path, check, get, set, unset, plugin enable, plugin disable, default-memory-provider, or secret set.'
+    'Use ui, path, env-path, check, get, set, unset, plugin enable, plugin disable, default-memory-provider, or secret set.'
   );
 }
 
@@ -540,6 +593,26 @@ function assertRuntimeConfigLoadedForEnvPath(
 
 function writeJson(stdout: NodeJS.WritableStream, value: unknown): void {
   stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function handleRuntimeConfigCliError(
+  error: unknown,
+  options: RuntimeConfigCliOptions
+): number {
+  if (
+    error instanceof RuntimeConfigCliUsageError ||
+    error instanceof RuntimeLocationCliUsageError ||
+    error instanceof RuntimeEnvFileError ||
+    error instanceof RuntimeConfigMutationError ||
+    error instanceof AggregateError ||
+    error instanceof TypeError ||
+    isLocalRuntimeTerminalError(error)
+  ) {
+    options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
+    return 1;
+  }
+
+  throw error;
 }
 
 function formatTerminalErrorMessage(

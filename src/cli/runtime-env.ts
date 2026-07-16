@@ -9,6 +9,7 @@ import {
   type LoadedProject02RuntimeConfig,
   type Project02ConfiguredPluginActivation,
   type RuntimeConfigDiagnostic,
+  type RuntimePluginFactoryCatalogSnapshot,
   type RuntimePluginFactoryDefinition
 } from '../runtime/config/index.ts';
 
@@ -24,7 +25,7 @@ export function runtimeConfigEnvPathForLocation(options: {
   readonly storeRoot?: string;
 }): string {
   return defaultRuntimeConfigEnvPath(
-    options.loadedConfig.config?.storeRoot ??
+    options.loadedConfig.config?.project02?.storeRoot ??
       options.storeRoot ??
       storeRootForLoadedDefaultConfigPath(options.loadedConfig)
   );
@@ -63,12 +64,16 @@ export function resolveRuntimeConfigActivationBeforeEnvFile(options: {
   readonly storeRoot?: string;
   readonly env: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
+  readonly catalogSnapshot?: RuntimePluginFactoryCatalogSnapshot;
 }): Project02ConfiguredPluginActivation | undefined {
   const configured = resolveConfiguredProject02PluginActivation({
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
     env: options.env,
-    ...(options.factories === undefined ? {} : { factories: options.factories })
+    ...(options.factories === undefined ? {} : { factories: options.factories }),
+    ...(options.catalogSnapshot === undefined
+      ? {}
+      : { catalogSnapshot: options.catalogSnapshot })
   });
 
   return diagnosticsCanBypassRuntimeEnvFile(configured.activation.diagnostics)

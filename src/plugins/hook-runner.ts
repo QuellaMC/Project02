@@ -42,6 +42,7 @@ import {
   type RuntimePluginFileStorePreparedTransaction,
   type RuntimePluginFileStoreTransaction
 } from './file-store.ts';
+import { isApprovalGatedRuntimeConfigTool } from './tool-contract.ts';
 import type { RuntimeEventIdentity } from '../runtime/event.ts';
 import { validateModelToolInputAgainstContract } from '../role-model/model-tools.ts';
 import {
@@ -56,10 +57,16 @@ import {
   createRoleModelPluginToolDefinitions,
   type RoleModelPluginToolDefinition
 } from '../role-model/contracts.ts';
-import { createCharacterStatePlugin } from './builtin/character-state/index.ts';
 import { createJsonBoundarySnapshot } from '../shared/json-boundary.ts';
+import {
+  createRuntimePluginConfigControlHostStateSnapshot,
+  type RuntimePluginConfigControlHostState
+} from './builtin/runtime-plugin/index.ts';
+import type {
+  RuntimePluginToolConfirmationHandler
+} from './tool-confirmation.ts';
 
-export { runtimePluginDiscoveryPluginId } from './access-control.ts';
+export { runtimePluginId } from './contract.ts';
 
 export const runtimePluginBeforeRoleModelCallRejectionReason =
   'plugin_before_role_model_call_rejected';
@@ -73,6 +80,9 @@ export type CreateRuntimePluginHostOptions = {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
+  readonly pluginInventoryState?: RuntimePluginConfigControlHostState;
+  readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
+  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
 };
 
 export type RuntimePluginBeforeRoleModelCallCompletedResult = {
@@ -206,22 +216,71 @@ type BoundedPluginPromptContextResult =
 export function createRuntimePluginHost(
   options: CreateRuntimePluginHostOptions = {}
 ): RuntimePluginHost {
+  if (
+    options.pluginInventoryState !== undefined &&
+    options.pluginConfigControl !== undefined
+  ) {
+    throw new TypeError(
+      'Runtime plugin inventory-only state and config-control state cannot both be supplied.'
+    );
+  }
+
   const sessionIdentity =
     options.storeRoot === undefined
       ? (options.sessionIdentity ?? Object.freeze({}))
       : options.sessionIdentity;
   const configuredPlugins = Object.freeze([...(options.plugins ?? [])]);
+  const pluginConfigControl =
+    options.pluginConfigControl === undefined
+      ? undefined
+      : createRuntimePluginConfigControlHostStateSnapshot(
+          options.pluginConfigControl
+        );
+  const pluginInventoryState =
+    pluginConfigControl ??
+    (options.pluginInventoryState === undefined
+      ? undefined
+      : createRuntimePluginConfigControlHostStateSnapshot(
+          options.pluginInventoryState
+        ));
   let allPlugins: readonly RuntimePlugin[] = [];
   let enabledPlugins: readonly RuntimePlugin[] = [];
   let accessByPluginId: RuntimePluginAccessMapByPluginId =
     Object.freeze({});
   assertNoCallerSuppliedHostScopedFirstPartyPlugins(configuredPlugins);
   const hostScopedPlugins = createHostScopedFirstPartyRuntimePlugins({
-    discoveryHostState: () => ({
+    hostStateForTurn: () => ({
       plugins: allPlugins,
       enabledPlugins,
-      accessByPluginId
-    })
+      accessByPluginId,
+      ...(pluginInventoryState === undefined
+        ? {}
+        : {
+            installedPluginManifests:
+              pluginInventoryState.pluginManifests
+          }),
+      ...(pluginInventoryState?.activationByPluginId === undefined
+        ? {}
+        : {
+            activationStates: Object.freeze(
+              Object.entries(
+                pluginInventoryState.activationByPluginId
+              ).map(([pluginId, activation]) =>
+                Object.freeze({
+                  pluginId,
+                  activationStatus: activation.status
+                })
+              )
+            )
+          })
+    }),
+    ...(pluginConfigControl === undefined
+      ? {}
+      : { pluginConfigControl }),
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+    ...(options.toolConfirmationHandler === undefined
+      ? {}
+      : { toolConfirmationHandler: options.toolConfirmationHandler })
   });
   const plugins = Object.freeze([
     ...hostScopedPlugins,
@@ -403,15 +462,6 @@ async function runRuntimePluginSessionEndHooksWithResolvedPermissions(
     hookName: 'onSessionEnd',
     evidenceKind: 'session_end',
     hookForPlugin: (plugin) => plugin.lifecycleHooks.onSessionEnd
-  });
-}
-
-export function createDefaultProject02PluginHost(
-  options: Omit<CreateRuntimePluginHostOptions, 'plugins'> = {}
-): RuntimePluginHost {
-  return createRuntimePluginHost({
-    ...options,
-    plugins: [createCharacterStatePlugin()]
   });
 }
 
@@ -725,6 +775,28 @@ async function runHandleToolCall(options: {
   }
 
   try {
+    if (
+      isApprovalGatedRuntimeConfigTool({
+        manifest: plugin.manifest,
+        tool: providedTool
+      })
+    ) {
+      // This exact host-owned handler applies its manifest timeout to the
+      // approval decision itself, so a late approval cannot outlive a generic
+      // Promise.race and commit after the host has already reported failure.
+      try {
+        return normalizeToolCallResult({
+          plugin,
+          providedTool,
+          context: hookContext.context,
+          value: await hook(options.call, hookContext.context),
+          deadlineAt: Number.MAX_SAFE_INTEGER
+        });
+      } finally {
+        hookContext.revokeFileStoreWrites();
+      }
+    }
+
     const result = await withPluginHookTimeout({
       plugin,
       hookName: 'handleToolCall',

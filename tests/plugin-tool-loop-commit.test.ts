@@ -3,15 +3,20 @@ import { createConversationSession } from '../src/core/conversation.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin
-} from '../src/plugins/builtin/character-state/index.ts';
+} from '../src/plugins/packages/character-state/plugin.ts';
 import { createRuntimePluginFileStore } from '../src/plugins/file-store.ts';
-import { createRuntimePluginHost, runtimePluginDiscoveryPluginId } from '../src/plugins/host.ts';
-import { firstPartyModelToolsPluginId } from '../src/plugins/types.ts';
+import { createRuntimePluginHost } from '../src/plugins/host.ts';
+import {
+  firstPartyModelToolsPluginId,
+  runtimePluginId
+} from '../src/plugins/types.ts';
 import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/runtime/event.ts';
 import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-log-store.ts';
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
 import { createRuntimeLogStore } from '../src/runtime/log.ts';
-import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
+import {
+  runLocalUserMessageEvent as runLocalUserMessageEventWithoutHost
+} from '../src/runtime/local.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
 import {
   createAfterTurnCommittedAppendFailingLogStore,
@@ -26,10 +31,41 @@ import {
   createTestEvent,
   createToolCallFinishedAppendFailingLogStore,
   handleFileStoreWritePluginId,
-  handleFileStoreWriteToolName
+  handleFileStoreWriteToolName,
+  runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent
 } from './support/plugin-tool-loop-fixtures.ts';
 
 describe('plugin-driven tool loop commit and rollback', () => {
+  it('requires a startup-injected host before recording turn evidence', async () => {
+    const session = createConversationSession();
+    const logStore = createRuntimeLogStore();
+
+    await expect(
+      Reflect.apply(runLocalUserMessageEventWithoutHost, undefined, [
+        {
+          event: createTestEvent('hello', 'evt_missing_plugin_host'),
+          session,
+          logStore,
+          roleModelAdapter: createSequencedAdapter([
+            {
+              toolCalls: [
+                {
+                  name: 'visible_reply',
+                  input: { text: 'This turn must not run.' }
+                }
+              ]
+            }
+          ])
+        }
+      ])
+    ).rejects.toThrow(
+      'Local runtime turns require an explicitly configured plugin host.'
+    );
+    expect(logStore.traceEntries()).toEqual([]);
+    expect(logStore.rawEvents()).toEqual([]);
+    expect(logStore.conversationMessages()).toEqual([]);
+  });
+
   it('terminates on top-level text only without committing visible messages', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
@@ -82,7 +118,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
           {
             name: 'visible_reply',
             input: {
-              text: 'I can use:\n- plugin.list\n- character_state.patch'
+              text: 'I can use:\n- runtime.plugin.list\n- character_state.patch'
             }
           }
         ]
@@ -99,7 +135,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     expect(result.status).toBe('completed');
     expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
       'list tools',
-      'I can use:\n- plugin.list\n- character_state.patch'
+      'I can use:\n- runtime.plugin.list\n- character_state.patch'
     ]);
   });
 
@@ -197,7 +233,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       sessionId,
       plugins: [createCharacterStatePlugin()],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         firstPartyModelToolsPluginId,
         characterStatePluginId
       ]
@@ -572,7 +608,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       sessionId,
       plugins: [createCharacterStatePlugin()],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         firstPartyModelToolsPluginId,
         characterStatePluginId
       ]
@@ -639,7 +675,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       sessionId,
       plugins: [createCharacterStatePlugin()],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         firstPartyModelToolsPluginId,
         characterStatePluginId
       ]
@@ -830,7 +866,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         firstPartyModelToolsPluginId,
         handleFileStoreWritePluginId
       ]
@@ -906,7 +942,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
         })
       ],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         firstPartyModelToolsPluginId,
         handleFileStoreWritePluginId
       ]
@@ -973,7 +1009,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],
       enabledPluginIds: [
-        runtimePluginDiscoveryPluginId,
+        runtimePluginId,
         firstPartyModelToolsPluginId,
         handleFileStoreWritePluginId
       ]

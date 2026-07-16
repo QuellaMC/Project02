@@ -28,6 +28,7 @@ import {
   type RuntimeConfigValue
 } from './types.ts';
 import { createJsonBoundarySnapshot } from '../../shared/json-boundary.ts';
+import { runtimeConfigValueMatchesField } from './schema.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -35,6 +36,8 @@ export type ResolveProject02RuntimeConfigOptions = {
   readonly pluginManifests?: readonly RuntimePluginManifest[];
   readonly env?: NodeJS.ProcessEnv;
   readonly allowPlaintextSecrets?: boolean;
+  readonly validateInactivePluginConfigs?: boolean;
+  readonly defaultEnabledPluginIds?: ReadonlySet<string>;
 };
 
 export function resolveProject02RuntimeConfig(
@@ -42,18 +45,19 @@ export function resolveProject02RuntimeConfig(
 ): ResolvedProject02RuntimeConfig {
   const env = options.env ?? process.env;
   const config = options.loadedConfig.config;
-  const configuredStoreRoot =
-    config?.storeRoot ??
-    options.storeRoot ??
-    storeRootForLoadedDefaultConfigPath(options.loadedConfig);
-  const storeRoot = createLocalRuntimeStorageLayout(
-    configuredStoreRoot === undefined ? {} : { storeRoot: configuredStoreRoot }
-  ).storeRoot;
+  const storeRoot = resolveProject02RuntimeStoreRoot(options);
   const diagnostics: RuntimeConfigDiagnostic[] = [
     ...options.loadedConfig.diagnostics
   ];
   const pluginConfigs: Record<string, ResolvedPluginRuntimeConfig> = {};
   const redactedPluginConfigs: Record<string, RedactedPluginRuntimeConfig> = {};
+  const defaultMemoryProvider = config?.project02?.defaultMemoryProvider;
+  const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
+  const project02 = Object.freeze({
+    storeRoot,
+    ...(defaultMemoryProvider === undefined ? {} : { defaultMemoryProvider }),
+    roleModelProvider
+  });
 
   for (const manifest of options.pluginManifests ?? []) {
     const resolved = resolvePluginConfig({
@@ -61,6 +65,11 @@ export function resolveProject02RuntimeConfig(
       manifest,
       env,
       allowPlaintextSecrets: options.allowPlaintextSecrets === true,
+      validateInactivePluginConfigs:
+        options.validateInactivePluginConfigs === true,
+      defaultEnabled:
+        options.defaultEnabledPluginIds?.has(manifest.id) ??
+        manifest.activation.defaultEnabled,
       diagnostics
     });
 
@@ -80,10 +89,10 @@ export function resolveProject02RuntimeConfig(
     ...(options.loadedConfig.path === undefined
       ? {}
       : { path: options.loadedConfig.path }),
+    project02,
     storeRoot,
-    ...(config?.defaultMemoryProvider === undefined
-      ? {}
-      : { defaultMemoryProvider: config.defaultMemoryProvider }),
+    ...(defaultMemoryProvider === undefined ? {} : { defaultMemoryProvider }),
+    roleModelProvider,
     pluginConfigs: Object.freeze(pluginConfigs),
     redactedPluginConfigs: Object.freeze(redactedPluginConfigs),
     diagnostics: Object.freeze(diagnostics),
@@ -95,6 +104,20 @@ export function resolveProject02RuntimeConfig(
       })
     )
   } satisfies ResolvedProject02RuntimeConfig);
+}
+
+export function resolveProject02RuntimeStoreRoot(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly storeRoot?: string;
+}): string {
+  const configuredStoreRoot =
+    options.loadedConfig.config?.project02?.storeRoot ??
+    options.storeRoot ??
+    storeRootForLoadedDefaultConfigPath(options.loadedConfig);
+
+  return createLocalRuntimeStorageLayout(
+    configuredStoreRoot === undefined ? {} : { storeRoot: configuredStoreRoot }
+  ).storeRoot;
 }
 
 export function storeRootForLoadedDefaultConfigPath(
@@ -151,13 +174,18 @@ function resolvePluginConfig(options: {
   readonly manifest: RuntimePluginManifest;
   readonly env: NodeJS.ProcessEnv;
   readonly allowPlaintextSecrets: boolean;
+  readonly validateInactivePluginConfigs: boolean;
+  readonly defaultEnabled: boolean;
   readonly diagnostics: RuntimeConfigDiagnostic[];
 }): ResolvedPluginRuntimeConfig {
   const configuredPlugin = options.config?.plugins?.[options.manifest.id];
-  const validateConfig = shouldValidatePluginConfig({
-    config: options.config,
-    manifest: options.manifest
-  });
+  const validateConfig =
+    options.validateInactivePluginConfigs ||
+    shouldValidatePluginConfig({
+      config: options.config,
+      manifest: options.manifest,
+      defaultEnabled: options.defaultEnabled
+    });
 
   if (validateConfig) {
     pushUnknownPluginConfigFieldDiagnostics({
@@ -239,7 +267,7 @@ function resolvePluginConfigField(options: {
     });
   }
 
-  if (!valueMatchesField(options.rawValue, options.field)) {
+  if (!runtimeConfigValueMatchesField(options.rawValue, options.field)) {
     if (options.validateConfig) {
       options.diagnostics.push(
         diagnostic(
@@ -392,6 +420,7 @@ function resolveSecretField(options: {
 function shouldValidatePluginConfig(options: {
   readonly config: Project02RuntimeConfig | undefined;
   readonly manifest: RuntimePluginManifest;
+  readonly defaultEnabled: boolean;
 }): boolean {
   const configured = options.config?.plugins?.[options.manifest.id];
 
@@ -412,7 +441,7 @@ function shouldValidatePluginConfig(options: {
     return true;
   }
 
-  if (!options.manifest.activation.defaultEnabled) {
+  if (!options.defaultEnabled) {
     return false;
   }
 
@@ -425,7 +454,7 @@ function pluginCanRequireConfigValidation(options: {
 }): boolean {
   if (
     options.manifest.kind !== 'memory_provider' ||
-    options.config?.defaultMemoryProvider === undefined
+    options.config?.project02?.defaultMemoryProvider === undefined
   ) {
     return true;
   }
@@ -439,7 +468,7 @@ function isSelectedDefaultMemoryProvider(options: {
 }): boolean {
   return (
     options.manifest.kind === 'memory_provider' &&
-    options.config?.defaultMemoryProvider === options.manifest.id
+    options.config?.project02?.defaultMemoryProvider === options.manifest.id
   );
 }
 
@@ -486,39 +515,6 @@ function pluginConfigDiagnosticMetadata(options: {
     pluginId: options.manifest.id,
     pluginConfigField: options.field.name
   };
-}
-
-function valueMatchesField(
-  value: RuntimeConfigValue,
-  field: RuntimePluginConfigField
-): boolean {
-  if (
-    field.allowedValues !== undefined &&
-    (typeof value !== 'string' || !field.allowedValues.includes(value))
-  ) {
-    return false;
-  }
-
-  switch (field.valueType) {
-    case undefined:
-      return true;
-    case 'string':
-    case 'path':
-    case 'enum':
-      return typeof value === 'string';
-    case 'number':
-      return typeof value === 'number';
-    case 'boolean':
-      return typeof value === 'boolean';
-    case 'object':
-      return typeof value === 'object' && value !== null && !Array.isArray(value);
-    case 'array':
-      return Array.isArray(value);
-    case 'secret':
-      return field.secret;
-  }
-
-  return true;
 }
 
 function fieldResult(options: {
@@ -617,8 +613,12 @@ function effectiveFingerprintInput(options: {
 
   return Object.freeze({
     version: options.config?.version ?? 'none',
-    storeRoot: options.storeRoot,
-    defaultMemoryProvider: options.config?.defaultMemoryProvider ?? null,
+    project02: Object.freeze({
+      storeRoot: options.storeRoot,
+      defaultMemoryProvider:
+        options.config?.project02?.defaultMemoryProvider ?? null,
+      roleModelProvider: options.config?.project02?.roleModelProvider ?? 'local'
+    }),
     plugins: options.redactedPluginConfigs,
     ...(pluginActivation === undefined ? {} : { pluginActivation })
   });

@@ -554,6 +554,14 @@ function requiredConfigField(
     value['allowedValues'] === undefined
       ? accept(undefined)
       : requiredStringArray(value['allowedValues'], 'allowedValues');
+  const agentMutable =
+    value['agentMutable'] === undefined
+      ? accept(undefined)
+      : requiredBoolean(value['agentMutable'], 'agentMutable');
+  const reloadRequired =
+    value['reloadRequired'] === undefined
+      ? accept(undefined)
+      : requiredBoolean(value['reloadRequired'], 'reloadRequired');
   const redactionLabels = requiredStringArray(
     value['redactionLabels'],
     'redactionLabels'
@@ -572,6 +580,8 @@ function requiredConfigField(
     defaultValueSummary.status === 'rejected' ||
     envVar.status === 'rejected' ||
     allowedValues.status === 'rejected' ||
+    agentMutable.status === 'rejected' ||
+    reloadRequired.status === 'rejected' ||
     redactionLabels.status === 'rejected' ||
     configFingerprint.status === 'rejected'
   ) {
@@ -584,9 +594,18 @@ function requiredConfigField(
       defaultValueSummary,
       envVar,
       allowedValues,
+      agentMutable,
+      reloadRequired,
       redactionLabels,
       configFingerprint
     ]);
+  }
+
+  if (secret.value && agentMutable.value === true) {
+    return reject(
+      'malformed_manifest',
+      'Secret plugin config fields cannot allow agent mutation.'
+    );
   }
 
   return accept(
@@ -609,6 +628,12 @@ function requiredConfigField(
               allowedValues.value.map(redactRuntimePluginText)
             )
           }),
+      ...(agentMutable.value === undefined
+        ? {}
+        : { agentMutable: agentMutable.value }),
+      ...(reloadRequired.value === undefined
+        ? {}
+        : { reloadRequired: reloadRequired.value }),
       redactionLabels: freezeRedactedStrings(redactionLabels.value),
       ...(configFingerprint.value === undefined
         ? {}

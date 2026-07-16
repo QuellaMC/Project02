@@ -4,14 +4,14 @@ import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-l
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
 import { createRuntimeLogStore } from '../src/runtime/log.ts';
 import { roleModelInvalidVisibleReplyRejectionReason } from '../src/role-model/contracts.ts';
-import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
 import type { RoleModelAdapter } from '../src/role-model/loop.ts';
 import type { RoleModelChatMessage } from '../src/role-model/prompt.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
 import {
   createDurableCharacterStateHarness,
   createSequencedAdapter,
-  createTestEvent
+  createTestEvent,
+  runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent
 } from './support/plugin-tool-loop-fixtures.ts';
 
 describe('plugin-driven tool loop progress and evidence', () => {
@@ -30,7 +30,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
                 name: 'visible_reply',
                 input: {
                   text:
-                    'I can see callable tools, but I need plugin.list for the canonical plugin inventory.'
+                    'I can see callable tools, but I need runtime.plugin.list for the canonical plugin inventory.'
                 }
               }
             ]
@@ -61,7 +61,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
     expect(result.status).toBe('completed');
     expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
       'what plugins are available?',
-      'I can see callable tools, but I need plugin.list for the canonical plugin inventory.'
+      'I can see callable tools, but I need runtime.plugin.list for the canonical plugin inventory.'
     ]);
     expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_started')).toBe(
       false
@@ -71,7 +71,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
       "Mira's internal Character State"
     );
     expect(runtimeContextMessage?.content).toContain('sourceReferences');
-    expect(runtimeContextMessage?.content).not.toContain('plugin.list');
+    expect(runtimeContextMessage?.content).not.toContain('runtime.plugin.list');
     expect(runtimeContextMessage?.content).not.toContain('visible_reply');
     expect(runtimeContextMessage?.content).not.toContain('character_state.patch');
   });
@@ -504,7 +504,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
             }
           },
           {
-            name: 'plugin.list',
+            name: 'runtime.plugin.list',
             input: {}
           }
         ]

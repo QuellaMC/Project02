@@ -6,4 +6,5 @@ export * from './load.ts';
 export * from './mutate.ts';
 export * from './redact.ts';
 export * from './resolve.ts';
+export * from './schema.ts';
 export * from './types.ts';

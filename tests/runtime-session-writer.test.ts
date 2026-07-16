@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createConversationSession } from '../src/core/conversation.ts';
+import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
@@ -55,6 +56,7 @@ describe('durable runtime session writer ownership', () => {
       event: createUserMessageRuntimeEvent('first', createRuntimeEventIdentity()),
       session: firstSession,
       logStore,
+      pluginHost: createRuntimePluginHost(),
       agent: {
         async reply() {
           markReplyStarted?.();
@@ -73,6 +75,7 @@ describe('durable runtime session writer ownership', () => {
         event: createUserMessageRuntimeEvent('second', createRuntimeEventIdentity()),
         session: secondSession,
         logStore,
+        pluginHost: createRuntimePluginHost(),
         agent: { reply: () => ({ text: 'second reply' }) }
       });
     } catch (error: unknown) {
@@ -106,6 +109,7 @@ describe('durable runtime session writer ownership', () => {
       event: createUserMessageRuntimeEvent('first', createRuntimeEventIdentity()),
       session: currentSession,
       logStore,
+      pluginHost: createRuntimePluginHost(),
       agent: { reply: () => ({ text: 'first reply' }) }
     });
     const rawEventCountBeforeStaleWriter = logStore.rawEvents().length;
@@ -115,6 +119,7 @@ describe('durable runtime session writer ownership', () => {
         event: createUserMessageRuntimeEvent('stale', createRuntimeEventIdentity()),
         session: staleSession,
         logStore,
+        pluginHost: createRuntimePluginHost(),
         agent: { reply: () => ({ text: 'stale reply' }) }
       })
     ).rejects.toMatchObject({ code: 'stale_session' });

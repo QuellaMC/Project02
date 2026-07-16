@@ -46,13 +46,14 @@ import {
   type RoleModelToolObservation
 } from '../../role-model/contracts.ts';
 import {
-  characterStatePatchModelToolName,
-  createCharacterStatePatchModelToolCall,
   createVisibleReplyModelToolCall,
   visibleReplyModelToolName,
   type PluginModelToolCall,
   type ModelToolCall
 } from '../../role-model/model-tools.ts';
+import {
+  characterStatePatchModelToolName
+} from '../../plugins/packages/character-state/contract.ts';
 import {
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
@@ -1804,10 +1805,6 @@ function requiredModelToolCall(value: unknown): ModelToolCall {
     );
 
     return createVisibleReplyModelToolCall(text);
-  }
-
-  if (name === characterStatePatchModelToolName) {
-    return createCharacterStatePatchModelToolCall(freezeJsonRecord(input));
   }
 
   return Object.freeze({

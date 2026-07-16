@@ -79,7 +79,9 @@ describe('runtime config CLI plugin paths', () => {
 
     expect(afterUnset).toEqual({
       version: runtimeConfigVersion,
-      storeRoot: seededStoreRoot
+      project02: {
+        storeRoot: seededStoreRoot
+      }
     });
   });
 
@@ -185,7 +187,9 @@ describe('runtime config CLI plugin paths', () => {
 
     expect(afterUnset).toMatchObject({
       version: runtimeConfigVersion,
-      storeRoot: seededStoreRoot,
+      project02: {
+        storeRoot: seededStoreRoot
+      },
       plugins: {
         memory: {
           enabled: true
@@ -472,7 +476,9 @@ describe('runtime config CLI plugin paths', () => {
 
     expect(afterUnset).toEqual({
       version: runtimeConfigVersion,
-      storeRoot: seededStoreRoot,
+      project02: {
+        storeRoot: seededStoreRoot
+      },
       plugins: {
         memory: {
           enabled: true

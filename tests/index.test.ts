@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import * as project02 from '../src/index.ts';
@@ -5,6 +7,7 @@ import * as project02 from '../src/index.ts';
 import {
   createConversationSession,
   createDeterministicLocalRoleModelAdapter,
+  createRuntimePluginHost,
   createRuntimeEventIdentity,
   createRuntimeLogStore,
   createUserMessageRuntimeEvent,
@@ -26,6 +29,26 @@ describe('root public surface', () => {
     expect(project02.createConfiguredProject02PluginHostFromPlan).toBeTypeOf(
       'function'
     );
+  });
+
+  it('keeps the broad production barrels cold for Character State', () => {
+    const pluginBarrel = readFileSync(
+      new URL('../src/plugins/index.ts', import.meta.url),
+      'utf8'
+    );
+    const rootBarrel = readFileSync(
+      new URL('../src/index.ts', import.meta.url),
+      'utf8'
+    );
+    const chatEntrypoint = readFileSync(
+      new URL('../src/cli/chat.ts', import.meta.url),
+      'utf8'
+    );
+
+    expect(pluginBarrel).not.toContain('packages/character-state/plugin');
+    expect(pluginBarrel).not.toContain("export * from './default-host.ts'");
+    expect(rootBarrel).not.toContain('packages/character-state/plugin');
+    expect(chatEntrypoint).not.toContain('runRuntimePluginSessionEndHooks');
   });
 });
 
@@ -78,6 +101,7 @@ describe('role-model module smoke', () => {
       ),
       session,
       logStore,
+      pluginHost: createRuntimePluginHost(),
       roleModelAdapter: createDeterministicLocalRoleModelAdapter(),
       committedAt: '2026-06-16T00:00:01.000Z'
     });

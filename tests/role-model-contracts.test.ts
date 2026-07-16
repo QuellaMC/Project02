@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  characterStatePatchModelToolName,
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
+import {
+  characterStatePatchModelToolName
+} from '../src/plugins/packages/character-state/contract.ts';
 import {
   createAcceptedRoleModelDecisionResult,
   createDefaultRoleModelPluginToolDefinitions,
@@ -24,7 +26,8 @@ import {
   roleModelUnsupportedEffectRejectionReason
 } from '../src/role-model/contracts.ts';
 import type { RoleModelPluginToolDefinition } from '../src/role-model/contracts.ts';
-import { createDefaultProject02PluginHost } from '../src/plugins/host.ts';
+import { createDefaultProject02PluginHost } from '../src/plugins/default-host.ts';
+import { runtimePluginListToolName } from '../src/plugins/contract.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
@@ -145,7 +148,7 @@ describe('role-model contracts', () => {
 
     expect(inputEnvelope.allowedTools).toEqual([
       visibleReplyModelToolName,
-      'plugin.list',
+      runtimePluginListToolName,
       characterStatePatchModelToolName
     ]);
     expect(

@@ -1,26 +1,20 @@
 import {
-  characterStatePluginId,
-  createCharacterStatePlugin,
-  createCharacterStatePluginManifest,
-  isCharacterStatePlugin
-} from './builtin/character-state/index.ts';
-import {
   createFirstPartyModelToolsPlugin,
   createFirstPartyModelToolsPluginManifest,
   isFirstPartyModelToolsPlugin
 } from './builtin/model-tools.ts';
 import {
-  firstPartyModelToolsPluginId
+  createRuntimePluginManagementPlugin,
+  createRuntimePluginManagementPluginManifest,
+  isRuntimePluginManagementPlugin,
+  type RuntimePluginListHostState,
+  type RuntimePluginConfigControlHostState
+} from './builtin/runtime-plugin/index.ts';
+import {
+  characterStatePluginId,
+  firstPartyModelToolsPluginId,
+  runtimePluginId
 } from './contract.ts';
-import {
-  runtimePluginDiscoveryPluginId,
-  type RuntimePluginAccessMapByPluginId
-} from './access-control.ts';
-import {
-  createRuntimePluginDiscoveryPlugin,
-  createRuntimePluginDiscoveryPluginManifest,
-  isRuntimePluginDiscoveryPlugin
-} from './discovery-plugin.ts';
 import type {
   RuntimePlugin,
   RuntimePluginManifest
@@ -28,6 +22,9 @@ import type {
 import type {
   RuntimePluginFactoryDefinition
 } from './factory.ts';
+import type {
+  RuntimePluginToolConfirmationHandler
+} from './tool-confirmation.ts';
 
 export type RuntimePluginCatalogFactoryDefinition =
   RuntimePluginFactoryDefinition<() => RuntimePlugin> & {
@@ -35,46 +32,42 @@ export type RuntimePluginCatalogFactoryDefinition =
     readonly construction: 'host_scoped' | 'factory';
   };
 
-export type RuntimePluginDiscoveryHostState = () => {
-  readonly plugins: readonly RuntimePlugin[];
-  readonly enabledPlugins: readonly RuntimePlugin[];
-  readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
-};
-
 export function defaultRuntimePluginCatalogFactoryDefinitions(): Readonly<
   Record<string, RuntimePluginCatalogFactoryDefinition>
 > {
   return Object.freeze({
-    [runtimePluginDiscoveryPluginId]: Object.freeze({
+    [runtimePluginId]: Object.freeze({
       catalogOwner: 'project02_host',
       construction: 'host_scoped',
-      manifest: createRuntimePluginDiscoveryPluginManifest(),
+      manifest: createRuntimePluginManagementPluginManifest(),
       create: () =>
-        createRuntimePluginDiscoveryPlugin(() => ({
-          plugins: Object.freeze([]),
-          enabledPlugins: Object.freeze([]),
-          accessByPluginId: Object.freeze({})
-        }))
+        createRuntimePluginManagementPlugin({
+          hostStateForTurn: () => ({
+            plugins: Object.freeze([]),
+            enabledPlugins: Object.freeze([]),
+            accessByPluginId: Object.freeze({})
+          }),
+          pluginConfigControl: {
+            pluginManifests: defaultRuntimePluginCatalogManifests()
+          }
+        })
     } satisfies RuntimePluginCatalogFactoryDefinition),
     [firstPartyModelToolsPluginId]: Object.freeze({
       catalogOwner: 'project02_host',
       construction: 'host_scoped',
       manifest: createFirstPartyModelToolsPluginManifest(),
       create: () => createFirstPartyModelToolsPlugin()
-    } satisfies RuntimePluginCatalogFactoryDefinition),
-    [characterStatePluginId]: Object.freeze({
-      catalogOwner: 'project02_host',
-      construction: 'factory',
-      manifest: createCharacterStatePluginManifest(),
-      create: () => createCharacterStatePlugin()
     } satisfies RuntimePluginCatalogFactoryDefinition)
   });
 }
 
 export const hostFirstPartyRuntimePluginIds = Object.freeze(
-  Object.values(defaultRuntimePluginCatalogFactoryDefinitions()).map(
-    (definition) => definition.manifest.id
-  )
+  [
+    ...Object.values(defaultRuntimePluginCatalogFactoryDefinitions()).map(
+      (definition) => definition.manifest.id
+    ),
+    characterStatePluginId
+  ]
 );
 
 export const hostScopedFirstPartyRuntimePluginIds = Object.freeze(
@@ -113,10 +106,22 @@ export function defaultRuntimePluginCatalogManifests(): readonly RuntimePluginMa
 }
 
 export function createHostScopedFirstPartyRuntimePlugins(options: {
-  readonly discoveryHostState: RuntimePluginDiscoveryHostState;
+  readonly hostStateForTurn: RuntimePluginListHostState;
+  readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
+  readonly storeRoot?: string;
+  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
 }): readonly RuntimePlugin[] {
   return Object.freeze([
-    createRuntimePluginDiscoveryPlugin(options.discoveryHostState),
+    createRuntimePluginManagementPlugin({
+      hostStateForTurn: options.hostStateForTurn,
+      ...(options.pluginConfigControl === undefined
+        ? {}
+        : { pluginConfigControl: options.pluginConfigControl }),
+      ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+      ...(options.toolConfirmationHandler === undefined
+        ? {}
+        : { confirmationHandler: options.toolConfirmationHandler })
+    }),
     createFirstPartyModelToolsPlugin()
   ]);
 }
@@ -133,9 +138,8 @@ export function isHostOwnedFirstPartyRuntimePlugin(
   plugin: RuntimePlugin
 ): boolean {
   return (
-    isRuntimePluginDiscoveryPlugin(plugin) ||
-    isFirstPartyModelToolsPlugin(plugin) ||
-    isCharacterStatePlugin(plugin)
+    isRuntimePluginManagementPlugin(plugin) ||
+    isFirstPartyModelToolsPlugin(plugin)
   );
 }
 
@@ -143,7 +147,7 @@ export function isHostScopedFirstPartyRuntimePlugin(
   plugin: RuntimePlugin
 ): boolean {
   return (
-    isRuntimePluginDiscoveryPlugin(plugin) ||
+    isRuntimePluginManagementPlugin(plugin) ||
     isFirstPartyModelToolsPlugin(plugin)
   );
 }

@@ -4,19 +4,41 @@ import type {
   RuntimePluginManifest,
   RuntimePluginProvidedTool
 } from './plugin-types.ts';
+import {
+  runtimePluginConfigUpdateToolName,
+  runtimePluginId
+} from './contract.ts';
 
 export function isModelFacingRuntimePluginTool(options: {
   readonly manifest: RuntimePluginManifest;
   readonly tool: RuntimePluginProvidedTool;
 }): boolean {
+  const approvalGatedRuntimeConfigWrite =
+    isApprovalGatedRuntimeConfigTool(options);
+
   return (
-    !isBuiltInModelToolName(options.tool.name) &&
+    approvalGatedRuntimeConfigWrite ||
+    (!isBuiltInModelToolName(options.tool.name) &&
+      options.tool.validationOwner === 'plugin_host' &&
+      options.manifest.runtimePolicy.confirmation !== 'required' &&
+      !options.tool.requiresConfirmation &&
+      (options.tool.sideEffectLevel === 'none' ||
+        options.tool.sideEffectLevel === 'runtime_read' ||
+        options.tool.sideEffectLevel === 'local_memory_write'))
+  );
+}
+
+export function isApprovalGatedRuntimeConfigTool(options: {
+  readonly manifest: RuntimePluginManifest;
+  readonly tool: RuntimePluginProvidedTool;
+}): boolean {
+  return (
+    options.manifest.id === runtimePluginId &&
+    options.tool.name === runtimePluginConfigUpdateToolName &&
     options.tool.validationOwner === 'plugin_host' &&
     options.manifest.runtimePolicy.confirmation !== 'required' &&
-    !options.tool.requiresConfirmation &&
-    (options.tool.sideEffectLevel === 'none' ||
-      options.tool.sideEffectLevel === 'runtime_read' ||
-      options.tool.sideEffectLevel === 'local_memory_write')
+    options.tool.requiresConfirmation &&
+    options.tool.sideEffectLevel === 'runtime_config_write'
   );
 }
 

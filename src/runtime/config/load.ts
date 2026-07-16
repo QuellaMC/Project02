@@ -5,9 +5,12 @@ import {
   LocalRuntimeStorageContractError
 } from '../storage/layout.ts';
 import {
+  legacyRuntimeConfigVersion,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
+  type LegacyProject02RuntimeConfig,
   type LoadedProject02RuntimeConfig,
+  type Project02HostConfig,
   type Project02RuntimeConfig,
   type Project02RuntimePluginConfig,
   type RuntimeConfigDiagnostic,
@@ -16,13 +19,24 @@ import {
   type RuntimeConfigValue
 } from './types.ts';
 import { createJsonBoundarySnapshot } from '../../shared/json-boundary.ts';
+import {
+  project02RuntimeConfigFieldDefinitions,
+  project02RuntimeConfigFieldNames,
+  runtimeConfigValueMatchesField
+} from './schema.ts';
 
 const project02RuntimeConfigFields = Object.freeze([
+  'version',
+  'project02',
+  'plugins'
+]);
+const legacyProject02RuntimeConfigFields = Object.freeze([
   'version',
   'storeRoot',
   'defaultMemoryProvider',
   'plugins'
 ]);
+const project02HostConfigFields = project02RuntimeConfigFieldNames();
 const project02RuntimePluginConfigFields = Object.freeze([
   'enabled',
   'config'
@@ -183,6 +197,10 @@ function parseProject02RuntimeConfig(value: unknown): {
     };
   }
 
+  if (value['version'] === legacyRuntimeConfigVersion) {
+    return parseLegacyProject02RuntimeConfig(value, diagnostics);
+  }
+
   pushUnknownRuntimeConfigFieldDiagnostics(value, diagnostics);
 
   if (value['version'] !== runtimeConfigVersion) {
@@ -196,12 +214,7 @@ function parseProject02RuntimeConfig(value: unknown): {
     );
   }
 
-  const storeRoot = optionalString(value['storeRoot'], 'storeRoot', diagnostics);
-  const defaultMemoryProvider = optionalString(
-    value['defaultMemoryProvider'],
-    'defaultMemoryProvider',
-    diagnostics
-  );
+  const project02 = optionalProject02HostConfig(value['project02'], diagnostics);
   const plugins = optionalPluginConfigs(value['plugins'], diagnostics);
 
   if (diagnostics.some((item) => item.severity === 'error')) {
@@ -213,12 +226,149 @@ function parseProject02RuntimeConfig(value: unknown): {
   return {
     config: Object.freeze({
       version: runtimeConfigVersion,
-      ...(storeRoot === undefined ? {} : { storeRoot }),
-      ...(defaultMemoryProvider === undefined ? {} : { defaultMemoryProvider }),
+      ...(project02 === undefined ? {} : { project02 }),
       ...(plugins === undefined ? {} : { plugins })
     } satisfies Project02RuntimeConfig),
     diagnostics
   };
+}
+
+function parseLegacyProject02RuntimeConfig(
+  value: Readonly<Record<string, unknown>>,
+  diagnostics: RuntimeConfigDiagnostic[]
+): {
+  readonly config?: Project02RuntimeConfig;
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+} {
+  pushUnknownFieldDiagnostics({
+    value,
+    allowedFields: legacyProject02RuntimeConfigFields,
+    diagnostics,
+    code: 'runtime_config_unknown_top_level_field',
+    messageForField: (field) => `Unknown runtime config field "${field}".`,
+    pathForField: (field) => field
+  });
+
+  const storeRoot = optionalString(value['storeRoot'], 'storeRoot', diagnostics);
+  const defaultMemoryProvider = optionalString(
+    value['defaultMemoryProvider'],
+    'defaultMemoryProvider',
+    diagnostics
+  );
+  const plugins = optionalPluginConfigs(value['plugins'], diagnostics);
+
+  if (diagnostics.some((item) => item.severity === 'error')) {
+    return { diagnostics };
+  }
+
+  const legacyConfig = Object.freeze({
+    version: legacyRuntimeConfigVersion,
+    ...(storeRoot === undefined ? {} : { storeRoot }),
+    ...(defaultMemoryProvider === undefined ? {} : { defaultMemoryProvider }),
+    ...(plugins === undefined ? {} : { plugins })
+  } satisfies LegacyProject02RuntimeConfig);
+  const project02 = project02HostConfigFromLegacy(legacyConfig);
+
+  diagnostics.push(
+    diagnostic(
+      'warning',
+      'runtime_config_legacy_version',
+      `Runtime config version "${legacyRuntimeConfigVersion}" is supported for compatibility and will be migrated to "${runtimeConfigVersion}" on the next write.`,
+      'version'
+    )
+  );
+
+  return {
+    config: Object.freeze({
+      version: runtimeConfigVersion,
+      ...(project02 === undefined ? {} : { project02 }),
+      ...(legacyConfig.plugins === undefined
+        ? {}
+        : { plugins: legacyConfig.plugins })
+    } satisfies Project02RuntimeConfig),
+    diagnostics
+  };
+}
+
+function project02HostConfigFromLegacy(
+  config: LegacyProject02RuntimeConfig
+): Project02HostConfig | undefined {
+  if (config.storeRoot === undefined && config.defaultMemoryProvider === undefined) {
+    return undefined;
+  }
+
+  return Object.freeze({
+    ...(config.storeRoot === undefined ? {} : { storeRoot: config.storeRoot }),
+    ...(config.defaultMemoryProvider === undefined
+      ? {}
+      : { defaultMemoryProvider: config.defaultMemoryProvider })
+  } satisfies Project02HostConfig);
+}
+
+function optionalProject02HostConfig(
+  value: unknown,
+  diagnostics: RuntimeConfigDiagnostic[]
+): Project02HostConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    diagnostics.push(
+      diagnostic(
+        'error',
+        'runtime_config_project02_not_object',
+        'Runtime config project02 section must be an object.',
+        'project02'
+      )
+    );
+    return undefined;
+  }
+
+  pushUnknownFieldDiagnostics({
+    value,
+    allowedFields: project02HostConfigFields,
+    diagnostics,
+    code: 'runtime_config_unknown_project02_field',
+    messageForField: (field) => `Unknown Project02 config field "${field}".`,
+    pathForField: (field) => `project02.${field}`
+  });
+
+  const config: Record<string, RuntimeConfigValue> = {};
+
+  for (const field of project02RuntimeConfigFieldDefinitions()) {
+    const fieldValue = value[field.name];
+
+    if (fieldValue === undefined) {
+      continue;
+    }
+
+    if (
+      !isRuntimeConfigValue(fieldValue) ||
+      !runtimeConfigValueMatchesField(fieldValue, field) ||
+      (typeof fieldValue === 'string' && fieldValue.trim().length === 0)
+    ) {
+      diagnostics.push(project02HostConfigFieldDiagnostic(field));
+      continue;
+    }
+
+    config[field.name] = createJsonBoundarySnapshot(fieldValue, {
+      field: field.path
+    });
+  }
+
+  return Object.freeze(config);
+}
+
+function project02HostConfigFieldDiagnostic(
+  field: ReturnType<typeof project02RuntimeConfigFieldDefinitions>[number]
+): RuntimeConfigDiagnostic {
+  return diagnostic(
+    'error',
+    field.invalidValueCode,
+    field.invalidValueMessage,
+    field.path
+  );
 }
 
 function optionalPluginConfigs(

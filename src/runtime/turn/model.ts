@@ -11,7 +11,6 @@ import {
   type RuntimePluginToolInvocationSnapshot
 } from '../../plugins/types.ts';
 import {
-  createDefaultProject02PluginHost,
   runtimePluginBeforeRoleModelCallRejectionReason,
   type RuntimePluginBeforeRoleModelCallCompletedResult,
   type RuntimePluginHealthHostResult,
@@ -96,7 +95,10 @@ type InvalidInterimVisibleReply = {
 export async function runSerializedLocalUserMessageEvent(
   options: RunLocalUserMessageEventOptions
 ): Promise<LocalRuntimeUserMessageResult> {
-  const state = createRuntimeTurnState(options);
+  const state = createRuntimeTurnState({
+    ...options,
+    pluginHost: requiredRuntimePluginHost(options.pluginHost)
+  });
 
   initializeRuntimeTurnEvidence(state);
   try {
@@ -157,7 +159,7 @@ async function prepareRuntimeTurn(
     currentUserMessage: state.event.payload.currentUserMessage,
     character: decisionContext.characterSnapshot
   });
-  const pluginHost = createPluginHostForTurn(state, decisionContext.sessionId);
+  const pluginHost = createPluginHostForTurn(state);
 
   state.runtimePluginContextForTurn = runtimePluginContext;
   state.runtimePluginHostForTurn = pluginHost;
@@ -572,20 +574,21 @@ function roleModelLoopAdapterOption(
 }
 
 function createPluginHostForTurn(
-  state: RuntimeTurnState,
-  decisionContextSessionId: string
+  state: RuntimeTurnState
 ): RuntimePluginHost {
-  if (state.options.pluginHost !== undefined) {
-    return state.options.pluginHost;
+  return requiredRuntimePluginHost(state.options.pluginHost);
+}
+
+function requiredRuntimePluginHost(
+  pluginHost: RuntimePluginHost | undefined
+): RuntimePluginHost {
+  if (pluginHost === undefined) {
+    throw new TypeError(
+      'Local runtime turns require an explicitly configured plugin host.'
+    );
   }
 
-  const sessionPaths = state.options.logStore.localRuntimeSessionPaths;
-
-  return createDefaultProject02PluginHost({
-    ...(sessionPaths === undefined ? {} : { storeRoot: sessionPaths.storeRoot }),
-    sessionId: sessionPaths?.sessionId ?? decisionContextSessionId,
-    sessionIdentity: state.options.session
-  });
+  return pluginHost;
 }
 
 function pluginToolEvidenceFromRouting(

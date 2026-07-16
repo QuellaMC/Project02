@@ -4,11 +4,8 @@ import {
 } from '../shared/json-boundary.ts';
 
 export const visibleReplyModelToolName = 'visible_reply';
-export const characterStatePatchModelToolName = 'character_state.patch';
 
 export type VisibleReplyModelToolName = typeof visibleReplyModelToolName;
-export type CharacterStatePatchModelToolName =
-  typeof characterStatePatchModelToolName;
 export type BuiltInModelToolName = VisibleReplyModelToolName;
 
 export const modelToolInputFieldValueTypes = Object.freeze([
@@ -95,8 +92,6 @@ export type VisibleReplyToolInput = {
   readonly text: string;
 };
 
-export type CharacterStatePatchToolInput = Readonly<Record<string, unknown>>;
-
 export type VisibleReplyModelToolCall = {
   readonly name: VisibleReplyModelToolName;
   readonly input: VisibleReplyToolInput;
@@ -105,11 +100,6 @@ export type VisibleReplyModelToolCall = {
 export type PluginModelToolCall = {
   readonly name: string;
   readonly input: Readonly<Record<string, unknown>>;
-};
-
-export type CharacterStatePatchModelToolCall = PluginModelToolCall & {
-  readonly name: CharacterStatePatchModelToolName;
-  readonly input: CharacterStatePatchToolInput;
 };
 
 export type BuiltInModelToolCall = VisibleReplyModelToolCall;
@@ -164,18 +154,6 @@ export function createVisibleReplyModelToolCall(
   } satisfies VisibleReplyModelToolCall);
 }
 
-export function createCharacterStatePatchModelToolCall(
-  input: CharacterStatePatchToolInput
-): CharacterStatePatchModelToolCall {
-  return Object.freeze({
-    name: characterStatePatchModelToolName,
-    input: createJsonBoundaryObjectSnapshot(input, {
-      field: 'Character State patch tool input',
-      redact: true
-    })
-  } satisfies CharacterStatePatchModelToolCall);
-}
-
 export function freezeBuiltInModelToolCall(
   call: BuiltInModelToolCall
 ): BuiltInModelToolCall {
@@ -206,20 +184,6 @@ export function findVisibleReplyModelToolCall(
   return createVisibleReplyModelToolCall(text);
 }
 
-export function findCharacterStatePatchModelToolCall(
-  calls: readonly ModelToolCall[]
-): CharacterStatePatchModelToolCall | undefined {
-  const call = calls.find(
-    (candidate) => candidate.name === characterStatePatchModelToolName
-  );
-
-  if (call === undefined) {
-    return undefined;
-  }
-
-  return createCharacterStatePatchModelToolCall(call.input);
-}
-
 export function freezeModelToolDefinition(
   definition: ModelToolDefinition
 ): ModelToolDefinition {
@@ -243,10 +207,6 @@ export function freezeModelToolCall(call: ModelToolCall): ModelToolCall {
     const text = call.input['text'];
 
     return createVisibleReplyModelToolCall(typeof text === 'string' ? text : '');
-  }
-
-  if (call.name === characterStatePatchModelToolName) {
-    return createCharacterStatePatchModelToolCall(call.input);
   }
 
   return Object.freeze({

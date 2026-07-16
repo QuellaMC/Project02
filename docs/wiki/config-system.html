@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project02 Config System</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; color: #17202a; }
+    code, pre { font-family: ui-monospace, monospace; }
+    pre { overflow-x: auto; padding: 1rem; background: #f4f6f7; border-radius: 0.4rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 0.55rem; border: 1px solid #ccd1d1; text-align: left; vertical-align: top; }
+    .rule { padding: 0.8rem 1rem; border-left: 4px solid #2874a6; background: #ebf5fb; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Project02 Config System</h1>
+
+    <p>
+      Project02 owns one small, versioned JSON config document. It separates host settings
+      from plugin settings, while sharing one loader, schema, redaction, inspection, and
+      mutation path across the CLI, console UI, runtime activation, and model-facing tools.
+      The config engine stays under <code>src/runtime/config</code>; model-facing plugin
+      operations are adapters over that shared boundary rather than a second config system.
+    </p>
+
+    <p class="rule">
+      The model may inspect safe config and propose one permitted plugin-field change. The
+      host validates it, the user approves it, and the locked runtime mutation service commits it.
+    </p>
+
+    <h2>Canonical authored document</h2>
+
+    <pre><code>{
+  "version": "project02.config.v2",
+  "project02": {
+    "storeRoot": ".project02-runtime",
+    "defaultMemoryProvider": "memory.example",
+    "roleModelProvider": "local"
+  },
+  "plugins": {
+    "memory.example": {
+      "enabled": true,
+      "config": {
+        "endpoint": "https://memory.example.test",
+        "apiKey": { "$env": "MEMORY_EXAMPLE_API_KEY" }
+      }
+    }
+  }
+}</code></pre>
+
+    <table>
+      <thead><tr><th>Section</th><th>Owner</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>project02</code></td><td>Project02 host</td><td>Runtime location, selected memory provider, and default role-model provider.</td></tr>
+        <tr><td><code>plugins.&lt;id&gt;</code></td><td>Host activation plus the named plugin manifest</td><td>Explicit enablement and manifest-declared plugin fields.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>One schema and three representations</h2>
+
+    <ul>
+      <li><strong>Authored:</strong> the operator-owned JSON document. Defaults are not written into it automatically.</li>
+      <li><strong>Resolved:</strong> validated values, defaults, environment references, sources, and diagnostics used by the host.</li>
+      <li><strong>Redacted:</strong> the only representation available to normal inspect output, the console, and model tools.</li>
+    </ul>
+
+    <p>
+      Project02 fields come from the host field registry. Plugin fields come from
+      <code>RuntimePluginManifest.config.fields</code>. That manifest metadata is the single
+      source for value types, allowed values, secret handling, reload requirements, console
+      rendering, and whether an ordinary non-secret field is agent-mutable. A secret field is
+      never agent-mutable.
+    </p>
+
+    <h2>Location and precedence</h2>
+
+    <ol>
+      <li>An explicit <code>--config</code> path.</li>
+      <li>An explicit <code>--store</code> root and its <code>config.json</code>.</li>
+      <li><code>PROJECT02_RUNTIME_CONFIG</code>.</li>
+      <li>The default <code>.project02-runtime/config.json</code>.</li>
+    </ol>
+
+    <p>
+      For role-model selection, an explicit CLI flag wins over the runtime environment, which
+      wins over <code>project02.roleModelProvider</code>. Environment variables remain useful
+      deployment overrides; the config document is the durable operator choice.
+    </p>
+
+    <h2>Safe mutation boundary</h2>
+
+    <ol>
+      <li>Read and strictly validate the current authored document.</li>
+      <li>Validate an exact structured operation; model writes cannot submit dotted paths or whole-document patches.</li>
+      <li>For model writes, require an installed manifest, a declared non-secret field, and <code>agentMutable: true</code>.</li>
+      <li>Compare the caller's authored fingerprint while holding the cross-process mutation lock.</li>
+      <li>Revalidate the new document and the target plugin's complete manifest schema while still holding the lock, then atomically replace it with mode <code>0600</code>.</li>
+      <li>Return the new fingerprint; never return resolved secret values.</li>
+    </ol>
+
+    <p>
+      Secret values continue through the dedicated environment-backed secret command. They are
+      not accepted in console fields or model tool inputs. Plugin enablement, host settings,
+      permissions, and plugin installation are also outside the model-write boundary.
+    </p>
+
+    <h2>Operator surfaces</h2>
+
+    <ul>
+      <li><code>pnpm runtime-config -- check</code> validates authored config, resolution, and activation.</li>
+      <li><code>pnpm runtime-config -- get &lt;path&gt;</code> reads a redacted value.</li>
+      <li><code>pnpm runtime-config -- ui</code> opens the schema-driven terminal editor.</li>
+      <li>Existing scriptable set, unset, plugin activation, memory-provider, and secret commands remain compatible.</li>
+    </ul>
+
+    <p>
+      The terminal editor stages one change, shows a redacted old/new preview, and requires
+      Save or Cancel. Saving is bound to the fingerprint observed before the preview, so a
+      concurrent edit fails instead of silently overwriting it.
+    </p>
+
+    <p>
+      Plugin entries are grouped by their existing catalog construction metadata. Entries with
+      <code>construction: "factory"</code>, plus factories without catalog metadata, appear under
+      <strong>Plugins</strong>. Entries with <code>construction: "host_scoped"</code> appear under
+      <strong>System services</strong>. The groups share one continuous numeric selection list,
+      preserve stable plugin-ID ordering within each group, and omit empty headings. The default
+      catalog therefore shows <code>character-state</code> as a plugin and
+      <code>first_party.model_tools</code> plus <code>runtime.plugin</code> as system services.
+    </p>
+
+    <h2>Runtime plugin management</h2>
+
+    <p>
+      One host-owned plugin, <code>runtime.plugin</code>, owns the model-facing plugin-management
+      surface. Its handlers remain focused internally, but callers see one coherent runtime
+      capability instead of separate discovery and config plugins.
+    </p>
+
+    <ul>
+      <li><code>runtime.plugin.list</code> with <code>scope: "all"</code> includes cold disabled or blocked plugins without constructing their code or exposing their tools.</li>
+      <li><code>runtime.plugin.config</code> returns one installed plugin's manifest field metadata, redacted authored/effective values, exact host activation state and reasons, diagnostics, and authored fingerprint.</li>
+      <li><code>runtime.plugin.config.update</code> proposes one exact set or unset operation for one agent-mutable field.</li>
+    </ul>
+
+    <p>
+      Provider adapters use the corresponding wire-safe names
+      <code>runtime_plugin_list</code>, <code>runtime_plugin_config</code>, and
+      <code>runtime_plugin_config_update</code>.
+    </p>
+
+    <p>
+      Listing is always available when <code>runtime.plugin</code> is active and remains independent
+      from config validity. If activation has config errors, the host retains only an immutable
+      inventory snapshot, so blocked plugins remain discoverable while config inspection and update
+      stay unavailable. Config inspection is added when valid config-control state exists; the update
+      tool is added only when the configured host also has a confirmation handler. The host validates
+      the proposal before prompting, shows a redacted exact preview, and accepts only a one-shot user
+      approval within the existing five-second deadline. Missing, denied, cancelled, timed-out, or
+      stale approval fails closed. The plugin manifest declares the maximum
+      <code>runtime_config_write</code> capability, while list and config inspection retain their
+      per-tool <code>runtime_read</code> classification and only config update requires confirmation.
+      Changes affect subsequent plugin construction; this slice does not hot-reload plugins.
+    </p>
+
+    <p>
+      Disabling <code>runtime.plugin</code> removes all three model-facing management tools together,
+      while the operator console remains available as the recovery path. The separate
+      <code>first_party.model_tools</code> system service is unchanged because its terminal tools use
+      different routing and commit semantics.
+    </p>
+
+    <h2>Unified plugin packages</h2>
+
+    <p>
+      Ordinary plugins use one package contract whether they ship with Project02 or are installed by
+      an operator. Project02 scans bundled packages and <code>&lt;storeRoot&gt;/plugins</code> into one
+      immutable catalog before activation. Cold discovery reads only package metadata; it does not
+      import disabled plugin code.
+    </p>
+
+    <pre><code>&lt;plugin-id&gt;/
+  package.json              # must declare { "type": "module" }
+  project02.plugin.json     # format, relative entry, cold manifest
+  index.ts | index.js | index.mjs</code></pre>
+
+    <pre><code>{
+  "format": "project02.plugin.v1",
+  "entry": "./index.ts",
+  "manifest": {
+    "...": "existing RuntimePluginManifest"
+  }
+}</code></pre>
+
+    <pre><code>export async function createProject02Plugin(input) {
+  return {
+    manifest: input.manifest,
+    providedTools: [],
+    lifecycleHooks: {}
+  };
+}</code></pre>
+
+    <p>
+      Every entry has exactly one runtime export, the named
+      <code>createProject02Plugin(input)</code> factory, and returns a normal runtime plugin.
+      The input contains <code>pluginId</code>, the validated <code>manifest</code>, effective
+      <code>storeRoot</code>, <code>resolvedConfig</code>, and <code>redactedConfig</code>. The host
+      validates the returned plugin and requires exact manifest parity before registration. Node loads
+      all three supported extensions as ESM; TypeScript entries are limited to
+      <a href="https://nodejs.org/docs/latest-v24.x/api/typescript.html">Node 24's erasable syntax</a>
+      and are not compiled or type-checked by Project02. TypeScript plugin imports must include explicit
+      file extensions and use <code>import type</code> for type-only dependencies. See also
+      <a href="https://nodejs.org/api/packages.html">Node's package and module rules</a>.
+    </p>
+
+    <p>
+      CommonJS, <code>.cjs</code>, <code>.cts</code>, <code>.tsx</code>, extensionless entries,
+      URLs, metadata or entry symlinks, and entries outside the package directory are rejected.
+      Adding, removing, or changing a package is observed by the next Project02 process; active
+      processes do not hot-reload plugin code.
+    </p>
+
+    <h3>Installing an operator package</h3>
+    <ol>
+      <li>Copy the complete package folder to <code>&lt;storeRoot&gt;/plugins/&lt;plugin-id&gt;</code>.</li>
+      <li>Run <code>pnpm runtime-config --store &lt;storeRoot&gt; check</code> to validate its cold descriptor and config schema without executing the entry.</li>
+      <li>Enable it with <code>pnpm runtime-config --store &lt;storeRoot&gt; plugin enable &lt;plugin-id&gt;</code>, or use <code>pnpm runtime-config --store &lt;storeRoot&gt; ui</code>.</li>
+      <li>Restart the Project02 command so the enabled package is imported once during host construction.</li>
+    </ol>
+
+    <p>
+      Package provenance is host-owned rather than manifest-owned. Bundled Character State is the
+      reference ordinary package and retains its first-party default. Operator packages remain disabled
+      until explicitly enabled and cannot gain bundled trust or default activation by copying manifest
+      fields. Enabled packages execute trusted Node code in the Project02 process; plugin permissions
+      constrain host services and model exposure, not direct Node capabilities.
+    </p>
+
+    <h2>Compatibility and future import</h2>
+
+    <p>
+      <code>project02.runtime_config.v1</code> remains readable. It is normalized to v2 in
+      memory with a warning, and the next successful mutation writes the canonical v2 document.
+      Legacy CLI paths remain aliases while <code>project02.*</code> is canonical.
+    </p>
+
+    <p>
+      Runtime plugin management uses an explicit pre-release clean break: the former discovery and
+      config plugin IDs and their short tool names have no aliases or migration adapter. The only
+      supported plugin ID is <code>runtime.plugin</code>, with the three exact tool names documented
+      above. This naming break does not change the authored config-document migration described here.
+    </p>
+
+    <p>
+      A future OpenClaw importer should be an adapter into this document and the existing
+      Project02 manifest contract. It may translate stable IDs, config schema and UI hints,
+      activation defaults, tool declarations, compatibility metadata, and supported migrations.
+      It must not make OpenClaw's internal config shape Project02's storage model, and imported
+      code remains disabled until installation, access, and activation are approved.
+    </p>
+
+    <h2>Research influences</h2>
+
+    <ul>
+      <li>Hermes, inspected locally from <code>explore_repo/hermes-agent</code> at <code>6cb88a0</code>: a compact terminal Save/Cancel flow and a useful distinction between authored and effective config; Project02 keeps its stronger cross-process lock and manifest schema.</li>
+      <li>OpenClaw, inspected locally from <code>explore_repo/openclaw</code> at <code>501f634</code>: cold manifest inspection, schema-driven forms, authored/runtime separation, and fingerprint-bound writes; Project02 adds explicit per-call approval.</li>
+      <li><a href="https://github.com/openai/codex/tree/main/codex-rs/config/src/loader">Codex config loader</a>: clear source precedence and centralized loading.</li>
+      <li><a href="https://github.com/openai/codex/blob/main/codex-rs/config/src/config_toml.rs">Codex typed config</a>: a strict typed boundary rather than independent ad hoc readers.</li>
+      <li><a href="https://github.com/openai/codex/blob/main/codex-rs/config/src/plugin_edit.rs">Codex plugin config edits</a>: targeted atomic edits that preserve unrelated state.</li>
+      <li><a href="https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md">Codex app-server config API</a>: shared read/write primitives and approval-aware clients.</li>
+    </ul>
+
+    <h2>Explicit non-goals for v2</h2>
+
+    <ul>
+      <li>No plugin marketplace, package-manager installation, dependency resolution, remote loading, signing, or sandbox claim.</li>
+      <li>No JSON5 includes, profiles, raw-document model editing, or custom plugin UI code.</li>
+      <li>No agent mutation of secrets, activation, permissions, Project02 host settings, or config location.</li>
+      <li>No hot reload, filesystem watcher, or OpenClaw importer implementation in this slice.</li>
+    </ul>
+  </main>
+</body>
+</html>

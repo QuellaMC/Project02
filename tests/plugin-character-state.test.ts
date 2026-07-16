@@ -6,15 +6,20 @@ import { describe, expect, it } from 'vitest';
 
 import {
   characterStatePatchModelToolName
-} from '../src/role-model/model-tools.ts';
+} from '../src/plugins/packages/character-state/contract.ts';
 import {
   characterStatePluginId,
-  createCharacterStatePlugin
-} from '../src/plugins/builtin/character-state/index.ts';
+  createCharacterStatePlugin,
+  createCharacterStatePluginManifest,
+  createProject02Plugin as createCompatibleProject02Plugin
+} from '../src/plugins/packages/character-state/plugin.ts';
+import {
+  createProject02Plugin
+} from '../src/plugins/packages/character-state/index.ts';
 import {
   createDefaultCharacterRuntimeState,
   planCharacterStatePatch
-} from '../src/plugins/builtin/character-state/schema.ts';
+} from '../src/plugins/packages/character-state/schema.ts';
 import {
   createRuntimeEventIdentity
 } from '../src/runtime/event.ts';
@@ -38,6 +43,23 @@ import { createLocalRuntimePluginPaths } from '../src/runtime/storage/layout.ts'
 import { createTestTempRoot } from './support/temp-root.ts';
 
 describe('Character State plugin', () => {
+  it('exposes the descriptor-backed package factory through the compatibility path', () => {
+    const manifest = createCharacterStatePluginManifest();
+    const plugin = createProject02Plugin({
+      pluginId: characterStatePluginId,
+      manifest,
+      storeRoot: '.project02-runtime',
+      resolvedConfig: Object.freeze({}),
+      redactedConfig: Object.freeze({})
+    });
+
+    expect(createCompatibleProject02Plugin).toBe(createProject02Plugin);
+    expect(plugin.manifest).toEqual(manifest);
+    expect(plugin.providedTools.map((tool) => tool.name)).toEqual([
+      characterStatePatchModelToolName
+    ]);
+  });
+
   it('writes valid patches during handleToolCall', async () => {
     const { plugin, context, fileStore } =
       createCharacterStateHarness('session-character-state-valid');

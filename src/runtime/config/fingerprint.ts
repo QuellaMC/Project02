@@ -1,8 +1,13 @@
 import { createHash } from 'node:crypto';
 
-import type { RuntimeConfigValue } from './types.ts';
+import type {
+  Project02RuntimeConfig,
+  RuntimeConfigValue
+} from './types.ts';
 
-export function createRuntimeConfigFingerprint(value: RuntimeConfigValue): string {
+export function createRuntimeConfigFingerprint(
+  value: RuntimeConfigValue | Project02RuntimeConfig
+): string {
   return `sha256:${createHash('sha256')
     .update(stableStringify(secretSafeFingerprintValue(value)))
     .digest('hex')}`;
@@ -34,7 +39,13 @@ export function stableStringify(value: unknown): string {
   return JSON.stringify(null);
 }
 
-function secretSafeFingerprintValue(value: RuntimeConfigValue): unknown {
+export function createProject02RuntimeConfigFingerprint(
+  config: Project02RuntimeConfig
+): string {
+  return createRuntimeConfigFingerprint(config);
+}
+
+function secretSafeFingerprintValue(value: unknown): unknown {
   if (
     value === null ||
     typeof value === 'string' ||
@@ -48,13 +59,21 @@ function secretSafeFingerprintValue(value: RuntimeConfigValue): unknown {
     return value.map(secretSafeFingerprintValue);
   }
 
-  if ('$env' in value) {
+  if (typeof value !== 'object') {
+    return null;
+  }
+
+  if ('$env' in value && typeof value.$env === 'string') {
     return {
       $secretRef: value.$env
     };
   }
 
-  if ('$plaintextSecret' in value) {
+  if (
+    '$plaintextSecret' in value &&
+    'justification' in value &&
+    typeof value.justification === 'string'
+  ) {
     return {
       $plaintextSecret: '[redacted]',
       justification: value.justification

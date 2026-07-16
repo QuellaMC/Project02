@@ -884,6 +884,8 @@ describe('runtime plugin config metadata', () => {
               valueType: 'enum',
               defaultValueSummary: 'local',
               allowedValues: ['local', 'cloud'],
+              agentMutable: true,
+              reloadRequired: true,
               redactionLabels: [],
               configFingerprint: 'declared-backend-v1'
             },
@@ -926,10 +928,34 @@ describe('runtime plugin config metadata', () => {
       name: 'backend',
       valueType: 'enum',
       allowedValues: ['local', 'cloud'],
+      agentMutable: true,
+      reloadRequired: true,
       configFingerprint: 'declared-backend-v1'
     });
     expect(JSON.stringify(plugin.manifest)).not.toContain('resolvedConfig');
     expect(JSON.stringify(plugin.manifest)).not.toContain('MEMORY_API_KEY=');
+  });
+
+  it('rejects manifest metadata that makes a secret field agent-mutable', () => {
+    expect(() =>
+      createRuntimePluginManifest(
+        runtimePluginManifestFixture({
+          config: {
+            fields: [
+              {
+                name: 'apiKey',
+                description: 'API key.',
+                required: false,
+                secret: true,
+                valueType: 'secret',
+                agentMutable: true,
+                redactionLabels: ['secret']
+              }
+            ]
+          }
+        })
+      )
+    ).toThrow('Secret plugin config fields cannot allow agent mutation.');
   });
 });
 

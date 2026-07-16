@@ -72,7 +72,9 @@ describe('runtime config CLI reads and checks', () => {
 
     expect(afterUnset).toEqual({
       version: runtimeConfigVersion,
-      storeRoot: seededStoreRoot,
+      project02: {
+        storeRoot: seededStoreRoot
+      },
       plugins: {
         memory: {
           enabled: true
@@ -108,7 +110,10 @@ describe('runtime config CLI reads and checks', () => {
     ).toBe(0);
 
     expect(JSON.parse(readFileSync(join(storeRoot, 'config.json'), 'utf8')) as unknown)
-      .toEqual({ version: runtimeConfigVersion, storeRoot: seededStoreRoot });
+      .toEqual({
+        version: runtimeConfigVersion,
+        project02: { storeRoot: seededStoreRoot }
+      });
 
     expect(
       await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
@@ -141,7 +146,10 @@ describe('runtime config CLI reads and checks', () => {
     ).toBe(0);
 
     expect(JSON.parse(readFileSync(join(storeRoot, 'config.json'), 'utf8')) as unknown)
-      .toEqual({ version: runtimeConfigVersion, storeRoot: seededStoreRoot });
+      .toEqual({
+        version: runtimeConfigVersion,
+        project02: { storeRoot: seededStoreRoot }
+      });
 
     expect(
       await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
@@ -215,11 +223,11 @@ describe('runtime config CLI reads and checks', () => {
     expect(stderr).toBe('');
     expect(output.runtimeConfig.diagnostics[0]).toMatchObject({
       code: 'runtime_config_string_invalid',
-      path: 'storeRoot'
+      path: 'project02.storeRoot'
     });
     expect(output.activationDiagnostics[0]).toMatchObject({
       code: 'runtime_config_string_invalid',
-      path: 'storeRoot'
+      path: 'project02.storeRoot'
     });
     expect(stdout).not.toContain('Could not load runtime config env file');
     expect(stderr).not.toContain('Could not load runtime config env file');
@@ -332,11 +340,11 @@ describe('runtime config CLI reads and checks', () => {
         expect(stderr).toBe('');
         expect(output.runtimeConfig.diagnostics[0]).toMatchObject({
           code: 'runtime_config_string_invalid',
-          path: 'storeRoot'
+          path: 'project02.storeRoot'
         });
         expect(output.activationDiagnostics[0]).toMatchObject({
           code: 'runtime_config_string_invalid',
-          path: 'storeRoot'
+          path: 'project02.storeRoot'
         });
         expect(stdout).not.toContain('Could not load .env file');
         expect(stderr).not.toContain('Could not load .env file');
@@ -391,11 +399,11 @@ describe('runtime config CLI reads and checks', () => {
       expect(stderr).toBe('');
       expect(output.runtimeConfig.diagnostics[0]).toMatchObject({
         code: 'runtime_config_string_invalid',
-        path: 'storeRoot'
+        path: 'project02.storeRoot'
       });
       expect(output.activationDiagnostics[0]).toMatchObject({
         code: 'runtime_config_string_invalid',
-        path: 'storeRoot'
+        path: 'project02.storeRoot'
       });
       expect(stdout).not.toContain('Could not load .env file');
       expect(stderr).not.toContain('Could not load .env file');

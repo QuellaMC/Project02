@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { createConversationSession } from '../src/core/conversation.ts';
+import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
@@ -32,6 +33,7 @@ describe('abandoned durable runtime writer recovery', () => {
       event: createUserMessageRuntimeEvent('first input', completedIdentity),
       session,
       logStore: initialLogStore,
+      pluginHost: createRuntimePluginHost(),
       agent: { reply: () => ({ text: 'first reply' }) }
     });
 
@@ -70,6 +72,7 @@ describe('abandoned durable runtime writer recovery', () => {
       }),
       session,
       logStore: reopenedLogStore,
+      pluginHost: createRuntimePluginHost(),
       agent: { reply: () => ({ text: 'second reply' }) }
     });
 
@@ -143,6 +146,7 @@ describe('abandoned durable runtime writer recovery', () => {
       event: createUserMessageRuntimeEvent('next input', createRuntimeEventIdentity()),
       session,
       logStore,
+      pluginHost: createRuntimePluginHost(),
       agent: { reply: () => ({ text: 'next reply' }) }
     });
 
@@ -200,6 +204,7 @@ describe('abandoned durable runtime writer recovery', () => {
         event: createUserMessageRuntimeEvent('next input'),
         session: createConversationSession({ id: sessionId }),
         logStore,
+        pluginHost: createRuntimePluginHost(),
         agent: { reply: () => ({ text: 'next reply' }) }
       })
     ).rejects.toMatchObject({ code: 'partial_write' });

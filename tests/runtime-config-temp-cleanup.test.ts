@@ -22,7 +22,10 @@ describe('runtime config atomic temporary-file cleanup', () => {
 
     writeFileSync(
       configPath,
-      `${JSON.stringify({ version: runtimeConfigVersion, storeRoot })}\n`,
+      `${JSON.stringify({
+        version: runtimeConfigVersion,
+        project02: { storeRoot }
+      })}\n`,
       'utf8'
     );
     writeFileSync(abandonedPath, 'plaintext-abandoned-sentinel\n', {

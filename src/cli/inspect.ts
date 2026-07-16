@@ -30,6 +30,7 @@ import {
 } from '../runtime/terminal-errors.ts';
 import {
   createRuntimeConfigInspectShape,
+  createRuntimePluginFactoryCatalogSnapshot,
   diagnosticsHaveErrors,
   loadProject02RuntimeConfig,
   resolveConfiguredProject02PluginActivation,
@@ -547,11 +548,19 @@ function inspectRuntimeConfig(args: {
     );
   }
 
+  const catalogSnapshot = options.factories === undefined
+    ? createRuntimePluginFactoryCatalogSnapshot({
+        loadedConfig,
+        ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot })
+      })
+    : undefined;
+
   const activationBeforeEnv = resolveRuntimeConfigActivationBeforeEnvFile({
     loadedConfig,
     ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
     env: options.configEnv,
-    ...(options.factories === undefined ? {} : { factories: options.factories })
+    ...(options.factories === undefined ? {} : { factories: options.factories }),
+    ...(catalogSnapshot === undefined ? {} : { catalogSnapshot })
   });
 
   if (activationBeforeEnv !== undefined) {
@@ -571,7 +580,8 @@ function inspectRuntimeConfig(args: {
     loadedConfig,
     ...(args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot }),
     env: runtimeEnv,
-    ...(options.factories === undefined ? {} : { factories: options.factories })
+    ...(options.factories === undefined ? {} : { factories: options.factories }),
+    ...(catalogSnapshot === undefined ? {} : { catalogSnapshot })
   });
 }
 

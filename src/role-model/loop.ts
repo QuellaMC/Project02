@@ -42,7 +42,6 @@ import {
   type RoleModelToolObservation
 } from './contracts.ts';
 import {
-  characterStatePatchModelToolName,
   createVisibleReplyModelToolCall,
   visibleReplyModelToolName,
   type ModelToolCall
@@ -1187,10 +1186,6 @@ function createRuntimePluginExecutionToolCall(options: {
 }
 
 function undeclaredToolPluginId(toolName: string): string {
-  if (toolName === characterStatePatchModelToolName) {
-    return 'character-state';
-  }
-
   return `undeclared.${toolName}`;
 }
 
