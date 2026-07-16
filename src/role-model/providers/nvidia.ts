@@ -11,18 +11,17 @@ import {
   type ModelToolCall,
   type ModelToolInputContract
 } from '../model-tools.ts';
+import type {
+  RoleModelAssistantChatMessage, RoleModelChatCompletionTool,
+  RoleModelChatMessage, RoleModelChatToolCall,
+  RoleModelProviderCapabilities, RoleModelProviderToolNameMapping
+} from '../chat-wire.ts';
 import {
   createRoleModelProviderToolNameMappings,
   defaultRoleModelProviderCapabilities,
   providerToolNameForRuntimeToolName,
   renderRoleModelTurnContext,
   runtimeToolNameForProviderToolName,
-  type RoleModelAssistantChatMessage,
-  type RoleModelChatCompletionTool,
-  type RoleModelChatMessage,
-  type RoleModelChatToolCall,
-  type RoleModelProviderCapabilities,
-  type RoleModelProviderToolNameMapping,
   type RoleModelTurnContext
 } from '../prompt.ts';
 import type {

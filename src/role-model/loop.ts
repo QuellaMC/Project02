@@ -48,13 +48,13 @@ import {
 } from './model-tools.ts';
 import {
   freezeRoleModelChatMessage,
+  type RoleModelAssistantChatMessage, type RoleModelChatMessage,
+  type RoleModelChatToolCall, type RoleModelProviderToolNameMapping,
+  type RoleModelToolChatMessage
+} from './chat-wire.ts';
+import {
   renderRoleModelTurnContext,
   runtimeToolNameForProviderToolName,
-  type RoleModelAssistantChatMessage,
-  type RoleModelChatMessage,
-  type RoleModelChatToolCall,
-  type RoleModelProviderToolNameMapping,
-  type RoleModelToolChatMessage,
   type RoleModelTurnContext
 } from './prompt.ts';
 import {

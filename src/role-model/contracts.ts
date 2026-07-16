@@ -30,12 +30,13 @@ import {
   type ModelToolDefinition,
   type VisibleReplyModelToolCall
 } from './model-tools.ts';
-import type {
-  RoleModelChatCompletionTool,
-  RoleModelChatMessage,
-  RoleModelProviderCapabilities,
-  RoleModelProviderToolNameMapping
-} from './prompt.ts';
+import {
+  freezeRoleModelChatMessage,
+  type RoleModelChatCompletionTool,
+  type RoleModelChatMessage,
+  type RoleModelProviderCapabilities,
+  type RoleModelProviderToolNameMapping
+} from './chat-wire.ts';
 import {
   assertCanonicalRuntimeTimestamp,
   type RuntimeEventIdentity,
@@ -1572,7 +1573,7 @@ function freezeRoleModelProviderExchangeSnapshot(
       params: freezeRuntimePluginJsonValue(snapshot.reasoning.params)
     }),
     renderedMessages: Object.freeze(
-      snapshot.renderedMessages.map(freezeProviderExchangeChatMessage)
+      snapshot.renderedMessages.map(freezeRoleModelChatMessage)
     ),
     renderedTools: Object.freeze(
       snapshot.renderedTools.map(freezeProviderExchangeTool)
@@ -1608,12 +1609,12 @@ function freezeRoleModelProviderExchangeSnapshot(
     ...(snapshot.nativeAssistantMessage === undefined
       ? {}
       : {
-          nativeAssistantMessage: freezeProviderExchangeChatMessage(
+          nativeAssistantMessage: freezeRoleModelChatMessage(
             snapshot.nativeAssistantMessage
           )
         }),
     nativeToolResultMessages: Object.freeze(
-      snapshot.nativeToolResultMessages.map(freezeProviderExchangeChatMessage)
+      snapshot.nativeToolResultMessages.map(freezeRoleModelChatMessage)
     ),
     ...(snapshot.responseBody === undefined
       ? {}
@@ -1923,46 +1924,6 @@ function isRuntimePluginJsonValue(value: unknown, depth = 0): boolean {
       isRuntimePluginJsonValue(item, depth + 1)
     )
   );
-}
-
-function freezeProviderExchangeChatMessage(
-  message: RoleModelChatMessage
-): RoleModelChatMessage {
-  if (message.role === 'assistant') {
-    return Object.freeze({
-      role: 'assistant',
-      content: message.content,
-      ...(message.tool_calls === undefined
-        ? {}
-        : {
-            tool_calls: Object.freeze(
-              message.tool_calls.map((toolCall) =>
-                Object.freeze({
-                  id: toolCall.id,
-                  type: 'function',
-                  function: Object.freeze({
-                    name: toolCall.function.name,
-                    arguments: toolCall.function.arguments
-                  })
-                })
-              )
-            )
-          })
-    } satisfies RoleModelChatMessage);
-  }
-
-  if (message.role === 'tool') {
-    return Object.freeze({
-      role: 'tool',
-      content: message.content,
-      tool_call_id: message.tool_call_id
-    } satisfies RoleModelChatMessage);
-  }
-
-  return Object.freeze({
-    role: message.role,
-    content: message.content
-  } satisfies RoleModelChatMessage);
 }
 
 function freezeProviderExchangeTool(

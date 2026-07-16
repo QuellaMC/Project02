@@ -24,7 +24,7 @@ import {
   type RunLocalUserMessageEventOptions
 } from '../../src/runtime/local.ts';
 import type { RoleModelAdapter } from '../../src/role-model/loop.ts';
-import type { RoleModelChatMessage } from '../../src/role-model/prompt.ts';
+import type { RoleModelChatMessage } from '../../src/role-model/chat-wire.ts';
 import { createTestTempRoot } from './temp-root.ts';
 
 export function runLocalUserMessageEventWithDefaultTestHost(

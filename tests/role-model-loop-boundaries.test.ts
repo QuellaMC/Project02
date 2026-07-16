@@ -20,10 +20,8 @@ import {
   type RoleModelAdapter,
   type RoleModelPluginToolHost
 } from '../src/role-model/loop.ts';
-import {
-  defaultRoleModelProviderCapabilities,
-  type RoleModelChatMessage
-} from '../src/role-model/prompt.ts';
+import type { RoleModelChatMessage } from '../src/role-model/chat-wire.ts';
+import { defaultRoleModelProviderCapabilities } from '../src/role-model/prompt.ts';
 import { visibleReplyModelToolName } from '../src/role-model/model-tools.ts';
 import {
   createAcceptedToolCallResult,

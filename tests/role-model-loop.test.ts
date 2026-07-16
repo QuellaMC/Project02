@@ -12,12 +12,14 @@ import {
   type RoleModelAdapter,
   type RoleModelPluginToolHost
 } from '../src/role-model/loop.ts';
+import type {
+  RoleModelAssistantChatMessage,
+  RoleModelChatMessage
+} from '../src/role-model/chat-wire.ts';
 import {
   createRoleModelProviderToolNameMappings,
   defaultRoleModelProviderCapabilities,
-  renderRoleModelTurnContext,
-  type RoleModelAssistantChatMessage,
-  type RoleModelChatMessage
+  renderRoleModelTurnContext
 } from '../src/role-model/prompt.ts';
 import { visibleReplyModelToolName } from '../src/role-model/model-tools.ts';
 import {

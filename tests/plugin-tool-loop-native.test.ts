@@ -3,7 +3,7 @@ import { createConversationSession } from '../src/core/conversation.ts';
 import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import { createRuntimeLogStore } from '../src/runtime/log.ts';
 import type { RoleModelAdapter } from '../src/role-model/loop.ts';
-import type { RoleModelChatMessage } from '../src/role-model/prompt.ts';
+import type { RoleModelChatMessage } from '../src/role-model/chat-wire.ts';
 import {
   createNativePluginListAdapter,
   createNativeVisibleReplyAndPluginListAdapter,

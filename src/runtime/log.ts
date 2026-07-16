@@ -16,10 +16,10 @@ import {
   type RuntimePluginHealthSnapshot,
   type RuntimePluginToolCallResult,
   type RuntimePluginEvidenceSnapshot,
+  type RuntimePluginRegistrySnapshot,
   type RuntimePluginToolInvocationSnapshot,
   type RuntimePluginTurnEvidenceSnapshot
 } from '../plugins/types.ts';
-import type { RuntimePluginHost } from '../plugins/host.ts';
 import {
   assertCanonicalRuntimeTimestamp,
   type RuntimeEventIdentity,
@@ -257,9 +257,17 @@ export function runtimePluginEvidenceOption(
   };
 }
 
+// Structural view of the plugin host limited to what turn evidence needs.
+// Importing the host implementation here would re-create the
+// runtime <-> plugins import cycle.
+type RuntimePluginRegistryView = {
+  registrySnapshot(): RuntimePluginRegistrySnapshot;
+  enabledPluginIds(): readonly string[];
+};
+
 export function runtimePluginTurnEvidenceOption(options: {
   readonly identity: RuntimeEventIdentity;
-  readonly pluginHost: RuntimePluginHost | undefined;
+  readonly pluginHost: RuntimePluginRegistryView | undefined;
   readonly contextItems: readonly RuntimePluginContextItem[];
   readonly toolInvocations: readonly RuntimePluginToolInvocationSnapshot[];
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];

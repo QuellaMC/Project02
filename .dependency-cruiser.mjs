@@ -67,13 +67,16 @@ export default {
         'Rule 3 — contract files (contract.ts, contracts.ts, *-contract.ts) ' +
         'must not VALUE-import implementation files. `import type` from an ' +
         'implementation is tolerated (erased, no runtime coupling); value ' +
-        'imports mean the contract drags the implementation in. Baselined.',
+        'imports mean the contract drags the implementation in. Contract ' +
+        'surface a contract file MAY value-import: other contract/types ' +
+        'files, chat-wire (provider wire types + their freeze invariants), ' +
+        'core, and shared. Baselined.',
       severity: 'error',
       from: { path: '(^|/)(contracts?|[^/]*-contract)\\.ts$' },
       to: {
         path: '^src/',
         pathNot: [
-          '(^|/)(contracts?|[^/]*-contract|types|plugin-types)\\.ts$',
+          '(^|/)(contracts?|[^/]*-contract|types|plugin-types|chat-wire)\\.ts$',
           '^src/shared/',
           '^src/core/'
         ],

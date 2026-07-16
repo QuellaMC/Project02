@@ -19,76 +19,19 @@ import {
   isModelToolJsonSchemaTypeArray,
   visibleReplyModelToolName
 } from './model-tools.ts';
-
-export type RoleModelSystemChatMessage = {
-  readonly role: 'system';
-  readonly content: string;
-};
-
-export type RoleModelDeveloperChatMessage = {
-  readonly role: 'developer';
-  readonly content: string;
-};
-
-export type RoleModelUserChatMessage = {
-  readonly role: 'user';
-  readonly content: string;
-};
-
-export type RoleModelAssistantChatMessage = {
-  readonly role: 'assistant';
-  readonly content: string | null;
-  readonly tool_calls?: readonly RoleModelChatToolCall[];
-};
-
-export type RoleModelToolChatMessage = {
-  readonly role: 'tool';
-  readonly content: string;
-  readonly tool_call_id: string;
-};
-
-export type RoleModelChatMessage =
-  | RoleModelSystemChatMessage
-  | RoleModelDeveloperChatMessage
-  | RoleModelUserChatMessage
-  | RoleModelAssistantChatMessage
-  | RoleModelToolChatMessage;
-
-export type RoleModelChatToolCall = {
-  readonly id: string;
-  readonly type: 'function';
-  readonly function: {
-    readonly name: string;
-    readonly arguments: string;
-  };
-};
-
-export type RoleModelChatCompletionTool = {
-  readonly type: 'function';
-  readonly function: {
-    readonly name: string;
-    readonly description: string;
-    readonly parameters: RoleModelObjectJsonSchema;
-    readonly strict?: true;
-  };
-};
-
-export type RoleModelObjectJsonSchema = {
-  readonly type: 'object';
-  readonly properties: Readonly<Record<string, RoleModelJsonSchema>>;
-  readonly required: readonly string[];
-  readonly additionalProperties: boolean;
-};
-
-export type RoleModelJsonSchema = {
-  readonly type?: ModelToolJsonSchema['type'];
-  readonly description?: string;
-  readonly enum?: readonly string[];
-  readonly properties?: Readonly<Record<string, RoleModelJsonSchema>>;
-  readonly required?: readonly string[];
-  readonly additionalProperties?: boolean;
-  readonly items?: RoleModelJsonSchema;
-};
+import {
+  freezeRoleModelChatMessage,
+  type RoleModelAssistantChatMessage,
+  type RoleModelChatCompletionTool,
+  type RoleModelChatMessage,
+  type RoleModelDeveloperChatMessage,
+  type RoleModelJsonSchema,
+  type RoleModelObjectJsonSchema,
+  type RoleModelProviderCapabilities,
+  type RoleModelProviderToolNameMapping,
+  type RoleModelSystemChatMessage,
+  type RoleModelUserChatMessage
+} from './chat-wire.ts';
 
 export type RoleModelPromptFrameKind =
   | 'system_protocol'
@@ -134,11 +77,6 @@ export type RoleModelTurnContext = {
   readonly tools: readonly RoleModelChatCompletionTool[];
 };
 
-export type RoleModelProviderToolNameMapping = {
-  readonly runtimeName: string;
-  readonly providerName: string;
-};
-
 export type RenderRoleModelTurnContextOptions = {
   readonly additionalMessages?: readonly RoleModelChatMessage[];
   readonly outputMode?: 'native_tools' | 'json_fallback';
@@ -148,18 +86,6 @@ export type RenderRoleModelTurnContextOptions = {
 export type RoleModelPreparedRequest = RoleModelTurnContext & {
   readonly outputMode: 'native_tools' | 'json_fallback';
   readonly capabilities: RoleModelProviderCapabilities;
-};
-
-export type RoleModelProviderCapabilities = {
-  readonly supportsNativeTools: boolean;
-  readonly supportsDeveloperOrSystemContext: boolean;
-  readonly preferredModelContextRole: 'developer' | 'system';
-  readonly supportsStrictToolSchema: boolean;
-  readonly supportsReasoning: boolean;
-  readonly reasoningParameterStyle: 'none' | 'nvidia';
-  readonly requiresReasoningBlockRoundTrip: boolean;
-  readonly supportsToolChoice: boolean;
-  readonly supportsParallelToolCalls: boolean;
 };
 
 const runtimeContextOpeningTagPattern = /<\s*runtime_context\b/giu;
@@ -341,53 +267,6 @@ function roleModelProviderSafeToolName(runtimeName: string): string {
   }
 
   return `tool_${safeName}`;
-}
-
-export function freezeRoleModelChatMessage(
-  message: RoleModelChatMessage
-): RoleModelChatMessage {
-  if (message.role === 'assistant') {
-    return Object.freeze({
-      role: 'assistant',
-      content: message.content,
-      ...(message.tool_calls === undefined
-        ? {}
-        : {
-            tool_calls: Object.freeze(
-              message.tool_calls.map(freezeRoleModelChatToolCall)
-            )
-          })
-    } satisfies RoleModelAssistantChatMessage);
-  }
-
-  if (message.role === 'tool') {
-    return Object.freeze({
-      role: 'tool',
-      content: message.content,
-      tool_call_id: message.tool_call_id
-    } satisfies RoleModelToolChatMessage);
-  }
-
-  return Object.freeze({
-    role: message.role,
-    content: message.content
-  } satisfies
-    | RoleModelSystemChatMessage
-    | RoleModelDeveloperChatMessage
-    | RoleModelUserChatMessage);
-}
-
-export function freezeRoleModelChatToolCall(
-  call: RoleModelChatToolCall
-): RoleModelChatToolCall {
-  return Object.freeze({
-    id: call.id,
-    type: 'function',
-    function: Object.freeze({
-      name: call.function.name,
-      arguments: call.function.arguments
-    })
-  } satisfies RoleModelChatToolCall);
 }
 
 function createSystemMessage(

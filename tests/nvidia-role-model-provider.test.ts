@@ -17,10 +17,8 @@ import {
   renderNvidiaTools,
   type NvidiaFetchClient
 } from '../src/role-model/providers/nvidia.ts';
-import {
-  renderRoleModelTurnContext,
-  type RoleModelAssistantChatMessage
-} from '../src/role-model/prompt.ts';
+import type { RoleModelAssistantChatMessage } from '../src/role-model/chat-wire.ts';
+import { renderRoleModelTurnContext } from '../src/role-model/prompt.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent

@@ -34,7 +34,7 @@ import { LocalRuntimeMutationLockBusyError } from '../src/runtime/storage/mutati
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
 import { createRuntimeLogStore } from '../src/runtime/log.ts';
 import type { RoleModelAdapter } from '../src/role-model/loop.ts';
-import type { RoleModelChatMessage } from '../src/role-model/prompt.ts';
+import type { RoleModelChatMessage } from '../src/role-model/chat-wire.ts';
 import {
   runLocalUserMessageEvent as runLocalUserMessageEventWithoutHost
 } from '../src/runtime/local.ts';

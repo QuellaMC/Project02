@@ -50,6 +50,7 @@ export type {
   RuntimePluginJsonValue,
   RuntimePluginManifest,
   RuntimePluginProvidedTool,
+  RuntimePluginRegistrySnapshot,
   RuntimePluginRuntimePolicy,
   RuntimePluginSourceReference,
   RuntimePluginToolCall,

@@ -6,11 +6,13 @@ import {
   createRoleModelInputEnvelope,
   type RoleModelPluginToolDefinition
 } from '../src/role-model/contracts.ts';
+import type {
+  RoleModelSystemChatMessage,
+  RoleModelUserChatMessage
+} from '../src/role-model/chat-wire.ts';
 import {
   defaultRoleModelProviderCapabilities,
-  renderRoleModelTurnContext,
-  type RoleModelSystemChatMessage,
-  type RoleModelUserChatMessage
+  renderRoleModelTurnContext
 } from '../src/role-model/prompt.ts';
 import { createRuntimePluginContextItem } from '../src/plugins/validation.ts';
 import { runtimePluginListToolName } from '../src/plugins/contract.ts';
