@@ -39,6 +39,17 @@ describe('runtime log store', () => {
 
     store.appendTrace(received);
     store.appendTrace(started);
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE'
+    });
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_turn_completed',
+      eventType: 'USER_MESSAGE',
+      status: 'completed'
+    });
 
     const snapshot = store.traceEntries();
 

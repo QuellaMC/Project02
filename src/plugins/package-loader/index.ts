@@ -23,6 +23,8 @@ import type {
 } from '../factory.ts';
 import { createRuntimePlugin } from '../constructors.ts';
 import { createRuntimePluginManifest } from '../manifest-validation.ts';
+import { isNodeErrorWithCode } from '../../shared/node-error.ts';
+import { isRecord } from '../validation-primitives.ts';
 import type {
   RuntimePlugin,
   RuntimePluginLifecycleHooks,
@@ -86,7 +88,7 @@ export function discoverRuntimePluginPackages(options: {
     try {
       entries = readdirSync(source.root, { withFileTypes: true });
     } catch (error: unknown) {
-      if (filesystemErrorCode(error) === 'ENOENT') {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
         continue;
       }
 
@@ -746,16 +748,7 @@ function packageDiagnostic(
   } satisfies RuntimePluginPackageDiagnostic);
 }
 
-function filesystemErrorCode(error: unknown): string | undefined {
-  return isRecord(error) && typeof error['code'] === 'string'
-    ? error['code']
-    : undefined;
-}
-
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}

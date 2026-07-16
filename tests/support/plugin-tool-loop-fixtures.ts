@@ -410,6 +410,42 @@ export function createAfterTurnCommittedAppendFailingLogStore(
   } satisfies RuntimeLogStore);
 }
 
+export function createTurnCompletedAppendFailingLogStore(
+  logStore: RuntimeLogStore
+): RuntimeLogStore {
+  return Object.freeze({
+    ...delegateRuntimeLogStoreLifecycle(logStore),
+    appendTrace(entry) {
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record) {
+      if (record.kind === 'runtime_turn_completed') {
+        throw new Error('runtime_turn_completed raw event append failed');
+      }
+
+      return logStore.appendRawEvent(record);
+    },
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
+    },
+    removeConversationMessages(messageIds) {
+      logStore.removeConversationMessages(messageIds);
+    },
+    readSessionEvidence() {
+      return logStore.readSessionEvidence();
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    }
+  } satisfies RuntimeLogStore);
+}
+
 export function createToolCallFinishedAppendFailingLogStore(
   logStore: RuntimeLogStore
 ): RuntimeLogStore {

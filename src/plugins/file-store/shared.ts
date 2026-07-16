@@ -2,6 +2,7 @@ import { sep } from 'node:path';
 
 import { parseAtomicReplacementFileName } from '../../runtime/storage/atomic-file.ts';
 import { createJsonBoundarySnapshot } from '../../shared/json-boundary.ts';
+import { isNodeErrorWithCode } from '../../shared/node-error.ts';
 import { splitCompleteJsonLines } from '../../shared/json-lines.ts';
 import type { RuntimePluginJsonValue } from '../types.ts';
 import type { RuntimePluginFileStorePathMode } from './contracts.ts';
@@ -93,9 +94,6 @@ export function isPlainObject(
 
 export function isMissingFileError(error: unknown): boolean {
   return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+    isNodeErrorWithCode(error, 'ENOENT') || isNodeErrorWithCode(error, 'ENOTDIR')
   );
 }

@@ -2,7 +2,7 @@ import type { ConversationSession } from '../core/conversation.ts';
 import { LocalRuntimeStorageContractError } from './storage/layout.ts';
 import { acquireLocalRuntimeSessionWriterLease } from './storage/session-store.ts';
 import { runSerializedLocalUserMessageEvent } from './turn/model.ts';
-import { recoverPendingRuntimeConfigEffects } from './turn/commit.ts';
+import { recoverPendingRuntimeConfigEffects } from './turn/config-effects.ts';
 import type {
   LocalRuntimeUserMessageResult,
   RunLocalUserMessageEventOptions

@@ -11,9 +11,9 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { applyRuntimeConfigMutation } from '../src/runtime/config/mutate.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
 import {
-  applyRuntimeConfigMutation,
   defaultRuntimeConfigPath,
   loadProject02RuntimeConfig,
   resolveProject02RuntimeConfig,

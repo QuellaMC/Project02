@@ -10,6 +10,7 @@ import type {
   RuntimePlugin
 } from './plugin-types.ts';
 import { assertUniqueRuntimePluginIds } from './plugin-identity.ts';
+import { isRecord } from './validation-primitives.ts';
 import { ownJsonRecordValue } from '../shared/json-boundary.ts';
 
 export type RuntimePluginAccessMapByPluginId = Readonly<
@@ -179,9 +180,6 @@ export function normalizeRuntimePluginAccessMap(
   return Object.freeze(accessMap);
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function isOneOf<T extends string>(
   value: unknown,

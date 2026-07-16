@@ -648,7 +648,7 @@ function modelToolJsonSchemaTypes(
     : Object.freeze([type]);
 }
 
-function isModelToolJsonSchemaTypeArray(
+export function isModelToolJsonSchemaTypeArray(
   value: NonNullable<ModelToolJsonSchema['type']>
 ): value is readonly ModelToolJsonSchemaType[] {
   return Array.isArray(value);
@@ -707,7 +707,7 @@ function freezeModelToolJsonSchema(
   } satisfies ModelToolJsonSchema);
 }
 
-function freezeModelToolJsonSchemaType(
+export function freezeModelToolJsonSchemaType(
   type: NonNullable<ModelToolJsonSchema['type']>
 ): NonNullable<ModelToolJsonSchema['type']> {
   return isModelToolJsonSchemaTypeArray(type) ? Object.freeze([...type]) : type;

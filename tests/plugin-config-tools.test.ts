@@ -6,7 +6,6 @@ import {
   createRuntimePlugin,
   createRuntimePluginContext,
   createRuntimePluginHost,
-  defaultRuntimePluginCatalogManifests,
   defaultRuntimePluginHostServiceCatalogEntries,
   isRuntimePluginManagementPlugin,
   preparedRuntimePluginConfigEffectHasApprovalEvidence,
@@ -52,7 +51,9 @@ describe('host-owned runtime plugin management tools', () => {
         confirmationAvailable: false
       }),
       pluginConfigControl: {
-        pluginManifests: defaultRuntimePluginCatalogManifests()
+        pluginManifests: Object.values(
+          defaultRuntimePluginHostServiceCatalogEntries()
+        ).map((entry) => entry.manifest)
       }
     });
 
@@ -1305,6 +1306,56 @@ describe('host-owned runtime plugin management tools', () => {
         storeRoot
       }).fingerprint
     ).toBe(before.fingerprint);
+  });
+
+  it('accepts an approval slower than the execution timeout within the approval window', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const storeRoot = createTestTempRoot('project02-plugin-config-slow-approval-');
+      const manifest = configurablePluginManifest();
+      const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+      const before = inspectRuntimePluginConfig({
+        manifest,
+        pluginManifests: [manifest],
+        configPath,
+        storeRoot
+      });
+      const approvalDelayMs = 30_000;
+      const host = createRuntimePluginHost({
+        storeRoot,
+        pluginConfigControl: {
+          pluginManifests: [manifest],
+          configPath
+        },
+        toolConfirmationHandler: async () => {
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, approvalDelayMs);
+          });
+          return { status: 'approved' };
+        }
+      });
+      const updatePromise = updateConfigField(host, {
+        pluginId: manifest.id,
+        fieldName: 'tone',
+        operation: 'set',
+        value: 'warm',
+        expectedFingerprint: before.fingerprint
+      });
+
+      await vi.advanceTimersByTimeAsync(approvalDelayMs + 1);
+      const result = await updatePromise;
+
+      expect(result.status).toBe('accepted');
+      expect(
+        result.status === 'accepted' ? result.preparedConfigEffect : undefined
+      ).toMatchObject({
+        targetPluginId: manifest.id,
+        fieldName: 'tone'
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('fails a timed-out approval closed without applying a late approved write', async () => {

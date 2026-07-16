@@ -17,8 +17,10 @@ import {
   handleRuntimePluginConfigReadToolCall
 } from './config.ts';
 import {
+  closeConflictedPreparedRuntimePluginConfigEffect,
   createRuntimePluginConfigUpdateTool,
   createPreparedRuntimePluginConfigEffectConfirmationPreview,
+  normalizePreparedRuntimePluginConfigEffect,
   preparedRuntimePluginConfigEffectIsStillCurrent,
   handleRuntimePluginConfigUpdateToolCall,
   reconcilePreparedRuntimePluginConfigEffect,
@@ -180,7 +182,9 @@ export {
   type RuntimePluginConfigControlHostState
 } from './state.ts';
 export {
+  closeConflictedPreparedRuntimePluginConfigEffect,
   createPreparedRuntimePluginConfigEffectConfirmationPreview,
+  normalizePreparedRuntimePluginConfigEffect,
   preparedRuntimePluginConfigEffectIsStillCurrent,
   reconcilePreparedRuntimePluginConfigEffect
 };

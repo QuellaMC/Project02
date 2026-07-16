@@ -19,6 +19,12 @@ export default defineConfig({
         branches: 79.1,
         functions: 94.4,
         lines: 85.3,
+        'src/runtime/turn/input.ts': {
+          statements: 31,
+          branches: 31,
+          functions: 57,
+          lines: 31
+        },
         'src/runtime/storage/atomic-file.ts': {
           statements: 88,
           branches: 68,

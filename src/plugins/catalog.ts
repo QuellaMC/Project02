@@ -86,14 +86,6 @@ const hostScopedFirstPartyRuntimePluginIdSet = new Set<string>(
   hostScopedFirstPartyRuntimePluginIds
 );
 
-export function defaultRuntimePluginCatalogManifests(): readonly RuntimePluginManifest[] {
-  return Object.freeze(
-    Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(
-      (definition) => definition.manifest
-    )
-  );
-}
-
 export function createHostScopedFirstPartyRuntimePlugins(options: {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;

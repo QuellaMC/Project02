@@ -34,6 +34,7 @@ import {
   type LocalRuntimeStorageLayout,
   type LocalRuntimeStorageLayoutOptions
 } from './layout.ts';
+import { isRecord } from './layout-contract.ts';
 import type { ConversationLogRecord } from '../log.ts';
 import { atomicReplaceFile } from './atomic-file.ts';
 import {
@@ -1150,9 +1151,6 @@ async function writeStorageFile(options: {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function isLocalRuntimeStorageErrorCode(
   error: unknown,

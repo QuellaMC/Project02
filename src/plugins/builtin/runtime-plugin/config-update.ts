@@ -1,8 +1,13 @@
-import { createRuntimePluginEvidenceSnapshot } from '../../constructors.ts';
+import {
+  createPreparedRuntimePluginConfigEffect,
+  createRuntimePluginEvidenceSnapshot
+} from '../../constructors.ts';
 import {
   runtimePluginConfigUpdateToolName,
   runtimePluginId
 } from '../../contract.ts';
+import { runtimeIdentityMatchesContext } from '../../plugin-identity.ts';
+import { isApprovalGatedRuntimePluginTool } from '../../tool-contract.ts';
 import type {
   PreparedRuntimePluginConfigEffect,
   RuntimePluginConfigField,
@@ -217,6 +222,55 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
     ],
     redactionLabels: field.redactionLabels,
     configFingerprint: options.effect.resultFingerprint
+  });
+}
+
+export function normalizePreparedRuntimePluginConfigEffect(options: {
+  readonly providedTool: RuntimePluginProvidedTool;
+  readonly context: RuntimePluginContext;
+  readonly value: unknown;
+}): PreparedRuntimePluginConfigEffect | undefined {
+  if (options.value === undefined) {
+    return undefined;
+  }
+
+  if (!isApprovalGatedRuntimePluginTool(options.providedTool)) {
+    throw new TypeError(
+      'Only an approval-gated runtime config tool can prepare a config effect.'
+    );
+  }
+
+  const effect = createPreparedRuntimePluginConfigEffect(options.value);
+
+  if (!runtimeIdentityMatchesContext(effect, options.context)) {
+    throw new TypeError(
+      'Prepared plugin config effect identity must match current runtime event identity.'
+    );
+  }
+
+  return effect;
+}
+
+export function closeConflictedPreparedRuntimePluginConfigEffect(options: {
+  readonly effect: PreparedRuntimePluginConfigEffect;
+  readonly reason: string;
+}) {
+  return createRuntimePluginEvidenceSnapshot({
+    eventId: options.effect.eventId,
+    traceId: options.effect.traceId,
+    createdAt: options.effect.createdAt,
+    kind: 'runtime_plugin_evidence_snapshot',
+    pluginId: runtimePluginId,
+    evidenceKind: 'after_turn_committed',
+    status: 'rejected',
+    summary: `Closed conflicted plugin "${options.effect.targetPluginId}" config effect "${options.effect.effectId}" without applying it: ${options.reason}`,
+    sourceReferences: [
+      {
+        kind: 'runtime',
+        id: options.effect.effectId
+      }
+    ],
+    redactionLabels: []
   });
 }
 

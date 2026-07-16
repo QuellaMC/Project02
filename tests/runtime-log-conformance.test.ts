@@ -251,6 +251,41 @@ const rejectedScenarios = [
   }
 ] as const satisfies readonly RuntimeLogConformanceScenario[];
 
+const readScenarios = [
+  {
+    name: 'blocks readSessionEvidence while a turn is open',
+    expected: 'partial_write',
+    run(logStore) {
+      appendTurnStart(logStore);
+      logStore.readSessionEvidence();
+    }
+  },
+  {
+    name: 'blocks rawEvents while a turn is open',
+    expected: 'partial_write',
+    run(logStore) {
+      appendTurnStart(logStore);
+      logStore.rawEvents();
+    }
+  },
+  {
+    name: 'blocks conversationMessages while a turn is open',
+    expected: 'partial_write',
+    run(logStore) {
+      appendTurnStart(logStore);
+      logStore.conversationMessages();
+    }
+  },
+  {
+    name: 'blocks traceEntries while a turn is open',
+    expected: 'partial_write',
+    run(logStore) {
+      appendTurnStart(logStore);
+      logStore.traceEntries();
+    }
+  }
+] as const satisfies readonly RuntimeLogConformanceScenario[];
+
 describe('runtime log store evidence conformance', () => {
   it.each(acceptedScenarios)('$name', async (scenario) => {
     await expectScenarioOutcomes(scenario);
@@ -259,26 +294,34 @@ describe('runtime log store evidence conformance', () => {
   it.each(rejectedScenarios)('$name', async (scenario) => {
     await expectScenarioOutcomes(scenario);
   });
+
+  it.each(readScenarios)('$name', async (scenario) => {
+    await expectScenarioOutcomes(scenario);
+  });
 });
+
+type RuntimeLogScenarioResult = {
+  readonly outcome: RuntimeLogConformanceOutcome;
+  readonly message: string | undefined;
+};
 
 async function expectScenarioOutcomes(
   scenario: RuntimeLogConformanceScenario
 ): Promise<void> {
-  const outcomes: Record<RuntimeLogBackend, RuntimeLogConformanceOutcome> = {
-    memory: await runScenario('memory', scenario),
-    file: await runScenario('file', scenario)
-  };
+  const memory = await runScenario('memory', scenario);
+  const file = await runScenario('file', scenario);
 
-  expect(outcomes).toEqual({
+  expect({ memory: memory.outcome, file: file.outcome }).toEqual({
     memory: scenario.expected,
     file: scenario.expected
   });
+  expect(memory.message).toBe(file.message);
 }
 
 async function runScenario(
   backend: RuntimeLogBackend,
   scenario: RuntimeLogConformanceScenario
-): Promise<RuntimeLogConformanceOutcome> {
+): Promise<RuntimeLogScenarioResult> {
   const fixture = await createRuntimeLogStoreFixture(backend);
 
   try {
@@ -295,7 +338,7 @@ async function createRuntimeLogStoreFixture(
 ): Promise<RuntimeLogStoreFixture> {
   if (backend === 'memory') {
     return {
-      logStore: createRuntimeLogStore(),
+      logStore: createRuntimeLogStore({ sessionId }),
       release: () => Promise.resolve()
     };
   }
@@ -325,13 +368,13 @@ async function createRuntimeLogStoreFixture(
   };
 }
 
-function captureOutcome(operation: () => void): RuntimeLogConformanceOutcome {
+function captureOutcome(operation: () => void): RuntimeLogScenarioResult {
   try {
     operation();
-    return 'accepted';
+    return { outcome: 'accepted', message: undefined };
   } catch (error: unknown) {
     if (error instanceof LocalRuntimeStorageContractError) {
-      return error.code;
+      return { outcome: error.code, message: error.message };
     }
 
     throw error;

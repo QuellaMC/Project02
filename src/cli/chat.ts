@@ -22,6 +22,7 @@ import {
   type LocalRuntimeUserMessageInputRejectedResult,
   type LocalRuntimeUserMessageResult
 } from '../runtime/local.ts';
+import { recoverPendingRuntimeConfigEffects } from '../runtime/turn/config-effects.ts';
 import {
   createRuntimeLogStore,
   runtimePluginEvidenceOption,
@@ -443,6 +444,10 @@ async function runChatCliAfterConfiguredHost(options: {
     }
 
     pluginHost = startupPluginHost;
+    recoverPendingRuntimeConfigEffects({
+      logStore: durableRuntime.logStore,
+      pluginHost
+    });
     roleModelAdapter = createSelectedRoleModelAdapter(
       options.runtimeArgs,
       options.runtimeEnv
@@ -711,7 +716,8 @@ async function runChatCliWithActiveWriter(
   options: RunChatCliOptions
 ): Promise<number> {
   const session = options.session ?? createConversationSession();
-  const logStore = options.logStore ?? createRuntimeLogStore();
+  const logStore =
+    options.logStore ?? createRuntimeLogStore({ sessionId: session.id });
   const pluginHost = options.pluginHost;
   const lines = createInterface({
     input: options.stdin,

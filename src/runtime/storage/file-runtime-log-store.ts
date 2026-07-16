@@ -147,10 +147,11 @@ export function createFileRuntimeLogStore(
 function appendJsonLine(filePath: string, line: string): void {
   try {
     appendFileSync(filePath, `${line}\n`, { encoding: 'utf8', mode: 0o600 });
-  } catch {
+  } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
-      `Could not append local runtime log file: ${filePath}.`
+      `Could not append local runtime log file: ${filePath}.`,
+      { cause: error }
     );
   }
 }

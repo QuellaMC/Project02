@@ -1,7 +1,21 @@
 import type {
+  RuntimePlugin,
+  RuntimePluginContext,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginToolCallResult
 } from './plugin-types.ts';
+
+export function mergedRedactionLabels(options: {
+  readonly plugin: RuntimePlugin;
+  readonly context: RuntimePluginContext;
+}): readonly string[] {
+  return Object.freeze([
+    ...new Set([
+      ...options.context.privacy.redactionLabels,
+      ...options.plugin.manifest.runtimePolicy.redactionLabels
+    ])
+  ]);
+}
 
 export function runtimePluginEvidenceBlocksToolInvocation(
   evidence: RuntimePluginEvidenceSnapshot
@@ -23,4 +37,12 @@ export function runtimePluginToolResultHasBlockingEvidence(
   result: RuntimePluginToolCallResult
 ): boolean {
   return result.evidence.some(runtimePluginEvidenceBlocksToolInvocation);
+}
+
+export function beforeRoleModelFailureRejectsTurn(plugin: RuntimePlugin): boolean {
+  return (
+    plugin.manifest.runtimePolicy.requiredForTurn ||
+    plugin.manifest.runtimePolicy.failureBehavior.beforeRoleModelCall ===
+      'reject_turn'
+  );
 }

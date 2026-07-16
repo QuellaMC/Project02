@@ -1,4 +1,19 @@
-import type { RuntimePlugin } from './plugin-types.ts';
+import type { RuntimePlugin, RuntimePluginContext } from './plugin-types.ts';
+
+export function runtimeIdentityMatchesContext(
+  identity: {
+    readonly eventId: string;
+    readonly traceId: string;
+    readonly createdAt: string;
+  },
+  context: RuntimePluginContext
+): boolean {
+  return (
+    identity.eventId === context.eventId &&
+    identity.traceId === context.traceId &&
+    identity.createdAt === context.timestamp
+  );
+}
 
 export function assertUniqueRuntimePluginIds(
   plugins: readonly RuntimePlugin[]

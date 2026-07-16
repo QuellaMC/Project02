@@ -310,13 +310,18 @@ export function runtimePluginTurnEvidenceOption(options: {
   };
 }
 
-export function createRuntimeLogStore(): RuntimeLogStore {
+export function createRuntimeLogStore(
+  options: { readonly sessionId?: string } = {}
+): RuntimeLogStore {
   const evidence: MutableDurableRuntimeSessionEvidence = {
     traceEntries: [],
     rawEvents: [],
     conversationMessages: []
   };
-  const transitionMachine = createRuntimeEvidenceTransitionMachine({ evidence });
+  const transitionMachine = createRuntimeEvidenceTransitionMachine({
+    evidence,
+    ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId })
+  });
 
   return Object.freeze({
     appendTrace(entry) {
@@ -347,6 +352,8 @@ export function createRuntimeLogStore(): RuntimeLogStore {
       transitionMachine.removeConversationMessages(messageIds);
     },
     readSessionEvidence() {
+      transitionMachine.assertPublicReadable();
+
       return createRuntimeSessionEvidenceSnapshot({
         traceEntries: evidence.traceEntries,
         rawEvents: evidence.rawEvents,
@@ -354,12 +361,18 @@ export function createRuntimeLogStore(): RuntimeLogStore {
       });
     },
     traceEntries() {
+      transitionMachine.assertPublicReadable();
+
       return Object.freeze([...evidence.traceEntries]);
     },
     rawEvents() {
+      transitionMachine.assertPublicReadable();
+
       return Object.freeze([...evidence.rawEvents]);
     },
     conversationMessages() {
+      transitionMachine.assertPublicReadable();
+
       return Object.freeze([...evidence.conversationMessages]);
     }
   } satisfies RuntimeLogStore);

@@ -56,7 +56,7 @@ export async function runRelayCli(
       const result = await runLocalUserMessageEvent({
         event: createUserMessageRuntimeEvent(message),
         session,
-        logStore: createRuntimeLogStore(),
+        logStore: createRuntimeLogStore({ sessionId: session.id }),
         pluginHost: options.pluginHost,
         rawInput: message,
         ...(options.agent === undefined ? {} : { agent: options.agent })

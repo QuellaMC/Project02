@@ -14,7 +14,11 @@ import type {
   ModelToolJsonSchemaType,
   ModelToolObjectJsonSchema
 } from './model-tools.ts';
-import { visibleReplyModelToolName } from './model-tools.ts';
+import {
+  freezeModelToolJsonSchemaType,
+  isModelToolJsonSchemaTypeArray,
+  visibleReplyModelToolName
+} from './model-tools.ts';
 
 export type RoleModelSystemChatMessage = {
   readonly role: 'system';
@@ -814,17 +818,7 @@ function modelToolJsonSchemaToRoleModelSchema(
 function freezeRoleModelJsonSchemaType(
   type: ModelToolJsonSchema['type']
 ): ModelToolJsonSchema['type'] {
-  if (type === undefined) {
-    return undefined;
-  }
-
-  return isModelToolJsonSchemaTypeArray(type) ? Object.freeze([...type]) : type;
-}
-
-function isModelToolJsonSchemaTypeArray(
-  value: NonNullable<ModelToolJsonSchema['type']>
-): value is readonly ModelToolJsonSchemaType[] {
-  return Array.isArray(value);
+  return type === undefined ? undefined : freezeModelToolJsonSchemaType(type);
 }
 
 function modelToolInputFieldToJsonSchema(

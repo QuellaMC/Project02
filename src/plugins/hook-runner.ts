@@ -1,16 +1,13 @@
 import {
-  createPreparedRuntimePluginConfigEffect,
-  createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
   createRuntimePluginRegistrySnapshot,
   createRuntimePluginToolCallResultSnapshot
 } from './constructors.ts';
 import { createRuntimePluginContextItem } from './manifest-validation.ts';
-import { redactRuntimePluginText } from './validation-primitives.ts';
+import { isRecord, redactRuntimePluginText } from './validation-primitives.ts';
 import type {
   RuntimePluginEvidenceKind,
-  RuntimePluginEvidenceStatus,
-  RuntimePluginPolicyOutcome
+  RuntimePluginEvidenceStatus
 } from './contract.ts';
 import type {
   RuntimePlugin,
@@ -26,7 +23,6 @@ import type {
   RuntimePluginToolCallExecutionResult,
   RuntimePluginToolCallResult,
   RuntimePluginRegistrySnapshot,
-  RuntimePluginSourceReference,
   RuntimePluginAfterTurnCommittedContext,
   RuntimePluginContext
 } from './plugin-types.ts';
@@ -57,7 +53,24 @@ import {
   routableModelFacingPluginTools,
   toolAllowsFileStoreWrites
 } from './tool-policy.ts';
-import { runtimePluginEvidenceBlocksToolInvocation } from './tool-evidence-policy.ts';
+import {
+  assertAcceptedToolEvidenceSourceReferences,
+  assertContextItemSourceReferences,
+  assertSnapshotPluginId,
+  createHookFailureEvidence,
+  failurePolicyOutcomeOption,
+  normalizeEvidenceSnapshots,
+  requiredArray
+} from './hook-evidence.ts';
+import {
+  boundPluginPromptContext,
+  type CollectedPluginContextItem
+} from './prompt-context-budget.ts';
+import {
+  beforeRoleModelFailureRejectsTurn,
+  mergedRedactionLabels,
+  runtimePluginEvidenceBlocksToolInvocation
+} from './tool-evidence-policy.ts';
 import {
   createRoleModelPluginToolDefinitions,
   type RoleModelPluginToolDefinition
@@ -66,17 +79,17 @@ import {
   createJsonBoundarySnapshot
 } from '../shared/json-boundary.ts';
 import {
-  createPreparedRuntimePluginConfigEffectConfirmationPreview,
-  preparedRuntimePluginConfigEffectIsStillCurrent,
   createRuntimePluginConfigControlHostStateSnapshot,
+  normalizePreparedRuntimePluginConfigEffect,
   reconcilePreparedRuntimePluginConfigEffect,
   type RuntimePluginConfigControlHostState
 } from './builtin/runtime-plugin/index.ts';
 import {
-  requestRuntimePluginToolConfirmation,
-  runtimePluginToolApprovalTimeoutMs,
+  confirmPreparedRuntimePluginToolResult,
+  createRejectedToolCallResult,
   type RuntimePluginToolConfirmationHandler
 } from './tool-confirmation.ts';
+import { runtimeIdentityMatchesContext } from './plugin-identity.ts';
 
 export { runtimePluginId } from './contract.ts';
 
@@ -165,8 +178,6 @@ export type RuntimePluginHealthHostResult = {
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
 };
 
-const runtimePluginContextEstimatedTokenBudget = 256;
-
 export type RuntimePluginHost = {
   registrySnapshot(): RuntimePluginRegistrySnapshot;
   enabledPluginIds(): readonly string[];
@@ -220,32 +231,6 @@ type HookInvocationResult =
         readonly message: string;
         readonly failureKind: 'exception' | 'timeout';
       };
-
-type CollectedPluginContextItem = {
-  readonly plugin: RuntimePlugin;
-  readonly item: RuntimePluginContextItem;
-};
-
-type CollectedPluginPromptContext = {
-  readonly plugin: RuntimePlugin;
-  readonly promptIndex: number;
-  readonly estimatedTokens: number;
-  readonly priority: number;
-  readonly contextItem: CollectedPluginContextItem;
-};
-
-type BoundedPluginPromptContextResult =
-  | {
-      readonly status: 'completed';
-      readonly contextItems: readonly RuntimePluginContextItem[];
-      readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
-    }
-  | {
-      readonly status: 'rejected';
-      readonly pluginId: string;
-      readonly message: string;
-      readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
-    };
 
 type RuntimePluginHostState = {
   readonly sessionIdentity: object | undefined;
@@ -1305,7 +1290,6 @@ function normalizeToolCallResult(options: {
     }
 
     const preparedConfigEffect = normalizePreparedRuntimePluginConfigEffect({
-      plugin: options.plugin,
       providedTool: options.providedTool,
       context: options.context,
       value: value['preparedConfigEffect']
@@ -1404,209 +1388,6 @@ function normalizeToolCallResult(options: {
   }
 
   throw new TypeError('Plugin tool result status is not supported.');
-}
-
-function normalizePreparedRuntimePluginConfigEffect(options: {
-  readonly plugin: RuntimePlugin;
-  readonly providedTool: RuntimePluginProvidedTool;
-  readonly context: RuntimePluginContext;
-  readonly value: unknown;
-}): PreparedRuntimePluginConfigEffect | undefined {
-  if (options.value === undefined) {
-    return undefined;
-  }
-
-  if (
-    !isApprovalGatedRuntimePluginTool(options.providedTool)
-  ) {
-    throw new TypeError(
-      'Only an approval-gated runtime config tool can prepare a config effect.'
-    );
-  }
-
-  const effect = createPreparedRuntimePluginConfigEffect(options.value);
-
-  if (!runtimeIdentityMatchesContext(effect, options.context)) {
-    throw new TypeError(
-      'Prepared plugin config effect identity must match current runtime event identity.'
-    );
-  }
-
-  return effect;
-}
-
-async function confirmPreparedRuntimePluginToolResult(options: {
-  readonly plugin: RuntimePlugin;
-  readonly providedTool: RuntimePluginProvidedTool;
-  readonly call: RuntimePluginToolCall;
-  readonly context: RuntimePluginContext;
-  readonly result: Extract<
-    RuntimePluginToolCallExecutionResult,
-    { readonly status: 'accepted' }
-  >;
-  readonly confirmationHandler: RuntimePluginToolConfirmationHandler;
-  readonly pluginConfigControl: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
-}): Promise<RuntimePluginToolCallExecutionResult> {
-  const effect = options.result.preparedConfigEffect;
-
-  if (effect === undefined) {
-    throw new TypeError(
-      'Approval-gated runtime config tool result is missing its prepared effect.'
-    );
-  }
-
-  const preview = createPreparedRuntimePluginConfigEffectConfirmationPreview({
-    effect,
-    state: options.pluginConfigControl,
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
-  });
-
-  let decision: Awaited<
-    ReturnType<typeof requestRuntimePluginToolConfirmation>
-  >;
-
-  try {
-    decision = await requestRuntimePluginToolConfirmation(
-      options.confirmationHandler,
-      Object.freeze({
-        pluginId: options.plugin.manifest.id,
-        toolName: options.providedTool.name,
-        summary: options.providedTool.description,
-        preview
-      })
-    );
-  } catch {
-    return createRejectedToolCallResult({
-      call: options.call,
-      context: options.context,
-      reason: 'plugin_config_approval_unavailable',
-      message: 'Plugin config update approval could not be completed.',
-      evidenceStatus: 'rejected',
-      policyOutcome: 'handler_rejected'
-    });
-  }
-
-  if (decision.status === 'approved') {
-    if (
-      !preparedRuntimePluginConfigEffectIsStillCurrent({
-        effect,
-        state: options.pluginConfigControl,
-        ...(options.storeRoot === undefined
-          ? {}
-          : { storeRoot: options.storeRoot })
-      })
-    ) {
-      return createRejectedToolCallResult({
-        call: options.call,
-        context: options.context,
-        reason: 'plugin_config_fingerprint_conflict',
-        message:
-          'Plugin config changed during approval and the prepared update was discarded.',
-        evidenceStatus: 'rejected',
-        policyOutcome: 'handler_rejected'
-      });
-    }
-    return withRuntimePluginToolApprovalEvidence({
-      plugin: options.plugin,
-      context: options.context,
-      effect,
-      result: options.result
-    });
-  }
-
-  const rejection =
-    decision.status === 'timed_out'
-      ? {
-          reason: 'plugin_config_approval_timeout',
-          message: `Plugin config update approval timed out after ${String(runtimePluginToolApprovalTimeoutMs)}ms.`
-        }
-      : decision.status === 'denied'
-        ? {
-            reason: 'plugin_config_approval_denied',
-            message: 'Plugin config update was denied by the user.'
-          }
-        : {
-            reason: 'plugin_config_approval_cancelled',
-            message: 'Plugin config update approval was cancelled.'
-          };
-
-  return createRejectedToolCallResult({
-    call: options.call,
-    context: options.context,
-    ...rejection,
-    evidenceStatus: 'rejected',
-    policyOutcome: 'handler_rejected'
-  });
-}
-
-function withRuntimePluginToolApprovalEvidence(options: {
-  readonly plugin: RuntimePlugin;
-  readonly context: RuntimePluginContext;
-  readonly effect: PreparedRuntimePluginConfigEffect;
-  readonly result: Extract<
-    RuntimePluginToolCallExecutionResult,
-    { readonly status: 'accepted' }
-  >;
-}): RuntimePluginToolCallExecutionResult {
-  const approvalEvidence = createRuntimePluginEvidenceSnapshot({
-    eventId: options.context.eventId,
-    traceId: options.context.traceId,
-    createdAt: options.context.timestamp,
-    kind: 'runtime_plugin_evidence_snapshot',
-    pluginId: options.plugin.manifest.id,
-    evidenceKind: 'policy',
-    status: 'accepted',
-    summary: `User approved one prepared config effect from plugin "${options.plugin.manifest.id}".`,
-    policyOutcome: 'user_approved',
-    sourceReferences: [
-      {
-        kind: 'runtime',
-        id: options.effect.effectId
-      }
-    ],
-    redactionLabels: mergedRedactionLabels({
-      plugin: options.plugin,
-      context: options.context
-    }),
-    configFingerprint: options.effect.resultFingerprint
-  });
-
-  return Object.freeze({
-    ...options.result,
-    evidence: Object.freeze([...options.result.evidence, approvalEvidence])
-  });
-}
-
-function createRejectedToolCallResult(options: {
-  readonly call: RuntimePluginToolCall;
-  readonly context: RuntimePluginContext;
-  readonly reason: string;
-  readonly message: string;
-  readonly evidenceStatus?: RuntimePluginEvidenceStatus;
-  readonly policyOutcome?: RuntimePluginPolicyOutcome;
-}): RuntimePluginToolCallResult {
-  const message = redactRuntimePluginText(options.message);
-
-  return Object.freeze({
-    status: 'rejected',
-    reason: options.reason,
-    message,
-    evidence: Object.freeze([
-      createRuntimePluginEvidenceSnapshot({
-        eventId: options.context.eventId,
-        traceId: options.context.traceId,
-        createdAt: options.context.timestamp,
-        kind: 'runtime_plugin_evidence_snapshot',
-        pluginId: options.call.pluginId,
-        evidenceKind: 'tool_invocation',
-        status: options.evidenceStatus ?? 'rejected',
-        summary: message,
-        policyOutcome: options.policyOutcome ?? 'handler_rejected',
-        redactionLabels: options.context.privacy.redactionLabels
-      })
-    ])
-  } satisfies RuntimePluginToolCallResult);
 }
 
 function normalizeJsonValue(
@@ -1991,282 +1772,6 @@ function normalizeContextItems(options: {
   );
 }
 
-function boundPluginPromptContext(options: {
-  readonly context: RuntimePluginContext;
-  readonly contextItems: readonly CollectedPluginContextItem[];
-}): BoundedPluginPromptContextResult {
-  const candidates = collectedPluginPromptContextCandidates({
-    contextItems: options.contextItems
-  });
-  const totalEstimatedTokens = candidates.reduce(
-    (total, candidate) => total + candidate.estimatedTokens,
-    0
-  );
-
-  if (totalEstimatedTokens <= runtimePluginContextEstimatedTokenBudget) {
-    return Object.freeze({
-      status: 'completed',
-      contextItems: Object.freeze(
-        options.contextItems.map((contextItem) => contextItem.item)
-      ),
-      evidence: Object.freeze([])
-    });
-  }
-
-  const retainedCandidates = new Set<CollectedPluginPromptContext>();
-  let retainedEstimatedTokens = 0;
-
-  for (const candidate of [...candidates].sort(
-    compareCollectedPromptContextPriority
-  )) {
-    const nextEstimatedTokens =
-      retainedEstimatedTokens + candidate.estimatedTokens;
-
-    if (nextEstimatedTokens > runtimePluginContextEstimatedTokenBudget) {
-      continue;
-    }
-
-    retainedCandidates.add(candidate);
-    retainedEstimatedTokens = nextEstimatedTokens;
-  }
-
-  const retainedContextItems = candidates.flatMap((candidate) => {
-    if (!retainedCandidates.has(candidate)) {
-      return [];
-    }
-
-    return [candidate.contextItem.item];
-  });
-  const droppedCandidates = candidates.filter(
-    (candidate) => !retainedCandidates.has(candidate)
-  );
-  const evidence = contextBudgetEvidence({
-    context: options.context,
-    droppedCandidates,
-    retainedEstimatedTokens,
-    totalEstimatedTokens
-  });
-  const rejectedContextItem =
-    firstDroppedPromptContextThatRejectsTurn(droppedCandidates);
-
-  if (rejectedContextItem !== undefined) {
-    return Object.freeze({
-      status: 'rejected',
-      pluginId: rejectedContextItem.plugin.manifest.id,
-      message: requiredContextBudgetRejectionMessage(rejectedContextItem),
-      evidence
-    });
-  }
-
-  return Object.freeze({
-    status: 'completed',
-    contextItems: Object.freeze(retainedContextItems),
-    evidence
-  });
-}
-
-function collectedPluginPromptContextCandidates(options: {
-  readonly contextItems: readonly CollectedPluginContextItem[];
-}): readonly CollectedPluginPromptContext[] {
-  const candidates: CollectedPluginPromptContext[] = [];
-
-  for (const contextItem of options.contextItems) {
-    candidates.push({
-      plugin: contextItem.plugin,
-      promptIndex: candidates.length,
-      estimatedTokens: estimateContextItemTokens(contextItem.item),
-      priority: contextItem.item.budget.priority,
-      contextItem
-    });
-  }
-
-  return Object.freeze(candidates);
-}
-
-function compareCollectedPromptContextPriority(
-  left: CollectedPluginPromptContext,
-  right: CollectedPluginPromptContext
-): number {
-  return right.priority - left.priority || left.promptIndex - right.promptIndex;
-}
-
-function contextBudgetEvidence(options: {
-  readonly context: RuntimePluginContext;
-  readonly droppedCandidates: readonly CollectedPluginPromptContext[];
-  readonly retainedEstimatedTokens: number;
-  readonly totalEstimatedTokens: number;
-}): readonly RuntimePluginEvidenceSnapshot[] {
-  const droppedByPlugin = new Map<
-    string,
-    {
-      readonly plugin: RuntimePlugin;
-      readonly dropped: CollectedPluginPromptContext[];
-    }
-  >();
-
-  for (const droppedCandidate of options.droppedCandidates) {
-    const pluginId = droppedCandidate.plugin.manifest.id;
-    const entry = droppedByPlugin.get(pluginId);
-
-    if (entry === undefined) {
-      droppedByPlugin.set(pluginId, {
-        plugin: droppedCandidate.plugin,
-        dropped: [droppedCandidate]
-      });
-      continue;
-    }
-
-    entry.dropped.push(droppedCandidate);
-  }
-
-  return Object.freeze(
-    [...droppedByPlugin.values()].map((entry) => {
-      const rejectsTurn = beforeRoleModelFailureRejectsTurn(entry.plugin);
-
-      return createHookFailureEvidence({
-        plugin: entry.plugin,
-        context: options.context,
-        evidenceKind: 'before_role_model_call',
-        status: rejectsTurn ? 'rejected' : 'degraded',
-        summary: contextBudgetEvidenceSummary({
-          droppedCandidates: entry.dropped,
-          retainedEstimatedTokens: options.retainedEstimatedTokens,
-          totalEstimatedTokens: options.totalEstimatedTokens
-        }),
-        policyOutcome: rejectsTurn ? 'required_rejected' : 'optional_degraded'
-      });
-    })
-  );
-}
-
-function firstDroppedPromptContextThatRejectsTurn(
-  droppedCandidates: readonly CollectedPluginPromptContext[]
-): CollectedPluginPromptContext | undefined {
-  return droppedCandidates.find((candidate) =>
-    beforeRoleModelFailureRejectsTurn(candidate.plugin)
-  );
-}
-
-function requiredContextBudgetRejectionMessage(
-  candidate: CollectedPluginPromptContext
-): string {
-  return `Required before-role-model plugin context exceeded the ${String(
-    runtimePluginContextEstimatedTokenBudget
-  )}-token budget; dropped context item "${candidate.contextItem.item.id}".`;
-}
-
-function contextBudgetEvidenceSummary(options: {
-  readonly droppedCandidates: readonly CollectedPluginPromptContext[];
-  readonly retainedEstimatedTokens: number;
-  readonly totalEstimatedTokens: number;
-}): string {
-  const droppedIds = options.droppedCandidates
-    .map((candidate) => candidate.contextItem.item.id)
-    .join(', ');
-
-  return `Plugin context budget kept ${String(
-    options.retainedEstimatedTokens
-  )}/${String(runtimePluginContextEstimatedTokenBudget)} estimated tokens and dropped ${
-    String(options.droppedCandidates.length)
-  } item(s) from ${String(
-    options.totalEstimatedTokens
-  )} estimated tokens${
-    droppedIds.length === 0 ? '' : `; dropped ids ${droppedIds}`
-  }`;
-}
-
-function estimateContextItemTokens(item: RuntimePluginContextItem): number {
-  return Math.max(
-    item.budget.estimatedTokens,
-    estimateRuntimeTextTokens(item.text)
-  );
-}
-
-function estimateRuntimeTextTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
-
-function normalizeEvidenceSnapshots(options: {
-  readonly plugin: RuntimePlugin;
-  readonly context: RuntimePluginContext;
-  readonly value: unknown;
-}): readonly RuntimePluginEvidenceSnapshot[] {
-  const items = requiredArray(options.value, 'evidence');
-  if (items.length > 64) {
-    throw new TypeError('evidence exceeds the 64-record limit.');
-  }
-
-  return Object.freeze(
-    items.map((item) => {
-      const evidence = createRuntimePluginEvidenceSnapshot(
-        item
-      );
-
-      assertSnapshotPluginId({
-        plugin: options.plugin,
-        actualPluginId: evidence.pluginId,
-        field: 'evidence.pluginId'
-      });
-      assertSnapshotRuntimeIdentity({
-        context: options.context,
-        snapshot: evidence,
-        field: 'evidence'
-      });
-
-      return evidence;
-    })
-  );
-}
-
-function createHookFailureEvidence(options: {
-  readonly plugin: RuntimePlugin;
-  readonly context: RuntimePluginContext;
-  readonly evidenceKind: RuntimePluginEvidenceKind;
-  readonly status: RuntimePluginEvidenceStatus;
-  readonly summary: string;
-  readonly policyOutcome?: RuntimePluginPolicyOutcome;
-}): RuntimePluginEvidenceSnapshot {
-  return createRuntimePluginEvidenceSnapshot({
-    eventId: options.context.eventId,
-    traceId: options.context.traceId,
-    createdAt: options.context.timestamp,
-    kind: 'runtime_plugin_evidence_snapshot',
-    pluginId: options.plugin.manifest.id,
-    evidenceKind: options.evidenceKind,
-    status: options.status,
-    summary: options.summary,
-    ...(options.policyOutcome === undefined
-      ? {}
-      : { policyOutcome: options.policyOutcome }),
-    redactionLabels: mergedRedactionLabels({
-      plugin: options.plugin,
-      context: options.context
-    }),
-    ...(options.plugin.manifest.config.fingerprint === undefined
-      ? {}
-      : { configFingerprint: options.plugin.manifest.config.fingerprint })
-  });
-}
-
-function failurePolicyOutcomeOption(
-  evidenceKind: RuntimePluginEvidenceKind,
-  failureKind: 'exception' | 'timeout'
-): { readonly policyOutcome?: RuntimePluginPolicyOutcome } {
-  if (failureKind === 'timeout') {
-    return {
-      policyOutcome: 'timeout'
-    };
-  }
-
-  if (evidenceKind === 'after_turn_committed') {
-    return {
-      policyOutcome: 'after_commit_failed'
-    };
-  }
-
-  return {};
-}
-
 function enabledPluginIdsForHost(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly enabledPluginIds: readonly string[] | undefined;
@@ -2317,14 +1822,6 @@ function assertNoCallerSuppliedHostScopedFirstPartyPlugins(
   }
 }
 
-function beforeRoleModelFailureRejectsTurn(plugin: RuntimePlugin): boolean {
-  return (
-    plugin.manifest.runtimePolicy.requiredForTurn ||
-    plugin.manifest.runtimePolicy.failureBehavior.beforeRoleModelCall ===
-      'reject_turn'
-  );
-}
-
 function handleToolCallFailureDegrades(options: {
   readonly plugin: RuntimePlugin;
   readonly providedTool: RuntimePluginProvidedTool;
@@ -2335,111 +1832,6 @@ function handleToolCallFailureDegrades(options: {
     options.plugin.manifest.runtimePolicy.failureBehavior.handleToolCall ===
       'degrade'
   );
-}
-
-function assertSnapshotPluginId(options: {
-  readonly plugin: RuntimePlugin;
-  readonly actualPluginId: string;
-  readonly field: string;
-}): void {
-  if (options.actualPluginId === options.plugin.manifest.id) {
-    return;
-  }
-
-  throw new TypeError(
-    `${options.field} must match plugin "${options.plugin.manifest.id}".`
-  );
-}
-
-function assertSnapshotRuntimeIdentity(options: {
-  readonly context: RuntimePluginContext;
-  readonly snapshot: Pick<RuntimePluginEvidenceSnapshot, 'eventId' | 'traceId' | 'createdAt'>;
-  readonly field: string;
-}): void {
-  if (runtimeIdentityMatchesContext(options.snapshot, options.context)) {
-    return;
-  }
-
-  throw new TypeError(
-    `${options.field} identity must match current runtime event identity.`
-  );
-}
-
-function runtimeIdentityMatchesContext(
-  identity: Pick<RuntimeEventIdentity, 'eventId' | 'traceId' | 'createdAt'>,
-  context: RuntimePluginContext
-): boolean {
-  return (
-    identity.eventId === context.eventId &&
-    identity.traceId === context.traceId &&
-    identity.createdAt === context.timestamp
-  );
-}
-
-function assertContextItemSourceReferences(options: {
-  readonly plugin: RuntimePlugin;
-  readonly contextItem: RuntimePluginContextItem;
-}): void {
-  assertRequiredSourceReferences({
-    sourceReferencesRequired:
-      options.plugin.manifest.runtimePolicy.sourceReferencesRequired,
-    sourceReferences: options.contextItem.sourceReferences,
-    message: `Plugin "${options.plugin.manifest.id}" context item "${options.contextItem.id}" requires source references.`
-  });
-}
-
-function assertAcceptedToolEvidenceSourceReferences(options: {
-  readonly plugin: RuntimePlugin;
-  readonly providedTool: RuntimePluginProvidedTool;
-  readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
-}): void {
-  assertRequiredSourceReferences({
-    sourceReferencesRequired: options.providedTool.sourceReferencesRequired,
-    sourceReferences: options.evidence
-      .filter(
-        (evidence) =>
-          evidence.evidenceKind === 'tool_invocation' &&
-          evidence.status === 'accepted'
-      )
-      .flatMap((evidence) => evidence.sourceReferences ?? []),
-    message: `Plugin "${options.plugin.manifest.id}" tool "${options.providedTool.name}" accepted result requires source references.`
-  });
-}
-
-function assertRequiredSourceReferences(options: {
-  readonly sourceReferencesRequired: boolean;
-  readonly sourceReferences: readonly RuntimePluginSourceReference[] | undefined;
-  readonly message: string;
-}): void {
-  if (!options.sourceReferencesRequired) {
-    return;
-  }
-
-  if ((options.sourceReferences?.length ?? 0) > 0) {
-    return;
-  }
-
-  throw new TypeError(options.message);
-}
-
-function mergedRedactionLabels(options: {
-  readonly plugin: RuntimePlugin;
-  readonly context: RuntimePluginContext;
-}): readonly string[] {
-  return Object.freeze([
-    ...new Set([
-      ...options.context.privacy.redactionLabels,
-      ...options.plugin.manifest.runtimePolicy.redactionLabels
-    ])
-  ]);
-}
-
-function requiredArray(value: unknown, field: string): readonly unknown[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${field} must be an array.`);
-  }
-
-  return value;
 }
 
 class PluginHookTimeoutError extends Error {
@@ -2532,6 +1924,3 @@ function errorMessage(error: unknown): string {
   return 'Plugin hook failed.';
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
