@@ -19,7 +19,7 @@ import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
   runtimeEventIdentityKey
-} from '../src/runtime/event.ts';
+} from '../src/core/message-event.ts';
 import {
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeStorageSchemaMarker

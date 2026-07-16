@@ -1,8 +1,5 @@
-import type { RuntimeEventIdentity } from '../../runtime/event.ts';
-import type {
-  RuntimePluginFileStore,
-  RuntimePluginJsonValue
-} from '../types.ts';
+import type { RuntimeEventIdentity } from '../../core/index.ts';
+import type { RuntimePluginFileStore } from '../types.ts';
 
 type RuntimePluginFileStoreIdentity = {
   readonly sessionId: string;
@@ -43,18 +40,14 @@ export type RuntimePluginFileStorePreparedTransaction = {
 
 export type RuntimePluginFileStorePathMode = 'json' | 'jsonl';
 
-export type InMemoryPluginStoreState = {
-  readonly files: Map<string, RuntimePluginJsonValue>;
-  readonly pathModes: Map<string, RuntimePluginFileStorePathMode>;
-  revision: number;
-};
-
-export type StagedPluginFileStoreOperation = {
-  readonly storeKey: string;
-  readonly options: CreateRuntimePluginFileStoreOptions;
-  readonly pluginId: string;
-  readonly path: string;
-  readonly kind: 'append_jsonl' | 'write_json';
-  readonly value: RuntimePluginJsonValue;
-  readonly expectedBeforeHash: string;
+/**
+ * Host capability for creating plugin file stores and their transactions.
+ * The composition root injects the concrete engine
+ * (src/runtime/storage/plugin-file-store/) so the host never imports it.
+ */
+export type RuntimePluginFileStoreProvider = {
+  readonly createFileStore: (
+    options: CreateRuntimePluginFileStoreOptions
+  ) => RuntimePluginFileStore;
+  readonly createFileStoreTransaction: () => RuntimePluginFileStoreTransaction;
 };

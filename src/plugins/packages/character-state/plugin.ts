@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-import { assertCanonicalRuntimeTimestamp } from '../../../runtime/event.ts';
+import { assertCanonicalRuntimeTimestamp } from '../../../core/index.ts';
 import { canonicalJsonStringify } from '../../../shared/canonical-json.ts';
 
 import {
@@ -19,7 +19,7 @@ import type {
 import {
   type ModelToolInputContract
 } from '../../../role-model/model-tools.ts';
-import { characterStatePatchModelToolName } from './contract.ts';
+import { characterStatePatchModelToolName } from '../../contract.ts';
 import {
   characterAttentionValues,
   characterCurrentActivityValues,

@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import {
   CompleteJsonLinesError,
   splitCompleteJsonLines
-} from '../../shared/json-lines.ts';
+} from './json-lines.ts';
 import { isNodeErrorWithCode } from '../../shared/node-error.ts';
 import {
   LocalRuntimeStorageContractError,

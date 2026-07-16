@@ -10,19 +10,21 @@ import {
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../runtime/event.ts';
+} from '../core/index.ts';
 import { runLocalUserMessageEvent } from '../runtime/local.ts';
 import { createRuntimeLogStore } from '../runtime/log.ts';
 import type { RuntimePluginHost } from '../plugins/host.ts';
 import { createRuntimePluginContext } from '../plugins/constructors.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
+  resolveRuntimeCliStartup,
+  type RuntimePluginFactoryDefinition
+} from '../app/index.ts';
+import {
   diagnosticsHaveErrors,
-  type RuntimePluginFactoryDefinition,
+  RuntimeEnvFileError
 } from '../runtime/config/index.ts';
-import { RuntimeEnvFileError } from './runtime-env.ts';
 import { isMainModule } from './main-module.ts';
-import { resolveRuntimeCliStartup } from './startup.ts';
 
 type RelayCliOptions = {
   readonly stdout: NodeJS.WritableStream;

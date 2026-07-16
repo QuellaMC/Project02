@@ -103,19 +103,19 @@ export default defineConfig({
           functions: 95,
           lines: 78
         },
-        'src/plugins/file-store/wal-codec.ts': {
+        'src/runtime/storage/plugin-file-store/wal-codec.ts': {
           statements: 80,
           branches: 78,
           functions: 88,
           lines: 80
         },
-        'src/plugins/file-store/wal-progress.ts': {
+        'src/runtime/storage/plugin-file-store/wal-progress.ts': {
           statements: 65,
           branches: 60,
           functions: 80,
           lines: 65
         },
-        'src/plugins/file-store/wal.ts': {
+        'src/runtime/storage/plugin-file-store/wal.ts': {
           statements: 82,
           branches: 74,
           functions: 85,

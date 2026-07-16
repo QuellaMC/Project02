@@ -1,7 +1,7 @@
 import { canonicalJsonStringify } from '../shared/canonical-json.ts';
 
 import type { RoleModelDecisionResult } from '../role-model/contracts.ts';
-import { runtimeEventIdentityKey } from '../runtime/event.ts';
+import { runtimeEventIdentityKey } from '../core/index.ts';
 import {
   isTerminalRawEventLogRecordKind,
   type ConversationLogRecord,
@@ -31,20 +31,20 @@ import {
 } from '../runtime/terminal-errors.ts';
 import {
   createRuntimeConfigInspectShape,
-  type Project02ConfiguredPluginActivation,
+  RuntimeEnvFileError,
   type RuntimeConfigDiagnostic,
-  type RuntimeConfigInspectShape,
-  type RuntimePluginFactoryDefinition
+  type RuntimeConfigInspectShape
 } from '../runtime/config/index.ts';
+import {
+  resolveRuntimeCliStartup, type Project02ConfiguredPluginActivation, type RuntimePluginFactoryDefinition
+} from '../app/index.ts';
 import { ownJsonRecordValue } from '../shared/json-boundary.ts';
 import {
   parseRuntimeLocationFlag,
   RuntimeLocationCliUsageError,
   type RuntimeLocationCliState
 } from './runtime-location.ts';
-import { RuntimeEnvFileError } from './runtime-env.ts';
 import { isMainModule } from './main-module.ts';
-import { resolveRuntimeCliStartup } from './startup.ts';
 
 type InspectCliOptions = {
   readonly stdout: NodeJS.WritableStream;

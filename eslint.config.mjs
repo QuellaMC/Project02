@@ -110,7 +110,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/plugins/file-store/durable-primitives.ts'],
+    files: ['src/runtime/storage/plugin-file-store/durable-primitives.ts'],
     rules: {
       'max-lines': [
         'error',
@@ -119,7 +119,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/plugins/file-store/transaction.ts'],
+    files: ['src/runtime/storage/plugin-file-store/transaction.ts'],
     rules: {
       'max-lines': [
         'error',
@@ -128,7 +128,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/plugins/file-store/wal.ts'],
+    files: ['src/runtime/storage/plugin-file-store/wal.ts'],
     rules: {
       'max-lines': [
         'error',
@@ -236,7 +236,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/runtime/config/activation.ts'],
+    files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',

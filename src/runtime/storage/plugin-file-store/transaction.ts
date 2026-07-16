@@ -1,21 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
-import type { RuntimeEventIdentity } from '../../runtime/event.ts';
+import type { RuntimeEventIdentity } from '../../../core/index.ts';
 import {
   createLocalRuntimeMutationLockOwnerToken,
   type LocalRuntimeMutationLockOwnerToken
-} from '../../runtime/storage/mutation-lock.ts';
-import type { RuntimePluginFileStore } from '../types.ts';
+} from '../mutation-lock.ts';
+import type { RuntimePluginFileStore } from '../../../plugins/index.ts';
 import { createRuntimePluginFileStore } from './base-store.ts';
 import { createDurableRuntimePluginFileStore } from './durable-store.ts';
 import type {
-  CreateRuntimePluginFileStoreOptions,
-  InMemoryRuntimePluginFileStoreOptions,
+  CreateRuntimePluginFileStoreOptions, InMemoryRuntimePluginFileStoreOptions,
+  RuntimePluginFileStorePathMode, RuntimePluginFileStorePreparedTransaction,
+  RuntimePluginFileStoreTransaction
+} from '../../../plugins/index.ts';
+import type {
   InMemoryPluginStoreState,
-  RuntimePluginFileStorePathMode,
-  RuntimePluginFileStorePreparedTransaction,
-  RuntimePluginFileStoreTransaction,
   StagedPluginFileStoreOperation
 } from './contracts.ts';
 import {

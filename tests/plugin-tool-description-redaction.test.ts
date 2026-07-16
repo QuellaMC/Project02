@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/runtime/event.ts';
+import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/core/message-event.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginRegistrySnapshot,

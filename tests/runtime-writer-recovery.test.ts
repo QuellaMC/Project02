@@ -7,7 +7,7 @@ import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../src/runtime/event.ts';
+} from '../src/core/message-event.ts';
 import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
 import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-log-store.ts';
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';

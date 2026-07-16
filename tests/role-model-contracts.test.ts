@@ -5,7 +5,7 @@ import {
 } from '../src/role-model/model-tools.ts';
 import {
   characterStatePatchModelToolName
-} from '../src/plugins/packages/character-state/contract.ts';
+} from '../src/plugins/contract.ts';
 import {
   createAcceptedRoleModelDecisionResult,
   createDefaultRoleModelPluginToolDefinitions,
@@ -32,7 +32,7 @@ import { runtimePluginListToolName } from '../src/plugins/contract.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../src/runtime/event.ts';
+} from '../src/core/message-event.ts';
 
 describe('role-model contracts', () => {
   it('accepts an approval-gated config-write definition without an identity carve-out', () => {

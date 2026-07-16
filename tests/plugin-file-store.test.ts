@@ -16,8 +16,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction
-} from '../src/plugins/file-store.ts';
-import { createDurableRuntimePluginFileStore } from '../src/plugins/file-store/durable-store.ts';
+} from '../src/runtime/storage/plugin-file-store/index.ts';
+import { createDurableRuntimePluginFileStore } from '../src/runtime/storage/plugin-file-store/durable-store.ts';
 import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeSessionPaths,

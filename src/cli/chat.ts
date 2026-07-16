@@ -14,7 +14,7 @@ import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
   RuntimeEventInputError
-} from '../runtime/event.ts';
+} from '../core/index.ts';
 import {
   recordLocalUserMessageInputRejection,
   runLocalUserMessageEvent,
@@ -64,11 +64,15 @@ import {
 } from '../plugins/host.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
+  resolveRuntimeCliStartup,
+  type PreparedProject02PluginActivationPlan,
+  type RuntimePluginFactoryDefinition
+} from '../app/index.ts';
+import {
   diagnosticsHaveErrors,
   roleModelProviderEnvVarName,
-  type PreparedProject02PluginActivationPlan,
-  type RuntimeConfigDiagnostic,
-  type RuntimePluginFactoryDefinition
+  RuntimeEnvFileError,
+  type RuntimeConfigDiagnostic
 } from '../runtime/config/index.ts';
 import type { RoleModelAdapter } from '../role-model/loop.ts';
 import {
@@ -81,11 +85,7 @@ import {
   RuntimeLocationCliUsageError,
   type RuntimeLocationCliState
 } from './runtime-location.ts';
-import {
-  RuntimeEnvFileError
-} from './runtime-env.ts';
 import { isMainModule } from './main-module.ts';
-import { resolveRuntimeCliStartup } from './startup.ts';
 
 type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;

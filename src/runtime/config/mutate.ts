@@ -77,6 +77,11 @@ export class RuntimeConfigMutationError extends Error {
 }
 
 export class RuntimeConfigConflictError extends RuntimeConfigMutationError {
+  // Stable machine-readable marker: plugins detect conflicts through this
+  // code (isRuntimeConfigConflictError in the builtin plugin) instead of
+  // importing the class. Keep in sync with runtimeConfigConflictErrorCode.
+  readonly code = 'runtime_config_conflict';
+
   constructor(message: string) {
     super(message);
     this.name = 'RuntimeConfigConflictError';
@@ -246,13 +251,9 @@ function prepareLockedRuntimeConfigMutation(
     loadedConfig: loaded,
     configPath: location.configPath,
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-    ...(options.expectedFingerprint === undefined
-      ? {}
-      : { expectedFingerprint: options.expectedFingerprint }),
+    expectedFingerprint: options.expectedFingerprint,
     operation: options.operation,
-    ...(options.validateCandidate === undefined
-      ? {}
-      : { validateCandidate: options.validateCandidate })
+    validateCandidate: options.validateCandidate
   });
   const nextEffectiveStoreRoot =
     preparedCandidate.config.project02?.storeRoot ?? selectedStoreRoot;
@@ -448,9 +449,9 @@ export function prepareRuntimeConfigMutationCandidate(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly configPath?: string;
   readonly storeRoot?: string;
-  readonly expectedFingerprint?: string;
+  readonly expectedFingerprint?: string | undefined;
   readonly operation: RuntimeConfigMutationOperation;
-  readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
+  readonly validateCandidate?: ((config: Project02RuntimeConfig) => void) | undefined;
 }): PreparedRuntimeConfigMutationCandidate {
   const blockingDiagnostic = options.loadedConfig.diagnostics.find(
     (diagnostic) =>

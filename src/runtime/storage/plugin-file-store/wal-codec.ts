@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import type { RuntimeEventIdentity } from '../../runtime/event.ts';
-import { createLocalRuntimeSessionPaths } from '../../runtime/storage/layout.ts';
-import type { RuntimePluginJsonValue } from '../types.ts';
+import type { RuntimeEventIdentity } from '../../../core/index.ts';
+import { createLocalRuntimeSessionPaths } from '../layout.ts';
+import type { RuntimePluginJsonValue } from '../../../plugins/index.ts';
 import {
   assertRegularFile,
   assertSafeDurableTransactionJournalDirectory,

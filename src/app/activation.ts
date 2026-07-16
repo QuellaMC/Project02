@@ -1,64 +1,58 @@
 import {
+  createLocalRuntimeStorageLayout,
+  createRuntimePluginFileStore,
+  createRuntimePluginFileStoreTransaction,
+  type RuntimePluginFileStoreProvider
+} from '../runtime/storage/index.ts';
+import {
+  createRuntimePluginContext,
+  createRuntimePluginHost,
   defaultRuntimePluginHostServiceCatalogEntries,
   hostFirstPartyRuntimePluginIds,
   isHostOwnedFirstPartyRuntimePluginId,
   isHostScopedFirstPartyRuntimePluginId,
-  type RuntimePluginCatalogEntry
-} from '../../plugins/catalog.ts';
+  runRuntimePluginSessionEndHooks,
+  runRuntimePluginShutdownHooks,
+  runtimePluginAccessSnapshot,
+  runtimePluginId,
+  type RuntimePlugin,
+  type RuntimePluginAccessMap,
+  type RuntimePluginCatalogEntry,
+  type RuntimePluginConfigControlHostState,
+  type RuntimePluginFactoryDefinition as RuntimePluginFactoryDefinitionContract,
+  type RuntimePluginFactoryFunction,
+  type RuntimePluginHost,
+  type RuntimePluginKind,
+  type RuntimePluginManifest,
+  type RuntimePluginPackageCatalogEntry,
+  type RuntimePluginSessionEndOptions,
+  type RuntimePluginToolConfirmationHandler
+} from '../plugins/index.ts';
 import {
   bundledRuntimePluginPackageRoot,
   discoverRuntimePluginPackages,
   type RuntimePluginPackageDiagnostic,
   type RuntimePluginPackageProvenance
-} from '../../plugins/package-loader/index.ts';
-import type {
-  RuntimePluginFactoryDefinition as RuntimePluginFactoryDefinitionContract,
-  RuntimePluginFactoryFunction,
-  RuntimePluginPackageCatalogEntry
-} from '../../plugins/factory.ts';
-import type {
-  RuntimePluginConfigControlHostState
-} from '../../plugins/builtin/runtime-plugin/index.ts';
-import type {
-  RuntimePluginToolConfirmationHandler
-} from '../../plugins/tool-confirmation.ts';
-import { runtimePluginId } from '../../plugins/contract.ts';
+} from '../plugins/package-loader/index.ts';
+import { ownJsonRecordValue } from '../shared/json-boundary.ts';
 import {
-  createRuntimePluginHost,
-  runRuntimePluginSessionEndHooks,
-  runRuntimePluginShutdownHooks,
-  type RuntimePluginHost,
-  type RuntimePluginSessionEndOptions
-} from '../../plugins/host.ts';
-import {
-  createRuntimePluginContext,
-  runtimePluginAccessSnapshot,
-  type RuntimePluginAccessMap,
-  type RuntimePlugin,
-  type RuntimePluginKind,
-  type RuntimePluginManifest
-} from '../../plugins/types.ts';
-import { ownJsonRecordValue } from '../../shared/json-boundary.ts';
-import type {
-  LoadedProject02RuntimeConfig,
-  ResolvedProject02RuntimeConfig,
-  RuntimeConfigDiagnostic,
-  RuntimePluginConfigActivationInspectShape
-} from './types.ts';
-import { createRuntimeConfigDiagnostic } from './diagnostic.ts';
-import {
+  createRuntimeConfigDiagnostic,
+  createRuntimePluginConfigControlCapability,
   diagnosticsHaveErrors,
-  runtimeConfigDiagnosticMatchesPlugin,
   resolveProject02RuntimeConfig,
-  resolveProject02RuntimeStoreRoot
-} from './resolve.ts';
-import { canonicalJsonValuesEqual } from '../../shared/canonical-json.ts';
-import { createLocalRuntimeStorageLayout } from '../storage/layout.ts';
+  resolveProject02RuntimeStoreRoot,
+  runtimeConfigDiagnosticMatchesPlugin,
+  type LoadedProject02RuntimeConfig,
+  type ResolvedProject02RuntimeConfig,
+  type RuntimeConfigDiagnostic,
+  type RuntimePluginConfigActivationInspectShape
+} from '../runtime/config/index.ts';
+import { canonicalJsonValuesEqual } from '../shared/canonical-json.ts';
 
 export type {
   RuntimePluginFactoryFunction,
   RuntimePluginFactoryInput
-} from '../../plugins/factory.ts';
+} from '../plugins/index.ts';
 
 export type RuntimePluginFactoryDefinition =
   RuntimePluginFactoryDefinitionContract<RuntimePluginFactoryFunction>;
@@ -123,6 +117,14 @@ export type RuntimePluginCatalogSnapshot = {
   >;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
+
+// The host must not import the file-store engine (arch rule: plugins never
+// value-import runtime storage); the composition root supplies it instead.
+const configuredRuntimePluginFileStoreProvider: RuntimePluginFileStoreProvider =
+  Object.freeze({
+    createFileStore: createRuntimePluginFileStore,
+    createFileStoreTransaction: createRuntimePluginFileStoreTransaction
+  });
 
 const configuredPluginConstructionCleanupSessionId =
   'configured-plugin-construction-cleanup';
@@ -337,6 +339,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
     activation,
     pluginConfigControl: Object.freeze({
       pluginManifests,
+      control: createRuntimePluginConfigControlCapability(),
       activationByPluginId: runtimePluginConfigActivationByPluginId(activation),
       defaultEnabledPluginIds: Object.freeze([
         ...composition.defaultEnabledPluginIds
@@ -371,14 +374,14 @@ function runtimePluginConfigActivationByPluginId(
 export async function createConfiguredProject02PluginHost(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly storeRoot?: string;
-  readonly sessionId?: string;
-  readonly sessionIdentity?: object;
+  readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
   readonly strictUnknownPlugins?: boolean;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
-  readonly constructionCleanup?: RuntimePluginSessionEndOptions;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
+  readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
+  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler | undefined;
 }): Promise<Project02ConfiguredPluginHost> {
   const activationPlan = prepareConfiguredProject02PluginActivation({
     loadedConfig: options.loadedConfig,
@@ -393,25 +396,19 @@ export async function createConfiguredProject02PluginHost(options: {
 
   return createConfiguredProject02PluginHostFromPlan({
     activationPlan,
-    ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
-    ...(options.sessionIdentity === undefined
-      ? {}
-      : { sessionIdentity: options.sessionIdentity }),
-    ...(options.constructionCleanup === undefined
-      ? {}
-      : { constructionCleanup: options.constructionCleanup }),
-    ...(options.toolConfirmationHandler === undefined
-      ? {}
-      : { toolConfirmationHandler: options.toolConfirmationHandler })
+    sessionId: options.sessionId,
+    sessionIdentity: options.sessionIdentity,
+    constructionCleanup: options.constructionCleanup,
+    toolConfirmationHandler: options.toolConfirmationHandler
   });
 }
 
 export async function createConfiguredProject02PluginHostFromPlan(options: {
   readonly activationPlan: PreparedProject02PluginActivationPlan;
-  readonly sessionId?: string;
-  readonly sessionIdentity?: object;
-  readonly constructionCleanup?: RuntimePluginSessionEndOptions;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
+  readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
+  readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
+  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler | undefined;
 }): Promise<Project02ConfiguredPluginHost> {
   const { activationPlan } = options;
   const { catalogEntries } = activationPlan;
@@ -424,16 +421,13 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
         plugins,
         enabledPluginIds: activationPlan.activation.enabledPluginIds,
         storeRoot: activationPlan.resolvedConfig.project02.storeRoot,
+        fileStore: configuredRuntimePluginFileStoreProvider,
         pluginInventoryState: runtimePluginInventoryStateForInvalidConfig(
           activationPlan.pluginConfigControl
         ),
-        ...(options.toolConfirmationHandler === undefined
-          ? {}
-          : { toolConfirmationHandler: options.toolConfirmationHandler }),
-        ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
-        ...(options.sessionIdentity === undefined
-          ? {}
-          : { sessionIdentity: options.sessionIdentity })
+        toolConfirmationHandler: options.toolConfirmationHandler,
+        sessionId: options.sessionId,
+        sessionIdentity: options.sessionIdentity
       }),
       plugins,
       resolvedConfig: activationPlan.resolvedConfig,
@@ -448,13 +442,9 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     catalogEntries,
     resolvedConfig: activationPlan.resolvedConfig,
     enabledPluginIds: activationPlan.activation.enabledPluginIds,
-    ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
-    ...(options.sessionIdentity === undefined
-      ? {}
-      : { sessionIdentity: options.sessionIdentity }),
-    ...(options.constructionCleanup === undefined
-      ? {}
-      : { constructionCleanup: options.constructionCleanup })
+    sessionId: options.sessionId,
+    sessionIdentity: options.sessionIdentity,
+    constructionCleanup: options.constructionCleanup
   });
   let host: RuntimePluginHost;
 
@@ -463,26 +453,19 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       plugins,
       enabledPluginIds: activationPlan.activation.enabledPluginIds,
       storeRoot: activationPlan.resolvedConfig.project02.storeRoot,
+      fileStore: configuredRuntimePluginFileStoreProvider,
       pluginConfigControl: activationPlan.pluginConfigControl,
-      ...(options.toolConfirmationHandler === undefined
-        ? {}
-        : { toolConfirmationHandler: options.toolConfirmationHandler }),
-      ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
-      ...(options.sessionIdentity === undefined
-        ? {}
-        : { sessionIdentity: options.sessionIdentity })
+      toolConfirmationHandler: options.toolConfirmationHandler,
+      sessionId: options.sessionId,
+      sessionIdentity: options.sessionIdentity
     });
   } catch (error: unknown) {
     await cleanupPartiallyInstantiatedPlugins({
       plugins,
       resolvedConfig: activationPlan.resolvedConfig,
-      ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
-      ...(options.sessionIdentity === undefined
-        ? {}
-        : { sessionIdentity: options.sessionIdentity }),
-      ...(options.constructionCleanup === undefined
-        ? {}
-        : { constructionCleanup: options.constructionCleanup })
+      sessionId: options.sessionId,
+      sessionIdentity: options.sessionIdentity,
+      constructionCleanup: options.constructionCleanup
     });
     throw error;
   }
@@ -717,9 +700,9 @@ async function instantiateRuntimePluginPackages(options: {
   readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly enabledPluginIds: readonly string[];
-  readonly sessionId?: string;
-  readonly sessionIdentity?: object;
-  readonly constructionCleanup?: RuntimePluginSessionEndOptions;
+  readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
+  readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
 }): Promise<readonly RuntimePlugin[]> {
   const plugins: RuntimePlugin[] = [];
   const enabledPluginIds = new Set(options.enabledPluginIds);
@@ -764,13 +747,9 @@ async function instantiateRuntimePluginPackages(options: {
     await cleanupPartiallyInstantiatedPlugins({
       plugins,
       resolvedConfig: options.resolvedConfig,
-      ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
-      ...(options.sessionIdentity === undefined
-        ? {}
-        : { sessionIdentity: options.sessionIdentity }),
-      ...(options.constructionCleanup === undefined
-        ? {}
-        : { constructionCleanup: options.constructionCleanup })
+      sessionId: options.sessionId,
+      sessionIdentity: options.sessionIdentity,
+      constructionCleanup: options.constructionCleanup
     });
     throw error;
   }
@@ -824,9 +803,9 @@ function runtimePluginPackageDiagnostic(options: {
 async function cleanupPartiallyInstantiatedPlugins(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
-  readonly sessionId?: string;
-  readonly sessionIdentity?: object;
-  readonly constructionCleanup?: RuntimePluginSessionEndOptions;
+  readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
+  readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
 }): Promise<void> {
   if (options.plugins.length === 0) {
     return;
@@ -848,10 +827,9 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
       plugins: options.plugins,
       context,
       storeRoot: options.resolvedConfig.project02.storeRoot,
+      createFileStore: configuredRuntimePluginFileStoreProvider.createFileStore,
       sessionId,
-      ...(options.sessionIdentity === undefined
-        ? {}
-        : { sessionIdentity: options.sessionIdentity }),
+      sessionIdentity: options.sessionIdentity,
       hookOptions: {
         ...options.constructionCleanup,
         ...configuredPluginConstructionCleanupOptions
@@ -866,10 +844,9 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
       plugins: options.plugins,
       context,
       storeRoot: options.resolvedConfig.project02.storeRoot,
+      createFileStore: configuredRuntimePluginFileStoreProvider.createFileStore,
       sessionId,
-      ...(options.sessionIdentity === undefined
-        ? {}
-        : { sessionIdentity: options.sessionIdentity })
+      sessionIdentity: options.sessionIdentity
     });
   } catch {
     // Shutdown is best-effort and must not mask the factory or host error.
@@ -920,7 +897,8 @@ function runtimePluginInventoryStateForInvalidConfig(
       ? {}
       : { defaultEnabledPluginIds: state.defaultEnabledPluginIds }),
     ...(state.configPath === undefined ? {} : { configPath: state.configPath }),
-    ...(state.env === undefined ? {} : { env: state.env })
+    ...(state.env === undefined ? {} : { env: state.env }),
+    ...(state.control === undefined ? {} : { control: state.control })
   });
 }
 

@@ -70,34 +70,6 @@
     }
   },
   {
-    "type": "dependency",
-    "from": "src/role-model/contracts.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "contracts-no-impl-value-deps"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/runtime/storage/layout-contract.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../event.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "contracts-no-impl-value-deps"
-    }
-  },
-  {
     "type": "cycle",
     "from": "src/runtime/log.ts",
     "to": "src/runtime/storage/layout.ts",
@@ -984,20 +956,6 @@
   {
     "type": "dependency",
     "from": "src/cli/chat.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/cli/chat.ts",
     "to": "src/runtime/local.ts",
     "unresolvedTo": "../runtime/local.ts",
     "dependencyTypes": [
@@ -1184,20 +1142,6 @@
   {
     "type": "dependency",
     "from": "src/cli/inspect.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/cli/inspect.ts",
     "to": "src/runtime/log.ts",
     "unresolvedTo": "../runtime/log.ts",
     "dependencyTypes": [
@@ -1325,20 +1269,6 @@
   {
     "type": "dependency",
     "from": "src/cli/relay.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/cli/relay.ts",
     "to": "src/runtime/local.ts",
     "unresolvedTo": "../runtime/local.ts",
     "dependencyTypes": [
@@ -1380,77 +1310,6 @@
   },
   {
     "type": "dependency",
-    "from": "src/plugins/builtin/runtime-plugin/config-update.ts",
-    "to": "src/runtime/config/control.ts",
-    "unresolvedTo": "../../../runtime/config/control.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/builtin/runtime-plugin/config-update.ts",
-    "to": "src/runtime/config/mutate.ts",
-    "unresolvedTo": "../../../runtime/config/mutate.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/builtin/runtime-plugin/config-update.ts",
-    "to": "src/runtime/config/redact.ts",
-    "unresolvedTo": "../../../runtime/config/redact.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/builtin/runtime-plugin/config-update.ts",
-    "to": "src/runtime/config/types.ts",
-    "unresolvedTo": "../../../runtime/config/types.ts",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/builtin/runtime-plugin/config.ts",
-    "to": "src/runtime/config/control.ts",
-    "unresolvedTo": "../../../runtime/config/control.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
     "from": "src/plugins/builtin/runtime-plugin/state.ts",
     "to": "src/runtime/config/types.ts",
     "unresolvedTo": "../../../runtime/config/types.ts",
@@ -1481,240 +1340,12 @@
   },
   {
     "type": "dependency",
-    "from": "src/plugins/constructors.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
     "from": "src/plugins/factory.ts",
     "to": "src/runtime/config/types.ts",
     "unresolvedTo": "../runtime/config/types.ts",
     "dependencyTypes": [
       "local",
       "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/contracts.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/durable-primitives.ts",
-    "to": "src/runtime/storage/atomic-file.ts",
-    "unresolvedTo": "../../runtime/storage/atomic-file.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/durable-primitives.ts",
-    "to": "src/runtime/storage/layout.ts",
-    "unresolvedTo": "../../runtime/storage/layout.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/durable-primitives.ts",
-    "to": "src/runtime/storage/mutation-lock.ts",
-    "unresolvedTo": "../../runtime/storage/mutation-lock.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/durable-store.ts",
-    "to": "src/runtime/storage/mutation-lock.ts",
-    "unresolvedTo": "../../runtime/storage/mutation-lock.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/shared.ts",
-    "to": "src/runtime/storage/atomic-file.ts",
-    "unresolvedTo": "../../runtime/storage/atomic-file.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/transaction.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/transaction.ts",
-    "to": "src/runtime/storage/mutation-lock.ts",
-    "unresolvedTo": "../../runtime/storage/mutation-lock.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/wal-codec.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/wal-codec.ts",
-    "to": "src/runtime/storage/layout.ts",
-    "unresolvedTo": "../../runtime/storage/layout.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/wal.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/wal.ts",
-    "to": "src/runtime/storage/atomic-file.ts",
-    "unresolvedTo": "../../runtime/storage/atomic-file.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/wal.ts",
-    "to": "src/runtime/storage/file-runtime-log-store.ts",
-    "unresolvedTo": "../../runtime/storage/file-runtime-log-store.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/wal.ts",
-    "to": "src/runtime/storage/layout.ts",
-    "unresolvedTo": "../../runtime/storage/layout.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/file-store/wal.ts",
-    "to": "src/runtime/storage/mutation-lock.ts",
-    "unresolvedTo": "../../runtime/storage/mutation-lock.ts",
-    "dependencyTypes": [
-      "local",
       "import"
     ],
     "rule": {
@@ -1752,41 +1383,12 @@
   },
   {
     "type": "dependency",
-    "from": "src/plugins/hook-runner.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
     "from": "src/plugins/packages/character-state/plugin.ts",
     "to": "src/role-model/model-tools.ts",
     "unresolvedTo": "../../../role-model/model-tools.ts",
     "dependencyTypes": [
       "local",
       "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/packages/character-state/plugin.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../../../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
       "import"
     ],
     "rule": {
@@ -1826,38 +1428,9 @@
   },
   {
     "type": "dependency",
-    "from": "src/plugins/plugin-types.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
     "from": "src/plugins/schema-validation.ts",
     "to": "src/role-model/model-tools.ts",
     "unresolvedTo": "../role-model/model-tools.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/plugins/tool-confirmation.ts",
-    "to": "src/runtime/config/mutate.ts",
-    "unresolvedTo": "../runtime/config/mutate.ts",
     "dependencyTypes": [
       "local",
       "import"
@@ -1983,20 +1556,6 @@
   },
   {
     "type": "dependency",
-    "from": "src/role-model/contracts.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
     "from": "src/role-model/decision-context.ts",
     "to": "src/core/conversation.ts",
     "unresolvedTo": "../core/conversation.ts",
@@ -2083,21 +1642,6 @@
   },
   {
     "type": "dependency",
-    "from": "src/role-model/loop.ts",
-    "to": "src/runtime/event.ts",
-    "unresolvedTo": "../runtime/event.ts",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
     "from": "src/role-model/prompt.ts",
     "to": "src/core/conversation.ts",
     "unresolvedTo": "../core/conversation.ts",
@@ -2156,107 +1700,6 @@
   },
   {
     "type": "dependency",
-    "from": "src/runtime/config/activation.ts",
-    "to": "src/plugins/builtin/runtime-plugin/index.ts",
-    "unresolvedTo": "../../plugins/builtin/runtime-plugin/index.ts",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/runtime/config/activation.ts",
-    "to": "src/plugins/catalog.ts",
-    "unresolvedTo": "../../plugins/catalog.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/runtime/config/activation.ts",
-    "to": "src/plugins/contract.ts",
-    "unresolvedTo": "../../plugins/contract.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/runtime/config/activation.ts",
-    "to": "src/plugins/factory.ts",
-    "unresolvedTo": "../../plugins/factory.ts",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/runtime/config/activation.ts",
-    "to": "src/plugins/host.ts",
-    "unresolvedTo": "../../plugins/host.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/runtime/config/activation.ts",
-    "to": "src/plugins/tool-confirmation.ts",
-    "unresolvedTo": "../../plugins/tool-confirmation.ts",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/runtime/config/activation.ts",
-    "to": "src/plugins/types.ts",
-    "unresolvedTo": "../../plugins/types.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
     "from": "src/runtime/config/control.ts",
     "to": "src/plugins/plugin-types.ts",
     "unresolvedTo": "../../plugins/plugin-types.ts",
@@ -2278,20 +1721,6 @@
     "dependencyTypes": [
       "local",
       "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/runtime/config/redact.ts",
-    "to": "src/plugins/types.ts",
-    "unresolvedTo": "../../plugins/types.ts",
-    "dependencyTypes": [
-      "local",
       "import"
     ],
     "rule": {
@@ -2337,20 +1766,6 @@
     "dependencyTypes": [
       "local",
       "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/runtime/event.ts",
-    "to": "src/core/message-validation.ts",
-    "unresolvedTo": "../core/message-validation.ts",
-    "dependencyTypes": [
-      "local",
       "import"
     ],
     "rule": {
@@ -2479,20 +1894,6 @@
     "from": "src/runtime/storage/raw-event-codec.ts",
     "to": "src/plugins/contract.ts",
     "unresolvedTo": "../../plugins/contract.ts",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "no-deep-cross-module-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": "src/runtime/storage/raw-event-codec.ts",
-    "to": "src/plugins/packages/character-state/contract.ts",
-    "unresolvedTo": "../../plugins/packages/character-state/contract.ts",
     "dependencyTypes": [
       "local",
       "import"

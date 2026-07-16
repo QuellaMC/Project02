@@ -1,20 +1,20 @@
 import {
   createRuntimePluginCatalogSnapshot,
-  diagnosticsHaveErrors,
-  loadProject02RuntimeConfig,
   prepareConfiguredProject02PluginActivation,
-  type LoadedProject02RuntimeConfig,
   type PreparedProject02PluginActivationPlan,
   type RuntimePluginCatalogSnapshot,
   type RuntimePluginFactoryDefinition
-} from '../runtime/config/index.ts';
-import type { RuntimeLocationCliState } from './runtime-location.ts';
+} from './activation.ts';
 import {
   defaultDotEnvForRuntimeLocation,
+  diagnosticsHaveErrors,
+  loadProject02RuntimeConfig,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
-  shouldReadDefaultDotEnvForRuntimeLocation
-} from './runtime-env.ts';
+  shouldReadDefaultDotEnvForRuntimeLocation,
+  type LoadedProject02RuntimeConfig,
+  type RuntimeLocationCliState
+} from '../runtime/config/index.ts';
 
 type RuntimeCliStartupCommonOptions = {
   readonly location?: RuntimeLocationCliState;

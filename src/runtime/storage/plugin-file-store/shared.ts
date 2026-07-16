@@ -1,11 +1,11 @@
 import { sep } from 'node:path';
 
-import { parseAtomicReplacementFileName } from '../../runtime/storage/atomic-file.ts';
-import { createJsonBoundarySnapshot } from '../../shared/json-boundary.ts';
-import { isNodeErrorWithCode } from '../../shared/node-error.ts';
-import { splitCompleteJsonLines } from '../../shared/json-lines.ts';
-import type { RuntimePluginJsonValue } from '../types.ts';
-import type { RuntimePluginFileStorePathMode } from './contracts.ts';
+import { parseAtomicReplacementFileName } from '../atomic-file.ts';
+import { createJsonBoundarySnapshot } from '../../../shared/json-boundary.ts';
+import { isNodeErrorWithCode } from '../../../shared/node-error.ts';
+import { splitCompleteJsonLines } from '../json-lines.ts';
+import type { RuntimePluginJsonValue } from '../../../plugins/index.ts';
+import type { RuntimePluginFileStorePathMode } from '../../../plugins/index.ts';
 
 export const durableRevisionFileName =
   '.project02-plugin-store-revision';

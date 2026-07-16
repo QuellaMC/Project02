@@ -84,6 +84,19 @@ export default {
       }
     },
     {
+      name: 'nothing-imports-app',
+      comment:
+        'src/app is the composition root: it wires runtime, plugins, and ' +
+        'role-model together. Only the public barrel and cli may import it. ' +
+        'Green (zero baseline entries).',
+      severity: 'error',
+      from: {
+        path: '^src/',
+        pathNot: ['^src/app/', '^src/cli/', '^src/index\\.ts$']
+      },
+      to: { path: '^src/app/' }
+    },
+    {
       name: 'nothing-imports-cli',
       comment:
         'Rule 4 — src/cli is a pure composition shell; no production code ' +

@@ -13,18 +13,18 @@ import {
   atomicReplaceFileSync,
   isAbandonedAtomicReplacementFile,
   parseAtomicReplacementFileName
-} from '../../runtime/storage/atomic-file.ts';
+} from '../atomic-file.ts';
 import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout
-} from '../../runtime/storage/layout.ts';
+} from '../layout.ts';
 import {
   acquireLocalRuntimeMutationLocks,
   acquireLocalRuntimeMutationLocksSync,
   type LocalRuntimeMutationLockOwnerToken
-} from '../../runtime/storage/mutation-lock.ts';
-import type { RuntimePluginJsonValue } from '../types.ts';
-import type { RuntimePluginFileStorePathMode } from './contracts.ts';
+} from '../mutation-lock.ts';
+import type { RuntimePluginJsonValue } from '../../../plugins/index.ts';
+import type { RuntimePluginFileStorePathMode } from '../../../plugins/index.ts';
 import {
   assertJsonlPathMode,
   assertJsonPathMode,

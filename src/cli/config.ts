@@ -7,13 +7,18 @@ import {
   getRedactedRuntimeConfigValueAtPath,
   inspectRuntimePluginConfig,
   RuntimeConfigMutationError,
+  runtimeConfigEnvPathForLocation,
+  RuntimeEnvFileError,
   storeRootForLoadedDefaultConfigPath,
   type LoadedProject02RuntimeConfig,
   type RuntimeConfigControlOperation,
   type RuntimeConfigMutationResult,
-  type RuntimePluginFactoryDefinition,
   type RuntimeConfigValue
 } from '../runtime/config/index.ts';
+import {
+  resolveRuntimeCliStartup,
+  type RuntimePluginFactoryDefinition
+} from '../app/index.ts';
 import type { RuntimePluginCatalogEntry } from '../plugins/catalog.ts';
 import { ownJsonRecordValue } from '../shared/json-boundary.ts';
 import {
@@ -26,15 +31,10 @@ import {
   type RuntimeLocationCliState
 } from './runtime-location.ts';
 import {
-  runtimeConfigEnvPathForLocation,
-  RuntimeEnvFileError
-} from './runtime-env.ts';
-import {
   runRuntimeConfigConsole,
   type RuntimeConfigConsolePromptAdapter
 } from './config-console.ts';
 import { isMainModule } from './main-module.ts';
-import { resolveRuntimeCliStartup } from './startup.ts';
 
 type RuntimeConfigCliOptions = {
   readonly stdout: NodeJS.WritableStream;

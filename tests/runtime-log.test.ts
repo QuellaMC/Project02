@@ -17,7 +17,7 @@ import type {
 } from '../src/plugins/types.ts';
 import type {
   RuntimeEventIdentity
-} from '../src/runtime/event.ts';
+} from '../src/core/message-event.ts';
 
 const identity = {
   eventId: 'evt_log_001',

@@ -6,7 +6,7 @@ import { visibleMessageRoleValues, type VisibleMessageRole } from '../../core/co
 import {
   createRuntimeEventIdentitySnapshot,
   type RuntimeEventIdentity
-} from '../event.ts';
+} from '../../core/index.ts';
 import {
   LocalRuntimeStorageContractError,
   requiredRecordCanonicalTimestamp,

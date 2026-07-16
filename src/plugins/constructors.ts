@@ -2,7 +2,7 @@ import type { CharacterProfile, VisibleMessage } from '../core/conversation.ts';
 import {
   assertCanonicalRuntimeTimestamp,
   type RuntimeEventIdentity
-} from '../runtime/event.ts';
+} from '../core/index.ts';
 import {
   createJsonBoundaryObjectSnapshot,
   createJsonBoundarySnapshot,

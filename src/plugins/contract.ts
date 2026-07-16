@@ -3,6 +3,8 @@ export const runtimePluginContractVersion =
 export const firstPartyModelToolsPluginId = 'first_party.model_tools';
 export const runtimePluginId = 'runtime.plugin';
 export const characterStatePluginId = 'character-state';
+
+export const characterStatePatchModelToolName = 'character_state.patch';
 export const runtimePluginListToolName = 'runtime.plugin.list';
 export const runtimePluginConfigReadToolName = 'runtime.plugin.config';
 export const runtimePluginConfigUpdateToolName =

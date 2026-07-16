@@ -13,10 +13,8 @@ import type {
 import type {
   RuntimePlugin
 } from '../src/plugins/plugin-types.ts';
-import {
-  runtimeConfigVersion,
-  type RuntimePluginFactoryDefinition
-} from '../src/runtime/config/index.ts';
+import { runtimeConfigVersion } from '../src/runtime/config/index.ts';
+import type { RuntimePluginFactoryDefinition } from '../src/app/index.ts';
 import {
   requiredDottedConfigPlugin,
   requiredSecretPlugin,

@@ -22,7 +22,7 @@ import { renderRoleModelTurnContext } from '../src/role-model/prompt.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../src/runtime/event.ts';
+} from '../src/core/message-event.ts';
 import {
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';

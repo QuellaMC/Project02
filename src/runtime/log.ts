@@ -24,7 +24,7 @@ import {
   assertCanonicalRuntimeTimestamp,
   type RuntimeEventIdentity,
   type RuntimeEventType
-} from './event.ts';
+} from '../core/index.ts';
 import type { LocalRuntimeSessionPaths } from './storage/layout.ts';
 import type { LocalRuntimeMutationLockOwnerToken } from './storage/mutation-lock.ts';
 import { redactJsonBoundaryText } from '../shared/json-boundary.ts';

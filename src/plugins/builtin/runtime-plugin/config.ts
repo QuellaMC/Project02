@@ -8,7 +8,12 @@ import type {
   RuntimePluginToolCall,
   RuntimePluginToolCallResult
 } from '../../plugin-types.ts';
-import { inspectRuntimePluginConfig } from '../../../runtime/config/control.ts';
+import type { RuntimePluginConfigControlCapability } from '../../../runtime/config/index.ts';
+import { requiredRuntimePluginConfigControl } from './state.ts';
+
+type RuntimePluginConfigInspection = ReturnType<
+  RuntimePluginConfigControlCapability['inspectConfig']
+>;
 import {
   createJsonBoundaryObjectSnapshot,
   ownJsonRecordValue
@@ -105,13 +110,13 @@ export function inspectRuntimePluginConfigForControl(options: {
   readonly manifest: RuntimePluginManifest;
   readonly state: RuntimePluginConfigControlHostState;
   readonly storeRoot?: string;
-}): ReturnType<typeof inspectRuntimePluginConfig> {
+}): RuntimePluginConfigInspection {
   const activation = ownJsonRecordValue(
     options.state.activationByPluginId,
     options.manifest.id
   );
 
-  return inspectRuntimePluginConfig({
+  return requiredRuntimePluginConfigControl(options.state).inspectConfig({
     manifest: options.manifest,
     pluginManifests: options.state.pluginManifests,
     ...(activation === undefined ? {} : { activation }),
@@ -155,7 +160,7 @@ export function rejectedPluginConfigToolCall(
 }
 
 function modelVisiblePluginConfigInspection(
-  inspection: ReturnType<typeof inspectRuntimePluginConfig>
+  inspection: RuntimePluginConfigInspection
 ): RuntimePluginJsonObject {
   return {
     ...inspection,

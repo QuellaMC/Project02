@@ -8,7 +8,7 @@ import {
   type RuntimeEventIdentity,
   type RuntimeEventType,
   type UserMessageRuntimeEvent
-} from '../event.ts';
+} from '../../core/index.ts';
 import {
   createAcceptedRoleModelDecisionResult,
   createDefaultRoleModelPluginToolDefinitions,
@@ -52,9 +52,6 @@ import {
   type ModelToolCall
 } from '../../role-model/model-tools.ts';
 import {
-  characterStatePatchModelToolName
-} from '../../plugins/packages/character-state/contract.ts';
-import {
   createPreparedRuntimePluginConfigEffect,
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
@@ -71,6 +68,7 @@ import {
   type RuntimePluginTurnEvidenceSnapshot
 } from '../../plugins/validation.ts';
 import {
+  characterStatePatchModelToolName,
   runtimePluginEvidenceKindValues,
   runtimePluginEvidenceStatusValues,
   runtimePluginPolicyOutcomeValues,

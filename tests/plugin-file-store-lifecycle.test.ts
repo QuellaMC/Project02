@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createRuntimePluginFileStoreTransaction
-} from '../src/plugins/file-store.ts';
-import { durablePathModesFileName } from '../src/plugins/file-store/shared.ts';
+} from '../src/runtime/storage/plugin-file-store/index.ts';
+import { durablePathModesFileName } from '../src/runtime/storage/plugin-file-store/shared.ts';
 import type { RuntimePluginFileStore } from '../src/plugins/types.ts';
 import { createLocalRuntimePluginPaths } from '../src/runtime/storage/layout.ts';
 import { createTestTempRoot } from './support/temp-root.ts';

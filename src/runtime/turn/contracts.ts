@@ -29,7 +29,7 @@ import type {
 import type {
   RuntimeEventIdentity,
   UserMessageRuntimeEvent
-} from '../event.ts';
+} from '../../core/index.ts';
 import type {
   ConversationLogRecord,
   RawEventLogPayloadSummary,

@@ -1,7 +1,7 @@
 import {
-  isRuntimePluginCredentialKey,
-  redactRuntimePluginText
-} from '../../plugins/types.ts';
+  isJsonBoundaryCredentialKey,
+  redactJsonBoundaryText
+} from '../../shared/json-boundary.ts';
 import type {
   RuntimeConfigValue,
   RedactedRuntimeConfigField,
@@ -9,7 +9,7 @@ import type {
 } from './types.ts';
 
 export function redactRuntimeConfigText(value: string): string {
-  return redactRuntimePluginText(value);
+  return redactJsonBoundaryText(value);
 }
 
 export function redactRuntimeConfigValue(
@@ -20,12 +20,12 @@ export function redactRuntimeConfigValue(
     return '[redacted]';
   }
 
-  if (options.key !== undefined && isRuntimePluginCredentialKey(options.key)) {
+  if (options.key !== undefined && isJsonBoundaryCredentialKey(options.key)) {
     return '[redacted]';
   }
 
   if (typeof value === 'string') {
-    return redactRuntimePluginText(value);
+    return redactJsonBoundaryText(value);
   }
 
   if (

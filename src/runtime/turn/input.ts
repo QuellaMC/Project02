@@ -3,7 +3,7 @@ import {
   RuntimeEventInputError,
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent
-} from '../event.ts';
+} from '../../core/index.ts';
 import type {
   RawEventLogPayloadSummary,
   RuntimeTraceEntry,

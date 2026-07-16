@@ -21,7 +21,7 @@ import {
 import {
   createUserMessageRuntimeEvent,
   createRuntimeEventIdentity
-} from '../src/runtime/event.ts';
+} from '../src/core/message-event.ts';
 import {
   runLocalUserMessageEvent
 } from '../src/runtime/local.ts';

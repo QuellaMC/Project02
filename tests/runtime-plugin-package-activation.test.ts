@@ -15,9 +15,9 @@ import { createRuntimePluginManifest } from '../src/plugins/manifest-validation.
 import type { RuntimePluginManifest } from '../src/plugins/plugin-types.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
-  loadProject02RuntimeConfig,
   prepareConfiguredProject02PluginActivation
-} from '../src/runtime/config/index.ts';
+} from '../src/app/index.ts';
+import { loadProject02RuntimeConfig } from '../src/runtime/config/index.ts';
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
 import { collect, writeRuntimeConfig } from './support/runtime-config.ts';

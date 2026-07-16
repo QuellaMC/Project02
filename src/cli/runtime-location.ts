@@ -1,7 +1,5 @@
-export type RuntimeLocationCliState = {
-  readonly storeRoot?: string;
-  readonly configPath?: string;
-};
+export type { RuntimeLocationCliState } from '../runtime/config/index.ts';
+import type { RuntimeLocationCliState } from '../runtime/config/index.ts';
 
 export type RuntimeLocationFlagParseResult =
   | {

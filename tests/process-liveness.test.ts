@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { processIsAlive } from '../src/shared/process-liveness.ts';
+import { processIsAlive } from '../src/runtime/storage/process-liveness.ts';
 
 describe('process liveness', () => {
   afterEach(() => {

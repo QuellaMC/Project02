@@ -17,7 +17,7 @@ import {
   writeFile
 } from 'node:fs/promises';
 import { isNodeErrorWithCode } from '../../shared/node-error.ts';
-import { processIsAlive } from '../../shared/process-liveness.ts';
+import { processIsAlive } from './process-liveness.ts';
 
 import {
   LocalRuntimeStorageContractError,

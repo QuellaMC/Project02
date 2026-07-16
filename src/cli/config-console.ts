@@ -13,7 +13,6 @@ import {
   inspectRuntimePluginConfig,
   loadProject02RuntimeConfig,
   project02RuntimeConfigFieldDefinitions,
-  prepareConfiguredProject02PluginActivation,
   redactRuntimeConfigText,
   redactRuntimeConfigValue,
   runtimeConfigValueMatchesField,
@@ -22,9 +21,9 @@ import {
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
   type RuntimePluginConfigActivationInspectShape,
-  type RuntimePluginConfigFieldInspectShape,
-  type RuntimePluginFactoryDefinition
+  type RuntimePluginConfigFieldInspectShape
 } from '../runtime/config/index.ts';
+import { prepareConfiguredProject02PluginActivation, type RuntimePluginFactoryDefinition } from '../app/index.ts';
 import { ownJsonRecordValue } from '../shared/json-boundary.ts';
 
 export type RuntimeConfigConsolePromptAdapter = {

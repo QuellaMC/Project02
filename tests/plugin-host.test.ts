@@ -19,8 +19,8 @@ import {
 } from '../src/role-model/model-tools.ts';
 import {
   characterStatePatchModelToolName
-} from '../src/plugins/packages/character-state/contract.ts';
-import { createRuntimePluginFileStore } from '../src/plugins/file-store.ts';
+} from '../src/plugins/contract.ts';
+import { createRuntimePluginFileStore } from '../src/runtime/storage/plugin-file-store/index.ts';
 import { createRuntimePluginManagementPlugin } from '../src/plugins/index.ts';
 import {
   characterStatePluginId,

@@ -1,6 +1,6 @@
-import type { RuntimePluginFileStore } from '../types.ts';
+import type { RuntimePluginFileStore } from '../../../plugins/index.ts';
+import type { InMemoryRuntimePluginFileStoreOptions } from '../../../plugins/index.ts';
 import type {
-  InMemoryRuntimePluginFileStoreOptions,
   InMemoryPluginStoreState,
   StagedPluginFileStoreOperation
 } from './contracts.ts';

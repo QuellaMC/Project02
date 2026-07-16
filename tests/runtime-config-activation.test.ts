@@ -7,9 +7,9 @@ import { createConversationSession } from '../src/core/conversation.ts';
 import {
   createConfiguredProject02PluginHost,
   createConfiguredProject02PluginHostFromPlan,
-  loadProject02RuntimeConfig,
   prepareConfiguredProject02PluginActivation
-} from '../src/runtime/config/index.ts';
+} from '../src/app/index.ts';
+import { loadProject02RuntimeConfig } from '../src/runtime/config/index.ts';
 import {
   createMemoryProviderRuntimePlugin,
   firstPartyModelToolsPluginId,
@@ -21,7 +21,7 @@ import {
   createCharacterStatePlugin,
   createCharacterStatePluginManifest
 } from '../src/plugins/packages/character-state/plugin.ts';
-import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/runtime/event.ts';
+import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/core/message-event.ts';
 import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
 import { createRuntimeLogStore } from '../src/runtime/log.ts';
 import {

@@ -37,13 +37,12 @@ import {
   isHostScopedFirstPartyRuntimePluginId
 } from './catalog.ts';
 import { createPluginHookContext } from './hook-context.ts';
-import {
-  createRuntimePluginFileStoreTransaction,
-  type RuntimePluginFileStorePreparedTransaction,
-  type RuntimePluginFileStoreTransaction
-} from './file-store.ts';
+import type {
+  RuntimePluginFileStorePreparedTransaction, RuntimePluginFileStoreProvider,
+  RuntimePluginFileStoreTransaction
+} from './file-store/contracts.ts';
 import { isApprovalGatedRuntimePluginTool } from './tool-contract.ts';
-import type { RuntimeEventIdentity } from '../runtime/event.ts';
+import type { RuntimeEventIdentity } from '../core/index.ts';
 import { validateModelToolInputAgainstContract } from '../role-model/model-tools.ts';
 import {
   isModelFacingPluginTool,
@@ -99,6 +98,8 @@ export const runtimePluginBeforeRoleModelCallRejectionReason =
 export type RuntimePluginBeforeRoleModelCallRejectionReason =
   typeof runtimePluginBeforeRoleModelCallRejectionReason;
 
+type CreateRuntimePluginFileStore = RuntimePluginFileStoreProvider['createFileStore'];
+
 export type CreateRuntimePluginHostOptions = {
   readonly plugins?: readonly RuntimePlugin[];
   readonly enabledPluginIds?: readonly string[];
@@ -107,7 +108,8 @@ export type CreateRuntimePluginHostOptions = {
   readonly sessionIdentity?: object | undefined;
   readonly pluginInventoryState?: RuntimePluginConfigControlHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
+  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler | undefined;
+  readonly fileStore?: RuntimePluginFileStoreProvider;
 };
 
 export type RuntimePluginBeforeRoleModelCallCompletedResult = {
@@ -143,7 +145,8 @@ export type RunRuntimePluginSessionEndHooksOptions = {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
-  readonly hookOptions?: RuntimePluginSessionEndOptions;
+  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
+  readonly hookOptions?: RuntimePluginSessionEndOptions | undefined;
 };
 
 export type RunRuntimePluginShutdownHooksOptions = {
@@ -152,6 +155,7 @@ export type RunRuntimePluginShutdownHooksOptions = {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
+  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
 };
 
 type RunRuntimePluginSessionEndHooksWithResolvedPermissionsOptions = {
@@ -161,7 +165,8 @@ type RunRuntimePluginSessionEndHooksWithResolvedPermissionsOptions = {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
-  readonly hookOptions?: RuntimePluginSessionEndOptions;
+  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
+  readonly hookOptions?: RuntimePluginSessionEndOptions | undefined;
 };
 
 type RunRuntimePluginShutdownHooksWithResolvedPermissionsOptions = {
@@ -171,6 +176,7 @@ type RunRuntimePluginShutdownHooksWithResolvedPermissionsOptions = {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
+  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
 };
 
 export type RuntimePluginHealthHostResult = {
@@ -277,9 +283,8 @@ export function createRuntimePluginHost(
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity,
-        ...(activeFileStoreTransaction === undefined
-          ? {}
-          : { fileStoreTransaction: activeFileStoreTransaction })
+        createFileStore: options.fileStore?.createFileStore,
+        fileStoreTransaction: activeFileStoreTransaction
       });
     },
     async handleToolCall(call, context) {
@@ -291,15 +296,10 @@ export function createRuntimePluginHost(
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity,
-        ...(options.toolConfirmationHandler === undefined
-          ? {}
-          : { toolConfirmationHandler: options.toolConfirmationHandler }),
-        ...(pluginConfigControl === undefined
-          ? {}
-          : { pluginConfigControl }),
-        ...(activeFileStoreTransaction === undefined
-          ? {}
-          : { fileStoreTransaction: activeFileStoreTransaction })
+        toolConfirmationHandler: options.toolConfirmationHandler,
+        pluginConfigControl,
+        createFileStore: options.fileStore?.createFileStore,
+        fileStoreTransaction: activeFileStoreTransaction
       });
     },
     reconcileConfigEffect(effect) {
@@ -312,9 +312,7 @@ export function createRuntimePluginHost(
       return reconcilePreparedRuntimePluginConfigEffect({
         effect,
         state: pluginConfigControl,
-        ...(options.storeRoot === undefined
-          ? {}
-          : { storeRoot: options.storeRoot })
+        storeRoot: options.storeRoot
       });
     },
     beginFileStoreTransaction() {
@@ -322,7 +320,9 @@ export function createRuntimePluginHost(
         throw new Error('Plugin fileStore transaction is already active.');
       }
 
-      activeFileStoreTransaction = createRuntimePluginFileStoreTransaction();
+      // Without a provider no plugin can obtain a store, so there is nothing
+      // to stage; granted plugins still fail loudly in createPluginHookContext.
+      activeFileStoreTransaction = options.fileStore?.createFileStoreTransaction();
     },
     async prepareFileStoreTransaction(identity) {
       const transaction = activeFileStoreTransaction;
@@ -344,6 +344,7 @@ export function createRuntimePluginHost(
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity,
+        createFileStore: options.fileStore?.createFileStore,
         hookName: 'afterTurnCommitted',
         evidenceKind: 'after_turn_committed',
         hookForPlugin: (plugin) =>
@@ -363,7 +364,8 @@ export function createRuntimePluginHost(
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity,
-        ...(hookOptions === undefined ? {} : { hookOptions })
+        createFileStore: options.fileStore?.createFileStore,
+        hookOptions
       });
     },
     shutdown(context) {
@@ -373,7 +375,8 @@ export function createRuntimePluginHost(
         accessByPluginId,
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
-        sessionIdentity
+        sessionIdentity,
+        createFileStore: options.fileStore?.createFileStore
       });
 
       return shutdownResult;
@@ -386,9 +389,8 @@ export function createRuntimePluginHost(
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity,
-        ...(activeFileStoreTransaction === undefined
-          ? {}
-          : { fileStoreTransaction: activeFileStoreTransaction })
+        createFileStore: options.fileStore?.createFileStore,
+        fileStoreTransaction: activeFileStoreTransaction
       });
     }
   } satisfies RuntimePluginHost);
@@ -509,9 +511,8 @@ export async function runRuntimePluginSessionEndHooks(
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
-    ...(options.hookOptions === undefined
-      ? {}
-      : { hookOptions: options.hookOptions })
+    createFileStore: options.createFileStore,
+    hookOptions: options.hookOptions
   });
 }
 
@@ -529,7 +530,8 @@ export async function runRuntimePluginShutdownHooks(
     }),
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
-    sessionIdentity: options.sessionIdentity
+    sessionIdentity: options.sessionIdentity,
+    createFileStore: options.createFileStore
   });
 }
 
@@ -543,9 +545,8 @@ async function runRuntimePluginSessionEndHooksWithResolvedPermissions(
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
-    ...(options.hookOptions?.allowFileStoreWrites === undefined
-      ? {}
-      : { allowFileStoreWrites: options.hookOptions.allowFileStoreWrites }),
+    createFileStore: options.createFileStore,
+    allowFileStoreWrites: options.hookOptions?.allowFileStoreWrites,
     hookName: 'onSessionEnd',
     evidenceKind: 'session_end',
     hookForPlugin: (plugin) => plugin.lifecycleHooks.onSessionEnd
@@ -562,6 +563,7 @@ async function runRuntimePluginShutdownHooksWithResolvedPermissions(
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
+    createFileStore: options.createFileStore,
     allowFileStoreWrites: false,
     hookName: 'onShutdown',
     evidenceKind: 'shutdown',
@@ -576,7 +578,8 @@ type BeforeRoleModelCallOptions = {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
-  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction;
+  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction | undefined;
+  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
 };
 
 type BeforeRoleModelCallPluginOutcome =
@@ -662,9 +665,8 @@ async function runBeforeRoleModelCallPlugin(
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
-    ...(options.fileStoreTransaction === undefined
-      ? {}
-      : { fileStoreTransaction: options.fileStoreTransaction })
+    fileStoreTransaction: options.fileStoreTransaction,
+    createFileStore: options.createFileStore
   });
   const result = await invokeBeforeRoleModelCallHook({
     plugin,
@@ -767,9 +769,10 @@ type HandleToolCallOptions = {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
-  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
-  readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
+  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction | undefined;
+  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
+  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler | undefined;
+  readonly pluginConfigControl?: RuntimePluginConfigControlHostState | undefined;
 };
 
 type ResolvedRuntimePluginToolExecution = {
@@ -820,9 +823,8 @@ async function runHandleToolCall(
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
-    ...(options.fileStoreTransaction === undefined
-      ? {}
-      : { fileStoreTransaction: options.fileStoreTransaction }),
+    fileStoreTransaction: options.fileStoreTransaction,
+    createFileStore: options.createFileStore,
     allowFileStoreWrites: toolAllowsFileStoreWrites(providedTool)
   });
 
@@ -1112,6 +1114,7 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
+  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
   readonly hookName: 'afterTurnCommitted' | 'onSessionEnd' | 'onShutdown';
   readonly evidenceKind: Extract<RuntimePluginEvidenceKind, 'after_turn_committed' | 'session_end' | 'shutdown'>;
   readonly allowFileStoreWrites?: boolean | undefined;
@@ -1142,9 +1145,8 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
-      ...(options.allowFileStoreWrites === undefined
-        ? {}
-        : { allowFileStoreWrites: options.allowFileStoreWrites })
+      createFileStore: options.createFileStore,
+      allowFileStoreWrites: options.allowFileStoreWrites
     });
     const result = await invokeHook({
       plugin,
@@ -1394,16 +1396,14 @@ function normalizeJsonValue(
   value: unknown,
   options: {
     readonly plugin: RuntimePlugin;
-    readonly deadlineAt?: number;
+    readonly deadlineAt?: number | undefined;
   }
 ): RuntimePluginJsonValue {
   try {
     return createJsonBoundarySnapshot(value, {
       field: 'Plugin tool output',
       redact: true,
-      ...(options.deadlineAt === undefined
-        ? {}
-        : { deadlineAt: options.deadlineAt })
+      deadlineAt: options.deadlineAt
     });
   } catch (error: unknown) {
     if (
@@ -1468,7 +1468,8 @@ async function runHealth(options: {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
-  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction;
+  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction | undefined;
+  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
 }): Promise<RuntimePluginHealthHostResult> {
   const snapshots: RuntimePluginHealthSnapshot[] = [];
   const evidence: RuntimePluginEvidenceSnapshot[] = [];
@@ -1493,9 +1494,8 @@ async function runHealth(options: {
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
-      ...(options.fileStoreTransaction === undefined
-        ? {}
-        : { fileStoreTransaction: options.fileStoreTransaction })
+      fileStoreTransaction: options.fileStoreTransaction,
+      createFileStore: options.createFileStore
     });
 
     try {

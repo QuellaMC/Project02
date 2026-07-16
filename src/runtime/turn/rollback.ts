@@ -9,7 +9,7 @@ import type {
   RuntimePluginHealthSnapshot,
   RuntimePluginToolInvocationSnapshot
 } from '../../plugins/types.ts';
-import type { RuntimeEventIdentity } from '../event.ts';
+import type { RuntimeEventIdentity } from '../../core/index.ts';
 import type {
   RuntimePluginHealthHostResult,
   RuntimePluginHost

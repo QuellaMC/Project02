@@ -41,7 +41,7 @@ import {
   assertCanonicalRuntimeTimestamp,
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent
-} from '../runtime/event.ts';
+} from '../core/index.ts';
 import {
   createJsonBoundaryObjectSnapshot,
   createJsonBoundarySnapshot,

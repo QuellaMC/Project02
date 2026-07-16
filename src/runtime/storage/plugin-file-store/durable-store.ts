@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { createLocalRuntimeMutationLockOwnerToken } from '../../runtime/storage/mutation-lock.ts';
-import type { RuntimePluginFileStore } from '../types.ts';
-import type { CreateRuntimePluginFileStoreOptions } from './contracts.ts';
+import { createLocalRuntimeMutationLockOwnerToken } from '../mutation-lock.ts';
+import type { RuntimePluginFileStore } from '../../../plugins/index.ts';
+import type { CreateRuntimePluginFileStoreOptions } from '../../../plugins/index.ts';
 import {
   assertDurableOperationPathMode,
   assertSafeDurablePluginPath,

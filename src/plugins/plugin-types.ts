@@ -3,7 +3,7 @@ import type {
   ModelToolCallLimit,
   ModelToolInputContract
 } from '../role-model/model-tools.ts';
-import type { RuntimeEventIdentity, RuntimeEventType } from '../runtime/event.ts';
+import type { RuntimeEventIdentity, RuntimeEventType } from '../core/index.ts';
 import type { JsonBoundaryObject, JsonBoundaryValue } from '../shared/json-boundary.ts';
 import type {
   runtimePluginContractVersion,

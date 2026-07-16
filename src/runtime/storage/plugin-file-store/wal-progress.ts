@@ -1,4 +1,4 @@
-import { splitCompleteJsonLines } from '../../shared/json-lines.ts';
+import { splitCompleteJsonLines } from '../json-lines.ts';
 import { isPlainObject } from './shared.ts';
 import type { DurablePluginFileStoreJournal } from './wal-codec.ts';
 

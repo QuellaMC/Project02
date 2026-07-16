@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   pluginHasConfigErrors,
   resolveProject02RuntimeConfig,
-  resolveRuntimePluginActivation,
   runtimeConfigVersion,
   runtimeConfigDiagnosticMatchesPlugin,
   type RuntimeConfigDiagnostic
 } from '../src/runtime/config/index.ts';
+import { resolveRuntimePluginActivation } from '../src/app/index.ts';
 
 describe('runtime config diagnostic plugin matching', () => {
   it('matches config errors by exact plugin id and config boundary', () => {

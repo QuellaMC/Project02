@@ -8,8 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction
-} from '../src/plugins/file-store.ts';
-import { durablePluginStoreMutationResourceKey } from '../src/plugins/file-store/durable-primitives.ts';
+} from '../src/runtime/storage/plugin-file-store/index.ts';
+import { durablePluginStoreMutationResourceKey } from '../src/runtime/storage/plugin-file-store/durable-primitives.ts';
 import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout

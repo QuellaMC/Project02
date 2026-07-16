@@ -19,7 +19,7 @@ import { runtimePluginListToolName } from '../src/plugins/contract.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../src/runtime/event.ts';
+} from '../src/core/message-event.ts';
 
 describe('role-model prompt rendering', () => {
   it('keeps current user text exact and renders runtime context as model-only context', () => {

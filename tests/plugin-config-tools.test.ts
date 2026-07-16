@@ -31,7 +31,7 @@ import {
 } from '../src/runtime/config/index.ts';
 import { writeRuntimeConfig } from './support/runtime-config.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
-import { pluginDiscoveryPluginSummaries } from './support/plugin-host-fixtures.ts';
+import { pluginDiscoveryPluginSummaries, testRuntimePluginConfigControlCapability } from './support/plugin-host-fixtures.ts';
 
 describe('host-owned runtime plugin management tools', () => {
   it('constructs the canonical host-scoped plugin from the catalog', () => {
@@ -51,6 +51,7 @@ describe('host-owned runtime plugin management tools', () => {
         confirmationAvailable: false
       }),
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: Object.values(
           defaultRuntimePluginHostServiceCatalogEntries()
         ).map((entry) => entry.manifest)
@@ -73,11 +74,13 @@ describe('host-owned runtime plugin management tools', () => {
     const bareHost = createRuntimePluginHost();
     const readOnlyHost = createRuntimePluginHost({
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest]
       }
     });
     const writableHost = createRuntimePluginHost({
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest]
       },
       toolConfirmationHandler: () => ({ status: 'approved' })
@@ -234,6 +237,7 @@ describe('host-owned runtime plugin management tools', () => {
     });
     const enabledPluginIds = [runtimePluginId, arbitraryPluginId];
     const pluginConfigControl = {
+      control: testRuntimePluginConfigControlCapability,
       pluginManifests: [targetManifest],
       configPath
     };
@@ -385,6 +389,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         activationByPluginId: {
           [manifest.id]: {
@@ -457,6 +462,7 @@ describe('host-owned runtime plugin management tools', () => {
     });
     const host = createRuntimePluginHost({
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         activationByPluginId: {}
       }
@@ -491,6 +497,7 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest(true);
     const host = createRuntimePluginHost({
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         defaultEnabledPluginIds: [],
         activationByPluginId: {
@@ -524,6 +531,7 @@ describe('host-owned runtime plugin management tools', () => {
   it('returns a stable rejection for an empty plugin config inspection id', async () => {
     const host = createRuntimePluginHost({
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [configurablePluginManifest()]
       }
     });
@@ -549,6 +557,7 @@ describe('host-owned runtime plugin management tools', () => {
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest]
       },
       toolConfirmationHandler: () => {
@@ -594,6 +603,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       },
@@ -654,6 +664,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       },
@@ -707,6 +718,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       },
@@ -771,6 +783,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       },
@@ -838,6 +851,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       },
@@ -864,6 +878,7 @@ describe('host-owned runtime plugin management tools', () => {
           resultFingerprint: `${preparedConfigEffect.resultFingerprint}-tampered`
         }),
         state: {
+          control: testRuntimePluginConfigControlCapability,
           pluginManifests: [manifest],
           configPath
         },
@@ -919,6 +934,7 @@ describe('host-owned runtime plugin management tools', () => {
     const hostA = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath: configPathA
       },
@@ -942,6 +958,7 @@ describe('host-owned runtime plugin management tools', () => {
       reconcilePreparedRuntimePluginConfigEffect({
         effect: preparedConfigEffect,
         state: {
+          control: testRuntimePluginConfigControlCapability,
           pluginManifests: [manifest],
           configPath: configPathB
         },
@@ -991,6 +1008,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [mutableManifest],
         configPath
       },
@@ -1034,6 +1052,7 @@ describe('host-owned runtime plugin management tools', () => {
     const originalDisplayName = mutableManifest.displayName;
     const host = createRuntimePluginHost({
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [mutableManifest],
         activationByPluginId: {
           [originalPluginId]: {
@@ -1136,6 +1155,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       },
@@ -1192,6 +1212,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       }
@@ -1233,6 +1254,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       },
@@ -1280,6 +1302,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       },
@@ -1325,6 +1348,7 @@ describe('host-owned runtime plugin management tools', () => {
       const host = createRuntimePluginHost({
         storeRoot,
         pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
           pluginManifests: [manifest],
           configPath
         },
@@ -1375,6 +1399,7 @@ describe('host-owned runtime plugin management tools', () => {
       const host = createRuntimePluginHost({
         storeRoot,
         pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
           pluginManifests: [manifest],
           configPath
         },
@@ -1453,6 +1478,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       },
@@ -1516,6 +1542,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       },
@@ -1570,6 +1597,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         configPath
       },
@@ -1609,6 +1637,7 @@ describe('host-owned runtime plugin management tools', () => {
     expect(() =>
       createRuntimePluginHost({
         pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
           pluginManifests: [manifest, manifest]
         }
       })

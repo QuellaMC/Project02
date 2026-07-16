@@ -8,8 +8,9 @@ import {
   characterStatePluginId,
   createCharacterStatePlugin
 } from '../src/plugins/packages/character-state/plugin.ts';
-import { createRuntimePluginFileStore } from '../src/plugins/file-store.ts';
-import { durablePluginStoreMutationResourceKey } from '../src/plugins/file-store/durable-primitives.ts';
+import { createRuntimePluginFileStore } from '../src/runtime/storage/plugin-file-store/index.ts';
+import { testRuntimePluginConfigControlCapability, testRuntimePluginFileStoreProvider } from './support/plugin-host-fixtures.ts';
+import { durablePluginStoreMutationResourceKey } from '../src/runtime/storage/plugin-file-store/durable-primitives.ts';
 import {
   createRuntimePluginHost,
   type RuntimePluginHost
@@ -24,7 +25,7 @@ import {
   applyRuntimePluginConfigControlOperation,
   inspectRuntimePluginConfig
 } from '../src/runtime/config/index.ts';
-import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/runtime/event.ts';
+import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/core/message-event.ts';
 import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-log-store.ts';
 import {
   createLocalRuntimePluginPaths,
@@ -113,11 +114,12 @@ function createConfigEffectTestHost(options: {
 }): RuntimePluginHost {
   const { fixture } = options;
 
-  return createRuntimePluginHost({
+  return createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
     storeRoot: fixture.storeRoot,
     sessionId: fixture.sessionId,
     sessionIdentity: options.session,
     pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
       pluginManifests: [fixture.targetPlugin.manifest],
       configPath: fixture.configPath
     },
@@ -378,7 +380,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
         sessionId
       })
     );
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
@@ -753,7 +755,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
         sessionId
       })
     );
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
@@ -820,7 +822,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const logStore = createRuntimeTurnCompletedAppendThenThrowLogStore(
       fileLogStore
     );
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
@@ -1011,7 +1013,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
         sessionId
       })
     );
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],
@@ -1080,7 +1082,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
 
     const session = createConversationSession({ id: sessionId });
     const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],
@@ -1574,11 +1576,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
     });
     const session = createConversationSession({ id: sessionId });
     const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
-    const baseHost = createRuntimePluginHost({
+    const baseHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       sessionIdentity: session,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
         configPath
       },
@@ -1661,11 +1664,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       id: sessionId,
       visibleTranscript: reopenedLogStore.conversationMessages()
     });
-    const recoveryHost = createRuntimePluginHost({
+    const recoveryHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       sessionIdentity: restoredSession,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
         configPath
       },
@@ -1760,11 +1764,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const logStore = createToolCallFinishedAppendFailingLogStore(
       createFileRuntimeLogStore({ storeRoot, sessionId })
     );
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       sessionIdentity: session,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
         configPath
       },
@@ -1868,11 +1873,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const logStore = createTurnCompletedAppendFailingLogStore(
       createFileRuntimeLogStore({ storeRoot, sessionId })
     );
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       sessionIdentity: session,
       pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
         configPath
       },
@@ -1949,7 +1955,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       storeRoot,
       sessionId
     });
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [
@@ -2020,7 +2026,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       storeRoot,
       sessionId
     });
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],

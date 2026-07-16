@@ -15,7 +15,7 @@ import {
   isTerminalRawEventLogRecord,
   type RuntimeSessionEvidenceSnapshot
 } from '../log.ts';
-import { runtimeEventIdentityKey } from '../event.ts';
+import { runtimeEventIdentityKey } from '../../core/index.ts';
 import { atomicReplaceFileSync } from './atomic-file.ts';
 import type { DurableRuntimeSessionEvidence } from './runtime-evidence-contract.ts';
 import {

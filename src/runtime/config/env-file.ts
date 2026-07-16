@@ -1,12 +1,22 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 
+import { defaultRuntimeConfigEnvPath } from './load.ts';
+import { storeRootForLoadedDefaultConfigPath } from './resolve.ts';
 import {
-  defaultRuntimeConfigEnvPath,
   runtimeConfigEnvVarName,
-  storeRootForLoadedDefaultConfigPath,
   type LoadedProject02RuntimeConfig
-} from '../runtime/config/index.ts';
+} from './types.ts';
+
+/**
+ * A runtime location selected by the operator (store root and/or config
+ * path). CLI flag parsing produces this shape (src/cli/runtime-location.ts);
+ * startup and env-file resolution consume it.
+ */
+export type RuntimeLocationCliState = {
+  readonly storeRoot?: string;
+  readonly configPath?: string;
+};
 
 export class RuntimeEnvFileError extends Error {
   readonly path: string | undefined;

@@ -1,6 +1,7 @@
 import {
   hostFirstPartyRuntimePluginIds
 } from '../../src/plugins/catalog.ts';
+import { testRuntimePluginFileStoreProvider } from './plugin-host-fixtures.ts';
 import {
   characterStatePluginId,
   firstPartyModelToolsPluginId,
@@ -50,6 +51,7 @@ export function createDefaultProject02PluginHost(
   options: Omit<CreateRuntimePluginHostOptions, 'plugins'> = {}
 ): RuntimePluginHost {
   return createRuntimePluginHost({
+    fileStore: testRuntimePluginFileStoreProvider,
     ...options,
     plugins: [characterStatePlugin],
     enabledPluginIds:

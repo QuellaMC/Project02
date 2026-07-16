@@ -28,11 +28,11 @@ import { isTerminalRawEventLogRecord } from '../log.ts';
 import {
   runtimeEventIdentityKey,
   type RuntimeEventIdentity
-} from '../event.ts';
+} from '../../core/index.ts';
 import {
   CompleteJsonLinesError,
   splitCompleteJsonLines
-} from '../../shared/json-lines.ts';
+} from './json-lines.ts';
 import { assertLocalRuntimeSessionReadable } from './session-store.ts';
 import { preparedRuntimePluginConfigEffectHasApprovalEvidence } from '../../plugins/validation.ts';
 import type {

@@ -2,7 +2,7 @@ import type {
   RuntimePluginJsonObject,
   RuntimePluginToolCallResult
 } from '../../plugins/validation.ts';
-import type { RuntimeEventIdentity } from '../event.ts';
+import type { RuntimeEventIdentity } from '../../core/index.ts';
 import type { RawEventLogRecordKind } from '../log.ts';
 import { throwMalformedRecord } from './codec-primitives.ts';
 

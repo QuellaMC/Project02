@@ -9,10 +9,10 @@ export { createDeterministicLocalRoleModelAdapter } from './role-model/loop.ts';
 export {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from './runtime/event.ts';
+} from './core/index.ts';
 export { runLocalUserMessageEvent } from './runtime/local.ts';
 export { createRuntimeLogStore } from './runtime/log.ts';
 export {
   createConfiguredProject02PluginHostFromPlan,
   prepareConfiguredProject02PluginActivation
-} from './runtime/config/activation.ts';
+} from './app/index.ts';

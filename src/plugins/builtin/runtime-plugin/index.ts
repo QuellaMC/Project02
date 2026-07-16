@@ -179,6 +179,9 @@ export {
 } from './list.ts';
 export {
   createRuntimePluginConfigControlHostStateSnapshot,
+  isRuntimeConfigConflictError,
+  requiredRuntimePluginConfigControl,
+  runtimeConfigConflictErrorCode,
   type RuntimePluginConfigControlHostState
 } from './state.ts';
 export {

@@ -1,6 +1,7 @@
 import { createConversationSession } from '../../src/core/conversation.ts';
 import { characterStatePluginId } from '../../src/plugins/contract.ts';
-import { createRuntimePluginFileStore } from '../../src/plugins/file-store.ts';
+import { createRuntimePluginFileStore } from '../../src/runtime/storage/plugin-file-store/index.ts';
+import { testRuntimePluginFileStoreProvider } from './plugin-host-fixtures.ts';
 import { createDefaultProject02PluginHost } from './default-plugin-host.ts';
 import { createRuntimePluginHost } from '../../src/plugins/host.ts';
 import {
@@ -14,7 +15,7 @@ import {
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../../src/runtime/event.ts';
+} from '../../src/core/message-event.ts';
 import { createFileRuntimeLogStore } from '../../src/runtime/storage/file-runtime-log-store.ts';
 import { createLocalRuntimeSessionStore } from '../../src/runtime/storage/session-store.ts';
 import { createRuntimeLogStore } from '../../src/runtime/log.ts';
@@ -734,6 +735,7 @@ export function createAfterTurnCommittedProbeHost(
   const pluginId = 'after-commit.fixture';
 
   return createRuntimePluginHost({
+    fileStore: testRuntimePluginFileStoreProvider,
     plugins: [
       createRuntimePlugin({
         manifest: {
@@ -817,6 +819,7 @@ export function createPluginStoreRevisionFixtureHost() {
   const pluginId = 'revision.fixture';
 
   return createRuntimePluginHost({
+    fileStore: testRuntimePluginFileStoreProvider,
     plugins: [
       createRuntimePlugin({
         manifest: {

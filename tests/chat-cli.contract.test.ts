@@ -17,7 +17,7 @@ import { createDefaultProject02PluginHost } from './support/default-plugin-host.
 import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimePluginFileStore
-} from '../src/plugins/file-store.ts';
+} from '../src/runtime/storage/plugin-file-store/index.ts';
 import {
   createRuntimePluginManagementPluginManifest
 } from '../src/plugins/index.ts';

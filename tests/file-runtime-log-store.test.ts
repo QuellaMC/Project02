@@ -19,7 +19,7 @@ import {
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../src/runtime/event.ts';
+} from '../src/core/message-event.ts';
 import {
   createConversationSession
 } from '../src/core/conversation.ts';
@@ -35,7 +35,7 @@ import {
 } from '../src/role-model/model-tools.ts';
 import {
   characterStatePatchModelToolName
-} from '../src/plugins/packages/character-state/contract.ts';
+} from '../src/plugins/contract.ts';
 import {
   roleModelDecisionContractVersion
 } from '../src/role-model/contracts.ts';

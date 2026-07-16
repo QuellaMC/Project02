@@ -2,12 +2,24 @@ export { reconcilePreparedRuntimePluginConfigEffect } from './builtin/runtime-pl
 export {
   createRuntimePluginManagementPlugin,
   createRuntimePluginManagementPluginManifest,
-  isRuntimePluginManagementPlugin
+  isRuntimePluginManagementPlugin,
+  type RuntimePluginConfigControlHostState
 } from './builtin/runtime-plugin/index.ts';
 export {
   defaultRuntimePluginHostServiceCatalogEntries,
-  hostScopedFirstPartyRuntimePluginIds
+  hostFirstPartyRuntimePluginIds,
+  hostScopedFirstPartyRuntimePluginIds,
+  isHostOwnedFirstPartyRuntimePluginId,
+  isHostScopedFirstPartyRuntimePluginId,
+  type RuntimePluginCatalogEntry
 } from './catalog.ts';
+export { runtimePluginAccessSnapshot } from './access-control.ts';
+export type {
+  RuntimePluginFactoryDefinition,
+  RuntimePluginFactoryFunction,
+  RuntimePluginFactoryInput,
+  RuntimePluginPackageCatalogEntry
+} from './factory.ts';
 export {
   createRuntimePlugin,
   createRuntimePluginContext,
@@ -22,14 +34,21 @@ export {
   runtimePluginListToolName,
   type RuntimePluginAccessMap
 } from './contract.ts';
-export {
-  createRuntimePluginFileStore,
-  type CreateRuntimePluginFileStoreOptions
-} from './file-store.ts';
-export type { RuntimePluginFileStorePreparedTransaction } from './file-store/contracts.ts';
+export type {
+  CreateRuntimePluginFileStoreOptions,
+  DurableRuntimePluginFileStoreOptions,
+  InMemoryRuntimePluginFileStoreOptions,
+  RuntimePluginFileStorePathMode,
+  RuntimePluginFileStorePreparedTransaction,
+  RuntimePluginFileStoreProvider,
+  RuntimePluginFileStoreTransaction
+} from './file-store/contracts.ts';
 export {
   createRuntimePluginHost,
+  runRuntimePluginSessionEndHooks,
+  runRuntimePluginShutdownHooks,
   runtimePluginBeforeRoleModelCallRejectionReason,
+  type RuntimePluginSessionEndOptions,
   type CreateRuntimePluginHostOptions,
   type RuntimePluginBeforeRoleModelCallCompletedResult,
   type RuntimePluginBeforeRoleModelCallHostResult,
@@ -42,9 +61,13 @@ export {
 export { createMemoryProviderRuntimePlugin } from './memory/provider-plugin.ts';
 export { memorySearchTool } from './memory/tools.ts';
 export type {
+  RuntimePlugin,
   RuntimePluginContext,
+  RuntimePluginFileStore,
+  RuntimePluginJsonValue,
   RuntimePluginManifest
 } from './plugin-types.ts';
+export type { RuntimePluginKind } from './contract.ts';
 export {
   type RuntimePluginToolConfirmationHandler,
   type RuntimePluginToolConfirmationRequest

@@ -25,6 +25,7 @@ import {
   createStagedAppendFileStorePlugin,
   expectRetainedFileStoreWriteBlocked,
   testIdentity,
+  testRuntimePluginFileStoreProvider,
   testPluginAfterTurnCommittedContext,
   testPluginContext
 } from './support/plugin-host-fixtures.ts';
@@ -148,10 +149,10 @@ describe('runtime plugin host access and lifecycle', () => {
       localTrustLevel: 'test_fixture',
       requestedAccess: { file_store: 'read', model_input: 'write' }
     });
-    const trustedAdapterHost = createRuntimePluginHost({
+    const trustedAdapterHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       plugins: [trustedAdapter]
     });
-    const testFixtureHost = createRuntimePluginHost({
+    const testFixtureHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       plugins: [testFixture]
     });
 
@@ -243,7 +244,7 @@ describe('runtime plugin host access and lifecycle', () => {
 
   it('allows explicitly enabled Character State file_store write access', async () => {
     const plugin = createCharacterStatePlugin();
-    const host = createRuntimePluginHost({
+    const host = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       plugins: [plugin],
       enabledPluginIds: [characterStatePluginId]
     });

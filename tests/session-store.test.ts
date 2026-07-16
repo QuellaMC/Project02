@@ -26,7 +26,7 @@ import {
 } from '../src/runtime/log.ts';
 import {
   createUserMessageRuntimeEvent
-} from '../src/runtime/event.ts';
+} from '../src/core/message-event.ts';
 import {
   runLocalUserMessageEvent
 } from '../src/runtime/local.ts';

@@ -39,7 +39,7 @@ export type CreateJsonBoundarySnapshotOptions = {
   readonly field: string;
   readonly redact?: boolean;
   readonly limits?: JsonBoundaryLimits;
-  readonly deadlineAt?: number;
+  readonly deadlineAt?: number | undefined;
   readonly now?: () => number;
 };
 

@@ -1,12 +1,12 @@
 import {
   createPreparedRuntimePluginConfigEffectConfirmationPreview,
+  isRuntimeConfigConflictError,
   preparedRuntimePluginConfigEffectIsStillCurrent,
   type RuntimePluginConfigControlHostState
 } from './builtin/runtime-plugin/index.ts';
 import { createRuntimePluginEvidenceSnapshot } from './constructors.ts';
 import { mergedRedactionLabels } from './tool-evidence-policy.ts';
 import { redactRuntimePluginText } from './validation-primitives.ts';
-import { RuntimeConfigConflictError } from '../runtime/config/mutate.ts';
 import type {
   RuntimePluginEvidenceStatus,
   RuntimePluginPolicyOutcome
@@ -112,7 +112,7 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
       ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
     });
   } catch (error: unknown) {
-    if (!(error instanceof RuntimeConfigConflictError)) {
+    if (!isRuntimeConfigConflictError(error)) {
       throw error;
     }
 

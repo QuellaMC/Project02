@@ -2,8 +2,8 @@ import { readFileSync, realpathSync, statSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createTestTempRoot } from './support/temp-root.ts';
+import { createConfiguredProject02PluginHost } from '../src/app/index.ts';
 import {
-  createConfiguredProject02PluginHost,
   createRuntimeConfigInspectShape,
   defaultRuntimeConfigPath,
   loadProject02RuntimeConfig,

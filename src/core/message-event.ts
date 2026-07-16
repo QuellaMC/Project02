@@ -4,7 +4,7 @@ import {
   oneLineMessageMultilineErrorMessage,
   OneLineMessageValidationError,
   type OneLineMessageValidationReason
-} from '../core/message-validation.ts';
+} from './message-validation.ts';
 
 export const runtimeEventTypeValues = ['USER_MESSAGE'] as const;
 

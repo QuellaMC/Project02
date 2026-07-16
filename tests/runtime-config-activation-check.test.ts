@@ -3,16 +3,14 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createTestTempRoot } from './support/temp-root.ts';
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
+import { createConfiguredProject02PluginHost } from '../src/app/index.ts';
+import { loadProject02RuntimeConfig } from '../src/runtime/config/index.ts';
 import {
-  createConfiguredProject02PluginHost,
-  loadProject02RuntimeConfig
-} from '../src/runtime/config/index.ts';
-import {
-  createRuntimePluginFileStore,
   createRuntimePlugin,
   runtimePluginId,
   type RuntimePluginContext
 } from '../src/plugins/index.ts';
+import { createRuntimePluginFileStore } from '../src/runtime/storage/plugin-file-store/index.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin,

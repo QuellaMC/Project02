@@ -17,7 +17,7 @@ import { runtimePluginContractVersion } from '../../src/plugins/contract.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../../src/runtime/event.ts';
+} from '../../src/core/message-event.ts';
 import { type RoleModelAdapter } from '../../src/role-model/loop.ts';
 
 export const memorySearchToolDefinition = Object.freeze({

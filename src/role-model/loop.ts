@@ -75,7 +75,7 @@ import type {
   RuntimePluginEvidenceStatus,
   RuntimePluginPolicyOutcome
 } from '../plugins/contract.ts';
-import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from '../runtime/event.ts';
+import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from '../core/index.ts';
 import {
   createJsonBoundaryObjectSnapshot
 } from '../shared/json-boundary.ts';

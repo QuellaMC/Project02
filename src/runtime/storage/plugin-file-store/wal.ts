@@ -14,26 +14,26 @@ import {
 import { dirname, join } from 'node:path';
 import { hostname } from 'node:os';
 
-import { canonicalJsonStringify } from '../../shared/canonical-json.ts';
-import { processIsAlive } from '../../shared/process-liveness.ts';
-import type { RuntimeEventIdentity } from '../../runtime/event.ts';
-import { parseAtomicReplacementFileName } from '../../runtime/storage/atomic-file.ts';
-import { findValidatedTerminalRawEventForSession } from '../../runtime/storage/file-runtime-log-store.ts';
+import { canonicalJsonStringify } from '../../../shared/canonical-json.ts';
+import { processIsAlive } from '../process-liveness.ts';
+import type { RuntimeEventIdentity } from '../../../core/index.ts';
+import { parseAtomicReplacementFileName } from '../atomic-file.ts';
+import { findValidatedTerminalRawEventForSession } from '../file-runtime-log-store.ts';
 import {
   createLocalRuntimeSessionPaths,
   type LocalRuntimeSessionPaths
-} from '../../runtime/storage/layout.ts';
+} from '../layout.ts';
 import {
   createLocalRuntimeMutationLockOwnerToken,
   LocalRuntimeMutationLockBusyError,
   type LocalRuntimeMutationLockOwnerToken
-} from '../../runtime/storage/mutation-lock.ts';
+} from '../mutation-lock.ts';
 import type {
   CreateRuntimePluginFileStoreOptions,
   RuntimePluginFileStorePathMode,
-  RuntimePluginFileStorePreparedTransaction,
-  StagedPluginFileStoreOperation
-} from './contracts.ts';
+  RuntimePluginFileStorePreparedTransaction
+} from '../../../plugins/index.ts';
+import type { StagedPluginFileStoreOperation } from './contracts.ts';
 import {
   assertDurableOperationPathMode,
   assertRegularFile,
@@ -58,7 +58,7 @@ import {
   writeDurableRevision,
   writeTextAtomic
 } from './durable-primitives.ts';
-import type { RuntimePluginJsonValue } from '../types.ts';
+import type { RuntimePluginJsonValue } from '../../../plugins/index.ts';
 import {
   durableDirectMutationJournalFileName,
   isMissingFileError

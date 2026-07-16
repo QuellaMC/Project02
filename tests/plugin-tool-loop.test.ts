@@ -4,14 +4,15 @@ import {
   characterStatePluginId,
   createCharacterStatePlugin
 } from '../src/plugins/packages/character-state/plugin.ts';
-import { createRuntimePluginFileStore } from '../src/plugins/file-store.ts';
+import { createRuntimePluginFileStore } from '../src/runtime/storage/plugin-file-store/index.ts';
+import { testRuntimePluginFileStoreProvider } from './support/plugin-host-fixtures.ts';
 import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimePluginContext,
   firstPartyModelToolsPluginId,
   runtimePluginId
 } from '../src/plugins/types.ts';
-import { createRuntimeEventIdentity } from '../src/runtime/event.ts';
+import { createRuntimeEventIdentity } from '../src/core/message-event.ts';
 import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-log-store.ts';
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
 import { createRuntimeLogStore } from '../src/runtime/log.ts';
@@ -447,7 +448,7 @@ describe('plugin-driven Character State tool loop', () => {
       storeRoot,
       sessionId
     });
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [
@@ -514,7 +515,7 @@ describe('plugin-driven Character State tool loop', () => {
       createdAt: '2026-06-15T00:00:00.000Z'
     });
 
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
@@ -586,7 +587,7 @@ describe('plugin-driven Character State tool loop', () => {
       createdAt: '2026-06-15T00:00:00.000Z'
     });
 
-    const pluginHost = createRuntimePluginHost({
+    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],

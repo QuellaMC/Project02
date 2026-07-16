@@ -1,8 +1,8 @@
 import { runtimePluginGrantsAccess } from './access-control.ts';
-import {
-  createRuntimePluginFileStore,
-  type RuntimePluginFileStoreTransaction
-} from './file-store.ts';
+import type {
+  RuntimePluginFileStoreProvider,
+  RuntimePluginFileStoreTransaction
+} from './file-store/contracts.ts';
 import { sideEffectLevelAllowsFileStoreWrites } from './tool-policy.ts';
 import type {
   RuntimePlugin,
@@ -32,8 +32,11 @@ export function createPluginHookContext<TContext extends RuntimePluginContext>(
     readonly storeRoot?: string | undefined;
     readonly sessionId?: string | undefined;
     readonly sessionIdentity?: object | undefined;
-    readonly allowFileStoreWrites?: boolean;
-    readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction;
+    readonly allowFileStoreWrites?: boolean | undefined;
+    readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction | undefined;
+    readonly createFileStore?:
+      | RuntimePluginFileStoreProvider['createFileStore']
+      | undefined;
   }
 ): PluginHookContextScope<TContext> {
   const grantsFileStore = runtimePluginGrantsAccess({
@@ -61,7 +64,7 @@ export function createPluginHookContext<TContext extends RuntimePluginContext>(
           : { sessionIdentity: options.sessionIdentity }),
         pluginId: options.plugin.manifest.id
       }) ??
-      createRuntimePluginFileStore({
+      options.createFileStore?.({
         ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
         sessionId,
         ...(options.sessionIdentity === undefined
@@ -70,6 +73,14 @@ export function createPluginHookContext<TContext extends RuntimePluginContext>(
         pluginId: options.plugin.manifest.id
       }))
     : undefined;
+
+  if (grantsFileStore && baseFileStore === undefined) {
+    throw new Error(
+      `Plugin "${options.plugin.manifest.id}" has file_store access, but the ` +
+        'host was created without a file-store provider.'
+    );
+  }
+
   const fileStore =
     baseFileStore === undefined
       ? undefined

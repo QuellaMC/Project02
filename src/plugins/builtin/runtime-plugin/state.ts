@@ -1,6 +1,7 @@
 import { createRuntimePluginManifest } from '../../manifest-validation.ts';
 import type { RuntimePluginManifest } from '../../plugin-types.ts';
 import type { RuntimePluginConfigActivationInspectShape } from '../../../runtime/config/types.ts';
+import type { RuntimePluginConfigControlCapability } from '../../../runtime/config/index.ts';
 
 export type RuntimePluginConfigControlHostState = {
   readonly pluginManifests: readonly RuntimePluginManifest[];
@@ -10,7 +11,38 @@ export type RuntimePluginConfigControlHostState = {
   readonly defaultEnabledPluginIds?: readonly string[];
   readonly configPath?: string;
   readonly env?: NodeJS.ProcessEnv;
+  /** Injected by the composition root; plugins never import the functions. */
+  readonly control?: RuntimePluginConfigControlCapability;
 };
+
+export function requiredRuntimePluginConfigControl(
+  state: RuntimePluginConfigControlHostState
+): RuntimePluginConfigControlCapability {
+  if (state.control === undefined) {
+    throw new Error(
+      'Runtime plugin config tools require a host config-control capability.'
+    );
+  }
+
+  return state.control;
+}
+
+export const runtimeConfigConflictErrorCode = 'runtime_config_conflict';
+
+/**
+ * Structural stand-in for `error instanceof RuntimeConfigConflictError`:
+ * matches the stable `code` the runtime config mutation layer stamps on
+ * conflict errors, so plugins need no value import of that layer.
+ */
+export function isRuntimeConfigConflictError(
+  error: unknown
+): error is Error & { readonly code: typeof runtimeConfigConflictErrorCode } {
+  return (
+    error instanceof Error &&
+    (error as { readonly code?: unknown }).code ===
+      runtimeConfigConflictErrorCode
+  );
+}
 
 const runtimePluginConfigControlHostStateSnapshots =
   new WeakSet<RuntimePluginConfigControlHostState>();
@@ -58,7 +90,8 @@ export function createRuntimePluginConfigControlHostStateSnapshot(
     ...(state.configPath === undefined ? {} : { configPath: state.configPath }),
     ...(state.env === undefined
       ? {}
-      : { env: Object.freeze({ ...state.env }) })
+      : { env: Object.freeze({ ...state.env }) }),
+    ...(state.control === undefined ? {} : { control: state.control })
   } satisfies RuntimePluginConfigControlHostState);
 
   runtimePluginConfigControlHostStateSnapshots.add(snapshot);
