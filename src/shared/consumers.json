@@ -1,0 +1,7 @@
+{
+  "canonical-json.ts": ["cli", "plugins", "role-model", "runtime"],
+  "json-boundary.ts": ["cli", "plugins", "role-model", "runtime"],
+  "json-lines.ts": ["plugins", "runtime"],
+  "node-error.ts": ["plugins", "runtime"],
+  "process-liveness.ts": ["plugins", "runtime"]
+}
