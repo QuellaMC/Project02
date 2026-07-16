@@ -250,7 +250,7 @@ describe('runtime config console UI', () => {
     });
   });
 
-  it('treats factories without catalog metadata as plugins and omits an empty system heading', async () => {
+  it('lists package factories separately from canonical bootstrap services', async () => {
     const storeRoot = createTestTempRoot('project02-config-console-plugin-group-');
     const plugin = requiredDottedConfigPlugin('sample.plugin', 'endpoint');
     let stdout = '';
@@ -269,31 +269,8 @@ describe('runtime config console UI', () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toContain('\nPlugins\n1) Required Memory (sample.plugin)\n');
-    expect(stdout).not.toContain('\nSystem services\n');
-  });
-
-  it('omits an empty plugin heading when only system services are available', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-system-group-');
-    const plugin = requiredDottedConfigPlugin('system.sample', 'endpoint');
-    let stdout = '';
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'ui'],
-      {
-        stdout: collect((chunk) => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: hostScopedFactoriesFor(plugin),
-        prompt: scriptedPrompt(['2', 'q'])
-      }
-    );
-
-    expect(exitCode).toBe(0);
-    expect(stdout).not.toContain('\nPlugins\n');
-    expect(stdout).toContain(
-      '\nSystem services\n1) Required Memory (system.sample)\n'
-    );
+    expect(stdout).toContain('\nSystem services\n');
+    expect(stdout).toContain('runtime.plugin');
   });
 
   it('reports a default terminal prompt input failure without hanging', async () => {
@@ -629,21 +606,6 @@ function factoriesFor(
       manifest: plugin.manifest,
       create: () => plugin
     } satisfies RuntimePluginFactoryDefinition)
-  });
-}
-
-function hostScopedFactoriesFor(
-  plugin: RuntimePlugin
-): Readonly<Record<string, RuntimePluginFactoryDefinition>> {
-  const definition = Object.freeze({
-    catalogOwner: 'project02_host' as const,
-    construction: 'host_scoped' as const,
-    manifest: plugin.manifest,
-    create: () => plugin
-  });
-
-  return Object.freeze({
-    [plugin.manifest.id]: definition
   });
 }
 

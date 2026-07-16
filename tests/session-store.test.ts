@@ -152,6 +152,59 @@ describe('local runtime session store', () => {
     );
   });
 
+  it('validates only the requested session on point reads', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock([
+        '2026-06-04T00:00:00.000Z',
+        '2026-06-04T00:01:00.000Z'
+      ])
+    });
+    const alpha = await store.createSession({ sessionId: 'alpha' });
+    await store.createSession({ sessionId: 'beta' });
+    const betaPaths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'beta'
+    });
+
+    await rm(betaPaths.sessionRoot, { recursive: true, force: true });
+
+    await expect(store.readSession('alpha')).resolves.toEqual(alpha);
+    expect(
+      assertLocalRuntimeSessionReadable({ storeRoot, sessionId: 'alpha' })
+    ).toEqual(alpha);
+    await expectStorageErrorCode(
+      async () => await store.listSessions(),
+      'missing_file'
+    );
+  });
+
+  it('ignores malformed unrelated catalog metadata on a point read', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+    });
+    const alpha = await store.createSession({ sessionId: 'alpha' });
+
+    await writeFile(
+      store.layout.sessionCatalogPath,
+      `${JSON.stringify(alpha)}\n${JSON.stringify({
+        sessionId: 'unrelated',
+        createdAt: false,
+        updatedAt: false
+      })}\n`,
+      'utf8'
+    );
+
+    await expect(store.readSession('alpha')).resolves.toEqual(alpha);
+    await expectStorageErrorCode(
+      async () => await store.listSessions(),
+      'malformed_record'
+    );
+  });
+
   it('rehydrates persisted visible conversation messages in order through the CT-02 reader seam', async () => {
     const storeRoot = await createTempStoreRoot();
     const logStore = createRuntimeLogStore();
@@ -380,6 +433,26 @@ describe('local runtime session store', () => {
     );
   });
 
+  it('rejects interior blank session catalog records', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+    });
+    const alpha = await store.createSession({ sessionId: 'alpha' });
+
+    await writeFile(
+      store.layout.sessionCatalogPath,
+      `${JSON.stringify(alpha)}\n\n`,
+      'utf8'
+    );
+
+    await expectStorageErrorCode(
+      async () => await store.readSession('alpha'),
+      'malformed_record'
+    );
+  });
+
   it('fails non-canonical session IDs in stored catalog records', async () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
@@ -402,10 +475,6 @@ describe('local runtime session store', () => {
 
     await expectStorageErrorCode(
       async () => await store.listSessions(),
-      'malformed_record'
-    );
-    await expectStorageErrorCode(
-      async () => await store.readSession('alpha'),
       'malformed_record'
     );
 

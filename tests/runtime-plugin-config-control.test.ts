@@ -8,6 +8,7 @@ import {
   createProject02RuntimeConfigFingerprint,
   defaultRuntimeConfigPath,
   inspectRuntimePluginConfig,
+  prepareRuntimePluginConfigControlOperation,
   RuntimeConfigConflictError,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
@@ -470,6 +471,48 @@ describe('runtime plugin config control', () => {
       })
     ).toThrow(RuntimeConfigConflictError);
     expect(readConfigFile(fixture.configPath)).toEqual(committed.config);
+  });
+
+  it('prepares the committed fingerprint without writing config', () => {
+    const fixture = createSeededControlFixture();
+    const originalConfigText = readFileSync(fixture.configPath, 'utf8');
+    const expectedConfig: Project02RuntimeConfig = {
+      ...fixture.config,
+      plugins: {
+        ...fixture.config.plugins,
+        [fixturePluginId]: {
+          ...fixture.config.plugins?.[fixturePluginId],
+          config: {
+            ...fixture.config.plugins?.[fixturePluginId]?.config,
+            label: 'prepared'
+          }
+        }
+      }
+    };
+    const options = {
+      configPath: fixture.configPath,
+      env: {},
+      manifest: fixture.manifest,
+      actor: 'agent' as const,
+      expectedFingerprint: fixture.fingerprint,
+      operation: {
+        kind: 'set' as const,
+        fieldName: 'label',
+        value: 'prepared'
+      }
+    };
+
+    const prepared = prepareRuntimePluginConfigControlOperation(options);
+
+    expect(prepared.resultFingerprint).toBe(
+      createProject02RuntimeConfigFingerprint(expectedConfig)
+    );
+    expect(readFileSync(fixture.configPath, 'utf8')).toBe(originalConfigText);
+
+    const committed = applyRuntimePluginConfigControlOperation(options);
+
+    expect(committed.fingerprint).toBe(prepared.resultFingerprint);
+    expect(committed.config).toEqual(expectedConfig);
   });
 
   it('bootstraps a missing config through the same inspected fingerprint', () => {

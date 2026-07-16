@@ -238,19 +238,21 @@
       constrain host services and model exposure, not direct Node capabilities.
     </p>
 
-    <h2>Compatibility and future import</h2>
+    <h2>Pre-release compatibility and future import</h2>
 
     <p>
-      <code>project02.runtime_config.v1</code> remains readable. It is normalized to v2 in
-      memory with a warning, and the next successful mutation writes the canonical v2 document.
-      Legacy CLI paths remain aliases while <code>project02.*</code> is canonical.
+      Runtime config accepts only <code>project02.config.v2</code>. Project02 is private and
+      untagged, and no deployed v1 config or real v1 user was identified before the audit-remediation
+      cleanup, so the speculative v1 reader and migration-on-write path were deleted. Host fields use
+      only canonical <code>project02.*</code> CLI paths; flat host-field aliases were deleted with
+      their compatibility tests.
     </p>
 
     <p>
       Runtime plugin management uses an explicit pre-release clean break: the former discovery and
       config plugin IDs and their short tool names have no aliases or migration adapter. The only
       supported plugin ID is <code>runtime.plugin</code>, with the three exact tool names documented
-      above. This naming break does not change the authored config-document migration described here.
+      above. Both the runtime-plugin naming break and the config contract are pre-release clean breaks.
     </p>
 
     <p>

@@ -19,6 +19,8 @@ import {
   unlink
 } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { isNodeErrorWithCode } from '../../shared/node-error.ts';
+import { processIsAlive } from '../../shared/process-liveness.ts';
 
 export type AtomicReplaceFileOptions = {
   readonly targetPath: string;
@@ -31,7 +33,7 @@ export async function atomicReplaceFile(
   options: AtomicReplaceFileOptions
 ): Promise<void> {
   const targetDirectory = dirname(options.targetPath);
-  const temporaryPath = temporaryReplacementPath(options.targetPath);
+  const temporaryPath = createAtomicReplacementPath(options.targetPath);
   const mode = options.mode ?? 0o600;
   let temporaryFileExists = false;
 
@@ -64,7 +66,7 @@ export async function atomicReplaceFile(
 
 export function atomicReplaceFileSync(options: AtomicReplaceFileOptions): void {
   const targetDirectory = dirname(options.targetPath);
-  const temporaryPath = temporaryReplacementPath(options.targetPath);
+  const temporaryPath = createAtomicReplacementPath(options.targetPath);
   const mode = options.mode ?? 0o600;
   let temporaryFileExists = false;
   let fileDescriptor: number | undefined;
@@ -108,7 +110,6 @@ export function cleanupAbandonedAtomicReplacementFilesSync(
   targetPath: string
 ): void {
   const targetDirectory = dirname(targetPath);
-  const prefix = `.${basename(targetPath)}.`;
   let entries: Dirent[];
 
   try {
@@ -122,12 +123,10 @@ export function cleanupAbandonedAtomicReplacementFilesSync(
   }
 
   for (const entry of entries) {
-    const ownerPid = atomicReplacementOwnerPid({ name: entry.name, prefix });
-
     if (
       !entry.isFile() ||
-      ownerPid === undefined ||
-      processIsAlive(ownerPid)
+      !atomicReplacementFileBelongsToTarget(entry.name, targetPath) ||
+      !isAbandonedAtomicReplacementFile(entry.name)
     ) {
       continue;
     }
@@ -142,7 +141,7 @@ export function cleanupAbandonedAtomicReplacementFilesSync(
   }
 }
 
-function temporaryReplacementPath(targetPath: string): string {
+function createAtomicReplacementPath(targetPath: string): string {
   const targetDirectory = dirname(targetPath);
 
   return join(
@@ -151,39 +150,39 @@ function temporaryReplacementPath(targetPath: string): string {
   );
 }
 
-function atomicReplacementOwnerPid(options: {
-  readonly name: string;
-  readonly prefix: string;
-}): number | undefined {
-  if (!options.name.startsWith(options.prefix)) {
-    return undefined;
-  }
+type AtomicReplacementFileIdentity = {
+  readonly targetName: string;
+  readonly ownerPid: number;
+};
 
-  const suffix = options.name.slice(options.prefix.length);
-  const match = /^(\d+)\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/iu.exec(
-    suffix
+export function parseAtomicReplacementFileName(
+  fileName: string
+): AtomicReplacementFileIdentity | undefined {
+  const match = /^\.(.+)\.(\d+)\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/iu.exec(
+    fileName
   );
-  const pid = match?.[1] === undefined ? Number.NaN : Number(match[1]);
+  const targetName = match?.[1];
+  const ownerPid = match?.[2] === undefined ? Number.NaN : Number(match[2]);
 
-  return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+  return targetName !== undefined &&
+    targetName.length > 0 &&
+    Number.isSafeInteger(ownerPid) &&
+    ownerPid > 0
+    ? Object.freeze({ targetName, ownerPid })
+    : undefined;
 }
 
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: unknown) {
-    return !isNodeErrorWithCode(error, 'ESRCH');
-  }
+export function atomicReplacementFileBelongsToTarget(
+  fileName: string,
+  targetPath: string
+): boolean {
+  return parseAtomicReplacementFileName(fileName)?.targetName === basename(targetPath);
 }
 
-function isNodeErrorWithCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === code
-  );
+export function isAbandonedAtomicReplacementFile(fileName: string): boolean {
+  const identity = parseAtomicReplacementFileName(fileName);
+
+  return identity !== undefined && !processIsAlive(identity.ownerPid);
 }
 
 async function chmodIfSupported(path: string, mode: number): Promise<void> {

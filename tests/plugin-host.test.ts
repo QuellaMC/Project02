@@ -4,7 +4,7 @@ import {
   createRuntimePluginAfterTurnCommittedContext
 } from '../src/plugins/types.ts';
 import {
-  defaultRuntimePluginCatalogFactoryDefinitions,
+  defaultRuntimePluginHostServiceCatalogEntries,
   hostFirstPartyRuntimePluginIds
 } from '../src/plugins/catalog.ts';
 import {
@@ -12,7 +12,7 @@ import {
   runtimePluginId,
   runtimePluginListToolName
 } from '../src/plugins/contract.ts';
-import { createDefaultProject02PluginHost } from '../src/plugins/default-host.ts';
+import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
 import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   visibleReplyModelToolName
@@ -60,7 +60,6 @@ describe('runtime plugin host catalog and routing', () => {
 
     expect(host.enabledPluginIds()).toEqual([]);
     expect(host.pluginToolDefinitions()).toEqual([]);
-    expect(host.resolveToolPluginId(runtimePluginListToolName)).toBeUndefined();
   });
 
   it('rejects caller-supplied host-scoped plugin instances', () => {
@@ -68,7 +67,8 @@ describe('runtime plugin host catalog and routing', () => {
       hostStateForTurn: () => ({
         plugins: Object.freeze([]),
         enabledPlugins: Object.freeze([]),
-        accessByPluginId: Object.freeze({})
+        accessByPluginId: Object.freeze({}),
+        confirmationAvailable: false
       })
     });
 
@@ -81,8 +81,8 @@ describe('runtime plugin host catalog and routing', () => {
     );
   });
 
-  it('keeps ordinary bundled plugins outside the bootstrap service catalog', () => {
-    const catalog = defaultRuntimePluginCatalogFactoryDefinitions();
+  it('keeps real bootstrap constructors separate from ordinary package loaders', () => {
+    const catalog = defaultRuntimePluginHostServiceCatalogEntries();
 
     expect([...hostFirstPartyRuntimePluginIds]).toEqual([
       runtimePluginId,
@@ -94,6 +94,21 @@ describe('runtime plugin host catalog and routing', () => {
         runtimePluginId,
         firstPartyModelToolsPluginId
       ].sort((left, right) => left.localeCompare(right))
+    );
+    expect(Object.values(catalog)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          catalogKind: 'host_service'
+        })
+      ])
+    );
+    expect(
+      Object.values(catalog).every(
+        (entry) => typeof entry.bootstrap === 'function'
+      )
+    ).toBe(true);
+    expect(Object.values(catalog).every((entry) => !('create' in entry))).toBe(
+      true
     );
   });
 
@@ -299,7 +314,6 @@ describe('runtime plugin host catalog and routing', () => {
         maxCalls: 1
       }
     });
-    expect(host.resolveToolPluginId(visibleReplyModelToolName)).toBeUndefined();
     expect(characterStatePatch).toMatchObject({
       pluginId: characterStatePluginId,
       validationOwner: 'plugin_host',
@@ -308,9 +322,6 @@ describe('runtime plugin host catalog and routing', () => {
         maxCalls: 1
       }
     });
-    expect(host.resolveToolPluginId(characterStatePatchModelToolName)).toBe(
-      characterStatePluginId
-    );
   });
 
   it('lists enabled plugins by default and includes disabled plugins for all scope', async () => {
@@ -382,6 +393,44 @@ describe('runtime plugin host catalog and routing', () => {
         })
       ])
     );
+  });
+
+  it('lists cold installed manifests without activation metadata as disabled', async () => {
+    const coldPlugin = createMemorySearchPlugin('memory.cold.fixture');
+    const host = createRuntimePluginHost({
+      pluginInventoryState: {
+        pluginManifests: [coldPlugin.manifest]
+      }
+    });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
+        input: { scope: 'all' }
+      },
+      testPluginContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected runtime.plugin.list scope=all to be accepted.');
+    }
+
+    expect(
+      pluginDiscoveryPluginSummaries(result.output).find(
+        (summary) => summary['id'] === coldPlugin.manifest.id
+      )
+    ).toMatchObject({
+      id: coldPlugin.manifest.id,
+      enabled: false,
+      availableForTurn: false,
+      activationStatus: 'disabled',
+      grantedAccess: {},
+      registeredLifecycleHooks: [],
+      providedTools: []
+    });
   });
 
   it('preserves plugin and per-plugin tool truncation bounds', async () => {
@@ -539,14 +588,13 @@ describe('runtime plugin host catalog and routing', () => {
     ).toThrow(/provided tool "memory\.search" is declared more than once/iu);
   });
 
-  it('does not resolve tool-provider-only plugin tools as routable', () => {
+  it('does not expose tool-provider-only plugin tools as routable', () => {
     const plugin = createMemorySearchToolProviderOnlyPlugin();
     const host = createExplicitlyEnabledRuntimePluginHost({ plugins: [plugin] });
 
     expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
       'memory.search'
     );
-    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
   });
 
   it('does not expose tools when the plugin manifest requires confirmation', async () => {
@@ -556,7 +604,6 @@ describe('runtime plugin host catalog and routing', () => {
     expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
       'memory.search'
     );
-    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
 
     const result = await host.handleToolCall(
       {
@@ -669,10 +716,16 @@ describe('runtime plugin host catalog and routing', () => {
   it('blocks fileStore writes attempted after handleToolCall timeout', async () => {
     const continueAfterTimeout = createDeferred<null>();
     const lateWrite = createDeferred<LateFileStoreWriteOutcome>();
+    let hookDeadlineAt: number | undefined;
+    let hookSignal: AbortSignal | undefined;
     const sessionIdentity = {};
     const plugin = createLateFileStoreWritePlugin({
       continueAfterTimeout: continueAfterTimeout.promise,
-      recordLateWriteOutcome: lateWrite.resolve
+      recordLateWriteOutcome: lateWrite.resolve,
+      recordExecutionScope(scope) {
+        hookDeadlineAt = scope.deadlineAt;
+        hookSignal = scope.signal;
+      }
     });
     const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
@@ -695,6 +748,8 @@ describe('runtime plugin host catalog and routing', () => {
       status: 'rejected',
       reason: 'handler_timeout'
     });
+    expect(hookDeadlineAt).toBeTypeOf('number');
+    expect(hookSignal?.aborted).toBe(true);
 
     continueAfterTimeout.resolve(null);
 
@@ -919,7 +974,6 @@ describe('runtime plugin host catalog and routing', () => {
     expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
       'memory.search'
     );
-    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
 
     const discovery = await host.handleToolCall(
       {
@@ -962,7 +1016,6 @@ describe('runtime plugin host catalog and routing', () => {
     expect(host.pluginToolDefinitions().map((tool) => tool.name)).not.toContain(
       'memory.search'
     );
-    expect(host.resolveToolPluginId('memory.search')).toBeUndefined();
 
     const discovery = await host.handleToolCall(
       {

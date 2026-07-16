@@ -8,17 +8,20 @@ export {
   validateRuntimePluginProvidedTool
 } from './manifest-validation.ts';
 export {
-  assertUniqueRuntimePluginIds,
   createRuntimePlugin,
   createRuntimePluginAfterTurnCommittedContext,
   createRuntimePluginContext,
   createRuntimePluginEvidenceSnapshot,
+  createPreparedRuntimePluginConfigEffect,
+  preparedRuntimePluginConfigEffectHasApprovalEvidence,
   createRuntimePluginHealthSnapshot,
   createRuntimePluginListingSnapshot,
   createRuntimePluginRegistrySnapshot,
   createRuntimePluginToolInvocationSnapshot,
+  createRuntimePluginToolCallResultSnapshot,
   createRuntimePluginTurnEvidenceSnapshot
 } from './constructors.ts';
+export { assertUniqueRuntimePluginIds } from './plugin-identity.ts';
 export {
   isRuntimePluginCredentialKey,
   redactRuntimePluginText

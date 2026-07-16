@@ -9,6 +9,9 @@ import {
 } from '../../core/conversation.ts';
 import {
   createRuntimePluginAfterTurnCommittedContext,
+  preparedRuntimePluginConfigEffectHasApprovalEvidence,
+  runtimePluginId,
+  type PreparedRuntimePluginConfigEffect,
   type RuntimePluginContextItem,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginToolCall,
@@ -28,6 +31,7 @@ import type {
   ConversationLogRecord,
   RawEventLogRecord,
   RawEventLogRecordInput,
+  RuntimeLogStore,
   RuntimeTraceEntry,
   RuntimeTraceStepName
 } from '../log.ts';
@@ -44,6 +48,7 @@ import type {
   LocalRuntimeUserMessageCompletedResult,
   RuntimeTurnState
 } from './contracts.ts';
+import { roleModelIOSnapshotSessionId } from './contracts.ts';
 
 type AcceptedRoleModelLoopResult = Extract<
   RoleModelLoopResult,
@@ -134,37 +139,39 @@ export function beginPluginFileStoreTransaction(
     pluginHost.beginFileStoreTransaction !== undefined;
 }
 
-export function preparePluginFileStoreTransaction(
+export async function preparePluginFileStoreTransaction(
   state: RuntimeTurnState
-): void {
+): Promise<void> {
   if (!state.pluginFileStoreTransactionActive) {
     return;
   }
 
-  state.preparedPluginFileStoreTransaction =
+  state.preparedPluginFileStoreTransaction = await
     state.runtimePluginHostForTurn?.prepareFileStoreTransaction?.(
       state.identity
     );
   state.pluginFileStoreTransactionActive = false;
 }
 
-export function rollbackPluginFileStoreTransaction(
+export async function rollbackPluginFileStoreTransaction(
   state: RuntimeTurnState
-): void {
+): Promise<void> {
   if (state.pluginFileStoreTransactionActive) {
     state.runtimePluginHostForTurn?.rollbackFileStoreTransaction?.();
     state.pluginFileStoreTransactionActive = false;
   }
 
-  state.preparedPluginFileStoreTransaction?.discard();
+  await state.preparedPluginFileStoreTransaction?.discard();
   state.preparedPluginFileStoreTransaction = undefined;
 }
 
-function finalizePluginFileStoreTransaction(state: RuntimeTurnState): void {
+async function finalizePluginFileStoreTransaction(
+  state: RuntimeTurnState
+): Promise<void> {
   const prepared = state.preparedPluginFileStoreTransaction;
 
   state.preparedPluginFileStoreTransaction = undefined;
-  prepared?.finalize();
+  await prepared?.finalize();
 }
 
 export async function appendVisibleReplyForDecision(
@@ -228,7 +235,7 @@ async function commitFinalVisibleReply(
 ): Promise<CharacterTurnResult> {
   const commitValidation = createRoleModelCommitValidationSnapshot({
     ...state.identity,
-    sessionId: decisionContextSessionIdFromEvidence(
+    sessionId: roleModelIOSnapshotSessionId(
       optionsForReply.roleModelIOSnapshot
     ),
     result: {
@@ -391,8 +398,15 @@ export async function completeRuntimeTurn(
   options: CompleteRuntimeTurnOptions
 ): Promise<LocalRuntimeUserMessageCompletedResult> {
   const { state } = options;
+  const runtimeConfigEffects = runtimeConfigEffectsForCompletedTurn(options);
 
-  preparePluginFileStoreTransaction(state);
+  assertRuntimeConfigEffectsCanCommit({
+    state,
+    pluginHost: options.pluginHost,
+    effects: runtimeConfigEffects
+  });
+
+  await preparePluginFileStoreTransaction(state);
   const turn = await commitTerminalVisibleReply(options);
   const terminalPluginEvidence = Object.freeze([
     ...options.roleModelPluginEvidence,
@@ -401,14 +415,24 @@ export async function completeRuntimeTurn(
   const terminalAppend = appendCompletedTerminalRawEvent({
     ...options,
     terminalPluginEvidence,
+    runtimeConfigEffects,
     turn
   });
-  const durability = finalizeCompletedDurability(
+  const durability = await finalizeCompletedDurability(
     state,
     terminalAppend.terminalAppendFailure
   );
+  const configEffectEvidence = reconcileCompletedRuntimeConfigEffects({
+    pluginHost: options.pluginHost,
+    effects: runtimeConfigEffects,
+    postCommitFailures: durability.postCommitFailures
+  });
 
-  await recordAfterTurnCommitted(options, durability.postCommitFailures);
+  await recordAfterTurnCommitted(
+    options,
+    durability.postCommitFailures,
+    configEffectEvidence
+  );
 
   return Object.freeze({
     status: 'completed',
@@ -449,6 +473,7 @@ async function commitTerminalVisibleReply(
 function appendCompletedTerminalRawEvent(
   options: CompleteRuntimeTurnOptions & {
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
+    readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
     readonly turn: CharacterTurnResult | undefined;
   }
 ): {
@@ -471,6 +496,7 @@ function appendCompletedTerminalRawEvent(
 function createTerminalRawEventInput(
   options: CompleteRuntimeTurnOptions & {
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
+    readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
     readonly turn: CharacterTurnResult | undefined;
   }
 ): RawEventLogRecordInput {
@@ -487,6 +513,9 @@ function createTerminalRawEventInput(
     roleModelIOSnapshot: options.roleModelResult.ioSnapshot,
     parsedRoleModelDecisionSnapshot:
       options.roleModelResult.parsedDecisionSnapshot,
+    ...(options.runtimeConfigEffects.length === 0
+      ? {}
+      : { runtimeConfigEffects: options.runtimeConfigEffects }),
     commitValidation: createRoleModelCommitValidationSnapshot({
       ...state.identity,
       sessionId: options.decisionContext.sessionId,
@@ -550,19 +579,19 @@ function recoverCompletedTerminalRawEvent(
   };
 }
 
-function finalizeCompletedDurability(
+async function finalizeCompletedDurability(
   state: RuntimeTurnState,
   terminalAppendFailure: string | undefined
-): {
+): Promise<{
   readonly pluginFileStoreRecoveryPending: boolean;
   readonly postCommitFailures: string[];
-} {
+}> {
   const postCommitFailures =
     terminalAppendFailure === undefined ? [] : [terminalAppendFailure];
   let pluginFileStoreRecoveryPending = false;
 
   try {
-    finalizePluginFileStoreTransaction(state);
+    await finalizePluginFileStoreTransaction(state);
   } catch (error: unknown) {
     pluginFileStoreRecoveryPending = true;
     postCommitFailures.push(runtimePostCommitFailureMessage(error));
@@ -647,9 +676,16 @@ function restoreTerminalTraceEntry(
 
 async function recordAfterTurnCommitted(
   options: CompleteRuntimeTurnOptions,
-  postCommitFailures: string[]
+  postCommitFailures: string[],
+  configEffectEvidence: readonly RuntimePluginEvidenceSnapshot[]
 ): Promise<void> {
   const { state } = options;
+  let afterCommitResult:
+    | {
+        readonly status: 'completed' | 'completed_with_failures';
+        readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
+      }
+    | undefined;
 
   try {
     const afterCommitPluginContext =
@@ -663,27 +699,262 @@ async function recordAfterTurnCommitted(
           state.options.committedAt ?? state.options.event.createdAt,
         visibleMessages: state.committedVisibleMessages
       });
-    const afterCommitResult = await options.pluginHost.afterTurnCommitted(
+    afterCommitResult = await options.pluginHost.afterTurnCommitted(
       afterCommitPluginContext
     );
-
-    if (shouldRecordAfterTurnCommittedEvent(afterCommitResult)) {
-      appendRawEvent(state, {
-        ...state.identity,
-        kind: 'after_turn_committed',
-        eventType: state.event.type,
-        status: afterCommitResult.status,
-        ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
-        toolCallIds: Object.freeze([...state.finishedToolCallIds]),
-        payloadSummary: state.payloadSummary,
-        ...runtimePluginEvidenceOption(afterCommitResult.evidence)
-      });
-    }
   } catch (error: unknown) {
     // The completed turn is already durable; follow-up work cannot change the
     // terminal decision or append a contradictory rejection.
     postCommitFailures.push(runtimePostCommitFailureMessage(error));
   }
+
+  const evidence = Object.freeze([
+    ...(afterCommitResult?.evidence ?? []),
+    ...configEffectEvidence
+  ]);
+  const status =
+    afterCommitResult?.status ??
+    (configEffectEvidence.length === 0
+      ? undefined
+      : 'completed_with_failures');
+
+  if (
+    status === undefined ||
+    !shouldRecordAfterTurnCommittedEvent({ status, evidence })
+  ) {
+    return;
+  }
+
+  try {
+    appendRawEvent(state, {
+      ...state.identity,
+      kind: 'after_turn_committed',
+      eventType: state.event.type,
+      status,
+      ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
+      toolCallIds: Object.freeze([...state.finishedToolCallIds]),
+      payloadSummary: state.payloadSummary,
+      ...runtimePluginEvidenceOption(evidence)
+    });
+  } catch (error: unknown) {
+    postCommitFailures.push(runtimePostCommitFailureMessage(error));
+  }
+}
+
+export function recoverPendingRuntimeConfigEffects(options: {
+  readonly logStore: RuntimeLogStore;
+  readonly pluginHost: RuntimePluginHost;
+}): void {
+  if (options.logStore.localRuntimeSessionPaths === undefined) {
+    return;
+  }
+
+  const rawEvents = options.logStore.readSessionEvidence().stored.rawEvents;
+  const reconciledEffectIds = reconciledRuntimeConfigEffectIds(rawEvents);
+
+  for (const terminal of rawEvents) {
+    if (terminal.kind !== 'runtime_turn_completed') {
+      continue;
+    }
+
+    for (const effect of terminal.runtimeConfigEffects ?? []) {
+      if (reconciledEffectIds.has(effect.effectId)) {
+        continue;
+      }
+
+      const evidence = reconcileRuntimeConfigEffect({
+        pluginHost: options.pluginHost,
+        effect
+      });
+
+      options.logStore.appendRawEvent({
+        eventId: terminal.eventId,
+        traceId: terminal.traceId,
+        createdAt: terminal.createdAt,
+        kind: 'after_turn_committed',
+        eventType: terminal.eventType,
+        status: 'completed',
+        ...(terminal.visibleMessageIds === undefined
+          ? {}
+          : { visibleMessageIds: terminal.visibleMessageIds }),
+        ...(terminal.toolCallIds === undefined
+          ? {}
+          : { toolCallIds: terminal.toolCallIds }),
+        ...(terminal.payloadSummary === undefined
+          ? {}
+          : { payloadSummary: terminal.payloadSummary }),
+        ...runtimePluginEvidenceOption([evidence])
+      });
+      reconciledEffectIds.add(effect.effectId);
+    }
+  }
+}
+
+function runtimeConfigEffectsForCompletedTurn(
+  options: CompleteRuntimeTurnOptions
+): readonly PreparedRuntimePluginConfigEffect[] {
+  const effects = options.roleModelResult.pluginToolResults.flatMap(
+    (routing) => {
+      const effect = options.state.preparedConfigEffectsByToolCallId.get(
+        routing.callId
+      );
+
+      return routing.result.status === 'accepted' && effect !== undefined
+        ? [effect]
+        : [];
+    }
+  );
+
+  if (effects.length !== options.state.preparedConfigEffectsByToolCallId.size) {
+    throw new Error(
+      'Prepared runtime config effects do not match accepted role-model tool results.'
+    );
+  }
+
+  return Object.freeze(effects);
+}
+
+function assertRuntimeConfigEffectsCanCommit(options: {
+  readonly state: RuntimeTurnState;
+  readonly pluginHost: RuntimePluginHost;
+  readonly effects: readonly PreparedRuntimePluginConfigEffect[];
+}): void {
+  if (options.effects.length === 0) {
+    return;
+  }
+
+  if (options.state.options.logStore.localRuntimeSessionPaths === undefined) {
+    throw new Error(
+      'Approved runtime config effects require durable local session evidence.'
+    );
+  }
+
+  if (options.pluginHost.reconcileConfigEffect === undefined) {
+    throw new Error(
+      'Approved runtime config effects require host reconciliation support.'
+    );
+  }
+
+  const effectIds = new Set<string>();
+
+  for (const effect of options.effects) {
+    const approval = options.state.finishedPluginToolResults.find(
+      (routing) => routing.callId === effect.effectId
+    );
+
+    if (
+      approval === undefined ||
+      !preparedRuntimePluginConfigEffectHasApprovalEvidence({
+        effect,
+        eventIdentity: approval.call,
+        inputIdentity: approval.call,
+        inputPluginId: approval.call.pluginId,
+        inputToolName: approval.call.toolName,
+        toolCallId: approval.callId,
+        dispatchedToHost: approval.dispatchedToHost,
+        pluginId: approval.call.pluginId,
+        toolName: approval.call.toolName,
+        result: approval.result
+      })
+    ) {
+      throw new Error(
+        'Prepared runtime config effect is missing its approved config-update tool evidence.'
+      );
+    }
+
+    if (effectIds.has(effect.effectId)) {
+      throw new Error('Prepared runtime config effect id must be unique.');
+    }
+
+    effectIds.add(effect.effectId);
+  }
+}
+
+function reconcileCompletedRuntimeConfigEffects(options: {
+  readonly pluginHost: RuntimePluginHost;
+  readonly effects: readonly PreparedRuntimePluginConfigEffect[];
+  readonly postCommitFailures: string[];
+}): readonly RuntimePluginEvidenceSnapshot[] {
+  const evidence: RuntimePluginEvidenceSnapshot[] = [];
+
+  for (const effect of options.effects) {
+    try {
+      evidence.push(
+        reconcileRuntimeConfigEffect({
+          pluginHost: options.pluginHost,
+          effect
+        })
+      );
+    } catch (error: unknown) {
+      options.postCommitFailures.push(runtimePostCommitFailureMessage(error));
+    }
+  }
+
+  return Object.freeze(evidence);
+}
+
+function reconcileRuntimeConfigEffect(options: {
+  readonly pluginHost: RuntimePluginHost;
+  readonly effect: PreparedRuntimePluginConfigEffect;
+}): RuntimePluginEvidenceSnapshot {
+  if (options.pluginHost.reconcileConfigEffect === undefined) {
+    throw new Error(
+      'Pending runtime config effect requires host reconciliation support.'
+    );
+  }
+
+  const evidence = options.pluginHost.reconcileConfigEffect(options.effect);
+  const referencesEffect = evidence.sourceReferences?.some(
+    (reference) =>
+      reference.kind === 'runtime' &&
+      reference.id === options.effect.effectId
+  );
+
+  if (
+    evidence.pluginId !== runtimePluginId ||
+    evidence.evidenceKind !== 'after_turn_committed' ||
+    evidence.status !== 'accepted' ||
+    evidence.eventId !== options.effect.eventId ||
+    evidence.traceId !== options.effect.traceId ||
+    evidence.createdAt !== options.effect.createdAt ||
+    referencesEffect !== true
+  ) {
+    throw new Error(
+      'Runtime config reconciliation returned invalid commit evidence.'
+    );
+  }
+
+  return evidence;
+}
+
+function reconciledRuntimeConfigEffectIds(
+  rawEvents: readonly RawEventLogRecord[]
+): Set<string> {
+  const effectIds = new Set<string>();
+
+  for (const rawEvent of rawEvents) {
+    if (rawEvent.kind !== 'after_turn_committed') {
+      continue;
+    }
+
+    for (const evidence of rawEvent.runtimePluginEvidence ?? []) {
+      if (
+        evidence.pluginId !== runtimePluginId ||
+        evidence.evidenceKind !== 'after_turn_committed' ||
+        evidence.status !== 'accepted'
+      ) {
+        continue;
+      }
+
+      for (const reference of evidence.sourceReferences ?? []) {
+        if (reference.kind === 'runtime') {
+          effectIds.add(reference.id);
+        }
+      }
+    }
+  }
+
+  return effectIds;
 }
 
 export function visibleMessageIdsForTurnOption(
@@ -742,12 +1013,6 @@ function runtimePostCommitFailureMessage(error: unknown): string {
   }
 
   return 'Runtime post-commit work failed.';
-}
-
-function decisionContextSessionIdFromEvidence(
-  snapshot: RoleModelIOSnapshot
-): string {
-  return snapshot.inputEnvelope.decisionContext.sessionId;
 }
 
 function createFixedReplyAgent(replyText: string): CharacterAgent {

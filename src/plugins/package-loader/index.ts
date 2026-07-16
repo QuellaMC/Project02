@@ -18,9 +18,8 @@ import {
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type {
-  RuntimePluginFactoryDefinition,
-  RuntimePluginFactoryFunction,
-  RuntimePluginFactoryInput
+  RuntimePluginFactoryInput,
+  RuntimePluginPackageCatalogEntry
 } from '../factory.ts';
 import { createRuntimePlugin } from '../constructors.ts';
 import { createRuntimePluginManifest } from '../manifest-validation.ts';
@@ -32,6 +31,7 @@ import type {
 import {
   createJsonBoundarySnapshot
 } from '../../shared/json-boundary.ts';
+import { canonicalJsonValuesEqual } from '../../shared/canonical-json.ts';
 
 export const runtimePluginPackageDescriptorFormat =
   'project02.plugin.v1';
@@ -59,10 +59,8 @@ export type RuntimePluginPackageDiagnostic = {
   readonly claimedPluginId?: string;
 };
 
-export type DiscoveredRuntimePluginPackage = {
-  readonly manifest: RuntimePluginManifest;
+export type DiscoveredRuntimePluginPackage = RuntimePluginPackageCatalogEntry & {
   readonly provenance: RuntimePluginPackageProvenance;
-  readonly factory: RuntimePluginFactoryDefinition<RuntimePluginFactoryFunction>;
 };
 
 export type RuntimePluginPackageDiscovery = {
@@ -167,6 +165,39 @@ function discoverRuntimePluginPackage(options: {
   readonly packageRoot: string;
   readonly provenance: RuntimePluginPackageProvenance;
 }): DiscoveredRuntimePluginPackageCandidate {
+  const descriptor = readRuntimePluginPackageDescriptor(options);
+  const entryPath = resolveRuntimePluginPackageEntryPath({
+    packageRoot: options.packageRoot,
+    entry: descriptor.entry,
+    descriptorPath: descriptor.descriptorPath,
+    provenance: options.provenance,
+    pluginId: descriptor.manifest.id
+  });
+
+  return Object.freeze({
+    package: Object.freeze({
+      catalogKind: 'package',
+      manifest: descriptor.manifest,
+      provenance: options.provenance,
+      load: (input) =>
+        loadRuntimePluginPackage({
+          entryPath,
+          manifest: descriptor.manifest,
+          input
+        })
+    } satisfies DiscoveredRuntimePluginPackage),
+    descriptorPath: descriptor.descriptorPath
+  } satisfies DiscoveredRuntimePluginPackageCandidate);
+}
+
+function readRuntimePluginPackageDescriptor(options: {
+  readonly packageRoot: string;
+  readonly provenance: RuntimePluginPackageProvenance;
+}): {
+  readonly descriptorPath: string;
+  readonly entry: string;
+  readonly manifest: RuntimePluginManifest;
+} {
   const packageJsonPath = join(options.packageRoot, 'package.json');
   const pluginId = basename(options.packageRoot);
   const packageJson = parsePackageJsonFile({
@@ -288,8 +319,18 @@ function discoverRuntimePluginPackage(options: {
     });
   }
 
+  return Object.freeze({ descriptorPath, entry, manifest });
+}
+
+function resolveRuntimePluginPackageEntryPath(options: {
+  readonly packageRoot: string;
+  readonly entry: string;
+  readonly descriptorPath: string;
+  readonly provenance: RuntimePluginPackageProvenance;
+  readonly pluginId: string;
+}): string {
   const packageRoot = resolve(options.packageRoot);
-  const unresolvedEntryPath = resolve(packageRoot, entry);
+  const unresolvedEntryPath = resolve(packageRoot, options.entry);
   const relativeEntryPath = relative(packageRoot, unresolvedEntryPath);
 
   if (
@@ -302,9 +343,9 @@ function discoverRuntimePluginPackage(options: {
       code: 'invalid_entry',
       message:
         'Runtime plugin package entry must stay inside its package directory.',
-      path: descriptorPath,
+      path: options.descriptorPath,
       provenance: options.provenance,
-      pluginId
+      pluginId: options.pluginId
     });
   }
   try {
@@ -313,9 +354,9 @@ function discoverRuntimePluginPackage(options: {
         code: 'invalid_entry',
         message:
           'Runtime plugin package entry must not be a symbolic link.',
-        path: descriptorPath,
+        path: options.descriptorPath,
         provenance: options.provenance,
-        pluginId
+        pluginId: options.pluginId
       });
     }
     if (!statSync(unresolvedEntryPath).isFile()) {
@@ -330,9 +371,9 @@ function discoverRuntimePluginPackage(options: {
       code: 'invalid_entry',
       message:
         'Runtime plugin package entry must reference an existing file.',
-      path: descriptorPath,
+      path: options.descriptorPath,
       provenance: options.provenance,
-      pluginId
+      pluginId: options.pluginId
     });
   }
 
@@ -349,24 +390,13 @@ function discoverRuntimePluginPackage(options: {
       code: 'invalid_entry',
       message:
         'Runtime plugin package entry must stay inside its package directory.',
-      path: descriptorPath,
+      path: options.descriptorPath,
       provenance: options.provenance,
-      pluginId
+      pluginId: options.pluginId
     });
   }
-  const factory = Object.freeze({
-    manifest,
-    create: (input) => loadRuntimePluginPackage({ entryPath, manifest, input })
-  } satisfies RuntimePluginFactoryDefinition<RuntimePluginFactoryFunction>);
 
-  return Object.freeze({
-    package: Object.freeze({
-      manifest,
-      provenance: options.provenance,
-      factory
-    } satisfies DiscoveredRuntimePluginPackage),
-    descriptorPath
-  } satisfies DiscoveredRuntimePluginPackageCandidate);
+  return entryPath;
 }
 
 function applyPackageIdentityPolicy(options: {
@@ -461,7 +491,7 @@ async function loadRuntimePluginPackage(options: {
 }): Promise<RuntimePlugin> {
   if (
     options.input.pluginId !== options.manifest.id ||
-    JSON.stringify(options.input.manifest) !== JSON.stringify(options.manifest)
+    !canonicalJsonValuesEqual(options.input.manifest, options.manifest)
   ) {
     throw new TypeError(
       `Runtime plugin package factory input does not match "${options.manifest.id}".`
@@ -536,7 +566,7 @@ async function loadRuntimePluginPackage(options: {
     );
   }
 
-  if (JSON.stringify(plugin.manifest) !== JSON.stringify(options.manifest)) {
+  if (!canonicalJsonValuesEqual(plugin.manifest, options.manifest)) {
     throw new TypeError(
       `Runtime plugin package "${options.manifest.id}" factory returned a different manifest.`
     );

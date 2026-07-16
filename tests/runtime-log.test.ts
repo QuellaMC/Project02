@@ -68,17 +68,42 @@ describe('runtime log store', () => {
     const payloadSummary = {
       normalizedCurrentUserMessage: 'hello'
     };
+    const normalized: RawEventLogRecordInput = {
+      ...identity,
+      kind: 'runtime_event_normalized',
+      eventType: 'USER_MESSAGE',
+      payloadSummary
+    };
     const completed: RawEventLogRecordInput = {
       ...identity,
       kind: 'runtime_turn_completed',
       eventType: 'USER_MESSAGE',
       status: 'completed',
       visibleMessageIds,
-      payloadSummary,
       runtimePluginTurnEvidence: createMinimalPluginTurnEvidence(identity)
     };
 
+    store.appendTrace({ ...identity, step: 'runtime_event_received' });
     const receivedRecord = store.appendRawEvent(received);
+    const normalizedRecord = store.appendRawEvent(normalized);
+    store.appendConversationMessage({
+      ...identity,
+      id: 'local-session:message-1',
+      role: 'user',
+      speakerId: 'local-user',
+      speakerName: 'You',
+      text: 'hello',
+      committedAt: '2026-06-04T00:00:01.000Z'
+    });
+    store.appendConversationMessage({
+      ...identity,
+      id: 'local-session:message-2',
+      role: 'character',
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: 'hello back',
+      committedAt: '2026-06-04T00:00:02.000Z'
+    });
     const appended = store.appendRawEvent(completed);
 
     visibleMessageIds.push('local-session:message-3');
@@ -88,9 +113,6 @@ describe('runtime log store', () => {
     expect(appended).toEqual({
       ...completed,
       visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
-      payloadSummary: {
-        normalizedCurrentUserMessage: 'hello'
-      },
       runtimePluginTurnEvidence: {
         ...createMinimalPluginTurnEvidence(identity),
         evidence: [
@@ -107,17 +129,34 @@ describe('runtime log store', () => {
         ]
       }
     });
+    expect(normalizedRecord.payloadSummary).toEqual({
+      normalizedCurrentUserMessage: 'hello'
+    });
     expect(Object.isFrozen(appended)).toBe(true);
     expect(Object.isFrozen(appended.visibleMessageIds)).toBe(true);
-    expect(Object.isFrozen(appended.payloadSummary)).toBe(true);
-    expect(store.rawEvents()).toEqual([receivedRecord, appended]);
+    expect(Object.isFrozen(normalizedRecord.payloadSummary)).toBe(true);
+    expect(store.rawEvents()).toEqual([
+      receivedRecord,
+      normalizedRecord,
+      appended
+    ]);
   });
 
   it('deeply snapshots tool input and result evidence before storing it', () => {
     const store = createRuntimeLogStore();
     const nestedInput = { query: 'before' };
     const nestedOutput = { answer: 'before' };
-    const record: RawEventLogRecordInput = {
+    const started: RawEventLogRecordInput = {
+      ...identity,
+      kind: 'tool_call_started',
+      eventType: 'USER_MESSAGE',
+      toolCallId: 'call_snapshot_001',
+      toolRound: 1,
+      toolName: 'memory.search',
+      toolPluginId: 'memory.fixture',
+      toolInput: { nested: nestedInput }
+    };
+    const finished: RawEventLogRecordInput = {
       ...identity,
       kind: 'tool_call_finished',
       eventType: 'USER_MESSAGE',
@@ -127,7 +166,6 @@ describe('runtime log store', () => {
       toolName: 'memory.search',
       toolPluginId: 'memory.fixture',
       dispatchedToHost: true,
-      toolInput: { nested: nestedInput },
       toolResult: {
         status: 'accepted',
         output: { nested: nestedOutput },
@@ -135,21 +173,28 @@ describe('runtime log store', () => {
       }
     };
 
-    const stored = store.appendRawEvent(record);
+    store.appendTrace({ ...identity, step: 'runtime_event_received' });
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE'
+    });
+    const storedStart = store.appendRawEvent(started);
+    const storedFinish = store.appendRawEvent(finished);
 
     nestedInput.query = 'after';
     nestedOutput.answer = 'after';
 
-    expect(stored.toolInput).toEqual({ nested: { query: 'before' } });
-    expect(stored.toolResult).toEqual({
+    expect(storedStart.toolInput).toEqual({ nested: { query: 'before' } });
+    expect(storedFinish.toolResult).toEqual({
       status: 'accepted',
       output: { nested: { answer: 'before' } },
       evidence: []
     });
-    expect(Object.isFrozen(stored.toolInput?.['nested'])).toBe(true);
+    expect(Object.isFrozen(storedStart.toolInput?.['nested'])).toBe(true);
     expect(
-      stored.toolResult?.status === 'accepted' &&
-        Object.isFrozen(stored.toolResult.output)
+      storedFinish.toolResult?.status === 'accepted' &&
+        Object.isFrozen(storedFinish.toolResult.output)
     ).toBe(true);
   });
 
@@ -174,12 +219,25 @@ describe('runtime log store', () => {
       committedAt: '2026-06-04T00:00:02.000Z'
     };
 
+    store.appendTrace({ ...identity, step: 'runtime_event_received' });
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE'
+    });
     store.appendConversationMessage(userMessage);
     store.appendConversationMessage(characterMessage);
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_turn_completed',
+      eventType: 'USER_MESSAGE',
+      status: 'completed',
+      visibleMessageIds: [userMessage.id, characterMessage.id]
+    });
 
     expect(store.conversationMessages()).toEqual([userMessage, characterMessage]);
-    expect(store.traceEntries()).toEqual([]);
-    expect(store.rawEvents()).toEqual([]);
+    expect(store.traceEntries()).toHaveLength(1);
+    expect(store.rawEvents()).toHaveLength(2);
   });
 
   it('records failed raw rejections without adding visible conversation records', () => {
@@ -192,9 +250,15 @@ describe('runtime log store', () => {
       reason: 'Provide exactly one non-empty message.'
     };
 
+    store.appendTrace({ ...identity, step: 'runtime_event_received' });
+    const received = store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE'
+    });
     store.appendRawEvent(rejection);
 
-    expect(store.rawEvents()).toEqual([rejection]);
+    expect(store.rawEvents()).toEqual([received, rejection]);
     expect(store.conversationMessages()).toEqual([]);
   });
 });

@@ -1318,6 +1318,10 @@ export function createPluginHostTestFileStore(options: {
 export function createLateFileStoreWritePlugin(options: {
   readonly continueAfterTimeout: Promise<null>;
   readonly recordLateWriteOutcome: (outcome: LateFileStoreWriteOutcome) => void;
+  readonly recordExecutionScope?: (scope: {
+    readonly deadlineAt: number;
+    readonly signal: AbortSignal;
+  }) => void;
 }): RuntimePlugin {
   const pluginId = 'memory.late-file-store-write.fixture';
   const manifest = memorySearchPluginManifest(pluginId);
@@ -1334,6 +1338,10 @@ export function createLateFileStoreWritePlugin(options: {
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
       async handleToolCall(_call, context) {
+        options.recordExecutionScope?.({
+          deadlineAt: context.deadlineAt,
+          signal: context.signal
+        });
         await options.continueAfterTimeout;
 
         if (context.fileStore === undefined) {

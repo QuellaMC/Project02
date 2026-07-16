@@ -181,8 +181,7 @@ const roleModelVisibleReplyProtocolPromptText =
 
 const roleModelNativeToolProtocolPromptParts = Object.freeze([
   'Use provided function tools when runtime/plugin state is needed.',
-  'Tools are assistant-owned runtime functions, not user commands.',
-  `Tool names are callable functions, not a full plugin inventory; call ${runtimePluginListToolName} for inventory facts.`
+  'Tools are assistant-owned runtime functions, not user commands.'
 ]);
 
 const roleModelNativeParallelToolProtocolPromptParts = Object.freeze([
@@ -422,6 +421,9 @@ function createRoleModelPromptFrames(
       'developer_protocol',
       createProtocolMessage({
         ...options,
+        availableToolNames: inputEnvelope.toolDefinitions.map(
+          (definition) => definition.name
+        ),
         visibleReplyAvailable: inputEnvelope.allowedTools.includes(
           visibleReplyModelToolName
         )
@@ -491,6 +493,7 @@ function createPromptFrame(
 }
 
 function createProtocolMessage(options: {
+  readonly availableToolNames: readonly string[];
   readonly capabilities: RoleModelProviderCapabilities;
   readonly outputMode: 'native_tools' | 'json_fallback';
   readonly visibleReplyAvailable: boolean;
@@ -511,12 +514,20 @@ function createProtocolMessage(options: {
 
 function createRoleModelNativeToolProtocolPromptText(
   options: {
+    readonly availableToolNames: readonly string[];
     readonly capabilities: RoleModelProviderCapabilities;
     readonly visibleReplyAvailable: boolean;
   }
 ): string {
   return [
     ...roleModelNativeToolProtocolPromptParts,
+    ...(options.availableToolNames.includes(runtimePluginListToolName)
+      ? [
+          `Tool names are callable functions, not a full plugin inventory; call ${runtimePluginListToolName} for inventory facts.`
+        ]
+      : [
+          'The provided tool definitions are the complete callable set for this response.'
+        ]),
     ...(options.capabilities.supportsParallelToolCalls
       ? roleModelNativeParallelToolProtocolPromptParts
       : []),

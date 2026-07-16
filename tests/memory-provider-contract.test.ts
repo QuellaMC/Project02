@@ -315,13 +315,23 @@ describe('memory provider runtime plugin helper', () => {
     });
   });
 
-  it('runs provider close on the session-end lifecycle', async () => {
-    const closedSessions: string[] = [];
+  it('ends only the selected provider session on the session-end lifecycle', async () => {
+    const endedSessions: string[] = [];
+    let closeCalls = 0;
+    let closeDeadlineAt: number | undefined;
+    let closeSignal: AbortSignal | undefined;
     const provider: Project02MemoryProvider = {
       id: 'memory.close',
       displayName: 'Close Provider',
-      close() {
-        closedSessions.push('closed');
+      endSession(sessionId) {
+        endedSessions.push(sessionId);
+
+        return Promise.resolve();
+      },
+      close(scope) {
+        closeCalls += 1;
+        closeDeadlineAt = scope.deadlineAt;
+        closeSignal = scope.signal;
 
         return Promise.resolve();
       }
@@ -332,13 +342,21 @@ describe('memory provider runtime plugin helper', () => {
       enabledPluginIds: [plugin.manifest.id]
     });
     const result = await host.onSessionEnd(testContext());
+    const shutdownResult = await host.shutdown(testContext());
+    const repeatedShutdownResult = await host.shutdown(testContext());
     const registeredPlugin = host
       .registrySnapshot()
       .plugins.find((snapshot) => snapshot.manifest.id === 'memory.close');
 
     expect(plugin.manifest.declaredPlugins).toContain('on_session_end');
+    expect(plugin.manifest.declaredPlugins).toContain('on_shutdown');
     expect(registeredPlugin?.registeredLifecycleHooks).toContain('on_session_end');
-    expect(closedSessions).toEqual(['closed']);
+    expect(registeredPlugin?.registeredLifecycleHooks).toContain('on_shutdown');
+    expect(endedSessions).toEqual(['session-memory']);
+    expect(closeCalls).toBe(1);
+    expect(closeDeadlineAt).toBeGreaterThan(Date.now());
+    expect(closeSignal).toBeInstanceOf(AbortSignal);
+    expect(closeSignal?.aborted).toBe(false);
     expect(result).toMatchObject({
       status: 'completed',
       evidence: [
@@ -349,13 +367,28 @@ describe('memory provider runtime plugin helper', () => {
         }
       ]
     });
+    expect(shutdownResult).toMatchObject({
+      status: 'completed',
+      evidence: [
+        {
+          pluginId: 'memory.close',
+          evidenceKind: 'shutdown',
+          status: 'accepted'
+        }
+      ]
+    });
+    expect(repeatedShutdownResult).toBe(shutdownResult);
   });
 
   it('exposes optional search and add tools when methods exist', async () => {
+    let searchDeadlineAt: number | undefined;
+    let searchSignal: AbortSignal | undefined;
     const provider: Project02MemoryProvider = {
       id: 'memory.tools',
       displayName: 'Tool Provider',
-      search() {
+      search(request) {
+        searchDeadlineAt = request.deadlineAt;
+        searchSignal = request.signal;
         return Promise.resolve({
           items: [
             {
@@ -426,6 +459,9 @@ describe('memory provider runtime plugin helper', () => {
         }
       ]
     });
+    expect(searchDeadlineAt).toBeTypeOf('number');
+    expect(searchDeadlineAt).toBeLessThan(Number.MAX_SAFE_INTEGER);
+    expect(searchSignal?.aborted).toBe(false);
 
     const add = await host.handleToolCall(
       {

@@ -50,6 +50,15 @@ describe('root public surface', () => {
     expect(rootBarrel).not.toContain('packages/character-state/plugin');
     expect(chatEntrypoint).not.toContain('runRuntimePluginSessionEndHooks');
   });
+
+  it('declares the root public surface without wildcard exports', () => {
+    const rootBarrel = readFileSync(
+      new URL('../src/index.ts', import.meta.url),
+      'utf8'
+    );
+
+    expect(rootBarrel).not.toMatch(/\bexport\s+\*/u);
+  });
 });
 
 describe('role-model module smoke', () => {

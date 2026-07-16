@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
   createRoleModelInputEnvelope,
   type RoleModelPluginToolDefinition
@@ -12,6 +13,7 @@ import {
   type RoleModelUserChatMessage
 } from '../src/role-model/prompt.ts';
 import { createRuntimePluginContextItem } from '../src/plugins/validation.ts';
+import { runtimePluginListToolName } from '../src/plugins/contract.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
@@ -50,7 +52,8 @@ describe('role-model prompt rendering', () => {
             redactionLabels: []
           })
         ]
-      })
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
     });
     const turnContext = renderRoleModelTurnContext(inputEnvelope);
     const currentUserMessage = turnContext.messages.at(-1) as
@@ -132,7 +135,8 @@ describe('role-model prompt rendering', () => {
             redactionLabels: []
           })
         ]
-      })
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
     });
     const turnContext = renderRoleModelTurnContext(inputEnvelope);
     const trustedText = turnContext.messages
@@ -181,7 +185,8 @@ describe('role-model prompt rendering', () => {
         sessionId: 'session-redacted-plugin-context',
         characterSnapshot: { id: 'mira', displayName: 'Mira' },
         pluginContextItems: [contextItem]
-      })
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
     });
     const serialized = JSON.stringify(renderRoleModelTurnContext(inputEnvelope));
 
@@ -203,7 +208,8 @@ describe('role-model prompt rendering', () => {
           id: 'mira',
           displayName: 'Mira'
         }
-      })
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
     });
     const nativeMessages = renderRoleModelTurnContext(inputEnvelope).messages;
     const fallbackMessages = renderRoleModelTurnContext(inputEnvelope, {
@@ -227,7 +233,8 @@ describe('role-model prompt rendering', () => {
           id: 'mira',
           displayName: 'Mira'
         }
-      })
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
     });
     const rendered = renderRoleModelTurnContext(inputEnvelope);
     const protocol = rendered.frames.find(
@@ -264,7 +271,8 @@ describe('role-model prompt rendering', () => {
           id: 'mira',
           displayName: 'Mira'
         }
-      })
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
     });
     const protocol = renderRoleModelTurnContext(inputEnvelope, {
       capabilities: {
@@ -309,6 +317,42 @@ describe('role-model prompt rendering', () => {
       'Terminal assistant content is non-committed model text and is not shown to the user.'
     );
     expect(protocol).not.toContain('user-visible text as terminal assistant content');
+    expect(protocol).not.toContain(runtimePluginListToolName);
+  });
+
+  it('advertises plugin inventory only when the inventory tool is exposed', () => {
+    const inventoryTool = Object.freeze({
+      pluginId: 'runtime.management.fixture',
+      name: runtimePluginListToolName,
+      description: 'List installed runtime plugins.',
+      requiredForUserTurn: false,
+      callLimit: { scope: 'user_turn', maxCalls: 1 },
+      inputContract: {
+        type: 'object',
+        fields: [],
+        additionalFields: false
+      },
+      validationOwner: 'plugin_host',
+      sideEffectLevel: 'runtime_read',
+      requiresConfirmation: false,
+      sourceReferencesRequired: false
+    } satisfies RoleModelPluginToolDefinition);
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('list plugins', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-role-model-plugin-inventory',
+        characterSnapshot: { id: 'mira', displayName: 'Mira' }
+      }),
+      allowedTools: [runtimePluginListToolName],
+      pluginToolDefinitions: [inventoryTool]
+    });
+    const protocol = renderRoleModelTurnContext(inputEnvelope).frames.find(
+      (frame) => frame.kind === 'developer_protocol'
+    )?.content;
+
+    expect(protocol).toContain(
+      `call ${runtimePluginListToolName} for inventory facts`
+    );
   });
 
   it('renders supported nested JSON Schema unchanged with strict mode', () => {

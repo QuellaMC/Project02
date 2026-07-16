@@ -3,10 +3,14 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  createRuntimePlugin,
   createRuntimePluginContext,
   createRuntimePluginHost,
-  defaultRuntimePluginCatalogFactoryDefinitions,
+  defaultRuntimePluginCatalogManifests,
+  defaultRuntimePluginHostServiceCatalogEntries,
   isRuntimePluginManagementPlugin,
+  preparedRuntimePluginConfigEffectHasApprovalEvidence,
+  reconcilePreparedRuntimePluginConfigEffect,
   runtimePluginConfigReadToolName,
   runtimePluginConfigUpdateToolName,
   runtimePluginId,
@@ -23,7 +27,8 @@ import {
 import {
   applyRuntimePluginConfigControlOperation,
   inspectRuntimePluginConfig,
-  loadProject02RuntimeConfig
+  loadProject02RuntimeConfig,
+  prepareRuntimePluginConfigControlOperation
 } from '../src/runtime/config/index.ts';
 import { writeRuntimeConfig } from './support/runtime-config.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
@@ -31,7 +36,7 @@ import { pluginDiscoveryPluginSummaries } from './support/plugin-host-fixtures.t
 
 describe('host-owned runtime plugin management tools', () => {
   it('constructs the canonical host-scoped plugin from the catalog', () => {
-    const definition = defaultRuntimePluginCatalogFactoryDefinitions()[
+    const definition = defaultRuntimePluginHostServiceCatalogEntries()[
       runtimePluginId
     ];
 
@@ -39,12 +44,23 @@ describe('host-owned runtime plugin management tools', () => {
       throw new TypeError('Expected runtime plugin management catalog definition.');
     }
 
-    const plugin = definition.create();
+    const plugin = definition.bootstrap({
+      hostStateForTurn: () => ({
+        plugins: Object.freeze([]),
+        enabledPlugins: Object.freeze([]),
+        accessByPluginId: Object.freeze({}),
+        confirmationAvailable: false
+      }),
+      pluginConfigControl: {
+        pluginManifests: defaultRuntimePluginCatalogManifests()
+      }
+    });
 
     expect(isRuntimePluginManagementPlugin(plugin)).toBe(true);
     expect(plugin.providedTools.map((tool) => tool.name)).toEqual([
       runtimePluginListToolName,
-      runtimePluginConfigReadToolName
+      runtimePluginConfigReadToolName,
+      runtimePluginConfigUpdateToolName
     ]);
     expect(plugin.manifest.runtimePolicy).toMatchObject({
       sideEffectLevel: 'runtime_config_write'
@@ -96,9 +112,6 @@ describe('host-owned runtime plugin management tools', () => {
       })
     );
     expect(
-      writableHost.resolveToolPluginId(runtimePluginConfigUpdateToolName)
-    ).toBe(runtimePluginId);
-    expect(
       writableHost
         .pluginToolDefinitions()
         .filter((tool) => tool.pluginId === runtimePluginId)
@@ -113,7 +126,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       expect.objectContaining({
         name: runtimePluginConfigUpdateToolName,
-        callLimit: { scope: 'user_turn', maxCalls: 2 }
+        callLimit: { scope: 'user_turn', maxCalls: 1 }
       })
     ]);
     expect(
@@ -123,7 +136,209 @@ describe('host-owned runtime plugin management tools', () => {
     ).toContain(runtimePluginId);
   });
 
-  it('does not register or route the removed plugin identifiers and tool names', () => {
+  it('enforces approval-gated config effects without plugin identity carve-outs', async () => {
+    const storeRoot = createTestTempRoot('project02-arbitrary-config-approval-');
+    const targetManifest = configurablePluginManifest();
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    const before = inspectRuntimePluginConfig({
+      manifest: targetManifest,
+      pluginManifests: [targetManifest],
+      configPath,
+      storeRoot
+    });
+    const prepared = prepareRuntimePluginConfigControlOperation({
+      manifest: targetManifest,
+      actor: 'agent',
+      expectedFingerprint: before.fingerprint,
+      operation: { kind: 'set', fieldName: 'tone', value: 'warm' },
+      configPath,
+      storeRoot
+    });
+    const arbitraryPluginId = 'settings.arbitrary.fixture';
+    const arbitraryToolName = 'settings.arbitrary.update';
+    const toolCallId = 'arbitrary-config-call';
+    let preparationCalls = 0;
+    const plugin = createRuntimePlugin({
+      manifest: {
+        id: arbitraryPluginId,
+        displayName: 'Arbitrary settings fixture',
+        version: '1.0.0',
+        kind: 'tool_provider',
+        description: 'Prepares an arbitrary policy-category config effect.',
+        contractVersion: runtimePluginContractVersion,
+        compatibility: {
+          hostContractVersions: [runtimePluginContractVersion],
+          sourceSystem: 'test'
+        },
+        declaredPlugins: ['tool_provider', 'handle_tool_call'],
+        config: { fields: [] },
+        localTrustLevel: 'test_fixture',
+        runtimePolicy: {
+          requiredForTurn: false,
+          sideEffectLevel: 'runtime_config_write',
+          confirmation: 'not_required',
+          timeoutMs: 1_000,
+          sourceReferencesRequired: false,
+          redactionLabels: [],
+          failureBehavior: {
+            beforeRoleModelCall: 'degrade',
+            handleToolCall: 'reject_tool_call',
+            afterTurnCommitted: 'log_failure',
+            health: 'degrade'
+          }
+        },
+        activation: { defaultEnabled: false, reasons: ['test'] },
+        requestedAccess: { model_input: 'write' }
+      },
+      providedTools: [
+        {
+          name: arbitraryToolName,
+          description: 'Set one exact prepared config value after approval.',
+          requiredForUserTurn: false,
+          callLimit: { scope: 'user_turn', maxCalls: 1 },
+          inputContract: {
+            type: 'object',
+            fields: [],
+            additionalFields: false
+          },
+          validationOwner: 'plugin_host',
+          sideEffectLevel: 'runtime_config_write',
+          requiresConfirmation: true,
+          sourceReferencesRequired: false
+        }
+      ],
+      lifecycleHooks: {
+        handleToolCall(call) {
+          preparationCalls += 1;
+          return {
+            status: 'accepted',
+            output: { status: 'prepared' },
+            evidence: [],
+            preparedConfigEffect: {
+              eventId: call.eventId,
+              traceId: call.traceId,
+              createdAt: call.createdAt,
+              kind: 'runtime_plugin_config_effect',
+              effectId: call.toolCallId ?? toolCallId,
+              targetPluginId: targetManifest.id,
+              targetConfigPath: prepared.targetConfigPath,
+              fieldName: 'tone',
+              expectedFingerprint: before.fingerprint,
+              resultFingerprint: prepared.resultFingerprint,
+              operation: { kind: 'set', value: 'warm' }
+            }
+          };
+        }
+      }
+    });
+    const enabledPluginIds = [runtimePluginId, arbitraryPluginId];
+    const pluginConfigControl = {
+      pluginManifests: [targetManifest],
+      configPath
+    };
+    const call = {
+      ...testIdentity(),
+      toolCallId,
+      pluginId: arbitraryPluginId,
+      toolName: arbitraryToolName,
+      input: {}
+    } as const;
+    const withoutHandler = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds,
+      storeRoot,
+      pluginConfigControl
+    });
+    const withoutControl = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds,
+      storeRoot,
+      toolConfirmationHandler: () => ({ status: 'approved' })
+    });
+
+    expect(withoutHandler.pluginToolDefinitions()).not.toContainEqual(
+      expect.objectContaining({ name: arbitraryToolName })
+    );
+    expect(withoutControl.pluginToolDefinitions()).not.toContainEqual(
+      expect.objectContaining({ name: arbitraryToolName })
+    );
+
+    let deniedPreview: RuntimePluginJsonObject | undefined;
+    const deniedHost = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds,
+      storeRoot,
+      pluginConfigControl,
+      toolConfirmationHandler(request) {
+        deniedPreview = request.preview;
+        return { status: 'denied' };
+      }
+    });
+    const denied = await deniedHost.handleToolCall(call, testContext());
+
+    expect(deniedPreview).toMatchObject({
+      targetPluginId: targetManifest.id,
+      fieldName: 'tone',
+      operation: 'set',
+      after: { configured: true, value: 'warm' }
+    });
+    expect(denied).toMatchObject({
+      status: 'rejected',
+      reason: 'plugin_config_approval_denied'
+    });
+    expect(denied).not.toHaveProperty('preparedConfigEffect');
+    expect(denied.evidence).not.toContainEqual(
+      expect.objectContaining({ policyOutcome: 'user_approved' })
+    );
+
+    const approvedHost = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds,
+      storeRoot,
+      pluginConfigControl,
+      toolConfirmationHandler: () => ({ status: 'approved' })
+    });
+    const approved = await approvedHost.handleToolCall(call, testContext());
+
+    expect(preparationCalls).toBe(2);
+    expect(approved.status).toBe('accepted');
+    if (approved.status !== 'accepted') {
+      return;
+    }
+
+    const effect = approved.preparedConfigEffect;
+
+    expect(effect).toBeDefined();
+    if (effect === undefined) {
+      return;
+    }
+
+    expect(approved.evidence).toContainEqual(
+      expect.objectContaining({
+        pluginId: arbitraryPluginId,
+        evidenceKind: 'policy',
+        status: 'accepted',
+        policyOutcome: 'user_approved',
+        configFingerprint: effect.resultFingerprint
+      })
+    );
+    expect(
+      preparedRuntimePluginConfigEffectHasApprovalEvidence({
+        effect,
+        eventIdentity: call,
+        inputIdentity: call,
+        inputPluginId: call.pluginId,
+        inputToolName: call.toolName,
+        toolCallId: call.toolCallId,
+        dispatchedToHost: true,
+        pluginId: call.pluginId,
+        toolName: call.toolName,
+        result: approved
+      })
+    ).toBe(true);
+  });
+
+  it('does not register or expose the removed plugin identifiers and tool names', () => {
     const manifest = configurablePluginManifest();
     const host = createRuntimePluginHost({
       pluginConfigControl: { pluginManifests: [manifest] },
@@ -136,17 +351,19 @@ describe('host-owned runtime plugin management tools', () => {
 
     expect(registeredPluginIds).not.toContain('runtime.plugin_discovery');
     expect(registeredPluginIds).not.toContain('runtime.plugin_config');
-    expect(host.resolveToolPluginId('plugin.list')).toBeUndefined();
-    expect(host.resolveToolPluginId('plugin.config')).toBeUndefined();
-    expect(host.resolveToolPluginId('plugin.config.update')).toBeUndefined();
-    expect(host.resolveToolPluginId(runtimePluginListToolName)).toBe(
-      runtimePluginId
+    const exposedToolNames = host.pluginToolDefinitions().map(
+      (definition) => definition.name
     );
-    expect(host.resolveToolPluginId(runtimePluginConfigReadToolName)).toBe(
-      runtimePluginId
-    );
-    expect(host.resolveToolPluginId(runtimePluginConfigUpdateToolName)).toBe(
-      runtimePluginId
+
+    expect(exposedToolNames).not.toContain('plugin.list');
+    expect(exposedToolNames).not.toContain('plugin.config');
+    expect(exposedToolNames).not.toContain('plugin.config.update');
+    expect(exposedToolNames).toEqual(
+      expect.arrayContaining([
+        runtimePluginListToolName,
+        runtimePluginConfigReadToolName,
+        runtimePluginConfigUpdateToolName
+      ])
     );
   });
 
@@ -230,6 +447,43 @@ describe('host-owned runtime plugin management tools', () => {
       value: '[redacted]'
     });
     expect(JSON.stringify(result.output)).not.toContain('raw-secret-value');
+  });
+
+  it('treats a missing own activation for a prototype-named plugin as absent', async () => {
+    const manifest = createRuntimePluginManifest({
+      ...configurablePluginManifest(),
+      id: 'constructor'
+    });
+    const host = createRuntimePluginHost({
+      pluginConfigControl: {
+        pluginManifests: [manifest],
+        activationByPluginId: {}
+      }
+    });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginId,
+        toolName: runtimePluginConfigReadToolName,
+        input: { pluginId: manifest.id }
+      },
+      testContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      return;
+    }
+
+    const output = requiredJsonObject(result.output);
+
+    expect(output['pluginId']).toBe(manifest.id);
+    expect(output['activation']).toEqual({
+      enabled: false,
+      status: 'disabled',
+      reasons: ['config_inspection_disabled']
+    });
   });
 
   it('uses host-attested defaults instead of an unconfigured manifest claim', async () => {
@@ -496,7 +750,7 @@ describe('host-owned runtime plugin management tools', () => {
     ).toBe(false);
   });
 
-  it('commits one approved field update through the fingerprint-bound config service', async () => {
+  it('prepares one approved field update without mutating authored config', async () => {
     const storeRoot = createTestTempRoot('project02-plugin-config-approved-');
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -542,22 +796,182 @@ describe('host-owned runtime plugin management tools', () => {
     expect(result).toMatchObject({
       status: 'accepted',
       output: {
-        status: 'updated',
+        status: 'approved_pending_commit',
         appliesTo: 'future_host_construction',
         pluginId: manifest.id,
         fieldName: 'tone',
-        operation: 'set',
-        fingerprint: after.fingerprint
+        operation: 'set'
+      },
+      preparedConfigEffect: {
+        targetPluginId: manifest.id,
+        fieldName: 'tone',
+        expectedFingerprint: before.fingerprint,
+        operation: { kind: 'set', value: 'warm' }
       }
     });
     expect(confirmationCalls).toBe(1);
-    expect(after.fingerprint).not.toBe(before.fingerprint);
+    expect(after.fingerprint).toBe(before.fingerprint);
     expect(
       after.fields.find((field) => field.name === 'tone')?.authored
-    ).toEqual({ configured: true, value: 'warm' });
+    ).toEqual({ configured: true, value: 'cool' });
   });
 
-  it('canonicalizes caller-owned manifests before approval and commit', async () => {
+  it('rejects a tampered prepared result fingerprint before mutating authored config', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-plugin-config-tampered-effect-'
+    );
+    const manifest = configurablePluginManifest();
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [manifest.id]: {
+          config: { tone: 'cool' }
+        }
+      }
+    });
+    const before = inspectRuntimePluginConfig({
+      manifest,
+      pluginManifests: [manifest],
+      configPath,
+      storeRoot
+    });
+    const host = createRuntimePluginHost({
+      storeRoot,
+      pluginConfigControl: {
+        pluginManifests: [manifest],
+        configPath
+      },
+      toolConfirmationHandler: () => ({ status: 'approved' })
+    });
+    const result = await updateConfigField(host, {
+      pluginId: manifest.id,
+      fieldName: 'tone',
+      operation: 'set',
+      value: 'warm',
+      expectedFingerprint: before.fingerprint
+    });
+    const preparedConfigEffect =
+      result.status === 'accepted' ? result.preparedConfigEffect : undefined;
+
+    if (preparedConfigEffect === undefined) {
+      throw new TypeError('Expected an approved prepared config effect.');
+    }
+
+    expect(() =>
+      reconcilePreparedRuntimePluginConfigEffect({
+        effect: Object.freeze({
+          ...preparedConfigEffect,
+          resultFingerprint: `${preparedConfigEffect.resultFingerprint}-tampered`
+        }),
+        state: {
+          pluginManifests: [manifest],
+          configPath
+        },
+        storeRoot
+      })
+    ).toThrow('does not match its validated config candidate');
+
+    const after = inspectRuntimePluginConfig({
+      manifest,
+      pluginManifests: [manifest],
+      configPath,
+      storeRoot
+    });
+
+    expect(after.fingerprint).toBe(before.fingerprint);
+    expect(
+      after.fields.find((field) => field.name === 'tone')?.authored
+    ).toEqual({ configured: true, value: 'cool' });
+  });
+
+  it('does not reconcile a prepared effect through a host targeting another config path', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-plugin-config-cross-path-effect-'
+    );
+    const manifest = configurablePluginManifest();
+    const authoredConfig = {
+      plugins: {
+        [manifest.id]: {
+          config: { tone: 'cool' }
+        }
+      }
+    } as const;
+    const configPathA = writeRuntimeConfig(
+      join(storeRoot, 'config-a.json'),
+      authoredConfig
+    );
+    const configPathB = writeRuntimeConfig(
+      join(storeRoot, 'config-b.json'),
+      authoredConfig
+    );
+    const beforeA = inspectRuntimePluginConfig({
+      manifest,
+      pluginManifests: [manifest],
+      configPath: configPathA,
+      storeRoot
+    });
+    const beforeB = inspectRuntimePluginConfig({
+      manifest,
+      pluginManifests: [manifest],
+      configPath: configPathB,
+      storeRoot
+    });
+    const hostA = createRuntimePluginHost({
+      storeRoot,
+      pluginConfigControl: {
+        pluginManifests: [manifest],
+        configPath: configPathA
+      },
+      toolConfirmationHandler: () => ({ status: 'approved' })
+    });
+    const result = await updateConfigField(hostA, {
+      pluginId: manifest.id,
+      fieldName: 'tone',
+      operation: 'set',
+      value: 'warm',
+      expectedFingerprint: beforeA.fingerprint
+    });
+    const preparedConfigEffect =
+      result.status === 'accepted' ? result.preparedConfigEffect : undefined;
+
+    if (preparedConfigEffect === undefined) {
+      throw new TypeError('Expected an approved prepared config effect.');
+    }
+
+    expect(() =>
+      reconcilePreparedRuntimePluginConfigEffect({
+        effect: preparedConfigEffect,
+        state: {
+          pluginManifests: [manifest],
+          configPath: configPathB
+        },
+        storeRoot
+      })
+    ).toThrow('targets another runtime config path');
+
+    const afterA = inspectRuntimePluginConfig({
+      manifest,
+      pluginManifests: [manifest],
+      configPath: configPathA,
+      storeRoot
+    });
+    const afterB = inspectRuntimePluginConfig({
+      manifest,
+      pluginManifests: [manifest],
+      configPath: configPathB,
+      storeRoot
+    });
+
+    expect(afterA.fingerprint).toBe(beforeA.fingerprint);
+    expect(afterB.fingerprint).toBe(beforeB.fingerprint);
+    expect(
+      afterA.fields.find((field) => field.name === 'tone')?.authored
+    ).toEqual({ configured: true, value: 'cool' });
+    expect(
+      afterB.fields.find((field) => field.name === 'tone')?.authored
+    ).toEqual({ configured: true, value: 'cool' });
+  });
+
+  it('canonicalizes caller-owned manifests before approval and preparation', async () => {
     const storeRoot = createTestTempRoot(
       'project02-plugin-config-manifest-snapshot-'
     );
@@ -603,11 +1017,13 @@ describe('host-owned runtime plugin management tools', () => {
         pluginId: originalPluginId,
         fieldName: 'tone',
         operation: 'set'
+      },
+      preparedConfigEffect: {
+        targetPluginId: originalPluginId,
+        operation: { kind: 'set', value: 'warm' }
       }
     });
-    expect(loaded.config?.plugins?.[originalPluginId]?.config?.['tone']).toBe(
-      'warm'
-    );
+    expect(loaded.config?.plugins?.[originalPluginId]).toBeUndefined();
     expect(loaded.config?.plugins?.[mutatedPluginId]).toBeUndefined();
   });
 
@@ -664,6 +1080,40 @@ describe('host-owned runtime plugin management tools', () => {
         (plugin) => plugin['id'] === 'test.retargeted'
       )
     ).toBe(false);
+  });
+
+  it('lists an installed cold manifest as disabled without activation metadata', async () => {
+    const manifest = configurablePluginManifest();
+    const host = createRuntimePluginHost({
+      pluginInventoryState: {
+        pluginManifests: [manifest]
+      }
+    });
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: runtimePluginId,
+        toolName: runtimePluginListToolName,
+        input: { scope: 'all' }
+      },
+      testContext()
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      return;
+    }
+
+    expect(
+      pluginDiscoveryPluginSummaries(result.output).find(
+        (plugin) => plugin['id'] === manifest.id
+      )
+    ).toMatchObject({
+      id: manifest.id,
+      enabled: false,
+      activationStatus: 'disabled'
+    });
   });
 
   it('rejects an approved update when the authored fingerprint drifts during approval', async () => {
@@ -756,7 +1206,7 @@ describe('host-owned runtime plugin management tools', () => {
 
     expect(result).toMatchObject({
       status: 'rejected',
-      reason: 'tool_not_declared'
+      reason: 'tool_not_routable'
     });
     expect(
       inspectRuntimePluginConfig({
@@ -894,7 +1344,8 @@ describe('host-owned runtime plugin management tools', () => {
         throw new TypeError('Expected runtime plugin config registration.');
       }
 
-      approvalDelayMs = configRegistration.manifest.runtimePolicy.timeoutMs;
+      expect(configRegistration.manifest.runtimePolicy.timeoutMs).toBe(5_000);
+      approvalDelayMs = 5 * 60_000;
       const updatePromise = updateConfigField(host, {
         pluginId: manifest.id,
         fieldName: 'tone',
@@ -937,7 +1388,7 @@ describe('host-owned runtime plugin management tools', () => {
     }
   });
 
-  it('commits the exact snapshotted value that the user approved', async () => {
+  it('prepares the exact snapshotted value that the user approved', async () => {
     const storeRoot = createTestTempRoot('project02-plugin-config-exact-value-');
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
@@ -983,12 +1434,18 @@ describe('host-owned runtime plugin management tools', () => {
     });
 
     expect(result.status).toBe('accepted');
-    expect(
-      after.fields.find((field) => field.name === 'settings')?.authored.value
-    ).toEqual({ mode: 'approved-value' });
+    expect(result).toMatchObject({
+      preparedConfigEffect: {
+        operation: {
+          kind: 'set',
+          value: { mode: 'approved-value' }
+        }
+      }
+    });
+    expect(after.fingerprint).toBe(before.fingerprint);
   });
 
-  it('commits one approved unset without accepting a value payload', async () => {
+  it('prepares one approved unset without accepting a value payload', async () => {
     const storeRoot = createTestTempRoot('project02-plugin-config-unset-');
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -1031,6 +1488,13 @@ describe('host-owned runtime plugin management tools', () => {
     });
 
     expect(result.status).toBe('accepted');
+    expect(result).toMatchObject({
+      preparedConfigEffect: {
+        targetPluginId: manifest.id,
+        fieldName: 'tone',
+        operation: { kind: 'unset' }
+      }
+    });
     expect(request?.preview).toMatchObject({
       operation: 'unset',
       before: { configured: true, value: 'warm' },
@@ -1038,7 +1502,7 @@ describe('host-owned runtime plugin management tools', () => {
     });
     expect(
       after.fields.find((field) => field.name === 'tone')?.authored.configured
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('rejects redacted nested content instead of asking approval for a hidden value', async () => {

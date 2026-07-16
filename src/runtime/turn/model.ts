@@ -21,14 +21,13 @@ import {
   createRejectedRoleModelDecisionResult,
   roleModelCommitValidationFailureRejectionReason,
   type DecisionContext,
-  type RoleModelDecisionRejection,
-  type RoleModelIOSnapshot
+  type RoleModelDecisionRejection
 } from '../../role-model/contracts.ts';
 import {
   createRoleModelAdapterFromCharacterAgent,
-  getRoleModelExecutionVisibleReplyText,
   runRoleModelLoop,
   type RoleModelAdapter,
+  type RoleModelLoopExecutionResult,
   type RoleModelInterimVisibleReplyEvent,
   type RoleModelLoopResult,
   type RoleModelPluginToolCallCompletedEvent,
@@ -47,6 +46,7 @@ import {
   visibleMessageIdsForTurnOption
 } from './commit.ts';
 import {
+  roleModelIOSnapshotSessionId,
   type LocalRuntimeUserMessageRejectedResult,
   type LocalRuntimeUserMessageResult,
   type RoleModelRawEvidence,
@@ -81,7 +81,10 @@ type PrepareRuntimeTurnResult =
     };
 
 type RunRuntimeModelResult =
-  | { readonly status: 'completed'; readonly result: RoleModelLoopResult }
+  | {
+      readonly status: 'completed';
+      readonly result: RoleModelLoopExecutionResult;
+    }
   | {
       readonly status: 'rejected';
       readonly result: LocalRuntimeUserMessageRejectedResult;
@@ -216,10 +219,9 @@ async function runRuntimeModel(
       decisionContext: roleModelDecisionContext,
       pluginToolDefinitions: prepared.pluginHost.pluginToolDefinitions(),
       pluginToolHost: prepared.pluginHost,
+      preparedConfigEffectsByToolCallId:
+        state.preparedConfigEffectsByToolCallId,
       runtimePluginContext: prepared.runtimePluginContext,
-      resolveToolPluginId(toolName) {
-        return prepared.pluginHost.resolveToolPluginId(toolName);
-      },
       onPluginToolCallStarted(event) {
         recordPluginToolCallStarted(state, event);
       },
@@ -337,7 +339,7 @@ async function recordInterimVisibleReply(
         commitValidation: createRejectedCommitValidationSnapshot({
           identity: state.identity,
           rejection,
-          sessionId: decisionContextSessionIdFromEvidence(event.ioSnapshot)
+          sessionId: roleModelIOSnapshotSessionId(event.ioSnapshot)
         })
       };
     }
@@ -390,8 +392,9 @@ async function rejectInvalidInterimVisibleReply(
 async function validateAndCommitRuntimeModelResult(
   state: RuntimeTurnState,
   prepared: PreparedRuntimeTurn,
-  roleModelResult: RoleModelLoopResult
+  roleModelExecutionResult: RoleModelLoopExecutionResult
 ): Promise<LocalRuntimeUserMessageResult> {
+  const roleModelResult = roleModelExecutionResult.publicResult;
   const roleModelEvidence = {
     roleModelIOSnapshot: roleModelResult.ioSnapshot,
     parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot
@@ -404,19 +407,19 @@ async function validateAndCommitRuntimeModelResult(
     roleModelResult.pluginToolResults
   );
 
-  if (roleModelResult.status === 'rejected') {
+  if (roleModelExecutionResult.status === 'rejected') {
     return await rejectRoleModelResult({
       state,
       prepared,
-      roleModelResult,
+      roleModelResult: roleModelExecutionResult.publicResult,
       roleModelEvidence,
       roleModelPluginEvidence,
       roleModelPluginToolInvocations
     });
   }
 
-  const visibleReplyText =
-    getRoleModelExecutionVisibleReplyText(roleModelResult);
+  const acceptedRoleModelResult = roleModelExecutionResult.publicResult;
+  const visibleReplyText = roleModelExecutionResult.visibleReplyText;
   const visibleReplyRejection = validateVisibleReplyText(visibleReplyText);
 
   if (visibleReplyRejection !== undefined) {
@@ -463,7 +466,7 @@ async function validateAndCommitRuntimeModelResult(
     decisionContext: prepared.decisionContext,
     pluginHost: prepared.pluginHost,
     contextItems: prepared.beforeRoleModelCallResult.contextItems,
-    roleModelResult,
+    roleModelResult: acceptedRoleModelResult,
     roleModelPluginEvidence,
     roleModelPluginToolInvocations,
     preCommitHealthResult,
@@ -609,10 +612,4 @@ function pluginToolInvocationsFromRouting(
       })
     )
   );
-}
-
-function decisionContextSessionIdFromEvidence(
-  snapshot: RoleModelIOSnapshot
-): string {
-  return snapshot.inputEnvelope.decisionContext.sessionId;
 }

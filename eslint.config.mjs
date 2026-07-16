@@ -22,7 +22,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/runtime/turn/**/*.ts'],
+    files: ['src/**/*.ts'],
     rules: {
       complexity: ['error', 20],
       'max-lines-per-function': [

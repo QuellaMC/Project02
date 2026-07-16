@@ -29,3 +29,9 @@ export type RuntimePluginFactoryDefinition<
   readonly manifest: RuntimePluginManifest;
   readonly create: TCreate;
 };
+
+export type RuntimePluginPackageCatalogEntry = {
+  readonly catalogKind: 'package';
+  readonly manifest: RuntimePluginManifest;
+  readonly load: RuntimePluginFactoryFunction;
+};

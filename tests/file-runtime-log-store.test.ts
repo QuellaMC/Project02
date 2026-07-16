@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
@@ -13,6 +13,9 @@ import {
   acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore
 } from '../src/runtime/storage/session-store.ts';
+import {
+  createLocalRuntimeMutationLockOwnerToken
+} from '../src/runtime/storage/mutation-lock.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
@@ -44,7 +47,7 @@ import {
   LocalRuntimeStorageContractError,
   createLocalRuntimeStorageLayout
 } from '../src/runtime/storage/layout.ts';
-import { createDefaultProject02PluginHost } from '../src/plugins/default-host.ts';
+import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
 import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimePlugin,
@@ -69,6 +72,88 @@ import {
 } from '../src/role-model/prompt.ts';
 
 describe('file runtime log store plugin tool event validation', () => {
+  it('refuses a store mutation under another owner token\'s writer lease', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-owner-token-append';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const ownerA = createLocalRuntimeMutationLockOwnerToken();
+    const ownerB = createLocalRuntimeMutationLockOwnerToken();
+    const storeA = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      writerLockOwnerToken: ownerA
+    });
+    const storeB = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      writerLockOwnerToken: ownerB
+    });
+    const writerLease = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot,
+      sessionId,
+      ownerToken: ownerA
+    });
+
+    try {
+      expect(() =>
+        storeB.appendTrace({
+          ...identity('evt_owner_token_append'),
+          step: 'runtime_event_received'
+        })
+      ).toThrow(expect.objectContaining({ code: 'session_busy' }));
+      expect(storeA.traceEntries()).toEqual([]);
+    } finally {
+      await writerLease.release();
+    }
+  });
+
+  it('allows only the writer lease owner to scavenge abandoned evidence temporaries', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-owner-token-scavenge';
+    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z'
+    });
+    const ownerA = createLocalRuntimeMutationLockOwnerToken();
+    const ownerB = createLocalRuntimeMutationLockOwnerToken();
+    const storeA = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      writerLockOwnerToken: ownerA
+    });
+    const storeB = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      writerLockOwnerToken: ownerB
+    });
+    const paths = storeA.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    const abandonedTemporaryPath = `${paths.sessionRoot}/.trace.jsonl.2147483647.00000000-0000-4000-8000-000000000000.tmp`;
+    writeFileSync(abandonedTemporaryPath, 'abandoned', 'utf8');
+    const writerLease = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot,
+      sessionId,
+      ownerToken: ownerA
+    });
+
+    try {
+      storeB.readSessionEvidence();
+      expect(existsSync(abandonedTemporaryPath)).toBe(true);
+
+      storeA.readSessionEvidence();
+      expect(existsSync(abandonedTemporaryPath)).toBe(false);
+    } finally {
+      await writerLease.release();
+    }
+  });
+
   it('rejects low-level durable mutation without the active session writer lease', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-low-level-writer';
@@ -871,6 +956,12 @@ describe('file runtime log store plugin tool event validation', () => {
       ...(underlying.localRuntimeSessionPaths === undefined
         ? {}
         : { localRuntimeSessionPaths: underlying.localRuntimeSessionPaths }),
+      ...(underlying.localRuntimeWriterLockOwnerToken === undefined
+        ? {}
+        : {
+            localRuntimeWriterLockOwnerToken:
+              underlying.localRuntimeWriterLockOwnerToken
+          }),
       appendTrace: (entry) => underlying.appendTrace(entry),
       appendRawEvent(record) {
         if (
@@ -1124,7 +1215,8 @@ describe('file runtime log store plugin tool event validation', () => {
     });
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
-      sessionId: 'session-tools'
+      sessionId: 'session-tools',
+      ownerToken: fileLogStoreWriterOwnerToken(logStore)
     });
 
     try {
@@ -1163,7 +1255,8 @@ describe('file runtime log store plugin tool event validation', () => {
     const eventId = 'evt_tool_finish_log_failed';
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
-      sessionId: 'session-tools-rejected'
+      sessionId: 'session-tools-rejected',
+      ownerToken: fileLogStoreWriterOwnerToken(logStore)
     });
 
     try {
@@ -1213,7 +1306,8 @@ describe('file runtime log store plugin tool event validation', () => {
     });
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
-      sessionId: 'session-terminal-tools'
+      sessionId: 'session-terminal-tools',
+      ownerToken: fileLogStoreWriterOwnerToken(logStore)
     });
 
     try {
@@ -1235,6 +1329,18 @@ describe('file runtime log store plugin tool event validation', () => {
 
 function createStoreRoot(): string {
   return createTestTempRoot('project02-log-store-');
+}
+
+function fileLogStoreWriterOwnerToken(
+  logStore: ReturnType<typeof createFileRuntimeLogStore>
+) {
+  const ownerToken = logStore.localRuntimeWriterLockOwnerToken;
+
+  if (ownerToken === undefined) {
+    throw new Error('Expected file runtime log store writer owner token.');
+  }
+
+  return ownerToken;
 }
 
 function identity(eventId = 'evt_tool_events') {

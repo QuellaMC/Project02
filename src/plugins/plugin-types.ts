@@ -190,6 +190,8 @@ export type RuntimePluginContext = {
   readonly traceId: string;
   readonly eventType: RuntimeEventType;
   readonly timestamp: string;
+  readonly deadlineAt: number;
+  readonly signal: AbortSignal;
   readonly currentUserMessage: string;
   readonly character: CharacterProfile;
   readonly privacy: {
@@ -217,6 +219,8 @@ export type CreateRuntimePluginContextOptions = RuntimeEventIdentity & {
   readonly currentUserMessage: string;
   readonly character: CharacterProfile;
   readonly redactionLabels?: readonly string[];
+  readonly deadlineAt?: number;
+  readonly signal?: AbortSignal;
 };
 
 export type CreateRuntimePluginAfterTurnCommittedContextOptions =
@@ -250,6 +254,30 @@ export type RuntimePluginToolCallResult =
       readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
     };
 
+export type PreparedRuntimePluginConfigEffect = RuntimeEventIdentity & {
+  readonly kind: 'runtime_plugin_config_effect';
+  readonly effectId: string;
+  readonly targetPluginId: string;
+  readonly targetConfigPath: string;
+  readonly fieldName: string;
+  readonly expectedFingerprint: string;
+  readonly resultFingerprint: string;
+  readonly operation:
+    | {
+        readonly kind: 'set';
+        readonly value: RuntimePluginJsonValue;
+      }
+    | {
+        readonly kind: 'unset';
+      };
+};
+
+export type RuntimePluginToolCallExecutionResult =
+  | (Extract<RuntimePluginToolCallResult, { readonly status: 'accepted' }> & {
+      readonly preparedConfigEffect?: PreparedRuntimePluginConfigEffect;
+    })
+  | Extract<RuntimePluginToolCallResult, { readonly status: 'rejected' }>;
+
 export type RuntimePluginToolInvocationSnapshot = RuntimeEventIdentity & {
   readonly kind: 'runtime_plugin_tool_invocation_snapshot';
   readonly pluginId: string;
@@ -272,11 +300,16 @@ export type RuntimePluginLifecycleHooks = {
   readonly handleToolCall?: (
     call: RuntimePluginToolCall,
     context: RuntimePluginContext
-  ) => RuntimePluginToolCallResult | Promise<RuntimePluginToolCallResult>;
+  ) =>
+    | RuntimePluginToolCallExecutionResult
+    | Promise<RuntimePluginToolCallExecutionResult>;
   readonly afterTurnCommitted?: (
     context: RuntimePluginAfterTurnCommittedContext
   ) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>;
   readonly onSessionEnd?: (
+    context: RuntimePluginContext
+  ) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>;
+  readonly onShutdown?: (
     context: RuntimePluginContext
   ) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>;
   readonly health?: (

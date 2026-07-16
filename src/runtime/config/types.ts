@@ -1,6 +1,5 @@
 import type { RuntimePluginConfigValueType } from '../../plugins/contract.ts';
 
-export const legacyRuntimeConfigVersion = 'project02.runtime_config.v1';
 export const runtimeConfigVersion = 'project02.config.v2';
 export const runtimeConfigEnvVarName = 'PROJECT02_RUNTIME_CONFIG';
 export const roleModelProviderEnvVarName = 'PROJECT02_ROLE_MODEL_PROVIDER';
@@ -53,13 +52,6 @@ export type Project02HostConfig = Readonly<
 export type Project02RuntimeConfig = {
   readonly version: typeof runtimeConfigVersion;
   readonly project02?: Project02HostConfig;
-  readonly plugins?: Readonly<Record<string, Project02RuntimePluginConfig>>;
-};
-
-export type LegacyProject02RuntimeConfig = {
-  readonly version: typeof legacyRuntimeConfigVersion;
-  readonly storeRoot?: string;
-  readonly defaultMemoryProvider?: string;
   readonly plugins?: Readonly<Record<string, Project02RuntimePluginConfig>>;
 };
 
@@ -139,9 +131,6 @@ export type ResolvedProject02RuntimeConfig = {
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
   };
-  readonly storeRoot: string;
-  readonly defaultMemoryProvider?: string;
-  readonly roleModelProvider: Project02RoleModelProvider;
   readonly pluginConfigs: Readonly<Record<string, ResolvedPluginRuntimeConfig>>;
   readonly redactedPluginConfigs: Readonly<Record<string, RedactedPluginRuntimeConfig>>;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
@@ -156,9 +145,6 @@ export type RuntimeConfigInspectShape = {
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
   };
-  readonly storeRoot: string;
-  readonly defaultMemoryProvider?: string;
-  readonly roleModelProvider: Project02RoleModelProvider;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
 };

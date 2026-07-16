@@ -1,14 +1,12 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 
 import {
   createLocalRuntimeStorageLayout,
   LocalRuntimeStorageContractError
 } from '../storage/layout.ts';
 import {
-  legacyRuntimeConfigVersion,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
-  type LegacyProject02RuntimeConfig,
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
   type Project02RuntimeConfig,
@@ -19,6 +17,7 @@ import {
   type RuntimeConfigValue
 } from './types.ts';
 import { createJsonBoundarySnapshot } from '../../shared/json-boundary.ts';
+import { createRuntimeConfigDiagnostic } from './diagnostic.ts';
 import {
   project02RuntimeConfigFieldDefinitions,
   project02RuntimeConfigFieldNames,
@@ -28,12 +27,6 @@ import {
 const project02RuntimeConfigFields = Object.freeze([
   'version',
   'project02',
-  'plugins'
-]);
-const legacyProject02RuntimeConfigFields = Object.freeze([
-  'version',
-  'storeRoot',
-  'defaultMemoryProvider',
   'plugins'
 ]);
 const project02HostConfigFields = project02RuntimeConfigFieldNames();
@@ -47,6 +40,8 @@ const runtimeConfigPlaintextSecretOverrideFields = Object.freeze([
   'allowPlaintextSecret',
   'justification'
 ]);
+
+export const maxProject02RuntimeConfigBytes = 256 * 1_024;
 
 export type LoadProject02RuntimeConfigOptions = {
   readonly configPath?: string;
@@ -84,7 +79,7 @@ export function loadProject02RuntimeConfig(
       source: location.source,
       path: location.path,
       diagnostics: [
-        diagnostic(
+        createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_missing',
           `Runtime config file does not exist: ${location.path}.`
@@ -93,22 +88,26 @@ export function loadProject02RuntimeConfig(
     } satisfies LoadedProject02RuntimeConfig);
   }
 
-  try {
-    const parsed = JSON.parse(readFileSync(location.path, 'utf8')) as unknown;
-    const accepted = validateProject02RuntimeConfig(parsed);
+  const readResult = readRuntimeConfigSource(location.path);
 
+  if (readResult.status === 'rejected') {
     return Object.freeze({
       source: location.source,
       path: location.path,
-      ...(accepted.config === undefined ? {} : { config: accepted.config }),
-      diagnostics: accepted.diagnostics
+      diagnostics: [readResult.diagnostic]
     } satisfies LoadedProject02RuntimeConfig);
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(readResult.source) as unknown;
   } catch (error: unknown) {
     return Object.freeze({
       source: location.source,
       path: location.path,
       diagnostics: [
-        diagnostic(
+        createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_malformed_json',
           `Runtime config file is not valid JSON: ${
@@ -118,12 +117,105 @@ export function loadProject02RuntimeConfig(
       ]
     } satisfies LoadedProject02RuntimeConfig);
   }
+
+  const accepted = validateProject02RuntimeConfig(parsed);
+
+  return Object.freeze({
+    source: location.source,
+    path: location.path,
+    ...(accepted.config === undefined ? {} : { config: accepted.config }),
+    diagnostics: accepted.diagnostics
+  } satisfies LoadedProject02RuntimeConfig);
+}
+
+function readRuntimeConfigSource(path: string):
+  | { readonly status: 'accepted'; readonly source: string }
+  | {
+      readonly status: 'rejected';
+      readonly diagnostic: RuntimeConfigDiagnostic;
+    } {
+  let fileStat: ReturnType<typeof statSync>;
+
+  try {
+    fileStat = statSync(path);
+  } catch {
+    return {
+      status: 'rejected',
+      diagnostic: createRuntimeConfigDiagnostic(
+        'error',
+        'runtime_config_read_failed',
+        `Runtime config file could not be inspected: ${path}.`
+      )
+    };
+  }
+
+  if (!fileStat.isFile()) {
+    return {
+      status: 'rejected',
+      diagnostic: createRuntimeConfigDiagnostic(
+        'error',
+        'runtime_config_read_failed',
+        `Runtime config path is not a regular file: ${path}.`
+      )
+    };
+  }
+
+  if (fileStat.size > maxProject02RuntimeConfigBytes) {
+    return {
+      status: 'rejected',
+      diagnostic: runtimeConfigLimitDiagnostic(
+        `Runtime config file exceeds the ${String(maxProject02RuntimeConfigBytes)}-byte size limit.`
+      )
+    };
+  }
+
+  let source: string;
+
+  try {
+    source = readFileSync(path, 'utf8');
+  } catch {
+    return {
+      status: 'rejected',
+      diagnostic: createRuntimeConfigDiagnostic(
+        'error',
+        'runtime_config_read_failed',
+        `Runtime config file could not be read: ${path}.`
+      )
+    };
+  }
+
+  if (Buffer.byteLength(source, 'utf8') > maxProject02RuntimeConfigBytes) {
+    return {
+      status: 'rejected',
+      diagnostic: runtimeConfigLimitDiagnostic(
+        `Runtime config file exceeds the ${String(maxProject02RuntimeConfigBytes)}-byte size limit.`
+      )
+    };
+  }
+
+  return { status: 'accepted', source };
 }
 
 export function validateProject02RuntimeConfig(
   value: unknown
 ): Project02RuntimeConfigValidationResult {
-  const accepted = parseProject02RuntimeConfig(value);
+  let accepted: ReturnType<typeof parseProject02RuntimeConfig>;
+
+  try {
+    accepted = parseProject02RuntimeConfig(value);
+  } catch (error: unknown) {
+    if (error instanceof RuntimeConfigBoundaryLimitError) {
+      return Object.freeze({
+        diagnostics: Object.freeze([
+          runtimeConfigLimitDiagnostic(
+            `Runtime config exceeds safe JSON limits: ${error.message}`
+          )
+        ])
+      } satisfies Project02RuntimeConfigValidationResult);
+    }
+
+    throw error;
+  }
 
   return Object.freeze({
     ...(accepted.config === undefined ? {} : { config: accepted.config }),
@@ -188,7 +280,7 @@ function parseProject02RuntimeConfig(value: unknown): {
   if (!isRecord(value)) {
     return {
       diagnostics: [
-        diagnostic(
+        createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_not_object',
           'Runtime config must be an object.'
@@ -197,15 +289,11 @@ function parseProject02RuntimeConfig(value: unknown): {
     };
   }
 
-  if (value['version'] === legacyRuntimeConfigVersion) {
-    return parseLegacyProject02RuntimeConfig(value, diagnostics);
-  }
-
   pushUnknownRuntimeConfigFieldDiagnostics(value, diagnostics);
 
   if (value['version'] !== runtimeConfigVersion) {
     diagnostics.push(
-      diagnostic(
+      createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_version_unsupported',
         `Runtime config version must be "${runtimeConfigVersion}".`,
@@ -233,78 +321,6 @@ function parseProject02RuntimeConfig(value: unknown): {
   };
 }
 
-function parseLegacyProject02RuntimeConfig(
-  value: Readonly<Record<string, unknown>>,
-  diagnostics: RuntimeConfigDiagnostic[]
-): {
-  readonly config?: Project02RuntimeConfig;
-  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
-} {
-  pushUnknownFieldDiagnostics({
-    value,
-    allowedFields: legacyProject02RuntimeConfigFields,
-    diagnostics,
-    code: 'runtime_config_unknown_top_level_field',
-    messageForField: (field) => `Unknown runtime config field "${field}".`,
-    pathForField: (field) => field
-  });
-
-  const storeRoot = optionalString(value['storeRoot'], 'storeRoot', diagnostics);
-  const defaultMemoryProvider = optionalString(
-    value['defaultMemoryProvider'],
-    'defaultMemoryProvider',
-    diagnostics
-  );
-  const plugins = optionalPluginConfigs(value['plugins'], diagnostics);
-
-  if (diagnostics.some((item) => item.severity === 'error')) {
-    return { diagnostics };
-  }
-
-  const legacyConfig = Object.freeze({
-    version: legacyRuntimeConfigVersion,
-    ...(storeRoot === undefined ? {} : { storeRoot }),
-    ...(defaultMemoryProvider === undefined ? {} : { defaultMemoryProvider }),
-    ...(plugins === undefined ? {} : { plugins })
-  } satisfies LegacyProject02RuntimeConfig);
-  const project02 = project02HostConfigFromLegacy(legacyConfig);
-
-  diagnostics.push(
-    diagnostic(
-      'warning',
-      'runtime_config_legacy_version',
-      `Runtime config version "${legacyRuntimeConfigVersion}" is supported for compatibility and will be migrated to "${runtimeConfigVersion}" on the next write.`,
-      'version'
-    )
-  );
-
-  return {
-    config: Object.freeze({
-      version: runtimeConfigVersion,
-      ...(project02 === undefined ? {} : { project02 }),
-      ...(legacyConfig.plugins === undefined
-        ? {}
-        : { plugins: legacyConfig.plugins })
-    } satisfies Project02RuntimeConfig),
-    diagnostics
-  };
-}
-
-function project02HostConfigFromLegacy(
-  config: LegacyProject02RuntimeConfig
-): Project02HostConfig | undefined {
-  if (config.storeRoot === undefined && config.defaultMemoryProvider === undefined) {
-    return undefined;
-  }
-
-  return Object.freeze({
-    ...(config.storeRoot === undefined ? {} : { storeRoot: config.storeRoot }),
-    ...(config.defaultMemoryProvider === undefined
-      ? {}
-      : { defaultMemoryProvider: config.defaultMemoryProvider })
-  } satisfies Project02HostConfig);
-}
-
 function optionalProject02HostConfig(
   value: unknown,
   diagnostics: RuntimeConfigDiagnostic[]
@@ -315,7 +331,7 @@ function optionalProject02HostConfig(
 
   if (!isRecord(value)) {
     diagnostics.push(
-      diagnostic(
+      createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_project02_not_object',
         'Runtime config project02 section must be an object.',
@@ -352,9 +368,7 @@ function optionalProject02HostConfig(
       continue;
     }
 
-    config[field.name] = createJsonBoundarySnapshot(fieldValue, {
-      field: field.path
-    });
+    config[field.name] = snapshotRuntimeConfigValue(fieldValue, field.path);
   }
 
   return Object.freeze(config);
@@ -363,7 +377,7 @@ function optionalProject02HostConfig(
 function project02HostConfigFieldDiagnostic(
   field: ReturnType<typeof project02RuntimeConfigFieldDefinitions>[number]
 ): RuntimeConfigDiagnostic {
-  return diagnostic(
+  return createRuntimeConfigDiagnostic(
     'error',
     field.invalidValueCode,
     field.invalidValueMessage,
@@ -381,7 +395,7 @@ function optionalPluginConfigs(
 
   if (!isRecord(value)) {
     diagnostics.push(
-      diagnostic(
+      createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_plugins_not_object',
         'Runtime config plugins must be an object.',
@@ -396,7 +410,7 @@ function optionalPluginConfigs(
       Object.entries(value).flatMap(([pluginId, pluginValue]) => {
         if (!isRecord(pluginValue)) {
           diagnostics.push(
-            diagnostic(
+            createRuntimeConfigDiagnostic(
               'error',
               'runtime_config_plugin_not_object',
               `Runtime config plugin "${pluginId}" must be an object.`,
@@ -448,7 +462,7 @@ function optionalConfigRecord(
 
   if (!isRecord(value)) {
     diagnostics.push(
-      diagnostic(
+      createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_plugin_config_not_object',
         'Plugin config must be an object.',
@@ -463,7 +477,7 @@ function optionalConfigRecord(
       Object.entries(value).flatMap(([key, item]) => {
         if (!isRuntimeConfigValue(item)) {
           diagnostics.push(
-            diagnostic(
+            createRuntimeConfigDiagnostic(
               'error',
               'runtime_config_value_invalid',
               'Runtime config values must be JSON-compatible values or supported secret refs.',
@@ -476,9 +490,7 @@ function optionalConfigRecord(
         return [
           [
             key,
-            createJsonBoundarySnapshot(item, {
-              field: `${path}.${key}`
-            })
+            snapshotRuntimeConfigValue(item, `${path}.${key}`)
           ]
         ];
       })
@@ -538,7 +550,7 @@ function pushUnknownFieldDiagnostics(options: {
     }
 
     options.diagnostics.push(
-      diagnostic(
+      createRuntimeConfigDiagnostic(
         'error',
         options.code,
         options.messageForField(field),
@@ -600,30 +612,6 @@ function hasOnlyFields(
   return Object.keys(value).every((field) => allowedFields.includes(field));
 }
 
-function optionalString(
-  value: unknown,
-  path: string,
-  diagnostics: RuntimeConfigDiagnostic[]
-): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    diagnostics.push(
-      diagnostic(
-        'error',
-        'runtime_config_string_invalid',
-        'Runtime config field must be a non-empty string.',
-        path
-      )
-    );
-    return undefined;
-  }
-
-  return value;
-}
-
 function optionalBoolean(
   value: unknown,
   path: string,
@@ -635,7 +623,7 @@ function optionalBoolean(
 
   if (typeof value !== 'boolean') {
     diagnostics.push(
-      diagnostic(
+      createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_boolean_invalid',
         'Runtime config field must be a boolean.',
@@ -661,30 +649,34 @@ function normalizeConfigPath(value: string): string {
   return normalized;
 }
 
-function diagnostic(
-  severity: RuntimeConfigDiagnostic['severity'],
-  code: string,
-  message: string,
-  path?: string,
-  metadata?: RuntimeConfigDiagnosticPluginMetadata
-): RuntimeConfigDiagnostic {
-  const base = {
-    severity,
-    code,
-    message,
-    ...(path === undefined ? {} : { path })
-  } as const;
+function runtimeConfigLimitDiagnostic(message: string): RuntimeConfigDiagnostic {
+  return createRuntimeConfigDiagnostic(
+    'error',
+    'runtime_config_limit_exceeded',
+    message
+  );
+}
 
-  return metadata === undefined
-    ? Object.freeze({ ...base, scope: 'global' })
-    : Object.freeze({
-        ...base,
-        scope: 'plugin',
-        pluginId: metadata.pluginId,
-        ...(metadata.pluginConfigField === undefined
-          ? {}
-          : { pluginConfigField: metadata.pluginConfigField })
-      });
+class RuntimeConfigBoundaryLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RuntimeConfigBoundaryLimitError';
+  }
+}
+
+function snapshotRuntimeConfigValue(
+  value: RuntimeConfigValue,
+  field: string
+): RuntimeConfigValue {
+  try {
+    return createJsonBoundarySnapshot(value, { field });
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      throw new RuntimeConfigBoundaryLimitError(error.message);
+    }
+
+    throw error;
+  }
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

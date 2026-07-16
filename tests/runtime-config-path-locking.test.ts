@@ -74,9 +74,8 @@ describe('runtime config canonical path locking', () => {
     applyRuntimeConfigMutation({
       configPath: configAlias,
       operation: {
-        kind: 'set',
-        path: 'plugins.gamma.enabled',
-        value: true
+        kind: 'plugin_enable',
+        pluginId: 'gamma'
       }
     });
 

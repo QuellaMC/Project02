@@ -5,9 +5,6 @@ import { createTestTempRoot } from './support/temp-root.ts';
 import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
 import { createConversationSession } from '../src/core/conversation.ts';
 import {
-  visibleReplyModelToolName
-} from '../src/role-model/model-tools.ts';
-import {
   createConfiguredProject02PluginHost,
   createConfiguredProject02PluginHostFromPlan,
   loadProject02RuntimeConfig,
@@ -15,10 +12,7 @@ import {
 } from '../src/runtime/config/index.ts';
 import {
   createMemoryProviderRuntimePlugin,
-  defaultRuntimePluginCatalogFactoryDefinitions,
   firstPartyModelToolsPluginId,
-  runtimePluginConfigReadToolName,
-  runtimePluginConfigUpdateToolName,
   runtimePluginId,
   runtimePluginListToolName
 } from '../src/plugins/index.ts';
@@ -46,6 +40,7 @@ import {
   testIdentity,
   testPluginContext
 } from './support/plugin-host-fixtures.ts';
+import { runtimePluginAccessSnapshot } from '../src/plugins/access-control.ts';
 
 describe('runtime config activation planning', () => {
   it('constructs the configured host from the exact prepared activation plan', async () => {
@@ -106,41 +101,6 @@ describe('runtime config activation planning', () => {
         pluginId: runtimePluginId,
         name: runtimePluginListToolName
       })
-    );
-  });
-
-  it('accepts fresh catalog factory definitions without duplicating host-scoped manifests', async () => {
-    const storeRoot = createTestTempRoot('project02-config-fresh-catalog-definitions-');
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
-      factories: defaultRuntimePluginCatalogFactoryDefinitions()
-    });
-    const registeredPluginIds = configured.host
-      .registrySnapshot()
-      .plugins.map((plugin) => plugin.manifest.id);
-    const toolNames = configured.host
-      .pluginToolDefinitions()
-      .map((tool) => tool.name);
-
-    expect(configured.activation.diagnostics).toEqual([]);
-    expect(configured.activation.enabledPluginIds).toEqual([
-      runtimePluginId,
-      firstPartyModelToolsPluginId
-    ]);
-    expect(registeredPluginIds).toEqual([
-      runtimePluginId,
-      firstPartyModelToolsPluginId
-    ]);
-    expect(new Set(registeredPluginIds).size).toBe(registeredPluginIds.length);
-    expect(toolNames).toEqual(
-      expect.arrayContaining([
-        runtimePluginListToolName,
-        runtimePluginConfigReadToolName,
-        visibleReplyModelToolName
-      ])
     );
   });
 
@@ -216,13 +176,11 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.enabledPluginIds).not.toContain(
       runtimePluginId
     );
-    for (const toolName of [
-      runtimePluginListToolName,
-      runtimePluginConfigReadToolName,
-      runtimePluginConfigUpdateToolName
-    ]) {
-      expect(configured.host.resolveToolPluginId(toolName)).toBeUndefined();
-    }
+    expect(
+      configured.host
+        .pluginToolDefinitions()
+        .filter((definition) => definition.pluginId === runtimePluginId)
+    ).toEqual([]);
   });
 
   it('keeps inventory available for cold blocked-plugin discovery when config is invalid', async () => {
@@ -282,12 +240,6 @@ describe('runtime config activation planning', () => {
         name: runtimePluginListToolName
       })
     ]);
-    expect(
-      configured.host.resolveToolPluginId(runtimePluginConfigReadToolName)
-    ).toBeUndefined();
-    expect(
-      configured.host.resolveToolPluginId(runtimePluginConfigUpdateToolName)
-    ).toBeUndefined();
     expect(factoryCalls).toBe(0);
     expect(inventoryResult.status).toBe('accepted');
     if (inventoryResult.status !== 'accepted') {
@@ -487,14 +439,23 @@ describe('runtime config activation planning', () => {
         }
       }
     });
-
-    expect(configured.activation.plugins).toContainEqual(
-      expect.objectContaining({
-        pluginId: plugin.manifest.id,
-        requestedAccess: { file_store: 'write' },
-        grantedAccess: { file_store: 'write' }
-      })
+    const activation = configured.activation.plugins.find(
+      (item) => item.pluginId === plugin.manifest.id
     );
+    const canonicalAccess = runtimePluginAccessSnapshot({
+      requestedAccess: plugin.manifest.requestedAccess,
+      enabled: true,
+      fieldPrefix: plugin.manifest.id
+    });
+    const hostAccess = configured.host
+      .registrySnapshot()
+      .plugins.find((item) => item.manifest.id === plugin.manifest.id);
+
+    expect(activation).toMatchObject({
+      pluginId: plugin.manifest.id,
+      ...canonicalAccess
+    });
+    expect(hostAccess).toMatchObject(canonicalAccess);
   });
 
   it('reports host-owned default grants for the built-in Character State factory', async () => {
@@ -574,14 +535,12 @@ describe('runtime config activation planning', () => {
     );
   });
 
-  it('does not trust caller-forged catalog provenance for host defaults', async () => {
+  it('does not default-enable a caller-supplied Character State factory', async () => {
     const storeRoot = createTestTempRoot('project02-config-character-state-forged-catalog-');
     const plugin = createCharacterStatePlugin();
     let factoryCalls = 0;
     const factories = {
       [characterStatePluginId]: {
-        catalogOwner: 'project02_host' as const,
-        construction: 'factory' as const,
         manifest: plugin.manifest,
         create() {
           factoryCalls += 1;
@@ -607,57 +566,6 @@ describe('runtime config activation planning', () => {
         grantedAccess: {}
       })
     );
-  });
-
-  it('canonicalizes host definitions copied from the public catalog', async () => {
-    const storeRoot = createTestTempRoot('project02-config-runtime-plugin-copied-catalog-');
-    const catalog = defaultRuntimePluginCatalogFactoryDefinitions();
-    const runtimeDefinition = catalog[runtimePluginId];
-    const spoofedPlugin = fileStoreSessionEndPlugin(
-      runtimePluginId,
-      () => {}
-    );
-    let spoofedFactoryCalls = 0;
-
-    if (runtimeDefinition === undefined) {
-      throw new Error('Expected runtime.plugin in the runtime plugin catalog.');
-    }
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot }),
-      factories: {
-        ...catalog,
-        [runtimePluginId]: {
-          ...runtimeDefinition,
-          manifest: spoofedPlugin.manifest,
-          create() {
-            spoofedFactoryCalls += 1;
-
-            return spoofedPlugin;
-          }
-        }
-      }
-    });
-
-    expect(spoofedFactoryCalls).toBe(0);
-    expect(configured.activation.plugins).toContainEqual(
-      expect.objectContaining({
-        pluginId: runtimePluginId,
-        enabled: true,
-        requestedAccess: { model_input: 'write' },
-        grantedAccess: { model_input: 'write' }
-      })
-    );
-    expect(
-      configured.host.registrySnapshot().plugins.find(
-        (plugin) => plugin.manifest.id === runtimePluginId
-      )?.manifest
-    ).toMatchObject({
-      id: runtimePluginId,
-      requestedAccess: { model_input: 'write' }
-    });
   });
 
   it('keeps disabled unknown plugin wrappers strict when selected by defaultMemoryProvider', async () => {

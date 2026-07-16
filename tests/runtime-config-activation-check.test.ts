@@ -701,7 +701,7 @@ describe('runtime config activation checks and construction', () => {
         }
       })
     ).rejects.toThrow(
-      'Plugin factory "memory.contract" returned a manifest that differs from its declared manifest "memory.contract".'
+      'Plugin package loader "memory.contract" returned a manifest that differs from its declared manifest "memory.contract".'
     );
     expect(cleanupCalls).toBe(1);
   });

@@ -5,8 +5,48 @@ import {
   defaultJsonBoundaryLimits,
   redactJsonBoundaryText
 } from '../src/shared/json-boundary.ts';
+import {
+  canonicalJsonStringify,
+  canonicalJsonValuesEqual,
+  createCanonicalJsonFingerprint
+} from '../src/shared/canonical-json.ts';
 
 describe('shared JSON boundary', () => {
+  it('compares nested arrays structurally', () => {
+    expect(
+      canonicalJsonValuesEqual(
+        ['same', { nested: [1, true, null] }],
+        ['same', { nested: [1, true, null] }]
+      )
+    ).toBe(true);
+    expect(
+      canonicalJsonValuesEqual(
+        ['same', { nested: [1, true, null] }],
+        ['same', { nested: [1, false, null] }]
+      )
+    ).toBe(false);
+  });
+
+  it('compares object values independently of key order', () => {
+    expect(
+      canonicalJsonValuesEqual(
+        { first: 1, second: { alpha: 'a', beta: 'b' } },
+        { second: { beta: 'b', alpha: 'a' }, first: 1 }
+      )
+    ).toBe(true);
+    expect(canonicalJsonValuesEqual({ first: 1 }, { second: 1 })).toBe(false);
+  });
+
+  it('canonicalizes fingerprints independently of object key order', () => {
+    const left = { first: 1, nested: { alpha: true, beta: false } };
+    const right = { nested: { beta: false, alpha: true }, first: 1 };
+
+    expect(canonicalJsonStringify(left)).toBe(canonicalJsonStringify(right));
+    expect(createCanonicalJsonFingerprint(left)).toBe(
+      createCanonicalJsonFingerprint(right)
+    );
+  });
+
   it('redacts structured credentials and credential-bearing text recursively', () => {
     const snapshot = createJsonBoundarySnapshot(
       {

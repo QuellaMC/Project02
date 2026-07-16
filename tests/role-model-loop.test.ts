@@ -46,6 +46,7 @@ describe('role-model loop routing and policy', () => {
         runRoleModelLoop({
           event: createTestEvent('hello', 'evt_invalid_max_tool_rounds'),
           decisionContext: createTestDecisionContext(),
+          pluginToolDefinitions: [],
           maxToolRounds,
           adapter: Object.freeze({
             invoke() {
@@ -116,7 +117,7 @@ describe('role-model loop routing and policy', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('hello', 'evt_explicit_empty_tools'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -143,7 +144,7 @@ describe('role-model loop routing and policy', () => {
 
   it('derives requested tool names for a replayable live adapter rejection', async () => {
     const details = 'Decision requested disallowed tool visible_reply.';
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('hello', 'evt_live_replayable_rejection'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [],
@@ -193,7 +194,7 @@ describe('role-model loop routing and policy', () => {
   });
 
   it('accepts terminal content as non-committed text when visible_reply is unavailable', async () => {
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('hello', 'evt_no_visible_terminal_text'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [],
@@ -230,7 +231,7 @@ describe('role-model loop routing and policy', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_disallowed_memory_search'),
       decisionContext: createTestDecisionContext(),
       allowedTools: [visibleReplyModelToolName],
@@ -323,7 +324,7 @@ describe('role-model loop routing and policy', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_native_argument_mismatch'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -420,7 +421,7 @@ describe('role-model loop routing and policy', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_provider_name_mapping'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -548,7 +549,7 @@ describe('role-model loop routing and policy', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('use colliding tools', 'evt_provider_name_collision'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -742,7 +743,7 @@ describe('role-model loop routing and policy', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('use tools', 'evt_native_history_mismatch'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -805,7 +806,7 @@ describe('role-model loop routing and policy', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_rejected_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -837,6 +838,47 @@ describe('role-model loop routing and policy', () => {
     expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
   });
 
+  it('routes executable tools through the immutable definition owner', async () => {
+    const routedPluginIds: string[] = [];
+    const options = {
+      event: createTestEvent('search memory', 'evt_definition_owned_routing'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'memory.search',
+              input: { query: 'Mira' }
+            }
+          ]
+        },
+        {
+          toolCalls: [
+            {
+              name: visibleReplyModelToolName,
+              input: { text: 'done' }
+            }
+          ]
+        }
+      ], () => undefined),
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolHost: Object.freeze({
+        handleToolCall(call) {
+          routedPluginIds.push(call.pluginId);
+          return createAcceptedToolCallResult();
+        }
+      } satisfies RoleModelPluginToolHost),
+      runtimePluginContext: createTestPluginContext(
+        'evt_definition_owned_routing'
+      )
+    };
+
+    const { publicResult: result } = await runRoleModelLoop(options);
+
+    expect(result.status).toBe('accepted');
+    expect(routedPluginIds).toEqual(['memory.search.fixture']);
+  });
+
   it('marks missing-host routing as not dispatched to the host', async () => {
     const completedDispatchSignals: boolean[] = [];
     const adapter = createSequencedAdapter([
@@ -862,7 +904,7 @@ describe('role-model loop routing and policy', () => {
       }
     ], () => undefined);
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_missing_plugin_tool_host'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -918,7 +960,7 @@ describe('role-model loop routing and policy', () => {
         }
       });
 
-      const result = await runRoleModelLoop({
+      const { publicResult: result } = await runRoleModelLoop({
         event: createTestEvent(
           'search memory',
           'evt_replayed_tool_call',
@@ -988,7 +1030,7 @@ describe('role-model loop routing and policy', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_required_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -1057,7 +1099,7 @@ describe('role-model loop routing and policy', () => {
       }
     });
 
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_handler_rejected_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,

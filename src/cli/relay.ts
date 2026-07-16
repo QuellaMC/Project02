@@ -1,8 +1,7 @@
-import { pathToFileURL } from 'node:url';
-
 import {
   createConversationSession,
-  type CharacterAgent
+  type CharacterAgent,
+  type ConversationSession
 } from '../core/conversation.ts';
 import {
   normalizeOneLineMessage,
@@ -17,22 +16,20 @@ import { createRuntimeLogStore } from '../runtime/log.ts';
 import type { RuntimePluginHost } from '../plugins/host.ts';
 import { createRuntimePluginContext } from '../plugins/constructors.ts';
 import {
-  createConfiguredProject02PluginHost,
-  createRuntimePluginFactoryCatalogSnapshot,
+  createConfiguredProject02PluginHostFromPlan,
   diagnosticsHaveErrors,
-  loadProject02RuntimeConfig
+  type RuntimePluginFactoryDefinition,
 } from '../runtime/config/index.ts';
-import {
-  loadRuntimeConfigEnvFile,
-  resolveRuntimeConfigActivationBeforeEnvFile,
-  RuntimeEnvFileError
-} from './runtime-env.ts';
+import { RuntimeEnvFileError } from './runtime-env.ts';
+import { isMainModule } from './main-module.ts';
+import { resolveRuntimeCliStartup } from './startup.ts';
 
 type RelayCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
   readonly pluginHost: RuntimePluginHost;
   readonly agent?: CharacterAgent;
+  readonly session?: ConversationSession;
 };
 
 type ConfiguredRelayCliOptions = {
@@ -40,9 +37,12 @@ type ConfiguredRelayCliOptions = {
   readonly stderr: NodeJS.WritableStream;
   readonly env?: NodeJS.ProcessEnv;
   readonly agent?: CharacterAgent;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 };
 
 const relayMissingReplyErrorMessage = 'Relay completed without a visible reply.';
+const configuredRelayShutdownMessage =
+  'relay configured plugin host lifetime ended';
 
 export async function runRelayCli(
   args: readonly string[],
@@ -50,7 +50,7 @@ export async function runRelayCli(
 ): Promise<number> {
   try {
     const message = readMessageArg(args);
-    const session = createConversationSession();
+    const session = options.session ?? createConversationSession();
 
     try {
       const result = await runLocalUserMessageEvent({
@@ -98,43 +98,15 @@ export async function runConfiguredRelayCli(
   args: readonly string[],
   options: ConfiguredRelayCliOptions
 ): Promise<number> {
-  const env = options.env ?? process.env;
-  const loadedConfig = loadProject02RuntimeConfig({ env });
-  const loadedConfigDiagnostic = loadedConfig.diagnostics.find(
-    (item) => item.severity === 'error'
-  );
-
-  if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
-    options.stderr.write(
-      `Error: ${loadedConfigDiagnostic?.message ?? 'Runtime config is invalid.'}\n`
-    );
-    return 1;
-  }
-
-  const catalogSnapshot = createRuntimePluginFactoryCatalogSnapshot({
-    loadedConfig
-  });
-  const activationBeforeEnv = resolveRuntimeConfigActivationBeforeEnvFile({
-    loadedConfig,
-    env,
-    catalogSnapshot
-  });
-
-  if (activationBeforeEnv !== undefined) {
-    const diagnostic = activationBeforeEnv.activation.diagnostics.find(
-      (item) => item.severity === 'error'
-    );
-
-    options.stderr.write(
-      `Error: ${diagnostic?.message ?? 'Runtime plugin activation failed.'}\n`
-    );
-    return 1;
-  }
-
-  let runtimeEnv: NodeJS.ProcessEnv;
+  let startup: ReturnType<typeof resolveRuntimeCliStartup>;
 
   try {
-    runtimeEnv = loadRuntimeConfigEnvFile({ loadedConfig, env });
+    startup = resolveRuntimeCliStartup({
+      ...(options.env === undefined ? {} : { env: options.env }),
+      ...(options.factories === undefined
+        ? {}
+        : { factories: options.factories })
+    });
   } catch (error: unknown) {
     if (error instanceof RuntimeEnvFileError) {
       options.stderr.write(`Error: ${error.message}\n`);
@@ -143,15 +115,35 @@ export async function runConfiguredRelayCli(
 
     throw error;
   }
+
+  const startupDiagnostic = (
+    startup.status === 'config_invalid'
+      ? startup.loadedConfig.diagnostics
+      : startup.activationPlan.activation.diagnostics
+  ).find((item) => item.severity === 'error');
+
+  if (
+    startup.status !== 'resolved' ||
+    diagnosticsHaveErrors(startup.activationPlan.activation.diagnostics)
+  ) {
+    options.stderr.write(
+      `Error: ${
+        startupDiagnostic?.message ??
+        (startup.status === 'config_invalid'
+          ? 'Runtime config is invalid.'
+          : 'Runtime plugin activation failed.')
+      }\n`
+    );
+    return 1;
+  }
+
   let configuredHost: Awaited<
-    ReturnType<typeof createConfiguredProject02PluginHost>
+    ReturnType<typeof createConfiguredProject02PluginHostFromPlan>
   >;
 
   try {
-    configuredHost = await createConfiguredProject02PluginHost({
-      loadedConfig,
-      env: runtimeEnv,
-      catalogSnapshot
+    configuredHost = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: startup.activationPlan
     });
   } catch {
     options.stderr.write(
@@ -160,23 +152,41 @@ export async function runConfiguredRelayCli(
     return 1;
   }
 
-  const diagnostic = configuredHost.activation.diagnostics.find(
-    (item) => item.severity === 'error'
-  );
+  const session = createConversationSession();
 
-  if (diagnosticsHaveErrors(configuredHost.activation.diagnostics)) {
-    options.stderr.write(
-      `Error: ${diagnostic?.message ?? 'Runtime plugin activation failed.'}\n`
-    );
-    return 1;
+  try {
+    return await runRelayCli(args, {
+      stdout: options.stdout,
+      stderr: options.stderr,
+      pluginHost: configuredHost.host,
+      session,
+      ...(options.agent === undefined ? {} : { agent: options.agent })
+    });
+  } finally {
+    await shutdownConfiguredRelayPluginHost({
+      pluginHost: configuredHost.host,
+      session
+    });
   }
+}
 
-  return await runRelayCli(args, {
-    stdout: options.stdout,
-    stderr: options.stderr,
-    pluginHost: configuredHost.host,
-    ...(options.agent === undefined ? {} : { agent: options.agent })
-  });
+async function shutdownConfiguredRelayPluginHost(options: {
+  readonly pluginHost: RuntimePluginHost;
+  readonly session: ConversationSession;
+}): Promise<void> {
+  try {
+    await options.pluginHost.shutdown(
+      createRuntimePluginContext({
+        ...createRuntimeEventIdentity(),
+        sessionId: options.session.id,
+        eventType: 'USER_MESSAGE',
+        currentUserMessage: configuredRelayShutdownMessage,
+        character: options.session.character
+      })
+    );
+  } catch {
+    // Shutdown is best-effort and must not mask the relay result.
+  }
 }
 
 async function closeRelayPluginSession(options: {
@@ -208,16 +218,6 @@ function readMessageArg(args: readonly string[]): string {
   }
 
   return normalizeOneLineMessage(messageArgs[0]);
-}
-
-function isMainModule(moduleUrl: string): boolean {
-  const scriptPath = process.argv[1];
-
-  if (scriptPath === undefined) {
-    return false;
-  }
-
-  return pathToFileURL(scriptPath).href === moduleUrl;
 }
 
 if (isMainModule(import.meta.url)) {

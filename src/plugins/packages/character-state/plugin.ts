@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import { assertCanonicalRuntimeTimestamp } from '../../../runtime/event.ts';
+import { canonicalJsonStringify } from '../../../shared/canonical-json.ts';
 
 import {
   createRuntimePlugin
@@ -55,7 +56,6 @@ const characterStateEventsPath = 'events.jsonl';
 const characterStateCheckpointPath = 'checkpoint.json';
 const characterStateCheckpointVersion = 1;
 const characterStateIdempotencyRecordVersion = 1;
-const characterStatePluginInstances = new WeakSet<RuntimePlugin>();
 
 const characterStatePatchInputContract = Object.freeze({
   type: 'object',
@@ -301,7 +301,6 @@ function createCharacterStatePluginFromManifest(
     }
   });
 
-  characterStatePluginInstances.add(plugin);
   return plugin;
 }
 
@@ -403,12 +402,7 @@ function decodeCharacterStateEventLog(
 
   for (const rawEvent of events) {
     const event = decodeStoredCharacterStatePatchEvent(rawEvent);
-    const identity = JSON.stringify([
-      event.eventId,
-      event.traceId,
-      event.createdAt,
-      event.toolCallId ?? null
-    ]);
+    const identity = characterStatePatchIdentityKey(event);
 
     if (identities.has(identity)) {
       throw new TypeError(
@@ -519,10 +513,6 @@ function jsonObjectEntriesEqual(left: object, right: object): boolean {
   );
 }
 
-export function isCharacterStatePlugin(plugin: RuntimePlugin): boolean {
-  return characterStatePluginInstances.has(plugin);
-}
-
 function readCharacterStateStore(
   fileStore: RuntimePluginFileStore
 ): CharacterStateCheckpoint {
@@ -623,17 +613,24 @@ function characterStateIdempotencyPath(identity: {
   readonly toolCallId?: string;
 }): string {
   const digest = createHash('sha256')
-    .update(
-      JSON.stringify([
-        identity.eventId,
-        identity.traceId,
-        identity.createdAt,
-        identity.toolCallId ?? null
-      ])
-    )
+    .update(characterStatePatchIdentityKey(identity))
     .digest('hex');
 
   return `idempotency/${digest}.json`;
+}
+
+function characterStatePatchIdentityKey(identity: {
+  readonly eventId: string;
+  readonly traceId: string;
+  readonly createdAt: string;
+  readonly toolCallId?: string;
+}): string {
+  return canonicalJsonStringify([
+    identity.eventId,
+    identity.traceId,
+    identity.createdAt,
+    identity.toolCallId ?? null
+  ]);
 }
 
 function isNonNegativeSafeInteger(value: unknown): value is number {

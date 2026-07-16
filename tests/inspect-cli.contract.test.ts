@@ -47,7 +47,7 @@ import {
   firstPartyModelToolsPluginId,
   runtimePluginId
 } from '../src/plugins/contract.ts';
-import { createDefaultProject02PluginHost } from '../src/plugins/default-host.ts';
+import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
 
 describe('inspect CLI plugin evidence', () => {
   it('shows model rounds and per-tool plugin events', async () => {
@@ -223,7 +223,7 @@ describe('inspect CLI plugin evidence', () => {
       readonly runtimeConfig: {
         readonly source: string;
         readonly path: string;
-        readonly storeRoot: string;
+        readonly project02: { readonly storeRoot: string };
       };
       readonly plugins: readonly {
         readonly pluginId: string;
@@ -237,7 +237,7 @@ describe('inspect CLI plugin evidence', () => {
     expect(output.runtimeConfig).toMatchObject({
       source: 'path',
       path: configPath,
-      storeRoot
+      project02: { storeRoot }
     });
     expect(output.plugins).toEqual(
       expect.arrayContaining([
@@ -296,7 +296,7 @@ describe('inspect CLI plugin evidence', () => {
         readonly runtimeConfig: {
           readonly source: string;
           readonly path: string;
-          readonly storeRoot: string;
+          readonly project02: { readonly storeRoot: string };
         };
         readonly sessions: readonly { readonly sessionId: string }[];
       };
@@ -305,7 +305,7 @@ describe('inspect CLI plugin evidence', () => {
       expect(output.runtimeConfig).toMatchObject({
         source: 'env',
         path: configPath,
-        storeRoot
+        project02: { storeRoot }
       });
       expect(output.sessions).toContainEqual(
         expect.objectContaining({
@@ -355,7 +355,7 @@ describe('inspect CLI plugin evidence', () => {
       const output = JSON.parse(stdout) as {
         readonly runtimeConfig: {
           readonly source: string;
-          readonly storeRoot: string;
+          readonly project02: { readonly storeRoot: string };
         };
         readonly sessions: readonly { readonly sessionId: string }[];
       };
@@ -363,7 +363,7 @@ describe('inspect CLI plugin evidence', () => {
       expect(exitCode).toBe(0);
       expect(output.runtimeConfig).toMatchObject({
         source: 'none',
-        storeRoot: selectedStoreRoot
+        project02: { storeRoot: selectedStoreRoot }
       });
       expect(output.sessions).toContainEqual(
         expect.objectContaining({
@@ -408,7 +408,7 @@ describe('inspect CLI plugin evidence', () => {
       const output = JSON.parse(stdout) as {
         readonly runtimeConfig: {
           readonly source: string;
-          readonly storeRoot: string;
+          readonly project02: { readonly storeRoot: string };
         };
         readonly sessions: readonly { readonly sessionId: string }[];
       };
@@ -417,7 +417,7 @@ describe('inspect CLI plugin evidence', () => {
       expect(stderr).toBe('');
       expect(output.runtimeConfig).toMatchObject({
         source: 'none',
-        storeRoot: selectedStoreRoot
+        project02: { storeRoot: selectedStoreRoot }
       });
       expect(output.sessions).toContainEqual(
         expect.objectContaining({
@@ -469,7 +469,7 @@ describe('inspect CLI plugin evidence', () => {
         readonly runtimeConfig: {
           readonly source: string;
           readonly path: string;
-          readonly storeRoot: string;
+          readonly project02: { readonly storeRoot: string };
         };
         readonly sessions: readonly { readonly sessionId: string }[];
       };
@@ -479,7 +479,7 @@ describe('inspect CLI plugin evidence', () => {
       expect(output.runtimeConfig).toMatchObject({
         source: 'env',
         path: configPath,
-        storeRoot: selectedStoreRoot
+        project02: { storeRoot: selectedStoreRoot }
       });
       expect(output.sessions).toContainEqual(
         expect.objectContaining({

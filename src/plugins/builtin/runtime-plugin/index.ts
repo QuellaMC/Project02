@@ -12,15 +12,17 @@ import type {
   RuntimePluginProvidedTool,
   RuntimePluginToolCallResult
 } from '../../plugin-types.ts';
-import type { RuntimePluginToolConfirmationHandler } from '../../tool-confirmation.ts';
 import {
   createRuntimePluginConfigReadTool,
   handleRuntimePluginConfigReadToolCall
 } from './config.ts';
 import {
   createRuntimePluginConfigUpdateTool,
+  createPreparedRuntimePluginConfigEffectConfirmationPreview,
+  preparedRuntimePluginConfigEffectIsStillCurrent,
   handleRuntimePluginConfigUpdateToolCall,
-  runtimePluginConfigUpdateTimeoutMs
+  reconcilePreparedRuntimePluginConfigEffect,
+  runtimePluginConfigUpdateExecutionTimeoutMs
 } from './config-update.ts';
 import {
   createRuntimePluginListTool,
@@ -36,7 +38,6 @@ export type CreateRuntimePluginManagementPluginOptions = {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
   readonly storeRoot?: string;
-  readonly confirmationHandler?: RuntimePluginToolConfirmationHandler;
 };
 
 const runtimePluginManagementPluginInstances = new WeakSet<RuntimePlugin>();
@@ -56,17 +57,14 @@ export function createRuntimePluginManagementPlugin(
 
   if (pluginConfigControl !== undefined) {
     providedTools.push(createRuntimePluginConfigReadTool());
-
-    if (options.confirmationHandler !== undefined) {
-      providedTools.push(createRuntimePluginConfigUpdateTool());
-    }
+    providedTools.push(createRuntimePluginConfigUpdateTool());
   }
 
   const plugin = createRuntimePlugin({
     manifest: createRuntimePluginManagementPluginManifest(),
     providedTools,
     lifecycleHooks: {
-      async handleToolCall(call, context) {
+      handleToolCall(call, context) {
         if (call.toolName === runtimePluginListToolName) {
           return handleRuntimePluginListToolCall({
             call,
@@ -91,14 +89,12 @@ export function createRuntimePluginManagementPlugin(
 
         if (
           call.toolName === runtimePluginConfigUpdateToolName &&
-          pluginConfigControl !== undefined &&
-          options.confirmationHandler !== undefined
+          pluginConfigControl !== undefined
         ) {
-          return await handleRuntimePluginConfigUpdateToolCall({
+          return handleRuntimePluginConfigUpdateToolCall({
             call,
             context,
             state: pluginConfigControl,
-            confirmationHandler: options.confirmationHandler,
             ...(options.storeRoot === undefined
               ? {}
               : { storeRoot: options.storeRoot })
@@ -137,7 +133,7 @@ export function createRuntimePluginManagementPluginManifest() {
       requiredForTurn: false,
       sideEffectLevel: 'runtime_config_write',
       confirmation: 'not_required',
-      timeoutMs: runtimePluginConfigUpdateTimeoutMs,
+      timeoutMs: runtimePluginConfigUpdateExecutionTimeoutMs,
       sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
@@ -183,3 +179,8 @@ export {
   createRuntimePluginConfigControlHostStateSnapshot,
   type RuntimePluginConfigControlHostState
 } from './state.ts';
+export {
+  createPreparedRuntimePluginConfigEffectConfirmationPreview,
+  preparedRuntimePluginConfigEffectIsStillCurrent,
+  reconcilePreparedRuntimePluginConfigEffect
+};

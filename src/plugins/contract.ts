@@ -23,6 +23,7 @@ export const runtimePluginDeclarationValues = [
   'handle_tool_call',
   'after_turn_committed',
   'on_session_end',
+  'on_shutdown',
   'health',
   'plugin_discovery'
 ] as const;
@@ -40,10 +41,6 @@ export const runtimePluginAccessNameValues = [
 ] as const;
 
 export const runtimePluginAccessLevelValues = ['none', 'read', 'write'] as const;
-
-export const runtimePluginAccessNames = Object.freeze([
-  ...runtimePluginAccessNameValues
-]);
 
 export const runtimePluginSideEffectLevelValues = [
   'none',
@@ -96,6 +93,7 @@ export const runtimePluginEvidenceKindValues = [
   'tool_invocation',
   'after_turn_committed',
   'session_end',
+  'shutdown',
   'health',
   'policy'
 ] as const;
@@ -114,6 +112,7 @@ export const runtimePluginPolicyOutcomeValues = [
   'required_rejected',
   'disallowed_tool_call',
   'handler_rejected',
+  'user_approved',
   'timeout',
   'health_degraded',
   'after_commit_failed'

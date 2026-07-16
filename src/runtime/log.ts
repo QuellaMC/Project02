@@ -3,16 +3,14 @@ import type {
   VisibleMessage
 } from '../core/conversation.ts';
 import {
-  createParsedRoleModelDecisionSnapshot,
-  createRoleModelIOSnapshot,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelDecisionRejection,
   type RoleModelIOSnapshot
 } from '../role-model/contracts.ts';
 import {
-  createRuntimePluginEvidenceSnapshot,
   runtimePluginContractVersion,
   createRuntimePluginTurnEvidenceSnapshot,
+  type PreparedRuntimePluginConfigEffect,
   type RuntimePluginContextItem,
   type RuntimePluginJsonObject,
   type RuntimePluginHealthSnapshot,
@@ -29,11 +27,9 @@ import {
 } from './event.ts';
 import type { LocalRuntimeSessionPaths } from './storage/layout.ts';
 import type { LocalRuntimeMutationLockOwnerToken } from './storage/mutation-lock.ts';
-import {
-  createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot,
-  redactJsonBoundaryText
-} from '../shared/json-boundary.ts';
+import { redactJsonBoundaryText } from '../shared/json-boundary.ts';
+import type { MutableDurableRuntimeSessionEvidence } from './storage/runtime-evidence-contract.ts';
+import { createRuntimeEvidenceTransitionMachine } from './storage/runtime-evidence-transition.ts';
 
 export const runtimeTurnStatusValues = [
   'completed',
@@ -111,6 +107,7 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
   readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
   readonly runtimePluginTurnEvidence?: RuntimePluginTurnEvidenceSnapshot;
+  readonly runtimeConfigEffects?: readonly PreparedRuntimePluginConfigEffect[];
 };
 
 export type ConversationLogRecord = VisibleMessage &
@@ -143,6 +140,7 @@ export type RawEventLogRecordInput = RuntimeEventIdentity & {
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
   readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
   readonly runtimePluginTurnEvidence?: RuntimePluginTurnEvidenceSnapshot;
+  readonly runtimeConfigEffects?: readonly PreparedRuntimePluginConfigEffect[];
 };
 
 export type ConversationLogRecordInput = VisibleMessage &
@@ -313,58 +311,56 @@ export function runtimePluginTurnEvidenceOption(options: {
 }
 
 export function createRuntimeLogStore(): RuntimeLogStore {
-  const traceEntries: RuntimeTraceEntry[] = [];
-  const rawEvents: RawEventLogRecord[] = [];
-  const conversationMessages: ConversationLogRecord[] = [];
+  const evidence: MutableDurableRuntimeSessionEvidence = {
+    traceEntries: [],
+    rawEvents: [],
+    conversationMessages: []
+  };
+  const transitionMachine = createRuntimeEvidenceTransitionMachine({ evidence });
 
   return Object.freeze({
     appendTrace(entry) {
-      const storedEntry = freezeTraceEntry(entry);
+      const storedEntry = transitionMachine.prepareTraceAppend(entry);
 
-      traceEntries.push(storedEntry);
+      transitionMachine.commitTraceAppend(storedEntry);
 
       return storedEntry;
     },
     appendRawEvent(record) {
-      const storedRecord = freezeRawEventRecord(record);
+      const storedRecord = transitionMachine.prepareRawEventAppend(record);
 
-      rawEvents.push(storedRecord);
+      transitionMachine.commitRawEventAppend(storedRecord);
 
       return storedRecord;
     },
-    appendConversationMessage(record) {
-      const storedRecord = freezeConversationLogRecord(record);
+    appendConversationMessage(record, expectedCharacter) {
+      const storedRecord = transitionMachine.prepareConversationAppend(
+        record,
+        expectedCharacter
+      );
 
-      conversationMessages.push(storedRecord);
+      transitionMachine.commitConversationAppend(storedRecord);
 
       return storedRecord;
     },
     removeConversationMessages(messageIds) {
-      const ids = new Set(messageIds);
-
-      for (let index = conversationMessages.length - 1; index >= 0; index -= 1) {
-        const message = conversationMessages[index];
-
-        if (message !== undefined && ids.has(message.id)) {
-          conversationMessages.splice(index, 1);
-        }
-      }
+      transitionMachine.removeConversationMessages(messageIds);
     },
     readSessionEvidence() {
       return createRuntimeSessionEvidenceSnapshot({
-        traceEntries,
-        rawEvents,
-        conversationMessages
+        traceEntries: evidence.traceEntries,
+        rawEvents: evidence.rawEvents,
+        conversationMessages: evidence.conversationMessages
       });
     },
     traceEntries() {
-      return Object.freeze([...traceEntries]);
+      return Object.freeze([...evidence.traceEntries]);
     },
     rawEvents() {
-      return Object.freeze([...rawEvents]);
+      return Object.freeze([...evidence.rawEvents]);
     },
     conversationMessages() {
-      return Object.freeze([...conversationMessages]);
+      return Object.freeze([...evidence.conversationMessages]);
     }
   } satisfies RuntimeLogStore);
 }
@@ -384,218 +380,6 @@ function createRuntimeSessionEvidenceSnapshot(options: {
       traceEntries: Object.freeze([])
     })
   } satisfies RuntimeSessionEvidenceSnapshot);
-}
-
-function freezeTraceEntry(entry: RuntimeTraceEntryInput): RuntimeTraceEntry {
-  return Object.freeze({
-    eventId: entry.eventId,
-    traceId: entry.traceId,
-    createdAt: assertCanonicalRuntimeTimestamp(
-      entry.createdAt,
-      'Runtime trace createdAt'
-    ),
-    step: entry.step
-  } satisfies RuntimeTraceEntry);
-}
-
-function freezeRawEventRecord(record: RawEventLogRecordInput): RawEventLogRecord {
-  const visibleMessageIds =
-    record.visibleMessageIds === undefined
-      ? undefined
-      : Object.freeze([...record.visibleMessageIds]);
-  const toolCallIds =
-    record.toolCallIds === undefined
-      ? undefined
-      : Object.freeze([...record.toolCallIds]);
-  const payloadSummary = freezeRawEventPayloadSummary(record.payloadSummary);
-  const roleModelIOSnapshot = freezeRoleModelIOSnapshot(
-    record.roleModelIOSnapshot
-  );
-  const parsedRoleModelDecisionSnapshot =
-    freezeParsedRoleModelDecisionSnapshot(
-      record.parsedRoleModelDecisionSnapshot
-    );
-  const commitValidation = freezeRoleModelCommitValidationSnapshot(
-    record.commitValidation
-  );
-  const runtimePluginEvidence = freezeRuntimePluginEvidenceSnapshots(
-    record.runtimePluginEvidence
-  );
-  const runtimePluginTurnEvidence = freezeRuntimePluginTurnEvidenceSnapshot(
-    record.runtimePluginTurnEvidence
-  );
-  const toolInput =
-    record.toolInput === undefined
-      ? undefined
-      : createJsonBoundaryObjectSnapshot(record.toolInput, {
-          field: 'Runtime tool input'
-        });
-  const toolResult = freezeRuntimePluginToolCallResult(record.toolResult);
-
-  return Object.freeze({
-    eventId: record.eventId,
-    traceId: record.traceId,
-    createdAt: assertCanonicalRuntimeTimestamp(
-      record.createdAt,
-      'Raw runtime event createdAt'
-    ),
-    kind: record.kind,
-    eventType: record.eventType,
-    ...(record.status === undefined ? {} : { status: record.status }),
-    ...(record.reason === undefined ? {} : { reason: record.reason }),
-    ...(visibleMessageIds === undefined ? {} : { visibleMessageIds }),
-    ...(toolCallIds === undefined ? {} : { toolCallIds }),
-    ...(record.toolCallId === undefined ? {} : { toolCallId: record.toolCallId }),
-    ...(record.dispatchedToHost === undefined
-      ? {}
-      : { dispatchedToHost: record.dispatchedToHost }),
-    ...(record.toolRound === undefined ? {} : { toolRound: record.toolRound }),
-    ...(record.toolName === undefined ? {} : { toolName: record.toolName }),
-    ...(record.toolPluginId === undefined
-      ? {}
-      : { toolPluginId: record.toolPluginId }),
-    ...(toolInput === undefined ? {} : { toolInput }),
-    ...(toolResult === undefined ? {} : { toolResult }),
-    ...(record.pluginStoreRevision === undefined
-      ? {}
-      : { pluginStoreRevision: record.pluginStoreRevision }),
-    ...(payloadSummary === undefined ? {} : { payloadSummary }),
-    ...(roleModelIOSnapshot === undefined ? {} : { roleModelIOSnapshot }),
-    ...(parsedRoleModelDecisionSnapshot === undefined
-      ? {}
-      : { parsedRoleModelDecisionSnapshot }),
-    ...(commitValidation === undefined ? {} : { commitValidation }),
-    ...(runtimePluginEvidence === undefined
-      ? {}
-      : { runtimePluginEvidence }),
-    ...(runtimePluginTurnEvidence === undefined
-      ? {}
-      : { runtimePluginTurnEvidence })
-  } satisfies RawEventLogRecord);
-}
-
-function freezeRuntimePluginToolCallResult(
-  result: RuntimePluginToolCallResult | undefined
-): RuntimePluginToolCallResult | undefined {
-  if (result === undefined) {
-    return undefined;
-  }
-
-  const evidence =
-    freezeRuntimePluginEvidenceSnapshots(result.evidence) ?? Object.freeze([]);
-
-  if (result.status === 'accepted') {
-    return Object.freeze({
-      status: 'accepted',
-      output: createJsonBoundarySnapshot(result.output, {
-        field: 'Runtime tool result'
-      }),
-      evidence
-    } satisfies RuntimePluginToolCallResult);
-  }
-
-  return Object.freeze({
-    status: 'rejected',
-    reason: result.reason,
-    message: result.message,
-    evidence
-  } satisfies RuntimePluginToolCallResult);
-}
-
-function freezeRawEventPayloadSummary(
-  payloadSummary: RawEventLogPayloadSummary | undefined
-): RawEventLogPayloadSummary | undefined {
-  if (payloadSummary === undefined) {
-    return undefined;
-  }
-
-  return Object.freeze({
-    ...(payloadSummary.rawInput === undefined
-      ? {}
-      : { rawInput: payloadSummary.rawInput }),
-    ...(payloadSummary.normalizedCurrentUserMessage === undefined
-      ? {}
-      : {
-          normalizedCurrentUserMessage:
-            payloadSummary.normalizedCurrentUserMessage
-        })
-  } satisfies RawEventLogPayloadSummary);
-}
-
-function freezeConversationLogRecord(
-  record: ConversationLogRecordInput
-): ConversationLogRecord {
-  return Object.freeze({
-    eventId: record.eventId,
-    traceId: record.traceId,
-    createdAt: assertCanonicalRuntimeTimestamp(
-      record.createdAt,
-      'Conversation log createdAt'
-    ),
-    id: record.id,
-    role: record.role,
-    speakerId: record.speakerId,
-    speakerName: record.speakerName,
-    text: record.text,
-    committedAt: assertCanonicalRuntimeTimestamp(
-      record.committedAt,
-      'Conversation log committedAt'
-    )
-  } satisfies ConversationLogRecord);
-}
-
-function freezeRoleModelIOSnapshot(
-  snapshot: RoleModelIOSnapshot | undefined
-): RoleModelIOSnapshot | undefined {
-  if (snapshot === undefined) {
-    return undefined;
-  }
-
-  return createRoleModelIOSnapshot(snapshot);
-}
-
-function freezeParsedRoleModelDecisionSnapshot(
-  snapshot: ParsedRoleModelDecisionSnapshot | undefined
-): ParsedRoleModelDecisionSnapshot | undefined {
-  if (snapshot === undefined) {
-    return undefined;
-  }
-
-  return createParsedRoleModelDecisionSnapshot(snapshot);
-}
-
-function freezeRoleModelCommitValidationSnapshot(
-  snapshot: RoleModelCommitValidationSnapshot | undefined
-): RoleModelCommitValidationSnapshot | undefined {
-  if (snapshot === undefined) {
-    return undefined;
-  }
-
-  return createRoleModelCommitValidationSnapshot(snapshot);
-}
-
-function freezeRuntimePluginEvidenceSnapshots(
-  snapshots: readonly RuntimePluginEvidenceSnapshot[] | undefined
-): readonly RuntimePluginEvidenceSnapshot[] | undefined {
-  if (snapshots === undefined) {
-    return undefined;
-  }
-
-  return Object.freeze(
-    snapshots.map((snapshot) =>
-      createRuntimePluginEvidenceSnapshot(snapshot)
-    )
-  );
-}
-
-function freezeRuntimePluginTurnEvidenceSnapshot(
-  snapshot: RuntimePluginTurnEvidenceSnapshot | undefined
-): RuntimePluginTurnEvidenceSnapshot | undefined {
-  if (snapshot === undefined) {
-    return undefined;
-  }
-
-  return createRuntimePluginTurnEvidenceSnapshot(snapshot);
 }
 
 function freezeRoleModelCommitValidationResult(

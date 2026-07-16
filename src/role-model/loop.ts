@@ -58,22 +58,26 @@ import {
   type RoleModelTurnContext
 } from './prompt.ts';
 import {
+  createPreparedRuntimePluginConfigEffect,
   createRuntimePluginEvidenceSnapshot,
+  createRuntimePluginToolCallResultSnapshot,
   redactRuntimePluginText,
+  type PreparedRuntimePluginConfigEffect,
   type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
   type RuntimePluginToolCall,
+  type RuntimePluginToolCallExecutionResult,
   type RuntimePluginToolCallResult,
   type RuntimePluginContext
 } from '../plugins/validation.ts';
+import { runtimePluginToolResultHasBlockingEvidence } from '../plugins/tool-evidence-policy.ts';
 import type {
   RuntimePluginEvidenceStatus,
   RuntimePluginPolicyOutcome
 } from '../plugins/contract.ts';
 import type { RuntimeEventIdentity, UserMessageRuntimeEvent } from '../runtime/event.ts';
 import {
-  createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot
+  createJsonBoundaryObjectSnapshot
 } from '../shared/json-boundary.ts';
 
 export { parseRoleModelDecision } from './contracts.ts';
@@ -110,9 +114,12 @@ export type RunRoleModelLoopOptions = {
   readonly decisionContext: DecisionContext;
   readonly adapter?: RoleModelAdapter;
   readonly allowedTools?: readonly RoleModelAllowedToolName[];
-  readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
+  readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
   readonly pluginToolHost?: RoleModelPluginToolHost;
-  readonly resolveToolPluginId?: (toolName: string) => string | undefined;
+  readonly preparedConfigEffectsByToolCallId?: Map<
+    string,
+    PreparedRuntimePluginConfigEffect
+  >;
   readonly maxToolRounds?: number;
   readonly onPluginToolCallStarted?: (
     event: RoleModelPluginToolCallStartedEvent
@@ -133,7 +140,9 @@ export type RoleModelPluginToolHost = {
   readonly handleToolCall: (
     call: RuntimePluginToolCall,
     context: RuntimePluginContext
-  ) => RuntimePluginToolCallResult | Promise<RuntimePluginToolCallResult>;
+  ) =>
+    | RuntimePluginToolCallExecutionResult
+    | Promise<RuntimePluginToolCallExecutionResult>;
 };
 
 export type RoleModelPluginToolRoutingEvidence = {
@@ -208,19 +217,18 @@ export type RoleModelLoopResult =
   | AcceptedRoleModelLoopResult
   | RejectedRoleModelLoopResult;
 
+export type RoleModelLoopExecutionResult =
+  | {
+      readonly status: 'accepted';
+      readonly publicResult: AcceptedRoleModelLoopResult;
+      readonly visibleReplyText?: string;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly publicResult: RejectedRoleModelLoopResult;
+    };
+
 export const defaultRoleModelMaxToolRounds = 99;
-
-const executionDecisionByLoopResult = new WeakMap<
-  AcceptedRoleModelLoopResult,
-  CharacterDecision
->();
-
-export function getRoleModelExecutionVisibleReplyText(
-  result: AcceptedRoleModelLoopResult
-): string | undefined {
-  const decision = executionDecisionByLoopResult.get(result) ?? result.decision;
-  return executionVisibleReplyText(decision);
-}
 
 function executionVisibleReplyText(
   decision: CharacterDecision
@@ -271,281 +279,427 @@ export function createRoleModelAdapterFromCharacterAgent(
 
 export async function runRoleModelLoop(
   options: RunRoleModelLoopOptions
-): Promise<RoleModelLoopResult> {
+): Promise<RoleModelLoopExecutionResult> {
   const adapter = options.adapter ?? createDeterministicLocalRoleModelAdapter();
   const maxToolRounds = normalizeMaxToolRounds(options.maxToolRounds);
   const identity = createSnapshotIdentity(options.event);
   const sessionId = options.decisionContext.sessionId;
-  const rounds: RoleModelLoopRound[] = [];
-  const allPluginToolResults: RoleModelPluginToolRoutingEvidence[] = [];
-  let toolRounds = 0;
-  let toolObservations: readonly RoleModelToolObservation[] = Object.freeze([]);
-  let nativeAdditionalMessages: readonly RoleModelChatMessage[] = Object.freeze([]);
+  const state: RoleModelLoopState = {
+    rounds: [],
+    allPluginToolResults: [],
+    toolRounds: 0,
+    toolObservations: Object.freeze([]),
+    nativeAdditionalMessages: Object.freeze([])
+  };
 
   for (let round = 1; ; round += 1) {
-    const inputEnvelope = createRoleModelInputEnvelope({
-      event: options.event,
-      decisionContext: options.decisionContext,
-      ...(options.allowedTools === undefined
-        ? {}
-        : { allowedTools: options.allowedTools }),
-      ...(options.pluginToolDefinitions === undefined
-        ? {}
-        : { pluginToolDefinitions: options.pluginToolDefinitions }),
-      toolObservations
-    });
-    const turnContext = renderRoleModelTurnContext(inputEnvelope, {
-      additionalMessages: nativeAdditionalMessages
-    });
-    const rawOutput: unknown = await adapter.invoke(inputEnvelope, {
-      turnContext
-    });
-    const rawOutputValidation = validateRoleModelAdapterRawOutput(
-      rawOutput,
-      inputEnvelope.allowedTools,
-      inputEnvelope.pluginToolDefinitions,
-      inputEnvelope.toolObservations
-    );
-    const adapterNativeAssistantMessage =
-      rawOutputValidation.status === 'accepted'
-        ? rawOutputValidation.nativeAssistantMessage
-        : undefined;
-    const nativeToolCallArgumentErrors =
-      rawOutputValidation.status === 'accepted'
-        ? (rawOutputValidation.nativeToolCallArgumentErrors ?? [])
-        : [];
-    const ioSnapshot = createRoleModelIOSnapshot({
-      ...identity,
-      sessionId,
-      inputEnvelope,
-      rawOutputText: rawOutputValidation.rawOutputText,
-      ...providerMetadataOption(rawOutputValidation.providerMetadata),
-      ...providerExchangeOption(rawOutputValidation.providerExchange)
-    });
-    const decisionResult =
-      rawOutputValidation.status === 'accepted'
-        ? parseRoleModelExecutionDecision(
-            rawOutputValidation.rawOutputText,
-            inputEnvelope.allowedTools,
-            inputEnvelope.pluginToolDefinitions,
-            toolObservations
-          )
-        : rawOutputValidation.decisionResult;
-    const parsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
-      ...identity,
-      sessionId,
-      result: decisionResult
-    });
-
-    if (decisionResult.status === 'rejected') {
-      const loopRound = createRoleModelLoopRound({
-        pluginToolResults: [],
-        inputEnvelope,
-        ioSnapshot,
-        parsedDecisionSnapshot,
-        round
-      });
-
-      rounds.push(loopRound);
-
-      return createRejectedRoleModelLoopResult({
-        pluginToolResults: allPluginToolResults,
-        decisionResult,
-        inputEnvelope,
-        ioSnapshot,
-        parsedDecisionSnapshot,
-        rounds
-      });
-    }
-
-    const executableToolCalls = executableModelToolCalls(
-      decisionResult.decision.toolCalls
-    );
-    const nativeAssistantMessage = nativeAssistantMessageForAcceptedDecision({
-      assistantMessage: adapterNativeAssistantMessage,
-      decision: decisionResult.decision,
-      allowedTools: inputEnvelope.allowedTools,
-      pluginToolDefinitions: inputEnvelope.pluginToolDefinitions,
-      toolObservations,
-      toolNameMappings:
-        rawOutputValidation.providerExchange?.toolNameMappings ?? [],
-      nativeToolCallArgumentErrors
-    });
-
-    if (executableToolCalls.length === 0) {
-      if (
-        getVisibleReplyToolCall(decisionResult.decision) === undefined &&
-        decisionResult.nonCommittedText === undefined
-      ) {
-        const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
-          roleModelMalformedOutputRejectionReason,
-          roleModelTerminalEmptyOutputRejectionDetails
-        );
-        const rejectedParsedDecisionSnapshot =
-          createParsedRoleModelDecisionSnapshot({
-            ...identity,
-            sessionId,
-            result: rejectedDecisionResult
-          });
-        const loopRound = createRoleModelLoopRound({
-          pluginToolResults: [],
-          inputEnvelope,
-          ioSnapshot,
-          parsedDecisionSnapshot: rejectedParsedDecisionSnapshot,
-          round
-        });
-
-        rounds.push(loopRound);
-
-        return createRejectedRoleModelLoopResult({
-          pluginToolResults: allPluginToolResults,
-          decisionResult: rejectedDecisionResult,
-          inputEnvelope,
-          ioSnapshot,
-          parsedDecisionSnapshot: rejectedParsedDecisionSnapshot,
-          rounds
-        });
-      }
-
-      const loopRound = createRoleModelLoopRound({
-        pluginToolResults: [],
-        inputEnvelope,
-        ioSnapshot,
-        parsedDecisionSnapshot,
-        round
-      });
-
-      rounds.push(loopRound);
-
-      const publicDecisionResult = parsedDecisionSnapshot.result;
-
-      if (publicDecisionResult.status !== 'accepted') {
-        throw new TypeError(
-          'Accepted role-model execution decision must produce accepted public evidence.'
-        );
-      }
-
-      const result = Object.freeze({
-        status: 'accepted',
-        inputEnvelope,
-        ioSnapshot,
-        parsedDecisionSnapshot,
-        decisionResult: publicDecisionResult,
-        decision: publicDecisionResult.decision,
-        pluginToolResults: Object.freeze([...allPluginToolResults]),
-        rounds: Object.freeze([...rounds])
-      } satisfies AcceptedRoleModelLoopResult);
-
-      executionDecisionByLoopResult.set(result, decisionResult.decision);
-      return result;
-    }
-
-    if (toolRounds >= maxToolRounds) {
-      const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
-        roleModelPluginToolRejectedRejectionReason,
-        `Role model exceeded maximum executable tool rounds (${String(maxToolRounds)}).`
-      );
-      const loopRound = createRoleModelLoopRound({
-        pluginToolResults: [],
-        inputEnvelope,
-        ioSnapshot,
-        parsedDecisionSnapshot,
-        round
-      });
-
-      rounds.push(loopRound);
-
-      return createRejectedRoleModelLoopResult({
-        pluginToolResults: allPluginToolResults,
-        decisionResult: rejectedDecisionResult,
-        inputEnvelope,
-        ioSnapshot,
-        parsedDecisionSnapshot,
-        rounds
-      });
-    }
-
-    const interimVisibleReplyText = executionVisibleReplyText(
-      decisionResult.decision
-    );
-
-    if (interimVisibleReplyText !== undefined) {
-      await options.onInterimVisibleReply?.({
-        round,
-        text: interimVisibleReplyText,
-        inputEnvelope,
-        ioSnapshot,
-        parsedDecisionSnapshot
-      });
-    }
-
-    await options.onPluginToolCallsRequested?.({
-      round,
-      toolNames: executableToolCalls.map((call) => call.name)
-    });
-
-    const pluginToolRouting = await routeExecutableToolCalls({
-      toolCalls: executableToolCalls,
+    const invokedRound = await invokeRoleModelLoopRound({
+      options,
+      adapter,
       identity,
-      inputEnvelope,
-      ioSnapshot,
-      parsedDecisionSnapshot,
+      sessionId,
       round,
-      ...(options.resolveToolPluginId === undefined
-        ? {}
-        : { resolveToolPluginId: options.resolveToolPluginId }),
-      ...(options.onPluginToolCallStarted === undefined
-        ? {}
-        : { onPluginToolCallStarted: options.onPluginToolCallStarted }),
-      ...(options.pluginToolHost === undefined
-        ? {}
-        : { pluginToolHost: options.pluginToolHost }),
-      ...(options.runtimePluginContext === undefined
-        ? {}
-        : { runtimePluginContext: options.runtimePluginContext }),
-      nativeToolCallArgumentErrors
+      state
     });
 
-    for (const result of pluginToolRouting.results) {
-      await options.onPluginToolCallCompleted?.({
-        round,
-        callId: result.callId,
-        dispatchedToHost: result.dispatchedToHost,
-        pluginId: result.call.pluginId,
-        toolName: result.call.toolName,
-        status: result.result.status,
-        result: result.result
+    if (invokedRound.status === 'rejected') {
+      return appendRejectedRoleModelLoopRound({
+        state,
+        invokedRound,
+        round
       });
     }
 
-    allPluginToolResults.push(...pluginToolRouting.results);
+    const terminalResult = terminalRoleModelLoopResult({
+      state,
+      invokedRound,
+      identity,
+      sessionId,
+      round,
+      maxToolRounds
+    });
 
-    const loopRound = createRoleModelLoopRound({
-      pluginToolResults: pluginToolRouting.results,
-      inputEnvelope,
-      ioSnapshot,
-      parsedDecisionSnapshot,
+    if (terminalResult !== undefined) {
+      return terminalResult;
+    }
+
+    const pluginToolRouting = await routeRoleModelLoopToolCalls({
+      options,
+      identity,
+      invokedRound,
       round
     });
 
-    rounds.push(loopRound);
+    recordRoleModelLoopToolRound({
+      state,
+      invokedRound,
+      pluginToolRouting,
+      round
+    });
+  }
+}
 
-    nativeAdditionalMessages = appendNativeToolRoundMessages({
-      assistantMessage: nativeAssistantMessage,
-      previousMessages: nativeAdditionalMessages,
-      results: pluginToolRouting.results,
-      toolNameMappings:
-        rawOutputValidation.providerExchange?.toolNameMappings ?? []
+type RoleModelLoopState = {
+  readonly rounds: RoleModelLoopRound[];
+  readonly allPluginToolResults: RoleModelPluginToolRoutingEvidence[];
+  toolRounds: number;
+  toolObservations: readonly RoleModelToolObservation[];
+  nativeAdditionalMessages: readonly RoleModelChatMessage[];
+};
+
+type InvokedRoleModelLoopRoundBase = {
+  readonly inputEnvelope: RoleModelInputEnvelope;
+  readonly ioSnapshot: RoleModelIOSnapshot;
+  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+};
+
+type InvokedRoleModelLoopRound =
+  | (InvokedRoleModelLoopRoundBase & {
+      readonly status: 'rejected';
+      readonly decisionResult: RejectedRoleModelDecisionResult;
+    })
+  | (InvokedRoleModelLoopRoundBase & {
+      readonly status: 'accepted';
+      readonly decisionResult: AcceptedRoleModelDecisionResult;
+      readonly executableToolCalls: readonly ModelToolCall[];
+      readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
+      readonly nativeToolCallArgumentErrors: readonly RoleModelNativeToolCallArgumentError[];
+      readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
     });
 
-    toolRounds += 1;
-    toolObservations = Object.freeze([
-      ...toolObservations,
-      ...pluginToolRouting.results.map((routing) =>
-        createToolObservationFromRouting({ round, routing })
-      )
-    ]);
+async function invokeRoleModelLoopRound(options: {
+  readonly options: RunRoleModelLoopOptions;
+  readonly adapter: RoleModelAdapter;
+  readonly identity: RuntimeEventIdentity;
+  readonly sessionId: string;
+  readonly round: number;
+  readonly state: RoleModelLoopState;
+}): Promise<InvokedRoleModelLoopRound> {
+  const inputEnvelope = createRoleModelInputEnvelope({
+    event: options.options.event,
+    decisionContext: options.options.decisionContext,
+    ...(options.options.allowedTools === undefined
+      ? {}
+      : { allowedTools: options.options.allowedTools }),
+    pluginToolDefinitions: options.options.pluginToolDefinitions,
+    toolObservations: options.state.toolObservations
+  });
+  const turnContext = renderRoleModelTurnContext(inputEnvelope, {
+    additionalMessages: options.state.nativeAdditionalMessages
+  });
+  const rawOutput: unknown = await options.adapter.invoke(inputEnvelope, {
+    turnContext
+  });
+  const rawOutputValidation = validateRoleModelAdapterRawOutput(
+    rawOutput,
+    inputEnvelope.allowedTools,
+    inputEnvelope.pluginToolDefinitions,
+    inputEnvelope.toolObservations
+  );
+  const ioSnapshot = createRoleModelIOSnapshot({
+    ...options.identity,
+    sessionId: options.sessionId,
+    inputEnvelope,
+    rawOutputText: rawOutputValidation.rawOutputText,
+    ...providerMetadataOption(rawOutputValidation.providerMetadata),
+    ...providerExchangeOption(rawOutputValidation.providerExchange)
+  });
+  const decisionResult =
+    rawOutputValidation.status === 'accepted'
+      ? parseRoleModelExecutionDecision(
+          rawOutputValidation.rawOutputText,
+          inputEnvelope.allowedTools,
+          inputEnvelope.pluginToolDefinitions,
+          options.state.toolObservations
+        )
+      : rawOutputValidation.decisionResult;
+  const parsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
+    ...options.identity,
+    sessionId: options.sessionId,
+    result: decisionResult
+  });
+
+  if (decisionResult.status === 'rejected') {
+    return {
+      status: 'rejected',
+      decisionResult,
+      inputEnvelope,
+      ioSnapshot,
+      parsedDecisionSnapshot
+    };
   }
+
+  const nativeToolCallArgumentErrors =
+    rawOutputValidation.status === 'accepted'
+      ? (rawOutputValidation.nativeToolCallArgumentErrors ?? [])
+      : [];
+  const toolNameMappings =
+    rawOutputValidation.providerExchange?.toolNameMappings ?? [];
+  const nativeAssistantMessage = nativeAssistantMessageForAcceptedDecision({
+    assistantMessage:
+      rawOutputValidation.status === 'accepted'
+        ? rawOutputValidation.nativeAssistantMessage
+        : undefined,
+    decision: decisionResult.decision,
+    allowedTools: inputEnvelope.allowedTools,
+    pluginToolDefinitions: inputEnvelope.pluginToolDefinitions,
+    toolObservations: options.state.toolObservations,
+    toolNameMappings,
+    nativeToolCallArgumentErrors
+  });
+
+  return {
+    status: 'accepted',
+    decisionResult,
+    inputEnvelope,
+    ioSnapshot,
+    parsedDecisionSnapshot,
+    executableToolCalls: executableModelToolCalls(decisionResult.decision.toolCalls),
+    ...(nativeAssistantMessage === undefined ? {} : { nativeAssistantMessage }),
+    nativeToolCallArgumentErrors,
+    toolNameMappings
+  };
+}
+
+function terminalRoleModelLoopResult(options: {
+  readonly state: RoleModelLoopState;
+  readonly invokedRound: Extract<InvokedRoleModelLoopRound, { status: 'accepted' }>;
+  readonly identity: RuntimeEventIdentity;
+  readonly sessionId: string;
+  readonly round: number;
+  readonly maxToolRounds: number;
+}): RoleModelLoopExecutionResult | undefined {
+  if (options.invokedRound.executableToolCalls.length === 0) {
+    return terminalAcceptedRoleModelLoopResult(options);
+  }
+
+  if (options.state.toolRounds < options.maxToolRounds) {
+    return undefined;
+  }
+
+  const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
+    roleModelPluginToolRejectedRejectionReason,
+    `Role model exceeded maximum executable tool rounds (${String(options.maxToolRounds)}).`
+  );
+  const rejectedParsedDecisionSnapshot =
+    createParsedRoleModelDecisionSnapshot({
+      ...options.identity,
+      sessionId: options.sessionId,
+      result: rejectedDecisionResult
+    });
+
+  return appendRejectedRoleModelLoopRound({
+    state: options.state,
+    invokedRound: {
+      status: 'rejected',
+      decisionResult: rejectedDecisionResult,
+      inputEnvelope: options.invokedRound.inputEnvelope,
+      ioSnapshot: options.invokedRound.ioSnapshot,
+      parsedDecisionSnapshot: rejectedParsedDecisionSnapshot
+    },
+    round: options.round
+  });
+}
+
+function terminalAcceptedRoleModelLoopResult(options: {
+  readonly state: RoleModelLoopState;
+  readonly invokedRound: Extract<InvokedRoleModelLoopRound, { status: 'accepted' }>;
+  readonly identity: RuntimeEventIdentity;
+  readonly sessionId: string;
+  readonly round: number;
+}): RoleModelLoopExecutionResult {
+  if (
+    getVisibleReplyToolCall(options.invokedRound.decisionResult.decision) ===
+      undefined &&
+    options.invokedRound.decisionResult.nonCommittedText === undefined
+  ) {
+    const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
+      roleModelMalformedOutputRejectionReason,
+      roleModelTerminalEmptyOutputRejectionDetails
+    );
+    const rejectedParsedDecisionSnapshot =
+      createParsedRoleModelDecisionSnapshot({
+        ...options.identity,
+        sessionId: options.sessionId,
+        result: rejectedDecisionResult
+      });
+
+    return appendRejectedRoleModelLoopRound({
+      state: options.state,
+      invokedRound: {
+        status: 'rejected',
+        decisionResult: rejectedDecisionResult,
+        inputEnvelope: options.invokedRound.inputEnvelope,
+        ioSnapshot: options.invokedRound.ioSnapshot,
+        parsedDecisionSnapshot: rejectedParsedDecisionSnapshot
+      },
+      round: options.round
+    });
+  }
+
+  const loopRound = createRoleModelLoopRound({
+    pluginToolResults: [],
+    inputEnvelope: options.invokedRound.inputEnvelope,
+    ioSnapshot: options.invokedRound.ioSnapshot,
+    parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+    round: options.round
+  });
+
+  options.state.rounds.push(loopRound);
+
+  const publicDecisionResult = options.invokedRound.parsedDecisionSnapshot.result;
+
+  if (publicDecisionResult.status !== 'accepted') {
+    throw new TypeError(
+      'Accepted role-model execution decision must produce accepted public evidence.'
+    );
+  }
+
+  const visibleReplyText = executionVisibleReplyText(
+    options.invokedRound.decisionResult.decision
+  );
+  const publicResult = Object.freeze({
+    status: 'accepted',
+    inputEnvelope: options.invokedRound.inputEnvelope,
+    ioSnapshot: options.invokedRound.ioSnapshot,
+    parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+    decisionResult: publicDecisionResult,
+    decision: publicDecisionResult.decision,
+    pluginToolResults: Object.freeze([
+      ...options.state.allPluginToolResults
+    ]),
+    rounds: Object.freeze([...options.state.rounds])
+  } satisfies AcceptedRoleModelLoopResult);
+
+  return Object.freeze({
+    status: 'accepted',
+    publicResult,
+    ...(visibleReplyText === undefined ? {} : { visibleReplyText })
+  });
+}
+
+function appendRejectedRoleModelLoopRound(options: {
+  readonly state: RoleModelLoopState;
+  readonly invokedRound: Extract<InvokedRoleModelLoopRound, { status: 'rejected' }>;
+  readonly round: number;
+}): RoleModelLoopExecutionResult {
+  const loopRound = createRoleModelLoopRound({
+    pluginToolResults: [],
+    inputEnvelope: options.invokedRound.inputEnvelope,
+    ioSnapshot: options.invokedRound.ioSnapshot,
+    parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+    round: options.round
+  });
+
+  options.state.rounds.push(loopRound);
+
+  return Object.freeze({
+    status: 'rejected',
+    publicResult: createRejectedRoleModelLoopResult({
+      pluginToolResults: options.state.allPluginToolResults,
+      inputEnvelope: options.invokedRound.inputEnvelope,
+      ioSnapshot: options.invokedRound.ioSnapshot,
+      parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+      rounds: options.state.rounds
+    })
+  });
+}
+
+async function routeRoleModelLoopToolCalls(options: {
+  readonly options: RunRoleModelLoopOptions;
+  readonly identity: RuntimeEventIdentity;
+  readonly invokedRound: Extract<InvokedRoleModelLoopRound, { status: 'accepted' }>;
+  readonly round: number;
+}): Promise<PluginToolRoutingResult> {
+  const interimVisibleReplyText = executionVisibleReplyText(
+    options.invokedRound.decisionResult.decision
+  );
+
+  if (interimVisibleReplyText !== undefined) {
+    await options.options.onInterimVisibleReply?.({
+      round: options.round,
+      text: interimVisibleReplyText,
+      inputEnvelope: options.invokedRound.inputEnvelope,
+      ioSnapshot: options.invokedRound.ioSnapshot,
+      parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot
+    });
+  }
+
+  await options.options.onPluginToolCallsRequested?.({
+    round: options.round,
+    toolNames: options.invokedRound.executableToolCalls.map((call) => call.name)
+  });
+
+  const pluginToolRouting = await routeExecutableToolCalls({
+    toolCalls: options.invokedRound.executableToolCalls,
+    identity: options.identity,
+    inputEnvelope: options.invokedRound.inputEnvelope,
+    ioSnapshot: options.invokedRound.ioSnapshot,
+    parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+    round: options.round,
+    ...(options.options.onPluginToolCallStarted === undefined
+      ? {}
+      : { onPluginToolCallStarted: options.options.onPluginToolCallStarted }),
+    ...(options.options.pluginToolHost === undefined
+      ? {}
+      : { pluginToolHost: options.options.pluginToolHost }),
+    ...(options.options.preparedConfigEffectsByToolCallId === undefined
+      ? {}
+      : {
+          preparedConfigEffectsByToolCallId:
+            options.options.preparedConfigEffectsByToolCallId
+        }),
+    ...(options.options.runtimePluginContext === undefined
+      ? {}
+      : { runtimePluginContext: options.options.runtimePluginContext }),
+    nativeToolCallArgumentErrors:
+      options.invokedRound.nativeToolCallArgumentErrors
+  });
+
+  for (const result of pluginToolRouting.results) {
+    await options.options.onPluginToolCallCompleted?.({
+      round: options.round,
+      callId: result.callId,
+      dispatchedToHost: result.dispatchedToHost,
+      pluginId: result.call.pluginId,
+      toolName: result.call.toolName,
+      status: result.result.status,
+      result: result.result
+    });
+  }
+
+  return pluginToolRouting;
+}
+
+function recordRoleModelLoopToolRound(options: {
+  readonly state: RoleModelLoopState;
+  readonly invokedRound: Extract<InvokedRoleModelLoopRound, { status: 'accepted' }>;
+  readonly pluginToolRouting: PluginToolRoutingResult;
+  readonly round: number;
+}): void {
+  options.state.allPluginToolResults.push(...options.pluginToolRouting.results);
+  options.state.rounds.push(
+    createRoleModelLoopRound({
+      pluginToolResults: options.pluginToolRouting.results,
+      inputEnvelope: options.invokedRound.inputEnvelope,
+      ioSnapshot: options.invokedRound.ioSnapshot,
+      parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+      round: options.round
+    })
+  );
+  options.state.nativeAdditionalMessages = appendNativeToolRoundMessages({
+    assistantMessage: options.invokedRound.nativeAssistantMessage,
+    previousMessages: options.state.nativeAdditionalMessages,
+    results: options.pluginToolRouting.results,
+    toolNameMappings: options.invokedRound.toolNameMappings
+  });
+  options.state.toolRounds += 1;
+  options.state.toolObservations = Object.freeze([
+    ...options.state.toolObservations,
+    ...options.pluginToolRouting.results.map((routing) =>
+      createToolObservationFromRouting({ round: options.round, routing })
+    )
+  ]);
 }
 
 function normalizeMaxToolRounds(value: number | undefined): number {
@@ -583,19 +737,26 @@ function createRoleModelLoopRound(options: {
 
 function createRejectedRoleModelLoopResult(options: {
   readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
-  readonly decisionResult: RejectedRoleModelDecisionResult;
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly ioSnapshot: RoleModelIOSnapshot;
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
   readonly rounds: readonly RoleModelLoopRound[];
 }): RejectedRoleModelLoopResult {
+  const decisionResult = options.parsedDecisionSnapshot.result;
+
+  if (decisionResult.status !== 'rejected') {
+    throw new TypeError(
+      'Rejected role-model execution decision must produce rejected public evidence.'
+    );
+  }
+
   return Object.freeze({
     status: 'rejected',
     inputEnvelope: options.inputEnvelope,
     ioSnapshot: options.ioSnapshot,
     parsedDecisionSnapshot: options.parsedDecisionSnapshot,
-    decisionResult: options.decisionResult,
-    rejection: options.decisionResult.rejection,
+    decisionResult,
+    rejection: decisionResult.rejection,
     pluginToolResults: Object.freeze([...options.pluginToolResults]),
     rounds: Object.freeze([...options.rounds])
   } satisfies RejectedRoleModelLoopResult);
@@ -624,94 +785,31 @@ function nativeAssistantMessageForAcceptedDecision(options: {
     return undefined;
   }
 
-  const nativeToolCallIds = new Set<string>();
-
-  for (const nativeToolCall of nativeToolCalls) {
-    if (
-      nativeToolCall.id.length === 0 ||
-      nativeToolCallIds.has(nativeToolCall.id)
-    ) {
-      return undefined;
-    }
-
-    nativeToolCallIds.add(nativeToolCall.id);
+  if (!nativeToolCallIdsAreValid(nativeToolCalls)) {
+    return undefined;
   }
 
   const expectedExecutableToolCalls = executableModelToolCalls(
     options.decision.toolCalls
   );
-  const argumentErrorsByExecutableIndex = new Map<
-    number,
-    RoleModelNativeToolCallArgumentError
-  >();
-
-  for (const error of options.nativeToolCallArgumentErrors) {
-    const expectedToolCall = expectedExecutableToolCalls[error.executableIndex];
-
-    if (
-      expectedToolCall === undefined ||
-      expectedToolCall.name !== error.toolName ||
-      argumentErrorsByExecutableIndex.has(error.executableIndex)
-    ) {
-      return undefined;
-    }
-
-    argumentErrorsByExecutableIndex.set(error.executableIndex, error);
-  }
-
-  const normalizedNativeToolCalls: Array<{
-    readonly name: string;
-    readonly input: unknown;
-  }> = [];
-  let executableIndex = 0;
-
-  for (const nativeToolCall of nativeToolCalls) {
-    const runtimeToolName = runtimeToolNameForProviderToolName(
-      nativeToolCall.function.name,
-      options.toolNameMappings
-    );
-    const expectedExecutableToolCall =
-      runtimeToolName === visibleReplyModelToolName
-        ? undefined
-        : expectedExecutableToolCalls[executableIndex];
-
-    if (
-      runtimeToolName !== visibleReplyModelToolName &&
-      (expectedExecutableToolCall === undefined ||
-        expectedExecutableToolCall.name !== runtimeToolName)
-    ) {
-      return undefined;
-    }
-
-    let input: unknown;
-    const argumentError =
-      runtimeToolName === visibleReplyModelToolName
-        ? undefined
-        : argumentErrorsByExecutableIndex.get(executableIndex);
-
-    if (argumentError !== undefined) {
-      input = expectedExecutableToolCall?.input;
-    } else {
-      try {
-        input = JSON.parse(nativeToolCall.function.arguments);
-      } catch {
-        return undefined;
-      }
-    }
-
-    normalizedNativeToolCalls.push(
-      Object.freeze({
-        name: runtimeToolName,
-        input
-      })
+  const argumentErrorsByExecutableIndex =
+    nativeToolCallArgumentErrorsByExecutableIndex(
+      options.nativeToolCallArgumentErrors,
+      expectedExecutableToolCalls
     );
 
-    if (runtimeToolName !== visibleReplyModelToolName) {
-      executableIndex += 1;
-    }
+  if (argumentErrorsByExecutableIndex === undefined) {
+    return undefined;
   }
 
-  if (executableIndex !== expectedExecutableToolCalls.length) {
+  const normalizedNativeToolCalls = normalizeNativeAssistantToolCalls({
+    nativeToolCalls,
+    expectedExecutableToolCalls,
+    argumentErrorsByExecutableIndex,
+    toolNameMappings: options.toolNameMappings
+  });
+
+  if (normalizedNativeToolCalls === undefined) {
     return undefined;
   }
 
@@ -735,6 +833,134 @@ function nativeAssistantMessageForAcceptedDecision(options: {
   }
 
   return options.assistantMessage;
+}
+
+function nativeToolCallIdsAreValid(
+  nativeToolCalls: readonly RoleModelChatToolCall[]
+): boolean {
+  const nativeToolCallIds = new Set<string>();
+
+  for (const nativeToolCall of nativeToolCalls) {
+    if (
+      nativeToolCall.id.length === 0 ||
+      nativeToolCallIds.has(nativeToolCall.id)
+    ) {
+      return false;
+    }
+
+    nativeToolCallIds.add(nativeToolCall.id);
+  }
+
+  return true;
+}
+
+function nativeToolCallArgumentErrorsByExecutableIndex(
+  errors: readonly RoleModelNativeToolCallArgumentError[],
+  expectedExecutableToolCalls: readonly ModelToolCall[]
+): ReadonlyMap<number, RoleModelNativeToolCallArgumentError> | undefined {
+  const errorsByIndex = new Map<number, RoleModelNativeToolCallArgumentError>();
+
+  for (const error of errors) {
+    const expectedToolCall = expectedExecutableToolCalls[error.executableIndex];
+
+    if (
+      expectedToolCall === undefined ||
+      expectedToolCall.name !== error.toolName ||
+      errorsByIndex.has(error.executableIndex)
+    ) {
+      return undefined;
+    }
+
+    errorsByIndex.set(error.executableIndex, error);
+  }
+
+  return errorsByIndex;
+}
+
+function normalizeNativeAssistantToolCalls(options: {
+  readonly nativeToolCalls: readonly RoleModelChatToolCall[];
+  readonly expectedExecutableToolCalls: readonly ModelToolCall[];
+  readonly argumentErrorsByExecutableIndex: ReadonlyMap<
+    number,
+    RoleModelNativeToolCallArgumentError
+  >;
+  readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
+}): readonly Readonly<{ name: string; input: unknown }>[] | undefined {
+  const normalizedNativeToolCalls: Array<
+    Readonly<{ name: string; input: unknown }>
+  > = [];
+  let executableIndex = 0;
+
+  for (const nativeToolCall of options.nativeToolCalls) {
+    const runtimeToolName = runtimeToolNameForProviderToolName(
+      nativeToolCall.function.name,
+      options.toolNameMappings
+    );
+    const expectedExecutableToolCall =
+      runtimeToolName === visibleReplyModelToolName
+        ? undefined
+        : options.expectedExecutableToolCalls[executableIndex];
+
+    if (
+      runtimeToolName !== visibleReplyModelToolName &&
+      (expectedExecutableToolCall === undefined ||
+        expectedExecutableToolCall.name !== runtimeToolName)
+    ) {
+      return undefined;
+    }
+
+    const inputResult = nativeAssistantToolCallInput({
+      nativeToolCall,
+      expectedExecutableToolCall,
+      argumentError:
+        runtimeToolName === visibleReplyModelToolName
+          ? undefined
+          : options.argumentErrorsByExecutableIndex.get(executableIndex)
+    });
+
+    if (inputResult.status === 'rejected') {
+      return undefined;
+    }
+
+    normalizedNativeToolCalls.push(
+      Object.freeze({
+        name: runtimeToolName,
+        input: inputResult.input
+      })
+    );
+
+    if (runtimeToolName !== visibleReplyModelToolName) {
+      executableIndex += 1;
+    }
+  }
+
+  return executableIndex === options.expectedExecutableToolCalls.length
+    ? normalizedNativeToolCalls
+    : undefined;
+}
+
+function nativeAssistantToolCallInput(options: {
+  readonly nativeToolCall: RoleModelChatToolCall;
+  readonly expectedExecutableToolCall: ModelToolCall | undefined;
+  readonly argumentError: RoleModelNativeToolCallArgumentError | undefined;
+}):
+  | { readonly status: 'accepted'; readonly input: unknown }
+  | { readonly status: 'rejected' } {
+  if (options.argumentError !== undefined) {
+    return {
+      status: 'accepted',
+      input: options.expectedExecutableToolCall?.input
+    };
+  }
+
+  try {
+    return {
+      status: 'accepted',
+      input: JSON.parse(options.nativeToolCall.function.arguments) as unknown
+    };
+  } catch {
+    return { status: 'rejected' };
+  }
 }
 
 function createToolObservationFromRouting(options: {
@@ -890,10 +1116,13 @@ async function routeExecutableToolCalls(options: {
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
   readonly round: number;
   readonly pluginToolHost?: RoleModelPluginToolHost;
+  readonly preparedConfigEffectsByToolCallId?: Map<
+    string,
+    PreparedRuntimePluginConfigEffect
+  >;
   readonly onPluginToolCallStarted?: (
     event: RoleModelPluginToolCallStartedEvent
   ) => Promise<void> | void;
-  readonly resolveToolPluginId?: (toolName: string) => string | undefined;
   readonly runtimePluginContext?: RuntimePluginContext;
   readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
 }): Promise<PluginToolRoutingResult> {
@@ -904,9 +1133,7 @@ async function routeExecutableToolCalls(options: {
       options.inputEnvelope.pluginToolDefinitions,
       toolCall.name
     );
-    const pluginId =
-      options.resolveToolPluginId?.(toolCall.name) ??
-      toolDefinition?.pluginId;
+    const pluginId = toolDefinition?.pluginId;
 
     const callId = createToolCallId({
       eventId: options.identity.eventId,
@@ -986,7 +1213,7 @@ async function routeExecutableToolCalls(options: {
       continue;
     }
 
-    let hostResult: RuntimePluginToolCallResult;
+    let hostResult: RuntimePluginToolCallExecutionResult;
 
     try {
       hostResult = await options.pluginToolHost.handleToolCall(
@@ -1012,11 +1239,20 @@ async function routeExecutableToolCalls(options: {
       continue;
     }
 
-    let frozenHostResult: RuntimePluginToolCallResult;
+    let routableHostResult: RuntimePluginToolCallResult;
 
     try {
-      frozenHostResult = freezeRuntimePluginToolCallResult(hostResult, {
-        call: executionCall
+      routableHostResult = normalizeRoutablePluginToolResult({
+        result: freezeRuntimePluginToolCallResult(hostResult, {
+          call: executionCall
+        }),
+        toolName: toolCall.name
+      });
+      capturePreparedConfigEffect({
+        call: executionCall,
+        result: hostResult,
+        routableResult: routableHostResult,
+        effectsByToolCallId: options.preparedConfigEffectsByToolCallId
       });
     } catch (error: unknown) {
       const routingEvidence = createRejectedToolRoutingEvidence({
@@ -1037,10 +1273,6 @@ async function routeExecutableToolCalls(options: {
       continue;
     }
 
-    const routableHostResult = normalizeRoutablePluginToolResult({
-      result: frozenHostResult,
-      toolName: toolCall.name
-    });
     const routingEvidence = Object.freeze({
       callId,
       call: routedCall,
@@ -1052,6 +1284,43 @@ async function routeExecutableToolCalls(options: {
   }
 
   return createAcceptedPluginToolRoutingResult(results);
+}
+
+function capturePreparedConfigEffect(options: {
+  readonly call: RuntimePluginToolCall;
+  readonly result: RuntimePluginToolCallExecutionResult;
+  readonly routableResult: RuntimePluginToolCallResult;
+  readonly effectsByToolCallId:
+    | Map<string, PreparedRuntimePluginConfigEffect>
+    | undefined;
+}): void {
+  if (
+    options.result.status !== 'accepted' ||
+    options.result.preparedConfigEffect === undefined ||
+    options.routableResult.status !== 'accepted' ||
+    options.effectsByToolCallId === undefined
+  ) {
+    return;
+  }
+
+  const effect = createPreparedRuntimePluginConfigEffect(
+    options.result.preparedConfigEffect
+  );
+  const toolCallId = options.call.toolCallId;
+
+  if (toolCallId === undefined || effect.effectId !== toolCallId) {
+    throw new TypeError(
+      'Prepared runtime config effect must match its routed tool call id.'
+    );
+  }
+
+  if (options.effectsByToolCallId.has(toolCallId)) {
+    throw new TypeError(
+      'Prepared runtime config effect tool call id must be unique.'
+    );
+  }
+
+  options.effectsByToolCallId.set(toolCallId, effect);
 }
 
 function createAcceptedPluginToolRoutingResult(
@@ -1111,7 +1380,7 @@ function normalizeRoutablePluginToolResult(options: {
 }): RuntimePluginToolCallResult {
   if (
     options.result.status === 'accepted' &&
-    options.result.evidence.some(toolInvocationEvidenceRejectsLoop)
+    runtimePluginToolResultHasBlockingEvidence(options.result)
   ) {
     return Object.freeze({
       status: 'rejected',
@@ -1122,24 +1391,6 @@ function normalizeRoutablePluginToolResult(options: {
   }
 
   return options.result;
-}
-
-function toolInvocationEvidenceRejectsLoop(
-  evidence: RuntimePluginToolCallResult['evidence'][number]
-): boolean {
-  if (evidence.evidenceKind !== 'tool_invocation') {
-    return false;
-  }
-
-  if (evidence.status === 'rejected' || evidence.status === 'failed') {
-    return true;
-  }
-
-  return (
-    evidence.policyOutcome === 'handler_rejected' ||
-    evidence.policyOutcome === 'required_rejected' ||
-    evidence.policyOutcome === 'disallowed_tool_call'
-  );
 }
 
 function findPluginToolDefinition(
@@ -1203,120 +1454,48 @@ function freezeRuntimePluginToolCallResult(
   result: RuntimePluginToolCallResult,
   options: { readonly call: RuntimePluginToolCall }
 ): RuntimePluginToolCallResult {
-  const boundedResult = snapshotRoutedPluginToolResult(result);
+  let boundedResult: RuntimePluginToolCallResult;
 
-  if (!isJsonRecord(boundedResult)) {
-    throw new TypeError('Plugin tool result must be a JSON object.');
+  try {
+    boundedResult = createRuntimePluginToolCallResultSnapshot(result);
+  } catch (error: unknown) {
+    if (error instanceof TypeError && error.message.includes('finite JSON')) {
+      throw new TypeError('Plugin tool output must be finite JSON.', {
+        cause: error
+      });
+    }
+
+    if (
+      error instanceof TypeError &&
+      error.message.includes('JSON serializable')
+    ) {
+      throw new TypeError('Plugin tool output must be JSON serializable.', {
+        cause: error
+      });
+    }
+
+    throw error;
   }
 
-  const evidence = freezeRoutedPluginEvidence(
-    boundedResult['evidence'],
-    options.call
-  );
-
-  if (boundedResult['status'] === 'accepted') {
-    return Object.freeze({
-      status: 'accepted',
-      output: freezeRuntimePluginToolOutputValue(boundedResult['output']),
-      evidence
-    } satisfies RuntimePluginToolCallResult);
-  }
-
-  if (
-    boundedResult['status'] !== 'rejected' ||
-    typeof boundedResult['reason'] !== 'string' ||
-    typeof boundedResult['message'] !== 'string'
-  ) {
-    throw new TypeError('Plugin tool result status is malformed.');
-  }
-
-  return Object.freeze({
-    status: 'rejected',
-    reason: redactRuntimePluginText(boundedResult['reason']),
-    message: redactRuntimePluginText(boundedResult['message']),
-    evidence
-  } satisfies RuntimePluginToolCallResult);
+  assertRoutedPluginEvidenceIdentity(boundedResult.evidence, options.call);
+  return boundedResult;
 }
 
-function freezeRoutedPluginEvidence(
-  evidence: unknown,
+function assertRoutedPluginEvidenceIdentity(
+  evidence: readonly RuntimePluginToolCallResult['evidence'][number][],
   call: RuntimePluginToolCall
-): readonly RuntimePluginToolCallResult['evidence'][number][] {
-  if (!Array.isArray(evidence) || evidence.length > 64) {
-    throw new TypeError('Plugin tool evidence exceeds the record limit.');
-  }
-
-  return Object.freeze(
-    evidence.map((item) => {
-      const snapshot = createRuntimePluginEvidenceSnapshot(item);
-
-      if (
-        snapshot.eventId !== call.eventId ||
-        snapshot.traceId !== call.traceId ||
-        snapshot.createdAt !== call.createdAt ||
-        snapshot.pluginId !== call.pluginId
-      ) {
-        throw new TypeError(
-          'Plugin tool evidence identity must match the routed call.'
-        );
-      }
-
-      return snapshot;
-    })
-  );
-}
-
-function snapshotRoutedPluginToolResult(
-  result: unknown
-): RuntimePluginJsonValue {
-  try {
-    return createJsonBoundarySnapshot(result, {
-      field: 'Plugin tool result',
-      redact: true
-    });
-  } catch (error: unknown) {
-    if (error instanceof TypeError && error.message.includes('finite JSON')) {
-      throw new TypeError('Plugin tool output must be finite JSON.', {
-        cause: error
-      });
-    }
+): void {
+  for (const snapshot of evidence) {
     if (
-      error instanceof TypeError &&
-      error.message.includes('JSON serializable')
+      snapshot.eventId !== call.eventId ||
+      snapshot.traceId !== call.traceId ||
+      snapshot.createdAt !== call.createdAt ||
+      snapshot.pluginId !== call.pluginId
     ) {
-      throw new TypeError('Plugin tool output must be JSON serializable.', {
-        cause: error
-      });
+      throw new TypeError(
+        'Plugin tool evidence identity must match the routed call.'
+      );
     }
-
-    throw error;
-  }
-}
-
-function freezeRuntimePluginToolOutputValue(
-  value: unknown
-): RuntimePluginJsonValue {
-  try {
-    return createJsonBoundarySnapshot(value, {
-      field: 'Plugin tool output',
-      redact: true
-    });
-  } catch (error: unknown) {
-    if (error instanceof TypeError && error.message.includes('finite JSON')) {
-      throw new TypeError('Plugin tool output must be finite JSON.', {
-        cause: error
-      });
-    }
-    if (
-      error instanceof TypeError &&
-      error.message.includes('JSON serializable')
-    ) {
-      throw new TypeError('Plugin tool output must be JSON serializable.', {
-        cause: error
-      });
-    }
-
-    throw error;
   }
 }
 

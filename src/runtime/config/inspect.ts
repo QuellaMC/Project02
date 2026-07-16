@@ -7,6 +7,7 @@ import type {
   RuntimeConfigValue
 } from './types.ts';
 import type { RuntimePluginManifest } from '../../plugins/plugin-types.ts';
+import { ownJsonRecordValue } from '../../shared/json-boundary.ts';
 import { redactRuntimeConfigValue } from './redact.ts';
 import { runtimeConfigDiagnosticMatchesPlugin } from './resolve.ts';
 
@@ -17,11 +18,6 @@ export function createRuntimeConfigInspectShape(
     source: resolvedConfig.source,
     ...(resolvedConfig.path === undefined ? {} : { path: resolvedConfig.path }),
     project02: resolvedConfig.project02,
-    storeRoot: resolvedConfig.storeRoot,
-    ...(resolvedConfig.defaultMemoryProvider === undefined
-      ? {}
-      : { defaultMemoryProvider: resolvedConfig.defaultMemoryProvider }),
-    roleModelProvider: resolvedConfig.roleModelProvider,
     diagnostics: Object.freeze([...resolvedConfig.diagnostics]),
     fingerprint: resolvedConfig.effectiveConfigFingerprint
   } satisfies RuntimeConfigInspectShape);
@@ -35,10 +31,14 @@ export function createRuntimePluginConfigInspectShape(options: {
   readonly activation?: RuntimePluginConfigActivationInspectShape;
   readonly defaultEnabled?: boolean;
 }): RuntimePluginConfigInspectShape {
-  const authoredPlugin = options.loadedConfig.config?.plugins?.[options.manifest.id];
-  const effectiveFields = options.resolvedConfig.redactedPluginConfigs[
+  const authoredPlugin = ownJsonRecordValue(
+    options.loadedConfig.config?.plugins,
     options.manifest.id
-  ];
+  );
+  const effectiveFields = ownJsonRecordValue(
+    options.resolvedConfig.redactedPluginConfigs,
+    options.manifest.id
+  );
 
   if (effectiveFields === undefined) {
     throw new TypeError(
@@ -76,8 +76,11 @@ export function createRuntimePluginConfigInspectShape(options: {
     activation,
     fields: Object.freeze(
       options.manifest.config.fields.map((field) => {
-        const authoredValue = authoredPlugin?.config?.[field.name];
-        const effective = effectiveFields[field.name];
+        const authoredValue = ownJsonRecordValue(
+          authoredPlugin?.config,
+          field.name
+        );
+        const effective = ownJsonRecordValue(effectiveFields, field.name);
 
         if (effective === undefined) {
           throw new TypeError(

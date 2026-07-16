@@ -43,6 +43,7 @@ export type RuntimePluginListHostState = () => {
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
   readonly installedPluginManifests?: readonly RuntimePluginManifest[];
   readonly activationStates?: readonly RuntimePluginListActivationState[];
+  readonly confirmationAvailable: boolean;
 };
 
 export function createRuntimePluginListTool(): RuntimePluginProvidedTool {
@@ -97,6 +98,7 @@ export function handleRuntimePluginListToolCall(options: {
     ...(hostState.activationStates === undefined
       ? {}
       : { activationStates: hostState.activationStates }),
+    confirmationAvailable: hostState.confirmationAvailable,
     includeDisabled: runtimePluginListIncludesDisabled(options.call.input)
   });
 
@@ -125,6 +127,7 @@ export function createRuntimePluginListOutput(options: {
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
   readonly installedPluginManifests?: readonly RuntimePluginManifest[];
   readonly activationStates?: readonly RuntimePluginListActivationState[];
+  readonly confirmationAvailable: boolean;
   readonly includeDisabled?: boolean;
 }): RuntimePluginJsonObject & {
   readonly plugins: readonly RuntimePluginJsonValue[];
@@ -150,8 +153,7 @@ export function createRuntimePluginListOutput(options: {
 
           return (
             !runtimePluginIds.has(manifest.id) &&
-            activation !== undefined &&
-            activation.activationStatus !== 'active'
+            activation?.activationStatus !== 'active'
           );
         })
       : [];
@@ -175,6 +177,7 @@ export function createRuntimePluginListOutput(options: {
           return createRuntimePluginListSummary({
             plugin,
             enabled,
+            confirmationAvailable: options.confirmationAvailable,
             activationStatus: effectiveRuntimePluginActivationStatus({
               enabled,
               configuredStatus: activationByPluginId.get(plugin.manifest.id)
@@ -206,10 +209,12 @@ export function createRuntimePluginListSummary(options: {
   readonly enabled: boolean;
   readonly activationStatus?: RuntimePluginListActivationStatus;
   readonly access: RuntimePluginAccessSnapshot;
+  readonly confirmationAvailable: boolean;
 }): RuntimePluginJsonObject {
   const discoverableTools = discoverableCurrentTurnPluginTools({
     plugin: options.plugin,
     access: options.access,
+    confirmationAvailable: options.confirmationAvailable,
     isHostOwnedFirstPartyModelToolsPlugin: isFirstPartyModelToolsPlugin
   });
   const safeTools = discoverableTools
@@ -316,6 +321,10 @@ function registeredLifecycleHookNames(
 
   if (plugin.lifecycleHooks.onSessionEnd !== undefined) {
     hooks.push('onSessionEnd');
+  }
+
+  if (plugin.lifecycleHooks.onShutdown !== undefined) {
+    hooks.push('onShutdown');
   }
 
   if (plugin.lifecycleHooks.health !== undefined) {

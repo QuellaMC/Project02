@@ -24,6 +24,7 @@ export type IsHostOwnedFirstPartyModelToolsPlugin = (
 export function pluginToolDefinitionsForEnabledPlugins(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
+  readonly confirmationAvailable: boolean;
 }): readonly RoleModelPluginToolDefinition[] {
   return Object.freeze(
     options.plugins
@@ -33,7 +34,11 @@ export function pluginToolDefinitionsForEnabledPlugins(options: {
           accessByPluginId: options.accessByPluginId
         });
 
-        return modelVisiblePluginTools({ plugin, access }).map((tool) =>
+        return modelVisiblePluginTools({
+          plugin,
+          access,
+          confirmationAvailable: options.confirmationAvailable
+        }).map((tool) =>
           Object.freeze({
             pluginId: plugin.manifest.id,
             ...tool
@@ -61,6 +66,7 @@ function modelToolDefinitionOrder(
 export function modelVisiblePluginTools(options: {
   readonly plugin: RuntimePlugin;
   readonly access: RuntimePluginAccessSnapshot;
+  readonly confirmationAvailable: boolean;
 }): readonly RuntimePluginProvidedTool[] {
   return Object.freeze(
     options.plugin.providedTools.filter(
@@ -69,6 +75,7 @@ export function modelVisiblePluginTools(options: {
           tool,
           access: options.access
         }) &&
+        (!tool.requiresConfirmation || options.confirmationAvailable) &&
         isModelVisiblePluginTool({
           plugin: options.plugin,
           tool
@@ -140,6 +147,7 @@ export function pluginToolHasRequiredGrantedAccess(options: {
 export function discoverableCurrentTurnPluginTools(options: {
   readonly plugin: RuntimePlugin;
   readonly access: RuntimePluginAccessSnapshot;
+  readonly confirmationAvailable: boolean;
   readonly isHostOwnedFirstPartyModelToolsPlugin?: IsHostOwnedFirstPartyModelToolsPlugin;
 }): readonly RuntimePluginProvidedTool[] {
   return Object.freeze(
@@ -149,6 +157,7 @@ export function discoverableCurrentTurnPluginTools(options: {
           tool,
           access: options.access
         }) &&
+        (!tool.requiresConfirmation || options.confirmationAvailable) &&
         isDiscoverableCurrentTurnTool({
           plugin: options.plugin,
           tool,
@@ -184,7 +193,7 @@ export function isFirstPartyBuiltInModelTool(options: {
     options.isHostOwnedFirstPartyModelToolsPlugin?.(options.plugin) === true &&
     options.tool.validationOwner === 'built_in_model_tools' &&
     isBuiltInModelToolName(options.tool.name) &&
-    !toolRequiresConfirmation(options) &&
+    !toolRequiresConfirmation(options.tool) &&
     options.tool.sideEffectLevel === 'none'
   );
 }
@@ -230,12 +239,8 @@ export function sideEffectLevelAllowsFileStoreWrites(
   return sideEffectLevel === 'local_memory_write';
 }
 
-export function toolRequiresConfirmation(options: {
-  readonly plugin: RuntimePlugin;
-  readonly tool: RuntimePluginProvidedTool;
-}): boolean {
-  return (
-    options.plugin.manifest.runtimePolicy.confirmation === 'required' ||
-    options.tool.requiresConfirmation
-  );
+export function toolRequiresConfirmation(
+  tool: RuntimePluginProvidedTool
+): boolean {
+  return tool.requiresConfirmation;
 }

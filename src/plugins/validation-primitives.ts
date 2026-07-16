@@ -1,5 +1,6 @@
 import {
   isJsonBoundaryCredentialKey,
+  ownJsonRecordValue,
   redactJsonBoundaryText
 } from '../shared/json-boundary.ts';
 import { runtimePluginSourceKindValues } from './contract.ts';
@@ -368,7 +369,7 @@ export function requireBooleanRecordField(
   record: Readonly<Record<string, unknown>>,
   field: string
 ): boolean {
-  const value = record[field];
+  const value = ownJsonRecordValue(record, field);
 
   if (typeof value !== 'boolean') {
     throw new TypeError(`Plugin field "${field}" must be a boolean.`);
@@ -389,7 +390,10 @@ export function requirePlainNonEmptyRecordString(
   record: Readonly<Record<string, unknown>>,
   field: string
 ): string {
-  return requirePlainNonEmptyStringFromUnknown(record[field], field);
+  return requirePlainNonEmptyStringFromUnknown(
+    ownJsonRecordValue(record, field),
+    field
+  );
 }
 
 export function requirePlainNonEmptyStringFromUnknown(

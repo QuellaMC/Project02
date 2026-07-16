@@ -14,6 +14,7 @@ import {
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
+  createRoleModelPluginToolDefinitions,
   createRoleModelToolObservation,
   createVisibleReplyCharacterDecision,
   isRoleModelRawOutputReplayableDecisionEvidence,
@@ -26,7 +27,7 @@ import {
   roleModelUnsupportedEffectRejectionReason
 } from '../src/role-model/contracts.ts';
 import type { RoleModelPluginToolDefinition } from '../src/role-model/contracts.ts';
-import { createDefaultProject02PluginHost } from '../src/plugins/default-host.ts';
+import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
 import { runtimePluginListToolName } from '../src/plugins/contract.ts';
 import {
   createRuntimeEventIdentity,
@@ -34,6 +35,36 @@ import {
 } from '../src/runtime/event.ts';
 
 describe('role-model contracts', () => {
+  it('accepts an approval-gated config-write definition without an identity carve-out', () => {
+    const definitions = createRoleModelPluginToolDefinitions([
+      {
+        pluginId: 'settings.arbitrary.fixture',
+        name: 'settings.arbitrary.update',
+        description: 'Update one arbitrary settings field after approval.',
+        requiredForUserTurn: false,
+        callLimit: {
+          scope: 'user_turn',
+          maxCalls: 1
+        },
+        inputContract: {
+          type: 'object',
+          fields: [],
+          additionalFields: false
+        },
+        validationOwner: 'plugin_host',
+        sideEffectLevel: 'runtime_config_write',
+        requiresConfirmation: true,
+        sourceReferencesRequired: false
+      }
+    ]);
+
+    expect(definitions).toHaveLength(1);
+    expect(definitions[0]).toMatchObject({
+      pluginId: 'settings.arbitrary.fixture',
+      name: 'settings.arbitrary.update'
+    });
+  });
+
   it.each([
     ['input', Number.NaN],
     ['output', Number.POSITIVE_INFINITY]
@@ -172,7 +203,8 @@ describe('role-model contracts', () => {
       decisionContext: createDecisionContext({
         sessionId: 'session-provider-exchange-redaction',
         characterSnapshot: { id: 'mira', displayName: 'Mira' }
-      })
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
     });
     const snapshot = createRoleModelIOSnapshot({
       ...identity,
@@ -282,7 +314,8 @@ describe('role-model contracts', () => {
             displayName: 'Mira'
           }
         }),
-        allowedTools: [visibleReplyModelToolName, visibleReplyModelToolName]
+        allowedTools: [visibleReplyModelToolName, visibleReplyModelToolName],
+        pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
       })
     ).toThrow('Role-model allowedTools must not contain duplicates.');
   });

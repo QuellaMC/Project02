@@ -16,15 +16,15 @@ import {
   rm,
   writeFile
 } from 'node:fs/promises';
+import { isNodeErrorWithCode } from '../../shared/node-error.ts';
+import { processIsAlive } from '../../shared/process-liveness.ts';
 
 import {
   LocalRuntimeStorageContractError,
   type LocalRuntimeStorageContractErrorCode
 } from './layout.ts';
-import { atomicReplaceFile } from './atomic-file.ts';
 
 export const defaultLocalRuntimeMutationLockWaitTimeoutMs = 10_000;
-export const defaultLocalRuntimeMutationLockHeartbeatIntervalMs = 5_000;
 export const defaultLocalRuntimeMutationLockIncompleteGraceMs = 30_000;
 
 type LocalRuntimeMutationLockBusyCode = Extract<
@@ -36,7 +36,6 @@ export type AcquireLocalRuntimeMutationLockOptions = {
   readonly locksRoot: string;
   readonly resourceKey: string;
   readonly waitTimeoutMs?: number;
-  readonly heartbeatIntervalMs?: number;
   readonly incompleteGraceMs?: number;
   readonly busyCode?: LocalRuntimeMutationLockBusyCode;
   readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
@@ -80,7 +79,6 @@ type MutationLockOwner = {
   readonly pid: number;
   readonly hostname: string;
   readonly acquiredAt: string;
-  readonly heartbeatAt: string;
 };
 
 type MutationLockReclamationIntentOwner = {
@@ -122,7 +120,6 @@ const syncOwnedMutationLocks = new WeakMap<
   LocalRuntimeMutationLockOwnerToken,
   Map<string, SyncOwnedMutationLock>
 >();
-const currentProcessOwnedMutationLockCounts = new Map<string, number>();
 
 export function createLocalRuntimeMutationLockOwnerToken(): LocalRuntimeMutationLockOwnerToken {
   return Object.freeze({});
@@ -148,44 +145,6 @@ export function localRuntimeMutationLockOwnerOwnsResource(options: {
     (syncOwnedMutationLocks.get(options.ownerToken)?.get(lockPath)?.count ?? 0) >
       0
   );
-}
-
-export function localRuntimeMutationLockResourceIsOwnedByCurrentProcess(options: {
-  readonly locksRoot: string;
-  readonly resourceKey: string;
-}): boolean {
-  const lockPath = mutationLockPath(options.locksRoot, options.resourceKey);
-
-  return (currentProcessOwnedMutationLockCounts.get(lockPath) ?? 0) > 0;
-}
-
-function mutationLockPath(locksRoot: string, resourceKeyInput: string): string {
-  const resourceKey = resourceKeyInput.trim();
-
-  if (resourceKey.length === 0) {
-    throw new TypeError('Local runtime mutation lock resource key must be non-empty.');
-  }
-
-  const hash = createHash('sha256').update(resourceKey).digest('hex');
-  return join(locksRoot, `${hash}.lock`);
-}
-
-function incrementCurrentProcessMutationLock(lockPath: string): void {
-  currentProcessOwnedMutationLockCounts.set(
-    lockPath,
-    (currentProcessOwnedMutationLockCounts.get(lockPath) ?? 0) + 1
-  );
-}
-
-function decrementCurrentProcessMutationLock(lockPath: string): void {
-  const next = (currentProcessOwnedMutationLockCounts.get(lockPath) ?? 1) - 1;
-
-  if (next <= 0) {
-    currentProcessOwnedMutationLockCounts.delete(lockPath);
-    return;
-  }
-
-  currentProcessOwnedMutationLockCounts.set(lockPath, next);
 }
 
 export async function acquireLocalRuntimeMutationLock(
@@ -297,11 +256,7 @@ export function acquireLocalRuntimeMutationLockSync(
     const lease = tryCreateMutationLockSync(normalized);
 
     if (lease !== undefined) {
-      return registerSyncMutationLockOwner(
-        options.ownerToken,
-        normalized,
-        lease
-      );
+      return registerSyncMutationLockOwner(options.ownerToken, normalized, lease);
     }
 
     if (reclaimAbandonedMutationLockSync(normalized)) {
@@ -375,7 +330,6 @@ type NormalizedMutationLockOptions = {
   readonly resourceKey: string;
   readonly lockPath: string;
   readonly waitTimeoutMs: number;
-  readonly heartbeatIntervalMs: number;
   readonly incompleteGraceMs: number;
   readonly busyCode: LocalRuntimeMutationLockBusyCode;
 };
@@ -393,11 +347,6 @@ function normalizeMutationLockOptions(
     options.waitTimeoutMs ?? defaultLocalRuntimeMutationLockWaitTimeoutMs,
     'waitTimeoutMs'
   );
-  const heartbeatIntervalMs = normalizePositiveSafeInteger(
-    options.heartbeatIntervalMs ??
-      defaultLocalRuntimeMutationLockHeartbeatIntervalMs,
-    'heartbeatIntervalMs'
-  );
   const incompleteGraceMs = normalizeNonNegativeSafeInteger(
     options.incompleteGraceMs ?? defaultLocalRuntimeMutationLockIncompleteGraceMs,
     'incompleteGraceMs'
@@ -409,7 +358,6 @@ function normalizeMutationLockOptions(
     resourceKey,
     lockPath: join(options.locksRoot, `${hash}.lock`),
     waitTimeoutMs,
-    heartbeatIntervalMs,
     incompleteGraceMs,
     busyCode: options.busyCode ?? 'storage_busy'
   };
@@ -661,8 +609,7 @@ async function tryCreateMutationLock(
     nonce: randomUUID(),
     pid: process.pid,
     hostname: hostname(),
-    acquiredAt: now,
-    heartbeatAt: now
+    acquiredAt: now
   } satisfies MutationLockOwner;
 
   try {
@@ -695,16 +642,6 @@ async function tryCreateMutationLock(
   }
 
   let released = false;
-  incrementCurrentProcessMutationLock(options.lockPath);
-  let heartbeatRefresh = Promise.resolve();
-  const heartbeat = setInterval(() => {
-    heartbeatRefresh = heartbeatRefresh
-      .then(async () => {
-        await refreshMutationLockHeartbeat(options.lockPath, owner);
-      })
-      .catch(() => {});
-  }, options.heartbeatIntervalMs);
-  heartbeat.unref();
 
   return Object.freeze({
     lockPath: options.lockPath,
@@ -715,13 +652,7 @@ async function tryCreateMutationLock(
       }
 
       released = true;
-      clearInterval(heartbeat);
-      try {
-        await heartbeatRefresh;
-        await releaseOwnedMutationLock(options.lockPath, owner.nonce);
-      } finally {
-        decrementCurrentProcessMutationLock(options.lockPath);
-      }
+      await releaseOwnedMutationLock(options.lockPath, owner.nonce);
     }
   } satisfies LocalRuntimeMutationLockLease);
 }
@@ -754,8 +685,7 @@ function tryCreateMutationLockSync(
     nonce: randomUUID(),
     pid: process.pid,
     hostname: hostname(),
-    acquiredAt: now,
-    heartbeatAt: now
+    acquiredAt: now
   } satisfies MutationLockOwner;
 
   try {
@@ -788,7 +718,6 @@ function tryCreateMutationLockSync(
   }
 
   let released = false;
-  incrementCurrentProcessMutationLock(options.lockPath);
 
   return Object.freeze({
     lockPath: options.lockPath,
@@ -799,36 +728,9 @@ function tryCreateMutationLockSync(
       }
 
       released = true;
-      try {
-        releaseOwnedMutationLockSync(options.lockPath, owner.nonce);
-      } finally {
-        decrementCurrentProcessMutationLock(options.lockPath);
-      }
+      releaseOwnedMutationLockSync(options.lockPath, owner.nonce);
     }
   } satisfies LocalRuntimeMutationLockLeaseSync);
-}
-
-async function refreshMutationLockHeartbeat(
-  lockPath: string,
-  owner: MutationLockOwner
-): Promise<void> {
-  const currentOwner = await readMutationLockOwner(lockPath);
-
-  if (currentOwner?.nonce !== owner.nonce) {
-    return;
-  }
-
-  const refreshed = {
-    ...owner,
-    heartbeatAt: new Date().toISOString()
-  } satisfies MutationLockOwner;
-
-  await atomicReplaceFile({
-    targetPath: ownerPath(lockPath),
-    content: `${JSON.stringify(refreshed)}\n`,
-    mode: 0o600,
-    createParent: false
-  }).catch(() => {});
 }
 
 async function releaseOwnedMutationLock(
@@ -941,7 +843,7 @@ function reclaimObservedMutationLockSync(
 ): boolean {
   if (
     observedOwner.hostname !== hostname() ||
-    isProcessAlive(observedOwner.pid)
+    processIsAlive(observedOwner.pid)
   ) {
     return false;
   }
@@ -968,7 +870,7 @@ function reclaimObservedMutationLockUnderIntentSync(
     currentOwner === undefined ||
     !sameMutationLockOwnerGeneration(currentOwner, observedOwner) ||
     currentOwner.hostname !== hostname() ||
-    isProcessAlive(currentOwner.pid)
+    processIsAlive(currentOwner.pid)
   ) {
     return false;
   }
@@ -1059,7 +961,7 @@ function hasActiveMutationLockReclamationIntentSync(
     const owner = readMutationLockReclamationIntentOwnerSync(intentPath);
 
     if (owner !== undefined) {
-      if (owner.hostname === hostname() && !isProcessAlive(owner.pid)) {
+      if (owner.hostname === hostname() && !processIsAlive(owner.pid)) {
         rmSync(intentPath, { force: true, recursive: true });
         continue;
       }
@@ -1180,8 +1082,7 @@ function isMutationLockOwner(value: unknown): value is MutationLockOwner {
     Number.isSafeInteger(owner['pid']) &&
     (owner['pid'] as number) > 0 &&
     typeof owner['hostname'] === 'string' &&
-    typeof owner['acquiredAt'] === 'string' &&
-    typeof owner['heartbeatAt'] === 'string'
+    typeof owner['acquiredAt'] === 'string'
   );
 }
 
@@ -1201,15 +1102,6 @@ function isMutationLockReclamationIntentOwner(
     typeof owner['hostname'] === 'string' &&
     typeof owner['createdAt'] === 'string'
   );
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: unknown) {
-    return !isNodeErrorWithCode(error, 'ESRCH');
-  }
 }
 
 function ownerPath(lockPath: string): string {
@@ -1237,21 +1129,4 @@ function normalizeNonNegativeSafeInteger(value: number, name: string): number {
   }
 
   return value;
-}
-
-function normalizePositiveSafeInteger(value: number, name: string): number {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new TypeError(`${name} must be a positive safe integer.`);
-  }
-
-  return value;
-}
-
-function isNodeErrorWithCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === code
-  );
 }

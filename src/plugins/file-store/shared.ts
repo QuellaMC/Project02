@@ -1,5 +1,8 @@
 import { sep } from 'node:path';
 
+import { parseAtomicReplacementFileName } from '../../runtime/storage/atomic-file.ts';
+import { createJsonBoundarySnapshot } from '../../shared/json-boundary.ts';
+import { splitCompleteJsonLines } from '../../shared/json-lines.ts';
 import type { RuntimePluginJsonValue } from '../types.ts';
 import type { RuntimePluginFileStorePathMode } from './contracts.ts';
 
@@ -26,7 +29,7 @@ export function normalizeRuntimePluginFileStorePath(path: string): string {
         part === durableRevisionFileName ||
         part === durablePathModesFileName ||
         part === durableDirectMutationJournalFileName ||
-        durablePluginAtomicTempFileOwnerPid(part) !== undefined
+        parseAtomicReplacementFileName(part) !== undefined
     ) ||
     parts.some((part) => part.includes(sep) && sep !== '/')
   ) {
@@ -36,73 +39,21 @@ export function normalizeRuntimePluginFileStorePath(path: string): string {
   return normalized;
 }
 
-export function durablePluginAtomicTempFileOwnerPid(
-  name: string
-): number | undefined {
-  const match = /^\..+\.(\d+)\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/iu.exec(
-    name
-  );
-  const parsed = match?.[1] === undefined ? Number.NaN : Number(match[1]);
-
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 export function freezeRuntimePluginFileStoreJsonValue(
   value: unknown
 ): RuntimePluginJsonValue {
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'boolean'
-  ) {
-    return value;
-  }
-
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      throw new TypeError('Plugin file values must contain finite JSON numbers.');
-    }
-
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return Object.freeze(
-      value.map((item) => freezeRuntimePluginFileStoreJsonValue(item))
-    );
-  }
-
-  if (isPlainObject(value)) {
-    const frozen: Record<string, RuntimePluginJsonValue> = Object.create(null) as Record<
-      string,
-      RuntimePluginJsonValue
-    >;
-
-    for (const [key, item] of Object.entries(value)) {
-      Object.defineProperty(frozen, key, {
-        value: freezeRuntimePluginFileStoreJsonValue(item),
-        enumerable: true,
-        configurable: false,
-        writable: false
-      });
-    }
-
-    return Object.freeze(frozen);
-  }
-
-  throw new TypeError('Plugin file values must be JSON-compatible.');
+  return createJsonBoundarySnapshot(value, {
+    field: 'Plugin file value'
+  });
 }
 
 export function parseRuntimePluginJsonlContent(
   content: string
 ): readonly RuntimePluginJsonValue[] {
   return Object.freeze(
-    content
-      .split('\n')
-      .filter((line) => line.trim().length > 0)
-      .map((line) =>
-        freezeRuntimePluginFileStoreJsonValue(JSON.parse(line) as unknown)
-      )
+    splitCompleteJsonLines(content).map((line) =>
+      freezeRuntimePluginFileStoreJsonValue(JSON.parse(line) as unknown)
+    )
   );
 }
 

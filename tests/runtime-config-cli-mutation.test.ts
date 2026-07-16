@@ -28,8 +28,17 @@ import {
   writeRuntimeConfig
 } from './support/runtime-config.ts';
 import {
+  requiredSecretPlugin,
   restoreProcessEnvValue
 } from './support/runtime-config-fixtures.ts';
+
+const installedSecretPlugin = requiredSecretPlugin('mem0-local');
+const installedSecretFactories = Object.freeze({
+  [installedSecretPlugin.manifest.id]: Object.freeze({
+    manifest: installedSecretPlugin.manifest,
+    create: () => installedSecretPlugin
+  })
+});
 
 describe('runtime config CLI mutation and storage', () => {
   it('seeds explicit store roots into newly created store configs', async () => {
@@ -41,7 +50,7 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'set', 'plugins.foo.config.backend', 'local'],
+        ['--store', storeRoot, 'set', 'project02.roleModelProvider', 'local'],
         {
           stdout: collect((chunk) => {
             setStdout += chunk;
@@ -57,14 +66,8 @@ describe('runtime config CLI mutation and storage', () => {
     });
     expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
       project02: {
-        storeRoot: seededStoreRoot
-      },
-      plugins: {
-        foo: {
-          config: {
-            backend: 'local'
-          }
-        }
+        storeRoot: seededStoreRoot,
+        roleModelProvider: 'local'
       }
     });
 
@@ -98,7 +101,7 @@ describe('runtime config CLI mutation and storage', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(
-          ['--store', relativeStoreRoot, 'set', 'plugins.foo.config.backend', 'local'],
+          ['--store', relativeStoreRoot, 'set', 'project02.roleModelProvider', 'local'],
           {
             stdout: collect((chunk) => {
               setStdout += chunk;
@@ -114,14 +117,8 @@ describe('runtime config CLI mutation and storage', () => {
       });
       expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
         project02: {
-          storeRoot
-        },
-        plugins: {
-          foo: {
-            config: {
-              backend: 'local'
-            }
-          }
+          storeRoot,
+          roleModelProvider: 'local'
         }
       });
 
@@ -153,7 +150,7 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
-        ['set', 'plugins.foo.config.backend', 'local'],
+        ['set', 'project02.roleModelProvider', 'local'],
         {
           stdout: collect((chunk) => {
             setStdout += chunk;
@@ -172,14 +169,8 @@ describe('runtime config CLI mutation and storage', () => {
     });
     expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
       project02: {
-        storeRoot: seededStoreRoot
-      },
-      plugins: {
-        foo: {
-          config: {
-            backend: 'local'
-          }
-        }
+        storeRoot: seededStoreRoot,
+        roleModelProvider: 'local'
       }
     });
 
@@ -190,7 +181,7 @@ describe('runtime config CLI mutation and storage', () => {
     });
     const resolved = resolveProject02RuntimeConfig({ loadedConfig: loaded });
 
-    expect(resolved.storeRoot).toBe(seededStoreRoot);
+    expect(resolved.project02.storeRoot).toBe(seededStoreRoot);
 
     expect(
       await runRuntimeConfigCliFromArgs(['env-path'], {
@@ -280,7 +271,7 @@ describe('runtime config CLI mutation and storage', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(
-          ['set', 'plugins.foo.config.backend', 'local'],
+          ['set', 'project02.roleModelProvider', 'local'],
           {
             stdout: collect((chunk) => {
               setStdout += chunk;
@@ -296,14 +287,8 @@ describe('runtime config CLI mutation and storage', () => {
       });
       expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
         project02: {
-          storeRoot: seededStoreRoot
-        },
-        plugins: {
-          foo: {
-            config: {
-              backend: 'local'
-            }
-          }
+          storeRoot: seededStoreRoot,
+          roleModelProvider: 'local'
         }
       });
 
@@ -329,7 +314,7 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
-        ['--config', configPath, 'set', 'plugins.foo.config.backend', 'local'],
+        ['--config', configPath, 'set', 'project02.roleModelProvider', 'local'],
         {
           stdout: collect(() => {}),
           stderr: collect(() => {})
@@ -339,12 +324,8 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toEqual({
       version: runtimeConfigVersion,
-      plugins: {
-        foo: {
-          config: {
-            backend: 'local'
-          }
-        }
+      project02: {
+        roleModelProvider: 'local'
       }
     });
   });
@@ -357,7 +338,7 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
-        ['set', 'plugins.foo.config.arg', '--', '--store'],
+        ['set', 'project02.defaultMemoryProvider', '--', '--store'],
         {
           stdout: collect((chunk) => {
             stdout += chunk;
@@ -375,12 +356,8 @@ describe('runtime config CLI mutation and storage', () => {
     expect(stderr).toBe('');
     expect(JSON.parse(stdout) as unknown).toMatchObject({ configPath });
     expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
-      plugins: {
-        foo: {
-          config: {
-            arg: '--store'
-          }
-        }
+      project02: {
+        defaultMemoryProvider: '--store'
       }
     });
   });
@@ -394,7 +371,14 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'set', 'plugins.foo.config.arg', '--', '--config'],
+        [
+          '--store',
+          storeRoot,
+          'set',
+          'project02.defaultMemoryProvider',
+          '--',
+          '--config'
+        ],
         {
           stdout: collect((chunk) => {
             stdout += chunk;
@@ -410,14 +394,8 @@ describe('runtime config CLI mutation and storage', () => {
     expect(JSON.parse(stdout) as unknown).toMatchObject({ configPath });
     expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
       project02: {
-        storeRoot: seededStoreRoot
-      },
-      plugins: {
-        foo: {
-          config: {
-            arg: '--config'
-          }
-        }
+        storeRoot: seededStoreRoot,
+        defaultMemoryProvider: '--config'
       }
     });
   });
@@ -429,7 +407,13 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
-        ['set', 'plugins.foo.config.prompt', 'hello', '--store', storeRoot],
+        [
+          'set',
+          'project02.defaultMemoryProvider',
+          'hello',
+          '--store',
+          storeRoot
+        ],
         {
           stdout: collect((chunk) => {
             stdout += chunk;
@@ -454,8 +438,8 @@ describe('runtime config CLI mutation and storage', () => {
           '--config',
           configPath,
           'set',
-          'plugins.foo.config.backend',
-          'remote'
+          'project02.roleModelProvider',
+          'nvidia'
         ] as const;
       },
       env(configPath: string) {
@@ -466,7 +450,7 @@ describe('runtime config CLI mutation and storage', () => {
     {
       label: 'PROJECT02_RUNTIME_CONFIG',
       args() {
-        return ['set', 'plugins.foo.config.backend', 'remote'] as const;
+        return ['set', 'project02.roleModelProvider', 'nvidia'] as const;
       },
       env(configPath: string) {
         return {
@@ -477,12 +461,8 @@ describe('runtime config CLI mutation and storage', () => {
   ])('preserves symlinked config files for $label mutations', async (example) => {
     const configRoot = createTestTempRoot('project02-config-link-');
     const targetPath = writeRuntimeConfig(join(configRoot, 'target.json'), {
-      plugins: {
-        foo: {
-          config: {
-            backend: 'local'
-          }
-        }
+      project02: {
+        roleModelProvider: 'local'
       }
     });
     const linkPath = join(configRoot, 'linked.json');
@@ -508,12 +488,8 @@ describe('runtime config CLI mutation and storage', () => {
     expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
     expect(readlinkSync(linkPath)).toBe(targetPath);
     expect(JSON.parse(readFileSync(targetPath, 'utf8')) as unknown).toMatchObject({
-      plugins: {
-        foo: {
-          config: {
-            backend: 'remote'
-          }
-        }
+      project02: {
+        roleModelProvider: 'nvidia'
       }
     });
   });
@@ -526,8 +502,8 @@ describe('runtime config CLI mutation and storage', () => {
           '--config',
           configPath,
           'set',
-          'plugins.foo.config.backend',
-          'remote'
+          'project02.roleModelProvider',
+          'nvidia'
         ] as const;
       },
       env(configPath: string) {
@@ -538,7 +514,7 @@ describe('runtime config CLI mutation and storage', () => {
     {
       label: 'PROJECT02_RUNTIME_CONFIG',
       args() {
-        return ['set', 'plugins.foo.config.backend', 'remote'] as const;
+        return ['set', 'project02.roleModelProvider', 'nvidia'] as const;
       },
       env(configPath: string) {
         return {
@@ -578,12 +554,8 @@ describe('runtime config CLI mutation and storage', () => {
       expect(readlinkSync(linkPath)).toBe(targetName);
       expect(JSON.parse(readFileSync(targetPath, 'utf8')) as unknown).toEqual({
         version: runtimeConfigVersion,
-        plugins: {
-          foo: {
-            config: {
-              backend: 'remote'
-            }
-          }
+        project02: {
+          roleModelProvider: 'nvidia'
         }
       });
     }
@@ -597,8 +569,8 @@ describe('runtime config CLI mutation and storage', () => {
           '--config',
           configPath,
           'set',
-          'plugins.foo.config.backend',
-          'remote'
+          'project02.roleModelProvider',
+          'nvidia'
         ] as const;
       },
       env(configPath: string) {
@@ -609,7 +581,7 @@ describe('runtime config CLI mutation and storage', () => {
     {
       label: 'PROJECT02_RUNTIME_CONFIG',
       args() {
-        return ['set', 'plugins.foo.config.backend', 'remote'] as const;
+        return ['set', 'project02.roleModelProvider', 'nvidia'] as const;
       },
       env(configPath: string) {
         return {
@@ -652,14 +624,8 @@ describe('runtime config CLI mutation and storage', () => {
       expect(JSON.parse(readFileSync(targetConfigPath, 'utf8')) as unknown).toEqual({
         version: runtimeConfigVersion,
         project02: {
-          storeRoot: seededStoreRoot
-        },
-        plugins: {
-          foo: {
-            config: {
-              backend: 'remote'
-            }
-          }
+          storeRoot: seededStoreRoot,
+          roleModelProvider: 'nvidia'
         }
       });
     }
@@ -672,7 +638,7 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
-        ['--config', configPath, 'set', 'storeRoot', storeRoot],
+        ['--config', configPath, 'set', 'project02.storeRoot', storeRoot],
         {
           stdout: collect(() => {}),
           stderr: collect(() => {})
@@ -687,12 +653,13 @@ describe('runtime config CLI mutation and storage', () => {
           'secret',
           'set',
           'mem0-local',
-          'cloudApiKey',
+          'apiKey',
           'MEM0_API_KEY'
         ],
         {
           stdout: collect(() => {}),
           stderr: collect(() => {}),
+          factories: installedSecretFactories,
           env: { MEM0_API_KEY: 'stored-secret' }
         }
       )
@@ -712,7 +679,7 @@ describe('runtime config CLI mutation and storage', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(
-          ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', envVar],
+          ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'apiKey', envVar],
           {
             stdout: collect((chunk) => {
               stdout += chunk;
@@ -720,6 +687,7 @@ describe('runtime config CLI mutation and storage', () => {
             stderr: collect((chunk) => {
               stderr += chunk;
             }),
+            factories: installedSecretFactories,
             env: { [envVar]: 'stored-secret' }
           }
         )
@@ -727,7 +695,7 @@ describe('runtime config CLI mutation and storage', () => {
 
       expect(stdout).toBe('');
       expect(stderr).toContain(
-        `Secret env var ${envVar} is reserved for Project02 runtime control`
+        `cannot use reserved Project02 runtime control env var "${envVar}"`
       );
       expect(existsSync(join(storeRoot, '.env'))).toBe(false);
       expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
@@ -740,7 +708,7 @@ describe('runtime config CLI mutation and storage', () => {
       plugins: {
         'mem0-local': {
           config: {
-            cloudApiKey: { $env: 'PROJECT02_EXISTING_SECRET' }
+            apiKey: { $env: 'PROJECT02_EXISTING_SECRET' }
           }
         }
       }
@@ -765,7 +733,7 @@ describe('runtime config CLI mutation and storage', () => {
           'secret',
           'set',
           'mem0-local',
-          'cloudApiKey',
+          'apiKey',
           roleModelProviderEnvVarName
         ],
         {
@@ -775,6 +743,7 @@ describe('runtime config CLI mutation and storage', () => {
           stderr: collect((chunk) => {
             stderr += chunk;
           }),
+          factories: installedSecretFactories,
           env: { [roleModelProviderEnvVarName]: 'stored-secret' }
         }
       )
@@ -782,7 +751,7 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(stdout).toBe('');
     expect(stderr).toContain(
-      `Secret env var ${roleModelProviderEnvVarName} is reserved for Project02 runtime control`
+      `cannot use reserved Project02 runtime control env var "${roleModelProviderEnvVarName}"`
     );
     expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
     expect(readFileSync(envPath, 'utf8')).toBe(originalEnv);
@@ -798,7 +767,7 @@ describe('runtime config CLI mutation and storage', () => {
           'secret',
           'set',
           'mem0-local',
-          'cloudApiKey',
+          'apiKey',
           'MEM0_API_KEY'
         ] as const;
       },
@@ -814,7 +783,7 @@ describe('runtime config CLI mutation and storage', () => {
           'secret',
           'set',
           'mem0-local',
-          'cloudApiKey',
+          'apiKey',
           'MEM0_API_KEY'
         ] as const;
       },
@@ -840,6 +809,7 @@ describe('runtime config CLI mutation and storage', () => {
         stderr: collect((chunk) => {
           stderr += chunk;
         }),
+        factories: installedSecretFactories,
         env: example.env(configPath)
       })
     ).toBe(1);
@@ -878,7 +848,7 @@ describe('runtime config CLI mutation and storage', () => {
           'secret',
           'set',
           'mem0-local',
-          'cloudApiKey',
+          'apiKey',
           'MEM0_API_KEY'
         ],
         {
@@ -888,6 +858,7 @@ describe('runtime config CLI mutation and storage', () => {
           stderr: collect((chunk) => {
             stderr += chunk;
           }),
+          factories: installedSecretFactories,
           env: { MEM0_API_KEY: 'stored-secret' }
         }
       )
@@ -926,7 +897,7 @@ describe('runtime config CLI mutation and storage', () => {
           'secret',
           'set',
           'mem0-local',
-          'cloudApiKey',
+          'apiKey',
           'MEM0_API_KEY'
         ],
         {
@@ -936,6 +907,7 @@ describe('runtime config CLI mutation and storage', () => {
           stderr: collect((chunk) => {
             stderr += chunk;
           }),
+          factories: installedSecretFactories,
           env: { MEM0_API_KEY: 'stored-secret' }
         }
       )
@@ -961,7 +933,7 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
-        ['--config', configPath, 'set', 'storeRoot', 'next-store'],
+        ['--config', configPath, 'set', 'project02.storeRoot', 'next-store'],
         {
           stdout: collect((chunk) => {
             stdout += chunk;
@@ -998,7 +970,7 @@ describe('runtime config CLI mutation and storage', () => {
           'secret',
           'set',
           'mem0-local',
-          'cloudApiKey',
+          'apiKey',
           'MEM0_API_KEY'
         ],
         {
@@ -1008,6 +980,7 @@ describe('runtime config CLI mutation and storage', () => {
           stderr: collect((chunk) => {
             stderr += chunk;
           }),
+          factories: installedSecretFactories,
           env: { MEM0_API_KEY: 'stored-secret' }
         }
       )
@@ -1051,7 +1024,7 @@ describe('runtime config CLI mutation and storage', () => {
           'secret',
           'set',
           'mem0-local',
-          'cloudApiKey',
+          'apiKey',
           'MEM0_API_KEY'
         ],
         {
@@ -1061,6 +1034,7 @@ describe('runtime config CLI mutation and storage', () => {
           stderr: collect((chunk) => {
             stderr += chunk;
           }),
+          factories: installedSecretFactories,
           env: { MEM0_API_KEY: 'stored-secret' }
         }
       )
@@ -1079,6 +1053,7 @@ describe('runtime config CLI mutation and storage', () => {
   it('reports env secret read failures before writing config updates', async () => {
     const storeRoot = createTestTempRoot('project02-config-env-read-blocked-');
     const envPath = join(realpathSync.native(storeRoot), '.env');
+    const displayEnvPath = join(storeRoot, '.env');
     let stdout = '';
     let stderr = '';
 
@@ -1086,7 +1061,7 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'cloudApiKey', 'MEM0_API_KEY'],
+        ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'apiKey', 'MEM0_API_KEY'],
         {
           stdout: collect((chunk) => {
             stdout += chunk;
@@ -1094,13 +1069,16 @@ describe('runtime config CLI mutation and storage', () => {
           stderr: collect((chunk) => {
             stderr += chunk;
           }),
+          factories: installedSecretFactories,
           env: { MEM0_API_KEY: 'stored-secret' }
         }
       )
     ).toBe(1);
 
     expect(stdout).toBe('');
-    expect(stderr).toBe(`Error: Could not read runtime config env file at ${envPath}.\n`);
+    expect(stderr).toBe(
+      `Error: Could not read runtime config env file at ${displayEnvPath}.\n`
+    );
     expect(stderr).not.toContain('EISDIR');
     expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
   });
@@ -1121,7 +1099,7 @@ describe('runtime config CLI mutation and storage', () => {
       operation: {
         kind: 'secret_set',
         pluginId: 'mem0-local',
-        fieldName: 'cloudApiKey',
+        fieldName: 'apiKey',
         envVar: 'MEM0_API_KEY',
         secretValue: 'stored-secret'
       }
@@ -1146,7 +1124,11 @@ describe('runtime config CLI mutation and storage', () => {
 
     const setResult = applyRuntimeConfigMutation({
       configPath,
-      operation: { kind: 'set', path: 'storeRoot', value: nextStoreRoot }
+      operation: {
+        kind: 'set',
+        path: 'project02.storeRoot',
+        value: nextStoreRoot
+      }
     });
 
     expect(setResult.config.project02?.storeRoot).toBe(nextStoreRoot);
@@ -1155,7 +1137,7 @@ describe('runtime config CLI mutation and storage', () => {
     const unsetResult = applyRuntimeConfigMutation({
       configPath,
       storeRoot: initialStoreRoot,
-      operation: { kind: 'unset', path: 'storeRoot' }
+      operation: { kind: 'unset', path: 'project02.storeRoot' }
     });
 
     expect(unsetResult.config.project02?.storeRoot).toBeUndefined();
@@ -1175,7 +1157,11 @@ describe('runtime config CLI mutation and storage', () => {
 
       const result = applyRuntimeConfigMutation({
         configPath: paddedConfigPath,
-        operation: { kind: 'set', path: 'storeRoot', value: 'next-store' }
+        operation: {
+          kind: 'set',
+          path: 'project02.storeRoot',
+          value: 'next-store'
+        }
       });
       const config: unknown = JSON.parse(readFileSync(configPath, 'utf8'));
 

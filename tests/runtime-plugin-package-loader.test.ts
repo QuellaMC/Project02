@@ -35,14 +35,15 @@ describe('runtime plugin package loader', () => {
     expect(discovery.diagnostics).toEqual([]);
     expect(discovery.packages).toHaveLength(1);
     expect(discovery.packages[0]).toMatchObject({
+      catalogKind: 'package',
       manifest: { id: manifest.id },
-      provenance: 'operator',
-      factory: { manifest: { id: manifest.id } }
+      provenance: 'operator'
     });
+    expect(discovery.packages[0]?.load).toBeTypeOf('function');
     expect(Object.isFrozen(discovery)).toBe(true);
     expect(Object.isFrozen(discovery.packages)).toBe(true);
     expect(Object.isFrozen(discovery.packages[0])).toBe(true);
-    expect(Object.isFrozen(discovery.packages[0]?.factory)).toBe(true);
+    expect(discovery.packages[0]).not.toHaveProperty('factory');
   });
 
   it('quarantines an invalid descriptor without hiding valid siblings', () => {
@@ -379,7 +380,7 @@ describe('runtime plugin package loader', () => {
       throw new Error('Expected the package to be discovered.');
     }
 
-    const plugin = await discoveredPackage.factory.create({
+    const plugin = await discoveredPackage.load({
       pluginId: manifest.id,
       manifest: discoveredPackage.manifest,
       storeRoot: root,
@@ -424,7 +425,7 @@ describe('runtime plugin package loader', () => {
       }
 
       await expect(
-        discoveredPackage.factory.create({
+        discoveredPackage.load({
           pluginId: manifest.id,
           manifest: discoveredPackage.manifest,
           storeRoot: root,
@@ -434,6 +435,41 @@ describe('runtime plugin package loader', () => {
       ).resolves.toMatchObject({ manifest: { id: manifest.id } });
     }
   );
+
+  it('accepts semantically identical factory input with reordered manifest keys', async () => {
+    const root = createTestTempRoot('project02-plugin-manifest-order-');
+    const manifest = testPluginManifest('memory.reordered-manifest');
+
+    writeTestPackage({
+      root,
+      manifest,
+      entrySource: validEntrySource()
+    });
+    const discovery = discoverRuntimePluginPackages({
+      sources: [{ root, provenance: 'operator' }],
+      reservedPluginIds: []
+    });
+    const discoveredPackage = discovery.packages[0];
+
+    expect(discoveredPackage).toBeDefined();
+    if (discoveredPackage === undefined) {
+      throw new Error('Expected the reordered-manifest package to be discovered.');
+    }
+
+    const reorderedManifest = Object.fromEntries(
+      Object.entries(discoveredPackage.manifest).reverse()
+    ) as RuntimePluginManifest;
+
+    await expect(
+      discoveredPackage.load({
+        pluginId: manifest.id,
+        manifest: reorderedManifest,
+        storeRoot: root,
+        resolvedConfig: {},
+        redactedConfig: {}
+      })
+    ).resolves.toMatchObject({ manifest: { id: manifest.id } });
+  });
 
   it('keeps one bundled package and quarantines an operator duplicate', () => {
     const parentRoot = createTestTempRoot('project02-plugin-packages-');
@@ -528,7 +564,7 @@ describe('runtime plugin package loader', () => {
     }
 
     await expect(
-      discoveredPackage.factory.create({
+      discoveredPackage.load({
         pluginId: manifest.id,
         manifest: discoveredPackage.manifest,
         storeRoot: root,
@@ -609,7 +645,7 @@ describe('runtime plugin package loader', () => {
       throw new Error('Expected the package to be discovered.');
     }
 
-    const error = await Promise.resolve(discoveredPackage.factory.create({
+    const error = await Promise.resolve(discoveredPackage.load({
       pluginId: manifest.id,
       manifest: discoveredPackage.manifest,
       storeRoot: root,
@@ -670,7 +706,7 @@ describe('runtime plugin package loader', () => {
       throw new Error('Expected the package to be discovered.');
     }
 
-    const error = await Promise.resolve(discoveredPackage.factory.create({
+    const error = await Promise.resolve(discoveredPackage.load({
       pluginId: manifest.id,
       manifest: discoveredPackage.manifest,
       storeRoot: root,
@@ -907,7 +943,7 @@ async function instantiatePackage(
   >['packages'][number],
   storeRoot: string
 ) {
-  return await discoveredPackage.factory.create({
+  return await discoveredPackage.load({
     pluginId: discoveredPackage.manifest.id,
     manifest: discoveredPackage.manifest,
     storeRoot,

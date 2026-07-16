@@ -5,6 +5,7 @@ import type {
   ConversationSession
 } from '../../core/conversation.ts';
 import type {
+  PreparedRuntimePluginConfigEffect,
   RuntimePluginContext,
   RuntimePluginContextItem,
   RuntimePluginEvidenceSnapshot,
@@ -131,6 +132,12 @@ export type RoleModelRawEvidence = {
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
 };
 
+export function roleModelIOSnapshotSessionId(
+  snapshot: RoleModelIOSnapshot
+): string {
+  return snapshot.inputEnvelope.decisionContext.sessionId;
+}
+
 export type NormalizeUserMessageRuntimeEventResult =
   | {
       readonly status: 'accepted';
@@ -160,6 +167,10 @@ export type RuntimeTurnState = {
   readonly startedPluginToolCalls: Map<string, RuntimePluginToolCall>;
   readonly finishedToolCallIds: string[];
   readonly finishedPluginToolResults: RoleModelPluginToolRoutingEvidence[];
+  readonly preparedConfigEffectsByToolCallId: Map<
+    string,
+    PreparedRuntimePluginConfigEffect
+  >;
   userConversationMessage: ConversationLogRecord | undefined;
 };
 

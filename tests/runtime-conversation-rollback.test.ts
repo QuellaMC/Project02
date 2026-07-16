@@ -36,6 +36,12 @@ describe('runtime conversation rollback failures', () => {
       ...(underlying.localRuntimeSessionPaths === undefined
         ? {}
         : { localRuntimeSessionPaths: underlying.localRuntimeSessionPaths }),
+      ...(underlying.localRuntimeWriterLockOwnerToken === undefined
+        ? {}
+        : {
+            localRuntimeWriterLockOwnerToken:
+              underlying.localRuntimeWriterLockOwnerToken
+          }),
       appendTrace: (entry) => underlying.appendTrace(entry),
       appendRawEvent: (record) => underlying.appendRawEvent(record),
       appendConversationMessage(record) {
@@ -135,6 +141,12 @@ describe('runtime conversation rollback failures', () => {
       ...(underlying.localRuntimeSessionPaths === undefined
         ? {}
         : { localRuntimeSessionPaths: underlying.localRuntimeSessionPaths }),
+      ...(underlying.localRuntimeWriterLockOwnerToken === undefined
+        ? {}
+        : {
+            localRuntimeWriterLockOwnerToken:
+              underlying.localRuntimeWriterLockOwnerToken
+          }),
       appendTrace: (entry) => underlying.appendTrace(entry),
       appendRawEvent: (record) => underlying.appendRawEvent(record),
       appendConversationMessage(record) {
@@ -224,6 +236,12 @@ describe('runtime conversation rollback failures', () => {
       ...(underlying.localRuntimeSessionPaths === undefined
         ? {}
         : { localRuntimeSessionPaths: underlying.localRuntimeSessionPaths }),
+      ...(underlying.localRuntimeWriterLockOwnerToken === undefined
+        ? {}
+        : {
+            localRuntimeWriterLockOwnerToken:
+              underlying.localRuntimeWriterLockOwnerToken
+          }),
       appendTrace: (entry) => underlying.appendTrace(entry),
       appendRawEvent: (record) => underlying.appendRawEvent(record),
       appendConversationMessage(record) {

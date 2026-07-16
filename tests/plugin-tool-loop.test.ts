@@ -561,9 +561,10 @@ describe('plugin-driven Character State tool loop', () => {
       const result = await pluginHost.handleToolCall(call, context);
 
       expect(result.status).toBe('accepted');
-      pluginHost
-        .prepareFileStoreTransaction?.(transactionIdentityFromContext(context))
-        ?.finalize();
+      const prepared = await pluginHost.prepareFileStoreTransaction?.(
+        transactionIdentityFromContext(context)
+      );
+      await prepared?.finalize();
     }
 
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
@@ -653,21 +654,23 @@ describe('plugin-driven Character State tool loop', () => {
 
     pluginHost.beginFileStoreTransaction?.();
     const originalResult = await pluginHost.handleToolCall(originalCall, context);
-    pluginHost
-      .prepareFileStoreTransaction?.(transactionIdentityFromContext(context))
-      ?.finalize();
+    const originalPrepared = await pluginHost.prepareFileStoreTransaction?.(
+      transactionIdentityFromContext(context)
+    );
+    await originalPrepared?.finalize();
     pluginHost.beginFileStoreTransaction?.();
     await pluginHost.handleToolCall(interveningCall, interveningContext);
-    pluginHost
-      .prepareFileStoreTransaction?.(
+    const interveningPrepared =
+      await pluginHost.prepareFileStoreTransaction?.(
         transactionIdentityFromContext(interveningContext)
-      )
-      ?.finalize();
+      );
+    await interveningPrepared?.finalize();
     pluginHost.beginFileStoreTransaction?.();
     const replayedResult = await pluginHost.handleToolCall(originalCall, context);
-    pluginHost
-      .prepareFileStoreTransaction?.(transactionIdentityFromContext(context))
-      ?.finalize();
+    const replayPrepared = await pluginHost.prepareFileStoreTransaction?.(
+      transactionIdentityFromContext(context)
+    );
+    await replayPrepared?.finalize();
     pluginHost.beginFileStoreTransaction?.();
     const conflictingResult = await pluginHost.handleToolCall(
       {
@@ -678,9 +681,10 @@ describe('plugin-driven Character State tool loop', () => {
       },
       context
     );
-    pluginHost
-      .prepareFileStoreTransaction?.(transactionIdentityFromContext(context))
-      ?.finalize();
+    const conflictingPrepared = await pluginHost.prepareFileStoreTransaction?.(
+      transactionIdentityFromContext(context)
+    );
+    await conflictingPrepared?.finalize();
 
     expect(originalResult).toMatchObject({
       status: 'accepted',

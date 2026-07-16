@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createRuntimePluginHost, runRuntimePluginSessionEndHooks } from '../src/plugins/host.ts';
-import type { RuntimePluginFileStore } from '../src/plugins/types.ts';
+import {
+  createRuntimePluginRegistrySnapshot,
+  runtimePluginAccessForPlugin,
+  type RuntimePluginFileStore
+} from '../src/plugins/types.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin
@@ -26,6 +30,26 @@ import {
 } from './support/plugin-host-fixtures.ts';
 
 describe('runtime plugin host access and lifecycle', () => {
+  it('treats a missing own access entry for a prototype-named plugin as absent', () => {
+    const plugin = createFileStoreAvailabilityProbePlugin({
+      pluginId: 'constructor',
+      requestedAccess: { file_store: 'read', model_input: 'write' }
+    });
+
+    expect(() =>
+      runtimePluginAccessForPlugin({
+        plugin,
+        accessByPluginId: {}
+      })
+    ).toThrow('Plugin "constructor" is missing resolved access.');
+
+    const registry = createRuntimePluginRegistrySnapshot([plugin], {
+      accessByPluginId: {}
+    });
+
+    expect(registry.plugins[0]?.grantedAccess).toEqual({});
+  });
+
   it('rejects duplicate plugin ids before standalone session-end API permission injection', async () => {
     const pluginId = 'memory.duplicate-session-end.fixture';
     const invokedPlugins: string[] = [];

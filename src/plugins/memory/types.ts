@@ -2,7 +2,12 @@ import type {
   RuntimePluginSourceReference
 } from '../plugin-types.ts';
 
-export type MemoryRecallRequest = {
+export type MemoryOperationScope = {
+  readonly deadlineAt: number;
+  readonly signal: AbortSignal;
+};
+
+export type MemoryRecallRequest = MemoryOperationScope & {
   readonly sessionId: string;
   readonly currentUserMessage: string;
   readonly maxItems: number;
@@ -19,7 +24,7 @@ export type MemoryRecallResult = {
   readonly items: readonly MemoryRecallItem[];
 };
 
-export type MemoryCaptureTurn = {
+export type MemoryCaptureTurn = MemoryOperationScope & {
   readonly sessionId: string;
   readonly userMessage: string;
   readonly characterMessage?: string;
@@ -32,7 +37,7 @@ export type MemoryCaptureResult = {
   readonly sourceReferences?: readonly RuntimePluginSourceReference[];
 };
 
-export type MemorySearchRequest = {
+export type MemorySearchRequest = MemoryOperationScope & {
   readonly sessionId: string;
   readonly query: string;
   readonly maxItems: number;
@@ -42,7 +47,7 @@ export type MemorySearchResult = {
   readonly items: readonly MemoryRecallItem[];
 };
 
-export type MemoryAddRequest = {
+export type MemoryAddRequest = MemoryOperationScope & {
   readonly sessionId: string;
   readonly text: string;
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
@@ -53,7 +58,7 @@ export type MemoryAddResult = {
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
 };
 
-export type MemoryHealthRequest = {
+export type MemoryHealthRequest = MemoryOperationScope & {
   readonly checkedAt: string;
 };
 
@@ -70,5 +75,6 @@ export type Project02MemoryProvider = {
   search?(request: MemorySearchRequest): Promise<MemorySearchResult>;
   add?(request: MemoryAddRequest): Promise<MemoryAddResult>;
   health?(request: MemoryHealthRequest): Promise<MemoryHealthResult>;
-  close?(): Promise<void>;
+  endSession?(sessionId: string, scope: MemoryOperationScope): Promise<void>;
+  close?(scope: MemoryOperationScope): Promise<void>;
 };

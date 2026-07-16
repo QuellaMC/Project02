@@ -27,6 +27,8 @@ export function createPluginHookContext<TContext extends RuntimePluginContext>(
     readonly context: TContext;
     readonly plugin: RuntimePlugin;
     readonly access: RuntimePluginAccessSnapshot;
+    readonly deadlineAt: number;
+    readonly signal: AbortSignal;
     readonly storeRoot?: string | undefined;
     readonly sessionId?: string | undefined;
     readonly sessionIdentity?: object | undefined;
@@ -88,6 +90,8 @@ export function createPluginHookContext<TContext extends RuntimePluginContext>(
   const context = Object.freeze({
     ...contextWithScrubbedTurn,
     pluginId: options.plugin.manifest.id,
+    deadlineAt: options.deadlineAt,
+    signal: options.signal,
     ...(fileStore === undefined ? {} : { fileStore: fileStore.fileStore })
   }) as TContext;
 

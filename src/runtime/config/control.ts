@@ -1,14 +1,19 @@
 import {
   applyRuntimeConfigMutation,
+  canonicalRuntimeConfigMutationPath,
   createRuntimeConfigMutationBase,
+  prepareRuntimeConfigMutationCandidate,
   type RuntimeConfigMutationResult
 } from './mutate.ts';
 import {
-  createProject02RuntimeConfigFingerprint,
-  stableStringify
+  createProject02RuntimeConfigFingerprint
 } from './fingerprint.ts';
+import { canonicalJsonValuesEqual } from '../../shared/canonical-json.ts';
 import { createRuntimePluginConfigInspectShape } from './inspect.ts';
-import { loadProject02RuntimeConfig } from './load.ts';
+import {
+  defaultRuntimeConfigPath,
+  loadProject02RuntimeConfig
+} from './load.ts';
 import { resolveProject02RuntimeConfig } from './resolve.ts';
 import { runtimeConfigValueMatchesField } from './schema.ts';
 import { redactRuntimeConfigValue } from './redact.ts';
@@ -24,7 +29,17 @@ import type {
   RuntimePluginConfigInspectShape
 } from './types.ts';
 
-export type RuntimeConfigControlOperation = RuntimeConfigMutationOperation;
+export type RuntimeConfigControlOperation = Extract<
+  RuntimeConfigMutationOperation,
+  {
+    readonly kind:
+      | 'set'
+      | 'unset'
+      | 'plugin_enable'
+      | 'plugin_disable'
+      | 'default_memory_provider';
+  }
+>;
 
 export function applyRuntimeConfigControlOperation(options: {
   readonly configPath?: string;
@@ -33,7 +48,27 @@ export function applyRuntimeConfigControlOperation(options: {
   readonly storeRoot?: string;
   readonly operation: RuntimeConfigControlOperation;
 }): RuntimeConfigMutationResult {
+  assertRuntimeConfigControlOperation(options.operation);
   return applyRuntimeConfigMutation(options);
+}
+
+function assertRuntimeConfigControlOperation(
+  operation: RuntimeConfigMutationOperation
+): asserts operation is RuntimeConfigControlOperation {
+  switch (operation.kind) {
+    case 'set':
+    case 'unset':
+    case 'plugin_enable':
+    case 'plugin_disable':
+    case 'default_memory_provider':
+      return;
+    case 'plugin_config_set':
+    case 'plugin_config_unset':
+    case 'secret_set':
+      throw new TypeError(
+        'Plugin config fields must be changed through manifest-aware control.'
+      );
+  }
 }
 
 export type RuntimePluginConfigControlActor = 'operator' | 'agent';
@@ -47,6 +82,12 @@ export type RuntimePluginConfigFieldControlOperation =
   | {
       readonly kind: 'unset';
       readonly fieldName: string;
+    }
+  | {
+      readonly kind: 'secret_set';
+      readonly fieldName: string;
+      readonly envVar: string;
+      readonly secretValue: string;
     };
 
 export function inspectRuntimePluginConfig(options: {
@@ -103,13 +144,114 @@ export function applyRuntimePluginConfigControlOperation(options: {
   readonly expectedFingerprint: string;
   readonly operation: RuntimePluginConfigFieldControlOperation;
 }): RuntimeConfigMutationResult {
-  const field = validateRuntimePluginConfigControlOperation(options);
+  const mutation = runtimePluginConfigControlMutation(options);
 
   return applyRuntimeConfigMutation({
     ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
     ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
     expectedFingerprint: options.expectedFingerprint,
+    validateCandidate: mutation.validateCandidate,
+    operation: mutation.operation
+  });
+}
+
+export function prepareRuntimePluginConfigControlOperation(options: {
+  readonly configPath?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly storeRoot?: string;
+  readonly manifest: RuntimePluginManifest;
+  readonly actor: RuntimePluginConfigControlActor;
+  readonly expectedFingerprint: string;
+  readonly operation: RuntimePluginConfigFieldControlOperation;
+}): {
+  readonly resultFingerprint: string;
+  readonly targetConfigPath: string;
+} {
+  const loadedConfig = loadProject02RuntimeConfig({
+    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
+    ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+  });
+  const mutation = runtimePluginConfigControlMutation(options);
+  const prepared = prepareRuntimeConfigMutationCandidate({
+    loadedConfig,
+    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+    expectedFingerprint: options.expectedFingerprint,
+    validateCandidate: mutation.validateCandidate,
+    operation: mutation.operation
+  });
+
+  return Object.freeze({
+    resultFingerprint: prepared.fingerprint,
+    targetConfigPath: runtimeConfigControlTargetPathFromLoaded({
+      ...(loadedConfig.path === undefined
+        ? {}
+        : { loadedPath: loadedConfig.path }),
+      ...(options.configPath === undefined
+        ? {}
+        : { configPath: options.configPath }),
+      ...(options.storeRoot === undefined
+        ? {}
+        : { storeRoot: options.storeRoot })
+    })
+  });
+}
+
+export function resolveRuntimeConfigControlTargetPath(options: {
+  readonly configPath?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly storeRoot?: string;
+}): string {
+  const loadedConfig = loadProject02RuntimeConfig({
+    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
+    ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+  });
+
+  return runtimeConfigControlTargetPathFromLoaded({
+    ...(loadedConfig.path === undefined
+      ? {}
+      : { loadedPath: loadedConfig.path }),
+    ...(options.configPath === undefined
+      ? {}
+      : { configPath: options.configPath }),
+    ...(options.storeRoot === undefined
+      ? {}
+      : { storeRoot: options.storeRoot })
+  });
+}
+
+function runtimeConfigControlTargetPathFromLoaded(options: {
+  readonly loadedPath?: string;
+  readonly configPath?: string;
+  readonly storeRoot?: string;
+}): string {
+  return canonicalRuntimeConfigMutationPath(
+    options.loadedPath ??
+      options.configPath ??
+      defaultRuntimeConfigPath(options.storeRoot)
+  );
+}
+
+function runtimePluginConfigControlMutation(options: {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly storeRoot?: string;
+  readonly manifest: RuntimePluginManifest;
+  readonly actor: RuntimePluginConfigControlActor;
+  readonly operation: RuntimePluginConfigFieldControlOperation;
+}): {
+  readonly operation: RuntimeConfigMutationOperation;
+  readonly validateCandidate: (config: Project02RuntimeConfig) => void;
+} {
+  const field = validateRuntimePluginConfigControlOperation(options);
+
+  return {
+    operation: runtimePluginConfigMutationOperation(options.operation, {
+      pluginId: options.manifest.id,
+      fieldName: field.name
+    }),
     validateCandidate: (config) => {
       assertRuntimePluginConfigCandidateValid({
         config,
@@ -119,21 +261,37 @@ export function applyRuntimePluginConfigControlOperation(options: {
           ? {}
           : { storeRoot: options.storeRoot })
       });
-    },
-    operation:
-      options.operation.kind === 'set'
-        ? {
-            kind: 'plugin_config_set',
-            pluginId: options.manifest.id,
-            fieldName: field.name,
-            value: options.operation.value
-          }
-        : {
-            kind: 'plugin_config_unset',
-            pluginId: options.manifest.id,
-            fieldName: field.name
-          }
-  });
+    }
+  };
+}
+
+function runtimePluginConfigMutationOperation(
+  operation: RuntimePluginConfigFieldControlOperation,
+  target: {
+    readonly pluginId: string;
+    readonly fieldName: string;
+  }
+): RuntimeConfigMutationOperation {
+  switch (operation.kind) {
+    case 'set':
+      return {
+        kind: 'plugin_config_set',
+        ...target,
+        value: operation.value
+      };
+    case 'unset':
+      return {
+        kind: 'plugin_config_unset',
+        ...target
+      };
+    case 'secret_set':
+      return {
+        kind: 'secret_set',
+        ...target,
+        envVar: operation.envVar,
+        secretValue: operation.secretValue
+      };
+  }
 }
 
 function assertRuntimePluginConfigCandidateValid(options: {
@@ -182,6 +340,20 @@ export function validateRuntimePluginConfigControlOperation(options: {
     );
   }
 
+  if (options.operation.kind === 'secret_set') {
+    if (options.actor !== 'operator') {
+      throw new TypeError('Only an operator can update plugin secrets.');
+    }
+
+    if (!field.secret) {
+      throw new TypeError(
+        `Plugin config field "${field.name}" is not declared as secret.`
+      );
+    }
+
+    return field;
+  }
+
   if (field.secret) {
     throw new TypeError(
       `Plugin config field "${field.name}" is secret and must be managed through the dedicated secret command.`
@@ -222,8 +394,10 @@ function runtimeConfigControlValueRequiresRedaction(
   fieldName: string
 ): boolean {
   return (
-    stableStringify(redactRuntimeConfigValue(value, { key: fieldName })) !==
-    stableStringify(value)
+    !canonicalJsonValuesEqual(
+      redactRuntimeConfigValue(value, { key: fieldName }),
+      value
+    )
   );
 }
 

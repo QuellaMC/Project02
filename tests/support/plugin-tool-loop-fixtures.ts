@@ -1,7 +1,7 @@
 import { createConversationSession } from '../../src/core/conversation.ts';
 import { characterStatePluginId } from '../../src/plugins/contract.ts';
 import { createRuntimePluginFileStore } from '../../src/plugins/file-store.ts';
-import { createDefaultProject02PluginHost } from '../../src/plugins/default-host.ts';
+import { createDefaultProject02PluginHost } from './default-plugin-host.ts';
 import { createRuntimePluginHost } from '../../src/plugins/host.ts';
 import {
   createRuntimePlugin,
@@ -374,9 +374,9 @@ export function createOneShotTerminalTraceAppendFailingLogStore(
   } satisfies RuntimeLogStore);
 }
 
-export function createAfterTurnCommittedAppendFailingLogStore(): RuntimeLogStore {
-  const logStore = createRuntimeLogStore();
-
+export function createAfterTurnCommittedAppendFailingLogStore(
+  logStore: RuntimeLogStore = createRuntimeLogStore()
+): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
     appendTrace(entry) {

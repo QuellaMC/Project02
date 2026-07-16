@@ -13,7 +13,7 @@ import {
 import {
   createConversationSession
 } from '../src/core/conversation.ts';
-import { createDefaultProject02PluginHost } from '../src/plugins/default-host.ts';
+import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
 import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimePluginFileStore
@@ -1273,6 +1273,118 @@ describe('chat CLI plugin lifecycle', () => {
     ).toBe('warm');
   });
 
+  it('allows terminal config approval after ten seconds', async () => {
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'Date']
+    });
+    const input = new PassThrough();
+
+    try {
+      const storeRoot = createTestTempRoot(
+        'project02-chat-plugin-config-slow-approval-'
+      );
+      const sessionId = 'plugin-config-slow-approval-session';
+      const configurablePlugin = createChatConfigurablePlugin();
+      const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+      const before = inspectRuntimePluginConfig({
+        manifest: configurablePlugin.manifest,
+        pluginManifests: [configurablePlugin.manifest],
+        configPath,
+        storeRoot
+      });
+      let adapterRound = 0;
+      let stdout = '';
+      let stderr = '';
+      const run = runChatCliFromArgs(
+        [
+          '--provider',
+          'local',
+          '--store',
+          storeRoot,
+          '--config',
+          configPath,
+          '--new-session',
+          sessionId
+        ],
+        {
+          stdin: input,
+          stdout: collect((chunk) => {
+            stdout += chunk;
+          }),
+          stderr: collect((chunk) => {
+            stderr += chunk;
+          }),
+          factories: {
+            [configurablePlugin.manifest.id]: {
+              manifest: configurablePlugin.manifest,
+              create: () => configurablePlugin
+            }
+          },
+          roleModelAdapter: {
+            invoke() {
+              adapterRound += 1;
+
+              return {
+                rawOutputText: JSON.stringify({
+                  toolCalls:
+                    adapterRound === 1
+                      ? [
+                          {
+                            name: runtimePluginConfigUpdateToolName,
+                            input: {
+                              pluginId: configurablePlugin.manifest.id,
+                              fieldName: 'tone',
+                              operation: 'set',
+                              value: 'warm',
+                              expectedFingerprint: before.fingerprint
+                            }
+                          }
+                        ]
+                      : [
+                          {
+                            name: 'visible_reply',
+                            input: { text: 'Plugin config request finished.' }
+                          }
+                        ]
+                })
+              };
+            }
+          }
+        }
+      );
+
+      input.write('change the plugin tone\n');
+      await waitForMicrotasks(() =>
+        stdout.includes('Approve this one exact change? [y/N] ')
+      );
+      await vi.advanceTimersByTimeAsync(10_000);
+      input.write('y\n/exit\n');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(await run).toBe(0);
+      expect(stderr).toBe('');
+      expect(stdout).toContain('Mira: Plugin config request finished.');
+      const after = inspectRuntimePluginConfig({
+        manifest: configurablePlugin.manifest,
+        pluginManifests: [configurablePlugin.manifest],
+        configPath,
+        storeRoot
+      });
+
+      expect({
+        adapterRound,
+        authoredTone: after.fields.find((field) => field.name === 'tone')?.authored
+          .value
+      }).toEqual({
+        adapterRound: 2,
+        authoredTone: 'warm'
+      });
+    } finally {
+      input.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   it('uses an injected plugin config confirmation handler without consuming chat input', async () => {
     const storeRoot = createTestTempRoot('project02-chat-plugin-config-injected-');
     const sessionId = 'plugin-config-injected-session';
@@ -1383,8 +1495,11 @@ describe('chat CLI plugin lifecycle', () => {
         configPath,
         storeRoot
       });
-      const approvalTimeoutMs =
-        createRuntimePluginManagementPluginManifest().runtimePolicy.timeoutMs;
+      const approvalTimeoutMs = 5 * 60_000;
+
+      expect(
+        createRuntimePluginManagementPluginManifest().runtimePolicy.timeoutMs
+      ).toBe(5_000);
       let adapterRound = 0;
       let stdout = '';
       let stderr = '';
@@ -1594,10 +1709,14 @@ describe('chat CLI plugin lifecycle', () => {
     const configuredPlugin = createSessionEndPlugin(() => {}, {
       beforeRoleModelCall() {
         return { contextItems: [], evidence: [] };
+      },
+      onShutdown() {
+        return { status: 'completed', evidence: [] };
       }
     });
     const beforeRoleModelCallContexts: RuntimePluginContext[] = [];
     const sessionEndContexts: RuntimePluginContext[] = [];
+    const shutdownContexts: RuntimePluginContext[] = [];
     let factoryCalls = 0;
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -1623,6 +1742,10 @@ describe('chat CLI plugin lifecycle', () => {
               return createSessionEndPlugin((context) => {
                 sessionEndContexts.push(context);
               }, {
+                onShutdown(context) {
+                  shutdownContexts.push(context);
+                  return { status: 'completed', evidence: [] };
+                },
                 beforeRoleModelCall(context) {
                   beforeRoleModelCallContexts.push(context);
                   return { contextItems: [], evidence: [] };
@@ -1646,6 +1769,16 @@ describe('chat CLI plugin lifecycle', () => {
       sessionId,
       currentUserMessage: '/exit'
     });
+    expect(shutdownContexts).toHaveLength(1);
+    expect(shutdownContexts[0]).toMatchObject({
+      sessionId,
+      character: {
+        id: 'mira',
+        displayName: 'Mira'
+      }
+    });
+    expect(shutdownContexts[0]?.deadlineAt).toBeGreaterThan(Date.now());
+    expect(shutdownContexts[0]?.signal.aborted).toBe(false);
   });
 
   it('closes configured plugins when a fatal chat turn exits before /exit', async () => {
@@ -2120,6 +2253,9 @@ function createSessionEndPlugin(
     readonly beforeRoleModelCall?: NonNullable<
       RuntimePlugin['lifecycleHooks']['beforeRoleModelCall']
     >;
+    readonly onShutdown?: NonNullable<
+      RuntimePlugin['lifecycleHooks']['onShutdown']
+    >;
     readonly requiredForTurn?: boolean;
     readonly requestedAccess?: RuntimePlugin['manifest']['requestedAccess'];
     readonly sideEffectLevel?: RuntimePlugin['manifest']['runtimePolicy']['sideEffectLevel'];
@@ -2127,10 +2263,13 @@ function createSessionEndPlugin(
   } = {}
 ): RuntimePlugin {
   const pluginId = options.pluginId ?? 'chat.session-end.fixture';
-  const declaredPlugins: RuntimePlugin['manifest']['declaredPlugins'] =
-    options.beforeRoleModelCall === undefined
-      ? ['on_session_end']
-      : ['before_role_model_call', 'on_session_end'];
+  const declaredPlugins: RuntimePlugin['manifest']['declaredPlugins'] = [
+    ...(options.beforeRoleModelCall === undefined
+      ? []
+      : ['before_role_model_call'] as const),
+    'on_session_end',
+    ...(options.onShutdown === undefined ? [] : ['on_shutdown'] as const)
+  ];
 
   return createRuntimePlugin({
     manifest: {
@@ -2175,6 +2314,9 @@ function createSessionEndPlugin(
       ...(options.beforeRoleModelCall === undefined
         ? {}
         : { beforeRoleModelCall: options.beforeRoleModelCall }),
+      ...(options.onShutdown === undefined
+        ? {}
+        : { onShutdown: options.onShutdown }),
       onSessionEnd(context) {
         onSessionEnd(context);
 
@@ -2427,6 +2569,12 @@ function createToolTraceFailingLogStore(
     ...(logStore.localRuntimeSessionPaths === undefined
       ? {}
       : { localRuntimeSessionPaths: logStore.localRuntimeSessionPaths }),
+    ...(logStore.localRuntimeWriterLockOwnerToken === undefined
+      ? {}
+      : {
+          localRuntimeWriterLockOwnerToken:
+            logStore.localRuntimeWriterLockOwnerToken
+        }),
     appendTrace(entry) {
       if (entry.step === failingStep) {
         throw new Error(`${failingStep} trace append failed`);

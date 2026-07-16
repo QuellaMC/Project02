@@ -186,11 +186,11 @@ async function runCharacterStateTransaction(options: {
 
   const hookMs = performance.now() - hookStartedAt;
   const prepareStartedAt = performance.now();
-  const prepared = transaction.prepare(options.identity);
+  const prepared = await transaction.prepare(options.identity);
   const prepareMs = performance.now() - prepareStartedAt;
   const finalizeStartedAt = performance.now();
 
-  prepared.finalize();
+  await prepared.finalize();
   return Object.freeze({
     hookMs,
     prepareMs,

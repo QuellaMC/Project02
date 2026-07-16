@@ -4,27 +4,23 @@ import {
   runtimePluginId
 } from '../../contract.ts';
 import type {
+  PreparedRuntimePluginConfigEffect,
   RuntimePluginConfigField,
   RuntimePluginContext,
   RuntimePluginJsonObject,
+  RuntimePluginToolCallExecutionResult,
   RuntimePluginProvidedTool,
-  RuntimePluginToolCall,
-  RuntimePluginToolCallResult
+  RuntimePluginToolCall
 } from '../../plugin-types.ts';
-import type {
-  RuntimePluginToolConfirmationDecision,
-  RuntimePluginToolConfirmationHandler
-} from '../../tool-confirmation.ts';
 import {
   applyRuntimePluginConfigControlOperation,
+  prepareRuntimePluginConfigControlOperation,
+  resolveRuntimeConfigControlTargetPath,
   validateRuntimePluginConfigControlOperation,
   type RuntimePluginConfigFieldControlOperation
 } from '../../../runtime/config/control.ts';
 import { redactRuntimeConfigValue } from '../../../runtime/config/redact.ts';
-import {
-  RuntimeConfigConflictError,
-  type RuntimeConfigMutationResult
-} from '../../../runtime/config/mutate.ts';
+import { RuntimeConfigConflictError } from '../../../runtime/config/mutate.ts';
 import type { RuntimeConfigValue } from '../../../runtime/config/types.ts';
 import {
   createJsonBoundaryObjectSnapshot,
@@ -38,7 +34,7 @@ import {
 } from './config.ts';
 import type { RuntimePluginConfigControlHostState } from './state.ts';
 
-export const runtimePluginConfigUpdateTimeoutMs = 5_000;
+export const runtimePluginConfigUpdateExecutionTimeoutMs = 5_000;
 
 export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool {
   return {
@@ -48,7 +44,7 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
     requiredForUserTurn: false,
     callLimit: {
       scope: 'user_turn',
-      maxCalls: 2
+      maxCalls: 1
     },
     inputContract: {
       type: 'object',
@@ -94,13 +90,237 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
   };
 }
 
-export async function handleRuntimePluginConfigUpdateToolCall(options: {
+export function reconcilePreparedRuntimePluginConfigEffect(options: {
+  readonly effect: PreparedRuntimePluginConfigEffect;
+  readonly state: RuntimePluginConfigControlHostState;
+  readonly storeRoot?: string;
+}) {
+  const manifest = options.state.pluginManifests.find(
+    (candidate) => candidate.id === options.effect.targetPluginId
+  );
+
+  if (manifest === undefined) {
+    throw new TypeError(
+      `Prepared config effect target plugin "${options.effect.targetPluginId}" is not installed.`
+    );
+  }
+
+  const operation: RuntimePluginConfigFieldControlOperation =
+    options.effect.operation.kind === 'set'
+      ? {
+          kind: 'set',
+          fieldName: options.effect.fieldName,
+          value: options.effect.operation.value
+        }
+      : {
+          kind: 'unset',
+          fieldName: options.effect.fieldName
+        };
+  const field = validateRuntimePluginConfigControlOperation({
+    manifest,
+    actor: 'agent',
+    operation
+  });
+  const targetConfigPath = resolveRuntimeConfigControlTargetPath({
+    ...(options.state.configPath === undefined
+      ? {}
+      : { configPath: options.state.configPath }),
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+    ...(options.state.env === undefined ? {} : { env: options.state.env })
+  });
+
+  if (targetConfigPath !== options.effect.targetConfigPath) {
+    throw new RuntimeConfigConflictError(
+      `Prepared config effect "${options.effect.effectId}" targets another runtime config path.`
+    );
+  }
+
+  const inspection = inspectRuntimePluginConfigForControl({
+    manifest,
+    state: options.state,
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+  });
+  let reconciliation: 'already_applied' | 'applied';
+
+  if (inspection.fingerprint === options.effect.resultFingerprint) {
+    reconciliation = 'already_applied';
+  } else {
+    if (inspection.fingerprint !== options.effect.expectedFingerprint) {
+      throw new RuntimeConfigConflictError(
+        `Prepared config effect "${options.effect.effectId}" cannot be reconciled because authored config changed.`
+      );
+    }
+
+    const prepared = prepareRuntimePluginConfigControlOperation({
+      manifest,
+      actor: 'agent',
+      expectedFingerprint: options.effect.expectedFingerprint,
+      operation,
+      ...(options.state.configPath === undefined
+        ? {}
+        : { configPath: options.state.configPath }),
+      ...(options.storeRoot === undefined
+        ? {}
+        : { storeRoot: options.storeRoot }),
+      ...(options.state.env === undefined ? {} : { env: options.state.env })
+    });
+
+    if (
+      prepared.targetConfigPath !== options.effect.targetConfigPath ||
+      prepared.resultFingerprint !== options.effect.resultFingerprint
+    ) {
+      throw new Error(
+        `Prepared config effect "${options.effect.effectId}" does not match its validated config candidate.`
+      );
+    }
+
+    const result = applyRuntimePluginConfigControlOperation({
+      manifest,
+      actor: 'agent',
+      expectedFingerprint: options.effect.expectedFingerprint,
+      operation,
+      ...(options.state.configPath === undefined
+        ? {}
+        : { configPath: options.state.configPath }),
+      ...(options.storeRoot === undefined
+        ? {}
+        : { storeRoot: options.storeRoot }),
+      ...(options.state.env === undefined ? {} : { env: options.state.env })
+    });
+
+    if (result.fingerprint !== options.effect.resultFingerprint) {
+      throw new Error(
+        `Prepared config effect "${options.effect.effectId}" produced an unexpected config fingerprint.`
+      );
+    }
+
+    reconciliation = 'applied';
+  }
+
+  return createRuntimePluginEvidenceSnapshot({
+    eventId: options.effect.eventId,
+    traceId: options.effect.traceId,
+    createdAt: options.effect.createdAt,
+    kind: 'runtime_plugin_evidence_snapshot',
+    pluginId: runtimePluginId,
+    evidenceKind: 'after_turn_committed',
+    status: 'accepted',
+    summary:
+      reconciliation === 'applied'
+        ? `Applied approved plugin "${manifest.id}" config field "${field.name}".`
+        : `Reconciled already-applied plugin "${manifest.id}" config field "${field.name}".`,
+    sourceReferences: [
+      {
+        kind: 'runtime',
+        id: options.effect.effectId
+      }
+    ],
+    redactionLabels: field.redactionLabels,
+    configFingerprint: options.effect.resultFingerprint
+  });
+}
+
+export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
+  readonly effect: PreparedRuntimePluginConfigEffect;
+  readonly state: RuntimePluginConfigControlHostState;
+  readonly storeRoot?: string;
+}): boolean {
+  const manifest = options.state.pluginManifests.find(
+    (candidate) => candidate.id === options.effect.targetPluginId
+  );
+
+  if (manifest === undefined) {
+    return false;
+  }
+
+  const targetConfigPath = resolveRuntimeConfigControlTargetPath({
+    ...(options.state.configPath === undefined
+      ? {}
+      : { configPath: options.state.configPath }),
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+    ...(options.state.env === undefined ? {} : { env: options.state.env })
+  });
+  const inspection = inspectRuntimePluginConfigForControl({
+    manifest,
+    state: options.state,
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+  });
+
+  return !(
+    targetConfigPath !== options.effect.targetConfigPath ||
+    inspection.fingerprint !== options.effect.expectedFingerprint
+  );
+}
+
+export function createPreparedRuntimePluginConfigEffectConfirmationPreview(
+  options: {
+    readonly effect: PreparedRuntimePluginConfigEffect;
+    readonly state: RuntimePluginConfigControlHostState;
+    readonly storeRoot?: string;
+  }
+): RuntimePluginJsonObject {
+  const manifest = options.state.pluginManifests.find(
+    (candidate) => candidate.id === options.effect.targetPluginId
+  );
+
+  if (
+    manifest === undefined ||
+    !preparedRuntimePluginConfigEffectIsStillCurrent(options)
+  ) {
+    throw new RuntimeConfigConflictError(
+      'Prepared plugin config effect is no longer current for approval.'
+    );
+  }
+
+  const operation: RuntimePluginConfigFieldControlOperation =
+    options.effect.operation.kind === 'set'
+      ? {
+          kind: 'set',
+          fieldName: options.effect.fieldName,
+          value: options.effect.operation.value
+        }
+      : {
+          kind: 'unset',
+          fieldName: options.effect.fieldName
+        };
+  const field = validateRuntimePluginConfigControlOperation({
+    manifest,
+    actor: 'agent',
+    operation
+  });
+  const inspection = inspectRuntimePluginConfigForControl({
+    manifest,
+    state: options.state,
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+  });
+  const inspectedField = inspection.fields.find(
+    (candidate) => candidate.name === field.name
+  );
+
+  if (inspectedField === undefined) {
+    throw new RuntimeConfigConflictError(
+      `Plugin config inspection is missing field "${field.name}".`
+    );
+  }
+
+  return createJsonBoundaryObjectSnapshot(
+    pluginConfigChangePreview({
+      pluginId: manifest.id,
+      field,
+      operation,
+      expectedFingerprint: options.effect.expectedFingerprint,
+      authored: inspectedField.authored
+    }),
+    { field: 'Prepared plugin config approval preview' }
+  );
+}
+
+export function handleRuntimePluginConfigUpdateToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly confirmationHandler: RuntimePluginToolConfirmationHandler;
   readonly storeRoot?: string;
-}): Promise<RuntimePluginToolCallResult> {
+}): RuntimePluginToolCallExecutionResult {
   let pluginId: string;
 
   try {
@@ -167,83 +387,11 @@ export async function handleRuntimePluginConfigUpdateToolCall(options: {
     );
   }
 
-  const inspectedField = inspection.fields.find(
-    (candidate) => candidate.name === field.name
-  );
-
-  if (inspectedField === undefined) {
-    return rejectedPluginConfigToolCall(
-      'plugin_config_update_invalid',
-      `Plugin config inspection is missing field "${field.name}".`
-    );
-  }
-
-  const preview = pluginConfigChangePreview({
-    pluginId: manifest.id,
-    field,
-    operation,
-    expectedFingerprint,
-    authored: inspectedField.authored
-  });
-  let confirmationStatus:
-    | 'approved'
-    | 'denied'
-    | 'cancelled'
-    | 'timed_out'
-    | undefined;
+  let resultFingerprint: string;
+  let targetConfigPath: string;
 
   try {
-    confirmationStatus = runtimePluginToolConfirmationStatus(
-      await runtimePluginConfigConfirmationBeforeDeadline({
-        confirmationHandler: options.confirmationHandler,
-        timeoutMs: runtimePluginConfigUpdateTimeoutMs,
-        request: Object.freeze({
-          pluginId: runtimePluginId,
-          toolName: runtimePluginConfigUpdateToolName,
-          summary: `Update plugin "${manifest.id}" config field "${field.name}" with one ${operation.kind} operation.`,
-          preview
-        })
-      })
-    );
-  } catch {
-    return rejectedPluginConfigToolCall(
-      'plugin_config_approval_unavailable',
-      'Plugin config update approval could not be completed.'
-    );
-  }
-
-  if (confirmationStatus === 'timed_out') {
-    return rejectedPluginConfigToolCall(
-      'plugin_config_approval_timeout',
-      `Plugin config update approval timed out after ${String(runtimePluginConfigUpdateTimeoutMs)}ms.`
-    );
-  }
-
-  if (confirmationStatus === 'denied') {
-    return rejectedPluginConfigToolCall(
-      'plugin_config_approval_denied',
-      'Plugin config update was denied by the user.'
-    );
-  }
-
-  if (confirmationStatus === 'cancelled') {
-    return rejectedPluginConfigToolCall(
-      'plugin_config_approval_cancelled',
-      'Plugin config update approval was cancelled.'
-    );
-  }
-
-  if (confirmationStatus !== 'approved') {
-    return rejectedPluginConfigToolCall(
-      'plugin_config_approval_unavailable',
-      'Plugin config update approval returned an unsupported decision.'
-    );
-  }
-
-  let mutationResult: RuntimeConfigMutationResult;
-
-  try {
-    mutationResult = applyRuntimePluginConfigControlOperation({
+    const prepared = prepareRuntimePluginConfigControlOperation({
       manifest,
       actor: 'agent',
       expectedFingerprint,
@@ -251,9 +399,14 @@ export async function handleRuntimePluginConfigUpdateToolCall(options: {
       ...(options.state.configPath === undefined
         ? {}
         : { configPath: options.state.configPath }),
-      ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+      ...(options.storeRoot === undefined
+        ? {}
+        : { storeRoot: options.storeRoot }),
       ...(options.state.env === undefined ? {} : { env: options.state.env })
     });
+
+    resultFingerprint = prepared.resultFingerprint;
+    targetConfigPath = prepared.targetConfigPath;
   } catch (error: unknown) {
     if (error instanceof RuntimeConfigConflictError) {
       return rejectedPluginConfigToolCall(
@@ -272,15 +425,15 @@ export async function handleRuntimePluginConfigUpdateToolCall(options: {
     status: 'accepted',
     output: createJsonBoundaryObjectSnapshot(
       {
-        status: 'updated',
+        status: 'approved_pending_commit',
         appliesTo: 'future_host_construction',
         pluginId: manifest.id,
         fieldName: field.name,
         operation: operation.kind,
-        fingerprint: mutationResult.fingerprint,
+        fingerprint: resultFingerprint,
         reloadRequired: field.reloadRequired === true
       },
-      { field: 'Committed plugin config update' }
+      { field: 'Prepared plugin config update' }
     ),
     evidence: [
       createRuntimePluginEvidenceSnapshot({
@@ -291,11 +444,34 @@ export async function handleRuntimePluginConfigUpdateToolCall(options: {
         pluginId: runtimePluginId,
         evidenceKind: 'tool_invocation',
         status: 'accepted',
-        summary: `Updated plugin "${manifest.id}" config field "${field.name}" for future host construction.`,
+        summary: `Approved plugin "${manifest.id}" config field "${field.name}" for turn commit.`,
         redactionLabels: options.context.privacy.redactionLabels,
-        configFingerprint: mutationResult.fingerprint
+        configFingerprint: resultFingerprint
       })
-    ]
+    ],
+    preparedConfigEffect: Object.freeze({
+      eventId: options.call.eventId,
+      traceId: options.call.traceId,
+      createdAt: options.call.createdAt,
+      kind: 'runtime_plugin_config_effect',
+      effectId:
+        options.call.toolCallId ??
+        `${options.call.eventId}.${options.call.traceId}.${runtimePluginConfigUpdateToolName}`,
+      targetPluginId: manifest.id,
+      targetConfigPath,
+      fieldName: field.name,
+      expectedFingerprint,
+      resultFingerprint,
+      operation:
+        operation.kind === 'set'
+          ? Object.freeze({
+              kind: 'set',
+              value: createJsonBoundarySnapshot(operation.value, {
+                field: 'Prepared plugin config update value'
+              })
+            })
+          : Object.freeze({ kind: 'unset' })
+    })
   };
 }
 
@@ -363,59 +539,4 @@ function pluginConfigChangePreview(options: {
           })
         : Object.freeze({ configured: false })
   });
-}
-
-function runtimePluginToolConfirmationStatus(
-  value: unknown
-): 'approved' | 'denied' | 'cancelled' | 'timed_out' | undefined {
-  if (!isUnknownRecord(value)) {
-    return undefined;
-  }
-
-  const status = value['status'];
-
-  return status === 'approved' ||
-    status === 'denied' ||
-    status === 'cancelled' ||
-    status === 'timed_out'
-    ? status
-    : undefined;
-}
-
-async function runtimePluginConfigConfirmationBeforeDeadline(options: {
-  readonly confirmationHandler: RuntimePluginToolConfirmationHandler;
-  readonly request: Parameters<RuntimePluginToolConfirmationHandler>[0];
-  readonly timeoutMs: number;
-}): Promise<RuntimePluginToolConfirmationDecision | { readonly status: 'timed_out' }> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const abortController = new AbortController();
-  const deadlineAt = Date.now() + options.timeoutMs;
-
-  try {
-    return await Promise.race([
-      Promise.resolve().then(() =>
-        options.confirmationHandler(options.request, {
-          signal: abortController.signal,
-          deadlineAt
-        })
-      ),
-      new Promise<{ readonly status: 'timed_out' }>((resolve) => {
-        timeoutId = setTimeout(() => {
-          resolve(Object.freeze({ status: 'timed_out' as const }));
-          abortController.abort();
-        }, options.timeoutMs);
-      })
-    ]);
-  } finally {
-    if (timeoutId !== undefined) {
-      clearTimeout(timeoutId);
-    }
-    abortController.abort();
-  }
-}
-
-function isUnknownRecord(
-  value: unknown
-): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

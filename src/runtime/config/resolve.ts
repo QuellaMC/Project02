@@ -27,7 +27,11 @@ import {
   type RuntimeConfigSecretRef,
   type RuntimeConfigValue
 } from './types.ts';
-import { createJsonBoundarySnapshot } from '../../shared/json-boundary.ts';
+import {
+  createJsonBoundarySnapshot,
+  ownJsonRecordValue
+} from '../../shared/json-boundary.ts';
+import { createRuntimeConfigDiagnostic } from './diagnostic.ts';
 import { runtimeConfigValueMatchesField } from './schema.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
@@ -90,9 +94,6 @@ export function resolveProject02RuntimeConfig(
       ? {}
       : { path: options.loadedConfig.path }),
     project02,
-    storeRoot,
-    ...(defaultMemoryProvider === undefined ? {} : { defaultMemoryProvider }),
-    roleModelProvider,
     pluginConfigs: Object.freeze(pluginConfigs),
     redactedPluginConfigs: Object.freeze(redactedPluginConfigs),
     diagnostics: Object.freeze(diagnostics),
@@ -178,7 +179,10 @@ function resolvePluginConfig(options: {
   readonly defaultEnabled: boolean;
   readonly diagnostics: RuntimeConfigDiagnostic[];
 }): ResolvedPluginRuntimeConfig {
-  const configuredPlugin = options.config?.plugins?.[options.manifest.id];
+  const configuredPlugin = ownJsonRecordValue(
+    options.config?.plugins,
+    options.manifest.id
+  );
   const validateConfig =
     options.validateInactivePluginConfigs ||
     shouldValidatePluginConfig({
@@ -203,7 +207,7 @@ function resolvePluginConfig(options: {
           ...options,
           validateConfig,
           field,
-          rawValue: configuredPlugin?.config?.[field.name]
+          rawValue: ownJsonRecordValue(configuredPlugin?.config, field.name)
         })
       ])
     )
@@ -229,7 +233,7 @@ function resolvePluginConfigField(options: {
   if (options.rawValue === undefined) {
     if (options.field.required && options.validateConfig) {
       options.diagnostics.push(
-        diagnostic(
+        createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_required_value_missing',
           `Required config field "${options.field.name}" is missing for plugin "${options.manifest.id}".`,
@@ -251,7 +255,7 @@ function resolvePluginConfigField(options: {
   if (secretValuePath !== undefined) {
     if (options.validateConfig) {
       options.diagnostics.push(
-        diagnostic(
+        createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_secret_ref_for_non_secret',
           `Non-secret config field "${options.field.name}" cannot contain a secret value.`,
@@ -270,7 +274,7 @@ function resolvePluginConfigField(options: {
   if (!runtimeConfigValueMatchesField(options.rawValue, options.field)) {
     if (options.validateConfig) {
       options.diagnostics.push(
-        diagnostic(
+        createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_value_type_invalid',
           `Config field "${options.field.name}" does not match its declared metadata.`,
@@ -316,7 +320,7 @@ function resolveSecretField(options: {
     if (isRuntimeControlEnvVarName(envRef.$env)) {
       if (options.validateConfig) {
         options.diagnostics.push(
-          diagnostic(
+          createRuntimeConfigDiagnostic(
             'error',
             'runtime_config_reserved_control_env_var',
             `Secret config field "${options.field.name}" for plugin "${options.manifest.id}" cannot use reserved Project02 runtime control env var "${envRef.$env}".`,
@@ -338,7 +342,7 @@ function resolveSecretField(options: {
 
     if (!resolved && options.field.required && options.validateConfig) {
       options.diagnostics.push(
-        diagnostic(
+        createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_required_secret_missing',
           `Required secret "${options.field.name}" for plugin "${options.manifest.id}" is missing from env:${envRef.$env}.`,
@@ -359,7 +363,7 @@ function resolveSecretField(options: {
   if (isPlaintextSecretOverride(options.rawValue)) {
     if (!options.allowPlaintextSecrets && options.validateConfig) {
       options.diagnostics.push(
-        diagnostic(
+        createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_plaintext_secret_rejected',
           `Plaintext secret override for "${options.field.name}" is not allowed.`,
@@ -382,7 +386,7 @@ function resolveSecretField(options: {
   if (options.rawValue !== undefined) {
     if (options.validateConfig) {
       options.diagnostics.push(
-        diagnostic(
+        createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_plaintext_secret_rejected',
           `Secret config field "${options.field.name}" must use an env ref.`,
@@ -400,7 +404,7 @@ function resolveSecretField(options: {
 
   if (options.field.required && options.validateConfig) {
     options.diagnostics.push(
-      diagnostic(
+      createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_required_secret_missing',
         `Required secret "${options.field.name}" is missing for plugin "${options.manifest.id}".`,
@@ -422,7 +426,10 @@ function shouldValidatePluginConfig(options: {
   readonly manifest: RuntimePluginManifest;
   readonly defaultEnabled: boolean;
 }): boolean {
-  const configured = options.config?.plugins?.[options.manifest.id];
+  const configured = ownJsonRecordValue(
+    options.config?.plugins,
+    options.manifest.id
+  );
 
   if (configured?.enabled === false) {
     return false;
@@ -493,7 +500,7 @@ function pushUnknownPluginConfigFieldDiagnostics(options: {
     }
 
     options.diagnostics.push(
-      diagnostic(
+      createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_unknown_plugin_config_field',
         `Unknown config field "${fieldName}" for plugin "${options.manifest.id}".`,
@@ -646,30 +653,4 @@ function pluginActivationFingerprintInput(
   return Object.keys(activation).length === 0
     ? undefined
     : Object.freeze(activation);
-}
-
-function diagnostic(
-  severity: RuntimeConfigDiagnostic['severity'],
-  code: string,
-  message: string,
-  path: string,
-  metadata?: RuntimeConfigDiagnosticPluginMetadata
-): RuntimeConfigDiagnostic {
-  const base = {
-    severity,
-    code,
-    message,
-    path
-  } as const;
-
-  return metadata === undefined
-    ? Object.freeze({ ...base, scope: 'global' })
-    : Object.freeze({
-        ...base,
-        scope: 'plugin',
-        pluginId: metadata.pluginId,
-        ...(metadata.pluginConfigField === undefined
-          ? {}
-          : { pluginConfigField: metadata.pluginConfigField })
-      });
 }

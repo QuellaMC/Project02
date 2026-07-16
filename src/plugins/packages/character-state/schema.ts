@@ -149,12 +149,6 @@ export function planCharacterStatePatch(options: {
   } satisfies AcceptedCharacterStatePatchResult);
 }
 
-export function encodeCharacterRuntimeState(
-  state: CharacterRuntimeState
-): string {
-  return JSON.stringify(freezeCharacterRuntimeState(state));
-}
-
 export function decodeCharacterRuntimeState(
   value: unknown,
   fail: (field: string) => never
@@ -216,27 +210,6 @@ export function characterRuntimeStatesEqual(
     left.current.currentActivity === right.current.currentActivity &&
     left.current.socialOrientation === right.current.socialOrientation
   );
-}
-
-export function freezeCharacterStatePatchResult(
-  result: CharacterStatePatchResult
-): CharacterStatePatchResult {
-  if (result.status === 'accepted') {
-    return Object.freeze({
-      status: 'accepted',
-      patch: freezeCharacterStatePatch(result.patch),
-      before: freezeCharacterRuntimeState(result.before),
-      after: freezeCharacterRuntimeState(result.after),
-      appliedChanges: freezeAppliedChanges(result.appliedChanges)
-    } satisfies AcceptedCharacterStatePatchResult);
-  }
-
-  return Object.freeze({
-    status: 'rejected',
-    patchInput: freezeUnknownRecord(result.patchInput),
-    before: freezeCharacterRuntimeState(result.before),
-    rejection: freezeCharacterStatePatchRejection(result.rejection)
-  } satisfies RejectedCharacterStatePatchResult);
 }
 
 export function decodeAcceptedCharacterStatePatchResult(
@@ -569,15 +542,6 @@ function characterStateAppliedChangesEqual(
       );
     })
   );
-}
-
-function freezeCharacterStatePatchRejection(
-  rejection: CharacterStatePatchRejection
-): CharacterStatePatchRejection {
-  return Object.freeze({
-    reason: rejection.reason,
-    details: rejection.details
-  } satisfies CharacterStatePatchRejection);
 }
 
 function freezeUnknownRecord(

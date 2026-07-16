@@ -9,7 +9,10 @@ import type {
   RuntimePluginToolCallResult
 } from '../../plugin-types.ts';
 import { inspectRuntimePluginConfig } from '../../../runtime/config/control.ts';
-import { createJsonBoundaryObjectSnapshot } from '../../../shared/json-boundary.ts';
+import {
+  createJsonBoundaryObjectSnapshot,
+  ownJsonRecordValue
+} from '../../../shared/json-boundary.ts';
 import type { RuntimePluginConfigControlHostState } from './state.ts';
 
 export function createRuntimePluginConfigReadTool(): RuntimePluginProvidedTool {
@@ -103,12 +106,15 @@ export function inspectRuntimePluginConfigForControl(options: {
   readonly state: RuntimePluginConfigControlHostState;
   readonly storeRoot?: string;
 }): ReturnType<typeof inspectRuntimePluginConfig> {
+  const activation = ownJsonRecordValue(
+    options.state.activationByPluginId,
+    options.manifest.id
+  );
+
   return inspectRuntimePluginConfig({
     manifest: options.manifest,
     pluginManifests: options.state.pluginManifests,
-    ...(options.state.activationByPluginId?.[options.manifest.id] === undefined
-      ? {}
-      : { activation: options.state.activationByPluginId[options.manifest.id] }),
+    ...(activation === undefined ? {} : { activation }),
     ...(options.state.defaultEnabledPluginIds === undefined
       ? {}
       : {

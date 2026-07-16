@@ -28,7 +28,7 @@ import {
 import {
   visibleReplyModelToolName
 } from '../src/role-model/model-tools.ts';
-import { createDefaultProject02PluginHost } from '../src/plugins/default-host.ts';
+import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
 import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
   createRuntimePluginContextItem
@@ -239,7 +239,7 @@ describe('NVIDIA role-model provider', () => {
       requiresConfirmation: false,
       sourceReferencesRequired: false
     } satisfies RoleModelPluginToolDefinition);
-    const result = await runRoleModelLoop({
+    const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent(
         'use the supplied credential',
         'evt_nvidia_authoritative_arguments'
@@ -408,7 +408,7 @@ describe('NVIDIA role-model provider', () => {
     expect(serializedOutput).not.toContain('user:pass');
     expect(serializedOutput).not.toContain('endpoint-secret');
 
-    const loopResult = await runRoleModelLoop({
+    const { publicResult: loopResult } = await runRoleModelLoop({
       event: inputEnvelope.event,
       decisionContext: inputEnvelope.decisionContext,
       pluginToolDefinitions: inputEnvelope.pluginToolDefinitions,

@@ -5,9 +5,6 @@ import type {
   RuntimePluginManifest
 } from '../plugins/plugin-types.ts';
 import {
-  hasRuntimePluginCatalogFactoryMetadata
-} from '../plugins/catalog.ts';
-import {
   applyRuntimeConfigControlOperation,
   applyRuntimePluginConfigControlOperation,
   createProject02RuntimeConfigFingerprint,
@@ -28,6 +25,7 @@ import {
   type RuntimePluginConfigFieldInspectShape,
   type RuntimePluginFactoryDefinition
 } from '../runtime/config/index.ts';
+import { ownJsonRecordValue } from '../shared/json-boundary.ts';
 
 export type RuntimeConfigConsolePromptAdapter = {
   question(prompt: string): Promise<string | undefined>;
@@ -236,6 +234,11 @@ async function runPluginConfigSection(
     return;
   }
 
+  const activation = ownJsonRecordValue(
+    catalog.activationByPluginId,
+    manifest.id
+  );
+
   const inspected = inspectRuntimePluginConfig({
     ...runtimeConfigLocation(context),
     ...(context.runtimeEnv === undefined && context.env === undefined
@@ -243,9 +246,7 @@ async function runPluginConfigSection(
       : { env: context.runtimeEnv ?? context.env }),
     manifest,
     pluginManifests: manifests,
-    ...(catalog.activationByPluginId[manifest.id] === undefined
-      ? {}
-      : { activation: catalog.activationByPluginId[manifest.id] }),
+    ...(activation === undefined ? {} : { activation }),
     defaultEnabled: catalog.defaultEnabledPluginIds.includes(manifest.id)
   });
 
@@ -581,11 +582,22 @@ function loadConsoleSnapshot(
     ...runtimeConfigLocation(context),
     ...(context.env === undefined ? {} : { env: context.env })
   });
-  const blockingDiagnostic = loaded.diagnostics.find(
-    (diagnostic) =>
+  let blockingDiagnostic: (typeof loaded.diagnostics)[number] | undefined;
+  const diagnostics: (typeof loaded.diagnostics)[number][] = [];
+
+  for (const diagnostic of loaded.diagnostics) {
+    if (diagnostic.code !== 'runtime_config_missing') {
+      diagnostics.push(diagnostic);
+    }
+
+    if (
+      blockingDiagnostic === undefined &&
       diagnostic.severity === 'error' &&
       diagnostic.code !== 'runtime_config_missing'
-  );
+    ) {
+      blockingDiagnostic = diagnostic;
+    }
+  }
 
   if (blockingDiagnostic !== undefined) {
     throw new TypeError(
@@ -601,11 +613,7 @@ function loadConsoleSnapshot(
   return Object.freeze({
     loadedConfig: loaded,
     config,
-    diagnostics: Object.freeze(
-      loaded.diagnostics.filter(
-        (diagnostic) => diagnostic.code !== 'runtime_config_missing'
-      )
-    ),
+    diagnostics: Object.freeze(diagnostics),
     fingerprint: createProject02RuntimeConfigFingerprint(config)
   });
 }
@@ -628,12 +636,11 @@ function pluginCatalog(
   });
   const entriesById = new Map<string, RuntimeConfigConsolePluginEntry>();
 
-  for (const definition of Object.values(activationPlan.factories)) {
+  for (const definition of Object.values(activationPlan.catalogEntries)) {
     entriesById.set(definition.manifest.id, Object.freeze({
       manifest: definition.manifest,
       section:
-        hasRuntimePluginCatalogFactoryMetadata(definition) &&
-        definition.construction === 'host_scoped'
+        definition.catalogKind === 'host_service'
           ? 'system_service'
           : 'plugin'
     }));
@@ -863,11 +870,10 @@ function createDefaultPrompt(
 
           rejectActiveQuestion = rejectQuestion;
           readline.once('close', handleClose);
-          void readline.question(prompt).then(
-            (answer) => {
-              settle(answer);
-            },
-            (error: unknown) => {
+          void (async () => {
+            try {
+              settle(await readline.question(prompt));
+            } catch (error: unknown) {
               rejectQuestion(
                 error instanceof Error
                   ? error
@@ -876,7 +882,7 @@ function createDefaultPrompt(
                     })
               );
             }
-          );
+          })();
         });
       }
     }),

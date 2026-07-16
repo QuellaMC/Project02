@@ -27,13 +27,26 @@ export type ModelToolInputField = {
   readonly allowedValues?: readonly string[];
 };
 
+export const modelToolJsonSchemaTypeValues = Object.freeze([
+  'string',
+  'number',
+  'boolean',
+  'object',
+  'array',
+  'null'
+] as const);
+
 export type ModelToolJsonSchemaType =
-  | 'string'
-  | 'number'
-  | 'boolean'
-  | 'object'
-  | 'array'
-  | 'null';
+  (typeof modelToolJsonSchemaTypeValues)[number];
+
+export function isModelToolJsonSchemaType(
+  value: unknown
+): value is ModelToolJsonSchemaType {
+  return (
+    typeof value === 'string' &&
+    modelToolJsonSchemaTypeValues.some((allowedValue) => allowedValue === value)
+  );
+}
 
 export type ModelToolJsonSchema = {
   readonly type?: ModelToolJsonSchemaType | readonly ModelToolJsonSchemaType[];
@@ -110,9 +123,6 @@ export const userTurnBuiltInModelToolNames = Object.freeze([
   visibleReplyModelToolName
 ] satisfies readonly BuiltInModelToolName[]);
 
-export const requiredUserTurnBuiltInModelToolNames = Object.freeze([
-] satisfies readonly BuiltInModelToolName[]);
-
 export const builtInModelToolDefinitions = Object.freeze([
   createBuiltInModelToolDefinition({
     name: visibleReplyModelToolName,
@@ -160,12 +170,6 @@ export function freezeBuiltInModelToolCall(
   return createVisibleReplyModelToolCall(call.input.text);
 }
 
-export function freezeBuiltInModelToolCalls(
-  calls: readonly BuiltInModelToolCall[]
-): readonly BuiltInModelToolCall[] {
-  return Object.freeze(calls.map(freezeBuiltInModelToolCall));
-}
-
 export function findVisibleReplyModelToolCall(
   calls: readonly ModelToolCall[]
 ): VisibleReplyModelToolCall | undefined {
@@ -194,12 +198,6 @@ export function freezeModelToolDefinition(
     callLimit: freezeModelToolCallLimit(definition.callLimit),
     inputContract: freezeModelToolInputContract(definition.inputContract)
   } satisfies ModelToolDefinition);
-}
-
-export function freezeModelToolDefinitions(
-  definitions: readonly ModelToolDefinition[]
-): readonly ModelToolDefinition[] {
-  return Object.freeze(definitions.map(freezeModelToolDefinition));
 }
 
 export function freezeModelToolCall(call: ModelToolCall): ModelToolCall {

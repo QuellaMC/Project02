@@ -1,5 +1,4 @@
 import { createInterface } from 'node:readline';
-import { pathToFileURL } from 'node:url';
 
 import {
   createConversationSession,
@@ -64,12 +63,8 @@ import {
 } from '../plugins/host.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
-  createRuntimePluginFactoryCatalogSnapshot,
   diagnosticsHaveErrors,
-  loadProject02RuntimeConfig,
-  prepareConfiguredProject02PluginActivation,
   roleModelProviderEnvVarName,
-  resolveProject02RuntimeConfig,
   type PreparedProject02PluginActivationPlan,
   type RuntimeConfigDiagnostic,
   type RuntimePluginFactoryDefinition
@@ -86,13 +81,10 @@ import {
   type RuntimeLocationCliState
 } from './runtime-location.ts';
 import {
-  defaultDotEnvForRuntimeLocation,
-  loadRuntimeConfigEnvFile,
-  readDefaultDotEnvFile,
-  resolveRuntimeConfigActivationBeforeEnvFile,
-  RuntimeEnvFileError,
-  shouldReadDefaultDotEnvForRuntimeLocation
+  RuntimeEnvFileError
 } from './runtime-env.ts';
+import { isMainModule } from './main-module.ts';
+import { resolveRuntimeCliStartup } from './startup.ts';
 
 type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -193,6 +185,8 @@ const startupFailurePluginCleanupMessage =
   'chat startup failed before opening a durable session';
 const fatalFailurePluginCleanupMessage =
   'chat turn failed before normal /exit cleanup';
+const configuredPluginShutdownMessage =
+  'chat configured plugin host lifetime ended';
 
 class ChatCliUsageError extends Error {
   constructor(message: string) {
@@ -332,88 +326,43 @@ export async function runChatCliFromArgs(
   options: ChatCliOptions
 ): Promise<number> {
   try {
-    const explicitEnv =
-      options.env === undefined || options.env === process.env
-        ? undefined
-        : options.env;
     const parsedArgs = parseChatCliArgs(args);
-    const defaultEnv =
-      explicitEnv === undefined &&
-      shouldReadDefaultDotEnvForRuntimeLocation({
-        location: parsedArgs,
-        env: process.env
-      })
-        ? defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), parsedArgs)
-        : undefined;
-    const baseEnv = explicitEnv ?? { ...(defaultEnv ?? {}), ...process.env };
-    const loadedConfig = loadProject02RuntimeConfig({
-      ...parsedArgs,
-      env: baseEnv
+    const startup = resolveRuntimeCliStartup({
+      location: parsedArgs,
+      ...(options.env === undefined ? {} : { env: options.env }),
+      ...(options.factories === undefined
+        ? {}
+        : { factories: options.factories }),
+      continueAfterActivationErrors: options.pluginHost !== undefined
     });
 
-    assertNoRuntimeConfigErrors(loadedConfig.diagnostics, 'Runtime config is invalid');
-
-    const catalogSnapshot =
-      options.pluginHost === undefined && options.factories === undefined
-        ? createRuntimePluginFactoryCatalogSnapshot({
-            loadedConfig,
-            ...(parsedArgs.storeRoot === undefined
-              ? {}
-              : { storeRoot: parsedArgs.storeRoot })
-          })
-        : undefined;
-
-    const activationBeforeEnv =
-      options.pluginHost === undefined
-        ? resolveRuntimeConfigActivationBeforeEnvFile({
-            loadedConfig,
-            ...(parsedArgs.storeRoot === undefined
-              ? {}
-              : { storeRoot: parsedArgs.storeRoot }),
-            env: baseEnv,
-            ...(options.factories === undefined ? {} : { factories: options.factories }),
-            ...(catalogSnapshot === undefined ? {} : { catalogSnapshot })
-          })
-        : undefined;
-
-    if (activationBeforeEnv !== undefined) {
+    if (startup.status === 'config_invalid') {
       assertNoRuntimeConfigErrors(
-        activationBeforeEnv.activation.diagnostics,
-        'Runtime config activation failed'
+        startup.loadedConfig.diagnostics,
+        'Runtime config is invalid'
       );
+      throw new ChatCliUsageError('Runtime config is invalid.');
     }
 
-    const runtimeEnv = loadRuntimeConfigEnvFile({
-      loadedConfig,
-      ...(parsedArgs.storeRoot === undefined ? {} : { storeRoot: parsedArgs.storeRoot }),
-      env: explicitEnv ?? process.env,
-      ...(defaultEnv === undefined ? {} : { envDefaults: defaultEnv })
-    });
+    if (startup.status === 'activation_blocked_before_runtime_env') {
+      assertNoRuntimeConfigErrors(
+        startup.activationPlan.activation.diagnostics,
+        'Runtime config activation failed'
+      );
+      throw new ChatCliUsageError('Runtime config activation failed.');
+    }
+
+    const runtimeEnv = startup.runtimeEnv;
     const selectedArgs = selectChatProvider(
       parsedArgs,
       runtimeEnv,
-      loadedConfig.config?.project02?.roleModelProvider
+      startup.loadedConfig.config?.project02?.roleModelProvider
     );
 
     const preparedActivationPlan =
       options.pluginHost === undefined
-        ? prepareConfiguredProject02PluginActivation({
-            loadedConfig,
-            ...(selectedArgs.storeRoot === undefined
-              ? {}
-              : { storeRoot: selectedArgs.storeRoot }),
-            env: runtimeEnv,
-            ...(options.factories === undefined ? {} : { factories: options.factories }),
-            ...(catalogSnapshot === undefined ? {} : { catalogSnapshot })
-          })
+        ? startup.activationPlan
         : undefined;
-    const resolvedRuntimeConfig =
-      preparedActivationPlan?.resolvedConfig ??
-      resolveProject02RuntimeConfig({
-        loadedConfig,
-        ...(selectedArgs.storeRoot === undefined ? {} : { storeRoot: selectedArgs.storeRoot }),
-        env: runtimeEnv
-      });
     if (preparedActivationPlan !== undefined) {
       assertNoRuntimeConfigErrors(
         preparedActivationPlan.activation.diagnostics,
@@ -422,7 +371,7 @@ export async function runChatCliFromArgs(
     }
     const runtimeArgs = {
       ...selectedArgs,
-      storeRoot: resolvedRuntimeConfig.storeRoot
+      storeRoot: startup.activationPlan.resolvedConfig.project02.storeRoot
     } satisfies ChatCliArgs;
 
     validateDurableSessionArgs(runtimeArgs);
@@ -534,6 +483,18 @@ async function runChatCliAfterConfiguredHost(options: {
 
     return exitCode;
   } finally {
+    if (options.configuredHost !== undefined) {
+      const decisionContext = buildUserTurnDecisionContext({
+        session: durableRuntime.session
+      });
+
+      await runBestEffortConfiguredChatPluginShutdown({
+        configuredHost: options.configuredHost,
+        sessionId: decisionContext.sessionId,
+        currentUserMessage: configuredPluginShutdownMessage,
+        character: decisionContext.characterSnapshot
+      });
+    }
     await durableRuntime.writerLease.release();
   }
 }
@@ -568,6 +529,14 @@ async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
     character: createConversationSession().character,
     hookOptions: { allowFileStoreWrites: false }
   });
+  await runBestEffortConfiguredChatPluginShutdown({
+    configuredHost: options.configuredHost,
+    sessionId: normalizeLocalRuntimeSessionId(
+      options.args.newSessionId ?? options.args.sessionId
+    ),
+    currentUserMessage: configuredPluginShutdownMessage,
+    character: createConversationSession().character
+  });
 }
 
 async function runBestEffortConfiguredChatPluginSessionEndCleanup(options: {
@@ -591,6 +560,27 @@ async function runBestEffortConfiguredChatPluginSessionEndCleanup(options: {
     );
   } catch {
     // Cleanup must not mask the startup or fatal turn error that triggered it.
+  }
+}
+
+async function runBestEffortConfiguredChatPluginShutdown(options: {
+  readonly configuredHost: ConfiguredChatPluginHost;
+  readonly sessionId: string;
+  readonly currentUserMessage: string;
+  readonly character: ReturnType<typeof createConversationSession>['character'];
+}): Promise<void> {
+  try {
+    await options.configuredHost.host.shutdown(
+      createRuntimePluginContext({
+        ...createRuntimeEventIdentity(),
+        sessionId: options.sessionId,
+        eventType: 'USER_MESSAGE',
+        currentUserMessage: options.currentUserMessage,
+        character: options.character
+      })
+    );
+  } catch {
+    // Shutdown is best-effort and must not mask the completed or failing chat lifetime.
   }
 }
 
@@ -750,86 +740,20 @@ async function runChatCliWithActiveWriter(
         break;
       }
 
-      const line = nextLine.value;
-      const trimmedLine = line.trim();
-
-      if (trimmedLine === exitCommand) {
-        await endChatSession({
-          session,
-          logStore,
-          pluginHost
-        });
-        return 0;
-      }
-
-      const nextModelTextVisibility = modelTextVisibilityCommand(
-        trimmedLine,
+      const lineResult = await handleChatInputLine({
+        options,
+        session,
+        logStore,
+        pluginHost,
+        line: nextLine.value,
         showNonCommittedTopLevelText
-      );
+      });
 
-      if (nextModelTextVisibility !== undefined) {
-        showNonCommittedTopLevelText = nextModelTextVisibility;
-        options.stdout.write(
-          `Model top-level text display: ${showNonCommittedTopLevelText ? 'shown' : 'hidden'}.\n`
-        );
-        options.stdout.write(promptText);
-        continue;
+      if (lineResult.status === 'exit') {
+        return lineResult.exitCode;
       }
 
-      try {
-        const result = await handleUserMessageThroughRuntime({
-          session,
-          logStore,
-          line,
-          ...(options.agent === undefined ? {} : { agent: options.agent }),
-          ...(options.roleModelAdapter === undefined
-            ? {}
-            : { roleModelAdapter: options.roleModelAdapter }),
-          pluginHost,
-          onProgress(progressEvent) {
-            writeRuntimeProgress(options.stdout, session, progressEvent);
-          }
-        });
-
-        if (result.status === 'completed') {
-          if (result.characterReplyText !== undefined) {
-            options.stdout.write(`${session.character.displayName}: ${result.characterReplyText}\n`);
-          }
-          if (
-            showNonCommittedTopLevelText &&
-            result.nonCommittedTopLevelText !== undefined
-          ) {
-            writeNonCommittedTopLevelText(
-              options.stdout,
-              result.nonCommittedTopLevelText
-            );
-          }
-        } else if (options.traceMode === true) {
-          writeTraceSummary(options.stderr, result.traceSummary);
-        } else {
-          options.stderr.write(`Error: ${result.errorMessage}\n`);
-        }
-
-        if (result.status === 'completed' && options.traceMode === true) {
-          writeTraceSummary(options.stderr, result.traceSummary);
-        }
-
-        if (result.status === 'rejected' && result.fatal) {
-          lines.close();
-          return 1;
-        }
-      } catch (error: unknown) {
-        if (isFormattedTerminalError(error)) {
-          options.stderr.write(`Error: ${formatTerminalErrorMessage(error)}\n`);
-        } else {
-          options.stderr.write(`Error: ${chatFailedBeforeReplyMessage}\n`);
-        }
-
-        lines.close();
-        return 1;
-      }
-
-      options.stdout.write(promptText);
+      showNonCommittedTopLevelText = lineResult.showNonCommittedTopLevelText;
     }
 
     await endChatSession({
@@ -843,6 +767,130 @@ async function runChatCliWithActiveWriter(
   }
 
   return 0;
+}
+
+type ChatInputLineResult =
+  | {
+      readonly status: 'continue';
+      readonly showNonCommittedTopLevelText: boolean;
+    }
+  | { readonly status: 'exit'; readonly exitCode: number };
+
+async function handleChatInputLine(options: {
+  readonly options: RunChatCliOptions;
+  readonly session: ConversationSession;
+  readonly logStore: RuntimeLogStore;
+  readonly pluginHost: RuntimePluginHost;
+  readonly line: string;
+  readonly showNonCommittedTopLevelText: boolean;
+}): Promise<ChatInputLineResult> {
+  const trimmedLine = options.line.trim();
+
+  if (trimmedLine === exitCommand) {
+    await endChatSession(options);
+    return { status: 'exit', exitCode: 0 };
+  }
+
+  const nextModelTextVisibility = modelTextVisibilityCommand(
+    trimmedLine,
+    options.showNonCommittedTopLevelText
+  );
+
+  if (nextModelTextVisibility !== undefined) {
+    options.options.stdout.write(
+      `Model top-level text display: ${nextModelTextVisibility ? 'shown' : 'hidden'}.\n`
+    );
+    options.options.stdout.write(promptText);
+    return {
+      status: 'continue',
+      showNonCommittedTopLevelText: nextModelTextVisibility
+    };
+  }
+
+  try {
+    const result = await handleUserMessageThroughRuntime({
+      session: options.session,
+      logStore: options.logStore,
+      line: options.line,
+      ...(options.options.agent === undefined
+        ? {}
+        : { agent: options.options.agent }),
+      ...(options.options.roleModelAdapter === undefined
+        ? {}
+        : { roleModelAdapter: options.options.roleModelAdapter }),
+      pluginHost: options.pluginHost,
+      onProgress(progressEvent) {
+        writeRuntimeProgress(
+          options.options.stdout,
+          options.session,
+          progressEvent
+        );
+      }
+    });
+
+    writeChatRuntimeResult({
+      options: options.options,
+      session: options.session,
+      result,
+      showNonCommittedTopLevelText: options.showNonCommittedTopLevelText
+    });
+
+    if (result.status === 'rejected' && result.fatal) {
+      return { status: 'exit', exitCode: 1 };
+    }
+  } catch (error: unknown) {
+    writeChatInputError(options.options.stderr, error);
+    return { status: 'exit', exitCode: 1 };
+  }
+
+  options.options.stdout.write(promptText);
+  return {
+    status: 'continue',
+    showNonCommittedTopLevelText: options.showNonCommittedTopLevelText
+  };
+}
+
+function writeChatRuntimeResult(options: {
+  readonly options: RunChatCliOptions;
+  readonly session: ConversationSession;
+  readonly result: Awaited<ReturnType<typeof handleUserMessageThroughRuntime>>;
+  readonly showNonCommittedTopLevelText: boolean;
+}): void {
+  if (options.result.status === 'completed') {
+    if (options.result.characterReplyText !== undefined) {
+      options.options.stdout.write(
+        `${options.session.character.displayName}: ${options.result.characterReplyText}\n`
+      );
+    }
+    if (
+      options.showNonCommittedTopLevelText &&
+      options.result.nonCommittedTopLevelText !== undefined
+    ) {
+      writeNonCommittedTopLevelText(
+        options.options.stdout,
+        options.result.nonCommittedTopLevelText
+      );
+    }
+  } else if (options.options.traceMode !== true) {
+    options.options.stderr.write(`Error: ${options.result.errorMessage}\n`);
+  }
+
+  if (options.options.traceMode === true) {
+    writeTraceSummary(options.options.stderr, options.result.traceSummary);
+  }
+}
+
+function writeChatInputError(
+  stderr: NodeJS.WritableStream,
+  error: unknown
+): void {
+  stderr.write(
+    `Error: ${
+      isFormattedTerminalError(error)
+        ? formatTerminalErrorMessage(error)
+        : chatFailedBeforeReplyMessage
+    }\n`
+  );
 }
 
 type EndChatSessionOptions = {
@@ -1210,17 +1258,51 @@ function traceToolCallSummaryOption(
   readonly terminalToolCalls?: readonly string[];
 } {
   const turnRawEvents = rawEvents ?? [];
-  const hasRoleModelEvidence = turnRawEvents.some(
-    (event) => event.parsedRoleModelDecisionSnapshot !== undefined
-  ) || terminalRawEvent?.parsedRoleModelDecisionSnapshot !== undefined;
-  const hasExecutedToolEvidence = turnRawEvents.some(
-    (event) => event.kind === 'tool_call_finished'
-  );
-
-  if (!hasRoleModelEvidence && !hasExecutedToolEvidence) {
+  if (!hasTraceToolCallEvidence(terminalRawEvent, turnRawEvents)) {
     return {};
   }
 
+  const requestedToolCalls = requestedToolCallNames(turnRawEvents);
+  const executedToolCalls = executedToolCallNames(turnRawEvents);
+  const terminalDecision = terminalDecisionEvidenceRawEvent(
+    terminalRawEvent,
+    turnRawEvents
+  )?.parsedRoleModelDecisionSnapshot?.result;
+  const terminalToolCalls =
+    terminalDecision?.status === 'accepted'
+      ? terminalDecision.decision.toolCalls.map((call) => call.name)
+      : [];
+
+  if (terminalDecision?.status === 'rejected') {
+    requestedToolCalls.push(...(terminalDecision.requestedToolNames ?? []));
+  }
+
+  requestedToolCalls.push(...terminalToolCalls);
+
+  return {
+    requestedToolCalls: Object.freeze(requestedToolCalls),
+    executedToolCalls: Object.freeze(executedToolCalls),
+    terminalToolCalls: Object.freeze(terminalToolCalls)
+  };
+}
+
+function hasTraceToolCallEvidence(
+  terminalRawEvent: RawEventLogRecord | undefined,
+  turnRawEvents: readonly RawEventLogRecord[]
+): boolean {
+  return (
+    terminalRawEvent?.parsedRoleModelDecisionSnapshot !== undefined ||
+    turnRawEvents.some(
+      (event) =>
+        event.parsedRoleModelDecisionSnapshot !== undefined ||
+        event.kind === 'tool_call_finished'
+    )
+  );
+}
+
+function requestedToolCallNames(
+  turnRawEvents: readonly RawEventLogRecord[]
+): string[] {
   const requestedToolCalls: string[] = [];
   const seenRequestedDecisions = new Set<string>();
 
@@ -1249,6 +1331,12 @@ function traceToolCallSummaryOption(
     );
   }
 
+  return requestedToolCalls;
+}
+
+function executedToolCallNames(
+  turnRawEvents: readonly RawEventLogRecord[]
+): string[] {
   const executedToolCalls: string[] = [];
   const seenExecutedToolCallIds = new Set<string>();
 
@@ -1275,26 +1363,7 @@ function traceToolCallSummaryOption(
     executedToolCalls.push(event.toolName);
   }
 
-  const terminalDecision = terminalDecisionEvidenceRawEvent(
-    terminalRawEvent,
-    turnRawEvents
-  )?.parsedRoleModelDecisionSnapshot?.result;
-  const terminalToolCalls =
-    terminalDecision?.status === 'accepted'
-      ? terminalDecision.decision.toolCalls.map((call) => call.name)
-      : [];
-
-  if (terminalDecision?.status === 'rejected') {
-    requestedToolCalls.push(...(terminalDecision.requestedToolNames ?? []));
-  }
-
-  requestedToolCalls.push(...terminalToolCalls);
-
-  return {
-    requestedToolCalls: Object.freeze(requestedToolCalls),
-    executedToolCalls: Object.freeze(executedToolCalls),
-    terminalToolCalls: Object.freeze(terminalToolCalls)
-  };
+  return executedToolCalls;
 }
 
 function requestedDecisionEvidenceKey(event: RawEventLogRecord): string | undefined {
@@ -1652,16 +1721,6 @@ function isFormattedTerminalError(
     error instanceof RuntimeEnvFileError ||
     isLocalRuntimeTerminalError(error)
   );
-}
-
-function isMainModule(moduleUrl: string): boolean {
-  const scriptPath = process.argv[1];
-
-  if (scriptPath === undefined) {
-    return false;
-  }
-
-  return pathToFileURL(scriptPath).href === moduleUrl;
 }
 
 if (isMainModule(import.meta.url)) {

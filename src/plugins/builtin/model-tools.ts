@@ -17,22 +17,26 @@ import type {
 
 const firstPartyModelToolsPluginInstances = new WeakSet<RuntimePlugin>();
 
+export const firstPartyModelToolsProvidedTools = Object.freeze(
+  builtInModelToolDefinitionsForUserTurn().map((definition) =>
+    Object.freeze({
+      name: definition.name,
+      description: definition.description,
+      requiredForUserTurn: definition.requiredForUserTurn,
+      callLimit: definition.callLimit,
+      inputContract: definition.inputContract,
+      validationOwner: 'built_in_model_tools',
+      sideEffectLevel: 'none',
+      requiresConfirmation: false,
+      sourceReferencesRequired: false
+    } satisfies RuntimePluginProvidedTool)
+  )
+);
+
 export function createFirstPartyModelToolsPlugin(): RuntimePlugin {
   const plugin = createRuntimePlugin({
     manifest: createFirstPartyModelToolsPluginManifest(),
-    providedTools: builtInModelToolDefinitionsForUserTurn().map((definition) =>
-      Object.freeze({
-        name: definition.name,
-        description: definition.description,
-        requiredForUserTurn: definition.requiredForUserTurn,
-        callLimit: definition.callLimit,
-        inputContract: definition.inputContract,
-        validationOwner: 'built_in_model_tools',
-        sideEffectLevel: 'none',
-        requiresConfirmation: false,
-        sourceReferencesRequired: false
-      } satisfies RuntimePluginProvidedTool)
-    ),
+    providedTools: firstPartyModelToolsProvidedTools,
     lifecycleHooks: {}
   });
 

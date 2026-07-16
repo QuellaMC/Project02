@@ -4,41 +4,34 @@ import type {
   RuntimePluginManifest,
   RuntimePluginProvidedTool
 } from './plugin-types.ts';
-import {
-  runtimePluginConfigUpdateToolName,
-  runtimePluginId
-} from './contract.ts';
 
 export function isModelFacingRuntimePluginTool(options: {
   readonly manifest: RuntimePluginManifest;
   readonly tool: RuntimePluginProvidedTool;
 }): boolean {
-  const approvalGatedRuntimeConfigWrite =
-    isApprovalGatedRuntimeConfigTool(options);
+  const manifestAllowsModelFacingTools =
+    options.manifest.runtimePolicy.confirmation !== 'required';
 
   return (
-    approvalGatedRuntimeConfigWrite ||
-    (!isBuiltInModelToolName(options.tool.name) &&
-      options.tool.validationOwner === 'plugin_host' &&
-      options.manifest.runtimePolicy.confirmation !== 'required' &&
-      !options.tool.requiresConfirmation &&
-      (options.tool.sideEffectLevel === 'none' ||
-        options.tool.sideEffectLevel === 'runtime_read' ||
-        options.tool.sideEffectLevel === 'local_memory_write'))
+    manifestAllowsModelFacingTools &&
+    (isApprovalGatedRuntimePluginTool(options.tool) ||
+      (!isBuiltInModelToolName(options.tool.name) &&
+        options.tool.validationOwner === 'plugin_host' &&
+        !options.tool.requiresConfirmation &&
+        (options.tool.sideEffectLevel === 'none' ||
+          options.tool.sideEffectLevel === 'runtime_read' ||
+          options.tool.sideEffectLevel === 'local_memory_write')))
   );
 }
 
-export function isApprovalGatedRuntimeConfigTool(options: {
-  readonly manifest: RuntimePluginManifest;
-  readonly tool: RuntimePluginProvidedTool;
-}): boolean {
+export function isApprovalGatedRuntimePluginTool(
+  tool: RuntimePluginProvidedTool
+): boolean {
   return (
-    options.manifest.id === runtimePluginId &&
-    options.tool.name === runtimePluginConfigUpdateToolName &&
-    options.tool.validationOwner === 'plugin_host' &&
-    options.manifest.runtimePolicy.confirmation !== 'required' &&
-    options.tool.requiresConfirmation &&
-    options.tool.sideEffectLevel === 'runtime_config_write'
+    !isBuiltInModelToolName(tool.name) &&
+    tool.validationOwner === 'plugin_host' &&
+    tool.requiresConfirmation &&
+    tool.sideEffectLevel === 'runtime_config_write'
   );
 }
 

@@ -37,6 +37,7 @@ describe('durable runtime session writer ownership', () => {
       createdAt: '2026-07-11T00:00:00.000Z'
     });
     const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const secondLogStore = createFileRuntimeLogStore({ storeRoot, sessionId });
     const rawEventsPath = logStore.localRuntimeSessionPaths?.rawEventsPath;
 
     if (rawEventsPath === undefined) {
@@ -74,7 +75,7 @@ describe('durable runtime session writer ownership', () => {
       await runLocalUserMessageEvent({
         event: createUserMessageRuntimeEvent('second', createRuntimeEventIdentity()),
         session: secondSession,
-        logStore,
+        logStore: secondLogStore,
         pluginHost: createRuntimePluginHost(),
         agent: { reply: () => ({ text: 'second reply' }) }
       });

@@ -51,6 +51,27 @@ describe('configured runtime plugin package activation', () => {
     expect(configured.packageProvenanceByPluginId).toEqual({
       [characterStatePluginId]: 'bundled'
     });
+    expect(configured.catalogEntries[characterStatePluginId]).toMatchObject({
+      catalogKind: 'package'
+    });
+    expect(configured.catalogEntries[runtimePluginId]).toMatchObject({
+      catalogKind: 'host_service'
+    });
+    expect(
+      configured.catalogEntries[characterStatePluginId]?.catalogKind ===
+        'package' &&
+        typeof configured.catalogEntries[characterStatePluginId].load ===
+          'function'
+    ).toBe(true);
+    expect(
+      configured.catalogEntries[runtimePluginId]?.catalogKind ===
+        'host_service' &&
+        typeof configured.catalogEntries[runtimePluginId].bootstrap ===
+          'function'
+    ).toBe(true);
+    expect(
+      Object.values(configured.catalogEntries).some((entry) => 'create' in entry)
+    ).toBe(false);
   });
 
   it('keeps an operator package disabled without evaluating its entry', async () => {
@@ -393,7 +414,7 @@ describe('configured runtime plugin package activation', () => {
       input: {
         pluginId: manifest.id,
         manifest: { id: manifest.id },
-        storeRoot: configured.resolvedConfig.storeRoot,
+        storeRoot: configured.resolvedConfig.project02.storeRoot,
         resolvedConfig: {
           label: {
             name: 'label',

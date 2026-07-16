@@ -19,51 +19,55 @@ import type {
   RuntimePlugin,
   RuntimePluginManifest
 } from './plugin-types.ts';
-import type {
-  RuntimePluginFactoryDefinition
-} from './factory.ts';
-import type {
-  RuntimePluginToolConfirmationHandler
-} from './tool-confirmation.ts';
+import type { RuntimePluginPackageCatalogEntry } from './factory.ts';
 
-export type RuntimePluginCatalogFactoryDefinition =
-  RuntimePluginFactoryDefinition<() => RuntimePlugin> & {
-    readonly catalogOwner: 'project02_host';
-    readonly construction: 'host_scoped' | 'factory';
-  };
+export type RuntimePluginHostServiceBootstrapInput = {
+  readonly hostStateForTurn: RuntimePluginListHostState;
+  readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
+  readonly storeRoot?: string;
+};
 
-export function defaultRuntimePluginCatalogFactoryDefinitions(): Readonly<
-  Record<string, RuntimePluginCatalogFactoryDefinition>
+export type RuntimePluginHostServiceCatalogEntry = {
+  readonly catalogKind: 'host_service';
+  readonly manifest: RuntimePluginManifest;
+  readonly bootstrap: (
+    input: RuntimePluginHostServiceBootstrapInput
+  ) => RuntimePlugin;
+};
+
+export type RuntimePluginCatalogEntry =
+  | RuntimePluginHostServiceCatalogEntry
+  | RuntimePluginPackageCatalogEntry;
+
+export function defaultRuntimePluginHostServiceCatalogEntries(): Readonly<
+  Record<string, RuntimePluginHostServiceCatalogEntry>
 > {
   return Object.freeze({
     [runtimePluginId]: Object.freeze({
-      catalogOwner: 'project02_host',
-      construction: 'host_scoped',
+      catalogKind: 'host_service',
       manifest: createRuntimePluginManagementPluginManifest(),
-      create: () =>
+      bootstrap: (input) =>
         createRuntimePluginManagementPlugin({
-          hostStateForTurn: () => ({
-            plugins: Object.freeze([]),
-            enabledPlugins: Object.freeze([]),
-            accessByPluginId: Object.freeze({})
-          }),
-          pluginConfigControl: {
-            pluginManifests: defaultRuntimePluginCatalogManifests()
-          }
+          hostStateForTurn: input.hostStateForTurn,
+          ...(input.pluginConfigControl === undefined
+            ? {}
+            : { pluginConfigControl: input.pluginConfigControl }),
+          ...(input.storeRoot === undefined
+            ? {}
+            : { storeRoot: input.storeRoot })
         })
-    } satisfies RuntimePluginCatalogFactoryDefinition),
+    } satisfies RuntimePluginHostServiceCatalogEntry),
     [firstPartyModelToolsPluginId]: Object.freeze({
-      catalogOwner: 'project02_host',
-      construction: 'host_scoped',
+      catalogKind: 'host_service',
       manifest: createFirstPartyModelToolsPluginManifest(),
-      create: () => createFirstPartyModelToolsPlugin()
-    } satisfies RuntimePluginCatalogFactoryDefinition)
+      bootstrap: () => createFirstPartyModelToolsPlugin()
+    } satisfies RuntimePluginHostServiceCatalogEntry)
   });
 }
 
 export const hostFirstPartyRuntimePluginIds = Object.freeze(
   [
-    ...Object.values(defaultRuntimePluginCatalogFactoryDefinitions()).map(
+    ...Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(
       (definition) => definition.manifest.id
     ),
     characterStatePluginId
@@ -71,8 +75,7 @@ export const hostFirstPartyRuntimePluginIds = Object.freeze(
 );
 
 export const hostScopedFirstPartyRuntimePluginIds = Object.freeze(
-  Object.values(defaultRuntimePluginCatalogFactoryDefinitions())
-    .filter((definition) => definition.construction === 'host_scoped')
+  Object.values(defaultRuntimePluginHostServiceCatalogEntries())
     .map((definition) => definition.manifest.id)
 );
 
@@ -83,23 +86,9 @@ const hostScopedFirstPartyRuntimePluginIdSet = new Set<string>(
   hostScopedFirstPartyRuntimePluginIds
 );
 
-export function hasRuntimePluginCatalogFactoryMetadata(
-  definition: RuntimePluginFactoryDefinition
-): definition is RuntimePluginCatalogFactoryDefinition {
-  if (!('catalogOwner' in definition) || !('construction' in definition)) {
-    return false;
-  }
-
-  return (
-    definition.catalogOwner === 'project02_host' &&
-    (definition.construction === 'host_scoped' ||
-      definition.construction === 'factory')
-  );
-}
-
 export function defaultRuntimePluginCatalogManifests(): readonly RuntimePluginManifest[] {
   return Object.freeze(
-    Object.values(defaultRuntimePluginCatalogFactoryDefinitions()).map(
+    Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(
       (definition) => definition.manifest
     )
   );
@@ -109,21 +98,12 @@ export function createHostScopedFirstPartyRuntimePlugins(options: {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
   readonly storeRoot?: string;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
 }): readonly RuntimePlugin[] {
-  return Object.freeze([
-    createRuntimePluginManagementPlugin({
-      hostStateForTurn: options.hostStateForTurn,
-      ...(options.pluginConfigControl === undefined
-        ? {}
-        : { pluginConfigControl: options.pluginConfigControl }),
-      ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-      ...(options.toolConfirmationHandler === undefined
-        ? {}
-        : { confirmationHandler: options.toolConfirmationHandler })
-    }),
-    createFirstPartyModelToolsPlugin()
-  ]);
+  return Object.freeze(
+    Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(
+      (entry) => entry.bootstrap(options)
+    )
+  );
 }
 
 export function isHostOwnedFirstPartyRuntimePluginId(pluginId: string): boolean {
@@ -135,15 +115,6 @@ export function isHostScopedFirstPartyRuntimePluginId(pluginId: string): boolean
 }
 
 export function isHostOwnedFirstPartyRuntimePlugin(
-  plugin: RuntimePlugin
-): boolean {
-  return (
-    isRuntimePluginManagementPlugin(plugin) ||
-    isFirstPartyModelToolsPlugin(plugin)
-  );
-}
-
-export function isHostScopedFirstPartyRuntimePlugin(
   plugin: RuntimePlugin
 ): boolean {
   return (

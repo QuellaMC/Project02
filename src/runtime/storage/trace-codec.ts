@@ -3,11 +3,13 @@ import {
   type RuntimeTraceEntry,
   type RuntimeTraceStepName
 } from '../log.ts';
-import { isOneOf, throwMalformedRecord } from './codec-primitives.ts';
 import {
-  parseJsonObject,
-  requiredRecordCanonicalTimestamp,
-  requiredRecordString
+  isOneOf,
+  requiredRuntimeEventIdentity,
+  throwMalformedRecord
+} from './codec-primitives.ts';
+import {
+  parseJsonObject
 } from './layout-contract.ts';
 
 export function encodeRuntimeTraceEntry(entry: RuntimeTraceEntry): string {
@@ -16,15 +18,10 @@ export function encodeRuntimeTraceEntry(entry: RuntimeTraceEntry): string {
 
 export function decodeRuntimeTraceEntry(line: string): RuntimeTraceEntry {
   const record = parseJsonObject(line, 'malformed_record');
+  const identity = requiredRuntimeEventIdentity(record);
 
   return Object.freeze({
-    eventId: requiredRecordString(record, 'eventId', 'malformed_record'),
-    traceId: requiredRecordString(record, 'traceId', 'malformed_record'),
-    createdAt: requiredRecordCanonicalTimestamp(
-      record,
-      'createdAt',
-      'malformed_record'
-    ),
+    ...identity,
     step: requiredRuntimeTraceStep(record['step'])
   } satisfies RuntimeTraceEntry);
 }
