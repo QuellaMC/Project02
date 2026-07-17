@@ -2,7 +2,6 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['tests/**/*.test.ts'],
     environment: 'node',
     maxWorkers: 4,
     globals: false,
@@ -10,6 +9,41 @@ export default defineConfig({
     restoreMocks: true,
     unstubEnvs: true,
     unstubGlobals: true,
+    // One project per test bucket; each inherits this root config. Coverage
+    // stays global (root-level) — vitest 4 does not support per-project coverage.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          include: ['tests/unit/**/*.test.ts']
+        }
+      },
+      {
+        extends: true,
+        test: {
+          name: 'contract',
+          include: ['tests/contract/**/*.test.ts']
+        }
+      },
+      {
+        extends: true,
+        test: {
+          name: 'integration',
+          include: ['tests/integration/**/*.test.ts'],
+          // Headroom only: several suites spawn 2-7 child node processes and
+          // contend for the lock/WAL files they exercise.
+          testTimeout: 30000
+        }
+      },
+      {
+        extends: true,
+        test: {
+          name: 'e2e',
+          include: ['tests/e2e/**/*.test.ts']
+        }
+      }
+    ],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
