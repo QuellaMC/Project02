@@ -21,10 +21,12 @@ export {
   type RuntimePluginConfigControlCapability
 } from './plugin-control-capability.ts';
 export {
-  createProject02RuntimeConfigFingerprint
+  createRuntimeConfigFingerprint
 } from './fingerprint.ts';
 export {
-  createRuntimeConfigInspectShape
+  createRuntimeConfigInspectShape,
+  inspectConfiguredPlugins,
+  type InspectConfiguredPlugin
 } from './inspect.ts';
 export {
   defaultRuntimeConfigEnvPath,
@@ -67,6 +69,8 @@ export {
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigInspectShape,
+  type RedactedPluginRuntimeConfig,
+  type ResolvedPluginRuntimeConfig,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
   type RuntimePluginConfigActivationInspectShape,

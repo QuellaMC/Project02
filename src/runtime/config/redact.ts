@@ -1,7 +1,4 @@
-import {
-  isJsonBoundaryCredentialKey,
-  redactJsonBoundaryText
-} from '../../shared/json-boundary.ts';
+import { isJsonBoundaryCredentialKey, redactJsonBoundaryText } from '../../shared/redaction.ts';
 import type {
   RuntimeConfigValue,
   RedactedRuntimeConfigField,
@@ -16,7 +13,7 @@ export function redactRuntimeConfigValue(
   value: RuntimeConfigValue,
   options: { readonly secret?: boolean; readonly key?: string } = {}
 ): RuntimeConfigValue {
-  if (options.secret === true || isSecretValue(value)) {
+  if (options.secret === true || runtimeConfigValueIsSecretMarker(value)) {
     return '[redacted]';
   }
 
@@ -75,7 +72,11 @@ export function redactResolvedRuntimeConfigField(
   } satisfies RedactedRuntimeConfigField);
 }
 
-function isSecretValue(value: RuntimeConfigValue): boolean {
+// The single owner of secret-marker detection: a config value is a secret
+// marker when it is a `$env` or `$plaintextSecret` object.
+export function runtimeConfigValueIsSecretMarker(
+  value: RuntimeConfigValue
+): boolean {
   return (
     typeof value === 'object' &&
     value !== null &&

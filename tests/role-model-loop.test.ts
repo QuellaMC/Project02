@@ -1,27 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   createDefaultRoleModelPluginToolDefinitions,
-  createRoleModelInputEnvelope,
-  isRoleModelRawOutputReplayableDecisionEvidence,
-  roleModelDisallowedToolRejectionReason,
-  type RoleModelProviderExchangeSnapshot
-} from '../src/role-model/contracts.ts';
-import {
   createRoleModelAdapterFromCharacterAgent,
-  runRoleModelLoop,
-  type RoleModelAdapter,
-  type RoleModelPluginToolHost
-} from '../src/role-model/loop.ts';
-import type {
-  RoleModelAssistantChatMessage,
-  RoleModelChatMessage
-} from '../src/role-model/chat-wire.ts';
-import {
+  createRoleModelInputEnvelope,
   createRoleModelProviderToolNameMappings,
   defaultRoleModelProviderCapabilities,
-  renderRoleModelTurnContext
-} from '../src/role-model/prompt.ts';
-import { visibleReplyModelToolName } from '../src/role-model/model-tools.ts';
+  isRoleModelRawOutputReplayableDecisionEvidence,
+  renderRoleModelTurnContext,
+  type RoleModelAdapter,
+  type RoleModelAssistantChatMessage,
+  type RoleModelChatMessage,
+  roleModelDisallowedToolRejectionReason,
+  type RoleModelPluginToolHost,
+  type RoleModelProviderExchangeSnapshot,
+  runRoleModelLoop,
+  visibleReplyModelToolName
+} from '../src/role-model/index.ts';
 import {
   createAcceptedToolCallResult,
   createRejectedToolCallResult,

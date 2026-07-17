@@ -1,13 +1,12 @@
-import type { CharacterProfile, VisibleMessage } from '../../core/conversation.ts';
 import {
+  type CharacterProfile,
   normalizeVisibleMessageText,
-  VisibleMessageTextValidationError
-} from '../../core/message-validation.ts';
-import {
-  runtimeEventTypeValues,
   type RuntimeEventIdentity,
   type RuntimeEventType,
-  type UserMessageRuntimeEvent
+  runtimeEventTypeValues,
+  type UserMessageRuntimeEvent,
+  type VisibleMessage,
+  VisibleMessageTextValidationError
 } from '../../core/index.ts';
 import {
   createAcceptedRoleModelDecisionResult,
@@ -44,13 +43,13 @@ import {
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
   type RoleModelToolObservation
-} from '../../role-model/contracts.ts';
+} from '../../role-model/index.ts';
 import {
   createVisibleReplyModelToolCall,
   visibleReplyModelToolName,
   type PluginModelToolCall,
   type ModelToolCall
-} from '../../role-model/model-tools.ts';
+} from '../../role-model/index.ts';
 import {
   createPreparedRuntimePluginConfigEffect,
   createRuntimePluginContextItem,
@@ -66,7 +65,7 @@ import {
   type RuntimePluginSourceReference,
   type RuntimePluginToolCallResult,
   type RuntimePluginTurnEvidenceSnapshot
-} from '../../plugins/validation.ts';
+} from '../../plugins/api/index.ts';
 import {
   characterStatePatchModelToolName,
   runtimePluginEvidenceKindValues,
@@ -77,7 +76,7 @@ import {
   type RuntimePluginEvidenceStatus,
   type RuntimePluginPolicyOutcome,
   type RuntimePluginSourceKind
-} from '../../plugins/contract.ts';
+} from '../../plugins/api/index.ts';
 import {
   createRoleModelCommitValidationSnapshot,
   isTerminalRawEventLogRecordKind,
@@ -91,7 +90,7 @@ import {
   type RoleModelCommitValidationResult,
   type RoleModelCommitValidationSnapshot,
   type RuntimeTurnStatus
-} from '../log.ts';
+} from '../evidence/records.ts';
 import {
   isOneOf,
   requiredNormalizedVisibleMessageText,

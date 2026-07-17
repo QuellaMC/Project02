@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createConversationSession } from '../src/core/conversation.ts';
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
-import { createRuntimeLogStore } from '../src/runtime/log.ts';
-import type { RoleModelAdapter } from '../src/role-model/loop.ts';
-import type { RoleModelChatMessage } from '../src/role-model/chat-wire.ts';
+import { createConversationSession } from '../src/core/index.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
+import { createRuntimeLogStore } from '../src/runtime/evidence/index.ts';
+import {
+  type RoleModelAdapter,
+  type RoleModelChatMessage
+} from '../src/role-model/index.ts';
 import {
   createNativePluginListAdapter,
   createNativeVisibleReplyAndPluginListAdapter,

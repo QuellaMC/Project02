@@ -2,17 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildUserTurnDecisionContext
-} from '../src/role-model/decision-context.ts';
+} from '../src/role-model/api/decision-context.ts';
 import {
+  type CharacterAgent,
   createConversationSession,
   defaultRecentVisibleMessageLimit,
   localCharacterProfile,
-  runCharacterTurn
-} from '../src/core/conversation.ts';
-import type {
-  CharacterAgent,
-  VisibleMessage
-} from '../src/core/conversation.ts';
+  runCharacterTurn,
+  type VisibleMessage
+} from '../src/core/index.ts';
 
 type MutableVisibleMessage = {
   id: string;

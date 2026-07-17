@@ -2,24 +2,24 @@ import { describe, expect, it } from 'vitest';
 import {
   createRuntimePlugin,
   createRuntimePluginAfterTurnCommittedContext
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 import {
   defaultRuntimePluginHostServiceCatalogEntries,
   hostFirstPartyRuntimePluginIds
-} from '../src/plugins/catalog.ts';
+} from '../src/plugins/host/catalog.ts';
 import {
   firstPartyModelToolsPluginId,
   runtimePluginId,
   runtimePluginListToolName
-} from '../src/plugins/contract.ts';
+} from '../src/plugins/api/contract.ts';
 import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
 import {
   visibleReplyModelToolName
-} from '../src/role-model/model-tools.ts';
+} from '../src/role-model/index.ts';
 import {
   characterStatePatchModelToolName
-} from '../src/plugins/contract.ts';
+} from '../src/plugins/api/contract.ts';
 import { createRuntimePluginFileStore } from '../src/runtime/storage/plugin-file-store/index.ts';
 import { createRuntimePluginManagementPlugin } from '../src/plugins/index.ts';
 import {

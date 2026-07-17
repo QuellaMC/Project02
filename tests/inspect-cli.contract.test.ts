@@ -10,8 +10,10 @@ import {
 } from './support/runtime-config.ts';
 
 import {
-  createConversationSession
-} from '../src/core/conversation.ts';
+  createConversationSession,
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent
+} from '../src/core/index.ts';
 import {
   createFileRuntimeLogStore
 } from '../src/runtime/storage/file-runtime-log-store.ts';
@@ -19,19 +21,13 @@ import {
   createLocalRuntimeSessionStore
 } from '../src/runtime/storage/session-store.ts';
 import {
-  createUserMessageRuntimeEvent,
-  createRuntimeEventIdentity
-} from '../src/core/message-event.ts';
-import {
   runLocalUserMessageEvent
-} from '../src/runtime/local.ts';
-import type {
-  RoleModelAdapter
-} from '../src/role-model/loop.ts';
+} from '../src/runtime/turn/local.ts';
 import {
-  defaultRoleModelProviderCapabilities
-} from '../src/role-model/prompt.ts';
-import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
+  defaultRoleModelProviderCapabilities,
+  type RoleModelAdapter
+} from '../src/role-model/index.ts';
+import { runInspectCliFromArgs } from '../src/cli/inspect/main.ts';
 import {
   runtimeConfigEnvVarName,
   runtimeConfigVersion
@@ -42,11 +38,11 @@ import {
   type RuntimePlugin,
   type RuntimePluginAccessMap,
   type RuntimePluginContext
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 import {
   firstPartyModelToolsPluginId,
   runtimePluginId
-} from '../src/plugins/contract.ts';
+} from '../src/plugins/api/contract.ts';
 import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
 
 describe('inspect CLI plugin evidence', () => {

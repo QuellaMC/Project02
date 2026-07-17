@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createLocalRuntimeSessionPaths,
-  decodeConversationLogRecord,
   decodeStorageSchemaMarker,
-  decodeRawEventLogRecord,
-  decodeRuntimeTraceEntry,
   localRuntimeStorageSchemaVersion
-} from '../src/runtime/storage/layout.ts';
+} from '../src/runtime/storage/layout-contract.ts';
+import { decodeConversationLogRecord } from '../src/runtime/storage/conversation-codec.ts';
+import { decodeRawEventLogRecord } from '../src/runtime/storage/raw-event-codec.ts';
+import { decodeRuntimeTraceEntry } from '../src/runtime/storage/trace-codec.ts';
 
 describe('local storage plugin schema', () => {
   it('uses schema version 3 and no top-level character state path', () => {

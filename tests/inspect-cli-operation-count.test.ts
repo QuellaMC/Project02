@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type {
   RawEventLogRecord,
   RuntimeSessionEvidenceSnapshot
-} from '../src/runtime/log.ts';
-import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
+} from '../src/runtime/evidence/records.ts';
+import { runInspectCliFromArgs } from '../src/cli/inspect/main.ts';
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
 import { collect } from './support/runtime-config.ts';
 import { createTestTempRoot } from './support/temp-root.ts';

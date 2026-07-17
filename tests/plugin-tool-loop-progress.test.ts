@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { createConversationSession } from '../src/core/conversation.ts';
+import { createConversationSession } from '../src/core/index.ts';
 import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-log-store.ts';
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
-import { createRuntimeLogStore } from '../src/runtime/log.ts';
-import { roleModelInvalidVisibleReplyRejectionReason } from '../src/role-model/contracts.ts';
-import type { RoleModelAdapter } from '../src/role-model/loop.ts';
-import type { RoleModelChatMessage } from '../src/role-model/chat-wire.ts';
+import { createRuntimeLogStore } from '../src/runtime/evidence/index.ts';
+import {
+  type RoleModelAdapter,
+  type RoleModelChatMessage,
+  roleModelInvalidVisibleReplyRejectionReason
+} from '../src/role-model/index.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
 import {
   createDurableCharacterStateHarness,

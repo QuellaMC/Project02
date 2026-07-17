@@ -6,7 +6,7 @@ import {
   type CharacterAgent,
   type CharacterAgentReply,
   type CharacterTurnResult
-} from '../../core/conversation.ts';
+} from '../../core/index.ts';
 import {
   createRuntimePluginAfterTurnCommittedContext,
   type PreparedRuntimePluginConfigEffect,
@@ -15,7 +15,7 @@ import {
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult,
   type RuntimePluginToolInvocationSnapshot
-} from '../../plugins/types.ts';
+} from '../../plugins/api/index.ts';
 import type {
   RuntimePluginHealthHostResult,
   RuntimePluginHost
@@ -26,24 +26,24 @@ import {
   runtimeConfigEffectsForCompletedTurn,
   runtimePostCommitFailureMessage
 } from './config-effects.ts';
+import { createRoleModelCommitValidationSnapshot } from '../evidence/records.ts';
 import {
-  createRoleModelCommitValidationSnapshot,
   runtimePluginEvidenceOption,
   runtimePluginTurnEvidenceOption
-} from '../log.ts';
+} from './plugin-evidence.ts';
 import type {
   ConversationLogRecord,
   RawEventLogRecord,
   RawEventLogRecordInput,
   RuntimeTraceEntry,
   RuntimeTraceStepName
-} from '../log.ts';
+} from '../evidence/records.ts';
 import type {
   DecisionContext,
   ParsedRoleModelDecisionSnapshot,
   RoleModelIOSnapshot
-} from '../../role-model/contracts.ts';
-import type { RoleModelLoopResult } from '../../role-model/loop.ts';
+} from '../../role-model/index.ts';
+import type { RoleModelLoopResult } from '../../role-model/index.ts';
 import { findValidatedTerminalRawEventForSession } from '../storage/file-runtime-log-store.ts';
 import type {
   AppendVisibleReplyOptions,

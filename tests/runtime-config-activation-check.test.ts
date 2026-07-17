@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createTestTempRoot } from './support/temp-root.ts';
-import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
+import { runRuntimeConfigCliFromArgs } from '../src/cli/config/main.ts';
 import { createConfiguredProject02PluginHost } from '../src/app/index.ts';
 import { loadProject02RuntimeConfig } from '../src/runtime/config/index.ts';
 import {

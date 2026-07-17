@@ -8,24 +8,22 @@ import {
   createRuntimePluginHealthSnapshot,
   createRuntimePluginListingSnapshot,
   createRuntimePluginToolInvocationSnapshot,
-  isFirstPartyBuiltInModelTool,
-  normalizeRuntimePluginAccessMap,
-  runtimePluginAccessFor,
-  runtimePluginAccessAllows,
   runtimePluginContractVersion,
   validateRuntimePluginContextItem,
   type RuntimePluginAccessMap
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
+import { normalizeRuntimePluginAccessMap, runtimePluginAccessAllows, runtimePluginAccessFor } from '../src/plugins/policy/access-control.ts';
+import { isFirstPartyBuiltInModelTool } from '../src/plugins/policy/tool-policy.ts';
 import {
   createFirstPartyModelToolsPlugin
-} from '../src/plugins/builtin/model-tools.ts';
+} from '../src/plugins/builtin/model-tools/index.ts';
 import {
   createRuntimePluginProvidedTool
-} from '../src/plugins/validation.ts';
+} from '../src/plugins/api/index.ts';
 import {
   isApprovalGatedRuntimePluginTool,
   isModelFacingRuntimePluginTool
-} from '../src/plugins/tool-contract.ts';
+} from '../src/plugins/api/tool-classification.ts';
 
 describe('runtime plugin source references', () => {
   it('bounds every public context, evidence, and health string as one result', () => {

@@ -3,16 +3,16 @@ import { describe, expect, it } from 'vitest';
 import {
   createMemoryProviderRuntimePlugin,
   type Project02MemoryProvider
-} from '../src/plugins/memory/index.ts';
+} from '../src/plugins/builtin/memory-provider/index.ts';
 import {
   createRuntimePluginContext
 } from '../src/plugins/index.ts';
 import {
   createRuntimePluginHost
-} from '../src/plugins/host.ts';
+} from '../src/plugins/host/index.ts';
 import {
   createRuntimePluginAfterTurnCommittedContext
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 
 describe('memory provider runtime plugin helper', () => {
   it('declares only implemented provider methods', () => {

@@ -1,24 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { createConversationSession } from '../src/core/conversation.ts';
+import {
+  createConversationSession,
+  createRuntimeEventIdentity
+} from '../src/core/index.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin
 } from '../src/plugins/packages/character-state/plugin.ts';
 import { createRuntimePluginFileStore } from '../src/runtime/storage/plugin-file-store/index.ts';
 import { testRuntimePluginFileStoreProvider } from './support/plugin-host-fixtures.ts';
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
 import {
   createRuntimePluginContext,
   firstPartyModelToolsPluginId,
   runtimePluginId
-} from '../src/plugins/types.ts';
-import { createRuntimeEventIdentity } from '../src/core/message-event.ts';
+} from '../src/plugins/api/index.ts';
 import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-log-store.ts';
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
-import { createRuntimeLogStore } from '../src/runtime/log.ts';
-import { roleModelDuplicateToolCallRejectionReason } from '../src/role-model/contracts.ts';
-import type { RoleModelAdapter } from '../src/role-model/loop.ts';
-import type { RoleModelChatMessage } from '../src/role-model/chat-wire.ts';
+import { createRuntimeLogStore } from '../src/runtime/evidence/index.ts';
+import {
+  type RoleModelAdapter,
+  type RoleModelChatMessage,
+  roleModelDuplicateToolCallRejectionReason
+} from '../src/role-model/index.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
 import {
   createDurableCharacterStateHarness,

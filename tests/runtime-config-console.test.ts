@@ -6,13 +6,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   runRuntimeConfigCliFromArgs
-} from '../src/cli/config.ts';
+} from '../src/cli/config/main.ts';
 import type {
   RuntimeConfigConsolePromptAdapter
-} from '../src/cli/config-console.ts';
+} from '../src/cli/config/console.ts';
 import type {
   RuntimePlugin
-} from '../src/plugins/plugin-types.ts';
+} from '../src/plugins/api/types.ts';
 import { runtimeConfigVersion } from '../src/runtime/config/index.ts';
 import type { RuntimePluginFactoryDefinition } from '../src/app/index.ts';
 import {

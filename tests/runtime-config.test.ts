@@ -20,7 +20,7 @@ import {
   createCharacterStatePlugin,
   createCharacterStatePluginManifest
 } from '../src/plugins/packages/character-state/plugin.ts';
-import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
+import { runRuntimeConfigCliFromArgs } from '../src/cli/config/main.ts';
 import {
   collect,
   writeRuntimeConfig

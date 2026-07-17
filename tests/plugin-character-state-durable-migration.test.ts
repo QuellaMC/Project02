@@ -4,7 +4,7 @@ import { performance } from 'node:perf_hooks';
 
 import { describe, expect, it } from 'vitest';
 
-import { characterStatePatchModelToolName } from '../src/plugins/contract.ts';
+import { characterStatePatchModelToolName } from '../src/plugins/api/contract.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin
@@ -24,9 +24,9 @@ import {
   createRuntimePluginContext,
   type RuntimePluginFileStore,
   type RuntimePluginJsonObject
-} from '../src/plugins/types.ts';
-import { createRuntimeEventIdentity } from '../src/core/message-event.ts';
-import { createLocalRuntimePluginPaths } from '../src/runtime/storage/layout.ts';
+} from '../src/plugins/api/index.ts';
+import { createRuntimeEventIdentity } from '../src/core/index.ts';
+import { createLocalRuntimePluginPaths } from '../src/runtime/storage/layout-contract.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
 
 describe('durable Character State migration', () => {

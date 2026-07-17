@@ -22,7 +22,7 @@ import {
   type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
   type RuntimePluginManifest
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 import {
   applyRuntimePluginConfigControlOperation,
   inspectRuntimePluginConfig,

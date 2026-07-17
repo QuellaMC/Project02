@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createRuntimePluginHost, runRuntimePluginSessionEndHooks } from '../src/plugins/host.ts';
+import { createRuntimePluginHost, runRuntimePluginSessionEndHooks } from '../src/plugins/host/index.ts';
 import {
   createRuntimePluginRegistrySnapshot,
-  runtimePluginAccessForPlugin,
   type RuntimePluginFileStore
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
+import { runtimePluginAccessForPlugin } from '../src/plugins/policy/access-control.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin

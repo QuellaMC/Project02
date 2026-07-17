@@ -19,7 +19,7 @@ import {
   type CharacterProfile,
   type ConversationSession,
   type VisibleMessage
-} from '../../core/conversation.ts';
+} from '../../core/index.ts';
 import {
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeSessionPaths,
@@ -33,9 +33,9 @@ import {
   type LocalRuntimeSessionPathsOptions,
   type LocalRuntimeStorageLayout,
   type LocalRuntimeStorageLayoutOptions
-} from './layout.ts';
+} from './layout-contract.ts';
 import { isRecord } from './layout-contract.ts';
-import type { ConversationLogRecord } from '../log.ts';
+import type { ConversationLogRecord } from '../evidence/records.ts';
 import { atomicReplaceFile } from './atomic-file.ts';
 import {
   acquireLocalRuntimeMutationLock,

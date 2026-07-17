@@ -2,8 +2,12 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createTestTempRoot } from './support/temp-root.ts';
-import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
-import { createConversationSession } from '../src/core/conversation.ts';
+import { runRuntimeConfigCliFromArgs } from '../src/cli/config/main.ts';
+import {
+  createConversationSession,
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent
+} from '../src/core/index.ts';
 import {
   createConfiguredProject02PluginHost,
   createConfiguredProject02PluginHostFromPlan,
@@ -21,9 +25,8 @@ import {
   createCharacterStatePlugin,
   createCharacterStatePluginManifest
 } from '../src/plugins/packages/character-state/plugin.ts';
-import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/core/message-event.ts';
-import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
-import { createRuntimeLogStore } from '../src/runtime/log.ts';
+import { runLocalUserMessageEvent } from '../src/runtime/turn/local.ts';
+import { createRuntimeLogStore } from '../src/runtime/evidence/index.ts';
 import {
   collect,
   writeRuntimeConfig
@@ -40,7 +43,7 @@ import {
   testIdentity,
   testPluginContext
 } from './support/plugin-host-fixtures.ts';
-import { runtimePluginAccessSnapshot } from '../src/plugins/access-control.ts';
+import { runtimePluginAccessSnapshot } from '../src/plugins/policy/access-control.ts';
 
 describe('runtime config activation planning', () => {
   it('constructs the configured host from the exact prepared activation plan', async () => {

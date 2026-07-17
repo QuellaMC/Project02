@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
+  createDefaultRoleModelPluginToolDefinitions,
   createRoleModelInputEnvelope,
+  renderRoleModelTurnContext,
+  type RoleModelAssistantChatMessage,
+  type RoleModelPluginToolDefinition,
   roleModelProviderErrorRejectionReason,
-  type RoleModelPluginToolDefinition
-} from '../src/role-model/contracts.ts';
+  runRoleModelLoop,
+  visibleReplyModelToolName
+} from '../src/role-model/index.ts';
 import {
   createNvidiaRoleModelProviderAdapter,
   createNvidiaRoleModelProviderConfigFromEnv,
@@ -17,23 +21,15 @@ import {
   renderNvidiaTools,
   type NvidiaFetchClient
 } from '../src/role-model/providers/nvidia.ts';
-import type { RoleModelAssistantChatMessage } from '../src/role-model/chat-wire.ts';
-import { renderRoleModelTurnContext } from '../src/role-model/prompt.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../src/core/message-event.ts';
-import {
-  visibleReplyModelToolName
-} from '../src/role-model/model-tools.ts';
+} from '../src/core/index.ts';
 import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
 import {
   createRuntimePluginContextItem
-} from '../src/plugins/types.ts';
-import {
-  runRoleModelLoop
-} from '../src/role-model/loop.ts';
+} from '../src/plugins/api/index.ts';
 import {
   createTestDecisionContext,
   createTestEvent,

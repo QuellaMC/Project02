@@ -17,59 +17,47 @@ import {
   createLocalRuntimeMutationLockOwnerToken
 } from '../src/runtime/storage/mutation-lock.ts';
 import {
+  createConversationSession,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../src/core/message-event.ts';
-import {
-  createConversationSession
-} from '../src/core/conversation.ts';
+} from '../src/core/index.ts';
 import {
   runLocalUserMessageEvent
-} from '../src/runtime/local.ts';
-import type { RuntimeLogStore } from '../src/runtime/log.ts';
+} from '../src/runtime/turn/local.ts';
+import type { RuntimeLogStore } from '../src/runtime/evidence/records.ts';
 import {
-  roleModelCommitValidationFailureRejectionReason
-} from '../src/role-model/contracts.ts';
-import {
+  defaultRoleModelProviderCapabilities,
+  type RoleModelAdapter,
+  roleModelCommitValidationFailureRejectionReason,
+  roleModelDecisionContractVersion,
+  type RoleModelProviderExchangeSnapshot,
   visibleReplyModelToolName
-} from '../src/role-model/model-tools.ts';
+} from '../src/role-model/index.ts';
 import {
   characterStatePatchModelToolName
-} from '../src/plugins/contract.ts';
-import {
-  roleModelDecisionContractVersion
-} from '../src/role-model/contracts.ts';
+} from '../src/plugins/api/contract.ts';
 import {
   firstPartyModelToolsPluginId
 } from '../src/plugins/index.ts';
 import {
-  decodeRawEventLogRecord,
   LocalRuntimeStorageContractError,
   createLocalRuntimeStorageLayout
-} from '../src/runtime/storage/layout.ts';
+} from '../src/runtime/storage/layout-contract.ts';
+import { decodeRawEventLogRecord } from '../src/runtime/storage/raw-event-codec.ts';
 import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginHealthSnapshot
-} from '../src/plugins/validation.ts';
-import { runtimePluginContractVersion } from '../src/plugins/contract.ts';
+} from '../src/plugins/api/index.ts';
+import { runtimePluginContractVersion } from '../src/plugins/api/contract.ts';
 import type {
   RuntimePluginHealthStatus
-} from '../src/plugins/contract.ts';
-import type {
-  RoleModelAdapter
-} from '../src/role-model/loop.ts';
-import type {
-  RoleModelProviderExchangeSnapshot
-} from '../src/role-model/contracts.ts';
+} from '../src/plugins/api/contract.ts';
 import {
   createNvidiaRoleModelProviderAdapter,
   type NvidiaFetchClient
 } from '../src/role-model/providers/nvidia.ts';
-import {
-  defaultRoleModelProviderCapabilities
-} from '../src/role-model/prompt.ts';
 
 describe('file runtime log store plugin tool event validation', () => {
   it('refuses a store mutation under another owner token\'s writer lease', async () => {

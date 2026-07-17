@@ -1,15 +1,15 @@
 import {
   CharacterInputError,
-  CharacterReplyValidationError
-} from '../../core/conversation.ts';
+  CharacterReplyValidationError,
+  type RuntimeEventIdentity
+} from '../../core/index.ts';
 import type {
   RuntimePluginContext,
   RuntimePluginContextItem,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginHealthSnapshot,
   RuntimePluginToolInvocationSnapshot
-} from '../../plugins/types.ts';
-import type { RuntimeEventIdentity } from '../../core/index.ts';
+} from '../../plugins/api/index.ts';
 import type {
   RuntimePluginHealthHostResult,
   RuntimePluginHost
@@ -18,13 +18,15 @@ import {
   createRejectedRoleModelDecisionResult,
   roleModelInvalidVisibleReplyRejectionReason,
   type RoleModelDecisionRejection
-} from '../../role-model/contracts.ts';
+} from '../../role-model/index.ts';
 import {
   createRoleModelCommitValidationSnapshot,
-  runtimePluginEvidenceOption,
-  runtimePluginTurnEvidenceOption,
   type RoleModelCommitValidationSnapshot
-} from '../log.ts';
+} from '../evidence/records.ts';
+import {
+  runtimePluginEvidenceOption,
+  runtimePluginTurnEvidenceOption
+} from './plugin-evidence.ts';
 import {
   IncompleteConversationRollbackError,
   appendRawEvent,

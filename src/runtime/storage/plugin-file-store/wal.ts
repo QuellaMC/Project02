@@ -22,7 +22,7 @@ import { findValidatedTerminalRawEventForSession } from '../file-runtime-log-sto
 import {
   createLocalRuntimeSessionPaths,
   type LocalRuntimeSessionPaths
-} from '../layout.ts';
+} from '../layout-contract.ts';
 import {
   createLocalRuntimeMutationLockOwnerToken,
   LocalRuntimeMutationLockBusyError,

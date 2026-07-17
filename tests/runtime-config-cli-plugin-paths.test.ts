@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { describe, expect, it } from 'vitest';
 import { createTestTempRoot } from './support/temp-root.ts';
-import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
+import { runRuntimeConfigCliFromArgs } from '../src/cli/config/main.ts';
 import {
   collect,
   writeRuntimeConfig

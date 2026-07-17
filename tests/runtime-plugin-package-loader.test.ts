@@ -8,12 +8,12 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { createRuntimePluginManifest } from '../src/plugins/manifest-validation.ts';
+import { createRuntimePluginManifest } from '../src/plugins/api/manifest-validation.ts';
 import {
   discoverRuntimePluginPackages,
   maxRuntimePluginPackageMetadataBytes
 } from '../src/plugins/package-loader/index.ts';
-import type { RuntimePluginManifest } from '../src/plugins/plugin-types.ts';
+import type { RuntimePluginManifest } from '../src/plugins/api/types.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
 
 describe('runtime plugin package loader', () => {

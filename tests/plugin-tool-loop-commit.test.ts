@@ -3,7 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
-import { createConversationSession } from '../src/core/conversation.ts';
+import {
+  createConversationSession,
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent
+} from '../src/core/index.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin
@@ -14,31 +18,32 @@ import { durablePluginStoreMutationResourceKey } from '../src/runtime/storage/pl
 import {
   createRuntimePluginHost,
   type RuntimePluginHost
-} from '../src/plugins/host.ts';
-import { createRuntimePlugin } from '../src/plugins/constructors.ts';
-import { runtimePluginConfigUpdateToolName } from '../src/plugins/contract.ts';
+} from '../src/plugins/host/index.ts';
+import { createRuntimePlugin } from '../src/plugins/api/constructors.ts';
+import { runtimePluginConfigUpdateToolName } from '../src/plugins/api/contract.ts';
 import {
   firstPartyModelToolsPluginId,
   runtimePluginId
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 import {
   applyRuntimePluginConfigControlOperation,
   inspectRuntimePluginConfig
 } from '../src/runtime/config/index.ts';
-import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/core/message-event.ts';
 import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-log-store.ts';
 import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout
-} from '../src/runtime/storage/layout.ts';
+} from '../src/runtime/storage/layout-contract.ts';
 import { LocalRuntimeMutationLockBusyError } from '../src/runtime/storage/mutation-lock.ts';
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
-import { createRuntimeLogStore } from '../src/runtime/log.ts';
-import type { RoleModelAdapter } from '../src/role-model/loop.ts';
-import type { RoleModelChatMessage } from '../src/role-model/chat-wire.ts';
+import { createRuntimeLogStore } from '../src/runtime/evidence/index.ts';
+import {
+  type RoleModelAdapter,
+  type RoleModelChatMessage
+} from '../src/role-model/index.ts';
 import {
   runLocalUserMessageEvent as runLocalUserMessageEventWithoutHost
-} from '../src/runtime/local.ts';
+} from '../src/runtime/turn/local.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
 import {
   createAfterTurnCommittedAppendFailingLogStore,

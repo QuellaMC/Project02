@@ -1,9 +1,13 @@
-import { createConversationSession } from '../../src/core/conversation.ts';
-import { characterStatePluginId } from '../../src/plugins/contract.ts';
+import {
+  createConversationSession,
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent
+} from '../../src/core/index.ts';
+import { characterStatePluginId } from '../../src/plugins/api/contract.ts';
 import { createRuntimePluginFileStore } from '../../src/runtime/storage/plugin-file-store/index.ts';
 import { testRuntimePluginFileStoreProvider } from './plugin-host-fixtures.ts';
 import { createDefaultProject02PluginHost } from './default-plugin-host.ts';
-import { createRuntimePluginHost } from '../../src/plugins/host.ts';
+import { createRuntimePluginHost } from '../../src/plugins/host/index.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginEvidenceSnapshot,
@@ -11,21 +15,19 @@ import {
   firstPartyModelToolsPluginId,
   runtimePluginId,
   runtimePluginContractVersion
-} from '../../src/plugins/types.ts';
-import {
-  createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent
-} from '../../src/core/message-event.ts';
+} from '../../src/plugins/api/index.ts';
 import { createFileRuntimeLogStore } from '../../src/runtime/storage/file-runtime-log-store.ts';
 import { createLocalRuntimeSessionStore } from '../../src/runtime/storage/session-store.ts';
-import { createRuntimeLogStore } from '../../src/runtime/log.ts';
-import type { RuntimeLogStore } from '../../src/runtime/log.ts';
+import { createRuntimeLogStore } from '../../src/runtime/evidence/index.ts';
+import type { RuntimeLogStore } from '../../src/runtime/evidence/records.ts';
 import {
   runLocalUserMessageEvent as runLocalUserMessageEventWithExplicitHost,
   type RunLocalUserMessageEventOptions
-} from '../../src/runtime/local.ts';
-import type { RoleModelAdapter } from '../../src/role-model/loop.ts';
-import type { RoleModelChatMessage } from '../../src/role-model/chat-wire.ts';
+} from '../../src/runtime/turn/local.ts';
+import {
+  type RoleModelAdapter,
+  type RoleModelChatMessage
+} from '../../src/role-model/index.ts';
 import { createTestTempRoot } from './temp-root.ts';
 
 export function runLocalUserMessageEventWithDefaultTestHost(

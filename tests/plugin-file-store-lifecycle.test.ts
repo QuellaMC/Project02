@@ -7,8 +7,8 @@ import {
   createRuntimePluginFileStoreTransaction
 } from '../src/runtime/storage/plugin-file-store/index.ts';
 import { durablePathModesFileName } from '../src/runtime/storage/plugin-file-store/shared.ts';
-import type { RuntimePluginFileStore } from '../src/plugins/types.ts';
-import { createLocalRuntimePluginPaths } from '../src/runtime/storage/layout.ts';
+import type { RuntimePluginFileStore } from '../src/plugins/api/index.ts';
+import { createLocalRuntimePluginPaths } from '../src/runtime/storage/layout-contract.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
 
 describe('runtime plugin file store transaction lifecycle', () => {

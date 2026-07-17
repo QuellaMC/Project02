@@ -1,28 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
   createDefaultRoleModelPluginToolDefinitions,
+  defaultRoleModelProviderCapabilities,
   isRoleModelRawOutputReplayableDecisionEvidence,
+  type RoleModelAdapter,
+  type RoleModelChatMessage,
   roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
-  roleModelTerminalEmptyOutputRejectionDetails,
   type RoleModelPluginToolDefinition,
+  type RoleModelPluginToolHost,
   type RoleModelProviderExchangeSnapshot,
-  type RoleModelProviderMetadata
-} from '../src/role-model/contracts.ts';
+  type RoleModelProviderMetadata,
+  roleModelTerminalEmptyOutputRejectionDetails,
+  runRoleModelLoop,
+  visibleReplyModelToolName
+} from '../src/role-model/index.ts';
 import {
   type PreparedRuntimePluginConfigEffect,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginToolCallResult
-} from '../src/plugins/validation.ts';
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
-import {
-  runRoleModelLoop,
-  type RoleModelAdapter,
-  type RoleModelPluginToolHost
-} from '../src/role-model/loop.ts';
-import type { RoleModelChatMessage } from '../src/role-model/chat-wire.ts';
-import { defaultRoleModelProviderCapabilities } from '../src/role-model/prompt.ts';
-import { visibleReplyModelToolName } from '../src/role-model/model-tools.ts';
+} from '../src/plugins/api/index.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
 import {
   createAcceptedToolCallResult,
   createAcceptedToolCallResultWithBlockingEvidence,

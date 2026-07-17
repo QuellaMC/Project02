@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import {
   createLocalRuntimeStorageLayout,
   LocalRuntimeStorageContractError
-} from '../storage/layout.ts';
+} from '../storage/layout-contract.ts';
 import {
   runtimeConfigEnvVarName,
   runtimeConfigVersion,

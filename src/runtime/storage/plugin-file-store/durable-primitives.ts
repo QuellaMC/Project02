@@ -17,7 +17,7 @@ import {
 import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout
-} from '../layout.ts';
+} from '../layout-contract.ts';
 import {
   acquireLocalRuntimeMutationLocks,
   acquireLocalRuntimeMutationLocksSync,

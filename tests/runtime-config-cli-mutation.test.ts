@@ -22,7 +22,7 @@ import {
   runtimeConfigEnvVarName,
   runtimeConfigVersion
 } from '../src/runtime/config/index.ts';
-import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
+import { runRuntimeConfigCliFromArgs } from '../src/cli/config/main.ts';
 import {
   collect,
   writeRuntimeConfig

@@ -10,12 +10,6 @@ export function createRuntimeConfigFingerprint(
   return createCanonicalJsonFingerprint(secretSafeFingerprintValue(value));
 }
 
-export function createProject02RuntimeConfigFingerprint(
-  config: Project02RuntimeConfig
-): string {
-  return createRuntimeConfigFingerprint(config);
-}
-
 function secretSafeFingerprintValue(value: unknown): unknown {
   if (
     value === null ||

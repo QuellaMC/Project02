@@ -3,16 +3,16 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
-import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
+import { runRuntimeConfigCliFromArgs } from '../src/cli/config/main.ts';
+import { runInspectCliFromArgs } from '../src/cli/inspect/main.ts';
 import {
   characterStatePluginId,
   firstPartyModelToolsPluginId,
   runtimePluginContractVersion,
   runtimePluginId
-} from '../src/plugins/contract.ts';
-import { createRuntimePluginManifest } from '../src/plugins/manifest-validation.ts';
-import type { RuntimePluginManifest } from '../src/plugins/plugin-types.ts';
+} from '../src/plugins/api/contract.ts';
+import { createRuntimePluginManifest } from '../src/plugins/api/manifest-validation.ts';
+import type { RuntimePluginManifest } from '../src/plugins/api/types.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
   prepareConfiguredProject02PluginActivation

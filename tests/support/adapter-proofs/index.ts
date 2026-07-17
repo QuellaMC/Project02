@@ -25,19 +25,17 @@ import {
   type RuntimePluginToolCallResult,
   type RuntimePluginToolValidationOwner,
   type RuntimePluginContext
-} from '../../../src/plugins/types.ts';
+} from '../../../src/plugins/api/index.ts';
 import {
   createFirstPartyModelToolsPlugin
-} from '../../../src/plugins/builtin/model-tools.ts';
+} from '../../../src/plugins/builtin/model-tools/index.ts';
 import {
+  type ModelToolInputContract,
+  type ModelToolInputField,
+  type ModelToolInputFieldValueType,
   modelToolInputFieldValueTypes
-} from '../../../src/role-model/model-tools.ts';
-import { isModelFacingPluginTool } from '../../../src/plugins/tool-policy.ts';
-import type {
-  ModelToolInputFieldValueType,
-  ModelToolInputContract,
-  ModelToolInputField
-} from '../../../src/role-model/model-tools.ts';
+} from '../../../src/role-model/index.ts';
+import { isModelFacingPluginTool } from '../../../src/plugins/policy/tool-policy.ts';
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 

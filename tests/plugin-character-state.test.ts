@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   characterStatePatchModelToolName
-} from '../src/plugins/contract.ts';
+} from '../src/plugins/api/contract.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin,
@@ -22,15 +22,15 @@ import {
 } from '../src/plugins/packages/character-state/schema.ts';
 import {
   createRuntimeEventIdentity
-} from '../src/core/message-event.ts';
+} from '../src/core/index.ts';
 import {
   createRuntimePluginContext
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 import type {
   RuntimePluginFileStore,
   RuntimePluginJsonObject,
   RuntimePluginJsonValue
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 import {
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction
@@ -39,7 +39,7 @@ import {
   durablePathModesFileName,
   durableRevisionFileName
 } from '../src/runtime/storage/plugin-file-store/shared.ts';
-import { createLocalRuntimePluginPaths } from '../src/runtime/storage/layout.ts';
+import { createLocalRuntimePluginPaths } from '../src/runtime/storage/layout-contract.ts';
 import { createTestTempRoot } from './support/temp-root.ts';
 
 describe('Character State plugin', () => {

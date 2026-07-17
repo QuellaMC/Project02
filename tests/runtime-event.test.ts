@@ -5,7 +5,7 @@ import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
   RuntimeEventInputError
-} from '../src/core/message-event.ts';
+} from '../src/core/index.ts';
 
 describe('runtime event contract', () => {
   it('creates a deterministic USER_MESSAGE event with separate event and trace identity', () => {

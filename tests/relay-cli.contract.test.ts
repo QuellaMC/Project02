@@ -3,19 +3,19 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import type { CharacterAgent } from '../src/core/conversation.ts';
-import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
-import { runConfiguredRelayCli, runRelayCli } from '../src/cli/relay.ts';
+import type { CharacterAgent } from '../src/core/index.ts';
+import { runRuntimeConfigCliFromArgs } from '../src/cli/config/main.ts';
+import { runConfiguredRelayCli, runRelayCli } from '../src/cli/relay/main.ts';
 import {
   createRuntimePluginHost,
   type RuntimePluginHost
-} from '../src/plugins/host.ts';
+} from '../src/plugins/host/index.ts';
 import {
   createRuntimePlugin,
   runtimePluginContractVersion,
   type RuntimePlugin,
   type RuntimePluginContext
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 import { runtimeConfigEnvVarName } from '../src/runtime/config/index.ts';
 import {
   requiredDottedConfigPlugin,

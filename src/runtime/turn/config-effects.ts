@@ -1,20 +1,15 @@
-import {
-  closeConflictedPreparedRuntimePluginConfigEffect
-} from '../../plugins/builtin/runtime-plugin/index.ts';
 import type { RuntimePluginHost } from '../../plugins/index.ts';
 import {
+  createRuntimePluginEvidenceSnapshot,
   preparedRuntimePluginConfigEffectHasApprovalEvidence,
   runtimePluginId,
   type PreparedRuntimePluginConfigEffect,
   type RuntimePluginEvidenceSnapshot
-} from '../../plugins/types.ts';
-import type { AcceptedRoleModelLoopResult } from '../../role-model/loop.ts';
+} from '../../plugins/api/index.ts';
+import type { AcceptedRoleModelLoopResult } from '../../role-model/index.ts';
 import { RuntimeConfigConflictError } from '../config/mutate.ts';
-import {
-  runtimePluginEvidenceOption,
-  type RawEventLogRecord,
-  type RuntimeLogStore
-} from '../log.ts';
+import type { RawEventLogRecord, RuntimeLogStore } from '../evidence/records.ts';
+import { runtimePluginEvidenceOption } from './plugin-evidence.ts';
 import type { RuntimeTurnState } from './contracts.ts';
 
 export function recoverPendingRuntimeConfigEffects(options: {
@@ -263,5 +258,28 @@ export function runtimePostCommitFailureMessage(error: unknown): string {
   }
 
   return 'Runtime post-commit work failed.';
+}
+
+export function closeConflictedPreparedRuntimePluginConfigEffect(options: {
+  readonly effect: PreparedRuntimePluginConfigEffect;
+  readonly reason: string;
+}): RuntimePluginEvidenceSnapshot {
+  return createRuntimePluginEvidenceSnapshot({
+    eventId: options.effect.eventId,
+    traceId: options.effect.traceId,
+    createdAt: options.effect.createdAt,
+    kind: 'runtime_plugin_evidence_snapshot',
+    pluginId: runtimePluginId,
+    evidenceKind: 'after_turn_committed',
+    status: 'rejected',
+    summary: `Closed conflicted plugin "${options.effect.targetPluginId}" config effect "${options.effect.effectId}" without applying it: ${options.reason}`,
+    sourceReferences: [
+      {
+        kind: 'runtime',
+        id: options.effect.effectId
+      }
+    ],
+    redactionLabels: []
+  });
 }
 

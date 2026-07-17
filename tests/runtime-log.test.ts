@@ -3,21 +3,19 @@ import { describe, expect, it } from 'vitest';
 import {
   runtimePluginContractVersion,
   createRuntimePluginTurnEvidenceSnapshot
-} from '../src/plugins/types.ts';
-import {
-  createRuntimeLogStore
-} from '../src/runtime/log.ts';
+} from '../src/plugins/api/index.ts';
+import { createRuntimeLogStore } from '../src/runtime/evidence/index.ts';
 import type {
   ConversationLogRecordInput,
   RawEventLogRecordInput,
   RuntimeTraceEntryInput
-} from '../src/runtime/log.ts';
+} from '../src/runtime/evidence/records.ts';
 import type {
   RuntimePluginTurnEvidenceSnapshot
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 import type {
   RuntimeEventIdentity
-} from '../src/core/message-event.ts';
+} from '../src/core/index.ts';
 
 const identity = {
   eventId: 'evt_log_001',

@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CharacterProfile } from '../src/core/conversation.ts';
+import type { CharacterProfile } from '../src/core/index.ts';
 import {
-  createRuntimeLogStore,
   type RuntimeLogStore
-} from '../src/runtime/log.ts';
+} from '../src/runtime/evidence/records.ts';
+import { createRuntimeLogStore } from '../src/runtime/evidence/index.ts';
 import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-log-store.ts';
-import { LocalRuntimeStorageContractError } from '../src/runtime/storage/layout.ts';
+import { LocalRuntimeStorageContractError } from '../src/runtime/storage/layout-contract.ts';
 import {
   runtimePluginConfigUpdateToolName,
   runtimePluginId
-} from '../src/plugins/contract.ts';
+} from '../src/plugins/api/contract.ts';
 import { createLocalRuntimeMutationLockOwnerToken } from '../src/runtime/storage/mutation-lock.ts';
 import {
   acquireLocalRuntimeSessionWriterLease,

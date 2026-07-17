@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/core/message-event.ts';
+import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../src/core/index.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginRegistrySnapshot,
   createRuntimePluginTurnEvidenceSnapshot,
   runtimePluginContractVersion
-} from '../src/plugins/types.ts';
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
+} from '../src/plugins/api/index.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
 import {
   createDecisionContext,
-  createRoleModelInputEnvelope
-} from '../src/role-model/contracts.ts';
-import { renderRoleModelTurnContext } from '../src/role-model/prompt.ts';
+  createRoleModelInputEnvelope,
+  renderRoleModelTurnContext
+} from '../src/role-model/index.ts';
 
 const credentialBearingDescription =
   'Search memory with api_key=super-secret Bearer secret-token and https://user:pass@example.test/?token=tool-secret.';

@@ -8,22 +8,22 @@ import {
   createRuntimePluginToolInvocationSnapshot,
   createRuntimePluginTurnEvidenceSnapshot,
   runtimePluginContractVersion
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 import {
   createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot
-} from '../src/role-model/contracts.ts';
+} from '../src/role-model/index.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
   runtimeEventIdentityKey
-} from '../src/core/message-event.ts';
+} from '../src/core/index.ts';
 import {
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeStorageSchemaMarker
-} from '../src/runtime/storage/layout.ts';
+} from '../src/runtime/storage/layout-contract.ts';
 const nonCanonicalTimestamp = '2026-07-11T08:00:00+08:00';
 const canonicalTimestamp = '2026-07-11T00:00:00.000Z';
 

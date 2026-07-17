@@ -13,7 +13,7 @@ import { durablePluginStoreMutationResourceKey } from '../src/runtime/storage/pl
 import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout
-} from '../src/runtime/storage/layout.ts';
+} from '../src/runtime/storage/layout-contract.ts';
 import {
   acquireLocalRuntimeMutationLockSync,
   LocalRuntimeMutationLockBusyError

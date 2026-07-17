@@ -1,11 +1,10 @@
 import {
-  normalizeVisibleMessageText,
-  VisibleMessageTextValidationError
-} from '../../core/message-validation.ts';
-import { visibleMessageRoleValues, type VisibleMessageRole } from '../../core/conversation.ts';
-import {
   createRuntimeEventIdentitySnapshot,
-  type RuntimeEventIdentity
+  normalizeVisibleMessageText,
+  type RuntimeEventIdentity,
+  type VisibleMessageRole,
+  visibleMessageRoleValues,
+  VisibleMessageTextValidationError
 } from '../../core/index.ts';
 import {
   LocalRuntimeStorageContractError,

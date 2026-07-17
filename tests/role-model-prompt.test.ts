@@ -1,25 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
+  createDefaultRoleModelPluginToolDefinitions,
   createRoleModelInputEnvelope,
-  type RoleModelPluginToolDefinition
-} from '../src/role-model/contracts.ts';
-import type {
-  RoleModelSystemChatMessage,
-  RoleModelUserChatMessage
-} from '../src/role-model/chat-wire.ts';
-import {
   defaultRoleModelProviderCapabilities,
-  renderRoleModelTurnContext
-} from '../src/role-model/prompt.ts';
-import { createRuntimePluginContextItem } from '../src/plugins/validation.ts';
-import { runtimePluginListToolName } from '../src/plugins/contract.ts';
+  renderRoleModelTurnContext,
+  type RoleModelPluginToolDefinition,
+  type RoleModelSystemChatMessage,
+  type RoleModelUserChatMessage
+} from '../src/role-model/index.ts';
+import { createRuntimePluginContextItem } from '../src/plugins/api/index.ts';
+import { runtimePluginListToolName } from '../src/plugins/api/contract.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../src/core/message-event.ts';
+} from '../src/core/index.ts';
 
 describe('role-model prompt rendering', () => {
   it('keeps current user text exact and renders runtime context as model-only context', () => {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect } from 'vitest';
-import { createRuntimeEventIdentity } from '../../src/core/message-event.ts';
+import { createRuntimeEventIdentity } from '../../src/core/index.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginAfterTurnCommittedContext,
@@ -12,12 +12,12 @@ import {
   createRuntimePluginProvidedTool,
   runtimePluginContractVersion,
   runtimePluginId
-} from '../../src/plugins/types.ts';
+} from '../../src/plugins/api/index.ts';
 import {
   createRuntimePluginHost,
   type CreateRuntimePluginHostOptions,
   type RuntimePluginHost
-} from '../../src/plugins/host.ts';
+} from '../../src/plugins/host/index.ts';
 import type {
   RuntimePlugin,
   RuntimePluginContext,
@@ -25,7 +25,7 @@ import type {
   RuntimePluginJsonObject,
   RuntimePluginJsonValue,
   RuntimePluginToolCallResult
-} from '../../src/plugins/types.ts';
+} from '../../src/plugins/api/index.ts';
 import {
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction,

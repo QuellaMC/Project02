@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createFirstPartyModelToolsPlugin } from '../src/plugins/builtin/model-tools.ts';
-import { firstPartyModelToolsPluginId } from '../src/plugins/contract.ts';
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
+import { createFirstPartyModelToolsPlugin } from '../src/plugins/builtin/model-tools/index.ts';
+import { firstPartyModelToolsPluginId } from '../src/plugins/api/contract.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
 import {
   mapHermesMemoryProviderFixture,
   mapFirstPartyModelToolsPlugin,
@@ -9,7 +9,7 @@ import {
   mapOpenClawMemoryPluginFixture,
   mapTencentDbMemoryGatewayFixture
 } from './support/adapter-proofs/index.ts';
-import { visibleReplyModelToolName } from '../src/role-model/model-tools.ts';
+import { visibleReplyModelToolName } from '../src/role-model/index.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin

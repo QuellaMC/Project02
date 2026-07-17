@@ -1,21 +1,22 @@
 import {
-  parseRoleModelProviderExchangeSnapshot,
+
   roleModelProviderErrorRejectionReason,
   type RoleModelInputEnvelope,
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata
-} from '../contracts.ts';
+} from '../api/contracts.ts';
+import { parseRoleModelProviderExchangeSnapshot } from '../api/provider-exchange.ts';
 import {
   validateModelToolInputAgainstContract,
   visibleReplyModelToolName,
   type ModelToolCall,
   type ModelToolInputContract
-} from '../model-tools.ts';
+} from '../api/model-tools.ts';
 import type {
   RoleModelAssistantChatMessage, RoleModelChatCompletionTool,
   RoleModelChatMessage, RoleModelChatToolCall,
   RoleModelProviderCapabilities, RoleModelProviderToolNameMapping
-} from '../chat-wire.ts';
+} from '../api/chat-wire.ts';
 import {
   createRoleModelProviderToolNameMappings,
   defaultRoleModelProviderCapabilities,
@@ -23,22 +24,22 @@ import {
   renderRoleModelTurnContext,
   runtimeToolNameForProviderToolName,
   type RoleModelTurnContext
-} from '../prompt.ts';
+} from '../prompt/render.ts';
 import type {
   RoleModelAdapter,
   RoleModelAdapterInvocation,
   RoleModelAdapterRawOutput,
   RoleModelNativeToolCallArgumentError
-} from '../loop.ts';
+} from '../api/adapter.ts';
 import {
   redactRuntimePluginText,
   type RuntimePluginJsonValue
-} from '../../plugins/types.ts';
+} from '../../plugins/api/index.ts';
 import {
   createJsonBoundaryObjectSnapshot,
   createJsonBoundarySnapshot
 } from '../../shared/json-boundary.ts';
-import { scrubReasoningBlocks } from '../reasoning.ts';
+import { scrubReasoningBlocks } from '../api/reasoning.ts';
 
 export const nvidiaRoleModelProviderName = 'nvidia';
 export const defaultNvidiaChatCompletionsEndpoint =

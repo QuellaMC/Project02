@@ -8,7 +8,7 @@ import {
   writeRuntimeConfig
 } from './support/runtime-config.ts';
 
-import { runRuntimeConfigCliFromArgs } from '../src/cli/config.ts';
+import { runRuntimeConfigCliFromArgs } from '../src/cli/config/main.ts';
 import {
   loadProject02RuntimeConfig,
   resolveProject02RuntimeConfig

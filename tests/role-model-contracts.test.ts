@@ -1,15 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  visibleReplyModelToolName
-} from '../src/role-model/model-tools.ts';
-import {
-  characterStatePatchModelToolName
-} from '../src/plugins/contract.ts';
-import {
   createAcceptedRoleModelDecisionResult,
-  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
+  createDefaultRoleModelPluginToolDefinitions,
   createParsedRoleModelDecisionSnapshot,
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
@@ -23,16 +17,20 @@ import {
   roleModelDisallowedToolRejectionReason,
   roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
+  type RoleModelPluginToolDefinition,
   roleModelTerminalEmptyOutputRejectionDetails,
-  roleModelUnsupportedEffectRejectionReason
-} from '../src/role-model/contracts.ts';
-import type { RoleModelPluginToolDefinition } from '../src/role-model/contracts.ts';
+  roleModelUnsupportedEffectRejectionReason,
+  visibleReplyModelToolName
+} from '../src/role-model/index.ts';
+import {
+  characterStatePatchModelToolName
+} from '../src/plugins/api/contract.ts';
 import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
-import { runtimePluginListToolName } from '../src/plugins/contract.ts';
+import { runtimePluginListToolName } from '../src/plugins/api/contract.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../src/core/message-event.ts';
+} from '../src/core/index.ts';
 
 describe('role-model contracts', () => {
   it('accepts an approval-gated config-write definition without an identity carve-out', () => {

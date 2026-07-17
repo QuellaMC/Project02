@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyRuntimePluginConfigControlOperation,
-  createProject02RuntimeConfigFingerprint,
+  createRuntimeConfigFingerprint,
   defaultRuntimeConfigPath,
   inspectRuntimePluginConfig,
   prepareRuntimePluginConfigControlOperation,
@@ -112,7 +112,7 @@ describe('runtime plugin config control', () => {
       }
     });
     expect(inspected.fingerprint).toBe(
-      createProject02RuntimeConfigFingerprint(authoredConfig)
+      createRuntimeConfigFingerprint(authoredConfig)
     );
     expect(inspectedWithChangedSecret.fingerprint).toBe(inspected.fingerprint);
     expect(JSON.stringify([inspected, inspectedWithChangedSecret])).not.toContain(
@@ -428,7 +428,7 @@ describe('runtime plugin config control', () => {
         manifest: fixture.manifest,
         actor: 'agent',
         expectedFingerprint:
-          createProject02RuntimeConfigFingerprint(invalidConfig),
+          createRuntimeConfigFingerprint(invalidConfig),
         operation: {
           kind: 'set',
           fieldName: 'label',
@@ -505,7 +505,7 @@ describe('runtime plugin config control', () => {
     const prepared = prepareRuntimePluginConfigControlOperation(options);
 
     expect(prepared.resultFingerprint).toBe(
-      createProject02RuntimeConfigFingerprint(expectedConfig)
+      createRuntimeConfigFingerprint(expectedConfig)
     );
     expect(readFileSync(fixture.configPath, 'utf8')).toBe(originalConfigText);
 
@@ -534,7 +534,7 @@ describe('runtime plugin config control', () => {
 
     expect(existsSync(configPath)).toBe(false);
     expect(inspected.fingerprint).toBe(
-      createProject02RuntimeConfigFingerprint(bootstrapBase)
+      createRuntimeConfigFingerprint(bootstrapBase)
     );
 
     const result = applyRuntimePluginConfigControlOperation({

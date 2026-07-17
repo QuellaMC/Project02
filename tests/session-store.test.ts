@@ -4,38 +4,36 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createDeterministicCharacterAgent } from '../src/role-model/providers/deterministic.ts';
+
 import {
   ConversationRehydrationError,
   createConversationSession,
+  createUserMessageRuntimeEvent,
   runCharacterTurn
-} from '../src/core/conversation.ts';
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
+} from '../src/core/index.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
 import {
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
   encodeStorageSchemaMarker,
   LocalRuntimeStorageContractError
-} from '../src/runtime/storage/layout.ts';
+} from '../src/runtime/storage/layout-contract.ts';
 import {
   createLocalRuntimeSessionStore,
   LocalRuntimeSessionStoreError
 } from '../src/runtime/storage/session-store.ts';
-import {
-  createRuntimeLogStore
-} from '../src/runtime/log.ts';
-import {
-  createUserMessageRuntimeEvent
-} from '../src/core/message-event.ts';
+import { createRuntimeLogStore } from '../src/runtime/evidence/index.ts';
 import {
   runLocalUserMessageEvent
-} from '../src/runtime/local.ts';
+} from '../src/runtime/turn/local.ts';
 import type {
   ConversationLogRecord
-} from '../src/runtime/log.ts';
+} from '../src/runtime/evidence/records.ts';
 import type {
   LocalRuntimeStorageContractErrorCode
-} from '../src/runtime/storage/layout.ts';
+} from '../src/runtime/storage/layout-contract.ts';
 import type {
   LocalRuntimeSessionConversationLogReader
 } from '../src/runtime/storage/session-store.ts';
@@ -287,7 +285,7 @@ describe('local runtime session store', () => {
     });
 
     const rehydrated = await store.rehydrateConversationSession('mira-local');
-    const result = await runCharacterTurn(rehydrated, 'second');
+    const result = await runCharacterTurn(rehydrated, 'second', createDeterministicCharacterAgent());
 
     expect(result.reply.text).toBe(
       'I remember you said "first" Stay with me for a minute.'
@@ -351,12 +349,12 @@ describe('local runtime session store', () => {
     const alpha = await store.rehydrateConversationSession('alpha');
     const beta = await store.rehydrateConversationSession('beta');
 
-    await expect(runCharacterTurn(alpha, 'second')).resolves.toMatchObject({
+    await expect(runCharacterTurn(alpha, 'second', createDeterministicCharacterAgent())).resolves.toMatchObject({
       reply: {
         text: 'I remember you said "alpha first" Stay with me for a minute.'
       }
     });
-    await expect(runCharacterTurn(beta, 'second')).resolves.toMatchObject({
+    await expect(runCharacterTurn(beta, 'second', createDeterministicCharacterAgent())).resolves.toMatchObject({
       reply: {
         text: 'I remember you said "beta first" Stay with me for a minute.'
       }

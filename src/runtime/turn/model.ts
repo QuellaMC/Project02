@@ -1,20 +1,20 @@
 import {
   CharacterReplyValidationError,
   normalizeCharacterAgentReply
-} from '../../core/conversation.ts';
-import { buildUserTurnDecisionContext } from '../../role-model/decision-context.ts';
+} from '../../core/index.ts';
+import { buildUserTurnDecisionContext } from '../../role-model/index.ts';
 import {
   createRuntimePluginContext,
   createRuntimePluginToolInvocationSnapshot,
+  runtimePluginBeforeRoleModelCallRejectionReason,
   type RuntimePluginContext,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginToolInvocationSnapshot
-} from '../../plugins/types.ts';
-import {
-  runtimePluginBeforeRoleModelCallRejectionReason,
-  type RuntimePluginBeforeRoleModelCallCompletedResult,
-  type RuntimePluginHealthHostResult,
-  type RuntimePluginHost
+} from '../../plugins/api/index.ts';
+import type {
+  RuntimePluginBeforeRoleModelCallCompletedResult,
+  RuntimePluginHealthHostResult,
+  RuntimePluginHost
 } from '../../plugins/index.ts';
 import {
   createDecisionContext,
@@ -22,7 +22,7 @@ import {
   roleModelCommitValidationFailureRejectionReason,
   type DecisionContext,
   type RoleModelDecisionRejection
-} from '../../role-model/contracts.ts';
+} from '../../role-model/index.ts';
 import {
   createRoleModelAdapterFromCharacterAgent,
   runRoleModelLoop,
@@ -34,7 +34,7 @@ import {
   type RoleModelPluginToolCallStartedEvent,
   type RoleModelPluginToolCallsRequestedEvent,
   type RoleModelPluginToolRoutingEvidence
-} from '../../role-model/loop.ts';
+} from '../../role-model/index.ts';
 import {
   appendToolCallFinished,
   appendToolCallStarted,

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('plugin type barrel startup safety', () => {
   it('does not pull runtime storage into chat CLI startup through plugins/types', () => {
-    const result = spawnSync(process.execPath, ['src/cli/chat.ts', '--help'], {
+    const result = spawnSync(process.execPath, ['src/cli/chat/main.ts', '--help'], {
       cwd: process.cwd(),
       encoding: 'utf8'
     });
@@ -23,7 +23,7 @@ describe('plugin type barrel startup safety', () => {
       process.execPath,
       [
         '-e',
-        "import('./src/role-model/contracts.ts').then(() => import('./src/runtime/local.ts'))"
+        "import('./src/role-model/index.ts').then(() => import('./src/runtime/turn/local.ts'))"
       ],
       {
         cwd: process.cwd(),
@@ -41,19 +41,19 @@ describe('plugin type barrel startup safety', () => {
 
   it.each([
     [
-      './src/plugins/validation.ts',
-      './src/plugins/tool-policy.ts',
-      './src/plugins/builtin/model-tools.ts'
+      './src/plugins/api/index.ts',
+      './src/plugins/policy/tool-policy.ts',
+      './src/plugins/builtin/model-tools/index.ts'
     ],
     [
-      './src/plugins/builtin/model-tools.ts',
-      './src/plugins/validation.ts',
-      './src/plugins/tool-policy.ts'
+      './src/plugins/builtin/model-tools/index.ts',
+      './src/plugins/api/index.ts',
+      './src/plugins/policy/tool-policy.ts'
     ],
     [
-      './src/plugins/tool-policy.ts',
-      './src/plugins/builtin/model-tools.ts',
-      './src/plugins/validation.ts'
+      './src/plugins/policy/tool-policy.ts',
+      './src/plugins/builtin/model-tools/index.ts',
+      './src/plugins/api/index.ts'
     ]
   ])('imports plugin construction and policy modules in order %j', (...modules) => {
     const importChain = modules

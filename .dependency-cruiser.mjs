@@ -106,6 +106,39 @@ export default {
       to: { path: '^src/cli/' }
     },
     {
+      name: 'runtime-plugins-value-via-api',
+      comment:
+        'runtime may VALUE-import plugins only through the plugin contract ' +
+        'barrel (plugins/api/index.ts): data shapes, contract constants, ' +
+        'validating constructors, pure predicates. Host, policy, and ' +
+        'package behavior are out of bounds for runtime. Green (zero ' +
+        'baseline entries).',
+      severity: 'error',
+      from: { path: '^src/runtime/' },
+      to: {
+        path: '^src/plugins/',
+        pathNot: ['^src/plugins/api/index\\.ts$'],
+        dependencyTypesNot: ['type-only']
+      }
+    },
+    {
+      name: 'runtime-plugins-via-barrels',
+      comment:
+        'every runtime import of plugins — type or value — lands on ' +
+        'plugins/api/index.ts or plugins/index.ts (the host interface ' +
+        'types live behind the main barrel until the 3e host split). ' +
+        'Green (zero baseline entries).',
+      severity: 'error',
+      from: { path: '^src/runtime/' },
+      to: {
+        path: '^src/plugins/',
+        pathNot: [
+          '^src/plugins/api/index\\.ts$',
+          '^src/plugins/index\\.ts$'
+        ]
+      }
+    },
+    {
       name: 'no-deep-cross-module-imports',
       comment:
         'Rule 5 — an import that crosses a top-level module boundary must ' +

@@ -5,17 +5,17 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createConversationSession } from '../src/core/conversation.ts';
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
 import {
+  createConversationSession,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../src/core/message-event.ts';
-import { runLocalUserMessageEvent } from '../src/runtime/local.ts';
+} from '../src/core/index.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
+import { runLocalUserMessageEvent } from '../src/runtime/turn/local.ts';
 import { createFileRuntimeLogStore } from '../src/runtime/storage/file-runtime-log-store.ts';
 import {
   LocalRuntimeStorageContractError
-} from '../src/runtime/storage/layout.ts';
+} from '../src/runtime/storage/layout-contract.ts';
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
 
 const tempRoots: string[] = [];
@@ -218,7 +218,7 @@ function spawnChatProcess(
 ): ChildProcessWithoutNullStreams {
   return spawn(
     process.execPath,
-    ['src/cli/chat.ts', '--store', storeRoot, '--session', sessionId],
+    ['src/cli/chat/main.ts', '--store', storeRoot, '--session', sessionId],
     { cwd: process.cwd(), stdio: 'pipe' }
   );
 }

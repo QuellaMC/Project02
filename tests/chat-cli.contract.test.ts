@@ -12,9 +12,9 @@ import {
 
 import {
   createConversationSession
-} from '../src/core/conversation.ts';
+} from '../src/core/index.ts';
 import { createDefaultProject02PluginHost } from './support/default-plugin-host.ts';
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
 import {
   createRuntimePluginFileStore
 } from '../src/runtime/storage/plugin-file-store/index.ts';
@@ -29,11 +29,11 @@ import {
   runtimePluginContractVersion,
   type RuntimePlugin,
   type RuntimePluginContext
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 import {
-  createRuntimeLogStore,
   type RuntimeLogStore
-} from '../src/runtime/log.ts';
+} from '../src/runtime/evidence/records.ts';
+import { createRuntimeLogStore } from '../src/runtime/evidence/index.ts';
 import {
   inspectRuntimePluginConfig,
   runtimeConfigEnvVarName
@@ -43,18 +43,18 @@ import {
 } from '../src/runtime/storage/file-runtime-log-store.ts';
 import {
   createLocalRuntimeStorageLayout
-} from '../src/runtime/storage/layout.ts';
+} from '../src/runtime/storage/layout-contract.ts';
 import {
   createLocalRuntimeSessionStore
 } from '../src/runtime/storage/session-store.ts';
 import type {
   RoleModelAdapter
-} from '../src/role-model/loop.ts';
+} from '../src/role-model/index.ts';
 import {
   nvidiaApiKeyEnvName
 } from '../src/role-model/providers/nvidia.ts';
-import { runChatCli, runChatCliFromArgs } from '../src/cli/chat.ts';
-import { runInspectCliFromArgs } from '../src/cli/inspect.ts';
+import { runChatCli, runChatCliFromArgs } from '../src/cli/chat/main.ts';
+import { runInspectCliFromArgs } from '../src/cli/inspect/main.ts';
 
 const roleModelProviderEnvName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 const realSetTimeout = globalThis.setTimeout;

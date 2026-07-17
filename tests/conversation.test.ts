@@ -4,14 +4,14 @@ import {
   CharacterInputError,
   CharacterReplyValidationError,
   createConversationSession,
-  createDeterministicCharacterAgent,
   localCharacterProfile,
   runCharacterTurn,
   ConversationRehydrationError,
   type CharacterAgent,
   type CharacterAgentReply,
   type VisibleMessage
-} from '../src/core/conversation.ts';
+} from '../src/core/index.ts';
+import { createDeterministicCharacterAgent } from '../src/role-model/providers/deterministic.ts';
 
 type DeferredReply = {
   readonly promise: Promise<CharacterAgentReply>;
@@ -366,7 +366,7 @@ describe('conversation core', () => {
       ]
     });
 
-    await expect(runCharacterTurn(session, 'second')).resolves.toMatchObject({
+    await expect(runCharacterTurn(session, 'second', createDeterministicCharacterAgent())).resolves.toMatchObject({
       userMessage: {
         id: 'local-session:message-3',
         text: 'second'

@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   createRuntimePluginToolInvocationSnapshot,
   redactRuntimePluginText
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 import type {
   RuntimePluginJsonObject,
   RuntimePluginJsonValue
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 
 describe('runtime plugin text redaction', () => {
   it('redacts JSON-shaped quoted secret keys', () => {

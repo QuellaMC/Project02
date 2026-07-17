@@ -9,7 +9,7 @@ import {
 import { basename, dirname, resolve } from 'node:path';
 
 import { ownJsonRecordValue } from '../../shared/json-boundary.ts';
-import { createLocalRuntimeStorageLayout } from '../storage/layout.ts';
+import { createLocalRuntimeStorageLayout } from '../storage/layout-contract.ts';
 import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync
@@ -40,7 +40,7 @@ import {
   redactRuntimeConfigValue
 } from './redact.ts';
 import {
-  createProject02RuntimeConfigFingerprint
+  createRuntimeConfigFingerprint
 } from './fingerprint.ts';
 import {
   type Project02ConfigFieldDefinition,
@@ -466,7 +466,7 @@ export function prepareRuntimeConfigMutationCandidate(options: {
 
   const currentConfig = createRuntimeConfigMutationBase(options);
   const currentFingerprint =
-    createProject02RuntimeConfigFingerprint(currentConfig);
+    createRuntimeConfigFingerprint(currentConfig);
 
   if (
     options.expectedFingerprint !== undefined &&
@@ -485,7 +485,7 @@ export function prepareRuntimeConfigMutationCandidate(options: {
 
   return Object.freeze({
     config,
-    fingerprint: createProject02RuntimeConfigFingerprint(config)
+    fingerprint: createRuntimeConfigFingerprint(config)
   } satisfies PreparedRuntimeConfigMutationCandidate);
 }
 

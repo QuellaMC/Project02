@@ -41,7 +41,7 @@ describe('root public surface', () => {
       'utf8'
     );
     const chatEntrypoint = readFileSync(
-      new URL('../src/cli/chat.ts', import.meta.url),
+      new URL('../src/cli/chat/main.ts', import.meta.url),
       'utf8'
     );
 

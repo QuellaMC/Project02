@@ -1,17 +1,17 @@
 import {
   hostFirstPartyRuntimePluginIds
-} from '../../src/plugins/catalog.ts';
+} from '../../src/plugins/host/catalog.ts';
 import { testRuntimePluginFileStoreProvider } from './plugin-host-fixtures.ts';
 import {
   characterStatePluginId,
   firstPartyModelToolsPluginId,
   runtimePluginId
-} from '../../src/plugins/contract.ts';
+} from '../../src/plugins/api/contract.ts';
 import {
   createRuntimePluginHost,
   type CreateRuntimePluginHostOptions,
   type RuntimePluginHost
-} from '../../src/plugins/host.ts';
+} from '../../src/plugins/host/index.ts';
 import {
   bundledRuntimePluginPackageRoot,
   discoverRuntimePluginPackages

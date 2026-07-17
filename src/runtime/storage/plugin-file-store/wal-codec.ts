@@ -3,7 +3,7 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import type { RuntimeEventIdentity } from '../../../core/index.ts';
-import { createLocalRuntimeSessionPaths } from '../layout.ts';
+import { createLocalRuntimeSessionPaths } from '../layout-contract.ts';
 import type { RuntimePluginJsonValue } from '../../../plugins/index.ts';
 import {
   assertRegularFile,

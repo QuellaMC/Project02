@@ -17,7 +17,7 @@
  * docs/plan/repo-structure-migration-2026-07-16.md, Slice 0.
  */
 import { readFileSync, readdirSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 
 const SRC_DIRECTORY = 'src';
 const SHARED_DIRECTORY = 'src/shared';
@@ -58,16 +58,23 @@ function moduleOf(filePath) {
 
 /**
  * @param {string} source TypeScript source text.
+ * @param {string} filePath importing file, relative to the repository root.
  * @return {string[]} shared file names (e.g. 'json-boundary.ts') the
- *     source imports.
+ *     source imports. Specifiers are resolved against the importing file
+ *     so module-local `shared/` directories (e.g. cli/shared) don't
+ *     false-positive.
  */
-function importedSharedFileNames(source) {
+function importedSharedFileNames(source, filePath) {
   const names = [];
+  const sharedRoot = resolve(SHARED_DIRECTORY);
   for (const match of source.matchAll(IMPORT_SPECIFIER_PATTERN)) {
     const specifier = match[1] ?? match[2];
-    const sharedMatch = /(?:^|\/)shared\/([^/]+\.ts)$/.exec(specifier ?? '');
-    if (sharedMatch) {
-      names.push(sharedMatch[1]);
+    if (specifier === undefined || !specifier.startsWith('.')) {
+      continue;
+    }
+    const resolved = resolve(dirname(filePath), specifier);
+    if (dirname(resolved) === sharedRoot && resolved.endsWith('.ts')) {
+      names.push(basename(resolved));
     }
   }
   return names;
@@ -113,7 +120,7 @@ function main() {
       continue;
     }
     const source = readFileSync(filePath, 'utf8');
-    for (const name of importedSharedFileNames(source)) {
+    for (const name of importedSharedFileNames(source, filePath)) {
       const approved = manifest[name] ?? [];
       if (!approved.includes(consumerModule)) {
         failures.push(

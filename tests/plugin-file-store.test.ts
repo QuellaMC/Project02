@@ -22,11 +22,11 @@ import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeSessionPaths,
   LocalRuntimeStorageContractError
-} from '../src/runtime/storage/layout.ts';
+} from '../src/runtime/storage/layout-contract.ts';
 import { createLocalRuntimeSessionStore } from '../src/runtime/storage/session-store.ts';
 import type {
   RuntimePluginJsonObject
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 
 const tempRoots: string[] = [];
 

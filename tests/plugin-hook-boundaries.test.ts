@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { createRuntimePluginHost } from '../src/plugins/host.ts';
+import { createRuntimePluginHost } from '../src/plugins/host/index.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginContext,
   runtimePluginContractVersion
-} from '../src/plugins/types.ts';
+} from '../src/plugins/api/index.ts';
 
 describe('runtime plugin hook result boundaries', () => {
   it('rejects aggregate hook text over 64 KiB even when each record is in range', async () => {

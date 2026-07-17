@@ -22,7 +22,7 @@ import { processIsAlive } from './process-liveness.ts';
 import {
   LocalRuntimeStorageContractError,
   type LocalRuntimeStorageContractErrorCode
-} from './layout.ts';
+} from './layout-contract.ts';
 
 export const defaultLocalRuntimeMutationLockWaitTimeoutMs = 10_000;
 export const defaultLocalRuntimeMutationLockIncompleteGraceMs = 30_000;

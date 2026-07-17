@@ -1,4 +1,4 @@
-import type { ConversationLogRecord } from '../log.ts';
+import type { ConversationLogRecord } from '../evidence/records.ts';
 import {
   requiredNormalizedVisibleMessageText,
   requiredRuntimeEventIdentity,

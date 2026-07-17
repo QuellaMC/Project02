@@ -38,34 +38,34 @@ export default tseslint.config(
   // File-size ratchet: each file below is pinned at its current size and may only shrink.
   // Delete a file's override once it drops under the global 400-line cap.
   {
-    files: ['src/plugins/hook-runner.ts'],
+    files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        { max: 1753, skipBlankLines: true, skipComments: true }
+        { max: 1750, skipBlankLines: true, skipComments: true }
       ]
     }
   },
   {
-    files: ['src/cli/chat.ts'],
+    files: ['src/cli/chat/main.ts'],
     rules: {
       'max-lines': [
         'error',
-        { max: 1531, skipBlankLines: true, skipComments: true }
+        { max: 1079, skipBlankLines: true, skipComments: true }
       ]
     }
   },
   {
-    files: ['src/cli/config-console.ts'],
+    files: ['src/cli/config/console.ts'],
     rules: {
       'max-lines': [
         'error',
-        { max: 767, skipBlankLines: true, skipComments: true }
+        { max: 766, skipBlankLines: true, skipComments: true }
       ]
     }
   },
   {
-    files: ['src/cli/config.ts'],
+    files: ['src/cli/config/main.ts'],
     rules: {
       'max-lines': [
         'error',
@@ -74,34 +74,25 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/cli/inspect.ts'],
+    files: ['src/runtime/evidence/turn-projection.ts'],
     rules: {
       'max-lines': [
         'error',
-        { max: 1183, skipBlankLines: true, skipComments: true }
+        { max: 869, skipBlankLines: true, skipComments: true }
       ]
     }
   },
   {
-    files: ['src/core/conversation.ts'],
+    files: ['src/plugins/builtin/plugin-management/config-update.ts'],
     rules: {
       'max-lines': [
         'error',
-        { max: 426, skipBlankLines: true, skipComments: true }
+        { max: 524, skipBlankLines: true, skipComments: true }
       ]
     }
   },
   {
-    files: ['src/plugins/builtin/runtime-plugin/config-update.ts'],
-    rules: {
-      'max-lines': [
-        'error',
-        { max: 546, skipBlankLines: true, skipComments: true }
-      ]
-    }
-  },
-  {
-    files: ['src/plugins/constructors.ts'],
+    files: ['src/plugins/api/constructors.ts'],
     rules: {
       'max-lines': [
         'error',
@@ -137,7 +128,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/plugins/manifest-validation.ts'],
+    files: ['src/plugins/api/manifest-validation.ts'],
     rules: {
       'max-lines': [
         'error',
@@ -146,7 +137,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/plugins/memory/provider-lifecycle.ts'],
+    files: ['src/plugins/builtin/memory-provider/provider-lifecycle.ts'],
     rules: {
       'max-lines': [
         'error',
@@ -182,7 +173,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/plugins/schema-validation.ts'],
+    files: ['src/plugins/api/tool-schema-validation.ts'],
     rules: {
       'max-lines': [
         'error',
@@ -191,25 +182,34 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/role-model/contracts.ts'],
+    files: ['src/role-model/loop/decision-parser.ts'],
     rules: {
       'max-lines': [
         'error',
-        { max: 1833, skipBlankLines: true, skipComments: true }
+        { max: 695, skipBlankLines: true, skipComments: true }
       ]
     }
   },
   {
-    files: ['src/role-model/loop.ts'],
+    files: ['src/role-model/api/provider-exchange.ts'],
     rules: {
       'max-lines': [
         'error',
-        { max: 1769, skipBlankLines: true, skipComments: true }
+        { max: 467, skipBlankLines: true, skipComments: true }
       ]
     }
   },
   {
-    files: ['src/role-model/model-tools.ts'],
+    files: ['src/role-model/loop/loop.ts'],
+    rules: {
+      'max-lines': [
+        'error',
+        { max: 1721, skipBlankLines: true, skipComments: true }
+      ]
+    }
+  },
+  {
+    files: ['src/role-model/api/model-tools.ts'],
     rules: {
       'max-lines': [
         'error',
@@ -218,7 +218,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/role-model/prompt.ts'],
+    files: ['src/role-model/prompt/render.ts'],
     rules: {
       'max-lines': [
         'error',
@@ -240,7 +240,7 @@ export default tseslint.config(
     rules: {
       'max-lines': [
         'error',
-        { max: 1138, skipBlankLines: true, skipComments: true }
+        { max: 1113, skipBlankLines: true, skipComments: true }
       ]
     }
   },
@@ -290,7 +290,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/runtime/storage/runtime-evidence-validation.ts'],
+    files: ['src/runtime/evidence/validation.ts'],
     rules: {
       'max-lines': [
         'error',

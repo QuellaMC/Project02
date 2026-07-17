@@ -67,13 +67,13 @@ export default defineConfig({
           functions: 95,
           lines: 95
         },
-        'src/runtime/storage/runtime-evidence-validation.ts': {
+        'src/runtime/evidence/validation.ts': {
           statements: 83,
           branches: 76,
           functions: 90,
           lines: 83
         },
-        'src/runtime/storage/runtime-evidence-recovery.ts': {
+        'src/runtime/evidence/recovery.ts': {
           statements: 82,
           branches: 74,
           functions: 90,
@@ -97,7 +97,7 @@ export default defineConfig({
           functions: 95,
           lines: 78
         },
-        'src/runtime/storage/runtime-evidence-cache.ts': {
+        'src/runtime/evidence/cache.ts': {
           statements: 78,
           branches: 65,
           functions: 95,

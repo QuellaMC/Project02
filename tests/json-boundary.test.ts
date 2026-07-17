@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createJsonBoundarySnapshot,
-  defaultJsonBoundaryLimits,
-  redactJsonBoundaryText
+  defaultJsonBoundaryLimits
 } from '../src/shared/json-boundary.ts';
+import { redactJsonBoundaryText } from '../src/shared/redaction.ts';
 import {
   canonicalJsonStringify,
   canonicalJsonValuesEqual,
