@@ -27,6 +27,7 @@ import type {
   RuntimePluginContext
 } from '../api/types.ts';
 import {
+  assertRuntimePluginFileStoreProviderPresent,
   resolveRuntimePluginAccessForPlugins,
   runtimePluginAccessForPlugin,
   type RuntimePluginAccessMapByPluginId
@@ -258,6 +259,11 @@ export function createRuntimePluginHost(
     registrySnapshot,
     pluginToolDefinitions
   } = createRuntimePluginHostState(options);
+  assertRuntimePluginFileStoreProviderPresent({
+    enabledPlugins,
+    accessByPluginId,
+    hasFileStoreProvider: options.fileStore !== undefined
+  });
   let activeFileStoreTransaction:
     | RuntimePluginFileStoreTransaction
     | undefined;
@@ -414,16 +420,12 @@ function createRuntimePluginHostState(
   const pluginConfigControl =
     options.pluginConfigControl === undefined
       ? undefined
-      : createRuntimePluginConfigControlHostStateSnapshot(
-          options.pluginConfigControl
-        );
+      : createRuntimePluginConfigControlHostStateSnapshot(options.pluginConfigControl);
   const pluginInventoryState =
     pluginConfigControl ??
     (options.pluginInventoryState === undefined
       ? undefined
-      : createRuntimePluginConfigControlHostStateSnapshot(
-          options.pluginInventoryState
-        ));
+      : createRuntimePluginConfigControlHostStateSnapshot(options.pluginInventoryState));
   let allPlugins: readonly RuntimePlugin[] = [];
   let enabledPlugins: readonly RuntimePlugin[] = [];
   let accessByPluginId: RuntimePluginAccessMapByPluginId = Object.freeze({});
@@ -436,9 +438,7 @@ function createRuntimePluginHostState(
       confirmationAvailable:
         options.toolConfirmationHandler !== undefined &&
         pluginConfigControl !== undefined,
-      ...(pluginInventoryState === undefined
-        ? {}
-        : { installedPluginManifests: pluginInventoryState.pluginManifests }),
+      ...(pluginInventoryState === undefined ? {} : { installedPluginManifests: pluginInventoryState.pluginManifests }),
       ...(pluginInventoryState?.activationByPluginId === undefined
         ? {}
         : {

@@ -31,6 +31,28 @@ import {
 } from '../support/plugin-host-fixtures.ts';
 
 describe('runtime plugin host access and lifecycle', () => {
+  it('fails at construction when a file_store plugin is enabled without a provider', () => {
+    const plugin = createFileStoreAvailabilityProbePlugin({
+      pluginId: 'filestore.no-provider.fixture',
+      requestedAccess: { file_store: 'read', model_input: 'write' }
+    });
+
+    expect(() =>
+      createRuntimePluginHost({
+        plugins: [plugin],
+        enabledPluginIds: [plugin.manifest.id]
+      })
+    ).toThrow('created without a file-store provider');
+    expect(() =>
+      createRuntimePluginHost({
+        plugins: [plugin],
+        enabledPluginIds: [plugin.manifest.id],
+        fileStore: testRuntimePluginFileStoreProvider
+      })
+    ).not.toThrow();
+    expect(() => createRuntimePluginHost({ plugins: [] })).not.toThrow();
+  });
+
   it('treats a missing own access entry for a prototype-named plugin as absent', () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: 'constructor',

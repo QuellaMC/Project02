@@ -190,3 +190,40 @@ function isOneOf<T extends string>(
     allowedValues.some((allowedValue) => allowedValue === value)
   );
 }
+
+/**
+ * Fails host construction, not first invocation, when a plugin that was
+ * actually granted file_store access has no provider to satisfy it. A
+ * compatible internal default is not possible - the store engine lives in
+ * runtime/storage and plugins must not import it - so the requirement is
+ * surfaced loudly at the API boundary instead.
+ */
+export function assertRuntimePluginFileStoreProviderPresent(options: {
+  readonly enabledPlugins: readonly RuntimePlugin[];
+  readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
+  readonly hasFileStoreProvider: boolean;
+}): void {
+  if (options.hasFileStoreProvider) {
+    return;
+  }
+
+  const grantedPlugin = options.enabledPlugins.find((plugin) =>
+    runtimePluginGrantsAccess({
+      access: runtimePluginAccessForPlugin({
+        plugin,
+        accessByPluginId: options.accessByPluginId
+      }),
+      accessName: 'file_store',
+      requiredAccess: 'read'
+    })
+  );
+
+  if (grantedPlugin !== undefined) {
+    throw new TypeError(
+      `Plugin "${grantedPlugin.manifest.id}" is granted file_store access, ` +
+        'but the host was created without a file-store provider. Pass ' +
+        'createRuntimePluginHost({ fileStore }) or compose the host through ' +
+        'the configured plugin activation factory.'
+    );
+  }
+}
