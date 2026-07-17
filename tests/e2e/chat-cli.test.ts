@@ -729,6 +729,25 @@ describe('chat CLI provider selection', () => {
     expect(stderr).toBe('');
   });
 
+  it('reports an invalid provider environment value as a CLI error', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-provider-invalid-env-');
+    let stderr = '';
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'invalid-provider-env'],
+      {
+        stdin: Readable.from(['hello\n']),
+        stdout: collect(() => {}),
+        stderr: collect((chunk) => {
+          stderr += chunk;
+        }),
+        env: { [roleModelProviderEnvName]: 'bogus' }
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('must be either "local" or "nvidia"');
+  });
+
   it('releases the durable writer lease when the provider turn fails', async () => {
     const storeRoot = createTestTempRoot('project02-chat-provider-failure-lease-');
     const sessionId = 'provider-failure-lease';

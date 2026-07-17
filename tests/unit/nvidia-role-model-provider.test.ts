@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createDecisionContext,
@@ -294,10 +294,31 @@ describe('NVIDIA role-model provider', () => {
       toolCalls: [
         {
           name: visibleReplyModelToolName,
-          input: {}
+          input: { text: '' }
         }
       ]
     });
+  });
+
+  it('clears the retry backoff timer when the deadline expires first', async () => {
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const fetchClient: NvidiaFetchClient = () =>
+      Promise.reject(new Error('socket hang up'));
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'provider-secret',
+      fetchClient,
+      requestTimeoutMs: 40,
+      transportRetryDelaysMs: [60_000]
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(output.providerMetadata?.error).toMatchObject({
+      code: 'request_timeout'
+    });
+    expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it('preserves native tool-call identities and arguments for execution while redacting provider evidence', async () => {

@@ -74,6 +74,7 @@ import {
 } from '../shared/runtime-location-flags.ts';
 import {
   createSelectedRoleModelAdapter, parseProviderName, providerOption,
+  RoleModelProviderSelectionError,
   selectChatProvider, type ChatProviderName
 } from '../../role-model/index.ts';
 import {
@@ -372,13 +373,7 @@ export async function runChatCliFromArgs(
       toolConfirmationBridge
     });
   } catch (error: unknown) {
-    if (
-      error instanceof ChatCliUsageError ||
-      error instanceof ChatCliStartupError ||
-      error instanceof RuntimeLocationCliUsageError ||
-      error instanceof RuntimeEnvFileError ||
-      isLocalRuntimeTerminalError(error)
-    ) {
+    if (isFormattedTerminalError(error)) {
       options.stderr.write(`Error: ${formatCliTerminalErrorMessage(error)}\n`);
       return 1;
     }
@@ -1175,12 +1170,14 @@ function isFormattedTerminalError(
 ): error is
   | ChatCliUsageError
   | ChatCliStartupError
+  | RoleModelProviderSelectionError
   | RuntimeLocationCliUsageError
   | RuntimeEnvFileError
   | LocalRuntimeTerminalError {
   return (
     error instanceof ChatCliUsageError ||
     error instanceof ChatCliStartupError ||
+    error instanceof RoleModelProviderSelectionError ||
     error instanceof RuntimeLocationCliUsageError ||
     error instanceof RuntimeEnvFileError ||
     isLocalRuntimeTerminalError(error)

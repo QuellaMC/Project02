@@ -199,11 +199,17 @@ function waitForNvidiaRetryDelay(
     return Promise.resolve();
   }
 
-  return requestDeadline.wait(
-    new Promise((resolve) => {
-      setTimeout(resolve, delayMs);
-    })
-  );
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  return requestDeadline
+    .wait(
+      new Promise<void>((resolve) => {
+        timeoutId = setTimeout(resolve, delayMs);
+      })
+    )
+    .finally(() => {
+      clearTimeout(timeoutId);
+    });
 }
 
 async function responseErrorMessage(

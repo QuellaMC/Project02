@@ -1062,10 +1062,13 @@ function createRawOutputTextFromNvidiaMessage(options: {
     });
 
     if (parsedArgs.status === 'rejected') {
+      // Empty text (not an empty object): the decision parser requires
+      // input.text to be a string, and the blank-reply gate is what turns
+      // this into a correction note the model can act on.
       if (runtimeToolName === visibleReplyModelToolName) {
         toolCalls.push({
           name: visibleReplyModelToolName,
-          input: Object.freeze({})
+          input: Object.freeze({ text: '' })
         });
         continue;
       }
