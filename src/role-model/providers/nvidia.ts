@@ -49,7 +49,6 @@ export const nvidiaRoleModelTemperature = 1;
 export const nvidiaRoleModelTopP = 1;
 export const nvidiaRoleModelMaxTokens = 16384;
 export const defaultNvidiaRoleModelReasoningBudget = 16384;
-export const defaultNvidiaRoleModelRequestTimeoutMs = 30_000;
 export const nvidiaApiKeyEnvName = 'NVIDIA_API_KEY';
 export const nvidiaModelEnvName = 'NVIDIA_MODEL';
 
@@ -85,28 +84,30 @@ export type NvidiaRoleModelProviderEnvironment = {
 export type NvidiaChatCompletionMessage = RoleModelChatMessage;
 export type NvidiaChatCompletionTool = RoleModelChatCompletionTool;
 
-export type NvidiaFetchRequest = {
-  readonly method: 'POST';
-  readonly headers: Readonly<Record<string, string>>;
-  readonly body: string;
-  readonly signal: AbortSignal;
-};
-
-export type NvidiaFetchResponse = {
-  readonly ok: boolean;
-  readonly status: number;
-  json(): Promise<unknown>;
-  text(): Promise<string>;
-};
-
-export type NvidiaFetchClient = (
-  url: string,
-  request: NvidiaFetchRequest
-) => Promise<NvidiaFetchResponse>;
+export {
+  createNvidiaRequestDeadline,
+  defaultNvidiaRoleModelRequestTimeoutMs,
+  defaultNvidiaTransportRetryDelaysMs,
+  NvidiaRequestTimeoutError,
+  type NvidiaFetchClient,
+  type NvidiaFetchRequest,
+  type NvidiaFetchResponse
+} from './nvidia-transport.ts';
+import {
+  createNvidiaRequestDeadline,
+  normalizeNvidiaRequestTimeoutMs,
+  normalizeNvidiaTransportRetryDelays,
+  NvidiaRequestTimeoutError,
+  performNvidiaTransportRequest,
+  type NvidiaFetchClient,
+  type NvidiaFetchRequest,
+  type NvidiaFetchResponse
+} from './nvidia-transport.ts';
 
 export type CreateNvidiaRoleModelProviderAdapterOptions =
   NvidiaRoleModelProviderConfig & {
     readonly fetchClient?: NvidiaFetchClient;
+    readonly transportRetryDelaysMs?: readonly number[];
   };
 
 type NvidiaProviderErrorCode =
@@ -145,6 +146,9 @@ export function createNvidiaRoleModelProviderAdapter(
   const thinkingMode = normalizeNvidiaThinkingMode(options.thinkingMode);
   const requestTimeoutMs = normalizeNvidiaRequestTimeoutMs(
     options.requestTimeoutMs
+  );
+  const transportRetryDelaysMs = normalizeNvidiaTransportRetryDelays(
+    options.transportRetryDelaysMs
   );
 
   return Object.freeze({
@@ -193,33 +197,27 @@ export function createNvidiaRoleModelProviderAdapter(
       const requestDeadline = createNvidiaRequestDeadline(requestTimeoutMs);
 
       try {
-        const response = await requestDeadline.wait(
-          fetchClient(endpoint, {
-            method: 'POST',
-            headers: {
-              authorization: `Bearer ${options.apiKey}`,
-              'content-type': 'application/json'
-            },
-            body,
-            signal: requestDeadline.signal
-          })
-        );
+        const transport = await performNvidiaTransportRequest({
+          fetchClient,
+          endpoint,
+          apiKey: options.apiKey,
+          body,
+          requestDeadline,
+          retryDelaysMs: transportRetryDelaysMs
+        });
 
-        if (!response.ok) {
+        if (transport.status === 'rejected') {
           return createProviderRejectedOutput({
             code: 'http_error',
             endpoint,
-            message: redactProviderSecret(
-              await requestDeadline.wait(responseErrorMessage(response)),
-              options.apiKey
-            ),
+            message: redactProviderSecret(transport.message, options.apiKey),
             model,
-            status: response.status,
+            status: transport.httpStatus,
             providerExchange: baseProviderExchange
           });
         }
 
-        const responseBody = await requestDeadline.wait(response.json());
+        const responseBody = transport.responseBody;
         const rawOutput = parseNvidiaResponseMessage(
           responseBody,
           toolNameMappings,
@@ -232,7 +230,7 @@ export function createNvidiaRoleModelProviderAdapter(
             endpoint,
             message: rawOutput.message,
             model,
-            status: response.status,
+            status: transport.httpStatus,
             providerExchange: createNvidiaProviderExchange({
               base: baseProviderExchange,
               responseBody
@@ -249,7 +247,7 @@ export function createNvidiaRoleModelProviderAdapter(
           providerMetadata: Object.freeze({
             ...baseMetadata,
             response: Object.freeze({
-              status: response.status
+              status: transport.httpStatus
             })
           } satisfies RoleModelProviderMetadata),
           providerExchange: createNvidiaProviderExchange({
@@ -294,67 +292,6 @@ export function createNvidiaRoleModelProviderAdapter(
       }
     }
   } satisfies RoleModelAdapter);
-}
-
-function normalizeNvidiaRequestTimeoutMs(value: number | undefined): number {
-  const timeoutMs = value ?? defaultNvidiaRoleModelRequestTimeoutMs;
-
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-    throw new TypeError(
-      'NVIDIA requestTimeoutMs must be a positive safe integer.'
-    );
-  }
-
-  return timeoutMs;
-}
-
-class NvidiaRequestTimeoutError extends Error {
-  constructor(timeoutMs: number) {
-    super(`NVIDIA provider request timed out after ${String(timeoutMs)}ms.`);
-    this.name = 'NvidiaRequestTimeoutError';
-  }
-}
-
-function createNvidiaRequestDeadline(timeoutMs: number): {
-  readonly signal: AbortSignal;
-  readonly wait: <T>(operation: Promise<T>) => Promise<T>;
-  readonly dispose: () => void;
-} {
-  const controller = new AbortController();
-  const deadlineAt = performance.now() + timeoutMs;
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutError = (): NvidiaRequestTimeoutError => {
-    controller.abort();
-    return new NvidiaRequestTimeoutError(timeoutMs);
-  };
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(timeoutError());
-    }, timeoutMs);
-  });
-
-  return Object.freeze({
-    signal: controller.signal,
-    async wait<T>(operation: Promise<T>): Promise<T> {
-      if (performance.now() >= deadlineAt) {
-        throw timeoutError();
-      }
-
-      const result = await Promise.race([operation, timeout]);
-
-      if (performance.now() >= deadlineAt) {
-        throw timeoutError();
-      }
-
-      return result;
-    },
-    dispose() {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-        timeoutId = undefined;
-      }
-    }
-  });
 }
 
 function createNvidiaRequestBody(options: {
@@ -1064,8 +1001,14 @@ function createRawOutputTextFromNvidiaMessage(options: {
   readonly visibleReplyAvailable: boolean;
 }): NvidiaRawOutputTextResult {
   if (options.toolCalls.length === 0) {
+    // Empty content is model behavior, not a transport fault: normalize it to
+    // the canonical empty decision so the loop's terminal-empty gate can
+    // return a correction note instead of failing the turn.
     if (options.content === null || options.content.length === 0) {
-      return rejectResponse('empty_output', 'NVIDIA response content is empty.');
+      return Object.freeze({
+        status: 'accepted',
+        rawOutputText: JSON.stringify({ toolCalls: [] })
+      } satisfies NvidiaRawOutputTextResult);
     }
 
     const scrubbedContent = scrubReasoningBlocks(options.content);
@@ -1120,7 +1063,11 @@ function createRawOutputTextFromNvidiaMessage(options: {
 
     if (parsedArgs.status === 'rejected') {
       if (runtimeToolName === visibleReplyModelToolName) {
-        return parsedArgs;
+        toolCalls.push({
+          name: visibleReplyModelToolName,
+          input: Object.freeze({})
+        });
+        continue;
       }
 
       nativeToolCallArgumentErrors.push(
@@ -1292,53 +1239,6 @@ function unknownArray(value: unknown): readonly unknown[] {
 
 function isReadonlyUnknownArray(value: unknown): value is readonly unknown[] {
   return Array.isArray(value);
-}
-
-async function responseErrorMessage(
-  response: NvidiaFetchResponse
-): Promise<string> {
-  let text: string;
-
-  try {
-    text = await response.text();
-  } catch {
-    return `NVIDIA provider HTTP ${String(response.status)}.`;
-  }
-
-  try {
-    const body: unknown = JSON.parse(text);
-    const message = providerErrorMessageFromBody(body);
-
-    if (message !== undefined) {
-      return message;
-    }
-  } catch {
-    // Fall through to text fallback below for non-JSON provider errors.
-  }
-
-  if (text.length > 0) {
-    return `NVIDIA provider HTTP ${String(response.status)}: ${text}`;
-  }
-
-  return `NVIDIA provider HTTP ${String(response.status)}.`;
-}
-
-function providerErrorMessageFromBody(body: unknown): string | undefined {
-  if (!isJsonRecord(body)) {
-    return undefined;
-  }
-
-  const error = body['error'];
-
-  if (isJsonRecord(error) && typeof error['message'] === 'string') {
-    return `NVIDIA provider error: ${error['message']}`;
-  }
-
-  if (typeof body['message'] === 'string') {
-    return `NVIDIA provider error: ${body['message']}`;
-  }
-
-  return undefined;
 }
 
 function redactProviderSecret(message: string, secret: string | undefined): string {

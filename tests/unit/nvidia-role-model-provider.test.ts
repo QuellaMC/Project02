@@ -90,6 +90,216 @@ describe('NVIDIA role-model provider', () => {
     expect(serializedEvidence).not.toContain('user-secret');
   });
 
+  it('retries transient transport failures and succeeds within the deadline', async () => {
+    let fetchCalls = 0;
+    const fetchClient: NvidiaFetchClient = () => {
+      fetchCalls += 1;
+
+      if (fetchCalls === 1) {
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          json() {
+            return Promise.resolve({});
+          },
+          text() {
+            return Promise.resolve('upstream unavailable');
+          }
+        });
+      }
+
+      return Promise.resolve(successfulReplyResponse('recovered'));
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'provider-secret',
+      fetchClient,
+      transportRetryDelaysMs: [0]
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(fetchCalls).toBe(2);
+    expect(output.rejection).toBeUndefined();
+    expect(output.rawOutputText).toContain('recovered');
+  });
+
+  it('retries a thrown network failure and succeeds', async () => {
+    let fetchCalls = 0;
+    const fetchClient: NvidiaFetchClient = () => {
+      fetchCalls += 1;
+
+      if (fetchCalls === 1) {
+        return Promise.reject(new Error('socket hang up'));
+      }
+
+      return Promise.resolve(successfulReplyResponse('after network blip'));
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'provider-secret',
+      fetchClient,
+      transportRetryDelaysMs: [0]
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(fetchCalls).toBe(2);
+    expect(output.rejection).toBeUndefined();
+  });
+
+  it('does not retry non-transient http failures', async () => {
+    let fetchCalls = 0;
+    const fetchClient: NvidiaFetchClient = () => {
+      fetchCalls += 1;
+
+      return Promise.resolve({
+        ok: false,
+        status: 401,
+        json() {
+          return Promise.resolve({});
+        },
+        text() {
+          return Promise.resolve('unauthorized');
+        }
+      });
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'provider-secret',
+      fetchClient,
+      transportRetryDelaysMs: [0, 0]
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(fetchCalls).toBe(1);
+    expect(output.rejection).toMatchObject({ reason: 'provider_error' });
+    expect(output.providerMetadata?.error).toMatchObject({ code: 'http_error' });
+    expect(output.providerMetadata?.response).toMatchObject({ status: 401 });
+  });
+
+  it('exhausts transport retries and reports the final http error', async () => {
+    let fetchCalls = 0;
+    const fetchClient: NvidiaFetchClient = () => {
+      fetchCalls += 1;
+
+      return Promise.resolve({
+        ok: false,
+        status: 429,
+        json() {
+          return Promise.resolve({});
+        },
+        text() {
+          return Promise.resolve('rate limited');
+        }
+      });
+    };
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'provider-secret',
+      fetchClient,
+      transportRetryDelaysMs: [0, 0]
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(fetchCalls).toBe(3);
+    expect(output.providerMetadata?.error).toMatchObject({ code: 'http_error' });
+    expect(output.providerMetadata?.response).toMatchObject({ status: 429 });
+  });
+
+  it('normalizes empty assistant content into an empty decision', async () => {
+    const fetchClient: NvidiaFetchClient = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: ''
+                }
+              }
+            ]
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'provider-secret',
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(output.rejection).toBeUndefined();
+    expect(JSON.parse(output.rawOutputText)).toEqual({ toolCalls: [] });
+  });
+
+  it('carries unparseable visible_reply arguments as an empty reply call', async () => {
+    const fetchClient: NvidiaFetchClient = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'tool_calls',
+                message: {
+                  role: 'assistant',
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: 'call_bad_reply_args',
+                      type: 'function',
+                      function: {
+                        name: 'visible_reply',
+                        arguments: '{"text": not-json'
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        }
+      });
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'provider-secret',
+      fetchClient
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      turnContext: renderRoleModelTurnContext(inputEnvelope)
+    });
+
+    expect(output.rejection).toBeUndefined();
+    expect(JSON.parse(output.rawOutputText)).toMatchObject({
+      toolCalls: [
+        {
+          name: visibleReplyModelToolName,
+          input: {}
+        }
+      ]
+    });
+  });
+
   it('preserves native tool-call identities and arguments for execution while redacting provider evidence', async () => {
     const fetchClient: NvidiaFetchClient = () =>
       Promise.resolve({
@@ -1559,4 +1769,42 @@ function createAliasCollisionToolDefinition(options: {
     requiresConfirmation: false,
     sourceReferencesRequired: false
   } satisfies RoleModelPluginToolDefinition);
+}
+
+function successfulReplyResponse(text: string): {
+  readonly ok: boolean;
+  readonly status: number;
+  json(): Promise<unknown>;
+  text(): Promise<string>;
+} {
+  return {
+    ok: true,
+    status: 200,
+    json() {
+      return Promise.resolve({
+        choices: [
+          {
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_reply',
+                  type: 'function',
+                  function: {
+                    name: 'visible_reply',
+                    arguments: JSON.stringify({ text })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      });
+    },
+    text() {
+      return Promise.resolve('');
+    }
+  };
 }
