@@ -675,16 +675,6 @@ function validateUserTurnToolCallCardinality(
   }
 
   for (const definition of modelToolDefinitions) {
-    const currentDecisionCount = toolCalls.filter(
-      (call) => call.name === definition.name
-    ).length;
-    const previousTurnAttemptCount =
-      definition.callLimit.scope === 'user_turn'
-        ? toolObservations.filter(
-            (observation) => observation.toolName === definition.name
-          ).length
-        : 0;
-    const count = previousTurnAttemptCount + currentDecisionCount;
     const successfulRequiredCallCount = toolObservations.filter(
       (observation) =>
         observation.toolName === definition.name &&
@@ -705,11 +695,22 @@ function validateUserTurnToolCallCardinality(
       );
     }
 
-    if (count > definition.callLimit.maxCalls) {
+    // user_turn budgets are enforced at tool routing, where an over-limit
+    // call becomes a rejected observation the model can react to; only
+    // per-response shape violations reject the decision itself.
+    if (definition.callLimit.scope !== 'model_response') {
+      continue;
+    }
+
+    const currentDecisionCount = toolCalls.filter(
+      (call) => call.name === definition.name
+    ).length;
+
+    if (currentDecisionCount > definition.callLimit.maxCalls) {
       return createRejectedRoleModelDecisionResult(
         roleModelDuplicateToolCallRejectionReason,
         `Decision requested ${definition.name} ${String(
-          count
+          currentDecisionCount
         )} times; ${definition.callLimit.scope} maxCalls is ${String(
           definition.callLimit.maxCalls
         )}.`,

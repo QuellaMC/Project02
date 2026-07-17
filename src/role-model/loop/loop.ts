@@ -43,6 +43,12 @@ import {
   normalizeReplayableRejectedRoleModelDecisionResult,
   parseRoleModelExecutionDecision
 } from './decision-parser.ts';
+import {
+  createRejectedToolRoutingEvidence,
+  missingRoutingTargetRejection,
+  type RoleModelPluginToolRoutingEvidence,
+  userTurnCallLimitRoutingRejection
+} from './routing-rejections.ts';
 import { parseRoleModelProviderExchangeSnapshot } from '../api/provider-exchange.ts';
 import type {
   RoleModelAdapter,
@@ -65,7 +71,6 @@ import {
 } from '../prompt/render.ts';
 import {
   createPreparedRuntimePluginConfigEffect,
-  createRuntimePluginEvidenceSnapshot,
   createRuntimePluginToolCallResultSnapshot,
   redactRuntimePluginText,
   type PreparedRuntimePluginConfigEffect,
@@ -77,10 +82,6 @@ import {
   type RuntimePluginContext
 } from '../../plugins/api/index.ts';
 import { runtimePluginToolResultHasBlockingEvidence } from '../../plugins/api/index.ts';
-import type {
-  RuntimePluginEvidenceStatus,
-  RuntimePluginPolicyOutcome
-} from '../../plugins/api/index.ts';
 import {
   createJsonBoundaryObjectSnapshot
 } from '../../shared/json-boundary.ts';
@@ -122,12 +123,7 @@ export type RoleModelPluginToolHost = {
     | Promise<RuntimePluginToolCallExecutionResult>;
 };
 
-export type RoleModelPluginToolRoutingEvidence = {
-  readonly callId: string;
-  readonly call: RuntimePluginToolCall;
-  readonly dispatchedToHost: boolean;
-  readonly result: RuntimePluginToolCallResult;
-};
+export { type RoleModelPluginToolRoutingEvidence } from './routing-rejections.ts';
 
 export type RoleModelInterimVisibleReplyEvent = {
   readonly round: number;
@@ -268,7 +264,8 @@ export async function runRoleModelLoop(
       options,
       identity,
       invokedRound,
-      round
+      round,
+      toolObservations: state.toolObservations
     });
 
     recordRoleModelLoopToolRound({
@@ -551,6 +548,7 @@ async function routeRoleModelLoopToolCalls(options: {
   readonly identity: RuntimeEventIdentity;
   readonly invokedRound: Extract<InvokedRoleModelLoopRound, { status: 'accepted' }>;
   readonly round: number;
+  readonly toolObservations: readonly RoleModelToolObservation[];
 }): Promise<PluginToolRoutingResult> {
   const interimVisibleReplyText = executionVisibleReplyText(
     options.invokedRound.decisionResult.decision
@@ -578,6 +576,7 @@ async function routeRoleModelLoopToolCalls(options: {
     ioSnapshot: options.invokedRound.ioSnapshot,
     parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
     round: options.round,
+    priorToolObservations: options.toolObservations,
     ...(options.options.onPluginToolCallStarted === undefined
       ? {}
       : { onPluginToolCallStarted: options.options.onPluginToolCallStarted }),
@@ -1066,6 +1065,7 @@ async function routeExecutableToolCalls(options: {
   ) => Promise<void> | void;
   readonly runtimePluginContext?: RuntimePluginContext;
   readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
+  readonly priorToolObservations: readonly RoleModelToolObservation[];
 }): Promise<PluginToolRoutingResult> {
   const results: RoleModelPluginToolRoutingEvidence[] = [];
 
@@ -1104,6 +1104,21 @@ async function routeExecutableToolCalls(options: {
       parsedDecisionSnapshot: options.parsedDecisionSnapshot
     });
 
+    const callLimitRejection = userTurnCallLimitRoutingRejection({
+      callId,
+      call: routedCall,
+      toolCall,
+      toolDefinition,
+      priorToolObservations: options.priorToolObservations,
+      routedResults: results,
+      context: options.runtimePluginContext
+    });
+
+    if (callLimitRejection !== undefined) {
+      results.push(callLimitRejection);
+      continue;
+    }
+
     const nativeToolCallArgumentError =
       options.nativeToolCallArgumentErrors?.find(
         (error) =>
@@ -1133,24 +1148,15 @@ async function routeExecutableToolCalls(options: {
       options.pluginToolHost === undefined ||
       options.runtimePluginContext === undefined
     ) {
-      const routingEvidence = createRejectedToolRoutingEvidence({
-        callId,
-        call: routedCall,
-        dispatchedToHost: false,
-        ...(options.runtimePluginContext === undefined
-          ? {}
-          : { context: options.runtimePluginContext }),
-        reason:
-          pluginId === undefined ? 'tool_not_declared' : 'tool_host_missing',
-        message:
-          pluginId === undefined
-            ? `Tool "${toolCall.name}" is not declared for this turn.`
-            : `Tool "${toolCall.name}" has no host handler for this turn.`,
-        policyOutcome:
-          pluginId === undefined ? 'disallowed_tool_call' : 'handler_rejected'
-      });
-
-      results.push(routingEvidence);
+      results.push(
+        missingRoutingTargetRejection({
+          callId,
+          call: routedCall,
+          toolName: toolCall.name,
+          pluginDeclared: pluginId !== undefined,
+          context: options.runtimePluginContext
+        })
+      );
       continue;
     }
 
@@ -1271,48 +1277,6 @@ function createAcceptedPluginToolRoutingResult(
     status: 'accepted',
     results: Object.freeze([...results])
   } satisfies PluginToolRoutingResult);
-}
-
-function createRejectedToolRoutingEvidence(options: {
-  readonly callId: string;
-  readonly call: RuntimePluginToolCall;
-  readonly dispatchedToHost: boolean;
-  readonly context?: RuntimePluginContext;
-  readonly reason: string;
-  readonly message: string;
-  readonly evidenceStatus?: RuntimePluginEvidenceStatus;
-  readonly policyOutcome?: RuntimePluginPolicyOutcome;
-}): RoleModelPluginToolRoutingEvidence {
-  const reason = redactRuntimePluginText(options.reason);
-  const message = redactRuntimePluginText(options.message);
-
-  return Object.freeze({
-    callId: options.callId,
-    call: options.call,
-    dispatchedToHost: options.dispatchedToHost,
-    result: Object.freeze({
-      status: 'rejected',
-      reason,
-      message,
-      evidence:
-        options.context === undefined
-          ? Object.freeze([])
-          : Object.freeze([
-              createRuntimePluginEvidenceSnapshot({
-                eventId: options.context.eventId,
-                traceId: options.context.traceId,
-                createdAt: options.context.timestamp,
-                kind: 'runtime_plugin_evidence_snapshot',
-                pluginId: options.call.pluginId,
-                evidenceKind: 'tool_invocation',
-                status: options.evidenceStatus ?? 'rejected',
-                summary: message,
-                policyOutcome: options.policyOutcome ?? 'handler_rejected',
-                redactionLabels: options.context.privacy.redactionLabels
-              })
-            ])
-    } satisfies RuntimePluginToolCallResult)
-  } satisfies RoleModelPluginToolRoutingEvidence);
 }
 
 function normalizeRoutablePluginToolResult(options: {

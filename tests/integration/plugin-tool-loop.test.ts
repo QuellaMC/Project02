@@ -20,8 +20,7 @@ import { createLocalRuntimeSessionStore } from '../../src/runtime/storage/sessio
 import { createRuntimeLogStore } from '../../src/runtime/evidence/index.ts';
 import {
   type RoleModelAdapter,
-  type RoleModelChatMessage,
-  roleModelDuplicateToolCallRejectionReason
+  type RoleModelChatMessage
 } from '../../src/role-model/index.ts';
 import { createTestTempRoot } from '../support/temp-root.ts';
 import {
@@ -325,11 +324,8 @@ describe('plugin-driven Character State tool loop', () => {
       .rawEvents()
       .filter((event) => event.kind === 'tool_call_finished');
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      reason: roleModelDuplicateToolCallRejectionReason
-    });
-    expect(toolFinishedEvents).toHaveLength(1);
+    expect(result.status).toBe('completed');
+    expect(toolFinishedEvents).toHaveLength(2);
     expect(toolFinishedEvents[0]).toMatchObject({
       dispatchedToHost: true,
       toolName: 'character_state.patch',
@@ -338,8 +334,18 @@ describe('plugin-driven Character State tool loop', () => {
         reason: 'invalid_input'
       }
     });
+    expect(toolFinishedEvents[1]).toMatchObject({
+      dispatchedToHost: false,
+      toolName: 'character_state.patch',
+      toolResult: {
+        status: 'rejected',
+        reason: 'tool_call_limit_reached'
+      }
+    });
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(0);
-    expect(pluginStore.readJson('checkpoint.json')).toBeUndefined();
+    const checkpoint = pluginStore.readJson('checkpoint.json');
+    expect(checkpoint).toMatchObject({ eventCount: 0 });
+    expect(JSON.stringify(checkpoint)).not.toContain('reflecting');
   });
 
   it('persists character_state.patch during handleToolCall', async () => {

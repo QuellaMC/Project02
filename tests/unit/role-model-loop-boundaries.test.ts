@@ -5,8 +5,9 @@ import {
   isRoleModelRawOutputReplayableDecisionEvidence,
   type RoleModelAdapter,
   type RoleModelChatMessage,
-  roleModelDuplicateToolCallRejectionReason,
+  type RoleModelInputEnvelope,
   roleModelMalformedOutputRejectionReason,
+  roleModelPluginToolRejectedRejectionReason,
   type RoleModelPluginToolDefinition,
   type RoleModelPluginToolHost,
   type RoleModelProviderExchangeSnapshot,
@@ -1024,33 +1025,36 @@ describe('role-model loop evidence and boundary validation', () => {
     expect(result.rounds).toHaveLength(3);
   });
 
-  it('rejects plugin tool repeats across rounds against its user-turn call limit', async () => {
-    let invocations = 0;
+  it('converts a repeated tool call into a rejected observation and completes the turn', async () => {
     let handledCalls = 0;
-    const adapter = createSequencedAdapter([
+    const capturedEnvelopes: RoleModelInputEnvelope[] = [];
+    const decisions = [
       {
         toolCalls: [
-          {
-            name: 'memory.search',
-            input: {
-              query: 'Mira'
-            }
-          }
+          { name: 'memory.search', input: { query: 'Mira' } }
         ]
       },
       {
         toolCalls: [
-          {
-            name: 'memory.search',
-            input: {
-              query: 'Mira again'
-            }
-          }
+          { name: 'memory.search', input: { query: 'Mira again' } }
+        ]
+      },
+      {
+        toolCalls: [
+          { name: visibleReplyModelToolName, input: { text: 'done' } }
         ]
       }
-    ], () => {
-      invocations += 1;
-    });
+    ];
+    let decisionIndex = 0;
+    const adapter = Object.freeze({
+      invoke(inputEnvelope) {
+        capturedEnvelopes.push(inputEnvelope);
+        const decision = decisions[decisionIndex] ?? decisions.at(-1);
+        decisionIndex += 1;
+
+        return { rawOutputText: JSON.stringify(decision) };
+      }
+    } satisfies RoleModelAdapter);
     const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
       handleToolCall() {
         handledCalls += 1;
@@ -1068,21 +1072,25 @@ describe('role-model loop evidence and boundary validation', () => {
       runtimePluginContext: createTestPluginContext('evt_repeated_tool')
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelDuplicateToolCallRejectionReason
-      }
-    });
-    if (result.status !== 'rejected') {
-      throw new Error('Expected repeated tool call to be rejected.');
-    }
-
-    expect(result.rejection.details).toContain('user_turn maxCalls is 1');
-    expect(invocations).toBe(2);
+    expect(result.status).toBe('accepted');
     expect(handledCalls).toBe(1);
-    expect(result.pluginToolResults).toHaveLength(1);
-    expect(result.rounds).toHaveLength(2);
+    expect(result.rounds).toHaveLength(3);
+    expect(result.pluginToolResults).toHaveLength(2);
+    expect(result.pluginToolResults[0]).toMatchObject({
+      dispatchedToHost: true,
+      result: { status: 'accepted' }
+    });
+    expect(result.pluginToolResults[1]).toMatchObject({
+      dispatchedToHost: false,
+      result: { status: 'rejected', reason: 'tool_call_limit_reached' }
+    });
+    expect(JSON.stringify(result.pluginToolResults[1])).toContain(
+      'user_turn maxCalls is 1'
+    );
+    expect(capturedEnvelopes).toHaveLength(3);
+    expect(JSON.stringify(capturedEnvelopes[2]?.toolObservations)).toContain(
+      'tool_call_limit_reached'
+    );
   });
 
   it('counts rejected and non-dispatched attempts toward user-turn call limits', async () => {
@@ -1097,6 +1105,11 @@ describe('role-model loop evidence and boundary validation', () => {
           toolCalls: [
             { name: 'memory.search', input: { query: 'retry' } }
           ]
+        },
+        {
+          toolCalls: [
+            { name: visibleReplyModelToolName, input: { text: 'done' } }
+          ]
         }
       ],
       () => undefined
@@ -1108,13 +1121,15 @@ describe('role-model loop evidence and boundary validation', () => {
       pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: { reason: roleModelDuplicateToolCallRejectionReason }
-    });
+    expect(result.status).toBe('accepted');
+    expect(result.pluginToolResults).toHaveLength(2);
     expect(result.pluginToolResults[0]).toMatchObject({
       dispatchedToHost: false,
       result: { status: 'rejected', reason: 'tool_host_missing' }
+    });
+    expect(result.pluginToolResults[1]).toMatchObject({
+      dispatchedToHost: false,
+      result: { status: 'rejected', reason: 'tool_call_limit_reached' }
     });
   });
 
@@ -1138,6 +1153,11 @@ describe('role-model loop evidence and boundary validation', () => {
             {
               toolCalls: [
                 { name: 'memory.search', input: { query: 'retry' } }
+              ]
+            },
+            {
+              toolCalls: [
+                { name: visibleReplyModelToolName, input: { text: 'done' } }
               ]
             }
           ],
@@ -1172,16 +1192,17 @@ describe('role-model loop evidence and boundary validation', () => {
         )
       });
 
-      expect(result).toMatchObject({
-        status: 'rejected',
-        rejection: { reason: roleModelDuplicateToolCallRejectionReason }
-      });
+      expect(result.status).toBe('accepted');
       expect(hostCalls).toBe(1);
-      expect(result.pluginToolResults).toHaveLength(1);
+      expect(result.pluginToolResults).toHaveLength(2);
+      expect(result.pluginToolResults[1]).toMatchObject({
+        dispatchedToHost: false,
+        result: { status: 'rejected', reason: 'tool_call_limit_reached' }
+      });
     }
   );
 
-  it('rejects an over-capacity batch before dispatching any member', async () => {
+  it('dispatches an over-capacity batch up to its limit and rejects the overflow members', async () => {
     let hostCalls = 0;
     const { publicResult: result } = await runRoleModelLoop({
       event: createTestEvent('search memory', 'evt_batch_attempt_limit'),
@@ -1192,6 +1213,11 @@ describe('role-model loop evidence and boundary validation', () => {
             toolCalls: [
               { name: 'memory.search', input: { query: 'first' } },
               { name: 'memory.search', input: { query: 'second' } }
+            ]
+          },
+          {
+            toolCalls: [
+              { name: visibleReplyModelToolName, input: { text: 'done' } }
             ]
           }
         ],
@@ -1207,12 +1233,63 @@ describe('role-model loop evidence and boundary validation', () => {
       runtimePluginContext: createTestPluginContext('evt_batch_attempt_limit')
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: { reason: roleModelDuplicateToolCallRejectionReason }
+    expect(result.status).toBe('accepted');
+    expect(hostCalls).toBe(1);
+    expect(result.pluginToolResults).toHaveLength(2);
+    expect(result.pluginToolResults[0]).toMatchObject({
+      dispatchedToHost: true,
+      result: { status: 'accepted' }
     });
-    expect(hostCalls).toBe(0);
-    expect(result.pluginToolResults).toHaveLength(0);
+    expect(result.pluginToolResults[1]).toMatchObject({
+      dispatchedToHost: false,
+      result: { status: 'rejected', reason: 'tool_call_limit_reached' }
+    });
+  });
+
+  it('rejects the turn when the model persists past its call limits for maxToolRounds', async () => {
+    let hostCalls = 0;
+    const { publicResult: result } = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_persistent_attempt_limit'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              { name: 'memory.search', input: { query: 'first' } }
+            ]
+          },
+          {
+            toolCalls: [
+              { name: 'memory.search', input: { query: 'again' } }
+            ]
+          }
+        ],
+        () => undefined
+      ),
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolHost: Object.freeze({
+        handleToolCall() {
+          hostCalls += 1;
+          return createAcceptedToolCallResult();
+        }
+      }),
+      runtimePluginContext: createTestPluginContext(
+        'evt_persistent_attempt_limit'
+      ),
+      maxToolRounds: 2
+    });
+
+    expect(result.status).toBe('rejected');
+    if (result.status !== 'rejected') {
+      throw new Error('Expected the persistent turn to be rejected.');
+    }
+    expect(result.rejection.reason).toBe(
+      roleModelPluginToolRejectedRejectionReason
+    );
+    expect(result.rejection.details).toContain(
+      'maximum executable tool rounds'
+    );
+    expect(hostCalls).toBe(1);
   });
 
   it('stores a rejected parsed snapshot for terminal empty toolCalls output', async () => {
