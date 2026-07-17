@@ -937,10 +937,14 @@ function mapRuntimeResult(result: LocalRuntimeUserMessageResult): ChatRuntimeTur
     };
   }
 
+  // A rejected runtime result is session-safe by construction: it exists only
+  // after the rejection was durably appended (storage failures throw instead
+  // and are wrapped as fatal by mapUnexpectedRuntimeFailureResult). The REPL
+  // therefore always continues past it.
   return {
     status: 'rejected',
     errorMessage: result.message,
-    fatal: result.reason !== 'input_validation_rejected',
+    fatal: false,
     traceSummary: createTraceSummary(
       result.event,
       'rejected',

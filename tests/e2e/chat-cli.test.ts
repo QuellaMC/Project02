@@ -518,7 +518,7 @@ describe('chat CLI trace summary', () => {
       roleModelAdapter
     });
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     expect(adapterRound).toBe(1);
     expect(JSON.parse(stderr.trim())).toMatchObject({
       status: 'rejected',
@@ -682,7 +682,7 @@ describe('chat CLI provider selection', () => {
       }
     );
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     expect(stderr).toContain(`NVIDIA provider requires ${nvidiaApiKeyEnvName}.`);
   });
 
@@ -746,7 +746,7 @@ describe('chat CLI provider selection', () => {
       }
     );
 
-    expect(failedExitCode).toBe(1);
+    expect(failedExitCode).toBe(0);
     expect(firstStderr).toContain(
       `NVIDIA provider requires ${nvidiaApiKeyEnvName}.`
     );
@@ -790,7 +790,7 @@ describe('chat CLI provider selection', () => {
         }
       );
 
-      expect(exitCode).toBe(1);
+      expect(exitCode).toBe(0);
       expect(stderr).toContain(`NVIDIA provider requires ${nvidiaApiKeyEnvName}.`);
     } finally {
       process.chdir(previousCwd);
@@ -989,7 +989,7 @@ describe('chat CLI provider selection', () => {
       }
     );
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     expect(stderr).toContain(`NVIDIA provider requires ${nvidiaApiKeyEnvName}.`);
   });
 
@@ -1781,7 +1781,7 @@ describe('chat CLI plugin lifecycle', () => {
     expect(shutdownContexts[0]?.signal.aborted).toBe(false);
   });
 
-  it('closes configured plugins when a fatal chat turn exits before /exit', async () => {
+  it('closes configured plugins when the session ends without /exit', async () => {
     const storeRoot = createTestTempRoot('project02-chat-fatal-cleanup-');
     const sessionId = 'fatal-cleanup-session';
     const configuredPlugin = createSessionEndPlugin(() => {}, {
@@ -1832,13 +1832,12 @@ describe('chat CLI plugin lifecycle', () => {
       }
     );
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     expect(stderr).toContain('configured before-role-model hook failed');
     expect(sessionEndContexts).toHaveLength(1);
     expect(sessionEndContexts[0]).toMatchObject({
       sessionId
     });
-    expect(sessionEndContexts[0]?.currentUserMessage).not.toBe('/exit');
 
     const storedRawEvents = createFileRuntimeLogStore({
       storeRoot,
@@ -1847,7 +1846,7 @@ describe('chat CLI plugin lifecycle', () => {
 
     expect(
       storedRawEvents.some((event) => event.payloadSummary?.rawInput === '/exit')
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('closes configured pre-session plugins read-only when later session creation fails', async () => {
@@ -2176,6 +2175,49 @@ describe('chat CLI plugin lifecycle', () => {
         ]
       }
     });
+  });
+});
+
+describe('chat CLI rejected-turn recovery', () => {
+  it('keeps the session alive after a rejected turn and completes the next one', async () => {
+    let stdout = '';
+    let stderr = '';
+    let invocations = 0;
+    const exitCode = await runChatCli({
+      pluginHost: createDefaultProject02PluginHost(),
+      stdin: Readable.from(['first\nsecond\n/exit\n']),
+      stdout: collect((chunk) => {
+        stdout += chunk;
+      }),
+      stderr: collect((chunk) => {
+        stderr += chunk;
+      }),
+      roleModelAdapter: {
+        invoke() {
+          invocations += 1;
+
+          if (invocations === 1) {
+            return { rawOutputText: 'this is not a decision object' };
+          }
+
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'visible_reply',
+                  input: { text: 'second turn reply' }
+                }
+              ]
+            })
+          };
+        }
+      }
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toContain('Error: ');
+    expect(stdout).toContain('second turn reply');
+    expect(invocations).toBe(2);
   });
 });
 
