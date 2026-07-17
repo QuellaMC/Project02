@@ -55,6 +55,7 @@ export type RunLocalUserMessageEventOptions = {
   readonly rawInput?: string;
   readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
+  readonly maxToolRounds?: number;
   readonly pluginHost: RuntimePluginHost;
   readonly characterTurnOptions?: CharacterTurnOptions;
   readonly committedAt?: string;

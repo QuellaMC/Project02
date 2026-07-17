@@ -1403,13 +1403,14 @@ async function persistedDisallowedToolRejectionRecord(
           })
         };
       }
-    } satisfies RoleModelAdapter)
+    } satisfies RoleModelAdapter),
+    maxToolRounds: 1
   });
   const storedRecord: unknown = structuredClone(logStore.rawEvents().at(-1));
 
   expect(result).toMatchObject({
     status: 'rejected',
-    reason: 'disallowed_tool'
+    reason: 'plugin_tool_rejected'
   });
 
   if (!isTestRecord(storedRecord)) {

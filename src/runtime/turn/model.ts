@@ -150,10 +150,7 @@ async function prepareRuntimeTurn(
     session: state.options.session,
     ...(state.options.characterTurnOptions?.recentMessageLimit === undefined
       ? {}
-      : {
-          recentMessageLimit:
-            state.options.characterTurnOptions.recentMessageLimit
-        })
+      : { recentMessageLimit: state.options.characterTurnOptions.recentMessageLimit })
   });
   const runtimePluginContext = createRuntimePluginContext({
     ...state.identity,
@@ -217,6 +214,7 @@ async function runRuntimeModel(
     const result = await runRoleModelLoop({
       event: state.event,
       decisionContext: roleModelDecisionContext,
+      ...(state.options.maxToolRounds === undefined ? {} : { maxToolRounds: state.options.maxToolRounds }),
       pluginToolDefinitions: prepared.pluginHost.pluginToolDefinitions(),
       pluginToolHost: prepared.pluginHost,
       preparedConfigEffectsByToolCallId:

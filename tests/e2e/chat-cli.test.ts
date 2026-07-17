@@ -485,21 +485,34 @@ describe('chat CLI trace summary', () => {
     expect(JSON.parse(stderr.trim())).not.toHaveProperty('toolCalls');
   });
 
-  it('rejects undeclared calls before any routing attempt', async () => {
+  it('returns undeclared calls to the model and completes after correction', async () => {
     let adapterRound = 0;
     let stderr = '';
     const roleModelAdapter: RoleModelAdapter = {
       invoke() {
         adapterRound += 1;
 
+        if (adapterRound === 1) {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'memory.unknown',
+                  input: {
+                    query: 'Mira'
+                  }
+                }
+              ]
+            })
+          };
+        }
+
         return {
           rawOutputText: JSON.stringify({
             toolCalls: [
               {
-                name: 'memory.unknown',
-                input: {
-                  query: 'Mira'
-                }
+                name: 'visible_reply',
+                input: { text: 'that tool is unavailable' }
               }
             ]
           })
@@ -519,12 +532,12 @@ describe('chat CLI trace summary', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(adapterRound).toBe(1);
+    expect(adapterRound).toBe(2);
     expect(JSON.parse(stderr.trim())).toMatchObject({
-      status: 'rejected',
-      requestedToolCalls: ['memory.unknown'],
+      status: 'completed',
+      requestedToolCalls: ['memory.unknown', 'visible_reply'],
       executedToolCalls: [],
-      terminalToolCalls: []
+      terminalToolCalls: ['visible_reply']
     });
   });
 

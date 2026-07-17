@@ -14,7 +14,6 @@ import {
   isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
-  roleModelDisallowedToolRejectionReason,
   roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
   type RoleModelPluginToolDefinition,
@@ -599,7 +598,7 @@ describe('role-model contracts', () => {
     });
   });
 
-  it('rejects executable tools omitted from allowedTools even when defined', () => {
+  it('accepts executable tools omitted from allowedTools; routing enforces the allowlist', () => {
     const memoryUnknownTool = {
       pluginId: 'memory',
       name: 'memory.unknown',
@@ -639,12 +638,10 @@ describe('role-model contracts', () => {
     );
 
     expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelDisallowedToolRejectionReason,
-        details: 'Decision requested disallowed tool memory.unknown.'
-      },
-      requestedToolNames: ['memory.unknown']
+      status: 'accepted',
+      decision: {
+        toolCalls: [{ name: 'memory.unknown', input: { query: 'Mira' } }]
+      }
     });
   });
 

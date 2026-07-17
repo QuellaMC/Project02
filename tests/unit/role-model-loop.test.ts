@@ -246,19 +246,27 @@ describe('role-model loop routing and policy', () => {
               }
             }
           ]
+        },
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {
+                text: 'stopped after the rejection'
+              }
+            }
+          ]
         }
       ], () => undefined)
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: 'disallowed_tool',
-        details: 'Decision requested disallowed tool memory.search.'
-      }
-    });
+    expect(result.status).toBe('accepted');
     expect(handledCalls).toBe(0);
-    expect(result.pluginToolResults).toEqual([]);
+    expect(result.pluginToolResults).toHaveLength(1);
+    expect(result.pluginToolResults[0]).toMatchObject({
+      dispatchedToHost: false,
+      result: { status: 'rejected', reason: 'tool_not_declared' }
+    });
   });
 
   it('drops native tool history when its arguments differ from the accepted decision', async () => {
@@ -1032,7 +1040,8 @@ describe('role-model loop routing and policy', () => {
       adapter,
       pluginToolDefinitions: withVisibleReplyTool(requiredMemorySearchToolDefinition),
       pluginToolHost,
-      runtimePluginContext: createTestPluginContext('evt_required_plugin_tool')
+      runtimePluginContext: createTestPluginContext('evt_required_plugin_tool'),
+      maxToolRounds: 2
     });
 
     expect(result).toMatchObject({
@@ -1041,7 +1050,7 @@ describe('role-model loop routing and policy', () => {
         reason: 'missing_required_tool_call'
       }
     });
-    expect(invocations).toBe(2);
+    expect(invocations).toBe(3);
     expect(result.pluginToolResults[0]?.result.evidence).toMatchObject([
       {
         status: 'degraded',

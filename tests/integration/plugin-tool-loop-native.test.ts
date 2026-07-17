@@ -230,7 +230,7 @@ describe('plugin-driven native tool loop routing', () => {
     });
   });
 
-  it('rejects undeclared executable tools before routing', async () => {
+  it('returns undeclared executable tools to the model without dispatching them', async () => {
     const session = createConversationSession();
     const logStore = createRuntimeLogStore();
     const adapter = createSequencedAdapter([
@@ -243,6 +243,14 @@ describe('plugin-driven native tool loop routing', () => {
             }
           }
         ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: { text: 'that tool is unavailable' }
+          }
+        ]
       }
     ]);
 
@@ -253,15 +261,24 @@ describe('plugin-driven native tool loop routing', () => {
       roleModelAdapter: adapter
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      reason: 'disallowed_tool',
-      message: 'Decision requested disallowed tool memory.unknown.'
+    expect(result.status).toBe('completed');
+    const toolFinishedEvents = logStore
+      .rawEvents()
+      .filter((event) => event.kind === 'tool_call_finished');
+    expect(toolFinishedEvents).toHaveLength(1);
+    expect(toolFinishedEvents[0]).toMatchObject({
+      dispatchedToHost: false,
+      toolName: 'memory.unknown',
+      toolResult: {
+        status: 'rejected',
+        reason: 'tool_not_declared'
+      }
     });
-    expect(logStore.conversationMessages()).toEqual([]);
     expect(
-      logStore.rawEvents().some((event) => event.kind.startsWith('tool_call'))
-    ).toBe(false);
+      logStore
+        .conversationMessages()
+        .some((message) => message.text === 'that tool is unavailable')
+    ).toBe(true);
   });
 
   it('does not synthesize Character State when the injected host omits it', async () => {
@@ -284,17 +301,28 @@ describe('plugin-driven native tool loop routing', () => {
       session,
       logStore,
       roleModelAdapter: adapter,
-      pluginHost
+      pluginHost,
+      maxToolRounds: 1
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      reason: 'disallowed_tool',
-      message: 'Decision requested disallowed tool character_state.patch.'
+    expect(result.status).toBe('rejected');
+    const dispatchedToolEvents = logStore
+      .rawEvents()
+      .filter(
+        (event) =>
+          event.kind === 'tool_call_finished' && event.dispatchedToHost === true
+      );
+    expect(dispatchedToolEvents).toEqual([]);
+    const finished = logStore
+      .rawEvents()
+      .filter((event) => event.kind === 'tool_call_finished');
+    expect(finished[0]).toMatchObject({
+      toolName: 'character_state.patch',
+      toolResult: {
+        status: 'rejected',
+        reason: 'tool_not_declared'
+      }
     });
-    expect(
-      logStore.rawEvents().some((event) => event.kind.startsWith('tool_call'))
-    ).toBe(false);
   });
 
   it('logs only valid pluginStoreRevision metadata from accepted tool output', async () => {

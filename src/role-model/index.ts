@@ -115,12 +115,14 @@ export {
 export {
   getRequiredVisibleReplyText,
   getVisibleReplyToolCall,
-  isRoleModelProviderErrorRawOutputEvidence,
-  isRoleModelRawOutputReplayableDecisionEvidence,
-  normalizeReplayableRejectedRoleModelDecisionResult,
   parseRoleModelDecision,
   parseRoleModelExecutionDecision
 } from './loop/decision-parser.ts';
+export {
+  isRoleModelProviderErrorRawOutputEvidence,
+  isRoleModelRawOutputReplayableDecisionEvidence,
+  normalizeReplayableRejectedRoleModelDecisionResult
+} from './loop/replay-evidence.ts';
 export {
   createRoleModelProviderToolNameMappings,
   defaultRoleModelProviderCapabilities,

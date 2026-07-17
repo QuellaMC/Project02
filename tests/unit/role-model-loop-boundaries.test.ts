@@ -7,6 +7,7 @@ import {
   type RoleModelChatMessage,
   type RoleModelInputEnvelope,
   roleModelMalformedOutputRejectionReason,
+  roleModelMissingRequiredToolCallRejectionReason,
   roleModelPluginToolRejectedRejectionReason,
   type RoleModelPluginToolDefinition,
   type RoleModelPluginToolHost,
@@ -1246,6 +1247,237 @@ describe('role-model loop evidence and boundary validation', () => {
     });
   });
 
+  it('returns an undeclared executable call to the model as a rejected observation', async () => {
+    let handledCalls = 0;
+    const { publicResult: result } = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_undeclared_feedback'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              { name: 'memory.unknown', input: { query: 'Mira' } }
+            ]
+          },
+          {
+            toolCalls: [
+              { name: visibleReplyModelToolName, input: { text: 'done' } }
+            ]
+          }
+        ],
+        () => undefined
+      ),
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolHost: Object.freeze({
+        handleToolCall() {
+          handledCalls += 1;
+          return createAcceptedToolCallResult();
+        }
+      }),
+      runtimePluginContext: createTestPluginContext('evt_undeclared_feedback')
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(handledCalls).toBe(0);
+    expect(result.rounds).toHaveLength(2);
+    expect(result.pluginToolResults).toHaveLength(1);
+    expect(result.pluginToolResults[0]).toMatchObject({
+      dispatchedToHost: false,
+      result: { status: 'rejected', reason: 'tool_not_declared' }
+    });
+  });
+
+  it('rejects a declared tool outside allowedTools as not declared for the turn', async () => {
+    let handledCalls = 0;
+    const { publicResult: result } = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_narrowed_allowlist'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              { name: 'memory.search', input: { query: 'Mira' } }
+            ]
+          },
+          {
+            toolCalls: [
+              { name: visibleReplyModelToolName, input: { text: 'done' } }
+            ]
+          }
+        ],
+        () => undefined
+      ),
+      allowedTools: [visibleReplyModelToolName],
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolHost: Object.freeze({
+        handleToolCall() {
+          handledCalls += 1;
+          return createAcceptedToolCallResult();
+        }
+      }),
+      runtimePluginContext: createTestPluginContext('evt_narrowed_allowlist')
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(handledCalls).toBe(0);
+    expect(result.pluginToolResults).toHaveLength(1);
+    expect(result.pluginToolResults[0]).toMatchObject({
+      dispatchedToHost: false,
+      result: { status: 'rejected', reason: 'tool_not_declared' }
+    });
+  });
+
+  it('sends a correction note when the terminal decision omits a required tool', async () => {
+    let handledCalls = 0;
+    const renderedRequests: string[] = [];
+    const decisions = [
+      {
+        toolCalls: [
+          { name: visibleReplyModelToolName, input: { text: 'skipping search' } }
+        ]
+      },
+      {
+        toolCalls: [
+          { name: 'memory.search', input: { query: 'Mira' } }
+        ]
+      },
+      {
+        toolCalls: [
+          { name: visibleReplyModelToolName, input: { text: 'done properly' } }
+        ]
+      }
+    ];
+    let decisionIndex = 0;
+    const adapter = Object.freeze({
+      invoke(inputEnvelope, invocation) {
+        void inputEnvelope;
+        renderedRequests.push(JSON.stringify(invocation.turnContext.messages));
+        const decision = decisions[decisionIndex] ?? decisions.at(-1);
+        decisionIndex += 1;
+
+        return { rawOutputText: JSON.stringify(decision) };
+      }
+    } satisfies RoleModelAdapter);
+
+    const { publicResult: result } = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_missing_required_feedback'),
+      decisionContext: createTestDecisionContext(),
+      adapter,
+      pluginToolDefinitions: withVisibleReplyTool(
+        requiredMemorySearchToolDefinition
+      ),
+      pluginToolHost: Object.freeze({
+        handleToolCall() {
+          handledCalls += 1;
+          return createAcceptedToolCallResult();
+        }
+      }),
+      runtimePluginContext: createTestPluginContext(
+        'evt_missing_required_feedback'
+      )
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(handledCalls).toBe(1);
+    expect(result.rounds).toHaveLength(3);
+    expect(renderedRequests).toHaveLength(3);
+    expect(renderedRequests[1]).toContain('was rejected');
+    expect(renderedRequests[1]).toContain('required');
+  });
+
+  it('sends a correction note for duplicate visible_reply calls', async () => {
+    const { publicResult: result } = await runRoleModelLoop({
+      event: createTestEvent('reply twice', 'evt_duplicate_reply_feedback'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              { name: visibleReplyModelToolName, input: { text: 'first' } },
+              { name: visibleReplyModelToolName, input: { text: 'second' } }
+            ]
+          },
+          {
+            toolCalls: [
+              { name: visibleReplyModelToolName, input: { text: 'just one' } }
+            ]
+          }
+        ],
+        () => undefined
+      ),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(result.rounds).toHaveLength(2);
+    if (result.status !== 'accepted') {
+      throw new Error('Expected duplicate visible_reply to be repaired.');
+    }
+    expect(executionResultVisibleReply(result)).toBe('just one');
+  });
+
+  it('sends a correction note when visible_reply text normalizes to empty', async () => {
+    const { publicResult: result } = await runRoleModelLoop({
+      event: createTestEvent('reply blank', 'evt_blank_reply_feedback'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              { name: visibleReplyModelToolName, input: { text: '   ' } }
+            ]
+          },
+          {
+            toolCalls: [
+              { name: visibleReplyModelToolName, input: { text: 'real reply' } }
+            ]
+          }
+        ],
+        () => undefined
+      ),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(result.rounds).toHaveLength(2);
+    if (result.status !== 'accepted') {
+      throw new Error('Expected a blank visible_reply to be repaired.');
+    }
+    expect(executionResultVisibleReply(result)).toBe('real reply');
+  });
+
+  it('keeps the terminal rejection when no round budget remains for feedback', async () => {
+    const { publicResult: result } = await runRoleModelLoop({
+      event: createTestEvent('search memory', 'evt_feedback_budget_exhausted'),
+      decisionContext: createTestDecisionContext(),
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              {
+                name: visibleReplyModelToolName,
+                input: { text: 'skipping search' }
+              }
+            ]
+          }
+        ],
+        () => undefined
+      ),
+      pluginToolDefinitions: withVisibleReplyTool(
+        requiredMemorySearchToolDefinition
+      ),
+      maxToolRounds: 0
+    });
+
+    expect(result.status).toBe('rejected');
+    if (result.status !== 'rejected') {
+      throw new Error('Expected exhaustion to keep the terminal rejection.');
+    }
+    expect(result.rejection.reason).toBe(
+      roleModelMissingRequiredToolCallRejectionReason
+    );
+  });
+
   it('rejects the turn when the model persists past its call limits for maxToolRounds', async () => {
     let hostCalls = 0;
     const { publicResult: result } = await runRoleModelLoop({
@@ -1301,7 +1533,8 @@ describe('role-model loop evidence and boundary validation', () => {
         {
           toolCalls: []
         }
-      ], () => undefined)
+      ], () => undefined),
+      maxToolRounds: 0
     });
     const result = executionResult.publicResult;
 
@@ -1603,3 +1836,17 @@ describe('role-model loop evidence and boundary validation', () => {
     expect(result.ioSnapshot.providerExchange).toBeDefined();
   });
 });
+
+function executionResultVisibleReply(
+  result: Extract<
+    Awaited<ReturnType<typeof runRoleModelLoop>>['publicResult'],
+    { status: 'accepted' }
+  >
+): string | undefined {
+  const call = result.decision.toolCalls.find(
+    (toolCall) => toolCall.name === visibleReplyModelToolName
+  );
+  const text = call?.input['text'];
+
+  return typeof text === 'string' ? text : undefined;
+}

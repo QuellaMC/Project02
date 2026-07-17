@@ -348,6 +348,67 @@ describe('plugin-driven Character State tool loop', () => {
     expect(JSON.stringify(checkpoint)).not.toContain('reflecting');
   });
 
+  it('replays a durably stored turn that recovered through decision-error feedback', async () => {
+    const sessionId = 'session-feedback-replay';
+    const {
+      session,
+      logStore,
+      storeRoot
+    } = await createDurableCharacterStateHarness(sessionId);
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'memory.unknown',
+            input: { query: 'Mira' }
+          }
+        ]
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: { text: 'recovered after feedback' }
+          }
+        ]
+      }
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('try unknown', 'evt_feedback_replay'),
+      session,
+      logStore,
+      roleModelAdapter: adapter
+    });
+
+    expect(result.status).toBe('completed');
+
+    const reopenedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId
+    });
+    const replayedEvents = reopenedLogStore.rawEvents();
+    const terminal = replayedEvents.at(-1);
+
+    expect(terminal).toMatchObject({
+      kind: 'runtime_turn_completed'
+    });
+    expect(
+      replayedEvents.filter((event) => event.kind === 'tool_call_finished')
+    ).toMatchObject([
+      {
+        dispatchedToHost: false,
+        toolName: 'memory.unknown',
+        toolResult: { status: 'rejected', reason: 'tool_not_declared' }
+      }
+    ]);
+    expect(
+      reopenedLogStore
+        .conversationMessages()
+        .some((message) => message.text === 'recovered after feedback')
+    ).toBe(true);
+  });
+
   it('persists character_state.patch during handleToolCall', async () => {
     const {
       session,
