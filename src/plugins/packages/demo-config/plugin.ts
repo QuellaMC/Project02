@@ -25,9 +25,9 @@ export function createDemoConfigPluginManifest(): RuntimePluginManifest {
   }).manifest;
 }
 
-// Package entry adapter: the discovered manifest and the resolved runtime
-// config arrive here once per host construction, so committed config updates
-// take effect at the next session start.
+// Package entry adapter: runs at host construction AND again after an
+// approved update to a reloadRequired: false field commits (the host swaps
+// in the rebuilt instance, so the next turn reflects the change).
 export function createProject02Plugin(
   input: RuntimePluginFactoryInput,
 ): RuntimePlugin {

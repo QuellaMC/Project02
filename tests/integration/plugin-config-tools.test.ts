@@ -768,6 +768,58 @@ describe('host-owned runtime plugin management tools', () => {
     ).toBe(false);
   });
 
+  it('reports next_turn for approved updates to reloadRequired:false fields', async () => {
+    const storeRoot = createTestTempRoot('project02-plugin-config-next-turn-');
+    const baseManifest = configurablePluginManifest();
+    const manifest = createRuntimePluginManifest({
+      ...baseManifest,
+      config: {
+        fields: baseManifest.config.fields.map(field =>
+          field.name === 'tone' ? {...field, reloadRequired: false} : field,
+        ),
+      },
+    });
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [manifest.id]: {
+          config: {tone: 'cool'},
+        },
+      },
+    });
+    const before = inspectRuntimePluginConfig({
+      manifest,
+      pluginManifests: [manifest],
+      configPath,
+      storeRoot,
+    });
+    const host = createRuntimePluginHost({
+      storeRoot,
+      pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: [manifest],
+        configPath,
+      },
+      toolConfirmationHandler: () => ({status: 'approved'}),
+    });
+
+    const result = await updateConfigField(host, {
+      pluginId: manifest.id,
+      fieldName: 'tone',
+      operation: 'set',
+      value: 'warm',
+      expectedFingerprint: before.fingerprint,
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      output: {
+        status: 'approved_pending_commit',
+        appliesTo: 'next_turn',
+        reloadRequired: false,
+      },
+    });
+  });
+
   it('prepares one approved field update without mutating authored config', async () => {
     const storeRoot = createTestTempRoot('project02-plugin-config-approved-');
     const manifest = configurablePluginManifest();

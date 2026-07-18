@@ -93,6 +93,11 @@ import {
   createRejectedToolCallResult,
   type RuntimePluginToolConfirmationHandler,
 } from './tool-confirmation.ts';
+import {
+  reloadRuntimePluginForCommittedConfig,
+  type RuntimePluginConfigReloadHostResult,
+  type RuntimePluginReloader,
+} from './reload.ts';
 import {runtimeIdentityMatchesContext} from '../api/identity.ts';
 
 export {runtimePluginId} from '../api/contract.ts';
@@ -115,6 +120,7 @@ export type CreateRuntimePluginHostOptions = {
   readonly toolConfirmationHandler?:
     RuntimePluginToolConfirmationHandler | undefined;
   readonly fileStore?: RuntimePluginFileStoreProvider;
+  readonly pluginReloader?: RuntimePluginReloader;
 };
 
 export type RuntimePluginBeforeRoleModelCallCompletedResult = {
@@ -203,6 +209,9 @@ export type RuntimePluginHost = {
   reconcileConfigEffect?(
     effect: PreparedRuntimePluginConfigEffect,
   ): RuntimePluginEvidenceSnapshot;
+  reloadPluginForCommittedConfig?(
+    effects: readonly PreparedRuntimePluginConfigEffect[],
+  ): Promise<RuntimePluginConfigReloadHostResult>;
   beginFileStoreTransaction?(): void;
   prepareFileStoreTransaction?(
     identity: RuntimeEventIdentity,
@@ -246,6 +255,11 @@ type RuntimePluginHostState = {
   readonly pluginConfigControl: RuntimePluginConfigControlHostState | undefined;
   readonly enabledIds: readonly string[];
   readonly enabledPlugins: readonly RuntimePlugin[];
+  /** Current instances: identical to enabledPlugins until a live config reload swaps one. */
+  readonly livePlugins: () => readonly RuntimePlugin[];
+  readonly swapEnabledPlugin: (
+    next: RuntimePlugin,
+  ) => RuntimePlugin | undefined;
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
   readonly registrySnapshot: RuntimePluginRegistrySnapshot;
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
@@ -259,6 +273,8 @@ export function createRuntimePluginHost(
     pluginConfigControl,
     enabledIds,
     enabledPlugins,
+    livePlugins,
+    swapEnabledPlugin,
     accessByPluginId,
     registrySnapshot,
     pluginToolDefinitions,
@@ -283,7 +299,7 @@ export function createRuntimePluginHost(
     },
     async beforeRoleModelCall(context) {
       return await runBeforeRoleModelCall({
-        plugins: enabledPlugins,
+        plugins: livePlugins(),
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -295,7 +311,7 @@ export function createRuntimePluginHost(
     },
     async handleToolCall(call, context) {
       return await runHandleToolCall({
-        plugins: enabledPlugins,
+        plugins: livePlugins(),
         call,
         context,
         accessByPluginId,
@@ -319,6 +335,15 @@ export function createRuntimePluginHost(
         effect,
         state: pluginConfigControl,
         storeRoot: options.storeRoot,
+      });
+    },
+    async reloadPluginForCommittedConfig(effects) {
+      return await reloadRuntimePluginForCommittedConfig({
+        effects,
+        reloader: options.pluginReloader,
+        pluginConfigControl,
+        livePlugins,
+        swapEnabledPlugin,
       });
     },
     beginFileStoreTransaction() {
@@ -345,7 +370,7 @@ export function createRuntimePluginHost(
     },
     async afterTurnCommitted(context) {
       const hookResult = await runHookPhase({
-        plugins: enabledPlugins,
+        plugins: livePlugins(),
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -364,7 +389,7 @@ export function createRuntimePluginHost(
     },
     async onSessionEnd(context, hookOptions) {
       return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
-        plugins: enabledPlugins,
+        plugins: livePlugins(),
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -376,7 +401,7 @@ export function createRuntimePluginHost(
     },
     shutdown(context) {
       shutdownResult ??= runRuntimePluginShutdownHooksWithResolvedPermissions({
-        plugins: enabledPlugins,
+        plugins: livePlugins(),
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -389,7 +414,7 @@ export function createRuntimePluginHost(
     },
     async health(context) {
       return await runHealth({
-        plugins: enabledPlugins,
+        plugins: livePlugins(),
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -495,6 +520,24 @@ function createRuntimePluginHostState(
     pluginConfigControl,
     enabledIds,
     enabledPlugins,
+    livePlugins: () => enabledPlugins,
+    swapEnabledPlugin: next => {
+      const previous = enabledPlugins.find(
+        plugin => plugin.manifest.id === next.manifest.id,
+      );
+
+      if (previous === undefined) {
+        return undefined;
+      }
+
+      enabledPlugins = Object.freeze(
+        enabledPlugins.map(plugin => (plugin === previous ? next : plugin)),
+      );
+      allPlugins = Object.freeze(
+        allPlugins.map(plugin => (plugin === previous ? next : plugin)),
+      );
+      return previous;
+    },
     accessByPluginId,
     registrySnapshot,
     pluginToolDefinitions,

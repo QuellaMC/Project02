@@ -58,12 +58,14 @@ export default tseslint.config(
   // seam-based extraction only (never size-motivated cuts), and a cohesive file that
   // genuinely needs to grow may raise its pin in its own commit with a stated reason.
   {
-    // Re-pinned +2 for the inventory/control host-state import split.
+    // Re-pinned +2 for the inventory/control host-state import split, then
+    // +40 for the live config-reload seam (state refs + method delegation
+    // only; the reload policy lives in src/plugins/host/reload.ts).
     files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1780, skipBlankLines: true, skipComments: true},
+        {max: 1820, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -105,11 +107,12 @@ export default tseslint.config(
     },
   },
   {
+    // Re-pinned +2 to inject the plugin reloader capability into the host.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1132, skipBlankLines: true, skipComments: true},
+        {max: 1134, skipBlankLines: true, skipComments: true},
       ],
     },
   },

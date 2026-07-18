@@ -12,10 +12,10 @@ import type {RawEventLogRecord, RuntimeLogStore} from '../evidence/records.ts';
 import {runtimePluginEvidenceOption} from './plugin-evidence.ts';
 import type {RuntimeTurnState} from './contracts.ts';
 
-export function recoverPendingRuntimeConfigEffects(options: {
+export async function recoverPendingRuntimeConfigEffects(options: {
   readonly logStore: RuntimeLogStore;
   readonly pluginHost: RuntimePluginHost;
-}): void {
+}): Promise<void> {
   if (options.logStore.localRuntimeSessionPaths === undefined) {
     return;
   }
@@ -51,6 +51,16 @@ export function recoverPendingRuntimeConfigEffects(options: {
         });
       }
 
+      // The host was constructed before this replay mutated the config
+      // file, so its instances are stale in exactly the mid-session way;
+      // recovery runs at turn start, which is what keeps the "next turn
+      // reflects the change" contract across crashes.
+      const reload = await applyCompletedRuntimeConfigReloads({
+        pluginHost: options.pluginHost,
+        effects: [effect],
+        reconcileEvidence: [evidence],
+      });
+
       options.logStore.appendRawEvent({
         eventId: terminal.eventId,
         traceId: terminal.traceId,
@@ -67,11 +77,93 @@ export function recoverPendingRuntimeConfigEffects(options: {
         ...(terminal.payloadSummary === undefined
           ? {}
           : {payloadSummary: terminal.payloadSummary}),
-        ...runtimePluginEvidenceOption([evidence]),
+        ...runtimePluginEvidenceOption([evidence, ...reload.evidence]),
       });
       reconciledEffectIds.add(effect.effectId);
     }
   }
+}
+
+/**
+ * Live-applies committed config effects after reconciliation: groups the
+ * effects whose reconcile evidence was accepted by target plugin and asks
+ * the host to rebuild each. Hosts without reload support (or without any
+ * accepted effect) do nothing; a reload problem never fails the turn.
+ */
+export async function applyCompletedRuntimeConfigReloads(options: {
+  readonly pluginHost: RuntimePluginHost;
+  readonly effects: readonly PreparedRuntimePluginConfigEffect[];
+  readonly reconcileEvidence: readonly RuntimePluginEvidenceSnapshot[];
+}): Promise<{
+  readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
+  readonly failures: readonly string[];
+}> {
+  const reload = options.pluginHost.reloadPluginForCommittedConfig?.bind(
+    options.pluginHost,
+  );
+
+  if (reload === undefined || options.effects.length === 0) {
+    return {evidence: Object.freeze([]), failures: Object.freeze([])};
+  }
+
+  const acceptedEffectIds = acceptedReconcileEffectIds(
+    options.reconcileEvidence,
+  );
+  const effectsByPluginId = new Map<
+    string,
+    PreparedRuntimePluginConfigEffect[]
+  >();
+
+  for (const effect of options.effects) {
+    if (!acceptedEffectIds.has(effect.effectId)) {
+      continue;
+    }
+
+    const group = effectsByPluginId.get(effect.targetPluginId) ?? [];
+
+    group.push(effect);
+    effectsByPluginId.set(effect.targetPluginId, group);
+  }
+
+  const evidence: RuntimePluginEvidenceSnapshot[] = [];
+  const failures: string[] = [];
+
+  for (const group of effectsByPluginId.values()) {
+    try {
+      const result = await reload(group);
+
+      if (result.evidence !== undefined) {
+        evidence.push(result.evidence);
+      }
+      if (result.failure !== undefined) {
+        failures.push(result.failure);
+      }
+    } catch (error: unknown) {
+      failures.push(runtimePostCommitFailureMessage(error));
+    }
+  }
+
+  return {evidence: Object.freeze(evidence), failures: Object.freeze(failures)};
+}
+
+function acceptedReconcileEffectIds(
+  reconcileEvidence: readonly RuntimePluginEvidenceSnapshot[],
+): Set<string> {
+  const effectIds = new Set<string>();
+
+  for (const snapshot of reconcileEvidence) {
+    if (snapshot.status !== 'accepted') {
+      continue;
+    }
+
+    for (const reference of snapshot.sourceReferences ?? []) {
+      if (reference.kind === 'runtime') {
+        effectIds.add(reference.id);
+      }
+    }
+  }
+
+  return effectIds;
 }
 
 export function runtimeConfigEffectsForCompletedTurn(options: {

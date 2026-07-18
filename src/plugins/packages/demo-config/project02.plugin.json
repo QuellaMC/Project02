@@ -23,7 +23,7 @@
       "fields": [
         {
           "name": "tone",
-          "description": "Reply tone directive injected into every turn. Agent-adjustable; a session applies committed changes at its next start.",
+          "description": "Reply tone directive injected into every turn. Agent-adjustable; committed changes apply by the next turn.",
           "required": false,
           "secret": false,
           "valueType": "string",
@@ -35,16 +35,18 @@
             "pirate"
           ],
           "agentMutable": true,
-          "redactionLabels": []
+          "redactionLabels": [],
+          "reloadRequired": false
         },
         {
           "name": "signoff",
-          "description": "Exact signoff the assistant appends to every reply. Agent-adjustable; unset means no signoff.",
+          "description": "Exact signoff the assistant appends to every reply. Agent-adjustable; committed changes apply by the next turn; unset means no signoff.",
           "required": false,
           "secret": false,
           "valueType": "string",
           "agentMutable": true,
-          "redactionLabels": []
+          "redactionLabels": [],
+          "reloadRequired": false
         },
         {
           "name": "operatorNote",

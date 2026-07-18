@@ -1,4 +1,5 @@
 import {spawn} from 'node:child_process';
+import {readFileSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
@@ -21,10 +22,14 @@ import {durablePluginStoreMutationResourceKey} from '../../src/runtime/storage/p
 import {
   createRuntimePluginHost,
   type RuntimePluginHost,
+  type RuntimePluginReloader,
 } from '../../src/plugins/host/index.ts';
 import {createRuntimePlugin} from '../../src/plugins/api/constructors.ts';
 import {runtimePluginConfigUpdateToolName} from '../../src/plugins/api/contract.ts';
 import {
+  createPluginContextEvidence,
+  createRuntimePluginContextItem,
+  createRuntimePluginManifest,
   firstPartyModelToolsPluginId,
   runtimePluginId,
 } from '../../src/plugins/api/index.ts';
@@ -193,6 +198,125 @@ function createConfigEffectTestAdapter(options: {
       };
     },
   } satisfies RoleModelAdapter);
+}
+
+async function createLiveReloadLoopFixture(
+  label: string,
+  overrides: {readonly reloader?: RuntimePluginReloader} = {},
+) {
+  const fixture = await createConfigEffectTestFixture(`reload-${label}`);
+  const manifest = createRuntimePluginManifest({
+    ...fixture.targetPlugin.manifest,
+    declaredPlugins: ['before_role_model_call'],
+    requestedAccess: {model_input: 'write'},
+    config: {
+      fields: fixture.targetPlugin.manifest.config.fields.map(field =>
+        field.name === 'tone' ? {...field, reloadRequired: false} : field,
+      ),
+    },
+  });
+  const stylePlugin = (tone: string) =>
+    createRuntimePlugin({
+      manifest,
+      lifecycleHooks: {
+        beforeRoleModelCall(context) {
+          return {
+            contextItems: [
+              createRuntimePluginContextItem({
+                pluginId: manifest.id,
+                id: 'style',
+                kind: 'runtime_note',
+                text: `tone:${tone}`,
+                budget: {estimatedTokens: 8, priority: 50},
+                sourceReferences: [],
+                confidence: 1,
+                redactionLabels: context.privacy.redactionLabels,
+              }),
+            ],
+            evidence: [
+              createPluginContextEvidence({
+                context,
+                pluginId: manifest.id,
+                status: 'accepted',
+                summary: 'Provided style context.',
+              }),
+            ],
+          };
+        },
+      },
+    });
+  const authoredTone = () => {
+    const config = JSON.parse(readFileSync(fixture.configPath, 'utf8')) as {
+      plugins?: Record<string, {config?: {tone?: string}}>;
+    };
+
+    return config.plugins?.[manifest.id]?.config?.tone ?? 'cool';
+  };
+  const session = createConversationSession({id: fixture.sessionId});
+  const logStore = createFileRuntimeLogStore({
+    storeRoot: fixture.storeRoot,
+    sessionId: fixture.sessionId,
+  });
+  const pluginHost = createRuntimePluginHost({
+    fileStore: testRuntimePluginFileStoreProvider,
+    storeRoot: fixture.storeRoot,
+    sessionId: fixture.sessionId,
+    sessionIdentity: session,
+    plugins: [stylePlugin(authoredTone())],
+    enabledPluginIds: [
+      runtimePluginId,
+      firstPartyModelToolsPluginId,
+      manifest.id,
+    ],
+    pluginConfigControl: {
+      control: testRuntimePluginConfigControlCapability,
+      pluginManifests: [manifest],
+      configPath: fixture.configPath,
+    },
+    toolConfirmationHandler: () => ({status: 'approved'}),
+    pluginReloader:
+      overrides.reloader ??
+      Object.freeze({
+        reload: (pluginId: string) =>
+          Promise.resolve(
+            pluginId === manifest.id
+              ? {
+                  status: 'rebuilt' as const,
+                  plugin: stylePlugin(authoredTone()),
+                }
+              : {status: 'declined' as const, reason: 'unknown plugin'},
+          ),
+      }),
+  });
+  const capturedContexts: string[][] = [];
+  const contextCaptureAdapter = Object.freeze({
+    invoke(inputEnvelope) {
+      capturedContexts.push(
+        inputEnvelope.decisionContext.pluginContextItems.map(item => item.text),
+      );
+      return {
+        rawOutputText: JSON.stringify({
+          toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+        }),
+      };
+    },
+  } satisfies RoleModelAdapter);
+
+  return {
+    session,
+    logStore,
+    pluginHost,
+    authoredTone,
+    capturedContexts,
+    contextCaptureAdapter,
+    updateInput: {
+      pluginId: manifest.id,
+      fieldName: 'tone',
+      operation: 'set',
+      value: 'warm',
+      expectedFingerprint: fixture.before.fingerprint,
+    },
+  };
 }
 
 describe('plugin-driven tool loop commit and rollback', () => {
@@ -1390,6 +1514,104 @@ describe('plugin-driven tool loop commit and rollback', () => {
     expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
       {configured: true, value: 'warm'},
     );
+  });
+
+  it('live-applies an approved reloadRequired:false config update by the next turn', async () => {
+    const live = await createLiveReloadLoopFixture('live-apply');
+    const updateAdapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
+        ],
+      },
+      {toolCalls: [{name: 'visible_reply', input: {text: 'tone updated'}}]},
+    ]);
+
+    const updateResult = await runLocalUserMessageEvent({
+      event: createTestEvent('update tone', 'evt_live_apply_update'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: live.pluginHost,
+      roleModelAdapter: updateAdapter,
+    });
+
+    expect(updateResult.status).toBe('completed');
+    if (updateResult.status !== 'completed') {
+      throw new Error('Expected the update turn to complete.');
+    }
+    expect(updateResult.postCommitFailures).toBeUndefined();
+    expect(live.authoredTone()).toBe('warm');
+
+    const liveApplyEvidence = live.logStore
+      .rawEvents()
+      .filter(event => event.kind === 'after_turn_committed')
+      .flatMap(event => event.runtimePluginEvidence ?? [])
+      .find(evidence => evidence.summary.startsWith('Live-applied'));
+
+    expect(liveApplyEvidence).toMatchObject({status: 'accepted'});
+
+    const followupResult = await runLocalUserMessageEvent({
+      event: createTestEvent('and now?', 'evt_live_apply_followup'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: live.pluginHost,
+      roleModelAdapter: live.contextCaptureAdapter,
+    });
+
+    expect(followupResult.status).toBe('completed');
+    expect(live.capturedContexts[0]).toContain('tone:warm');
+  });
+
+  it('keeps the old instance and records a post-commit failure when the reload factory throws', async () => {
+    const live = await createLiveReloadLoopFixture('live-fail', {
+      reloader: {
+        reload: () => Promise.reject(new Error('factory exploded')),
+      },
+    });
+    const updateAdapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
+        ],
+      },
+      {toolCalls: [{name: 'visible_reply', input: {text: 'tone updated'}}]},
+    ]);
+
+    const updateResult = await runLocalUserMessageEvent({
+      event: createTestEvent('update tone', 'evt_live_fail_update'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: live.pluginHost,
+      roleModelAdapter: updateAdapter,
+    });
+
+    expect(updateResult.status).toBe('completed');
+    if (updateResult.status !== 'completed') {
+      throw new Error('Expected the update turn to complete.');
+    }
+    expect(updateResult.postCommitFailures?.join(' ')).toContain(
+      'factory exploded',
+    );
+    expect(live.authoredTone()).toBe('warm');
+
+    const failedEvidence = live.logStore
+      .rawEvents()
+      .filter(event => event.kind === 'after_turn_committed')
+      .flatMap(event => event.runtimePluginEvidence ?? [])
+      .find(evidence => evidence.summary.startsWith('Live config reload'));
+
+    expect(failedEvidence).toMatchObject({status: 'failed'});
+
+    const followupResult = await runLocalUserMessageEvent({
+      event: createTestEvent('and now?', 'evt_live_fail_followup'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: live.pluginHost,
+      roleModelAdapter: live.contextCaptureAdapter,
+    });
+
+    expect(followupResult.status).toBe('completed');
+    expect(live.capturedContexts[0]).toContain('tone:cool');
   });
 
   it('recovers an applied config effect when its commit marker append failed', async () => {

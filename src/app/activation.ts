@@ -49,6 +49,7 @@ import {
   type RuntimePluginConfigActivationInspectShape,
 } from '../runtime/config/index.ts';
 import {canonicalJsonValuesEqual} from '../shared/canonical-json.ts';
+import {createConfiguredRuntimePluginReloader} from './plugin-reload.ts';
 
 export type {
   RuntimePluginFactoryFunction,
@@ -462,6 +463,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       toolConfirmationHandler: options.toolConfirmationHandler,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
+      pluginReloader: createConfiguredRuntimePluginReloader({activationPlan}),
     });
   } catch (error: unknown) {
     await cleanupPartiallyInstantiatedPlugins({

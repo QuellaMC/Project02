@@ -21,6 +21,7 @@ import type {
   RuntimePluginHost,
 } from '../../plugins/index.ts';
 import {
+  applyCompletedRuntimeConfigReloads,
   assertRuntimeConfigEffectsCanCommit,
   reconcileCompletedRuntimeConfigEffects,
   runtimeConfigEffectsForCompletedTurn,
@@ -427,12 +428,17 @@ export async function completeRuntimeTurn(
     effects: runtimeConfigEffects,
     postCommitFailures: durability.postCommitFailures,
   });
+  const configReload = await applyCompletedRuntimeConfigReloads({
+    pluginHost: options.pluginHost,
+    effects: runtimeConfigEffects,
+    reconcileEvidence: configEffectEvidence,
+  });
 
-  await recordAfterTurnCommitted(
-    options,
-    durability.postCommitFailures,
-    configEffectEvidence,
-  );
+  durability.postCommitFailures.push(...configReload.failures);
+  await recordAfterTurnCommitted(options, durability.postCommitFailures, [
+    ...configEffectEvidence,
+    ...configReload.evidence,
+  ]);
 
   return Object.freeze({
     status: 'completed',

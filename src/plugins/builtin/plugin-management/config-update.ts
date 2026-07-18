@@ -44,7 +44,7 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
   return {
     name: runtimePluginConfigUpdateToolName,
     description:
-      'Set or unset one declared non-secret, agent-mutable plugin config field after exact user approval. This cannot change activation, permissions, paths, secrets, or Project02 host settings, and applies only to later host construction.',
+      'Set or unset one declared non-secret, agent-mutable plugin config field after exact user approval. This cannot change activation, permissions, paths, secrets, or Project02 host settings. Committed changes apply by the next turn for fields declaring reloadRequired: false, otherwise at a later host construction.',
     requiredForUserTurn: false,
     inputContract: {
       type: 'object',
@@ -471,12 +471,15 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
     output: createJsonBoundaryObjectSnapshot(
       {
         status: 'approved_pending_commit',
-        appliesTo: 'future_host_construction',
+        appliesTo:
+          field.reloadRequired === false
+            ? 'next_turn'
+            : 'future_host_construction',
         pluginId: manifest.id,
         fieldName: field.name,
         operation: operation.kind,
         fingerprint: resultFingerprint,
-        reloadRequired: field.reloadRequired === true,
+        reloadRequired: field.reloadRequired !== false,
       },
       {field: 'Prepared plugin config update'},
     ),

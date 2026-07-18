@@ -259,7 +259,7 @@ async function stagePluginFieldChange(
     target: `plugins.${manifest.id}.config.${field.name}`,
     oldValue,
     newValue,
-    reloadRequired: field.reloadRequired === true,
+    reloadRequired: field.reloadRequired !== false,
     commit() {
       applyRuntimePluginConfigControlOperation({
         ...runtimeConfigLocation(context),
