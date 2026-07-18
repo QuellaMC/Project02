@@ -1,0 +1,43 @@
+/**
+ * Public contract of the runtime plugin package loader: descriptor
+ * format, metadata size limits, bundled package root, and the shapes a
+ * discovery run produces.
+ */
+import {fileURLToPath} from 'node:url';
+
+import type {RuntimePluginPackageCatalogEntry} from '../api/factory.ts';
+
+export const runtimePluginPackageDescriptorFormat = 'project02.plugin.v1';
+
+export const maxRuntimePluginPackageMetadataBytes = 256 * 1_024;
+
+export const bundledRuntimePluginPackageRoot = fileURLToPath(
+  new URL('../packages/', import.meta.url),
+);
+
+export type RuntimePluginPackageProvenance = 'bundled' | 'operator';
+
+export type RuntimePluginPackageSource = {
+  readonly root: string;
+  readonly provenance: RuntimePluginPackageProvenance;
+};
+
+export type RuntimePluginPackageDiagnostic = {
+  readonly severity: 'error';
+  readonly code: string;
+  readonly message: string;
+  readonly path: string;
+  readonly provenance: RuntimePluginPackageProvenance;
+  readonly pluginId?: string;
+  readonly claimedPluginId?: string;
+};
+
+export type DiscoveredRuntimePluginPackage =
+  RuntimePluginPackageCatalogEntry & {
+    readonly provenance: RuntimePluginPackageProvenance;
+  };
+
+export type RuntimePluginPackageDiscovery = {
+  readonly packages: readonly DiscoveredRuntimePluginPackage[];
+  readonly diagnostics: readonly RuntimePluginPackageDiagnostic[];
+};

@@ -2,7 +2,6 @@ import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
 import {
   freezeBuiltInModelToolCall,
   freezeModelToolCall,
-  validateModelToolInputAgainstContract,
   visibleReplyModelToolName,
   createVisibleReplyModelToolCall,
   findVisibleReplyModelToolCall,
@@ -11,6 +10,7 @@ import {
   type ModelToolCall,
   type VisibleReplyModelToolCall,
 } from '../api/model-tools.ts';
+import {validateModelToolInputAgainstContract} from '../api/model-tool-input-validation.ts';
 import {
   isRoleModelToolNameSyntax,
   roleModelAllowedToolNames,
