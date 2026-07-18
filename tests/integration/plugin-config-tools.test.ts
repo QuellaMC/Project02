@@ -1001,13 +1001,120 @@ describe('host-owned runtime plugin management tools', () => {
         value: 'warm',
         expectedFingerprint: fingerprint,
       },
-      'evt_plugin_config_test_next',
+      {eventId: 'evt_plugin_config_test_next'},
     );
 
     expect(nextEvent).toMatchObject({
       status: 'accepted',
       output: {appliesTo: 'next_turn'},
     });
+
+    // The turn record is keyed by the full runtime identity: a reused event
+    // id under a fresh trace is a different turn, not a mixed group.
+    const freshTrace = await updateConfigField(
+      host,
+      {
+        pluginId: manifest.id,
+        fieldName: 'tone',
+        operation: 'set',
+        value: 'warm',
+        expectedFingerprint: fingerprint,
+      },
+      {traceId: 'trace_plugin_config_test_retry'},
+    );
+
+    expect(freshTrace).toMatchObject({
+      status: 'accepted',
+      output: {appliesTo: 'next_turn'},
+    });
+  });
+
+  it('keeps the next_turn promise when the session-scoped update was denied', async () => {
+    const storeRoot = createTestTempRoot('project02-plugin-config-denied-mix-');
+    const baseManifest = configurablePluginManifest();
+    const manifest = createRuntimePluginManifest({
+      ...baseManifest,
+      config: {
+        fields: [
+          ...baseManifest.config.fields.map(field =>
+            field.name === 'tone' ? {...field, reloadRequired: false} : field,
+          ),
+          {
+            name: 'signoff',
+            description: 'Session-scoped signoff.',
+            required: false,
+            secret: false,
+            valueType: 'string',
+            agentMutable: true,
+            redactionLabels: [],
+          },
+        ],
+      },
+    });
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [manifest.id]: {
+          config: {tone: 'cool'},
+        },
+      },
+    });
+    const fingerprint = inspectRuntimePluginConfig({
+      manifest,
+      pluginManifests: [manifest],
+      configPath,
+      storeRoot,
+    }).fingerprint;
+    const host = createRuntimePluginHost({
+      storeRoot,
+      plugins: [createRuntimePlugin({manifest})],
+      enabledPluginIds: [
+        runtimePluginId,
+        firstPartyModelToolsPluginId,
+        manifest.id,
+      ],
+      pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: [manifest],
+        configPath,
+      },
+      // Deny exactly the session-scoped field; a denied update never commits,
+      // so it must not poison the live field's next_turn promise.
+      toolConfirmationHandler: request => ({
+        status:
+          request.preview['fieldName'] === 'signoff' ? 'denied' : 'approved',
+      }),
+      pluginReloader: {
+        reload: () =>
+          Promise.resolve({status: 'declined', reason: 'unused in this test'}),
+      },
+    });
+
+    const deniedSessionScoped = await updateConfigField(host, {
+      pluginId: manifest.id,
+      fieldName: 'signoff',
+      operation: 'set',
+      value: 'cheers',
+      expectedFingerprint: fingerprint,
+    });
+
+    expect(deniedSessionScoped).toMatchObject({
+      status: 'rejected',
+      reason: 'plugin_config_approval_denied',
+    });
+
+    const liveAfterDenied = await updateConfigField(host, {
+      pluginId: manifest.id,
+      fieldName: 'tone',
+      operation: 'set',
+      value: 'warm',
+      expectedFingerprint: fingerprint,
+    });
+
+    expect(liveAfterDenied).toMatchObject({
+      status: 'accepted',
+      output: {appliesTo: 'next_turn'},
+    });
+    expect(JSON.stringify(liveAfterDenied)).not.toContain('appliesToNote');
   });
 
   it('prepares one approved field update without mutating authored config', async () => {
@@ -1991,10 +2098,15 @@ function testIdentity() {
   } as const;
 }
 
-function testContext(eventId?: string) {
+type TestIdentityOverride = {
+  readonly eventId?: string;
+  readonly traceId?: string;
+};
+
+function testContext(identity: TestIdentityOverride = {}) {
   return createRuntimePluginContext({
     ...testIdentity(),
-    ...(eventId === undefined ? {} : {eventId}),
+    ...identity,
     sessionId: 'session_plugin_config_test',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'inspect plugin config',
@@ -2008,17 +2120,17 @@ function testContext(eventId?: string) {
 async function updateConfigField(
   host: ReturnType<typeof createRuntimePluginHost>,
   input: Readonly<Record<string, string | number | boolean | null>>,
-  eventId?: string,
+  identity: TestIdentityOverride = {},
 ) {
   return await host.handleToolCall(
     {
       ...testIdentity(),
-      ...(eventId === undefined ? {} : {eventId}),
+      ...identity,
       pluginId: runtimePluginId,
       toolName: runtimePluginConfigUpdateToolName,
       input,
     },
-    testContext(eventId),
+    testContext(identity),
   );
 }
 

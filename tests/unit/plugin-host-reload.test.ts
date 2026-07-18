@@ -347,6 +347,47 @@ describe('runtime plugin host live config reload', () => {
     expect(sessionEndLog.sort()).toEqual(['declined-rebuild', 'v1']);
   });
 
+  it('retires an instance handed back with a declined reload', async () => {
+    const sessionEndLog: string[] = [];
+    const orphan = reloadFixturePlugin('orphan', sessionEndLog);
+    const host = reloadHost({
+      initial: reloadFixturePlugin('v1', sessionEndLog),
+      reloader: {
+        reload: () =>
+          Promise.resolve({
+            status: 'declined',
+            reason: 'manifest drifted after construction',
+            plugin: orphan,
+          }),
+      },
+    });
+
+    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+
+    expect(result?.outcome).toBe('deferred');
+    expect(await contextText(host)).toBe('v1');
+    await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
+    expect(sessionEndLog.sort()).toEqual(['orphan', 'v1']);
+  });
+
+  it('does not retire the live instance when the factory returns it unchanged', async () => {
+    const sessionEndLog: string[] = [];
+    const v1 = reloadFixturePlugin('v1', sessionEndLog);
+    const host = reloadHost({
+      initial: v1,
+      reloader: {
+        reload: () => Promise.resolve({status: 'rebuilt', plugin: v1}),
+      },
+    });
+
+    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+
+    expect(result?.outcome).toBe('live_applied');
+    await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
+    // The same object must not receive terminal hooks twice (live + retired).
+    expect(sessionEndLog).toEqual(['v1']);
+  });
+
   it('runs terminal lifecycle hooks on superseded instances too', async () => {
     const sessionEndLog: string[] = [];
     const host = reloadHost({

@@ -41,6 +41,15 @@ export type RuntimePluginListHostState = () => {
   readonly activationStates?: readonly RuntimePluginListActivationState[];
   readonly confirmationAvailable: boolean;
   readonly liveReloadAvailable?: boolean;
+  /** Host-kept record of confirmed config updates for the identified turn. */
+  readonly sessionScopedConfigUpdateConfirmed?: (
+    identity: {
+      readonly eventId: string;
+      readonly traceId: string;
+      readonly createdAt: string;
+    },
+    pluginId: string,
+  ) => boolean;
 };
 
 export function createRuntimePluginListTool(): RuntimePluginProvidedTool {

@@ -120,6 +120,10 @@ export function createConfiguredRuntimePluginReloader(options: {
         return {
           status: 'declined',
           reason: `the rebuilt plugin "${pluginId}" no longer matches its declared manifest`,
+          // The factory already ran: hand the instance back so the host
+          // retires it into the terminal-lifecycle list instead of leaking
+          // whatever the factory allocated.
+          plugin,
         };
       }
 

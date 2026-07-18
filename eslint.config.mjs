@@ -62,12 +62,15 @@ export default tseslint.config(
     // +46 for the live config-reload seam (state refs, superseded-instance
     // retention, and method delegation only; the reload policy lives in
     // src/plugins/host/reload.ts), then +7 for the retirePlugin closure that
-    // keeps guard-declined rebuilds reachable for terminal lifecycle hooks.
+    // keeps guard-declined rebuilds reachable for terminal lifecycle hooks,
+    // then +23 for the retire at-most-once invariant and the confirmed
+    // config-update turn log wired at the tool-dispatch choke point (the log
+    // itself lives in reload.ts).
     files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1833, skipBlankLines: true, skipComments: true},
+        {max: 1856, skipBlankLines: true, skipComments: true},
       ],
     },
   },

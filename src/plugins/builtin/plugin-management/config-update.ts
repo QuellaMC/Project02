@@ -356,52 +356,18 @@ export function createPreparedRuntimePluginConfigEffectConfirmationPreview(optio
   );
 }
 
-export type RuntimePluginConfigUpdateTurnTracker = {
-  sessionScopedUpdateApproved(eventId: string, pluginId: string): boolean;
-  recordApprovedUpdate(options: {
-    readonly eventId: string;
-    readonly pluginId: string;
-    readonly sessionScoped: boolean;
-  }): void;
-};
-
-/**
- * Tracks approved config updates within one runtime event so a live-field
- * update stops promising appliesTo: next_turn once a session-scoped update
- * for the same plugin was already approved this turn — committed same-plugin
- * changes reload as one group, and a mixed group always defers.
- */
-export function createRuntimePluginConfigUpdateTurnTracker(): RuntimePluginConfigUpdateTurnTracker {
-  let trackedEventId: string | undefined;
-  const sessionScopedPluginIds = new Set<string>();
-  const enterEvent = (eventId: string): void => {
-    if (trackedEventId !== eventId) {
-      trackedEventId = eventId;
-      sessionScopedPluginIds.clear();
-    }
-  };
-
-  return {
-    sessionScopedUpdateApproved(eventId, pluginId) {
-      enterEvent(eventId);
-      return sessionScopedPluginIds.has(pluginId);
-    },
-    recordApprovedUpdate(options) {
-      enterEvent(options.eventId);
-
-      if (options.sessionScoped) {
-        sessionScopedPluginIds.add(options.pluginId);
-      }
-    },
-  };
-}
-
 export function handleRuntimePluginConfigUpdateToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly state: RuntimePluginConfigControlHostState;
   readonly canLiveReload?: (pluginId: string) => boolean;
-  readonly turnTracker?: RuntimePluginConfigUpdateTurnTracker;
+  /**
+   * Host-kept turn record: true when this turn already CONFIRMED a
+   * session-scoped update for the plugin. Committed same-plugin changes
+   * reload as one group and a mixed group always defers, so a live-field
+   * update must stop promising appliesTo: next_turn in that case.
+   */
+  readonly sessionScopedUpdateConfirmedThisTurn?: (pluginId: string) => boolean;
   readonly storeRoot?: string;
 }): RuntimePluginToolCallExecutionResult {
   let pluginId: string;
@@ -520,9 +486,12 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
     ...(options.canLiveReload === undefined
       ? {}
       : {canLiveReload: options.canLiveReload}),
-    ...(options.turnTracker === undefined
+    ...(options.sessionScopedUpdateConfirmedThisTurn === undefined
       ? {}
-      : {turnTracker: options.turnTracker}),
+      : {
+          sessionScopedUpdateConfirmedThisTurn:
+            options.sessionScopedUpdateConfirmedThisTurn,
+        }),
   });
 }
 
@@ -536,23 +505,14 @@ function approvedRuntimePluginConfigUpdateResult(options: {
   readonly resultFingerprint: string;
   readonly targetConfigPath: string;
   readonly canLiveReload?: (pluginId: string) => boolean;
-  readonly turnTracker?: RuntimePluginConfigUpdateTurnTracker;
+  readonly sessionScopedUpdateConfirmedThisTurn?: (pluginId: string) => boolean;
 }): RuntimePluginToolCallExecutionResult {
   const {call, context, manifest, field, operation, resultFingerprint} =
     options;
   const liveField = field.reloadRequired === false;
   const mixedTurnGroup =
     liveField &&
-    options.turnTracker?.sessionScopedUpdateApproved(
-      call.eventId,
-      manifest.id,
-    ) === true;
-
-  options.turnTracker?.recordApprovedUpdate({
-    eventId: call.eventId,
-    pluginId: manifest.id,
-    sessionScoped: !liveField,
-  });
+    options.sessionScopedUpdateConfirmedThisTurn?.(manifest.id) === true;
 
   return {
     status: 'accepted',

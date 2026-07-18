@@ -5,7 +5,12 @@ import {describe, expect, it} from 'vitest';
 
 import {prepareConfiguredProject02PluginActivation} from '../../src/app/index.ts';
 import {createConfiguredRuntimePluginReloader} from '../../src/app/plugin-reload.ts';
-import {runtimePluginId} from '../../src/plugins/api/index.ts';
+import {
+  createRuntimePlugin,
+  createRuntimePluginManifest,
+  runtimePluginId,
+} from '../../src/plugins/api/index.ts';
+import type {RuntimePlugin} from '../../src/plugins/api/index.ts';
 import {
   inspectRuntimePluginConfig,
   loadProject02RuntimeConfig,
@@ -185,6 +190,72 @@ describe('configured runtime plugin reloader', () => {
     if (result.status === 'declined') {
       expect(result.reason).toContain('moved past');
     }
+  });
+
+  it('hands the constructed instance back when the rebuilt manifest mismatches', async () => {
+    const storeRoot = createTestTempRoot('project02-plugin-reload-mismatch-');
+    const configPath = join(storeRoot, 'config.json');
+
+    writeRuntimeConfig(configPath, {
+      plugins: {'demo-config': {enabled: true, config: {tone: 'warm'}}},
+    });
+
+    const activationPlan = prepareConfiguredProject02PluginActivation({
+      loadedConfig: loadProject02RuntimeConfig({
+        configPath,
+        storeRoot,
+        env: {},
+      }),
+      storeRoot,
+      env: {},
+    });
+    const entry = activationPlan.catalogEntries['demo-config'];
+
+    if (entry === undefined || entry.catalogKind !== 'package') {
+      throw new Error('demo-config package entry missing from the plan');
+    }
+
+    let constructed: RuntimePlugin | undefined;
+    const reloader = createConfiguredRuntimePluginReloader({
+      activationPlan: {
+        ...activationPlan,
+        catalogEntries: {
+          ...activationPlan.catalogEntries,
+          'demo-config': {
+            ...entry,
+            load: async input => {
+              const original = await entry.load(input);
+
+              constructed = createRuntimePlugin({
+                manifest: createRuntimePluginManifest({
+                  ...original.manifest,
+                  version: '2.0.0-drifted',
+                }),
+                lifecycleHooks: original.lifecycleHooks,
+              });
+              return constructed;
+            },
+          },
+        },
+      },
+    });
+
+    const result = await reloader.reload('demo-config', {
+      expectedFingerprint: authoredFingerprint({
+        activationPlan,
+        configPath,
+        storeRoot,
+      }),
+    });
+
+    if (result.status !== 'declined') {
+      throw new Error(`Expected declined, got ${result.status}`);
+    }
+    expect(result.reason).toContain('no longer matches');
+    // The factory ran, so the declined result must carry the instance for
+    // the host to retire into terminal lifecycle dispatch.
+    expect(constructed).toBeDefined();
+    expect(result.plugin).toBe(constructed);
   });
 
   it('declines a reload when the refreshed config is invalid', async () => {

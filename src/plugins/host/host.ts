@@ -94,7 +94,9 @@ import {
   type RuntimePluginToolConfirmationHandler,
 } from './tool-confirmation.ts';
 import {
+  createConfirmedRuntimePluginConfigUpdateLog,
   reloadRuntimePluginForCommittedConfig,
+  type ConfirmedRuntimePluginConfigUpdateLog,
   type RuntimePluginConfigReloadHostResult,
   type RuntimePluginReloader,
 } from './reload.ts';
@@ -264,6 +266,8 @@ type RuntimePluginHostState = {
   ) => RuntimePlugin | undefined;
   /** Retains a never-serving instance (e.g. a guard-declined rebuild) for terminal hooks. */
   readonly retirePlugin: (plugin: RuntimePlugin) => void;
+  readonly confirmedConfigUpdates:
+    ConfirmedRuntimePluginConfigUpdateLog | undefined;
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
   readonly registrySnapshot: RuntimePluginRegistrySnapshot;
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
@@ -281,6 +285,7 @@ export function createRuntimePluginHost(
     supersededPlugins,
     swapEnabledPlugin,
     retirePlugin,
+    confirmedConfigUpdates,
     accessByPluginId,
     registrySnapshot,
     pluginToolDefinitions,
@@ -316,7 +321,7 @@ export function createRuntimePluginHost(
       });
     },
     async handleToolCall(call, context) {
-      return await runHandleToolCall({
+      const result = await runHandleToolCall({
         plugins: livePlugins(),
         call,
         context,
@@ -329,6 +334,11 @@ export function createRuntimePluginHost(
         createFileStore: options.fileStore?.createFileStore,
         fileStoreTransaction: activeFileStoreTransaction,
       });
+
+      // Settled results pass exactly one choke point, so the turn log sees
+      // the same confirmed effects the commit path will consume.
+      confirmedConfigUpdates?.note(result);
+      return result;
     },
     reconcileConfigEffect(effect) {
       if (pluginConfigControl === undefined) {
@@ -464,10 +474,23 @@ function createRuntimePluginHostState(
       : createRuntimePluginInventoryHostStateSnapshot(
           options.pluginInventoryState,
         ));
+  const confirmedConfigUpdates =
+    pluginConfigControl === undefined
+      ? undefined
+      : createConfirmedRuntimePluginConfigUpdateLog({
+          pluginManifests: pluginConfigControl.pluginManifests,
+        });
   let allPlugins: readonly RuntimePlugin[] = [];
   let enabledPlugins: readonly RuntimePlugin[] = [];
   let supersededPlugins: readonly RuntimePlugin[] = Object.freeze([]);
   const retirePlugin = (plugin: RuntimePlugin): void => {
+    // At-most-once invariant across live + retired instances: a factory that
+    // hands back the still-live object (or the same reject twice) must not
+    // get that instance terminal lifecycle hooks a second time.
+    if (enabledPlugins.includes(plugin) || supersededPlugins.includes(plugin)) {
+      return;
+    }
+
     supersededPlugins = Object.freeze([...supersededPlugins, plugin]);
   };
   let accessByPluginId: RuntimePluginAccessMapByPluginId = Object.freeze({});
@@ -481,6 +504,12 @@ function createRuntimePluginHostState(
         options.toolConfirmationHandler !== undefined &&
         pluginConfigControl !== undefined,
       liveReloadAvailable: options.pluginReloader !== undefined,
+      ...(confirmedConfigUpdates === undefined
+        ? {}
+        : {
+            sessionScopedConfigUpdateConfirmed:
+              confirmedConfigUpdates.sessionScopedConfirmed,
+          }),
       ...(pluginInventoryState === undefined
         ? {}
         : {installedPluginManifests: pluginInventoryState.pluginManifests}),
@@ -532,6 +561,7 @@ function createRuntimePluginHostState(
     pluginConfigControl,
     enabledIds,
     enabledPlugins,
+    confirmedConfigUpdates,
     livePlugins: () => enabledPlugins,
     supersededPlugins: () => supersededPlugins,
     swapEnabledPlugin: next => {
