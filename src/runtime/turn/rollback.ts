@@ -1,44 +1,44 @@
 import {
   CharacterInputError,
   CharacterReplyValidationError,
-  type RuntimeEventIdentity
+  type RuntimeEventIdentity,
 } from '../../core/index.ts';
 import type {
   RuntimePluginContext,
   RuntimePluginContextItem,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginHealthSnapshot,
-  RuntimePluginToolInvocationSnapshot
+  RuntimePluginToolInvocationSnapshot,
 } from '../../plugins/api/index.ts';
 import type {
   RuntimePluginHealthHostResult,
-  RuntimePluginHost
+  RuntimePluginHost,
 } from '../../plugins/index.ts';
 import {
   createRejectedRoleModelDecisionResult,
   roleModelInvalidVisibleReplyRejectionReason,
-  type RoleModelDecisionRejection
+  type RoleModelDecisionRejection,
 } from '../../role-model/index.ts';
 import {
   createRoleModelCommitValidationSnapshot,
-  type RoleModelCommitValidationSnapshot
+  type RoleModelCommitValidationSnapshot,
 } from '../evidence/records.ts';
 import {
   runtimePluginEvidenceOption,
-  runtimePluginTurnEvidenceOption
+  runtimePluginTurnEvidenceOption,
 } from './plugin-evidence.ts';
 import {
   IncompleteConversationRollbackError,
   appendRawEvent,
   appendTrace,
   rollbackPluginFileStoreTransaction,
-  visibleMessageIdsForTurnOption
+  visibleMessageIdsForTurnOption,
 } from './commit.ts';
 import {
   type LocalRuntimeUserMessageRejectedResult,
   type RoleModelRawEvidence,
   type RuntimeTurnRejectionOptions,
-  type RuntimeTurnState
+  type RuntimeTurnState,
 } from './contracts.ts';
 
 const unexpectedRuntimeTurnFailureMessage =
@@ -46,7 +46,7 @@ const unexpectedRuntimeTurnFailureMessage =
 
 export async function appendRejectedResult(
   state: RuntimeTurnState,
-  optionsForRejection: RuntimeTurnRejectionOptions
+  optionsForRejection: RuntimeTurnRejectionOptions,
 ): Promise<LocalRuntimeUserMessageRejectedResult> {
   const evidence = optionsForRejection.evidence ?? {};
   const pluginHostForEvidence =
@@ -55,11 +55,11 @@ export async function appendRejectedResult(
     optionsForRejection.healthResult ??
     (await pluginHealthForTurn({
       pluginHost: pluginHostForEvidence,
-      runtimePluginContext: optionsForRejection.runtimePluginContext
+      runtimePluginContext: optionsForRejection.runtimePluginContext,
     }));
   const runtimePluginEvidence = combineRuntimePluginEvidence(
     optionsForRejection.runtimePluginEvidence ?? [],
-    healthResult.evidence
+    healthResult.evidence,
   );
 
   await rollbackPluginFileStoreTransaction(state);
@@ -80,8 +80,8 @@ export async function appendRejectedResult(
       contextItems: optionsForRejection.runtimePluginContextItems ?? [],
       toolInvocations: optionsForRejection.runtimePluginToolInvocations ?? [],
       evidence: runtimePluginEvidence,
-      health: healthResult.snapshots
-    })
+      health: healthResult.snapshots,
+    }),
   });
 
   const rawEvent = appendRawEvent(state, {
@@ -100,8 +100,8 @@ export async function appendRejectedResult(
       contextItems: optionsForRejection.runtimePluginContextItems ?? [],
       toolInvocations: optionsForRejection.runtimePluginToolInvocations ?? [],
       evidence: runtimePluginEvidence,
-      health: healthResult.snapshots
-    })
+      health: healthResult.snapshots,
+    }),
   });
 
   appendTrace(state, 'raw_event_log_appended');
@@ -114,23 +114,21 @@ export async function appendRejectedResult(
     message: optionsForRejection.message,
     rawEvent,
     rawEventLogRecords: Object.freeze([...state.rawEventLogRecords]),
-    traceEntries: Object.freeze([...state.traceEntries])
+    traceEntries: Object.freeze([...state.traceEntries]),
   } satisfies LocalRuntimeUserMessageRejectedResult);
 }
 
-function rejectionIdentityOptions(
-  options: RuntimeTurnRejectionOptions
-): {
+function rejectionIdentityOptions(options: RuntimeTurnRejectionOptions): {
   readonly toolCallIds?: readonly string[];
   readonly visibleMessageIds?: readonly string[];
 } {
   return {
     ...(options.toolCallIds === undefined
       ? {}
-      : { toolCallIds: options.toolCallIds }),
+      : {toolCallIds: options.toolCallIds}),
     ...(options.visibleMessageIds === undefined
       ? {}
-      : { visibleMessageIds: options.visibleMessageIds })
+      : {visibleMessageIds: options.visibleMessageIds}),
   };
 }
 
@@ -141,31 +139,31 @@ export function appendRoleModelRejectedResult(
   runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[],
   runtimePluginContextItems?: readonly RuntimePluginContextItem[],
   runtimePluginToolInvocations?: readonly RuntimePluginToolInvocationSnapshot[],
-  runtimePluginContext?: RuntimePluginContext
+  runtimePluginContext?: RuntimePluginContext,
 ): Promise<LocalRuntimeUserMessageRejectedResult> {
   return appendRejectedResult(state, {
     evidence,
-    ...(runtimePluginEvidence === undefined ? {} : { runtimePluginEvidence }),
+    ...(runtimePluginEvidence === undefined ? {} : {runtimePluginEvidence}),
     ...(runtimePluginContextItems === undefined
       ? {}
-      : { runtimePluginContextItems }),
+      : {runtimePluginContextItems}),
     ...(runtimePluginToolInvocations === undefined
       ? {}
-      : { runtimePluginToolInvocations }),
+      : {runtimePluginToolInvocations}),
     message: rejection.details ?? rejection.reason,
     rawKind: 'commit_validation_rejected',
     rawReason: rejection.reason,
     reason: rejection.reason,
-    ...(runtimePluginContext === undefined ? {} : { runtimePluginContext }),
+    ...(runtimePluginContext === undefined ? {} : {runtimePluginContext}),
     traceStep: 'commit_validation_rejected',
     toolCallIds: Object.freeze([...state.finishedToolCallIds]),
-    ...visibleMessageIdsForTurnOption(state.committedVisibleMessages)
+    ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
   });
 }
 
 export async function handleRuntimeTurnFailure(
   state: RuntimeTurnState,
-  error: unknown
+  error: unknown,
 ): Promise<LocalRuntimeUserMessageRejectedResult> {
   if (
     state.terminalRawEventMayBeDurable ||
@@ -181,7 +179,7 @@ export async function handleRuntimeTurnFailure(
       rawReason: error.message,
       reason: 'input_validation_rejected',
       ...runtimePluginContextOption(state.runtimePluginContextForTurn),
-      traceStep: 'input_validation_rejected'
+      traceStep: 'input_validation_rejected',
     });
   }
 
@@ -195,7 +193,7 @@ export async function handleRuntimeTurnFailure(
       reason: rejection.reason,
       ...runtimePluginContextOption(state.runtimePluginContextForTurn),
       traceStep: 'character_reply_rejected',
-      ...visibleMessageIdsForTurnOption(state.committedVisibleMessages)
+      ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
     });
   }
 
@@ -208,7 +206,7 @@ export async function handleRuntimeTurnFailure(
     reason: unexpectedRuntimeTurnFailureMessage,
     toolCallIds: Object.freeze([...state.finishedToolCallIds]),
     ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
-    payloadSummary: state.payloadSummary
+    payloadSummary: state.payloadSummary,
   });
   appendTrace(state, 'raw_event_log_appended');
   appendTrace(state, 'runtime_turn_rejected');
@@ -217,9 +215,9 @@ export async function handleRuntimeTurnFailure(
 }
 
 function runtimePluginContextOption(
-  context: RuntimePluginContext | undefined
-): { readonly runtimePluginContext?: RuntimePluginContext } {
-  return context === undefined ? {} : { runtimePluginContext: context };
+  context: RuntimePluginContext | undefined,
+): {readonly runtimePluginContext?: RuntimePluginContext} {
+  return context === undefined ? {} : {runtimePluginContext: context};
 }
 
 export function healthResultRejectsTurn(options: {
@@ -227,8 +225,8 @@ export function healthResultRejectsTurn(options: {
   readonly healthResult: RuntimePluginHealthHostResult;
 }): boolean {
   if (
-    options.healthResult.evidence.some((evidence) =>
-      healthEvidenceRejectsTurn(evidence)
+    options.healthResult.evidence.some(evidence =>
+      healthEvidenceRejectsTurn(evidence),
     )
   ) {
     return true;
@@ -236,13 +234,13 @@ export function healthResultRejectsTurn(options: {
 
   const rejectingPluginIds = healthRejectingPluginIds(options.pluginHost);
 
-  return options.healthResult.snapshots.some((snapshot) =>
-    healthSnapshotRejectsTurn({ snapshot, rejectingPluginIds })
+  return options.healthResult.snapshots.some(snapshot =>
+    healthSnapshotRejectsTurn({snapshot, rejectingPluginIds}),
   );
 }
 
 function healthEvidenceRejectsTurn(
-  evidence: RuntimePluginEvidenceSnapshot
+  evidence: RuntimePluginEvidenceSnapshot,
 ): boolean {
   return evidence.evidenceKind === 'health' && evidence.status === 'failed';
 }
@@ -251,8 +249,8 @@ export function healthResultRejectionMessage(options: {
   readonly pluginHost: RuntimePluginHost | undefined;
   readonly healthResult: RuntimePluginHealthHostResult;
 }): string {
-  const failedEvidenceSummary = options.healthResult.evidence.find((evidence) =>
-    healthEvidenceRejectsTurn(evidence)
+  const failedEvidenceSummary = options.healthResult.evidence.find(evidence =>
+    healthEvidenceRejectsTurn(evidence),
   )?.summary;
 
   if (failedEvidenceSummary !== undefined) {
@@ -260,8 +258,8 @@ export function healthResultRejectionMessage(options: {
   }
 
   const rejectingPluginIds = healthRejectingPluginIds(options.pluginHost);
-  const rejectingSnapshot = options.healthResult.snapshots.find((snapshot) =>
-    healthSnapshotRejectsTurn({ snapshot, rejectingPluginIds })
+  const rejectingSnapshot = options.healthResult.snapshots.find(snapshot =>
+    healthSnapshotRejectsTurn({snapshot, rejectingPluginIds}),
   );
 
   if (rejectingSnapshot !== undefined) {
@@ -282,7 +280,7 @@ function healthSnapshotRejectsTurn(options: {
 }
 
 function healthRejectingPluginIds(
-  pluginHost: RuntimePluginHost | undefined
+  pluginHost: RuntimePluginHost | undefined,
 ): ReadonlySet<string> {
   if (pluginHost === undefined) {
     return new Set<string>();
@@ -294,12 +292,12 @@ function healthRejectingPluginIds(
     pluginHost
       .registrySnapshot()
       .plugins.filter(
-        (registration) =>
+        registration =>
           enabledPluginIds.has(registration.manifest.id) &&
           registration.manifest.runtimePolicy.failureBehavior.health ===
-            'reject_turn'
+            'reject_turn',
       )
-      .map((registration) => registration.manifest.id)
+      .map(registration => registration.manifest.id),
   );
 }
 
@@ -313,7 +311,7 @@ async function pluginHealthForTurn(options: {
   ) {
     return Object.freeze({
       snapshots: Object.freeze([]),
-      evidence: Object.freeze([])
+      evidence: Object.freeze([]),
     } satisfies RuntimePluginHealthHostResult);
   }
 
@@ -323,7 +321,7 @@ async function pluginHealthForTurn(options: {
 export function combineRuntimePluginEvidence(
   ...evidenceGroups: readonly (readonly RuntimePluginEvidenceSnapshot[])[]
 ): readonly RuntimePluginEvidenceSnapshot[] {
-  return Object.freeze(evidenceGroups.flatMap((evidence) => evidence));
+  return Object.freeze(evidenceGroups.flatMap(evidence => evidence));
 }
 
 export function createRejectedCommitValidationSnapshot(options: {
@@ -336,16 +334,16 @@ export function createRejectedCommitValidationSnapshot(options: {
     sessionId: options.sessionId,
     result: {
       status: 'rejected',
-      rejection: options.rejection
-    }
+      rejection: options.rejection,
+    },
   });
 }
 
 export function createInvalidVisibleReplyRejection(
-  error: CharacterReplyValidationError
+  error: CharacterReplyValidationError,
 ): RoleModelDecisionRejection {
   return createRejectedRoleModelDecisionResult(
     roleModelInvalidVisibleReplyRejectionReason,
-    error.message
+    error.message,
   ).rejection;
 }

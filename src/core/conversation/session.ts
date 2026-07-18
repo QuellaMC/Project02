@@ -2,13 +2,13 @@ import {
   freezeCharacterProfile,
   localCharacterProfile,
   type CharacterProfile,
-  type VisibleMessage
+  type VisibleMessage,
 } from '../message/message.ts';
 import {
   normalizeOneLineMessage,
   normalizeVisibleMessageText,
   OneLineMessageValidationError,
-  VisibleMessageTextValidationError
+  VisibleMessageTextValidationError,
 } from '../message/validation.ts';
 
 export type ConversationSession = {
@@ -28,7 +28,9 @@ export type CharacterAgentReply = {
 };
 
 export type CharacterAgent = {
-  reply(input: CharacterAgentInput): Promise<CharacterAgentReply> | CharacterAgentReply;
+  reply(
+    input: CharacterAgentInput,
+  ): Promise<CharacterAgentReply> | CharacterAgentReply;
 };
 
 export type CharacterTurnResult = {
@@ -43,9 +45,10 @@ export type ConversationSessionOptions = {
   readonly visibleTranscript?: readonly VisibleMessage[];
 };
 
-export type RestoredVisibleTranscriptValidationOptions = ConversationSessionOptions & {
-  readonly allowIncompleteFinalTurn?: boolean;
-};
+export type RestoredVisibleTranscriptValidationOptions =
+  ConversationSessionOptions & {
+    readonly allowIncompleteFinalTurn?: boolean;
+  };
 
 export type CharacterTurnOptions = {
   readonly recentMessageLimit?: number;
@@ -55,7 +58,7 @@ export const defaultRecentVisibleMessageLimit = 8;
 
 const localUserSpeaker = {
   id: 'local-user',
-  displayName: 'You'
+  displayName: 'You',
 } as const;
 
 const defaultSessionId = 'local-session';
@@ -84,25 +87,27 @@ export class ConversationRehydrationError extends Error {
 }
 
 export function createConversationSession(
-  options: ConversationSessionOptions = {}
+  options: ConversationSessionOptions = {},
 ): ConversationSession {
   const sessionId = options.id ?? defaultSessionId;
-  const character = freezeCharacterProfile(options.character ?? localCharacterProfile);
+  const character = freezeCharacterProfile(
+    options.character ?? localCharacterProfile,
+  );
   const visibleTranscript = [
     ...validateRestoredVisibleTranscript({
       id: sessionId,
       character,
       ...(options.visibleTranscript === undefined
         ? {}
-        : { visibleTranscript: options.visibleTranscript })
-    })
+        : {visibleTranscript: options.visibleTranscript}),
+    }),
   ];
   const session: ConversationSession = {
     id: sessionId,
     character,
     get visibleTranscript() {
       return Object.freeze([...visibleTranscript]);
-    }
+    },
   };
 
   const frozenSession = Object.freeze(session);
@@ -113,26 +118,30 @@ export function createConversationSession(
 }
 
 export function validateRestoredVisibleTranscript(
-  options: RestoredVisibleTranscriptValidationOptions = {}
+  options: RestoredVisibleTranscriptValidationOptions = {},
 ): readonly VisibleMessage[] {
   const sessionId = options.id ?? defaultSessionId;
-  const character = freezeCharacterProfile(options.character ?? localCharacterProfile);
+  const character = freezeCharacterProfile(
+    options.character ?? localCharacterProfile,
+  );
 
-  return Object.freeze(createInitialVisibleTranscript({
-    sessionId,
-    character,
-    ...(options.visibleTranscript === undefined
-      ? {}
-      : { visibleTranscript: options.visibleTranscript }),
-    allowIncompleteFinalTurn: options.allowIncompleteFinalTurn ?? false
-  }));
+  return Object.freeze(
+    createInitialVisibleTranscript({
+      sessionId,
+      character,
+      ...(options.visibleTranscript === undefined
+        ? {}
+        : {visibleTranscript: options.visibleTranscript}),
+      allowIncompleteFinalTurn: options.allowIncompleteFinalTurn ?? false,
+    }),
+  );
 }
 
 export async function runCharacterTurn(
   session: ConversationSession,
   message: string | undefined,
   agent: CharacterAgent,
-  options: CharacterTurnOptions = {}
+  options: CharacterTurnOptions = {},
 ): Promise<CharacterTurnResult> {
   return await enqueueSessionTurn(session, async () => {
     return await runSerializedCharacterTurn(session, message, agent, options);
@@ -141,7 +150,7 @@ export async function runCharacterTurn(
 
 export function rollbackLastCharacterTurn(
   session: ConversationSession,
-  turn: CharacterTurnResult
+  turn: CharacterTurnResult,
 ): void {
   const transcript = getMutableTranscript(session);
   const userMessageIndex = transcript.length - 2;
@@ -151,7 +160,9 @@ export function rollbackLastCharacterTurn(
     transcript[userMessageIndex] !== turn.userMessage ||
     transcript[userMessageIndex + 1] !== turn.characterMessage
   ) {
-    throw new Error('Cannot roll back a character turn that is no longer latest.');
+    throw new Error(
+      'Cannot roll back a character turn that is no longer latest.',
+    );
   }
 
   transcript.splice(userMessageIndex, 2);
@@ -161,18 +172,18 @@ async function runSerializedCharacterTurn(
   session: ConversationSession,
   message: string | undefined,
   agent: CharacterAgent,
-  options: CharacterTurnOptions
+  options: CharacterTurnOptions,
 ): Promise<CharacterTurnResult> {
   const normalizedMessage = normalizeCharacterInput(message);
   const transcript = getMutableTranscript(session);
   const recentVisibleMessages = selectRecentVisibleMessages(
     transcript,
-    options.recentMessageLimit ?? defaultRecentVisibleMessageLimit
+    options.recentMessageLimit ?? defaultRecentVisibleMessageLimit,
   );
   const reply = await agent.reply({
     character: session.character,
     message: normalizedMessage,
-    recentVisibleMessages
+    recentVisibleMessages,
   });
   const normalizedReplyText = normalizeCharacterReply(reply);
   const nextMessageNumber = transcript.length + 1;
@@ -181,12 +192,12 @@ async function runSerializedCharacterTurn(
     role: 'user',
     speakerId: localUserSpeaker.id,
     speakerName: localUserSpeaker.displayName,
-    text: normalizedMessage
+    text: normalizedMessage,
   } satisfies VisibleMessage);
   const characterMessage = createCharacterVisibleMessage({
     messageNumber: nextMessageNumber + 1,
     replyText: normalizedReplyText,
-    session
+    session,
   });
 
   transcript.push(userMessage, characterMessage);
@@ -195,14 +206,14 @@ async function runSerializedCharacterTurn(
     userMessage,
     characterMessage,
     reply: {
-      text: normalizedReplyText
-    }
+      text: normalizedReplyText,
+    },
   };
 }
 
 async function enqueueSessionTurn<T>(
   session: ConversationSession,
-  operation: () => Promise<T>
+  operation: () => Promise<T>,
 ): Promise<T> {
   const previousTurn = sessionTurnQueues.get(session) ?? Promise.resolve();
   const currentTurn = previousTurn.then(operation, operation);
@@ -211,8 +222,8 @@ async function enqueueSessionTurn<T>(
     session,
     currentTurn.then(
       () => undefined,
-      () => undefined
-    )
+      () => undefined,
+    ),
   );
 
   return await currentTurn;
@@ -230,19 +241,23 @@ function normalizeCharacterInput(message: string | undefined): string {
   }
 }
 
-export function validateCharacterAgentReply(reply: unknown): CharacterAgentReply {
+export function validateCharacterAgentReply(
+  reply: unknown,
+): CharacterAgentReply {
   if (!isCharacterAgentReply(reply)) {
-    throw new CharacterReplyValidationError('Character agent returned an invalid reply.');
+    throw new CharacterReplyValidationError(
+      'Character agent returned an invalid reply.',
+    );
   }
 
   return reply;
 }
 
 export function normalizeCharacterAgentReply(
-  reply: unknown
+  reply: unknown,
 ): CharacterAgentReply {
   return Object.freeze({
-    text: normalizeCharacterReply(reply)
+    text: normalizeCharacterReply(reply),
   } satisfies CharacterAgentReply);
 }
 
@@ -254,7 +269,7 @@ function normalizeCharacterReply(reply: unknown): string {
   } catch (error: unknown) {
     if (error instanceof VisibleMessageTextValidationError) {
       throw new CharacterReplyValidationError(
-        'Character agent returned an empty reply.'
+        'Character agent returned an empty reply.',
       );
     }
 
@@ -273,7 +288,7 @@ function isCharacterAgentReply(reply: unknown): reply is CharacterAgentReply {
 
 export function selectRecentVisibleMessages(
   transcript: readonly VisibleMessage[],
-  recentMessageLimit: number = defaultRecentVisibleMessageLimit
+  recentMessageLimit: number = defaultRecentVisibleMessageLimit,
 ): readonly VisibleMessage[] {
   if (recentMessageLimit <= 0) {
     return [];
@@ -292,7 +307,10 @@ function getMutableTranscript(session: ConversationSession): VisibleMessage[] {
   return transcript;
 }
 
-function createMessageId(session: ConversationSession, messageNumber: number): string {
+function createMessageId(
+  session: ConversationSession,
+  messageNumber: number,
+): string {
   return createMessageIdForSessionId(session.id, messageNumber);
 }
 
@@ -306,7 +324,7 @@ function createCharacterVisibleMessage(options: {
     role: 'character',
     speakerId: options.session.character.id,
     speakerName: options.session.character.displayName,
-    text: options.replyText
+    text: options.replyText,
   } satisfies VisibleMessage);
 }
 
@@ -325,14 +343,14 @@ function createInitialVisibleTranscript(options: {
         sessionId: options.sessionId,
         character: options.character,
         message,
-        expectedMessageNumber: index + 1
-      })
+        expectedMessageNumber: index + 1,
+      }),
     );
   });
 
   if (!options.allowIncompleteFinalTurn && restoredMessages.length % 2 !== 0) {
     throw new ConversationRehydrationError(
-      'Restored visible messages must end after a complete user/character turn.'
+      'Restored visible messages must end after a complete user/character turn.',
     );
   }
 
@@ -347,22 +365,22 @@ function freezeValidatedRestoredVisibleMessage(options: {
 }): VisibleMessage {
   const expectedId = createMessageIdForSessionId(
     options.sessionId,
-    options.expectedMessageNumber
+    options.expectedMessageNumber,
   );
 
   if (options.message.id !== expectedId) {
     throw new ConversationRehydrationError(
-      `Restored visible message must have sequential ID "${expectedId}".`
+      `Restored visible message must have sequential ID "${expectedId}".`,
     );
   }
 
   validateRestoredRoleOrder({
     expectedMessageNumber: options.expectedMessageNumber,
-    message: options.message
+    message: options.message,
   });
   validateRestoredSpeaker({
     character: options.character,
-    message: options.message
+    message: options.message,
   });
 
   let normalizedText: string;
@@ -372,7 +390,7 @@ function freezeValidatedRestoredVisibleMessage(options: {
   } catch (error: unknown) {
     if (error instanceof VisibleMessageTextValidationError) {
       throw new ConversationRehydrationError(
-        'Restored visible message text must already be normalized.'
+        'Restored visible message text must already be normalized.',
       );
     }
 
@@ -381,7 +399,7 @@ function freezeValidatedRestoredVisibleMessage(options: {
 
   if (normalizedText !== options.message.text) {
     throw new ConversationRehydrationError(
-      'Restored visible message text must already be normalized.'
+      'Restored visible message text must already be normalized.',
     );
   }
 
@@ -390,7 +408,7 @@ function freezeValidatedRestoredVisibleMessage(options: {
     role: options.message.role,
     speakerId: options.message.speakerId,
     speakerName: options.message.speakerName,
-    text: options.message.text
+    text: options.message.text,
   } satisfies VisibleMessage);
 }
 
@@ -403,7 +421,7 @@ function validateRestoredRoleOrder(options: {
 
   if (options.message.role !== expectedRole) {
     throw new ConversationRehydrationError(
-      'Restored visible messages must preserve user/character commit order.'
+      'Restored visible messages must preserve user/character commit order.',
     );
   }
 }
@@ -420,7 +438,7 @@ function validateRestoredSpeaker(options: {
       options.message.speakerName !== localUserSpeaker.displayName
     ) {
       throw new ConversationRehydrationError(
-        'Restored user message speaker metadata is malformed.'
+        'Restored user message speaker metadata is malformed.',
       );
     }
 
@@ -433,7 +451,7 @@ function validateRestoredSpeaker(options: {
       options.message.speakerName !== options.character.displayName
     ) {
       throw new ConversationRehydrationError(
-        'Restored character message speaker metadata is malformed.'
+        'Restored character message speaker metadata is malformed.',
       );
     }
 
@@ -441,10 +459,13 @@ function validateRestoredSpeaker(options: {
   }
 
   throw new ConversationRehydrationError(
-    'Restored visible message role is malformed.'
+    'Restored visible message role is malformed.',
   );
 }
 
-function createMessageIdForSessionId(sessionId: string, messageNumber: number): string {
+function createMessageIdForSessionId(
+  sessionId: string,
+  messageNumber: number,
+): string {
   return `${sessionId}:message-${String(messageNumber)}`;
 }

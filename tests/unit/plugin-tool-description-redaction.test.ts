@@ -1,17 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import { createRuntimeEventIdentity, createUserMessageRuntimeEvent } from '../../src/core/index.ts';
+import {
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent,
+} from '../../src/core/index.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginRegistrySnapshot,
   createRuntimePluginTurnEvidenceSnapshot,
-  runtimePluginContractVersion
+  runtimePluginContractVersion,
 } from '../../src/plugins/api/index.ts';
-import { createRuntimePluginHost } from '../../src/plugins/host/index.ts';
+import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   createDecisionContext,
   createRoleModelInputEnvelope,
-  renderRoleModelTurnContext
+  renderRoleModelTurnContext,
 } from '../../src/role-model/index.ts';
 
 const credentialBearingDescription =
@@ -23,10 +26,10 @@ describe('plugin tool description redaction', () => {
     const registry = createRuntimePluginRegistrySnapshot([plugin]);
 
     expectCredentialBearingTextRedacted(
-      registry.plugins[0]?.manifest.description
+      registry.plugins[0]?.manifest.description,
     );
     expectCredentialBearingTextRedacted(
-      registry.plugins[0]?.manifest.config.fields[0]?.description
+      registry.plugins[0]?.manifest.config.fields[0]?.description,
     );
 
     const snapshot = createRuntimePluginTurnEvidenceSnapshot({
@@ -43,20 +46,20 @@ describe('plugin tool description redaction', () => {
           registered: true,
           enabled: true,
           availableForTurn: true,
-          redactionLabels: ['credential']
-        }
+          redactionLabels: ['credential'],
+        },
       ],
       contextItems: [],
       toolInvocations: [],
       evidence: [],
-      health: []
+      health: [],
     });
 
     expectCredentialBearingTextRedacted(
-      snapshot.plugins[0]?.manifest.description
+      snapshot.plugins[0]?.manifest.description,
     );
     expectCredentialBearingTextRedacted(
-      snapshot.plugins[0]?.manifest.config.fields[0]?.description
+      snapshot.plugins[0]?.manifest.config.fields[0]?.description,
     );
   });
 
@@ -64,11 +67,11 @@ describe('plugin tool description redaction', () => {
     const plugin = createCredentialDescriptionPlugin();
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id]
+      enabledPluginIds: [plugin.manifest.id],
     });
     const toolDefinition = host
       .pluginToolDefinitions()
-      .find((tool) => tool.name === 'memory.secret_search');
+      .find(tool => tool.name === 'memory.secret_search');
 
     expect(toolDefinition).toBeDefined();
     if (toolDefinition === undefined) {
@@ -83,27 +86,29 @@ describe('plugin tool description redaction', () => {
         sessionId: 'session-plugin-tool-description-redaction',
         characterSnapshot: {
           id: 'mira',
-          displayName: 'Mira'
-        }
+          displayName: 'Mira',
+        },
       }),
-      pluginToolDefinitions: host.pluginToolDefinitions()
+      pluginToolDefinitions: host.pluginToolDefinitions(),
     });
     const renderedTool = renderRoleModelTurnContext(inputEnvelope).tools.find(
-      (tool) => tool.function.name === 'memory.secret_search'
+      tool => tool.function.name === 'memory.secret_search',
     );
 
     expect(renderedTool).toBeDefined();
     if (renderedTool === undefined) {
-      throw new Error('Expected memory.secret_search to render as a chat tool.');
+      throw new Error(
+        'Expected memory.secret_search to render as a chat tool.',
+      );
     }
 
-    expect(renderedTool.function.description).toContain(toolDefinition.description);
     expect(renderedTool.function.description).toContain(
-      'Optional for this user turn; at most 1 call per user turn.'
+      toolDefinition.description,
     );
-    expectCredentialBearingTextToHaveNoRawSecrets(
-      JSON.stringify(renderedTool)
+    expect(renderedTool.function.description).toContain(
+      'Optional for this user turn; at most 1 call per user turn.',
     );
+    expectCredentialBearingTextToHaveNoRawSecrets(JSON.stringify(renderedTool));
   });
 
   it('redacts provided tool descriptions when rehydrating turn evidence snapshots', () => {
@@ -118,21 +123,21 @@ describe('plugin tool description redaction', () => {
           providedTools: [
             {
               ...credentialDescriptionTool(),
-              description: credentialBearingDescription
-            }
+              description: credentialBearingDescription,
+            },
           ],
           registeredLifecycleHooks: ['tool_provider'],
           installed: true,
           registered: true,
           enabled: true,
           availableForTurn: true,
-          redactionLabels: ['credential']
-        }
+          redactionLabels: ['credential'],
+        },
       ],
       contextItems: [],
       toolInvocations: [],
       evidence: [],
-      health: []
+      health: [],
     });
     const description = snapshot.plugins[0]?.providedTools[0]?.description;
 
@@ -144,7 +149,7 @@ function createCredentialDescriptionPlugin() {
   return createRuntimePlugin({
     manifest: {
       ...credentialDescriptionManifest(),
-      declaredPlugins: ['tool_provider', 'handle_tool_call']
+      declaredPlugins: ['tool_provider', 'handle_tool_call'],
     },
     providedTools: [credentialDescriptionTool()],
     lifecycleHooks: {
@@ -152,10 +157,10 @@ function createCredentialDescriptionPlugin() {
         return {
           status: 'accepted',
           output: {},
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -169,7 +174,7 @@ function credentialDescriptionManifest() {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'test'
+      sourceSystem: 'test',
     },
     declaredPlugins: ['tool_provider'],
     config: {
@@ -179,9 +184,9 @@ function credentialDescriptionManifest() {
           description: credentialBearingDescription,
           required: false,
           secret: true,
-          redactionLabels: ['credential']
-        }
-      ]
+          redactionLabels: ['credential'],
+        },
+      ],
     },
     localTrustLevel: 'test_fixture',
     runtimePolicy: {
@@ -195,14 +200,14 @@ function credentialDescriptionManifest() {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
         afterTurnCommitted: 'log_failure',
-        health: 'degrade'
-      }
+        health: 'degrade',
+      },
     },
     activation: {
       defaultEnabled: true,
-      reasons: ['test']
+      reasons: ['test'],
     },
-    requestedAccess: { model_input: 'write' }
+    requestedAccess: {model_input: 'write'},
   };
 }
 
@@ -214,9 +219,7 @@ function expectCredentialBearingTextRedacted(value: string | undefined): void {
 
   expect(value).toContain('api_key=[redacted]');
   expect(value).toContain('Bearer [redacted]');
-  expect(value).toContain(
-    'https://[redacted]@example.test/?token=[redacted]'
-  );
+  expect(value).toContain('https://[redacted]@example.test/?token=[redacted]');
   expectCredentialBearingTextToHaveNoRawSecrets(value);
 }
 
@@ -234,7 +237,7 @@ function credentialDescriptionTool() {
     requiredForUserTurn: false,
     callLimit: {
       scope: 'user_turn',
-      maxCalls: 1
+      maxCalls: 1,
     },
     inputContract: {
       type: 'object',
@@ -243,15 +246,15 @@ function credentialDescriptionTool() {
           name: 'query',
           description: 'Search query.',
           required: true,
-          valueType: 'string'
-        }
+          valueType: 'string',
+        },
       ],
-      additionalFields: false
+      additionalFields: false,
     },
     validationOwner: 'plugin_host',
     sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
-    sourceReferencesRequired: false
+    sourceReferencesRequired: false,
   };
 }
 
@@ -259,6 +262,6 @@ function testIdentity() {
   return createRuntimeEventIdentity({
     eventId: 'evt_plugin_tool_description_redaction',
     traceId: 'trace_plugin_tool_description_redaction',
-    createdAt: '2026-06-15T00:00:00.000Z'
+    createdAt: '2026-06-15T00:00:00.000Z',
   });
 }

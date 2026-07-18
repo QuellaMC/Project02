@@ -1,17 +1,17 @@
-import { readFileSync } from 'node:fs';
+import {readFileSync} from 'node:fs';
 
-import { createRuntimePlugin } from '../../api/constructors.ts';
+import {createRuntimePlugin} from '../../api/constructors.ts';
 import {
   createRuntimePluginContextItem,
-  createRuntimePluginManifest
+  createRuntimePluginManifest,
 } from '../../api/manifest-validation.ts';
-import { createPluginContextEvidence } from '../../api/evidence-helpers.ts';
-import type { RuntimePluginFactoryInput } from '../../api/factory.ts';
+import {createPluginContextEvidence} from '../../api/evidence-helpers.ts';
+import type {RuntimePluginFactoryInput} from '../../api/factory.ts';
 import type {
   RuntimePlugin,
   RuntimePluginBeforeRoleModelCallResult,
   RuntimePluginJsonObject,
-  RuntimePluginManifest
+  RuntimePluginManifest,
 } from '../../api/types.ts';
 
 export const demoConfigPluginId = 'demo-config';
@@ -21,12 +21,12 @@ const demoConfigPluginDescriptorFormat = 'project02.plugin.v1';
 const demoConfigPluginEntry = './index.ts';
 const demoConfigPluginDescriptorUrl = new URL(
   './project02.plugin.json',
-  import.meta.url
+  import.meta.url,
 );
 
 export function createDemoConfigPluginManifest(): RuntimePluginManifest {
   return createRuntimePluginManifest(
-    readDemoConfigPluginDescriptor()['manifest']
+    readDemoConfigPluginDescriptor()['manifest'],
   );
 }
 
@@ -34,7 +34,7 @@ export function createDemoConfigPluginManifest(): RuntimePluginManifest {
 // config arrive here once per host construction, so committed config updates
 // take effect at the next session start.
 export function createProject02Plugin(
-  input: RuntimePluginFactoryInput
+  input: RuntimePluginFactoryInput,
 ): RuntimePlugin {
   const tone = configuredStringValue(input, 'tone') ?? demoConfigDefaultTone;
   const signoff = configuredStringValue(input, 'signoff');
@@ -58,34 +58,38 @@ export function createProject02Plugin(
               text: directives,
               budget: {
                 estimatedTokens: 48,
-                priority: 60
+                priority: 60,
               },
               sourceReferences: [],
               confidence: 1,
-              redactionLabels: context.privacy.redactionLabels
-            })
+              redactionLabels: context.privacy.redactionLabels,
+            }),
           ],
           evidence: [
             createPluginContextEvidence({
               context,
               pluginId: input.pluginId,
               status: 'accepted',
-              summary: 'Provided demo config style directives.'
-            })
-          ]
+              summary: 'Provided demo config style directives.',
+            }),
+          ],
         } satisfies RuntimePluginBeforeRoleModelCallResult);
-      }
-    }
+      },
+    },
   });
 }
 
 function configuredStringValue(
   input: RuntimePluginFactoryInput,
-  fieldName: string
+  fieldName: string,
 ): string | undefined {
   const field = input.resolvedConfig[fieldName];
 
-  if (field === undefined || !field.resolved || typeof field.value !== 'string') {
+  if (
+    field === undefined ||
+    !field.resolved ||
+    typeof field.value !== 'string'
+  ) {
     return undefined;
   }
 
@@ -99,11 +103,11 @@ function readDemoConfigPluginDescriptor(): RuntimePluginJsonObject {
 
   try {
     descriptor = JSON.parse(
-      readFileSync(demoConfigPluginDescriptorUrl, 'utf8')
+      readFileSync(demoConfigPluginDescriptorUrl, 'utf8'),
     ) as unknown;
   } catch (error: unknown) {
     throw new TypeError('Demo Config plugin descriptor could not be read.', {
-      cause: error
+      cause: error,
     });
   }
 
@@ -113,7 +117,7 @@ function readDemoConfigPluginDescriptor(): RuntimePluginJsonObject {
     descriptor['entry'] !== demoConfigPluginEntry ||
     !Object.hasOwn(descriptor, 'manifest') ||
     Object.keys(descriptor).some(
-      (key) => key !== 'format' && key !== 'entry' && key !== 'manifest'
+      key => key !== 'format' && key !== 'entry' && key !== 'manifest',
     )
   ) {
     throw new TypeError('Demo Config plugin descriptor is malformed.');

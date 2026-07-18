@@ -9,7 +9,7 @@ export {
   visibleMessageRoleValues,
   type CharacterProfile,
   type VisibleMessage,
-  type VisibleMessageRole
+  type VisibleMessageRole,
 } from './message/message.ts';
 export {
   normalizeOneLineMessage,
@@ -19,7 +19,7 @@ export {
   OneLineMessageValidationError,
   VisibleMessageTextValidationError,
   type OneLineMessageValidationReason,
-  type VisibleMessageTextValidationReason
+  type VisibleMessageTextValidationReason,
 } from './message/validation.ts';
 export {
   assertCanonicalRuntimeTimestamp,
@@ -33,7 +33,7 @@ export {
   type RuntimeEventIdentityOptions,
   type RuntimeEventType,
   type UserMessageRuntimeEvent,
-  type UserMessageRuntimeEventPayload
+  type UserMessageRuntimeEventPayload,
 } from './message/event.ts';
 export {
   CharacterInputError,
@@ -54,5 +54,5 @@ export {
   type CharacterTurnResult,
   type ConversationSession,
   type ConversationSessionOptions,
-  type RestoredVisibleTranscriptValidationOptions
+  type RestoredVisibleTranscriptValidationOptions,
 } from './conversation/session.ts';

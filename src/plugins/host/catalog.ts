@@ -1,25 +1,22 @@
 import {
   createFirstPartyModelToolsPlugin,
   createFirstPartyModelToolsPluginManifest,
-  isFirstPartyModelToolsPlugin
+  isFirstPartyModelToolsPlugin,
 } from '../builtin/model-tools/index.ts';
 import {
   createRuntimePluginManagementPlugin,
   createRuntimePluginManagementPluginManifest,
   isRuntimePluginManagementPlugin,
   type RuntimePluginListHostState,
-  type RuntimePluginConfigControlHostState
+  type RuntimePluginConfigControlHostState,
 } from '../builtin/plugin-management/index.ts';
 import {
   characterStatePluginId,
   firstPartyModelToolsPluginId,
-  runtimePluginId
+  runtimePluginId,
 } from '../api/contract.ts';
-import type {
-  RuntimePlugin,
-  RuntimePluginManifest
-} from '../api/types.ts';
-import type { RuntimePluginPackageCatalogEntry } from '../api/factory.ts';
+import type {RuntimePlugin, RuntimePluginManifest} from '../api/types.ts';
+import type {RuntimePluginPackageCatalogEntry} from '../api/factory.ts';
 
 export type RuntimePluginHostServiceBootstrapInput = {
   readonly hostStateForTurn: RuntimePluginListHostState;
@@ -31,13 +28,12 @@ export type RuntimePluginHostServiceCatalogEntry = {
   readonly catalogKind: 'host_service';
   readonly manifest: RuntimePluginManifest;
   readonly bootstrap: (
-    input: RuntimePluginHostServiceBootstrapInput
+    input: RuntimePluginHostServiceBootstrapInput,
   ) => RuntimePlugin;
 };
 
 export type RuntimePluginCatalogEntry =
-  | RuntimePluginHostServiceCatalogEntry
-  | RuntimePluginPackageCatalogEntry;
+  RuntimePluginHostServiceCatalogEntry | RuntimePluginPackageCatalogEntry;
 
 export function defaultRuntimePluginHostServiceCatalogEntries(): Readonly<
   Record<string, RuntimePluginHostServiceCatalogEntry>
@@ -46,44 +42,43 @@ export function defaultRuntimePluginHostServiceCatalogEntries(): Readonly<
     [runtimePluginId]: Object.freeze({
       catalogKind: 'host_service',
       manifest: createRuntimePluginManagementPluginManifest(),
-      bootstrap: (input) =>
+      bootstrap: input =>
         createRuntimePluginManagementPlugin({
           hostStateForTurn: input.hostStateForTurn,
           ...(input.pluginConfigControl === undefined
             ? {}
-            : { pluginConfigControl: input.pluginConfigControl }),
+            : {pluginConfigControl: input.pluginConfigControl}),
           ...(input.storeRoot === undefined
             ? {}
-            : { storeRoot: input.storeRoot })
-        })
+            : {storeRoot: input.storeRoot}),
+        }),
     } satisfies RuntimePluginHostServiceCatalogEntry),
     [firstPartyModelToolsPluginId]: Object.freeze({
       catalogKind: 'host_service',
       manifest: createFirstPartyModelToolsPluginManifest(),
-      bootstrap: () => createFirstPartyModelToolsPlugin()
-    } satisfies RuntimePluginHostServiceCatalogEntry)
+      bootstrap: () => createFirstPartyModelToolsPlugin(),
+    } satisfies RuntimePluginHostServiceCatalogEntry),
   });
 }
 
-export const hostFirstPartyRuntimePluginIds = Object.freeze(
-  [
-    ...Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(
-      (definition) => definition.manifest.id
-    ),
-    characterStatePluginId
-  ]
-);
+export const hostFirstPartyRuntimePluginIds = Object.freeze([
+  ...Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(
+    definition => definition.manifest.id,
+  ),
+  characterStatePluginId,
+]);
 
 export const hostScopedFirstPartyRuntimePluginIds = Object.freeze(
-  Object.values(defaultRuntimePluginHostServiceCatalogEntries())
-    .map((definition) => definition.manifest.id)
+  Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(
+    definition => definition.manifest.id,
+  ),
 );
 
 const hostFirstPartyRuntimePluginIdSet = new Set<string>(
-  hostFirstPartyRuntimePluginIds
+  hostFirstPartyRuntimePluginIds,
 );
 const hostScopedFirstPartyRuntimePluginIdSet = new Set<string>(
-  hostScopedFirstPartyRuntimePluginIds
+  hostScopedFirstPartyRuntimePluginIds,
 );
 
 export function createHostScopedFirstPartyRuntimePlugins(options: {
@@ -92,22 +87,26 @@ export function createHostScopedFirstPartyRuntimePlugins(options: {
   readonly storeRoot?: string;
 }): readonly RuntimePlugin[] {
   return Object.freeze(
-    Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(
-      (entry) => entry.bootstrap(options)
-    )
+    Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(entry =>
+      entry.bootstrap(options),
+    ),
   );
 }
 
-export function isHostOwnedFirstPartyRuntimePluginId(pluginId: string): boolean {
+export function isHostOwnedFirstPartyRuntimePluginId(
+  pluginId: string,
+): boolean {
   return hostFirstPartyRuntimePluginIdSet.has(pluginId);
 }
 
-export function isHostScopedFirstPartyRuntimePluginId(pluginId: string): boolean {
+export function isHostScopedFirstPartyRuntimePluginId(
+  pluginId: string,
+): boolean {
   return hostScopedFirstPartyRuntimePluginIdSet.has(pluginId);
 }
 
 export function isHostOwnedFirstPartyRuntimePlugin(
-  plugin: RuntimePlugin
+  plugin: RuntimePlugin,
 ): boolean {
   return (
     isRuntimePluginManagementPlugin(plugin) ||

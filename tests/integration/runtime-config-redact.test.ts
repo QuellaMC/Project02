@@ -1,28 +1,29 @@
-import { join } from 'node:path';
+import {join} from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import { createTestTempRoot } from '../support/temp-root.ts';
-import {
-  writeRuntimeConfig
-} from '../support/runtime-config.ts';
-import { collect } from '../support/streams.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {collect} from '../support/streams.ts';
 
-import { runRuntimeConfigCliFromArgs } from '../../src/cli/config/main.ts';
+import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {
   loadProject02RuntimeConfig,
-  resolveProject02RuntimeConfig
+  resolveProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
 import {
   createRuntimePlugin,
   runtimePluginContractVersion,
-  type RuntimePluginManifest
+  type RuntimePluginManifest,
 } from '../../src/plugins/index.ts';
 
 describe('runtime config redaction', () => {
   it('redacts dotted credential field names in resolved config', () => {
     const configPath = writeRuntimeConfig(
-      join(createTestTempRoot('project02-config-dotted-redact-'), 'config.json'),
+      join(
+        createTestTempRoot('project02-config-dotted-redact-'),
+        'config.json',
+      ),
       {
         plugins: {
           'memory.dotted-redaction': {
@@ -32,31 +33,31 @@ describe('runtime config redaction', () => {
               'display.name': 'visible display name',
               metadata: {
                 'cloud.api.key': 'nested-api-key-secret',
-                'display.name': 'nested visible display name'
-              }
-            }
-          }
-        }
-      }
+                'display.name': 'nested visible display name',
+              },
+            },
+          },
+        },
+      },
     );
 
     const resolved = resolveProject02RuntimeConfig({
-      loadedConfig: loadProject02RuntimeConfig({ configPath }),
-      pluginManifests: [dottedConfigManifest()]
+      loadedConfig: loadProject02RuntimeConfig({configPath}),
+      pluginManifests: [dottedConfigManifest()],
     });
     const redacted = resolved.redactedPluginConfigs['memory.dotted-redaction'];
 
     expect(redacted?.['api.key']).toMatchObject({
       secret: false,
-      value: '[redacted]'
+      value: '[redacted]',
     });
     expect(redacted?.['display.name']).toMatchObject({
       secret: false,
-      value: 'visible display name'
+      value: 'visible display name',
     });
     expect(redacted?.['metadata']?.value).toEqual({
       'cloud.api.key': '[redacted]',
-      'display.name': 'nested visible display name'
+      'display.name': 'nested visible display name',
     });
     expect(JSON.stringify(redacted)).not.toContain('resolved-api-key-secret');
     expect(JSON.stringify(redacted)).not.toContain('nested-api-key-secret');
@@ -64,7 +65,10 @@ describe('runtime config redaction', () => {
 
   it('redacts nested credential object paths in resolved config', () => {
     const configPath = writeRuntimeConfig(
-      join(createTestTempRoot('project02-config-nested-redact-'), 'config.json'),
+      join(
+        createTestTempRoot('project02-config-nested-redact-'),
+        'config.json',
+      ),
       {
         plugins: {
           'memory.dotted-redaction': {
@@ -73,54 +77,54 @@ describe('runtime config redaction', () => {
               metadata: {
                 api: {
                   key: 'nested-api-key-secret',
-                  url: 'visible-api-url'
+                  url: 'visible-api-url',
                 },
                 ordinary: {
-                  key: 'visible ordinary key'
+                  key: 'visible ordinary key',
                 },
                 providers: [
                   {
                     api: {
                       key: 'array-api-key-secret',
-                      url: 'visible-array-api-url'
+                      url: 'visible-array-api-url',
                     },
                     ordinary: {
-                      key: 'visible array ordinary key'
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        }
-      }
+                      key: 'visible array ordinary key',
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
     );
 
     const resolved = resolveProject02RuntimeConfig({
-      loadedConfig: loadProject02RuntimeConfig({ configPath }),
-      pluginManifests: [dottedConfigManifest()]
+      loadedConfig: loadProject02RuntimeConfig({configPath}),
+      pluginManifests: [dottedConfigManifest()],
     });
     const redacted = resolved.redactedPluginConfigs['memory.dotted-redaction'];
 
     expect(redacted?.['metadata']?.value).toEqual({
       api: {
         key: '[redacted]',
-        url: 'visible-api-url'
+        url: 'visible-api-url',
       },
       ordinary: {
-        key: 'visible ordinary key'
+        key: 'visible ordinary key',
       },
       providers: [
         {
           api: {
             key: '[redacted]',
-            url: 'visible-array-api-url'
+            url: 'visible-array-api-url',
           },
           ordinary: {
-            key: 'visible array ordinary key'
-          }
-        }
-      ]
+            key: 'visible array ordinary key',
+          },
+        },
+      ],
     });
     expect(JSON.stringify(redacted)).not.toContain('nested-api-key-secret');
     expect(JSON.stringify(redacted)).not.toContain('array-api-key-secret');
@@ -128,17 +132,17 @@ describe('runtime config redaction', () => {
 
   it('fails closed for manifest-declared auth secrets on runtime-config get', async () => {
     const manifest = authSecretConfigManifest();
-    const plugin = createRuntimePlugin({ manifest });
+    const plugin = createRuntimePlugin({manifest});
     const plaintextSecret = 'plaintext-auth-secret';
     const configPath = writeRuntimeConfig(
       join(createTestTempRoot('project02-config-auth-get-'), 'config.json'),
       {
         plugins: {
           [manifest.id]: {
-            config: { auth: plaintextSecret }
-          }
-        }
-      }
+            config: {auth: plaintextSecret},
+          },
+        },
+      },
     );
     let stdout = '';
     let stderr = '';
@@ -146,29 +150,29 @@ describe('runtime config redaction', () => {
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--config', configPath, 'get', `plugins.${manifest.id}.config.auth`],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
         }),
         factories: {
           [manifest.id]: {
             manifest,
-            create: () => plugin
-          }
-        }
-      }
+            create: () => plugin,
+          },
+        },
+      },
     );
 
     expect({
       exitCode,
       stdout,
-      leakedSecret: `${stdout}${stderr}`.includes(plaintextSecret)
+      leakedSecret: `${stdout}${stderr}`.includes(plaintextSecret),
     }).toEqual({
       exitCode: 1,
       stdout: '',
-      leakedSecret: false
+      leakedSecret: false,
     });
   });
 });
@@ -190,10 +194,10 @@ function authSecretConfigManifest(): RuntimePluginManifest {
           required: false,
           secret: true,
           valueType: 'secret',
-          redactionLabels: ['secret']
-        }
-      ]
-    }
+          redactionLabels: ['secret'],
+        },
+      ],
+    },
   } satisfies RuntimePluginManifest);
 }
 
@@ -207,7 +211,7 @@ function dottedConfigManifest(): RuntimePluginManifest {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'project02'
+      sourceSystem: 'project02',
     },
     declaredPlugins: [],
     config: {
@@ -218,7 +222,7 @@ function dottedConfigManifest(): RuntimePluginManifest {
           required: false,
           secret: false,
           valueType: 'string',
-          redactionLabels: []
+          redactionLabels: [],
         },
         {
           name: 'display.name',
@@ -226,7 +230,7 @@ function dottedConfigManifest(): RuntimePluginManifest {
           required: false,
           secret: false,
           valueType: 'string',
-          redactionLabels: []
+          redactionLabels: [],
         },
         {
           name: 'metadata',
@@ -234,9 +238,9 @@ function dottedConfigManifest(): RuntimePluginManifest {
           required: false,
           secret: false,
           valueType: 'object',
-          redactionLabels: []
-        }
-      ]
+          redactionLabels: [],
+        },
+      ],
     },
     localTrustLevel: 'trusted_adapter',
     runtimePolicy: {
@@ -250,13 +254,13 @@ function dottedConfigManifest(): RuntimePluginManifest {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'degrade',
         afterTurnCommitted: 'log_failure',
-        health: 'degrade'
-      }
+        health: 'degrade',
+      },
     },
     activation: {
       defaultEnabled: true,
-      reasons: ['test_dotted_redaction']
+      reasons: ['test_dotted_redaction'],
     },
-    requestedAccess: {}
+    requestedAccess: {},
   } satisfies RuntimePluginManifest);
 }

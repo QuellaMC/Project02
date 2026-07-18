@@ -1,38 +1,38 @@
 import {
   createConversationSession,
   createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent
+  createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
-import { characterStatePluginId } from '../../src/plugins/api/contract.ts';
-import { createRuntimePluginFileStore } from '../../src/runtime/storage/plugin-file-store/index.ts';
-import { testRuntimePluginFileStoreProvider } from './plugin-host-fixtures.ts';
-import { createDefaultProject02PluginHost } from './default-plugin-host.ts';
-import { createRuntimePluginHost } from '../../src/plugins/host/index.ts';
+import {characterStatePluginId} from '../../src/plugins/api/contract.ts';
+import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
+import {testRuntimePluginFileStoreProvider} from './plugin-host-fixtures.ts';
+import {createDefaultProject02PluginHost} from './default-plugin-host.ts';
+import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
   firstPartyModelToolsPluginId,
   runtimePluginId,
-  runtimePluginContractVersion
+  runtimePluginContractVersion,
 } from '../../src/plugins/api/index.ts';
-import { createFileRuntimeLogStore } from '../../src/runtime/storage/file-runtime-log-store.ts';
-import { createLocalRuntimeSessionStore } from '../../src/runtime/storage/session-store.ts';
-import { createRuntimeLogStore } from '../../src/runtime/evidence/index.ts';
-import type { RuntimeLogStore } from '../../src/runtime/evidence/records.ts';
+import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
+import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
+import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
+import type {RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
 import {
   runLocalUserMessageEvent as runLocalUserMessageEventWithExplicitHost,
-  type RunLocalUserMessageEventOptions
+  type RunLocalUserMessageEventOptions,
 } from '../../src/runtime/turn/local.ts';
 import {
   type RoleModelAdapter,
-  type RoleModelChatMessage
+  type RoleModelChatMessage,
 } from '../../src/role-model/index.ts';
-import { createTestTempRoot } from './temp-root.ts';
+import {createTestTempRoot} from './temp-root.ts';
 
 export function runLocalUserMessageEventWithDefaultTestHost(
   options: Omit<RunLocalUserMessageEventOptions, 'pluginHost'> &
-    Partial<Pick<RunLocalUserMessageEventOptions, 'pluginHost'>>
+    Partial<Pick<RunLocalUserMessageEventOptions, 'pluginHost'>>,
 ) {
   const sessionPaths = options.logStore.localRuntimeSessionPaths;
   const pluginHost =
@@ -40,19 +40,19 @@ export function runLocalUserMessageEventWithDefaultTestHost(
     createDefaultProject02PluginHost({
       ...(sessionPaths === undefined
         ? {}
-        : { storeRoot: sessionPaths.storeRoot }),
+        : {storeRoot: sessionPaths.storeRoot}),
       sessionId: sessionPaths?.sessionId ?? options.session.id,
-      sessionIdentity: options.session
+      sessionIdentity: options.session,
     });
 
   return runLocalUserMessageEventWithExplicitHost({
     ...options,
-    pluginHost
+    pluginHost,
   });
 }
 
 export function createNativePluginListAdapter(
-  messagesByRound: RoleModelChatMessage[][]
+  messagesByRound: RoleModelChatMessage[][],
 ): RoleModelAdapter {
   let index = 0;
 
@@ -67,9 +67,9 @@ export function createNativePluginListAdapter(
             toolCalls: [
               {
                 name: 'runtime.plugin.list',
-                input: {}
-              }
-            ]
+                input: {},
+              },
+            ],
           }),
           nativeAssistantMessage: {
             role: 'assistant',
@@ -80,11 +80,11 @@ export function createNativePluginListAdapter(
                 type: 'function',
                 function: {
                   name: 'runtime.plugin.list',
-                  arguments: '{}'
-                }
-              }
-            ]
-          }
+                  arguments: '{}',
+                },
+              },
+            ],
+          },
         };
       }
 
@@ -94,18 +94,18 @@ export function createNativePluginListAdapter(
             {
               name: 'visible_reply',
               input: {
-                text: 'Plugins are available.'
-              }
-            }
-          ]
-        })
+                text: 'Plugins are available.',
+              },
+            },
+          ],
+        }),
       };
-    }
+    },
   } satisfies RoleModelAdapter);
 }
 
 export function createNativeVisibleReplyAndPluginListAdapter(
-  messagesByRound: RoleModelChatMessage[][]
+  messagesByRound: RoleModelChatMessage[][],
 ): RoleModelAdapter {
   let index = 0;
 
@@ -121,14 +121,14 @@ export function createNativeVisibleReplyAndPluginListAdapter(
               {
                 name: 'visible_reply',
                 input: {
-                  text: 'Checking plugins.'
-                }
+                  text: 'Checking plugins.',
+                },
               },
               {
                 name: 'runtime.plugin.list',
-                input: {}
-              }
-            ]
+                input: {},
+              },
+            ],
           }),
           nativeAssistantMessage: {
             role: 'assistant',
@@ -139,19 +139,19 @@ export function createNativeVisibleReplyAndPluginListAdapter(
                 type: 'function',
                 function: {
                   name: 'visible_reply',
-                  arguments: '{"text":"Checking plugins."}'
-                }
+                  arguments: '{"text":"Checking plugins."}',
+                },
               },
               {
                 id: 'call_runtime_plugin_list_with_visible',
                 type: 'function',
                 function: {
                   name: 'runtime.plugin.list',
-                  arguments: '{}'
-                }
-              }
-            ]
-          }
+                  arguments: '{}',
+                },
+              },
+            ],
+          },
         };
       }
 
@@ -161,18 +161,18 @@ export function createNativeVisibleReplyAndPluginListAdapter(
             {
               name: 'visible_reply',
               input: {
-                text: 'Plugins are available after progress.'
-              }
-            }
-          ]
-        })
+                text: 'Plugins are available after progress.',
+              },
+            },
+          ],
+        }),
       };
-    }
+    },
   } satisfies RoleModelAdapter);
 }
 
 export function createSequencedAdapter(
-  decisions: readonly Readonly<Record<string, unknown>>[]
+  decisions: readonly Readonly<Record<string, unknown>>[],
 ): RoleModelAdapter {
   let index = 0;
 
@@ -186,14 +186,14 @@ export function createSequencedAdapter(
 
       index += 1;
       return {
-        rawOutputText: JSON.stringify(decision)
+        rawOutputText: JSON.stringify(decision),
       };
-    }
+    },
   } satisfies RoleModelAdapter);
 }
 
 export function createConversationAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore()
+  logStore: RuntimeLogStore = createRuntimeLogStore(),
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -220,12 +220,12 @@ export function createConversationAppendFailingLogStore(
     },
     conversationMessages() {
       return logStore.conversationMessages();
-    }
+    },
   } satisfies RuntimeLogStore);
 }
 
 export function createCharacterAppendFailingLogStore(
-  logStore: RuntimeLogStore
+  logStore: RuntimeLogStore,
 ): RuntimeLogStore {
   let conversationAppendCount = 0;
 
@@ -260,12 +260,12 @@ export function createCharacterAppendFailingLogStore(
     },
     conversationMessages() {
       return logStore.conversationMessages();
-    }
+    },
   } satisfies RuntimeLogStore);
 }
 
 export function createRuntimeTurnCompletedAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore()
+  logStore: RuntimeLogStore = createRuntimeLogStore(),
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -296,12 +296,12 @@ export function createRuntimeTurnCompletedAppendFailingLogStore(
     },
     conversationMessages() {
       return logStore.conversationMessages();
-    }
+    },
   } satisfies RuntimeLogStore);
 }
 
 export function createRuntimeTurnCompletedAppendThenThrowLogStore(
-  logStore: RuntimeLogStore
+  logStore: RuntimeLogStore,
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -312,7 +312,9 @@ export function createRuntimeTurnCompletedAppendThenThrowLogStore(
       const stored = logStore.appendRawEvent(record);
 
       if (record.kind === 'runtime_turn_completed') {
-        throw new Error('terminal raw event append reported failure after write');
+        throw new Error(
+          'terminal raw event append reported failure after write',
+        );
       }
 
       return stored;
@@ -334,12 +336,12 @@ export function createRuntimeTurnCompletedAppendThenThrowLogStore(
     },
     conversationMessages() {
       return logStore.conversationMessages();
-    }
+    },
   } satisfies RuntimeLogStore);
 }
 
 export function createOneShotTerminalTraceAppendFailingLogStore(
-  logStore: RuntimeLogStore
+  logStore: RuntimeLogStore,
 ): RuntimeLogStore {
   let failed = false;
 
@@ -373,12 +375,12 @@ export function createOneShotTerminalTraceAppendFailingLogStore(
     },
     conversationMessages() {
       return logStore.conversationMessages();
-    }
+    },
   } satisfies RuntimeLogStore);
 }
 
 export function createAfterTurnCommittedAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore()
+  logStore: RuntimeLogStore = createRuntimeLogStore(),
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -409,12 +411,12 @@ export function createAfterTurnCommittedAppendFailingLogStore(
     },
     conversationMessages() {
       return logStore.conversationMessages();
-    }
+    },
   } satisfies RuntimeLogStore);
 }
 
 export function createTurnCompletedAppendFailingLogStore(
-  logStore: RuntimeLogStore
+  logStore: RuntimeLogStore,
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -445,12 +447,12 @@ export function createTurnCompletedAppendFailingLogStore(
     },
     conversationMessages() {
       return logStore.conversationMessages();
-    }
+    },
   } satisfies RuntimeLogStore);
 }
 
 export function createToolCallFinishedAppendFailingLogStore(
-  logStore: RuntimeLogStore
+  logStore: RuntimeLogStore,
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -481,7 +483,7 @@ export function createToolCallFinishedAppendFailingLogStore(
     },
     conversationMessages() {
       return logStore.conversationMessages();
-    }
+    },
   } satisfies RuntimeLogStore);
 }
 
@@ -494,32 +496,32 @@ type DelegatedRuntimeLogStoreLifecycle = Pick<
 >;
 
 function delegateRuntimeLogStoreLifecycle(
-  logStore: RuntimeLogStore
+  logStore: RuntimeLogStore,
 ): DelegatedRuntimeLogStoreLifecycle {
   return Object.freeze({
     ...(logStore.localRuntimeSessionPaths === undefined
       ? {}
-      : { localRuntimeSessionPaths: logStore.localRuntimeSessionPaths }),
+      : {localRuntimeSessionPaths: logStore.localRuntimeSessionPaths}),
     ...(logStore.localRuntimeWriterLockOwnerToken === undefined
       ? {}
       : {
           localRuntimeWriterLockOwnerToken:
-            logStore.localRuntimeWriterLockOwnerToken
+            logStore.localRuntimeWriterLockOwnerToken,
         }),
     ...(logStore.checkpointWriterEvidence === undefined
       ? {}
       : {
           checkpointWriterEvidence() {
             logStore.checkpointWriterEvidence?.();
-          }
+          },
         }),
     ...(logStore.recoverAbandonedWriterEvidence === undefined
       ? {}
       : {
           recoverAbandonedWriterEvidence() {
             return logStore.recoverAbandonedWriterEvidence?.() ?? false;
-          }
-        })
+          },
+        }),
   } satisfies DelegatedRuntimeLogStoreLifecycle);
 }
 
@@ -540,11 +542,11 @@ export function createHealthRejectingPlugin() {
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test'
+        sourceSystem: 'test',
       },
       declaredPlugins: ['health'],
       config: {
-        fields: []
+        fields: [],
       },
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
@@ -558,14 +560,14 @@ export function createHealthRejectingPlugin() {
           beforeRoleModelCall: 'reject_turn',
           handleToolCall: 'reject_tool_call',
           afterTurnCommitted: 'log_failure',
-          health: 'reject_turn'
-        }
+          health: 'reject_turn',
+        },
       },
       activation: {
         defaultEnabled: true,
-        reasons: ['test']
+        reasons: ['test'],
       },
-      requestedAccess: {}
+      requestedAccess: {},
     },
     providedTools: [],
     lifecycleHooks: {
@@ -575,17 +577,17 @@ export function createHealthRejectingPlugin() {
           status: 'unavailable',
           checkedAt: context.timestamp,
           summary: 'Health fixture rejects the turn.',
-          redactionLabels: []
+          redactionLabels: [],
         });
-      }
-    }
+      },
+    },
   });
 }
 
 export function createHandleFileStoreWritePlugin(
   options: {
     readonly rejectHealthWhenValue?: string;
-  } = {}
+  } = {},
 ) {
   const healthRejectsWhenValue = options.rejectHealthWhenValue;
 
@@ -599,14 +601,14 @@ export function createHandleFileStoreWritePlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test'
+        sourceSystem: 'test',
       },
-        declaredPlugins:
-          healthRejectsWhenValue === undefined
-            ? ['tool_provider', 'handle_tool_call']
-            : ['tool_provider', 'handle_tool_call', 'health'],
+      declaredPlugins:
+        healthRejectsWhenValue === undefined
+          ? ['tool_provider', 'handle_tool_call']
+          : ['tool_provider', 'handle_tool_call', 'health'],
       config: {
-        fields: []
+        fields: [],
       },
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
@@ -620,14 +622,15 @@ export function createHandleFileStoreWritePlugin(
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'reject_tool_call',
           afterTurnCommitted: 'log_failure',
-          health: healthRejectsWhenValue === undefined ? 'degrade' : 'reject_turn'
-        }
+          health:
+            healthRejectsWhenValue === undefined ? 'degrade' : 'reject_turn',
+        },
       },
       activation: {
         defaultEnabled: true,
-        reasons: ['test']
+        reasons: ['test'],
       },
-      requestedAccess: { file_store: 'write', model_input: 'write' }
+      requestedAccess: {file_store: 'write', model_input: 'write'},
     },
     providedTools: [
       Object.freeze({
@@ -636,7 +639,7 @@ export function createHandleFileStoreWritePlugin(
         requiredForUserTurn: false,
         callLimit: {
           scope: 'user_turn',
-          maxCalls: 1
+          maxCalls: 1,
         },
         inputContract: {
           type: 'object',
@@ -644,32 +647,34 @@ export function createHandleFileStoreWritePlugin(
             {
               name: 'value',
               description: 'Value to write.',
-              required: true
-            }
+              required: true,
+            },
           ],
-          additionalFields: false
+          additionalFields: false,
         },
         validationOwner: 'plugin_host',
         sideEffectLevel: 'local_memory_write',
         requiresConfirmation: false,
-        sourceReferencesRequired: false
-      })
+        sourceReferencesRequired: false,
+      }),
     ],
     lifecycleHooks: {
       handleToolCall(call, context) {
         if (context.fileStore === undefined) {
-          throw new Error('Expected handle write fixture to receive fileStore.');
+          throw new Error(
+            'Expected handle write fixture to receive fileStore.',
+          );
         }
 
         context.fileStore.writeJsonAtomic('state.json', {
-          value: call.input['value'] ?? 'missing'
+          value: call.input['value'] ?? 'missing',
         });
 
         return {
           status: 'accepted',
           output: {
             ok: true,
-            pluginStoreRevision: context.fileStore.revision()
+            pluginStoreRevision: context.fileStore.revision(),
           },
           evidence: [
             createRuntimePluginEvidenceSnapshot({
@@ -681,9 +686,9 @@ export function createHandleFileStoreWritePlugin(
               evidenceKind: 'tool_invocation',
               status: 'accepted',
               summary: 'Staged handleToolCall fileStore write.',
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
       },
       ...(healthRejectsWhenValue === undefined
@@ -692,7 +697,7 @@ export function createHandleFileStoreWritePlugin(
             health(context) {
               if (context.fileStore === undefined) {
                 throw new Error(
-                  'Expected handle write fixture health to receive fileStore.'
+                  'Expected handle write fixture health to receive fileStore.',
                 );
               }
 
@@ -711,11 +716,11 @@ export function createHandleFileStoreWritePlugin(
                   status === 'available'
                     ? 'Staged handle write state is healthy.'
                     : 'Staged handle write state rejects the turn.',
-                redactionLabels: []
+                redactionLabels: [],
               });
-            }
-          })
-    }
+            },
+          }),
+    },
   });
 }
 
@@ -732,7 +737,7 @@ export function createAfterTurnCommittedProbeHost(
   options: {
     readonly status?: 'completed' | 'failed';
     readonly summary?: string;
-  } = {}
+  } = {},
 ) {
   const pluginId = 'after-commit.fixture';
 
@@ -749,11 +754,11 @@ export function createAfterTurnCommittedProbeHost(
           contractVersion: runtimePluginContractVersion,
           compatibility: {
             hostContractVersions: [runtimePluginContractVersion],
-            sourceSystem: 'test'
+            sourceSystem: 'test',
           },
           declaredPlugins: ['after_turn_committed'],
           config: {
-            fields: []
+            fields: [],
           },
           localTrustLevel: 'test_fixture',
           runtimePolicy: {
@@ -767,14 +772,14 @@ export function createAfterTurnCommittedProbeHost(
               beforeRoleModelCall: 'degrade',
               handleToolCall: 'reject_tool_call',
               afterTurnCommitted: 'log_failure',
-              health: 'degrade'
-            }
+              health: 'degrade',
+            },
           },
           activation: {
             defaultEnabled: true,
-            reasons: ['test']
+            reasons: ['test'],
           },
-          requestedAccess: {}
+          requestedAccess: {},
         },
         providedTools: [],
         lifecycleHooks: {
@@ -793,27 +798,22 @@ export function createAfterTurnCommittedProbeHost(
                     pluginId,
                     evidenceKind: 'after_turn_committed',
                     status: 'failed',
-                    summary:
-                      options.summary ?? 'After commit fixture failed.',
-                    redactionLabels: []
-                  })
-                ]
+                    summary: options.summary ?? 'After commit fixture failed.',
+                    redactionLabels: [],
+                  }),
+                ],
               };
             }
 
             return {
               status: 'completed',
-              evidence: []
+              evidence: [],
             };
-          }
-        }
-      })
+          },
+        },
+      }),
     ],
-    enabledPluginIds: [
-      runtimePluginId,
-      firstPartyModelToolsPluginId,
-      pluginId
-    ]
+    enabledPluginIds: [runtimePluginId, firstPartyModelToolsPluginId, pluginId],
   });
 }
 
@@ -833,11 +833,11 @@ export function createPluginStoreRevisionFixtureHost() {
           contractVersion: runtimePluginContractVersion,
           compatibility: {
             hostContractVersions: [runtimePluginContractVersion],
-            sourceSystem: 'test'
+            sourceSystem: 'test',
           },
           declaredPlugins: ['tool_provider', 'handle_tool_call'],
           config: {
-            fields: []
+            fields: [],
           },
           localTrustLevel: 'test_fixture',
           runtimePolicy: {
@@ -851,38 +851,33 @@ export function createPluginStoreRevisionFixtureHost() {
               beforeRoleModelCall: 'degrade',
               handleToolCall: 'reject_tool_call',
               afterTurnCommitted: 'log_failure',
-              health: 'degrade'
-            }
+              health: 'degrade',
+            },
           },
           activation: {
             defaultEnabled: true,
-            reasons: ['test']
+            reasons: ['test'],
           },
-          requestedAccess: { model_input: 'write' }
+          requestedAccess: {model_input: 'write'},
         },
         providedTools: [
           createRevisionFixtureTool('revision.zero'),
-          createRevisionFixtureTool('revision.valid')
+          createRevisionFixtureTool('revision.valid'),
         ],
         lifecycleHooks: {
           handleToolCall(call) {
             return {
               status: 'accepted',
               output: {
-                pluginStoreRevision:
-                  call.toolName === 'revision.valid' ? 2 : 0
+                pluginStoreRevision: call.toolName === 'revision.valid' ? 2 : 0,
               },
-              evidence: []
+              evidence: [],
             };
-          }
-        }
-      })
+          },
+        },
+      }),
     ],
-    enabledPluginIds: [
-      runtimePluginId,
-      firstPartyModelToolsPluginId,
-      pluginId
-    ]
+    enabledPluginIds: [runtimePluginId, firstPartyModelToolsPluginId, pluginId],
   });
 }
 
@@ -893,17 +888,17 @@ export function createRevisionFixtureTool(name: string) {
     requiredForUserTurn: false,
     callLimit: {
       scope: 'user_turn',
-      maxCalls: 1
+      maxCalls: 1,
     },
     inputContract: {
       type: 'object',
       fields: [],
-      additionalFields: false
+      additionalFields: false,
     },
     validationOwner: 'plugin_host',
     sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
-    sourceReferencesRequired: false
+    sourceReferencesRequired: false,
   } as const;
 }
 
@@ -913,8 +908,8 @@ export function createTestEvent(message: string, eventId: string) {
     createRuntimeEventIdentity({
       eventId,
       traceId: `trace_${eventId}`,
-      createdAt: '2026-06-15T00:00:00.000Z'
-    })
+      createdAt: '2026-06-15T00:00:00.000Z',
+    }),
   );
 }
 
@@ -926,29 +921,29 @@ export function transactionIdentityFromContext(context: {
   return {
     eventId: context.eventId,
     traceId: context.traceId,
-    createdAt: context.timestamp
+    createdAt: context.timestamp,
   };
 }
 
 export async function createDurableCharacterStateHarness(sessionId: string) {
   const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-  await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+  await createLocalRuntimeSessionStore({storeRoot}).createSession({
     sessionId,
-    createdAt: '2026-06-15T00:00:00.000Z'
+    createdAt: '2026-06-15T00:00:00.000Z',
   });
 
   return {
     storeRoot,
-    session: createConversationSession({ id: sessionId }),
+    session: createConversationSession({id: sessionId}),
     logStore: createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     }),
     pluginStore: createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId: characterStatePluginId
-    })
+      pluginId: characterStatePluginId,
+    }),
   };
 }

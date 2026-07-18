@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {
   createRuntimePlugin,
@@ -10,19 +10,19 @@ import {
   createRuntimePluginToolInvocationSnapshot,
   runtimePluginContractVersion,
   validateRuntimePluginContextItem,
-  type RuntimePluginAccessMap
+  type RuntimePluginAccessMap,
 } from '../../src/plugins/api/index.ts';
-import { normalizeRuntimePluginAccessMap, runtimePluginAccessAllows, runtimePluginAccessFor } from '../../src/plugins/policy/access-control.ts';
-import { isFirstPartyBuiltInModelTool } from '../../src/plugins/policy/tool-policy.ts';
 import {
-  createFirstPartyModelToolsPlugin
-} from '../../src/plugins/builtin/model-tools/index.ts';
-import {
-  createRuntimePluginProvidedTool
-} from '../../src/plugins/api/index.ts';
+  normalizeRuntimePluginAccessMap,
+  runtimePluginAccessAllows,
+  runtimePluginAccessFor,
+} from '../../src/plugins/policy/access-control.ts';
+import {isFirstPartyBuiltInModelTool} from '../../src/plugins/policy/tool-policy.ts';
+import {createFirstPartyModelToolsPlugin} from '../../src/plugins/builtin/model-tools/index.ts';
+import {createRuntimePluginProvidedTool} from '../../src/plugins/api/index.ts';
 import {
   isApprovalGatedRuntimePluginTool,
-  isModelFacingRuntimePluginTool
+  isModelFacingRuntimePluginTool,
 } from '../../src/plugins/api/tool-classification.ts';
 
 describe('runtime plugin source references', () => {
@@ -34,9 +34,9 @@ describe('runtime plugin source references', () => {
       id: 'bounded-context',
       kind: 'memory',
       text: 'safe',
-      budget: { estimatedTokens: 1, priority: 1 },
+      budget: {estimatedTokens: 1, priority: 1},
       sourceReferences,
-      redactionLabels: []
+      redactionLabels: [],
     });
     const evidence = (sourceReferences: readonly unknown[]) => ({
       eventId: 'evt_bounded_evidence',
@@ -48,57 +48,59 @@ describe('runtime plugin source references', () => {
       status: 'accepted',
       summary: 'safe',
       sourceReferences,
-      redactionLabels: []
+      redactionLabels: [],
     });
     const health = (summary: string) => ({
       pluginId: 'memory.boundary.fixture',
       status: 'ok',
       checkedAt: '2026-07-11T00:00:00.000Z',
       summary,
-      redactionLabels: []
+      redactionLabels: [],
     });
 
     expect(
       createRuntimePluginContextItem(
-        context([{ kind: 'memory', id: 'source', title: exact }])
-      ).sourceReferences[0]?.title
+        context([{kind: 'memory', id: 'source', title: exact}]),
+      ).sourceReferences[0]?.title,
     ).toBe(exact);
     expect(() =>
       createRuntimePluginContextItem(
-        context([{ kind: 'memory', id: 'source', title: over }])
-      )
+        context([{kind: 'memory', id: 'source', title: over}]),
+      ),
     ).toThrow('exceeds the JSON string byte limit.');
     expect(
       validateRuntimePluginContextItem(
-        context([{ kind: 'memory', id: 'source', title: over }])
-      )
+        context([{kind: 'memory', id: 'source', title: over}]),
+      ),
     ).toMatchObject({
       status: 'rejected',
-      reason: 'malformed_context_item'
+      reason: 'malformed_context_item',
     });
     expect(
       createRuntimePluginEvidenceSnapshot(
-        evidence([{ kind: 'memory', id: exact }])
-      ).sourceReferences?.[0]?.id
+        evidence([{kind: 'memory', id: exact}]),
+      ).sourceReferences?.[0]?.id,
     ).toBe(exact);
     expect(() =>
       createRuntimePluginEvidenceSnapshot(
-        evidence([{ kind: 'memory', id: over }])
-      )
+        evidence([{kind: 'memory', id: over}]),
+      ),
     ).toThrow('exceeds the JSON string byte limit.');
-    expect(createRuntimePluginHealthSnapshot(health(exact)).summary).toBe(exact);
+    expect(createRuntimePluginHealthSnapshot(health(exact)).summary).toBe(
+      exact,
+    );
     expect(() => createRuntimePluginHealthSnapshot(health(over))).toThrow(
-      'exceeds the JSON string byte limit.'
+      'exceeds the JSON string byte limit.',
     );
     expect(() =>
       createRuntimePluginContextItem(
         context(
-          Array.from({ length: 32 }, (_value, index) => ({
+          Array.from({length: 32}, (_value, index) => ({
             kind: 'memory',
-            id: `${String(index)}-${'x'.repeat(2_200)}`
-          }))
-        )
-      )
+            id: `${String(index)}-${'x'.repeat(2_200)}`,
+          })),
+        ),
+      ),
     ).toThrow('exceeds the aggregate JSON text limit.');
   }, 20_000);
 
@@ -106,16 +108,16 @@ describe('runtime plugin source references', () => {
     const labels = [
       'api_key=label-secret',
       'Bearer label-token',
-      'Cookie: session=label-cookie'
+      'Cookie: session=label-cookie',
     ];
     const contextItem = createRuntimePluginContextItem({
       pluginId: 'memory.labels.fixture',
       id: 'labels',
       kind: 'memory',
       text: 'safe',
-      budget: { estimatedTokens: 1, priority: 1 },
+      budget: {estimatedTokens: 1, priority: 1},
       sourceReferences: [],
-      redactionLabels: labels
+      redactionLabels: labels,
     });
     const evidence = createRuntimePluginEvidenceSnapshot({
       eventId: 'evt_labels',
@@ -126,14 +128,14 @@ describe('runtime plugin source references', () => {
       evidenceKind: 'tool_invocation',
       status: 'accepted',
       summary: 'safe',
-      redactionLabels: labels
+      redactionLabels: labels,
     });
     const health = createRuntimePluginHealthSnapshot({
       pluginId: 'memory.labels.fixture',
       status: 'ok',
       checkedAt: '2026-07-11T00:00:00.000Z',
       summary: 'safe',
-      redactionLabels: labels
+      redactionLabels: labels,
     });
     const manifest = createRuntimePluginManifest(
       runtimePluginManifestFixture({
@@ -150,14 +152,14 @@ describe('runtime plugin source references', () => {
             beforeRoleModelCall: 'degrade',
             handleToolCall: 'degrade',
             afterTurnCommitted: 'log_failure',
-            health: 'degrade'
-          }
+            health: 'degrade',
+          },
         },
         activation: {
           defaultEnabled: false,
-          reasons: ['api_key=reason-secret']
-        }
-      })
+          reasons: ['api_key=reason-secret'],
+        },
+      }),
     );
     const listing = createRuntimePluginListingSnapshot({
       pluginId: manifest.id,
@@ -170,9 +172,9 @@ describe('runtime plugin source references', () => {
       availableForTurn: true,
       redactionLabels: labels,
       requestedAccess: {},
-      grantedAccess: {}
+      grantedAccess: {},
     });
-    const serialized = JSON.stringify({ contextItem, evidence, health, listing });
+    const serialized = JSON.stringify({contextItem, evidence, health, listing});
 
     for (const secret of [
       'label-secret',
@@ -180,33 +182,33 @@ describe('runtime plugin source references', () => {
       'label-cookie',
       'display-secret',
       'version-secret',
-      'reason-secret'
+      'reason-secret',
     ]) {
       expect(serialized).not.toContain(secret);
     }
     expect(listing.manifest).toMatchObject({
       displayName: 'Authorization: [redacted]',
       version: '1.0.0?token=[redacted]',
-      activation: { reasons: ['api_key=[redacted]'] }
+      activation: {reasons: ['api_key=[redacted]']},
     });
     for (const snapshotLabels of [
       contextItem.redactionLabels,
       evidence.redactionLabels,
       health.redactionLabels,
       listing.redactionLabels,
-      listing.manifest.runtimePolicy.redactionLabels
+      listing.manifest.runtimePolicy.redactionLabels,
     ]) {
       expect(snapshotLabels).toEqual([
         'api_key=[redacted]',
         'Bearer [redacted]',
-        'Cookie: [redacted]'
+        'Cookie: [redacted]',
       ]);
     }
   });
 
   it('enforces tool-result evidence and aggregate limits at the public constructor', () => {
     const evidence = (count: number, summary = 'accepted') =>
-      Array.from({ length: count }, (_value, index) => ({
+      Array.from({length: count}, (_value, index) => ({
         eventId: 'evt_bounded_tool_snapshot',
         traceId: 'trace_bounded_tool_snapshot',
         createdAt: '2026-07-11T00:00:00.000Z',
@@ -215,7 +217,7 @@ describe('runtime plugin source references', () => {
         evidenceKind: 'tool_invocation' as const,
         status: 'accepted' as const,
         summary: `${summary}${String(index)}`,
-        redactionLabels: []
+        redactionLabels: [],
       }));
     const invocation = (resultEvidence: readonly unknown[]) => ({
       eventId: 'evt_bounded_tool_snapshot',
@@ -224,25 +226,25 @@ describe('runtime plugin source references', () => {
       kind: 'runtime_plugin_tool_invocation_snapshot' as const,
       pluginId: 'memory.boundary.fixture',
       toolName: 'memory.search',
-      input: { query: 'Mira' },
+      input: {query: 'Mira'},
       result: {
         status: 'accepted' as const,
-        output: { matched: true },
-        evidence: resultEvidence
-      }
+        output: {matched: true},
+        evidence: resultEvidence,
+      },
     });
 
     expect(
       createRuntimePluginToolInvocationSnapshot(invocation(evidence(64))).result
-        .evidence
+        .evidence,
     ).toHaveLength(64);
     expect(() =>
-      createRuntimePluginToolInvocationSnapshot(invocation(evidence(65)))
+      createRuntimePluginToolInvocationSnapshot(invocation(evidence(65))),
     ).toThrow('Plugin tool result evidence exceeds the 64-record limit.');
     expect(() =>
       createRuntimePluginToolInvocationSnapshot(
-        invocation(evidence(5, 'x'.repeat(14 * 1_024)))
-      )
+        invocation(evidence(5, 'x'.repeat(14 * 1_024))),
+      ),
     ).toThrow('Plugin tool result exceeds the aggregate JSON text limit.');
   });
 
@@ -254,7 +256,7 @@ describe('runtime plugin source references', () => {
       kind: 'runtime_plugin_tool_invocation_snapshot',
       pluginId: 'memory.redaction.fixture',
       toolName: 'memory.search',
-      input: { query: 'Authorization: Bearer input-secret' },
+      input: {query: 'Authorization: Bearer input-secret'},
       result: {
         status: 'rejected',
         reason: 'handler_failed token=reason-secret',
@@ -269,13 +271,11 @@ describe('runtime plugin source references', () => {
             evidenceKind: 'tool_invocation',
             status: 'rejected',
             summary: 'api_key=summary-secret',
-            sourceReferences: [
-              { kind: 'memory', id: 'token=source-secret' }
-            ],
-            redactionLabels: []
-          }
-        ]
-      }
+            sourceReferences: [{kind: 'memory', id: 'token=source-secret'}],
+            redactionLabels: [],
+          },
+        ],
+      },
     });
     const serialized = JSON.stringify(snapshot);
 
@@ -284,47 +284,47 @@ describe('runtime plugin source references', () => {
       'reason-secret',
       'message-secret',
       'summary-secret',
-      'source-secret'
+      'source-secret',
     ]) {
       expect(serialized).not.toContain(secret);
     }
     expect(snapshot.result).toMatchObject({
       status: 'rejected',
       reason: 'handler_failed token=[redacted]',
-      message: 'Cookie: [redacted]'
+      message: 'Cookie: [redacted]',
     });
     expect(snapshot.result.evidence[0]?.sourceReferences?.[0]?.id).toBe(
-      'token=[redacted]'
+      'token=[redacted]',
     );
   });
 
   it('enforces source-reference and context-text byte limits exactly', () => {
-    const references = Array.from({ length: 32 }, (_value, index) => ({
+    const references = Array.from({length: 32}, (_value, index) => ({
       kind: 'memory' as const,
-      id: `source-${String(index)}`
+      id: `source-${String(index)}`,
     }));
     const exactText = '界'.repeat(Math.floor((16 * 1_024) / 3));
     const base = {
       pluginId: 'memory.boundary.fixture',
       id: 'bounded-context',
       kind: 'memory',
-      budget: { estimatedTokens: 1, priority: 1 },
-      redactionLabels: []
+      budget: {estimatedTokens: 1, priority: 1},
+      redactionLabels: [],
     } as const;
 
     expect(
       createRuntimePluginContextItem({
         ...base,
         text: exactText,
-        sourceReferences: references
-      }).sourceReferences
+        sourceReferences: references,
+      }).sourceReferences,
     ).toHaveLength(32);
     expect(() =>
       createRuntimePluginContextItem({
         ...base,
         text: `${exactText}界`,
-        sourceReferences: references
-      })
+        sourceReferences: references,
+      }),
     ).toThrow('Plugin context item.text exceeds the JSON string byte limit.');
     expect(() =>
       createRuntimePluginContextItem({
@@ -332,9 +332,9 @@ describe('runtime plugin source references', () => {
         text: 'safe',
         sourceReferences: [
           ...references,
-          { kind: 'memory' as const, id: 'source-over-limit' }
-        ]
-      })
+          {kind: 'memory' as const, id: 'source-over-limit'},
+        ],
+      }),
     ).toThrow('Plugin sourceReferences exceed the 32-record limit.');
   });
 
@@ -343,18 +343,18 @@ describe('runtime plugin source references', () => {
       {
         kind: 'memory',
         id: '1234567890',
-        title: 'numeric database key'
+        title: 'numeric database key',
       },
       {
         kind: 'resource',
         id: '1f4e2d3c-9a8b-4c7d-8123-abcdefabcdef',
-        title: 'UUID beginning with a digit'
+        title: 'UUID beginning with a digit',
       },
       {
         kind: 'resource',
         id: 'resources/users/42/profile.json',
-        title: 'path-like resource ID'
-      }
+        title: 'path-like resource ID',
+      },
     ] as const;
 
     const contextItem = createRuntimePluginContextItem({
@@ -364,10 +364,10 @@ describe('runtime plugin source references', () => {
       text: 'Retrieved memory context.',
       budget: {
         estimatedTokens: 8,
-        priority: 1
+        priority: 1,
       },
       sourceReferences: references,
-      redactionLabels: []
+      redactionLabels: [],
     });
     const evidence = createRuntimePluginEvidenceSnapshot({
       eventId: 'evt_external_source_reference',
@@ -379,20 +379,20 @@ describe('runtime plugin source references', () => {
       status: 'accepted',
       summary: 'Memory search completed.',
       sourceReferences: references,
-      redactionLabels: []
+      redactionLabels: [],
     });
 
     const expectedIds = [
       '1234567890',
       '1f4e2d3c-9a8b-4c7d-8123-abcdefabcdef',
-      'resources/users/42/profile.json'
+      'resources/users/42/profile.json',
     ];
 
-    expect(contextItem.sourceReferences.map((reference) => reference.id)).toEqual(
-      expectedIds
+    expect(contextItem.sourceReferences.map(reference => reference.id)).toEqual(
+      expectedIds,
     );
-    expect(evidence.sourceReferences?.map((reference) => reference.id)).toEqual(
-      expectedIds
+    expect(evidence.sourceReferences?.map(reference => reference.id)).toEqual(
+      expectedIds,
     );
   });
 
@@ -406,16 +406,16 @@ describe('runtime plugin source references', () => {
           text: 'Retrieved memory context.',
           budget: {
             estimatedTokens: 8,
-            priority: 1
+            priority: 1,
           },
           sourceReferences: [
             {
               kind: 'memory',
-              id
-            }
+              id,
+            },
           ],
-          redactionLabels: []
-        })
+          redactionLabels: [],
+        }),
       ).toThrow('Plugin field "id" must be a non-empty string.');
 
       expect(() =>
@@ -431,11 +431,11 @@ describe('runtime plugin source references', () => {
           sourceReferences: [
             {
               kind: 'memory',
-              id
-            }
+              id,
+            },
           ],
-          redactionLabels: []
-        })
+          redactionLabels: [],
+        }),
       ).toThrow('Plugin field "id" must be a non-empty string.');
     }
   });
@@ -443,11 +443,13 @@ describe('runtime plugin source references', () => {
 
 describe('runtime plugin access control', () => {
   it('defaults absent requestedAccess to an empty permission object', () => {
-    const manifest = createRuntimePluginManifest(runtimePluginManifestFixture());
+    const manifest = createRuntimePluginManifest(
+      runtimePluginManifestFixture(),
+    );
 
     expect(manifest.requestedAccess).toEqual({});
     expect(runtimePluginAccessFor(manifest.requestedAccess, 'file_store')).toBe(
-      'none'
+      'none',
     );
   });
 
@@ -455,31 +457,31 @@ describe('runtime plugin access control', () => {
     expect(
       createRuntimePluginManifest(
         runtimePluginManifestFixture({
-          requestedAccess: {}
-        })
-      ).requestedAccess
+          requestedAccess: {},
+        }),
+      ).requestedAccess,
     ).toEqual({});
     expect(
       createRuntimePluginManifest(
         runtimePluginManifestFixture({
-          requestedAccess: { file_store: 'read' }
-        })
-      ).requestedAccess
-    ).toEqual({ file_store: 'read' });
+          requestedAccess: {file_store: 'read'},
+        }),
+      ).requestedAccess,
+    ).toEqual({file_store: 'read'});
     expect(
       createRuntimePluginManifest(
         runtimePluginManifestFixture({
           requestedAccess: {
             file_store: 'write',
             turn_context: 'read',
-            model_input: 'write'
-          }
-        })
-      ).requestedAccess
+            model_input: 'write',
+          },
+        }),
+      ).requestedAccess,
     ).toEqual({
       file_store: 'write',
       turn_context: 'read',
-      model_input: 'write'
+      model_input: 'write',
     });
   });
 
@@ -487,35 +489,33 @@ describe('runtime plugin access control', () => {
     for (const requestedAccess of [
       [],
       ['file_store'],
-      { unknown_access: 'read' },
-      { file_store: 'admin' },
+      {unknown_access: 'read'},
+      {file_store: 'admin'},
       null,
       'file_store',
       true,
-      1
+      1,
     ]) {
       expect(() =>
         createRuntimePluginManifest(
           runtimePluginManifestFixture({
-            requestedAccess
-          })
-        )
+            requestedAccess,
+          }),
+        ),
       ).toThrow(/requestedAccess/u);
     }
   });
 
   it('ignores inherited access values', () => {
     const inheritedPermissions = Object.create({
-      file_store: 'write'
+      file_store: 'write',
     }) as RuntimePluginAccessMap;
 
     expect(Object.keys(inheritedPermissions)).toEqual([]);
     expect(runtimePluginAccessFor(inheritedPermissions, 'file_store')).toBe(
-      'none'
+      'none',
     );
-    expect(
-      normalizeRuntimePluginAccessMap(inheritedPermissions)
-    ).toEqual({});
+    expect(normalizeRuntimePluginAccessMap(inheritedPermissions)).toEqual({});
   });
 
   it('orders access levels for allow checks', () => {
@@ -537,15 +537,15 @@ describe('runtime plugin model-facing tool policy', () => {
                 name: 'mode',
                 description: 'Mode.',
                 required: false,
-                allowedValues: ['api_key=legacy-enum-secret']
-              }
+                allowedValues: ['api_key=legacy-enum-secret'],
+              },
             ],
-            additionalFields: false
-          }
-        })
-      )
+            additionalFields: false,
+          },
+        }),
+      ),
     ).toThrow(
-      'Model tool inputContract field allowedValues must not contain credential-bearing values.'
+      'Model tool inputContract field allowedValues must not contain credential-bearing values.',
     );
     expect(() =>
       createRuntimePluginProvidedToolWithJsonSchema({
@@ -553,14 +553,14 @@ describe('runtime plugin model-facing tool policy', () => {
         properties: {
           mode: {
             type: 'string',
-            enum: ['Authorization: ApiKey schema-enum-secret']
-          }
+            enum: ['Authorization: ApiKey schema-enum-secret'],
+          },
         },
         required: [],
-        additionalProperties: false
-      })
+        additionalProperties: false,
+      }),
     ).toThrow(
-      'Model tool inputContract.jsonSchema.properties.mode.enum must not contain credential-bearing values.'
+      'Model tool inputContract.jsonSchema.properties.mode.enum must not contain credential-bearing values.',
     );
   });
 
@@ -571,8 +571,8 @@ describe('runtime plugin model-facing tool policy', () => {
         properties: {},
         required: [],
         additionalProperties: false,
-        oneOf: []
-      })
+        oneOf: [],
+      }),
     ).toThrow('Model tool inputContract.jsonSchema.oneOf is not supported.');
   });
 
@@ -586,18 +586,18 @@ describe('runtime plugin model-facing tool policy', () => {
             properties: {
               name: {
                 type: 'string',
-                minLength: 1
-              }
+                minLength: 1,
+              },
             },
             required: ['name'],
-            additionalProperties: false
-          }
+            additionalProperties: false,
+          },
         },
         required: ['profile'],
-        additionalProperties: false
-      })
+        additionalProperties: false,
+      }),
     ).toThrow(
-      'Model tool inputContract.jsonSchema.properties.profile.properties.name.minLength is not supported.'
+      'Model tool inputContract.jsonSchema.properties.profile.properties.name.minLength is not supported.',
     );
   });
 
@@ -610,15 +610,15 @@ describe('runtime plugin model-facing tool policy', () => {
             type: 'array',
             items: {
               type: 'string',
-              pattern: '^[a-z]+$'
-            }
-          }
+              pattern: '^[a-z]+$',
+            },
+          },
         },
         required: ['aliases'],
-        additionalProperties: false
-      })
+        additionalProperties: false,
+      }),
     ).toThrow(
-      'Model tool inputContract.jsonSchema.properties.aliases.items.pattern is not supported.'
+      'Model tool inputContract.jsonSchema.properties.aliases.items.pattern is not supported.',
     );
   });
 
@@ -630,7 +630,7 @@ describe('runtime plugin model-facing tool policy', () => {
         note: {
           type: ['string', 'null'],
           description: 'Optional note.',
-          enum: ['remember', 'forget']
+          enum: ['remember', 'forget'],
         },
         entries: {
           type: ['array', 'null'],
@@ -638,16 +638,16 @@ describe('runtime plugin model-facing tool policy', () => {
             type: ['object', 'null'],
             properties: {
               text: {
-                type: 'string'
-              }
+                type: 'string',
+              },
             },
             required: ['text'],
-            additionalProperties: false
-          }
-        }
+            additionalProperties: false,
+          },
+        },
       },
       required: ['note'],
-      additionalProperties: false
+      additionalProperties: false,
     };
 
     const tool = createRuntimePluginProvidedToolWithJsonSchema(jsonSchema);
@@ -658,19 +658,18 @@ describe('runtime plugin model-facing tool policy', () => {
   it('preserves an explicitly declared __proto__ property as data', () => {
     const jsonSchema = {
       type: 'object',
-      properties: Object.fromEntries([
-        ['__proto__', { type: 'string' }]
-      ]),
+      properties: Object.fromEntries([['__proto__', {type: 'string'}]]),
       required: ['__proto__'],
-      additionalProperties: false
+      additionalProperties: false,
     };
-    const schema = createRuntimePluginProvidedToolWithJsonSchema(jsonSchema)
-      .inputContract.jsonSchema;
+    const schema =
+      createRuntimePluginProvidedToolWithJsonSchema(jsonSchema).inputContract
+        .jsonSchema;
 
     expect(schema?.properties === undefined).toBe(false);
     expect(Object.hasOwn(schema?.properties ?? {}, '__proto__')).toBe(true);
     expect(Object.getPrototypeOf(schema?.properties ?? {})).toBe(
-      Object.prototype
+      Object.prototype,
     );
   });
 
@@ -679,21 +678,21 @@ describe('runtime plugin model-facing tool policy', () => {
       'duplicate required names',
       {
         type: 'object',
-        properties: { note: { type: 'string' } },
+        properties: {note: {type: 'string'}},
         required: ['note', 'note'],
-        additionalProperties: false
+        additionalProperties: false,
       },
-      'jsonSchema.required must not contain duplicates'
+      'jsonSchema.required must not contain duplicates',
     ],
     [
       'required names absent from properties',
       {
         type: 'object',
-        properties: { note: { type: 'string' } },
+        properties: {note: {type: 'string'}},
         required: ['missing'],
-        additionalProperties: false
+        additionalProperties: false,
       },
-      'jsonSchema.required includes "missing" outside properties'
+      'jsonSchema.required includes "missing" outside properties',
     ],
     [
       'required names inherited from Object.prototype',
@@ -701,58 +700,58 @@ describe('runtime plugin model-facing tool policy', () => {
         type: 'object',
         properties: {},
         required: ['toString'],
-        additionalProperties: false
+        additionalProperties: false,
       },
-      'jsonSchema.required includes "toString" outside properties'
+      'jsonSchema.required includes "toString" outside properties',
     ],
     [
       'duplicate union types',
       {
         type: 'object',
-        properties: { note: { type: ['string', 'string'] } },
+        properties: {note: {type: ['string', 'string']}},
         required: ['note'],
-        additionalProperties: false
+        additionalProperties: false,
       },
-      'jsonSchema.properties.note.type must not contain duplicates'
+      'jsonSchema.properties.note.type must not contain duplicates',
     ],
     [
       'object keywords on non-object types',
       {
         type: 'object',
         properties: {
-          note: { type: 'string', properties: {} }
+          note: {type: 'string', properties: {}},
         },
         required: ['note'],
-        additionalProperties: false
+        additionalProperties: false,
       },
-      'jsonSchema.properties.note uses object keywords without object type'
-    ]
+      'jsonSchema.properties.note uses object keywords without object type',
+    ],
   ])('rejects %s recursively', (_case, schema, message) => {
     expect(() => createRuntimePluginProvidedToolWithJsonSchema(schema)).toThrow(
-      message
+      message,
     );
   });
 
   it('accepts absent call limits and rejects malformed ones', () => {
     const unlimited = createRuntimePluginProvidedTool(
-      runtimePluginProvidedToolFixture({ callLimit: undefined })
+      runtimePluginProvidedToolFixture({callLimit: undefined}),
     );
 
     expect(unlimited.callLimit).toBeUndefined();
     expect(() =>
       createRuntimePluginProvidedTool(
-        runtimePluginProvidedToolFixture({ callLimit: 5 })
-      )
+        runtimePluginProvidedToolFixture({callLimit: 5}),
+      ),
     ).toThrow('Plugin provided tool callLimit must be an object.');
     expect(() =>
       createRuntimePluginProvidedTool(
         runtimePluginProvidedToolFixture({
           callLimit: {
             scope: 'session',
-            maxCalls: 1
-          }
-        })
-      )
+            maxCalls: 1,
+          },
+        }),
+      ),
     ).toThrow('Plugin provided tool callLimit.scope is not supported.');
   });
 
@@ -761,7 +760,7 @@ describe('runtime plugin model-facing tool policy', () => {
       createRuntimePlugin({
         manifest: runtimePluginManifestFixture({
           declaredPlugins: ['tool_provider', 'handle_tool_call'],
-          requestedAccess: {}
+          requestedAccess: {},
         }),
         providedTools: [runtimePluginProvidedToolFixture()],
         lifecycleHooks: {
@@ -769,13 +768,13 @@ describe('runtime plugin model-facing tool policy', () => {
             return {
               status: 'accepted',
               output: {},
-              evidence: []
+              evidence: [],
             };
-          }
-        }
-      })
+          },
+        },
+      }),
     ).toThrow(
-      'Model-facing tools require requestedAccess.model_input = "write".'
+      'Model-facing tools require requestedAccess.model_input = "write".',
     );
   });
 
@@ -783,7 +782,7 @@ describe('runtime plugin model-facing tool policy', () => {
     const plugin = createRuntimePlugin({
       manifest: runtimePluginManifestFixture({
         declaredPlugins: ['tool_provider', 'handle_tool_call'],
-        requestedAccess: { model_input: 'write' }
+        requestedAccess: {model_input: 'write'},
       }),
       providedTools: [runtimePluginProvidedToolFixture()],
       lifecycleHooks: {
@@ -791,10 +790,10 @@ describe('runtime plugin model-facing tool policy', () => {
           return {
             status: 'accepted',
             output: {},
-            evidence: []
+            evidence: [],
           };
-        }
-      }
+        },
+      },
     });
 
     expect(plugin.providedTools).toHaveLength(1);
@@ -804,49 +803,49 @@ describe('runtime plugin model-facing tool policy', () => {
     const manifest = createRuntimePluginManifest(
       runtimePluginManifestFixture({
         id: 'settings.arbitrary.fixture',
-        requestedAccess: { model_input: 'write' }
-      })
+        requestedAccess: {model_input: 'write'},
+      }),
     );
     const tool = createRuntimePluginProvidedTool(
       runtimePluginProvidedToolFixture({
         name: 'settings.arbitrary.update',
         sideEffectLevel: 'runtime_config_write',
-        requiresConfirmation: true
-      })
+        requiresConfirmation: true,
+      }),
     );
 
     expect(isApprovalGatedRuntimePluginTool(tool)).toBe(true);
-    expect(isModelFacingRuntimePluginTool({ manifest, tool })).toBe(true);
+    expect(isModelFacingRuntimePluginTool({manifest, tool})).toBe(true);
     expect(
       isModelFacingRuntimePluginTool({
         manifest: createRuntimePluginManifest(
           runtimePluginManifestFixture({
             id: 'settings.arbitrary.fixture',
-            requestedAccess: { model_input: 'write' },
+            requestedAccess: {model_input: 'write'},
             runtimePolicy: {
               ...manifest.runtimePolicy,
-              confirmation: 'required'
-            }
-          })
+              confirmation: 'required',
+            },
+          }),
         ),
-        tool
-      })
+        tool,
+      }),
     ).toBe(false);
   });
 
   it('accepts non-model-facing tools without model_input write', () => {
     for (const tool of [
-      runtimePluginProvidedToolFixture({ sideEffectLevel: 'external_write' }),
+      runtimePluginProvidedToolFixture({sideEffectLevel: 'external_write'}),
       runtimePluginProvidedToolFixture({
         sideEffectLevel: 'runtime_config_write',
-        requiresConfirmation: false
-      })
+        requiresConfirmation: false,
+      }),
     ]) {
       expect(() =>
         createRuntimePlugin({
           manifest: runtimePluginManifestFixture({
             declaredPlugins: ['tool_provider', 'handle_tool_call'],
-            requestedAccess: {}
+            requestedAccess: {},
           }),
           providedTools: [tool],
           lifecycleHooks: {
@@ -854,11 +853,11 @@ describe('runtime plugin model-facing tool policy', () => {
               return {
                 status: 'accepted',
                 output: {},
-                evidence: []
+                evidence: [],
               };
-            }
-          }
-        })
+            },
+          },
+        }),
       ).not.toThrow();
     }
   });
@@ -869,10 +868,10 @@ describe('runtime plugin model-facing tool policy', () => {
         manifest: runtimePluginManifestFixture(),
         lifecycleHooks: {
           onShutdown() {
-            return { status: 'completed', evidence: [] };
-          }
-        }
-      })
+            return {status: 'completed', evidence: []};
+          },
+        },
+      }),
     ).toThrow('onShutdown hooks must declare on_shutdown.');
   });
 
@@ -882,33 +881,35 @@ describe('runtime plugin model-facing tool policy', () => {
     const copiedPlugin = createRuntimePlugin({
       manifest: firstPartyPlugin.manifest,
       providedTools: firstPartyPlugin.providedTools,
-      lifecycleHooks: firstPartyPlugin.lifecycleHooks
+      lifecycleHooks: firstPartyPlugin.lifecycleHooks,
     });
 
     if (firstPartyTool === undefined) {
-      throw new Error('Expected first-party model tools plugin to provide a tool.');
+      throw new Error(
+        'Expected first-party model tools plugin to provide a tool.',
+      );
     }
 
     expect(firstPartyTool.callLimit).toEqual({
       scope: 'model_response',
-      maxCalls: 1
+      maxCalls: 1,
     });
 
     expect(
       isFirstPartyBuiltInModelTool({
         plugin: firstPartyPlugin,
         tool: firstPartyTool,
-        isHostOwnedFirstPartyModelToolsPlugin: (plugin) =>
-          plugin === firstPartyPlugin
-      })
+        isHostOwnedFirstPartyModelToolsPlugin: plugin =>
+          plugin === firstPartyPlugin,
+      }),
     ).toBe(true);
     expect(
       isFirstPartyBuiltInModelTool({
         plugin: copiedPlugin,
         tool: firstPartyTool,
-        isHostOwnedFirstPartyModelToolsPlugin: (plugin) =>
-          plugin === firstPartyPlugin
-      })
+        isHostOwnedFirstPartyModelToolsPlugin: plugin =>
+          plugin === firstPartyPlugin,
+      }),
     ).toBe(false);
   });
 });
@@ -925,7 +926,7 @@ describe('runtime plugin config metadata', () => {
         contractVersion: runtimePluginContractVersion,
         compatibility: {
           hostContractVersions: [runtimePluginContractVersion],
-          sourceSystem: 'test'
+          sourceSystem: 'test',
         },
         declaredPlugins: ['plugin_discovery'],
         config: {
@@ -941,7 +942,7 @@ describe('runtime plugin config metadata', () => {
               agentMutable: true,
               reloadRequired: true,
               redactionLabels: [],
-              configFingerprint: 'declared-backend-v1'
+              configFingerprint: 'declared-backend-v1',
             },
             {
               name: 'apiKey',
@@ -950,10 +951,10 @@ describe('runtime plugin config metadata', () => {
               secret: true,
               valueType: 'secret',
               envVar: 'MEMORY_API_KEY',
-              redactionLabels: ['secret']
-            }
+              redactionLabels: ['secret'],
+            },
           ],
-          fingerprint: 'declared-config-v1'
+          fingerprint: 'declared-config-v1',
         },
         localTrustLevel: 'test_fixture',
         runtimePolicy: {
@@ -967,15 +968,15 @@ describe('runtime plugin config metadata', () => {
             beforeRoleModelCall: 'degrade',
             handleToolCall: 'degrade',
             afterTurnCommitted: 'log_failure',
-            health: 'degrade'
-          }
+            health: 'degrade',
+          },
         },
         activation: {
           defaultEnabled: false,
-          reasons: ['test']
+          reasons: ['test'],
         },
-        requestedAccess: {}
-      }
+        requestedAccess: {},
+      },
     });
 
     expect(plugin.manifest.config.fields[0]).toMatchObject({
@@ -984,7 +985,7 @@ describe('runtime plugin config metadata', () => {
       allowedValues: ['local', 'cloud'],
       agentMutable: true,
       reloadRequired: true,
-      configFingerprint: 'declared-backend-v1'
+      configFingerprint: 'declared-backend-v1',
     });
     expect(JSON.stringify(plugin.manifest)).not.toContain('resolvedConfig');
     expect(JSON.stringify(plugin.manifest)).not.toContain('MEMORY_API_KEY=');
@@ -1003,18 +1004,18 @@ describe('runtime plugin config metadata', () => {
                 secret: true,
                 valueType: 'secret',
                 agentMutable: true,
-                redactionLabels: ['secret']
-              }
-            ]
-          }
-        })
-      )
+                redactionLabels: ['secret'],
+              },
+            ],
+          },
+        }),
+      ),
     ).toThrow('Secret plugin config fields cannot allow agent mutation.');
   });
 });
 
 function runtimePluginManifestFixture(
-  overrides: Readonly<Record<string, unknown>> = {}
+  overrides: Readonly<Record<string, unknown>> = {},
 ): Readonly<Record<string, unknown>> {
   return Object.freeze({
     id: 'access-control.fixture',
@@ -1025,11 +1026,11 @@ function runtimePluginManifestFixture(
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'test'
+      sourceSystem: 'test',
     },
     declaredPlugins: ['plugin_discovery'],
     config: {
-      fields: []
+      fields: [],
     },
     localTrustLevel: 'test_fixture',
     runtimePolicy: {
@@ -1043,14 +1044,14 @@ function runtimePluginManifestFixture(
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'degrade',
         afterTurnCommitted: 'log_failure',
-        health: 'degrade'
-      }
+        health: 'degrade',
+      },
     },
     activation: {
       defaultEnabled: false,
-      reasons: ['test']
+      reasons: ['test'],
     },
-    ...overrides
+    ...overrides,
   });
 }
 
@@ -1061,14 +1062,14 @@ function createRuntimePluginProvidedToolWithJsonSchema(jsonSchema: unknown) {
         type: 'object',
         fields: [],
         additionalFields: false,
-        jsonSchema
-      }
-    })
+        jsonSchema,
+      },
+    }),
   );
 }
 
 function runtimePluginProvidedToolFixture(
-  overrides: Readonly<Record<string, unknown>> = {}
+  overrides: Readonly<Record<string, unknown>> = {},
 ): Readonly<Record<string, unknown>> {
   return Object.freeze({
     name: 'memory.search',
@@ -1076,17 +1077,17 @@ function runtimePluginProvidedToolFixture(
     requiredForUserTurn: false,
     callLimit: {
       scope: 'user_turn',
-      maxCalls: 1
+      maxCalls: 1,
     },
     inputContract: {
       type: 'object',
       fields: [],
-      additionalFields: false
+      additionalFields: false,
     },
     validationOwner: 'plugin_host',
     sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
     sourceReferencesRequired: false,
-    ...overrides
+    ...overrides,
   });
 }

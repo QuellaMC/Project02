@@ -4,15 +4,15 @@
  * in src/plugins/file-store/contracts.ts; hosts receive these factories via
  * the RuntimePluginFileStoreProvider option instead of importing them.
  */
-export { createRuntimePluginFileStore } from './base-store.ts';
+export {createRuntimePluginFileStore} from './base-store.ts';
 export {
   freezeRuntimePluginFileStoreJsonValue,
-  normalizeRuntimePluginFileStorePath
+  normalizeRuntimePluginFileStorePath,
 } from './shared.ts';
-export { createRuntimePluginFileStoreTransaction } from './transaction.ts';
+export {createRuntimePluginFileStoreTransaction} from './transaction.ts';
 export type {
   CreateRuntimePluginFileStoreOptions,
   RuntimePluginFileStorePreparedTransaction,
   RuntimePluginFileStoreProvider,
-  RuntimePluginFileStoreTransaction
+  RuntimePluginFileStoreTransaction,
 } from '../../../plugins/index.ts';

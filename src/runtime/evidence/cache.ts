@@ -1,44 +1,50 @@
-import { type Dirent, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { basename } from 'node:path';
+import {
+  type Dirent,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+} from 'node:fs';
+import {basename} from 'node:path';
 import {
   CompleteJsonLinesError,
-  splitCompleteJsonLines
+  splitCompleteJsonLines,
 } from '../storage/json-lines.ts';
-import { isNodeErrorWithCode } from '../../shared/node-error.ts';
+import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
   LocalRuntimeStorageContractError,
-  type LocalRuntimeSessionPaths
+  type LocalRuntimeSessionPaths,
 } from '../storage/layout-contract.ts';
 import {
   atomicReplacementFileBelongsToTarget,
-  isAbandonedAtomicReplacementFile
+  isAbandonedAtomicReplacementFile,
 } from '../storage/atomic-file.ts';
-import { decodeConversationLogRecord } from '../storage/conversation-codec.ts';
-import { decodeRawEventLogRecord } from '../storage/raw-event-codec.ts';
-import { decodeRuntimeTraceEntry } from '../storage/trace-codec.ts';
+import {decodeConversationLogRecord} from '../storage/conversation-codec.ts';
+import {decodeRawEventLogRecord} from '../storage/raw-event-codec.ts';
+import {decodeRuntimeTraceEntry} from '../storage/trace-codec.ts';
 import type {
   CachedRuntimeSessionEvidence,
   DurableRuntimeSessionEvidence,
   MutableDurableRuntimeSessionEvidence,
   RuntimeEvidenceFileStamp,
-  RuntimeEvidenceFileStamps
+  RuntimeEvidenceFileStamps,
 } from './contract.ts';
 
 export function createMutableDurableRuntimeSessionEvidence(
-  evidence: DurableRuntimeSessionEvidence
+  evidence: DurableRuntimeSessionEvidence,
 ): MutableDurableRuntimeSessionEvidence {
   return {
     traceEntries: [...evidence.traceEntries],
     rawEvents: [...evidence.rawEvents],
-    conversationMessages: [...evidence.conversationMessages]
+    conversationMessages: [...evidence.conversationMessages],
   };
 }
 
 export function readCoherentRuntimeSessionEvidence(
   paths: LocalRuntimeSessionPaths,
   onEvidenceFileRead:
-    | ((event: { readonly filePath: string; readonly attempt: number }) => void)
-    | undefined
+    | ((event: {readonly filePath: string; readonly attempt: number}) => void)
+    | undefined,
 ): CachedRuntimeSessionEvidence {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const before = readRuntimeEvidenceFileStamps(paths);
@@ -46,7 +52,7 @@ export function readCoherentRuntimeSessionEvidence(
       paths,
       before,
       attempt,
-      onEvidenceFileRead
+      onEvidenceFileRead,
     );
     const after = readRuntimeEvidenceFileStamps(paths);
 
@@ -58,26 +64,26 @@ export function readCoherentRuntimeSessionEvidence(
       traceEntries: decodeRuntimeEvidenceJsonLines({
         filePath: paths.tracePath,
         content: contents.trace,
-        decodeLine: decodeRuntimeTraceEntry
+        decodeLine: decodeRuntimeTraceEntry,
       }),
       rawEvents: decodeRuntimeEvidenceJsonLines({
         filePath: paths.rawEventsPath,
         content: contents.rawEvents,
-        decodeLine: decodeRawEventLogRecord
+        decodeLine: decodeRawEventLogRecord,
       }),
       conversationMessages: decodeRuntimeEvidenceJsonLines({
         filePath: paths.conversationPath,
         content: contents.conversation,
-        decodeLine: decodeConversationLogRecord
-      })
+        decodeLine: decodeConversationLogRecord,
+      }),
     });
 
-    return { stamps: after, evidence };
+    return {stamps: after, evidence};
   }
 
   throw new LocalRuntimeStorageContractError(
     'concurrent_write',
-    `Local runtime evidence changed during a coherent read: ${paths.sessionId}.`
+    `Local runtime evidence changed during a coherent read: ${paths.sessionId}.`,
   );
 }
 
@@ -86,8 +92,8 @@ function readRuntimeEvidenceFileContents(
   stamps: RuntimeEvidenceFileStamps,
   attempt: number,
   onEvidenceFileRead:
-    | ((event: { readonly filePath: string; readonly attempt: number }) => void)
-    | undefined
+    | ((event: {readonly filePath: string; readonly attempt: number}) => void)
+    | undefined,
 ): {
   readonly trace: string | undefined;
   readonly rawEvents: string | undefined;
@@ -98,20 +104,20 @@ function readRuntimeEvidenceFileContents(
       paths.tracePath,
       stamps.trace,
       attempt,
-      onEvidenceFileRead
+      onEvidenceFileRead,
     ),
     rawEvents: readStampedRuntimeEvidenceFile(
       paths.rawEventsPath,
       stamps.rawEvents,
       attempt,
-      onEvidenceFileRead
+      onEvidenceFileRead,
     ),
     conversation: readStampedRuntimeEvidenceFile(
       paths.conversationPath,
       stamps.conversation,
       attempt,
-      onEvidenceFileRead
-    )
+      onEvidenceFileRead,
+    ),
   });
 }
 
@@ -120,8 +126,8 @@ function readStampedRuntimeEvidenceFile(
   stamp: RuntimeEvidenceFileStamp,
   attempt: number,
   onEvidenceFileRead:
-    | ((event: { readonly filePath: string; readonly attempt: number }) => void)
-    | undefined
+    | ((event: {readonly filePath: string; readonly attempt: number}) => void)
+    | undefined,
 ): string | undefined {
   if (!stamp.exists) {
     return undefined;
@@ -129,7 +135,7 @@ function readStampedRuntimeEvidenceFile(
 
   try {
     const content = readFileSync(filePath, 'utf8');
-    onEvidenceFileRead?.({ filePath, attempt });
+    onEvidenceFileRead?.({filePath, attempt});
     return content;
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
@@ -139,7 +145,7 @@ function readStampedRuntimeEvidenceFile(
     throw new LocalRuntimeStorageContractError(
       'read_failed',
       `Could not read local runtime log file: ${filePath}.`,
-      { cause: error }
+      {cause: error},
     );
   }
 }
@@ -155,7 +161,7 @@ function decodeRuntimeEvidenceJsonLines<T>(options: {
 
   try {
     return Object.freeze(
-      splitCompleteJsonLines(options.content).map(options.decodeLine)
+      splitCompleteJsonLines(options.content).map(options.decodeLine),
     );
   } catch (error: unknown) {
     if (error instanceof CompleteJsonLinesError) {
@@ -166,7 +172,7 @@ function decodeRuntimeEvidenceJsonLines<T>(options: {
         error.reason === 'missing_terminal_newline'
           ? `Local runtime log file ended without a complete JSONL record: ${options.filePath}.`
           : `Local runtime log file contains a blank JSONL record: ${options.filePath}.`,
-        { cause: error }
+        {cause: error},
       );
     }
 
@@ -175,18 +181,20 @@ function decodeRuntimeEvidenceJsonLines<T>(options: {
 }
 
 export function readRuntimeEvidenceFileStamps(
-  paths: LocalRuntimeSessionPaths
+  paths: LocalRuntimeSessionPaths,
 ): RuntimeEvidenceFileStamps {
   return Object.freeze({
     trace: readRuntimeEvidenceFileStamp(paths.tracePath),
     rawEvents: readRuntimeEvidenceFileStamp(paths.rawEventsPath),
-    conversation: readRuntimeEvidenceFileStamp(paths.conversationPath)
+    conversation: readRuntimeEvidenceFileStamp(paths.conversationPath),
   });
 }
 
-function readRuntimeEvidenceFileStamp(filePath: string): RuntimeEvidenceFileStamp {
+function readRuntimeEvidenceFileStamp(
+  filePath: string,
+): RuntimeEvidenceFileStamp {
   try {
-    const stat = statSync(filePath, { bigint: true });
+    const stat = statSync(filePath, {bigint: true});
 
     return Object.freeze({
       exists: true,
@@ -194,24 +202,24 @@ function readRuntimeEvidenceFileStamp(filePath: string): RuntimeEvidenceFileStam
       inode: stat.ino,
       size: stat.size,
       modifiedAtNanoseconds: stat.mtimeNs,
-      changedAtNanoseconds: stat.ctimeNs
+      changedAtNanoseconds: stat.ctimeNs,
     });
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return Object.freeze({ exists: false });
+      return Object.freeze({exists: false});
     }
 
     throw new LocalRuntimeStorageContractError(
       'read_failed',
       `Could not inspect local runtime log file: ${filePath}.`,
-      { cause: error }
+      {cause: error},
     );
   }
 }
 
 export function sameRuntimeEvidenceFileStamps(
   left: RuntimeEvidenceFileStamps,
-  right: RuntimeEvidenceFileStamps
+  right: RuntimeEvidenceFileStamps,
 ): boolean {
   return (
     sameRuntimeEvidenceFileStamp(left.trace, right.trace) &&
@@ -222,7 +230,7 @@ export function sameRuntimeEvidenceFileStamps(
 
 function sameRuntimeEvidenceFileStamp(
   left: RuntimeEvidenceFileStamp,
-  right: RuntimeEvidenceFileStamp
+  right: RuntimeEvidenceFileStamp,
 ): boolean {
   if (!left.exists || !right.exists) {
     return left.exists === right.exists;
@@ -238,12 +246,12 @@ function sameRuntimeEvidenceFileStamp(
 }
 
 export function scavengeAbandonedRuntimeEvidenceTemporaryFiles(
-  paths: LocalRuntimeSessionPaths
+  paths: LocalRuntimeSessionPaths,
 ): void {
   let entries: Dirent[];
 
   try {
-    entries = readdirSync(paths.sessionRoot, { withFileTypes: true });
+    entries = readdirSync(paths.sessionRoot, {withFileTypes: true});
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return;
@@ -252,14 +260,14 @@ export function scavengeAbandonedRuntimeEvidenceTemporaryFiles(
     throw new LocalRuntimeStorageContractError(
       'read_failed',
       `Could not inspect local runtime evidence temporary files: ${paths.sessionRoot}.`,
-      { cause: error }
+      {cause: error},
     );
   }
 
   const targetNames = [
     basename(paths.tracePath),
     basename(paths.rawEventsPath),
-    basename(paths.conversationPath)
+    basename(paths.conversationPath),
   ];
 
   for (const entry of entries) {
@@ -268,8 +276,8 @@ export function scavengeAbandonedRuntimeEvidenceTemporaryFiles(
     }
 
     if (
-      !targetNames.some((targetName) =>
-        atomicReplacementFileBelongsToTarget(entry.name, targetName)
+      !targetNames.some(targetName =>
+        atomicReplacementFileBelongsToTarget(entry.name, targetName),
       ) ||
       !isAbandonedAtomicReplacementFile(entry.name)
     ) {
@@ -283,7 +291,7 @@ export function scavengeAbandonedRuntimeEvidenceTemporaryFiles(
         throw new LocalRuntimeStorageContractError(
           'write_failed',
           `Could not remove abandoned local runtime evidence temporary file: ${entry.name}.`,
-          { cause: error }
+          {cause: error},
         );
       }
     }

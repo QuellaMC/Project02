@@ -1,10 +1,10 @@
 import type {
   RuntimePluginJsonObject,
-  RuntimePluginToolCallResult
+  RuntimePluginToolCallResult,
 } from '../../plugins/api/index.ts';
-import type { RuntimeEventIdentity } from '../../core/index.ts';
-import type { RawEventLogRecordKind } from '../evidence/records.ts';
-import { throwMalformedRecord } from './codec-primitives.ts';
+import type {RuntimeEventIdentity} from '../../core/index.ts';
+import type {RawEventLogRecordKind} from '../evidence/records.ts';
+import {throwMalformedRecord} from './codec-primitives.ts';
 
 type RawEventToolSemantics = {
   readonly identity: RuntimeEventIdentity;
@@ -19,7 +19,7 @@ type RawEventToolSemantics = {
 };
 
 export function assertToolRawEventSemantics(
-  options: RawEventToolSemantics
+  options: RawEventToolSemantics,
 ): void {
   if (!isToolRawEvent(options.kind)) {
     assertNonToolRawEventHasNoToolFields(options);
@@ -41,7 +41,7 @@ function isToolRawEvent(kind: RawEventLogRecordKind): boolean {
 }
 
 function assertNonToolRawEventHasNoToolFields(
-  options: RawEventToolSemantics
+  options: RawEventToolSemantics,
 ): void {
   if (
     options.toolCallId !== undefined ||
@@ -85,7 +85,7 @@ function assertFinishedToolRawEvent(options: RawEventToolSemantics): void {
   assertToolResultEvidenceIdentity({
     identity: options.identity,
     pluginId: options.toolPluginId,
-    result: options.toolResult
+    result: options.toolResult,
   });
 }
 

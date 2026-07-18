@@ -1,8 +1,8 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import {existsSync, readFileSync, statSync} from 'node:fs';
 
 import {
   createLocalRuntimeStorageLayout,
-  LocalRuntimeStorageContractError
+  LocalRuntimeStorageContractError,
 } from '../storage/layout-contract.ts';
 import {
   runtimeConfigEnvVarName,
@@ -14,31 +14,28 @@ import {
   type RuntimeConfigDiagnostic,
   type RuntimeConfigDiagnosticPluginMetadata,
   type RuntimeConfigSource,
-  type RuntimeConfigValue
+  type RuntimeConfigValue,
 } from './types.ts';
-import { createJsonBoundarySnapshot } from '../../shared/json-boundary.ts';
-import { createRuntimeConfigDiagnostic } from './diagnostic.ts';
+import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
+import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {
   project02RuntimeConfigFieldDefinitions,
   project02RuntimeConfigFieldNames,
-  runtimeConfigValueMatchesField
+  runtimeConfigValueMatchesField,
 } from './schema.ts';
 
 const project02RuntimeConfigFields = Object.freeze([
   'version',
   'project02',
-  'plugins'
+  'plugins',
 ]);
 const project02HostConfigFields = project02RuntimeConfigFieldNames();
-const project02RuntimePluginConfigFields = Object.freeze([
-  'enabled',
-  'config'
-]);
+const project02RuntimePluginConfigFields = Object.freeze(['enabled', 'config']);
 const runtimeConfigSecretRefFields = Object.freeze(['$env', 'description']);
 const runtimeConfigPlaintextSecretOverrideFields = Object.freeze([
   '$plaintextSecret',
   'allowPlaintextSecret',
-  'justification'
+  'justification',
 ]);
 
 export const maxProject02RuntimeConfigBytes = 256 * 1_024;
@@ -55,15 +52,15 @@ export type Project02RuntimeConfigValidationResult = {
 };
 
 export function loadProject02RuntimeConfig(
-  options: LoadProject02RuntimeConfigOptions = {}
+  options: LoadProject02RuntimeConfigOptions = {},
 ): LoadedProject02RuntimeConfig {
   const env = options.env ?? process.env;
-  const location = resolveRuntimeConfigLocation({ ...options, env });
+  const location = resolveRuntimeConfigLocation({...options, env});
 
   if (location.source === 'none') {
     return Object.freeze({
       source: 'none',
-      diagnostics: []
+      diagnostics: [],
     } satisfies LoadedProject02RuntimeConfig);
   }
 
@@ -71,7 +68,7 @@ export function loadProject02RuntimeConfig(
     if (location.source === 'default') {
       return Object.freeze({
         source: 'none',
-        diagnostics: []
+        diagnostics: [],
       } satisfies LoadedProject02RuntimeConfig);
     }
 
@@ -82,9 +79,9 @@ export function loadProject02RuntimeConfig(
         createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_missing',
-          `Runtime config file does not exist: ${location.path}.`
-        )
-      ]
+          `Runtime config file does not exist: ${location.path}.`,
+        ),
+      ],
     } satisfies LoadedProject02RuntimeConfig);
   }
 
@@ -94,7 +91,7 @@ export function loadProject02RuntimeConfig(
     return Object.freeze({
       source: location.source,
       path: location.path,
-      diagnostics: [readResult.diagnostic]
+      diagnostics: [readResult.diagnostic],
     } satisfies LoadedProject02RuntimeConfig);
   }
 
@@ -112,9 +109,9 @@ export function loadProject02RuntimeConfig(
           'runtime_config_malformed_json',
           `Runtime config file is not valid JSON: ${
             error instanceof Error ? error.message : 'unknown parse error'
-          }.`
-        )
-      ]
+          }.`,
+        ),
+      ],
     } satisfies LoadedProject02RuntimeConfig);
   }
 
@@ -123,13 +120,13 @@ export function loadProject02RuntimeConfig(
   return Object.freeze({
     source: location.source,
     path: location.path,
-    ...(accepted.config === undefined ? {} : { config: accepted.config }),
-    diagnostics: accepted.diagnostics
+    ...(accepted.config === undefined ? {} : {config: accepted.config}),
+    diagnostics: accepted.diagnostics,
   } satisfies LoadedProject02RuntimeConfig);
 }
 
 function readRuntimeConfigSource(path: string):
-  | { readonly status: 'accepted'; readonly source: string }
+  | {readonly status: 'accepted'; readonly source: string}
   | {
       readonly status: 'rejected';
       readonly diagnostic: RuntimeConfigDiagnostic;
@@ -144,8 +141,8 @@ function readRuntimeConfigSource(path: string):
       diagnostic: createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_read_failed',
-        `Runtime config file could not be inspected: ${path}.`
-      )
+        `Runtime config file could not be inspected: ${path}.`,
+      ),
     };
   }
 
@@ -155,8 +152,8 @@ function readRuntimeConfigSource(path: string):
       diagnostic: createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_read_failed',
-        `Runtime config path is not a regular file: ${path}.`
-      )
+        `Runtime config path is not a regular file: ${path}.`,
+      ),
     };
   }
 
@@ -164,8 +161,8 @@ function readRuntimeConfigSource(path: string):
     return {
       status: 'rejected',
       diagnostic: runtimeConfigLimitDiagnostic(
-        `Runtime config file exceeds the ${String(maxProject02RuntimeConfigBytes)}-byte size limit.`
-      )
+        `Runtime config file exceeds the ${String(maxProject02RuntimeConfigBytes)}-byte size limit.`,
+      ),
     };
   }
 
@@ -179,8 +176,8 @@ function readRuntimeConfigSource(path: string):
       diagnostic: createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_read_failed',
-        `Runtime config file could not be read: ${path}.`
-      )
+        `Runtime config file could not be read: ${path}.`,
+      ),
     };
   }
 
@@ -188,16 +185,16 @@ function readRuntimeConfigSource(path: string):
     return {
       status: 'rejected',
       diagnostic: runtimeConfigLimitDiagnostic(
-        `Runtime config file exceeds the ${String(maxProject02RuntimeConfigBytes)}-byte size limit.`
-      )
+        `Runtime config file exceeds the ${String(maxProject02RuntimeConfigBytes)}-byte size limit.`,
+      ),
     };
   }
 
-  return { status: 'accepted', source };
+  return {status: 'accepted', source};
 }
 
 export function validateProject02RuntimeConfig(
-  value: unknown
+  value: unknown,
 ): Project02RuntimeConfigValidationResult {
   let accepted: ReturnType<typeof parseProject02RuntimeConfig>;
 
@@ -208,9 +205,9 @@ export function validateProject02RuntimeConfig(
       return Object.freeze({
         diagnostics: Object.freeze([
           runtimeConfigLimitDiagnostic(
-            `Runtime config exceeds safe JSON limits: ${error.message}`
-          )
-        ])
+            `Runtime config exceeds safe JSON limits: ${error.message}`,
+          ),
+        ]),
       } satisfies Project02RuntimeConfigValidationResult);
     }
 
@@ -218,20 +215,20 @@ export function validateProject02RuntimeConfig(
   }
 
   return Object.freeze({
-    ...(accepted.config === undefined ? {} : { config: accepted.config }),
-    diagnostics: Object.freeze([...accepted.diagnostics])
+    ...(accepted.config === undefined ? {} : {config: accepted.config}),
+    diagnostics: Object.freeze([...accepted.diagnostics]),
   } satisfies Project02RuntimeConfigValidationResult);
 }
 
 export function defaultRuntimeConfigPath(storeRoot?: string): string {
   return createLocalRuntimeStorageLayout(
-    storeRoot === undefined ? {} : { storeRoot }
+    storeRoot === undefined ? {} : {storeRoot},
   ).configPath;
 }
 
 export function defaultRuntimeConfigEnvPath(storeRoot?: string): string {
   return createLocalRuntimeStorageLayout(
-    storeRoot === undefined ? {} : { storeRoot }
+    storeRoot === undefined ? {} : {storeRoot},
   ).envPath;
 }
 
@@ -240,19 +237,22 @@ function resolveRuntimeConfigLocation(options: {
   readonly storeRoot?: string;
   readonly env: NodeJS.ProcessEnv;
 }):
-  | { readonly source: Exclude<RuntimeConfigSource, 'none'>; readonly path: string }
-  | { readonly source: 'none' } {
+  | {
+      readonly source: Exclude<RuntimeConfigSource, 'none'>;
+      readonly path: string;
+    }
+  | {readonly source: 'none'} {
   if (options.configPath !== undefined) {
     return {
       source: 'path',
-      path: normalizeConfigPath(options.configPath)
+      path: normalizeConfigPath(options.configPath),
     };
   }
 
   if (options.storeRoot !== undefined) {
     return {
       source: 'default',
-      path: defaultRuntimeConfigPath(options.storeRoot)
+      path: defaultRuntimeConfigPath(options.storeRoot),
     };
   }
 
@@ -261,13 +261,13 @@ function resolveRuntimeConfigLocation(options: {
   if (envPath !== undefined && envPath.trim().length > 0) {
     return {
       source: 'env',
-      path: normalizeConfigPath(envPath)
+      path: normalizeConfigPath(envPath),
     };
   }
 
   return {
     source: 'default',
-    path: defaultRuntimeConfigPath(options.storeRoot)
+    path: defaultRuntimeConfigPath(options.storeRoot),
   };
 }
 
@@ -283,9 +283,9 @@ function parseProject02RuntimeConfig(value: unknown): {
         createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_not_object',
-          'Runtime config must be an object.'
-        )
-      ]
+          'Runtime config must be an object.',
+        ),
+      ],
     };
   }
 
@@ -297,33 +297,36 @@ function parseProject02RuntimeConfig(value: unknown): {
         'error',
         'runtime_config_version_unsupported',
         `Runtime config version must be "${runtimeConfigVersion}".`,
-        'version'
-      )
+        'version',
+      ),
     );
   }
 
-  const project02 = optionalProject02HostConfig(value['project02'], diagnostics);
+  const project02 = optionalProject02HostConfig(
+    value['project02'],
+    diagnostics,
+  );
   const plugins = optionalPluginConfigs(value['plugins'], diagnostics);
 
-  if (diagnostics.some((item) => item.severity === 'error')) {
+  if (diagnostics.some(item => item.severity === 'error')) {
     return {
-      diagnostics
+      diagnostics,
     };
   }
 
   return {
     config: Object.freeze({
       version: runtimeConfigVersion,
-      ...(project02 === undefined ? {} : { project02 }),
-      ...(plugins === undefined ? {} : { plugins })
+      ...(project02 === undefined ? {} : {project02}),
+      ...(plugins === undefined ? {} : {plugins}),
     } satisfies Project02RuntimeConfig),
-    diagnostics
+    diagnostics,
   };
 }
 
 function optionalProject02HostConfig(
   value: unknown,
-  diagnostics: RuntimeConfigDiagnostic[]
+  diagnostics: RuntimeConfigDiagnostic[],
 ): Project02HostConfig | undefined {
   if (value === undefined) {
     return undefined;
@@ -335,8 +338,8 @@ function optionalProject02HostConfig(
         'error',
         'runtime_config_project02_not_object',
         'Runtime config project02 section must be an object.',
-        'project02'
-      )
+        'project02',
+      ),
     );
     return undefined;
   }
@@ -346,8 +349,8 @@ function optionalProject02HostConfig(
     allowedFields: project02HostConfigFields,
     diagnostics,
     code: 'runtime_config_unknown_project02_field',
-    messageForField: (field) => `Unknown Project02 config field "${field}".`,
-    pathForField: (field) => `project02.${field}`
+    messageForField: field => `Unknown Project02 config field "${field}".`,
+    pathForField: field => `project02.${field}`,
   });
 
   const config: Record<string, RuntimeConfigValue> = {};
@@ -375,19 +378,19 @@ function optionalProject02HostConfig(
 }
 
 function project02HostConfigFieldDiagnostic(
-  field: ReturnType<typeof project02RuntimeConfigFieldDefinitions>[number]
+  field: ReturnType<typeof project02RuntimeConfigFieldDefinitions>[number],
 ): RuntimeConfigDiagnostic {
   return createRuntimeConfigDiagnostic(
     'error',
     field.invalidValueCode,
     field.invalidValueMessage,
-    field.path
+    field.path,
   );
 }
 
 function optionalPluginConfigs(
   value: unknown,
-  diagnostics: RuntimeConfigDiagnostic[]
+  diagnostics: RuntimeConfigDiagnostic[],
 ): Readonly<Record<string, Project02RuntimePluginConfig>> | undefined {
   if (value === undefined) {
     return undefined;
@@ -399,8 +402,8 @@ function optionalPluginConfigs(
         'error',
         'runtime_config_plugins_not_object',
         'Runtime config plugins must be an object.',
-        'plugins'
-      )
+        'plugins',
+      ),
     );
     return undefined;
   }
@@ -414,8 +417,8 @@ function optionalPluginConfigs(
               'error',
               'runtime_config_plugin_not_object',
               `Runtime config plugin "${pluginId}" must be an object.`,
-              `plugins.${pluginId}`
-            )
+              `plugins.${pluginId}`,
+            ),
           );
           return [];
         }
@@ -423,38 +426,38 @@ function optionalPluginConfigs(
         pushUnknownRuntimePluginConfigFieldDiagnostics({
           pluginId,
           value: pluginValue,
-          diagnostics
+          diagnostics,
         });
 
         const enabled = optionalBoolean(
           pluginValue['enabled'],
           `plugins.${pluginId}.enabled`,
-          diagnostics
+          diagnostics,
         );
         const config = optionalConfigRecord(
           pluginValue['config'],
           `plugins.${pluginId}.config`,
-          diagnostics
+          diagnostics,
         );
 
         return [
           [
             pluginId,
             Object.freeze({
-              ...(enabled === undefined ? {} : { enabled }),
-              ...(config === undefined ? {} : { config })
-            } satisfies Project02RuntimePluginConfig)
-          ]
+              ...(enabled === undefined ? {} : {enabled}),
+              ...(config === undefined ? {} : {config}),
+            } satisfies Project02RuntimePluginConfig),
+          ],
         ];
-      })
-    )
+      }),
+    ),
   );
 }
 
 function optionalConfigRecord(
   value: unknown,
   path: string,
-  diagnostics: RuntimeConfigDiagnostic[]
+  diagnostics: RuntimeConfigDiagnostic[],
 ): Readonly<Record<string, RuntimeConfigValue>> | undefined {
   if (value === undefined) {
     return undefined;
@@ -466,8 +469,8 @@ function optionalConfigRecord(
         'error',
         'runtime_config_plugin_config_not_object',
         'Plugin config must be an object.',
-        path
-      )
+        path,
+      ),
     );
     return undefined;
   }
@@ -481,34 +484,29 @@ function optionalConfigRecord(
               'error',
               'runtime_config_value_invalid',
               'Runtime config values must be JSON-compatible values or supported secret refs.',
-              `${path}.${key}`
-            )
+              `${path}.${key}`,
+            ),
           );
           return [];
         }
 
-        return [
-          [
-            key,
-            snapshotRuntimeConfigValue(item, `${path}.${key}`)
-          ]
-        ];
-      })
-    )
+        return [[key, snapshotRuntimeConfigValue(item, `${path}.${key}`)]];
+      }),
+    ),
   );
 }
 
 function pushUnknownRuntimeConfigFieldDiagnostics(
   value: Readonly<Record<string, unknown>>,
-  diagnostics: RuntimeConfigDiagnostic[]
+  diagnostics: RuntimeConfigDiagnostic[],
 ): void {
   pushUnknownFieldDiagnostics({
     value,
     allowedFields: project02RuntimeConfigFields,
     diagnostics,
     code: 'runtime_config_unknown_top_level_field',
-    messageForField: (field) => `Unknown runtime config field "${field}".`,
-    pathForField: (field) => field
+    messageForField: field => `Unknown runtime config field "${field}".`,
+    pathForField: field => field,
   });
 }
 
@@ -522,10 +520,10 @@ function pushUnknownRuntimePluginConfigFieldDiagnostics(options: {
     allowedFields: project02RuntimePluginConfigFields,
     diagnostics: options.diagnostics,
     code: 'runtime_config_unknown_plugin_wrapper_field',
-    messageForField: (field) =>
+    messageForField: field =>
       `Unknown plugin wrapper field "${field}" for plugin "${options.pluginId}".`,
-    pathForField: (field) => `plugins.${options.pluginId}.${field}`,
-    metadataForField: () => ({ pluginId: options.pluginId })
+    pathForField: field => `plugins.${options.pluginId}.${field}`,
+    metadataForField: () => ({pluginId: options.pluginId}),
   });
 }
 
@@ -537,13 +535,13 @@ function pushUnknownFieldDiagnostics(options: {
   readonly messageForField: (field: string) => string;
   readonly pathForField: (field: string) => string;
   readonly metadataForField?: (
-    field: string
+    field: string,
   ) => RuntimeConfigDiagnosticPluginMetadata;
 }): void {
   const allowedFields = new Set(options.allowedFields);
 
   for (const field of Object.keys(options.value).sort((a, b) =>
-    a.localeCompare(b)
+    a.localeCompare(b),
   )) {
     if (allowedFields.has(field)) {
       continue;
@@ -555,8 +553,8 @@ function pushUnknownFieldDiagnostics(options: {
         options.code,
         options.messageForField(field),
         options.pathForField(field),
-        options.metadataForField?.(field)
-      )
+        options.metadataForField?.(field),
+      ),
     );
   }
 }
@@ -607,15 +605,15 @@ function isRuntimeConfigValue(value: unknown): value is RuntimeConfigValue {
 
 function hasOnlyFields(
   value: Readonly<Record<string, unknown>>,
-  allowedFields: readonly string[]
+  allowedFields: readonly string[],
 ): boolean {
-  return Object.keys(value).every((field) => allowedFields.includes(field));
+  return Object.keys(value).every(field => allowedFields.includes(field));
 }
 
 function optionalBoolean(
   value: unknown,
   path: string,
-  diagnostics: RuntimeConfigDiagnostic[]
+  diagnostics: RuntimeConfigDiagnostic[],
 ): boolean | undefined {
   if (value === undefined) {
     return undefined;
@@ -627,8 +625,8 @@ function optionalBoolean(
         'error',
         'runtime_config_boolean_invalid',
         'Runtime config field must be a boolean.',
-        path
-      )
+        path,
+      ),
     );
     return undefined;
   }
@@ -642,18 +640,20 @@ function normalizeConfigPath(value: string): string {
   if (normalized.length === 0) {
     throw new LocalRuntimeStorageContractError(
       'missing_file',
-      'Runtime config path must be non-empty.'
+      'Runtime config path must be non-empty.',
     );
   }
 
   return normalized;
 }
 
-function runtimeConfigLimitDiagnostic(message: string): RuntimeConfigDiagnostic {
+function runtimeConfigLimitDiagnostic(
+  message: string,
+): RuntimeConfigDiagnostic {
   return createRuntimeConfigDiagnostic(
     'error',
     'runtime_config_limit_exceeded',
-    message
+    message,
   );
 }
 
@@ -666,10 +666,10 @@ class RuntimeConfigBoundaryLimitError extends Error {
 
 function snapshotRuntimeConfigValue(
   value: RuntimeConfigValue,
-  field: string
+  field: string,
 ): RuntimeConfigValue {
   try {
-    return createJsonBoundarySnapshot(value, { field });
+    return createJsonBoundarySnapshot(value, {field});
   } catch (error: unknown) {
     if (error instanceof TypeError) {
       throw new RuntimeConfigBoundaryLimitError(error.message);

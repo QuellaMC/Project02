@@ -1,4 +1,4 @@
-import type { RuntimeEventIdentity } from '../../core/index.ts';
+import type {RuntimeEventIdentity} from '../../core/index.ts';
 import {
   createRuntimePluginTurnEvidenceSnapshot,
   runtimePluginContractVersion,
@@ -7,18 +7,18 @@ import {
   type RuntimePluginHealthSnapshot,
   type RuntimePluginRegistrySnapshot,
   type RuntimePluginToolInvocationSnapshot,
-  type RuntimePluginTurnEvidenceSnapshot
+  type RuntimePluginTurnEvidenceSnapshot,
 } from '../../plugins/api/index.ts';
 
 export function runtimePluginEvidenceOption(
-  evidence: readonly RuntimePluginEvidenceSnapshot[] | undefined
-): { readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[] } {
+  evidence: readonly RuntimePluginEvidenceSnapshot[] | undefined,
+): {readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[]} {
   if (evidence === undefined || evidence.length === 0) {
     return {};
   }
 
   return {
-    runtimePluginEvidence: Object.freeze([...evidence])
+    runtimePluginEvidence: Object.freeze([...evidence]),
   };
 }
 
@@ -37,7 +37,7 @@ export function runtimePluginTurnEvidenceOption(options: {
   readonly toolInvocations: readonly RuntimePluginToolInvocationSnapshot[];
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
   readonly health: readonly RuntimePluginHealthSnapshot[];
-}): { readonly runtimePluginTurnEvidence?: RuntimePluginTurnEvidenceSnapshot } {
+}): {readonly runtimePluginTurnEvidence?: RuntimePluginTurnEvidenceSnapshot} {
   if (options.pluginHost === undefined) {
     return {};
   }
@@ -45,7 +45,7 @@ export function runtimePluginTurnEvidenceOption(options: {
   const registry = options.pluginHost.registrySnapshot();
   const enabledPluginIds = new Set(options.pluginHost.enabledPluginIds());
   const healthStatuses = new Map(
-    options.health.map((snapshot) => [snapshot.pluginId, snapshot.status])
+    options.health.map(snapshot => [snapshot.pluginId, snapshot.status]),
   );
 
   return {
@@ -53,7 +53,7 @@ export function runtimePluginTurnEvidenceOption(options: {
       ...options.identity,
       kind: 'runtime_plugin_turn_evidence_snapshot',
       contractVersion: runtimePluginContractVersion,
-      plugins: registry.plugins.map((registration) => {
+      plugins: registry.plugins.map(registration => {
         const enabled = enabledPluginIds.has(registration.manifest.id);
         const healthStatus = healthStatuses.get(registration.manifest.id);
 
@@ -69,16 +69,16 @@ export function runtimePluginTurnEvidenceOption(options: {
           redactionLabels: registration.manifest.runtimePolicy.redactionLabels,
           requestedAccess: registration.requestedAccess,
           grantedAccess: registration.grantedAccess,
-          ...(healthStatus === undefined ? {} : { healthStatus }),
+          ...(healthStatus === undefined ? {} : {healthStatus}),
           ...(registration.manifest.config.fingerprint === undefined
             ? {}
-            : { configFingerprint: registration.manifest.config.fingerprint })
+            : {configFingerprint: registration.manifest.config.fingerprint}),
         };
       }),
       contextItems: options.contextItems,
       toolInvocations: options.toolInvocations,
       evidence: options.evidence,
-      health: options.health
-    })
+      health: options.health,
+    }),
   };
 }

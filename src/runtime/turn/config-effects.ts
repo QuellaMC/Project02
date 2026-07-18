@@ -1,16 +1,16 @@
-import type { RuntimePluginHost } from '../../plugins/index.ts';
+import type {RuntimePluginHost} from '../../plugins/index.ts';
 import {
   createRuntimePluginEvidenceSnapshot,
   preparedRuntimePluginConfigEffectHasApprovalEvidence,
   runtimePluginId,
   type PreparedRuntimePluginConfigEffect,
-  type RuntimePluginEvidenceSnapshot
+  type RuntimePluginEvidenceSnapshot,
 } from '../../plugins/api/index.ts';
-import type { AcceptedRoleModelLoopResult } from '../../role-model/index.ts';
-import { RuntimeConfigConflictError } from '../config/mutate.ts';
-import type { RawEventLogRecord, RuntimeLogStore } from '../evidence/records.ts';
-import { runtimePluginEvidenceOption } from './plugin-evidence.ts';
-import type { RuntimeTurnState } from './contracts.ts';
+import type {AcceptedRoleModelLoopResult} from '../../role-model/index.ts';
+import {RuntimeConfigConflictError} from '../config/mutate.ts';
+import type {RawEventLogRecord, RuntimeLogStore} from '../evidence/records.ts';
+import {runtimePluginEvidenceOption} from './plugin-evidence.ts';
+import type {RuntimeTurnState} from './contracts.ts';
 
 export function recoverPendingRuntimeConfigEffects(options: {
   readonly logStore: RuntimeLogStore;
@@ -38,7 +38,7 @@ export function recoverPendingRuntimeConfigEffects(options: {
       try {
         evidence = reconcileRuntimeConfigEffect({
           pluginHost: options.pluginHost,
-          effect
+          effect,
         });
       } catch (error: unknown) {
         if (!(error instanceof RuntimeConfigConflictError)) {
@@ -47,7 +47,7 @@ export function recoverPendingRuntimeConfigEffects(options: {
 
         evidence = closeConflictedPreparedRuntimePluginConfigEffect({
           effect,
-          reason: error.message
+          reason: error.message,
         });
       }
 
@@ -60,14 +60,14 @@ export function recoverPendingRuntimeConfigEffects(options: {
         status: 'completed',
         ...(terminal.visibleMessageIds === undefined
           ? {}
-          : { visibleMessageIds: terminal.visibleMessageIds }),
+          : {visibleMessageIds: terminal.visibleMessageIds}),
         ...(terminal.toolCallIds === undefined
           ? {}
-          : { toolCallIds: terminal.toolCallIds }),
+          : {toolCallIds: terminal.toolCallIds}),
         ...(terminal.payloadSummary === undefined
           ? {}
-          : { payloadSummary: terminal.payloadSummary }),
-        ...runtimePluginEvidenceOption([evidence])
+          : {payloadSummary: terminal.payloadSummary}),
+        ...runtimePluginEvidenceOption([evidence]),
       });
       reconciledEffectIds.add(effect.effectId);
     }
@@ -78,21 +78,19 @@ export function runtimeConfigEffectsForCompletedTurn(options: {
   readonly state: RuntimeTurnState;
   readonly roleModelResult: AcceptedRoleModelLoopResult;
 }): readonly PreparedRuntimePluginConfigEffect[] {
-  const effects = options.roleModelResult.pluginToolResults.flatMap(
-    (routing) => {
-      const effect = options.state.preparedConfigEffectsByToolCallId.get(
-        routing.callId
-      );
+  const effects = options.roleModelResult.pluginToolResults.flatMap(routing => {
+    const effect = options.state.preparedConfigEffectsByToolCallId.get(
+      routing.callId,
+    );
 
-      return routing.result.status === 'accepted' && effect !== undefined
-        ? [effect]
-        : [];
-    }
-  );
+    return routing.result.status === 'accepted' && effect !== undefined
+      ? [effect]
+      : [];
+  });
 
   if (effects.length !== options.state.preparedConfigEffectsByToolCallId.size) {
     throw new Error(
-      'Prepared runtime config effects do not match accepted role-model tool results.'
+      'Prepared runtime config effects do not match accepted role-model tool results.',
     );
   }
 
@@ -110,13 +108,13 @@ export function assertRuntimeConfigEffectsCanCommit(options: {
 
   if (options.state.options.logStore.localRuntimeSessionPaths === undefined) {
     throw new Error(
-      'Approved runtime config effects require durable local session evidence.'
+      'Approved runtime config effects require durable local session evidence.',
     );
   }
 
   if (options.pluginHost.reconcileConfigEffect === undefined) {
     throw new Error(
-      'Approved runtime config effects require host reconciliation support.'
+      'Approved runtime config effects require host reconciliation support.',
     );
   }
 
@@ -124,7 +122,7 @@ export function assertRuntimeConfigEffectsCanCommit(options: {
 
   for (const effect of options.effects) {
     const approval = options.state.finishedPluginToolResults.find(
-      (routing) => routing.callId === effect.effectId
+      routing => routing.callId === effect.effectId,
     );
 
     if (
@@ -139,11 +137,11 @@ export function assertRuntimeConfigEffectsCanCommit(options: {
         dispatchedToHost: approval.dispatchedToHost,
         pluginId: approval.call.pluginId,
         toolName: approval.call.toolName,
-        result: approval.result
+        result: approval.result,
       })
     ) {
       throw new Error(
-        'Prepared runtime config effect is missing its approved config-update tool evidence.'
+        'Prepared runtime config effect is missing its approved config-update tool evidence.',
       );
     }
 
@@ -167,8 +165,8 @@ export function reconcileCompletedRuntimeConfigEffects(options: {
       evidence.push(
         reconcileRuntimeConfigEffect({
           pluginHost: options.pluginHost,
-          effect
-        })
+          effect,
+        }),
       );
     } catch (error: unknown) {
       options.postCommitFailures.push(runtimePostCommitFailureMessage(error));
@@ -177,8 +175,8 @@ export function reconcileCompletedRuntimeConfigEffects(options: {
         evidence.push(
           closeConflictedPreparedRuntimePluginConfigEffect({
             effect,
-            reason: error.message
-          })
+            reason: error.message,
+          }),
         );
       }
     }
@@ -193,15 +191,14 @@ function reconcileRuntimeConfigEffect(options: {
 }): RuntimePluginEvidenceSnapshot {
   if (options.pluginHost.reconcileConfigEffect === undefined) {
     throw new Error(
-      'Pending runtime config effect requires host reconciliation support.'
+      'Pending runtime config effect requires host reconciliation support.',
     );
   }
 
   const evidence = options.pluginHost.reconcileConfigEffect(options.effect);
   const referencesEffect = evidence.sourceReferences?.some(
-    (reference) =>
-      reference.kind === 'runtime' &&
-      reference.id === options.effect.effectId
+    reference =>
+      reference.kind === 'runtime' && reference.id === options.effect.effectId,
   );
 
   if (
@@ -214,7 +211,7 @@ function reconcileRuntimeConfigEffect(options: {
     referencesEffect !== true
   ) {
     throw new Error(
-      'Runtime config reconciliation returned invalid commit evidence.'
+      'Runtime config reconciliation returned invalid commit evidence.',
     );
   }
 
@@ -222,7 +219,7 @@ function reconcileRuntimeConfigEffect(options: {
 }
 
 export function reconciledRuntimeConfigEffectIds(
-  rawEvents: readonly RawEventLogRecord[]
+  rawEvents: readonly RawEventLogRecord[],
 ): Set<string> {
   const effectIds = new Set<string>();
 
@@ -251,7 +248,6 @@ export function reconciledRuntimeConfigEffectIds(
   return effectIds;
 }
 
-
 export function runtimePostCommitFailureMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -276,10 +272,9 @@ export function closeConflictedPreparedRuntimePluginConfigEffect(options: {
     sourceReferences: [
       {
         kind: 'runtime',
-        id: options.effect.effectId
-      }
+        id: options.effect.effectId,
+      },
     ],
-    redactionLabels: []
+    redactionLabels: [],
   });
 }
-

@@ -5,27 +5,27 @@ export const characterMoodValues = Object.freeze([
   'curious',
   'concerned',
   'playful',
-  'tired'
+  'tired',
 ] as const);
 export const characterEnergyValues = Object.freeze([
   'low',
   'medium',
-  'high'
+  'high',
 ] as const);
 export const characterAttentionValues = Object.freeze([
   'present',
   'focused',
-  'distracted'
+  'distracted',
 ] as const);
 export const characterCurrentActivityValues = Object.freeze([
   'idle',
   'chatting',
-  'reflecting'
+  'reflecting',
 ] as const);
 export const characterSocialOrientationValues = Object.freeze([
   'open',
   'supportive',
-  'reserved'
+  'reserved',
 ] as const);
 
 export type CharacterMood = (typeof characterMoodValues)[number];
@@ -57,9 +57,7 @@ export type CharacterRuntimeState = {
 export type CharacterStatePatch = Partial<LivingStateCurrent>;
 
 export type CharacterStatePatchRejectionReason =
-  | 'malformed_state_patch'
-  | 'unsupported_state_field'
-  | 'invalid_state_value';
+  'malformed_state_patch' | 'unsupported_state_field' | 'invalid_state_value';
 
 export type CharacterStatePatchRejection = {
   readonly reason: CharacterStatePatchRejectionReason;
@@ -88,8 +86,7 @@ export type RejectedCharacterStatePatchResult = {
 };
 
 export type CharacterStatePatchResult =
-  | AcceptedCharacterStatePatchResult
-  | RejectedCharacterStatePatchResult;
+  AcceptedCharacterStatePatchResult | RejectedCharacterStatePatchResult;
 
 export function createDefaultCharacterRuntimeState(): CharacterRuntimeState {
   return freezeCharacterRuntimeState({
@@ -99,13 +96,13 @@ export function createDefaultCharacterRuntimeState(): CharacterRuntimeState {
       energy: 'medium',
       attention: 'present',
       currentActivity: 'idle',
-      socialOrientation: 'open'
-    }
+      socialOrientation: 'open',
+    },
   });
 }
 
 export function createLivingStateBrief(
-  state: CharacterRuntimeState
+  state: CharacterRuntimeState,
 ): LivingStateBrief {
   const frozenState = freezeCharacterRuntimeState(state);
   const current = frozenState.current;
@@ -114,7 +111,7 @@ export function createLivingStateBrief(
     text:
       `mood=${current.mood}; energy=${current.energy}; attention=${current.attention}; ` +
       `activity=${current.currentActivity}; social=${current.socialOrientation}`,
-    current
+    current,
   } satisfies LivingStateBrief);
 }
 
@@ -130,13 +127,13 @@ export function planCharacterStatePatch(options: {
       status: 'rejected',
       patchInput: freezeUnknownRecord(options.patchInput),
       before,
-      rejection: parsedPatch.rejection
+      rejection: parsedPatch.rejection,
     } satisfies RejectedCharacterStatePatchResult);
   }
 
   const after = createCharacterRuntimeState({
     ...before.current,
-    ...parsedPatch.patch
+    ...parsedPatch.patch,
   });
   const appliedChanges = createAppliedChanges(before.current, after.current);
 
@@ -145,13 +142,13 @@ export function planCharacterStatePatch(options: {
     patch: freezeCharacterStatePatch(parsedPatch.patch),
     before,
     after,
-    appliedChanges
+    appliedChanges,
   } satisfies AcceptedCharacterStatePatchResult);
 }
 
 export function decodeCharacterRuntimeState(
   value: unknown,
-  fail: (field: string) => never
+  fail: (field: string) => never,
 ): CharacterRuntimeState {
   if (!isJsonRecord(value)) {
     fail('characterState');
@@ -176,32 +173,32 @@ export function decodeCharacterRuntimeState(
       current,
       'attention',
       characterAttentionValues,
-      fail
+      fail,
     ),
     currentActivity: requiredEnumValue(
       current,
       'currentActivity',
       characterCurrentActivityValues,
-      fail
+      fail,
     ),
     socialOrientation: requiredEnumValue(
       current,
       'socialOrientation',
       characterSocialOrientationValues,
-      fail
-    )
+      fail,
+    ),
   });
 }
 
 export function freezeCharacterRuntimeState(
-  state: CharacterRuntimeState
+  state: CharacterRuntimeState,
 ): CharacterRuntimeState {
   return createCharacterRuntimeState(state.current);
 }
 
 export function characterRuntimeStatesEqual(
   left: CharacterRuntimeState,
-  right: CharacterRuntimeState
+  right: CharacterRuntimeState,
 ): boolean {
   return (
     left.current.mood === right.current.mood &&
@@ -214,7 +211,7 @@ export function characterRuntimeStatesEqual(
 
 export function decodeAcceptedCharacterStatePatchResult(
   value: unknown,
-  fail: (field: string) => never
+  fail: (field: string) => never,
 ): AcceptedCharacterStatePatchResult {
   if (!isJsonRecord(value) || value['status'] !== 'accepted') {
     fail('characterStatePatchResult');
@@ -236,11 +233,11 @@ export function decodeAcceptedCharacterStatePatchResult(
   const after = decodeCharacterRuntimeState(value['after'], fail);
   const appliedChanges = decodeCharacterStateAppliedChanges(
     value['appliedChanges'],
-    fail
+    fail,
   );
   const expectedAfter = createCharacterRuntimeState({
     ...before.current,
-    ...parsedPatch.patch
+    ...parsedPatch.patch,
   });
   const expectedChanges = createAppliedChanges(before.current, after.current);
 
@@ -256,12 +253,12 @@ export function decodeAcceptedCharacterStatePatchResult(
     patch: parsedPatch.patch,
     before,
     after,
-    appliedChanges
+    appliedChanges,
   } satisfies AcceptedCharacterStatePatchResult);
 }
 
 function createCharacterRuntimeState(
-  current: LivingStateCurrent
+  current: LivingStateCurrent,
 ): CharacterRuntimeState {
   return Object.freeze({
     version: characterRuntimeStateVersion,
@@ -270,8 +267,8 @@ function createCharacterRuntimeState(
       energy: current.energy,
       attention: current.attention,
       currentActivity: current.currentActivity,
-      socialOrientation: current.socialOrientation
-    } satisfies LivingStateCurrent)
+      socialOrientation: current.socialOrientation,
+    } satisfies LivingStateCurrent),
   } satisfies CharacterRuntimeState);
 }
 
@@ -286,7 +283,7 @@ type ParsedPatchResult =
     };
 
 function parseCharacterStatePatch(
-  patchInput: Readonly<Record<string, unknown>>
+  patchInput: Readonly<Record<string, unknown>>,
 ): ParsedPatchResult {
   let patch: CharacterStatePatch = Object.freeze({});
 
@@ -294,14 +291,14 @@ function parseCharacterStatePatch(
     if (!isCharacterStateField(field)) {
       return rejectPatch(
         'unsupported_state_field',
-        `character_state.patch field "${field}" is not supported.`
+        `character_state.patch field "${field}" is not supported.`,
       );
     }
 
     if (typeof value !== 'string') {
       return rejectPatch(
         'malformed_state_patch',
-        `character_state.patch field "${field}" must be a string.`
+        `character_state.patch field "${field}" must be a string.`,
       );
     }
 
@@ -310,37 +307,37 @@ function parseCharacterStatePatch(
     if (fieldPatch === undefined) {
       return rejectPatch(
         'invalid_state_value',
-        `character_state.patch field "${field}" has unsupported value "${value}".`
+        `character_state.patch field "${field}" has unsupported value "${value}".`,
       );
     }
 
     patch = {
       ...patch,
-      ...fieldPatch
+      ...fieldPatch,
     };
   }
 
   return Object.freeze({
     status: 'accepted',
-    patch: freezeCharacterStatePatch(patch)
+    patch: freezeCharacterStatePatch(patch),
   } satisfies ParsedPatchResult);
 }
 
 function rejectPatch(
   reason: CharacterStatePatchRejectionReason,
-  details: string
+  details: string,
 ): ParsedPatchResult {
   return Object.freeze({
     status: 'rejected',
     rejection: Object.freeze({
       reason,
-      details
-    } satisfies CharacterStatePatchRejection)
+      details,
+    } satisfies CharacterStatePatchRejection),
   } satisfies ParsedPatchResult);
 }
 
 function isCharacterStateField(
-  field: string
+  field: string,
 ): field is keyof LivingStateCurrent {
   return (
     field === 'mood' ||
@@ -353,32 +350,26 @@ function isCharacterStateField(
 
 function parseCharacterStateFieldPatch(
   field: keyof LivingStateCurrent,
-  value: string
+  value: string,
 ): CharacterStatePatch | undefined {
   if (field === 'mood' && isCharacterMood(value)) {
-    return { mood: value };
+    return {mood: value};
   }
 
   if (field === 'energy' && isCharacterEnergy(value)) {
-    return { energy: value };
+    return {energy: value};
   }
 
   if (field === 'attention' && isCharacterAttention(value)) {
-    return { attention: value };
+    return {attention: value};
   }
 
-  if (
-    field === 'currentActivity' &&
-    isCharacterCurrentActivity(value)
-  ) {
-    return { currentActivity: value };
+  if (field === 'currentActivity' && isCharacterCurrentActivity(value)) {
+    return {currentActivity: value};
   }
 
-  if (
-    field === 'socialOrientation' &&
-    isCharacterSocialOrientation(value)
-  ) {
-    return { socialOrientation: value };
+  if (field === 'socialOrientation' && isCharacterSocialOrientation(value)) {
+    return {socialOrientation: value};
   }
 
   return undefined;
@@ -397,40 +388,40 @@ function isCharacterAttention(value: string): value is CharacterAttention {
 }
 
 function isCharacterCurrentActivity(
-  value: string
+  value: string,
 ): value is CharacterCurrentActivity {
   return characterCurrentActivityValues.includes(
-    value as CharacterCurrentActivity
+    value as CharacterCurrentActivity,
   );
 }
 
 function isCharacterSocialOrientation(
-  value: string
+  value: string,
 ): value is CharacterSocialOrientation {
   return characterSocialOrientationValues.includes(
-    value as CharacterSocialOrientation
+    value as CharacterSocialOrientation,
   );
 }
 
 function freezeCharacterStatePatch(
-  patch: CharacterStatePatch
+  patch: CharacterStatePatch,
 ): CharacterStatePatch {
   return Object.freeze({
-    ...(patch.mood === undefined ? {} : { mood: patch.mood }),
-    ...(patch.energy === undefined ? {} : { energy: patch.energy }),
-    ...(patch.attention === undefined ? {} : { attention: patch.attention }),
+    ...(patch.mood === undefined ? {} : {mood: patch.mood}),
+    ...(patch.energy === undefined ? {} : {energy: patch.energy}),
+    ...(patch.attention === undefined ? {} : {attention: patch.attention}),
     ...(patch.currentActivity === undefined
       ? {}
-      : { currentActivity: patch.currentActivity }),
+      : {currentActivity: patch.currentActivity}),
     ...(patch.socialOrientation === undefined
       ? {}
-      : { socialOrientation: patch.socialOrientation })
+      : {socialOrientation: patch.socialOrientation}),
   } satisfies CharacterStatePatch);
 }
 
 function createAppliedChanges(
   before: LivingStateCurrent,
-  after: LivingStateCurrent
+  after: LivingStateCurrent,
 ): readonly CharacterStateAppliedChange[] {
   const changes: CharacterStateAppliedChange[] = [];
 
@@ -441,13 +432,13 @@ function createAppliedChanges(
     changes,
     'currentActivity',
     before.currentActivity,
-    after.currentActivity
+    after.currentActivity,
   );
   appendAppliedChange(
     changes,
     'socialOrientation',
     before.socialOrientation,
-    after.socialOrientation
+    after.socialOrientation,
   );
 
   return freezeAppliedChanges(changes);
@@ -457,7 +448,7 @@ function appendAppliedChange(
   changes: CharacterStateAppliedChange[],
   field: keyof LivingStateCurrent,
   before: string,
-  after: string
+  after: string,
 ): void {
   if (before === after) {
     return;
@@ -467,28 +458,28 @@ function appendAppliedChange(
     Object.freeze({
       field,
       before,
-      after
-    } satisfies CharacterStateAppliedChange)
+      after,
+    } satisfies CharacterStateAppliedChange),
   );
 }
 
 function freezeAppliedChanges(
-  changes: readonly CharacterStateAppliedChange[]
+  changes: readonly CharacterStateAppliedChange[],
 ): readonly CharacterStateAppliedChange[] {
   return Object.freeze(
-    changes.map((change) =>
+    changes.map(change =>
       Object.freeze({
         field: change.field,
         before: change.before,
-        after: change.after
-      } satisfies CharacterStateAppliedChange)
-    )
+        after: change.after,
+      } satisfies CharacterStateAppliedChange),
+    ),
   );
 }
 
 function decodeCharacterStateAppliedChanges(
   value: unknown,
-  fail: (field: string) => never
+  fail: (field: string) => never,
 ): readonly CharacterStateAppliedChange[] {
   if (!Array.isArray(value)) {
     fail('characterStatePatchResult.appliedChanges');
@@ -510,7 +501,7 @@ function decodeCharacterStateAppliedChanges(
         typeof before !== 'string' ||
         typeof after !== 'string' ||
         Object.keys(item).some(
-          (key) => key !== 'field' && key !== 'before' && key !== 'after'
+          key => key !== 'field' && key !== 'before' && key !== 'after',
         )
       ) {
         fail(`characterStatePatchResult.appliedChanges.${String(index)}`);
@@ -519,15 +510,15 @@ function decodeCharacterStateAppliedChanges(
       return Object.freeze({
         field,
         before,
-        after
+        after,
       } satisfies CharacterStateAppliedChange);
-    })
+    }),
   );
 }
 
 function characterStateAppliedChangesEqual(
   left: readonly CharacterStateAppliedChange[],
-  right: readonly CharacterStateAppliedChange[]
+  right: readonly CharacterStateAppliedChange[],
 ): boolean {
   return (
     left.length === right.length &&
@@ -545,7 +536,7 @@ function characterStateAppliedChangesEqual(
 }
 
 function freezeUnknownRecord(
-  record: Readonly<Record<string, unknown>>
+  record: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
   const snapshot: Record<string, unknown> = {};
 
@@ -572,7 +563,7 @@ function requiredEnumValue<const T extends string>(
   record: Readonly<Record<string, unknown>>,
   field: string,
   allowedValues: readonly T[],
-  fail: (field: string) => never
+  fail: (field: string) => never,
 ): T {
   const value = record[field];
 
@@ -584,7 +575,7 @@ function requiredEnumValue<const T extends string>(
 }
 
 function isJsonRecord(
-  value: unknown
+  value: unknown,
 ): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -1,7 +1,5 @@
-import {
-  createJsonBoundaryObjectSnapshot
-} from '../../shared/json-boundary.ts';
-import { redactJsonBoundaryText } from '../../shared/redaction.ts';
+import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
+import {redactJsonBoundaryText} from '../../shared/redaction.ts';
 
 export const visibleReplyModelToolName = 'visible_reply';
 
@@ -13,7 +11,7 @@ export const modelToolInputFieldValueTypes = Object.freeze([
   'number',
   'boolean',
   'object',
-  'array'
+  'array',
 ] as const);
 
 export type ModelToolInputFieldValueType =
@@ -33,18 +31,18 @@ export const modelToolJsonSchemaTypeValues = Object.freeze([
   'boolean',
   'object',
   'array',
-  'null'
+  'null',
 ] as const);
 
 export type ModelToolJsonSchemaType =
   (typeof modelToolJsonSchemaTypeValues)[number];
 
 export function isModelToolJsonSchemaType(
-  value: unknown
+  value: unknown,
 ): value is ModelToolJsonSchemaType {
   return (
     typeof value === 'string' &&
-    modelToolJsonSchemaTypeValues.some((allowedValue) => allowedValue === value)
+    modelToolJsonSchemaTypeValues.some(allowedValue => allowedValue === value)
   );
 }
 
@@ -74,11 +72,10 @@ export type ModelToolInputContract = {
 
 export const modelToolCallLimitScopes = Object.freeze([
   'model_response',
-  'user_turn'
+  'user_turn',
 ] as const);
 
-export type ModelToolCallLimitScope =
-  (typeof modelToolCallLimitScopes)[number];
+export type ModelToolCallLimitScope = (typeof modelToolCallLimitScopes)[number];
 
 export type ModelToolCallLimit = {
   readonly scope: ModelToolCallLimitScope;
@@ -121,7 +118,7 @@ export type BuiltInModelToolCall = VisibleReplyModelToolCall;
 export type ModelToolCall = BuiltInModelToolCall | PluginModelToolCall;
 
 export const userTurnBuiltInModelToolNames = Object.freeze([
-  visibleReplyModelToolName
+  visibleReplyModelToolName,
 ] satisfies readonly BuiltInModelToolName[]);
 
 export const builtInModelToolDefinitions = Object.freeze([
@@ -136,12 +133,12 @@ export const builtInModelToolDefinitions = Object.freeze([
           name: 'text',
           description: 'The reply text to show to the user.',
           required: true,
-          valueType: 'string'
-        }
+          valueType: 'string',
+        },
       ],
-      additionalFields: false
-    }
-  })
+      additionalFields: false,
+    },
+  }),
 ] satisfies readonly BuiltInModelToolDefinition[]);
 
 export function builtInModelToolDefinitionsForUserTurn(): readonly BuiltInModelToolDefinition[] {
@@ -149,32 +146,34 @@ export function builtInModelToolDefinitionsForUserTurn(): readonly BuiltInModelT
 }
 
 export function isBuiltInModelToolName(
-  value: unknown
+  value: unknown,
 ): value is BuiltInModelToolName {
   return value === visibleReplyModelToolName;
 }
 
 export function createVisibleReplyModelToolCall(
-  text: string
+  text: string,
 ): VisibleReplyModelToolCall {
   return Object.freeze({
     name: visibleReplyModelToolName,
     input: Object.freeze({
-      text: redactJsonBoundaryText(text)
-    } satisfies VisibleReplyToolInput)
+      text: redactJsonBoundaryText(text),
+    } satisfies VisibleReplyToolInput),
   } satisfies VisibleReplyModelToolCall);
 }
 
 export function freezeBuiltInModelToolCall(
-  call: BuiltInModelToolCall
+  call: BuiltInModelToolCall,
 ): BuiltInModelToolCall {
   return createVisibleReplyModelToolCall(call.input.text);
 }
 
 export function findVisibleReplyModelToolCall(
-  calls: readonly ModelToolCall[]
+  calls: readonly ModelToolCall[],
 ): VisibleReplyModelToolCall | undefined {
-  const call = calls.find((candidate) => candidate.name === visibleReplyModelToolName);
+  const call = calls.find(
+    candidate => candidate.name === visibleReplyModelToolName,
+  );
 
   if (call === undefined) {
     return undefined;
@@ -190,14 +189,16 @@ export function findVisibleReplyModelToolCall(
 }
 
 export function freezeModelToolDefinition(
-  definition: ModelToolDefinition
+  definition: ModelToolDefinition,
 ): ModelToolDefinition {
   return Object.freeze({
     name: definition.name,
     description: definition.description,
     requiredForUserTurn: definition.requiredForUserTurn,
-    ...(definition.callLimit === undefined ? {} : { callLimit: freezeModelToolCallLimit(definition.callLimit) }),
-    inputContract: freezeModelToolInputContract(definition.inputContract)
+    ...(definition.callLimit === undefined
+      ? {}
+      : {callLimit: freezeModelToolCallLimit(definition.callLimit)}),
+    inputContract: freezeModelToolInputContract(definition.inputContract),
   } satisfies ModelToolDefinition);
 }
 
@@ -205,20 +206,22 @@ export function freezeModelToolCall(call: ModelToolCall): ModelToolCall {
   if (call.name === visibleReplyModelToolName) {
     const text = call.input['text'];
 
-    return createVisibleReplyModelToolCall(typeof text === 'string' ? text : '');
+    return createVisibleReplyModelToolCall(
+      typeof text === 'string' ? text : '',
+    );
   }
 
   return Object.freeze({
     name: call.name,
     input: createJsonBoundaryObjectSnapshot(call.input, {
       field: `Model tool "${call.name}" input`,
-      redact: true
-    })
+      redact: true,
+    }),
   } satisfies PluginModelToolCall);
 }
 
 export function freezeModelToolCalls(
-  calls: readonly ModelToolCall[]
+  calls: readonly ModelToolCall[],
 ): readonly ModelToolCall[] {
   return Object.freeze(calls.map(freezeModelToolCall));
 }
@@ -243,7 +246,7 @@ export function validateModelToolInputAgainstContract(options: {
       toolName: options.toolName,
       value: options.input,
       schema: options.inputContract.jsonSchema,
-      fieldPath: ''
+      fieldPath: '',
     });
 
     if (schemaValidation !== undefined) {
@@ -252,24 +255,24 @@ export function validateModelToolInputAgainstContract(options: {
 
     return Object.freeze({
       status: 'accepted',
-      input: freezeJsonRecord(options.input)
+      input: freezeJsonRecord(options.input),
     } satisfies ModelToolInputValidationResult);
   }
 
   const supportedFieldNames = options.inputContract.fields.map(
-    (field) => field.name
+    field => field.name,
   );
 
   if (!options.inputContract.additionalFields) {
     const unsupportedInputKeys = Object.keys(options.input).filter(
-      (key) => !supportedFieldNames.includes(key)
+      key => !supportedFieldNames.includes(key),
     );
 
     if (unsupportedInputKeys.length > 0) {
       return rejectModelToolInput(
         `${options.toolName} input includes unsupported fields: ${unsupportedInputKeys.join(
-          ', '
-        )}.`
+          ', ',
+        )}.`,
       );
     }
   }
@@ -279,7 +282,7 @@ export function validateModelToolInputAgainstContract(options: {
 
     if (field.required && fieldValue === undefined) {
       return rejectModelToolInput(
-        `${options.toolName} input missing required field "${field.name}".`
+        `${options.toolName} input missing required field "${field.name}".`,
       );
     }
 
@@ -293,8 +296,8 @@ export function validateModelToolInputAgainstContract(options: {
     ) {
       return rejectModelToolInput(
         `${options.toolName} input field "${field.name}" must be ${modelToolInputFieldTypeArticle(
-          field.valueType
-        )} ${modelToolInputFieldTypeLabel(field.valueType)}.`
+          field.valueType,
+        )} ${modelToolInputFieldTypeLabel(field.valueType)}.`,
       );
     }
 
@@ -308,15 +311,15 @@ export function validateModelToolInputAgainstContract(options: {
     ) {
       return rejectModelToolInput(
         `${options.toolName} input field "${field.name}" must be one of: ${field.allowedValues.join(
-          ', '
-        )}.`
+          ', ',
+        )}.`,
       );
     }
   }
 
   const jsonValueValidation = validateModelToolInputJsonValues({
     toolName: options.toolName,
-    input: options.input
+    input: options.input,
   });
 
   if (jsonValueValidation !== undefined) {
@@ -325,7 +328,7 @@ export function validateModelToolInputAgainstContract(options: {
 
   return Object.freeze({
     status: 'accepted',
-    input: freezeJsonRecord(options.input)
+    input: freezeJsonRecord(options.input),
   } satisfies ModelToolInputValidationResult);
 }
 
@@ -341,56 +344,60 @@ function createBuiltInModelToolDefinition(options: {
     requiredForUserTurn: options.requiredForUserTurn,
     callLimit: Object.freeze({
       scope: 'model_response',
-      maxCalls: 1
+      maxCalls: 1,
     }),
-    inputContract: freezeModelToolInputContract(options.inputContract)
+    inputContract: freezeModelToolInputContract(options.inputContract),
   } satisfies BuiltInModelToolDefinition);
 }
 
 function freezeModelToolCallLimit(
-  callLimit: ModelToolCallLimit
+  callLimit: ModelToolCallLimit,
 ): ModelToolCallLimit {
   return Object.freeze({
     scope: callLimit.scope,
-    maxCalls: callLimit.maxCalls
+    maxCalls: callLimit.maxCalls,
   });
 }
 
 function freezeModelToolInputContract(
-  inputContract: ModelToolInputContract
+  inputContract: ModelToolInputContract,
 ): ModelToolInputContract {
   return Object.freeze({
     type: inputContract.type,
     fields: Object.freeze(
-      inputContract.fields.map((field) =>
+      inputContract.fields.map(field =>
         Object.freeze({
           name: field.name,
           description: field.description,
           required: field.required,
-          ...(field.valueType === undefined ? {} : { valueType: field.valueType }),
+          ...(field.valueType === undefined
+            ? {}
+            : {valueType: field.valueType}),
           ...(field.allowedValues === undefined
             ? {}
-            : { allowedValues: Object.freeze([...field.allowedValues]) })
-        } satisfies ModelToolInputField)
-      )
+            : {allowedValues: Object.freeze([...field.allowedValues])}),
+        } satisfies ModelToolInputField),
+      ),
     ),
     additionalFields: inputContract.additionalFields,
     ...(inputContract.jsonSchema === undefined
       ? {}
-      : { jsonSchema: freezeModelToolObjectJsonSchema(inputContract.jsonSchema) })
+      : {
+          jsonSchema: freezeModelToolObjectJsonSchema(inputContract.jsonSchema),
+        }),
   } satisfies ModelToolInputContract);
 }
 
 function rejectModelToolInput(details: string): ModelToolInputValidationResult {
   return Object.freeze({
     status: 'rejected',
-    details
+    details,
   } satisfies ModelToolInputValidationResult);
 }
 
 function modelToolInputValueMatchesType(
   value: unknown,
-  valueType: ModelToolInputFieldValueType
+  valueType: ModelToolInputFieldValueType,
 ): boolean {
   if (valueType === 'number') {
     return typeof value === 'number' && Number.isFinite(value);
@@ -408,13 +415,13 @@ function modelToolInputValueMatchesType(
 }
 
 function modelToolInputFieldTypeArticle(
-  valueType: ModelToolInputFieldValueType
+  valueType: ModelToolInputFieldValueType,
 ): 'a' | 'an' {
   return valueType === 'array' || valueType === 'object' ? 'an' : 'a';
 }
 
 function modelToolInputFieldTypeLabel(
-  valueType: ModelToolInputFieldValueType
+  valueType: ModelToolInputFieldValueType,
 ): string {
   return valueType === 'number' ? 'finite number' : valueType;
 }
@@ -427,7 +434,7 @@ function validateModelToolInputJsonValues(options: {
     const result = validateModelToolInputJsonValue({
       toolName: options.toolName,
       fieldPath: key,
-      value
+      value,
     });
 
     if (result !== undefined) {
@@ -464,7 +471,7 @@ function validateModelToolInputJsonValue(options: {
       const result = validateModelToolInputJsonValue({
         toolName: options.toolName,
         fieldPath: `${options.fieldPath}[${String(index)}]`,
-        value: item
+        value: item,
       });
 
       if (result !== undefined) {
@@ -480,7 +487,7 @@ function validateModelToolInputJsonValue(options: {
       const result = validateModelToolInputJsonValue({
         toolName: options.toolName,
         fieldPath: `${options.fieldPath}.${key}`,
-        value: item
+        value: item,
       });
 
       if (result !== undefined) {
@@ -504,7 +511,7 @@ function validateModelToolInputAgainstJsonSchema(options: {
     toolName: options.toolName,
     value: options.value,
     schema: options.schema,
-    fieldPath: options.fieldPath
+    fieldPath: options.fieldPath,
   });
 
   if (typeError !== undefined) {
@@ -524,7 +531,7 @@ function validateModelToolInputAgainstJsonSchema(options: {
       return validateModelToolInputJsonValue({
         toolName: options.toolName,
         fieldPath: displayFieldPath(options.fieldPath),
-        value: options.value
+        value: options.value,
       });
     }
 
@@ -533,7 +540,7 @@ function validateModelToolInputAgainstJsonSchema(options: {
         toolName: options.toolName,
         value: item,
         schema: options.schema.items,
-        fieldPath: `${options.fieldPath}[${String(index)}]`
+        fieldPath: `${options.fieldPath}[${String(index)}]`,
       });
 
       if (itemError !== undefined) {
@@ -551,19 +558,19 @@ function validateModelToolInputAgainstJsonSchema(options: {
     for (const field of required) {
       if (options.value[field] === undefined) {
         return `${options.toolName} input missing required field "${displayFieldPath(
-          appendFieldPath(options.fieldPath, field)
+          appendFieldPath(options.fieldPath, field),
         )}".`;
       }
     }
 
     if (options.schema.additionalProperties === false) {
       const unsupportedKeys = Object.keys(options.value).filter(
-        (key) => properties[key] === undefined
+        key => properties[key] === undefined,
       );
 
       if (unsupportedKeys.length > 0) {
         return `${options.toolName} input includes unsupported fields: ${unsupportedKeys
-          .map((key) => displayFieldPath(appendFieldPath(options.fieldPath, key)))
+          .map(key => displayFieldPath(appendFieldPath(options.fieldPath, key)))
           .join(', ')}.`;
       }
     }
@@ -579,7 +586,7 @@ function validateModelToolInputAgainstJsonSchema(options: {
         toolName: options.toolName,
         value: childValue,
         schema,
-        fieldPath: appendFieldPath(options.fieldPath, field)
+        fieldPath: appendFieldPath(options.fieldPath, field),
       });
 
       if (childError !== undefined) {
@@ -591,7 +598,7 @@ function validateModelToolInputAgainstJsonSchema(options: {
   return validateModelToolInputJsonValue({
     toolName: options.toolName,
     fieldPath: displayFieldPath(options.fieldPath),
-    value: options.value
+    value: options.value,
   });
 }
 
@@ -609,18 +616,18 @@ function validateJsonSchemaType(options: {
 
   const types = modelToolJsonSchemaTypes(schemaType);
 
-  if (types.some((type) => jsonValueMatchesSchemaType(options.value, type))) {
+  if (types.some(type => jsonValueMatchesSchemaType(options.value, type))) {
     return undefined;
   }
 
   return `${options.toolName} input field "${displayFieldPath(
-    options.fieldPath
+    options.fieldPath,
   )}" must be ${types.join(' or ')}.`;
 }
 
 function jsonValueMatchesSchemaType(
   value: unknown,
-  type: ModelToolJsonSchemaType
+  type: ModelToolJsonSchemaType,
 ): boolean {
   if (type === 'array') {
     return Array.isArray(value);
@@ -642,7 +649,7 @@ function jsonValueMatchesSchemaType(
 }
 
 function modelToolJsonSchemaTypes(
-  type: NonNullable<ModelToolJsonSchema['type']>
+  type: NonNullable<ModelToolJsonSchema['type']>,
 ): readonly ModelToolJsonSchemaType[] {
   return isModelToolJsonSchemaTypeArray(type)
     ? Object.freeze([...type])
@@ -650,7 +657,7 @@ function modelToolJsonSchemaTypes(
 }
 
 export function isModelToolJsonSchemaTypeArray(
-  value: NonNullable<ModelToolJsonSchema['type']>
+  value: NonNullable<ModelToolJsonSchema['type']>,
 ): value is readonly ModelToolJsonSchemaType[] {
   return Array.isArray(value);
 }
@@ -664,26 +671,26 @@ function displayFieldPath(path: string): string {
 }
 
 function freezeModelToolObjectJsonSchema(
-  schema: ModelToolObjectJsonSchema
+  schema: ModelToolObjectJsonSchema,
 ): ModelToolObjectJsonSchema {
   return freezeModelToolJsonSchema(schema) as ModelToolObjectJsonSchema;
 }
 
 function freezeModelToolJsonSchema(
-  schema: ModelToolJsonSchema
+  schema: ModelToolJsonSchema,
 ): ModelToolJsonSchema {
   return Object.freeze({
     ...(schema.type === undefined
       ? {}
       : {
-          type: freezeModelToolJsonSchemaType(schema.type)
+          type: freezeModelToolJsonSchemaType(schema.type),
         }),
     ...(schema.description === undefined
       ? {}
-      : { description: schema.description }),
+      : {description: schema.description}),
     ...(schema.enum === undefined
       ? {}
-      : { enum: Object.freeze([...schema.enum]) }),
+      : {enum: Object.freeze([...schema.enum])}),
     ...(schema.properties === undefined
       ? {}
       : {
@@ -691,31 +698,31 @@ function freezeModelToolJsonSchema(
             Object.fromEntries(
               Object.entries(schema.properties).map(([key, value]) => [
                 key,
-                freezeModelToolJsonSchema(value)
-              ])
-            )
-          )
+                freezeModelToolJsonSchema(value),
+              ]),
+            ),
+          ),
         }),
     ...(schema.required === undefined
       ? {}
-      : { required: Object.freeze([...schema.required]) }),
+      : {required: Object.freeze([...schema.required])}),
     ...(schema.additionalProperties === undefined
       ? {}
-      : { additionalProperties: schema.additionalProperties }),
+      : {additionalProperties: schema.additionalProperties}),
     ...(schema.items === undefined
       ? {}
-      : { items: freezeModelToolJsonSchema(schema.items) })
+      : {items: freezeModelToolJsonSchema(schema.items)}),
   } satisfies ModelToolJsonSchema);
 }
 
 export function freezeModelToolJsonSchemaType(
-  type: NonNullable<ModelToolJsonSchema['type']>
+  type: NonNullable<ModelToolJsonSchema['type']>,
 ): NonNullable<ModelToolJsonSchema['type']> {
   return isModelToolJsonSchemaTypeArray(type) ? Object.freeze([...type]) : type;
 }
 
 function freezeJsonRecord(
-  record: Readonly<Record<string, unknown>>
+  record: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
   const snapshot: Record<string, unknown> = {};
 
@@ -739,8 +746,7 @@ function freezeJsonValue(value: unknown): unknown {
 }
 
 function isJsonRecord(
-  value: unknown
+  value: unknown,
 ): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
-

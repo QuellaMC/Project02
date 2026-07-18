@@ -1,8 +1,8 @@
-import { createInterface } from 'node:readline/promises';
+import {createInterface} from 'node:readline/promises';
 
 import type {
   RuntimePluginConfigField,
-  RuntimePluginManifest
+  RuntimePluginManifest,
 } from '../../plugins/api/index.ts';
 import {
   applyRuntimeConfigControlOperation,
@@ -21,10 +21,13 @@ import {
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
   type RuntimePluginConfigActivationInspectShape,
-  type RuntimePluginConfigFieldInspectShape
+  type RuntimePluginConfigFieldInspectShape,
 } from '../../runtime/config/index.ts';
-import { prepareConfiguredProject02PluginActivation, type RuntimePluginFactoryDefinition } from '../../app/index.ts';
-import { ownJsonRecordValue } from '../../shared/json-boundary.ts';
+import {
+  prepareConfiguredProject02PluginActivation,
+  type RuntimePluginFactoryDefinition,
+} from '../../app/index.ts';
+import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 
 export type RuntimeConfigConsolePromptAdapter = {
   question(prompt: string): Promise<string | undefined>;
@@ -76,11 +79,12 @@ type RuntimeConfigConsolePluginCatalog = {
 const cancelled = Symbol('runtime-config-console-cancelled');
 
 export async function runRuntimeConfigConsole(
-  options: RuntimeConfigConsoleOptions
+  options: RuntimeConfigConsoleOptions,
 ): Promise<number> {
-  const ownedPrompt = options.prompt === undefined
-    ? createDefaultPrompt(options.stdin ?? process.stdin, options.stdout)
-    : undefined;
+  const ownedPrompt =
+    options.prompt === undefined
+      ? createDefaultPrompt(options.stdin ?? process.stdin, options.stdout)
+      : undefined;
   const prompt = options.prompt ?? ownedPrompt?.prompt;
 
   if (prompt === undefined) {
@@ -89,7 +93,7 @@ export async function runRuntimeConfigConsole(
 
   const context: RuntimeConfigConsoleContext = {
     ...options,
-    prompt
+    prompt,
   };
 
   try {
@@ -121,7 +125,7 @@ export async function runRuntimeConfigConsole(
 
 async function runProject02ConfigSection(
   context: RuntimeConfigConsoleContext,
-  snapshot: RuntimeConfigConsoleSnapshot
+  snapshot: RuntimeConfigConsoleSnapshot,
 ): Promise<void> {
   const fields = project02RuntimeConfigFieldDefinitions();
 
@@ -130,19 +134,19 @@ async function runProject02ConfigSection(
   fields.forEach((field, index) => {
     const currentValue = getRedactedRuntimeConfigValueAtPath(
       snapshot.config,
-      field.path
+      field.path,
     );
 
     writeLine(
       context.stdout,
-      `${String(index + 1)}) ${field.label}: ${formatCurrentValue(currentValue, field.defaultValueSummary)}`
+      `${String(index + 1)}) ${field.label}: ${formatCurrentValue(currentValue, field.defaultValueSummary)}`,
     );
   });
 
   const selected = await askForNumber(
     context,
     'Select a Project02 field: ',
-    fields.length
+    fields.length,
   );
   const field = selected === undefined ? undefined : fields[selected - 1];
 
@@ -160,7 +164,7 @@ async function runProject02ConfigSection(
 async function stageProject02FieldChange(
   context: RuntimeConfigConsoleContext,
   snapshot: RuntimeConfigConsoleSnapshot,
-  field: Project02ConfigFieldDefinition
+  field: Project02ConfigFieldDefinition,
 ): Promise<StagedRuntimeConfigChange | undefined> {
   writeLine(context.stdout, '1) Set');
   writeLine(context.stdout, '2) Unset');
@@ -173,12 +177,15 @@ async function stageProject02FieldChange(
     return undefined;
   }
 
-  const oldValue = getRedactedRuntimeConfigValueAtPath(snapshot.config, field.path);
+  const oldValue = getRedactedRuntimeConfigValueAtPath(
+    snapshot.config,
+    field.path,
+  );
   let operation: RuntimeConfigMutationOperation;
   let newValue: RuntimeConfigValue | undefined;
 
   if (action === 2) {
-    operation = { kind: 'unset', path: field.path };
+    operation = {kind: 'unset', path: field.path};
   } else {
     const value = await askForFieldValue(context, field);
 
@@ -187,8 +194,8 @@ async function stageProject02FieldChange(
       return undefined;
     }
 
-    newValue = redactRuntimeConfigValue(value, { key: field.name });
-    operation = { kind: 'set', path: field.path, value };
+    newValue = redactRuntimeConfigValue(value, {key: field.name});
+    operation = {kind: 'set', path: field.path, value};
   }
 
   return {
@@ -199,21 +206,21 @@ async function stageProject02FieldChange(
     commit() {
       applyRuntimeConfigControlOperation({
         ...runtimeConfigLocation(context),
-        ...(context.env === undefined ? {} : { env: context.env }),
+        ...(context.env === undefined ? {} : {env: context.env}),
         expectedFingerprint: snapshot.fingerprint,
-        operation
+        operation,
       });
-    }
+    },
   };
 }
 
 async function runPluginConfigSection(
   context: RuntimeConfigConsoleContext,
-  snapshot: RuntimeConfigConsoleSnapshot
+  snapshot: RuntimeConfigConsoleSnapshot,
 ): Promise<void> {
   const catalog = pluginCatalog(context, snapshot);
   const entries = catalog.entries;
-  const manifests = Object.freeze(entries.map((entry) => entry.manifest));
+  const manifests = Object.freeze(entries.map(entry => entry.manifest));
 
   writeLine(context.stdout, '');
 
@@ -224,10 +231,13 @@ async function runPluginConfigSection(
 
   writePluginEntries(context.stdout, entries);
 
-  const selected = await askForNumber(context, 'Select a plugin: ', entries.length);
-  const manifest = selected === undefined
-    ? undefined
-    : entries[selected - 1]?.manifest;
+  const selected = await askForNumber(
+    context,
+    'Select a plugin: ',
+    entries.length,
+  );
+  const manifest =
+    selected === undefined ? undefined : entries[selected - 1]?.manifest;
 
   if (manifest === undefined) {
     return;
@@ -235,18 +245,18 @@ async function runPluginConfigSection(
 
   const activation = ownJsonRecordValue(
     catalog.activationByPluginId,
-    manifest.id
+    manifest.id,
   );
 
   const inspected = inspectRuntimePluginConfig({
     ...runtimeConfigLocation(context),
     ...(context.runtimeEnv === undefined && context.env === undefined
       ? {}
-      : { env: context.runtimeEnv ?? context.env }),
+      : {env: context.runtimeEnv ?? context.env}),
     manifest,
     pluginManifests: manifests,
-    ...(activation === undefined ? {} : { activation }),
-    defaultEnabled: catalog.defaultEnabledPluginIds.includes(manifest.id)
+    ...(activation === undefined ? {} : {activation}),
+    defaultEnabled: catalog.defaultEnabledPluginIds.includes(manifest.id),
   });
 
   writeLine(context.stdout, '');
@@ -255,7 +265,7 @@ async function runPluginConfigSection(
   inspected.fields.forEach((field, index) => {
     writeLine(
       context.stdout,
-      `${String(index + 2)}) ${field.name}: ${formatInspectedFieldValue(field)}`
+      `${String(index + 2)}) ${field.name}: ${formatInspectedFieldValue(field)}`,
     );
   });
   writeDiagnostics(context.stdout, inspected.diagnostics);
@@ -263,7 +273,7 @@ async function runPluginConfigSection(
   const item = await askForNumber(
     context,
     'Select a plugin setting: ',
-    inspected.fields.length + 1
+    inspected.fields.length + 1,
   );
 
   if (item === undefined) {
@@ -275,7 +285,7 @@ async function runPluginConfigSection(
       context,
       manifest,
       inspected.enabled,
-      inspected.fingerprint
+      inspected.fingerprint,
     );
 
     if (change !== undefined) {
@@ -301,7 +311,7 @@ async function runPluginConfigSection(
     manifest,
     field,
     inspectedField,
-    inspected.fingerprint
+    inspected.fingerprint,
   );
 
   if (change !== undefined) {
@@ -313,7 +323,7 @@ async function stagePluginActivationChange(
   context: RuntimeConfigConsoleContext,
   manifest: RuntimePluginManifest,
   enabled: boolean,
-  fingerprint: string
+  fingerprint: string,
 ): Promise<StagedRuntimeConfigChange | undefined> {
   writeLine(context.stdout, '1) Enable');
   writeLine(context.stdout, '2) Disable');
@@ -331,7 +341,7 @@ async function stagePluginActivationChange(
   if (nextEnabled === enabled) {
     writeLine(
       context.stdout,
-      `Plugin ${manifest.id} is already ${enabled ? 'enabled' : 'disabled'}.`
+      `Plugin ${manifest.id} is already ${enabled ? 'enabled' : 'disabled'}.`,
     );
     return undefined;
   }
@@ -344,14 +354,14 @@ async function stagePluginActivationChange(
     commit() {
       applyRuntimeConfigControlOperation({
         ...runtimeConfigLocation(context),
-        ...(context.env === undefined ? {} : { env: context.env }),
+        ...(context.env === undefined ? {} : {env: context.env}),
         expectedFingerprint: fingerprint,
         operation: {
           kind: nextEnabled ? 'plugin_enable' : 'plugin_disable',
-          pluginId: manifest.id
-        }
+          pluginId: manifest.id,
+        },
       });
-    }
+    },
   };
 }
 
@@ -360,7 +370,7 @@ async function stagePluginFieldChange(
   manifest: RuntimePluginManifest,
   field: RuntimePluginConfigField,
   inspectedField: RuntimePluginConfigFieldInspectShape,
-  fingerprint: string
+  fingerprint: string,
 ): Promise<StagedRuntimeConfigChange | undefined> {
   writeLine(context.stdout, '1) Set');
   if (!field.required) {
@@ -373,7 +383,7 @@ async function stagePluginFieldChange(
   const action = await askForNumber(
     context,
     'Choose an action: ',
-    field.required ? 2 : 3
+    field.required ? 2 : 3,
   );
   const cancelAction = field.required ? 2 : 3;
 
@@ -385,8 +395,13 @@ async function stagePluginFieldChange(
   const oldValue = inspectedField.authored.configured
     ? inspectedField.authored.value
     : undefined;
-  let operation: { readonly kind: 'set'; readonly fieldName: string; readonly value: RuntimeConfigValue } |
-    { readonly kind: 'unset'; readonly fieldName: string };
+  let operation:
+    | {
+        readonly kind: 'set';
+        readonly fieldName: string;
+        readonly value: RuntimeConfigValue;
+      }
+    | {readonly kind: 'unset'; readonly fieldName: string};
   let newValue: RuntimeConfigValue | undefined;
 
   if (!field.required && action === 2) {
@@ -395,7 +410,7 @@ async function stagePluginFieldChange(
       return undefined;
     }
 
-    operation = { kind: 'unset', fieldName: field.name };
+    operation = {kind: 'unset', fieldName: field.name};
   } else {
     const value = await askForFieldValue(context, field);
 
@@ -404,8 +419,8 @@ async function stagePluginFieldChange(
       return undefined;
     }
 
-    operation = { kind: 'set', fieldName: field.name, value };
-    newValue = redactRuntimeConfigValue(value, { key: field.name });
+    operation = {kind: 'set', fieldName: field.name, value};
+    newValue = redactRuntimeConfigValue(value, {key: field.name});
   }
 
   return {
@@ -418,19 +433,19 @@ async function stagePluginFieldChange(
         ...runtimeConfigLocation(context),
         ...(context.runtimeEnv === undefined && context.env === undefined
           ? {}
-          : { env: context.runtimeEnv ?? context.env }),
+          : {env: context.runtimeEnv ?? context.env}),
         manifest,
         actor: 'operator',
         expectedFingerprint: fingerprint,
-        operation
+        operation,
       });
-    }
+    },
   };
 }
 
 async function previewAndCommitChange(
   context: RuntimeConfigConsoleContext,
-  change: StagedRuntimeConfigChange
+  change: StagedRuntimeConfigChange,
 ): Promise<void> {
   writeLine(context.stdout, '');
   writeLine(context.stdout, `Target: ${change.target}`);
@@ -450,13 +465,16 @@ async function previewAndCommitChange(
   writeLine(context.stdout, `Saved ${change.target}.`);
 
   if (change.reloadRequired) {
-    writeLine(context.stdout, 'This change takes effect after the runtime reloads.');
+    writeLine(
+      context.stdout,
+      'This change takes effect after the runtime reloads.',
+    );
   }
 }
 
 async function askForFieldValue(
   context: RuntimeConfigConsoleContext,
-  field: RuntimePluginConfigField
+  field: RuntimePluginConfigField,
 ): Promise<RuntimeConfigValue | typeof cancelled> {
   for (;;) {
     const answer = await context.prompt.question(`New ${field.name}: `);
@@ -477,26 +495,26 @@ async function askForFieldValue(
 
 function parseRuntimeConfigFieldValue(
   answer: string,
-  field: RuntimePluginConfigField
+  field: RuntimePluginConfigField,
 ):
-  | { readonly ok: true; readonly value: RuntimeConfigValue }
-  | { readonly ok: false; readonly message: string } {
+  | {readonly ok: true; readonly value: RuntimeConfigValue}
+  | {readonly ok: false; readonly message: string} {
   const trimmed = answer.trim();
   const parsed = parseValueForType(trimmed, field.valueType);
 
   if (parsed === undefined || !runtimeConfigValueMatchesField(parsed, field)) {
     return {
       ok: false,
-      message: fieldValueErrorMessage(field)
+      message: fieldValueErrorMessage(field),
     };
   }
 
-  return { ok: true, value: parsed };
+  return {ok: true, value: parsed};
 }
 
 function parseValueForType(
   value: string,
-  valueType: RuntimePluginConfigField['valueType']
+  valueType: RuntimePluginConfigField['valueType'],
 ): RuntimeConfigValue | undefined {
   if (valueType === 'string' || valueType === 'path' || valueType === 'enum') {
     return value;
@@ -552,7 +570,7 @@ function fieldValueErrorMessage(field: RuntimePluginConfigField): string {
 async function askForNumber(
   context: RuntimeConfigConsoleContext,
   question: string,
-  maximum: number
+  maximum: number,
 ): Promise<number | undefined> {
   for (;;) {
     const answer = (await context.prompt.question(question))?.trim();
@@ -569,17 +587,17 @@ async function askForNumber(
 
     writeLine(
       context.stdout,
-      `Choose a number from 1 to ${String(maximum)}, or q to quit.`
+      `Choose a number from 1 to ${String(maximum)}, or q to quit.`,
     );
   }
 }
 
 function loadConsoleSnapshot(
-  context: RuntimeConfigConsoleContext
+  context: RuntimeConfigConsoleContext,
 ): RuntimeConfigConsoleSnapshot {
   const loaded = loadProject02RuntimeConfig({
     ...runtimeConfigLocation(context),
-    ...(context.env === undefined ? {} : { env: context.env })
+    ...(context.env === undefined ? {} : {env: context.env}),
   });
   let blockingDiagnostic: (typeof loaded.diagnostics)[number] | undefined;
   const diagnostics: (typeof loaded.diagnostics)[number][] = [];
@@ -600,49 +618,48 @@ function loadConsoleSnapshot(
 
   if (blockingDiagnostic !== undefined) {
     throw new TypeError(
-      `Cannot open config console because the runtime config is invalid: ${blockingDiagnostic.message}`
+      `Cannot open config console because the runtime config is invalid: ${blockingDiagnostic.message}`,
     );
   }
 
   const config = createRuntimeConfigMutationBase({
     loadedConfig: loaded,
-    ...runtimeConfigLocation(context)
+    ...runtimeConfigLocation(context),
   });
 
   return Object.freeze({
     loadedConfig: loaded,
     config,
     diagnostics: Object.freeze(diagnostics),
-    fingerprint: createRuntimeConfigFingerprint(config)
+    fingerprint: createRuntimeConfigFingerprint(config),
   });
 }
 
 function pluginCatalog(
   context: RuntimeConfigConsoleContext,
-  snapshot: RuntimeConfigConsoleSnapshot
+  snapshot: RuntimeConfigConsoleSnapshot,
 ): RuntimeConfigConsolePluginCatalog {
   const activationPlan = prepareConfiguredProject02PluginActivation({
     loadedConfig: snapshot.loadedConfig,
-    ...(context.storeRoot === undefined
-      ? {}
-      : { storeRoot: context.storeRoot }),
+    ...(context.storeRoot === undefined ? {} : {storeRoot: context.storeRoot}),
     ...(context.runtimeEnv === undefined && context.env === undefined
       ? {}
-      : { env: context.runtimeEnv ?? context.env }),
-    ...(context.factories === undefined
-      ? {}
-      : { factories: context.factories })
+      : {env: context.runtimeEnv ?? context.env}),
+    ...(context.factories === undefined ? {} : {factories: context.factories}),
   });
   const entriesById = new Map<string, RuntimeConfigConsolePluginEntry>();
 
   for (const definition of Object.values(activationPlan.catalogEntries)) {
-    entriesById.set(definition.manifest.id, Object.freeze({
-      manifest: definition.manifest,
-      section:
-        definition.catalogKind === 'host_service'
-          ? 'system_service'
-          : 'plugin'
-    }));
+    entriesById.set(
+      definition.manifest.id,
+      Object.freeze({
+        manifest: definition.manifest,
+        section:
+          definition.catalogKind === 'host_service'
+            ? 'system_service'
+            : 'plugin',
+      }),
+    );
   }
 
   const entries = [...entriesById.values()];
@@ -650,33 +667,37 @@ function pluginCatalog(
   return Object.freeze({
     entries: Object.freeze([
       ...entries
-        .filter((entry) => entry.section === 'plugin')
-        .sort((left, right) => left.manifest.id.localeCompare(right.manifest.id)),
+        .filter(entry => entry.section === 'plugin')
+        .sort((left, right) =>
+          left.manifest.id.localeCompare(right.manifest.id),
+        ),
       ...entries
-        .filter((entry) => entry.section === 'system_service')
-        .sort((left, right) => left.manifest.id.localeCompare(right.manifest.id))
+        .filter(entry => entry.section === 'system_service')
+        .sort((left, right) =>
+          left.manifest.id.localeCompare(right.manifest.id),
+        ),
     ]),
     activationByPluginId:
       activationPlan.pluginConfigControl.activationByPluginId ??
       Object.freeze({}),
     defaultEnabledPluginIds:
       activationPlan.pluginConfigControl.defaultEnabledPluginIds ??
-      Object.freeze([])
+      Object.freeze([]),
   });
 }
 
 function writePluginEntries(
   stdout: NodeJS.WritableStream,
-  entries: readonly RuntimeConfigConsolePluginEntry[]
+  entries: readonly RuntimeConfigConsolePluginEntry[],
 ): void {
   const sections = [
-    { heading: 'Plugins', section: 'plugin' },
-    { heading: 'System services', section: 'system_service' }
+    {heading: 'Plugins', section: 'plugin'},
+    {heading: 'System services', section: 'system_service'},
   ] as const;
   let index = 0;
 
-  for (const { heading, section } of sections) {
-    const sectionEntries = entries.filter((entry) => entry.section === section);
+  for (const {heading, section} of sections) {
+    const sectionEntries = entries.filter(entry => entry.section === section);
 
     if (sectionEntries.length === 0) {
       continue;
@@ -687,14 +708,14 @@ function writePluginEntries(
       index += 1;
       writeLine(
         stdout,
-        `${String(index)}) ${entry.manifest.displayName} (${entry.manifest.id})`
+        `${String(index)}) ${entry.manifest.displayName} (${entry.manifest.id})`,
       );
     }
   }
 }
 
 function formatInspectedFieldValue(
-  field: RuntimePluginConfigFieldInspectShape
+  field: RuntimePluginConfigFieldInspectShape,
 ): string {
   const value = field.authored.configured
     ? field.authored.value
@@ -708,7 +729,7 @@ function formatInspectedFieldValue(
 
 function formatCurrentValue(
   value: RuntimeConfigValue | undefined,
-  defaultValueSummary?: string
+  defaultValueSummary?: string,
 ): string {
   if (value !== undefined) {
     return formatPreviewValue(value);
@@ -726,7 +747,7 @@ function formatPreviewValue(value: RuntimeConfigValue | undefined): string {
 function writeSecretConfigInstructions(
   context: RuntimeConfigConsoleContext,
   manifest: RuntimePluginManifest,
-  field: RuntimePluginConfigField
+  field: RuntimePluginConfigField,
 ): void {
   const locationArgs = [
     ...(context.storeRoot === undefined
@@ -734,7 +755,7 @@ function writeSecretConfigInstructions(
       : ['--store', shellQuote(context.storeRoot)]),
     ...(context.configPath === undefined
       ? []
-      : ['--config', shellQuote(context.configPath)])
+      : ['--config', shellQuote(context.configPath)]),
   ];
   const envVar = field.envVar ?? suggestedSecretEnvVar(manifest.id, field.name);
   const commandArgs = [
@@ -742,26 +763,23 @@ function writeSecretConfigInstructions(
     'set',
     shellQuote(manifest.id),
     shellQuote(field.name),
-    shellQuote(envVar)
+    shellQuote(envVar),
   ];
 
   writeLine(
     context.stdout,
-    'Secret values are not displayed or entered in this console.'
+    'Secret values are not displayed or entered in this console.',
   );
+  writeLine(context.stdout, `Set ${envVar} in the environment, then run:`);
   writeLine(
     context.stdout,
-    `Set ${envVar} in the environment, then run:`
-  );
-  writeLine(
-    context.stdout,
-    `pnpm runtime-config${locationArgs.length === 0 ? '' : ` ${locationArgs.join(' ')}`} -- ${commandArgs.join(' ')}`
+    `pnpm runtime-config${locationArgs.length === 0 ? '' : ` ${locationArgs.join(' ')}`} -- ${commandArgs.join(' ')}`,
   );
 }
 
 function writeDiagnostics(
   stdout: NodeJS.WritableStream,
-  diagnostics: readonly RuntimeConfigDiagnostic[]
+  diagnostics: readonly RuntimeConfigDiagnostic[],
 ): void {
   if (diagnostics.length === 0) {
     return;
@@ -771,7 +789,7 @@ function writeDiagnostics(
   for (const diagnostic of diagnostics) {
     writeLine(
       stdout,
-      `- ${diagnostic.severity}: ${redactRuntimeConfigText(diagnostic.message)}`
+      `- ${diagnostic.severity}: ${redactRuntimeConfigText(diagnostic.message)}`,
     );
   }
 }
@@ -779,15 +797,19 @@ function writeDiagnostics(
 function runtimeConfigLocation(options: {
   readonly configPath?: string;
   readonly storeRoot?: string;
-}): { readonly configPath?: string; readonly storeRoot?: string } {
+}): {readonly configPath?: string; readonly storeRoot?: string} {
   return {
-    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   };
 }
 
 function suggestedSecretEnvVar(pluginId: string, fieldName: string): string {
-  return `${pluginId}_${fieldName}`.replaceAll(/[^A-Za-z0-9]+/g, '_').toUpperCase();
+  return `${pluginId}_${fieldName}`
+    .replaceAll(/[^A-Za-z0-9]+/g, '_')
+    .toUpperCase();
 }
 
 function shellQuote(value: string): string {
@@ -800,7 +822,7 @@ function writeLine(stdout: NodeJS.WritableStream, value: string): void {
 
 function createDefaultPrompt(
   stdin: NodeJS.ReadableStream,
-  stdout: NodeJS.WritableStream
+  stdout: NodeJS.WritableStream,
 ): {
   readonly prompt: RuntimeConfigConsolePromptAdapter;
   close(): void;
@@ -816,14 +838,14 @@ function createDefaultPrompt(
         : '';
     const normalizedError = new TypeError(
       `Could not read runtime config console input${detail}.`,
-      { cause: error }
+      {cause: error},
     );
 
     inputError = normalizedError;
     rejectActiveQuestion?.(normalizedError);
   };
   stdin.on('error', handleInputError);
-  const readline = createInterface({ input: stdin, output: stdout });
+  const readline = createInterface({input: stdin, output: stdout});
 
   readline.once('close', () => {
     closed = true;
@@ -876,19 +898,22 @@ function createDefaultPrompt(
               rejectQuestion(
                 error instanceof Error
                   ? error
-                  : new TypeError('Could not read runtime config console input.', {
-                      cause: error
-                    })
+                  : new TypeError(
+                      'Could not read runtime config console input.',
+                      {
+                        cause: error,
+                      },
+                    ),
               );
             }
           })();
         });
-      }
+      },
     }),
     close() {
       stdin.off('error', handleInputError);
       readline.off('error', handleInputError);
       readline.close();
-    }
+    },
   };
 }

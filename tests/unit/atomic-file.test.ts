@@ -1,22 +1,30 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 
 import {
   atomicReplacementFileBelongsToTarget,
   atomicReplaceFile,
-  parseAtomicReplacementFileName
+  parseAtomicReplacementFileName,
 } from '../../src/runtime/storage/atomic-file.ts';
 
 const tempRoots: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    tempRoots.splice(0).map(async (root) => {
-      await rm(root, { force: true, recursive: true });
-    })
+    tempRoots.splice(0).map(async root => {
+      await rm(root, {force: true, recursive: true});
+    }),
   );
 });
 
@@ -29,7 +37,7 @@ describe('atomic file replacement', () => {
     await atomicReplaceFile({
       targetPath,
       content: 'new\n',
-      mode: 0o600
+      mode: 0o600,
     });
 
     expect(await readFile(targetPath, 'utf8')).toBe('new\n');
@@ -43,7 +51,7 @@ describe('atomic file replacement', () => {
     await mkdir(targetPath);
 
     await expect(
-      atomicReplaceFile({ targetPath, content: 'new\n', mode: 0o600 })
+      atomicReplaceFile({targetPath, content: 'new\n', mode: 0o600}),
     ).rejects.toThrow();
 
     expect(await readdir(root)).toEqual(['config.json']);
@@ -55,13 +63,16 @@ describe('atomic file replacement', () => {
 
     expect(parseAtomicReplacementFileName(fileName)).toEqual({
       targetName: 'trace.jsonl',
-      ownerPid: 4242
+      ownerPid: 4242,
     });
     expect(
-      atomicReplacementFileBelongsToTarget(fileName, '/runtime/trace.jsonl')
+      atomicReplacementFileBelongsToTarget(fileName, '/runtime/trace.jsonl'),
     ).toBe(true);
     expect(
-      atomicReplacementFileBelongsToTarget(fileName, '/runtime/raw-events.jsonl')
+      atomicReplacementFileBelongsToTarget(
+        fileName,
+        '/runtime/raw-events.jsonl',
+      ),
     ).toBe(false);
   });
 });

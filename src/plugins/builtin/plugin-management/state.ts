@@ -1,7 +1,7 @@
-import { createRuntimePluginManifest } from '../../api/manifest-validation.ts';
-import type { RuntimePluginManifest } from '../../api/types.ts';
-import type { RuntimePluginConfigActivationInspectShape } from '../../../runtime/config/index.ts';
-import type { RuntimePluginConfigControlCapability } from '../../../runtime/config/index.ts';
+import {createRuntimePluginManifest} from '../../api/manifest-validation.ts';
+import type {RuntimePluginManifest} from '../../api/types.ts';
+import type {RuntimePluginConfigActivationInspectShape} from '../../../runtime/config/index.ts';
+import type {RuntimePluginConfigControlCapability} from '../../../runtime/config/index.ts';
 
 export type RuntimePluginConfigControlHostState = {
   readonly pluginManifests: readonly RuntimePluginManifest[];
@@ -16,11 +16,11 @@ export type RuntimePluginConfigControlHostState = {
 };
 
 export function requiredRuntimePluginConfigControl(
-  state: RuntimePluginConfigControlHostState
+  state: RuntimePluginConfigControlHostState,
 ): RuntimePluginConfigControlCapability {
   if (state.control === undefined) {
     throw new Error(
-      'Runtime plugin config tools require a host config-control capability.'
+      'Runtime plugin config tools require a host config-control capability.',
     );
   }
 
@@ -35,7 +35,7 @@ export function requiredRuntimePluginConfigControl(
  * backstop.
  */
 export function assertRuntimePluginConfigControlCapabilityPresent(
-  state: RuntimePluginConfigControlHostState
+  state: RuntimePluginConfigControlHostState,
 ): void {
   if (state.control !== undefined) {
     return;
@@ -45,7 +45,7 @@ export function assertRuntimePluginConfigControlCapabilityPresent(
     'Runtime plugin config-control state was supplied without its host ' +
       'config-control capability ("control"). Attach control or compose the ' +
       'host through the configured plugin activation factory; pass ' +
-      'pluginInventoryState instead for an inventory-only host.'
+      'pluginInventoryState instead for an inventory-only host.',
   );
 }
 
@@ -57,12 +57,11 @@ export const runtimeConfigConflictErrorCode = 'runtime_config_conflict';
  * conflict errors, so plugins need no value import of that layer.
  */
 export function isRuntimeConfigConflictError(
-  error: unknown
-): error is Error & { readonly code: typeof runtimeConfigConflictErrorCode } {
+  error: unknown,
+): error is Error & {readonly code: typeof runtimeConfigConflictErrorCode} {
   return (
     error instanceof Error &&
-    (error as { readonly code?: unknown }).code ===
-      runtimeConfigConflictErrorCode
+    (error as {readonly code?: unknown}).code === runtimeConfigConflictErrorCode
   );
 }
 
@@ -70,14 +69,14 @@ const runtimePluginConfigControlHostStateSnapshots =
   new WeakSet<RuntimePluginConfigControlHostState>();
 
 export function createRuntimePluginConfigControlHostStateSnapshot(
-  state: RuntimePluginConfigControlHostState
+  state: RuntimePluginConfigControlHostState,
 ): RuntimePluginConfigControlHostState {
   if (runtimePluginConfigControlHostStateSnapshots.has(state)) {
     return state;
   }
 
-  const pluginManifests = state.pluginManifests.map((manifest) =>
-    createRuntimePluginManifest(manifest)
+  const pluginManifests = state.pluginManifests.map(manifest =>
+    createRuntimePluginManifest(manifest),
   );
 
   assertUniquePluginConfigControlManifestIds(pluginManifests);
@@ -95,25 +94,23 @@ export function createRuntimePluginConfigControlHostStateSnapshot(
                   Object.freeze({
                     enabled: activation.enabled,
                     status: activation.status,
-                    reasons: Object.freeze([...activation.reasons])
-                  })
-                ]
-              )
-            )
-          )
+                    reasons: Object.freeze([...activation.reasons]),
+                  }),
+                ],
+              ),
+            ),
+          ),
         }),
     ...(state.defaultEnabledPluginIds === undefined
       ? {}
       : {
           defaultEnabledPluginIds: Object.freeze([
-            ...new Set(state.defaultEnabledPluginIds)
-          ])
+            ...new Set(state.defaultEnabledPluginIds),
+          ]),
         }),
-    ...(state.configPath === undefined ? {} : { configPath: state.configPath }),
-    ...(state.env === undefined
-      ? {}
-      : { env: Object.freeze({ ...state.env }) }),
-    ...(state.control === undefined ? {} : { control: state.control })
+    ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
+    ...(state.env === undefined ? {} : {env: Object.freeze({...state.env})}),
+    ...(state.control === undefined ? {} : {control: state.control}),
   } satisfies RuntimePluginConfigControlHostState);
 
   runtimePluginConfigControlHostStateSnapshots.add(snapshot);
@@ -121,14 +118,14 @@ export function createRuntimePluginConfigControlHostStateSnapshot(
 }
 
 function assertUniquePluginConfigControlManifestIds(
-  manifests: readonly RuntimePluginManifest[]
+  manifests: readonly RuntimePluginManifest[],
 ): void {
   const seenPluginIds = new Set<string>();
 
   for (const manifest of manifests) {
     if (seenPluginIds.has(manifest.id)) {
       throw new TypeError(
-        `Plugin config control manifest id "${manifest.id}" is declared more than once.`
+        `Plugin config control manifest id "${manifest.id}" is declared more than once.`,
       );
     }
 

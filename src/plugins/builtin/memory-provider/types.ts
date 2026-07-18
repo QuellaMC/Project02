@@ -1,6 +1,4 @@
-import type {
-  RuntimePluginSourceReference
-} from '../../api/types.ts';
+import type {RuntimePluginSourceReference} from '../../api/types.ts';
 
 export type MemoryOperationScope = {
   readonly deadlineAt: number;

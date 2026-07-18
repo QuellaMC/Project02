@@ -1,21 +1,23 @@
 import {
-
   roleModelProviderErrorRejectionReason,
   type RoleModelInputEnvelope,
   type RoleModelProviderExchangeSnapshot,
-  type RoleModelProviderMetadata
+  type RoleModelProviderMetadata,
 } from '../api/contracts.ts';
-import { parseRoleModelProviderExchangeSnapshot } from '../api/provider-exchange.ts';
+import {parseRoleModelProviderExchangeSnapshot} from '../api/provider-exchange.ts';
 import {
   validateModelToolInputAgainstContract,
   visibleReplyModelToolName,
   type ModelToolCall,
-  type ModelToolInputContract
+  type ModelToolInputContract,
 } from '../api/model-tools.ts';
 import type {
-  RoleModelAssistantChatMessage, RoleModelChatCompletionTool,
-  RoleModelChatMessage, RoleModelChatToolCall,
-  RoleModelProviderCapabilities, RoleModelProviderToolNameMapping
+  RoleModelAssistantChatMessage,
+  RoleModelChatCompletionTool,
+  RoleModelChatMessage,
+  RoleModelChatToolCall,
+  RoleModelProviderCapabilities,
+  RoleModelProviderToolNameMapping,
 } from '../api/chat-wire.ts';
 import {
   createRoleModelProviderToolNameMappings,
@@ -23,23 +25,23 @@ import {
   providerToolNameForRuntimeToolName,
   renderRoleModelTurnContext,
   runtimeToolNameForProviderToolName,
-  type RoleModelTurnContext
+  type RoleModelTurnContext,
 } from '../prompt/render.ts';
 import type {
   RoleModelAdapter,
   RoleModelAdapterInvocation,
   RoleModelAdapterRawOutput,
-  RoleModelNativeToolCallArgumentError
+  RoleModelNativeToolCallArgumentError,
 } from '../api/adapter.ts';
 import {
   redactRuntimePluginText,
-  type RuntimePluginJsonValue
+  type RuntimePluginJsonValue,
 } from '../../plugins/api/index.ts';
 import {
   createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot
+  createJsonBoundarySnapshot,
 } from '../../shared/json-boundary.ts';
-import { scrubReasoningBlocks } from '../api/reasoning.ts';
+import {scrubReasoningBlocks} from '../api/reasoning.ts';
 
 export const nvidiaRoleModelProviderName = 'nvidia';
 export const defaultNvidiaChatCompletionsEndpoint =
@@ -56,7 +58,7 @@ export const nvidiaRoleModelProviderCapabilities = Object.freeze({
   ...defaultRoleModelProviderCapabilities,
   supportsReasoning: true,
   reasoningParameterStyle: 'nvidia',
-  requiresReasoningBlockRoundTrip: false
+  requiresReasoningBlockRoundTrip: false,
 } satisfies RoleModelProviderCapabilities);
 
 export type NvidiaRoleModelThinkingMode =
@@ -91,7 +93,7 @@ export {
   NvidiaRequestTimeoutError,
   type NvidiaFetchClient,
   type NvidiaFetchRequest,
-  type NvidiaFetchResponse
+  type NvidiaFetchResponse,
 } from './nvidia-transport.ts';
 import {
   createNvidiaRequestDeadline,
@@ -101,7 +103,7 @@ import {
   performNvidiaTransportRequest,
   type NvidiaFetchClient,
   type NvidiaFetchRequest,
-  type NvidiaFetchResponse
+  type NvidiaFetchResponse,
 } from './nvidia-transport.ts';
 
 export type CreateNvidiaRoleModelProviderAdapterOptions =
@@ -121,34 +123,34 @@ type NvidiaProviderErrorCode =
 const nvidiaNativeToolArgumentsContract = Object.freeze({
   type: 'object',
   fields: Object.freeze([]),
-  additionalFields: true
+  additionalFields: true,
 } satisfies ModelToolInputContract);
 const terminalNvidiaFinishReasons = Object.freeze(['stop', 'tool_calls']);
 
 export function createNvidiaRoleModelProviderConfigFromEnv(
-  env: NvidiaRoleModelProviderEnvironment = process.env
+  env: NvidiaRoleModelProviderEnvironment = process.env,
 ): NvidiaRoleModelProviderConfig {
   const apiKey = optionalNvidiaProviderEnvValue(env.NVIDIA_API_KEY);
   const model = optionalNvidiaProviderEnvValue(env.NVIDIA_MODEL);
 
   return Object.freeze({
-    ...(apiKey === undefined ? {} : { apiKey }),
-    ...(model === undefined ? {} : { model })
+    ...(apiKey === undefined ? {} : {apiKey}),
+    ...(model === undefined ? {} : {model}),
   } satisfies NvidiaRoleModelProviderConfig);
 }
 
 export function createNvidiaRoleModelProviderAdapter(
-  options: CreateNvidiaRoleModelProviderAdapterOptions = {}
+  options: CreateNvidiaRoleModelProviderAdapterOptions = {},
 ): RoleModelAdapter {
   const endpoint = options.endpoint ?? defaultNvidiaChatCompletionsEndpoint;
   const model = options.model ?? defaultNvidiaRoleModelName;
   const fetchClient = options.fetchClient ?? defaultFetchClient;
   const thinkingMode = normalizeNvidiaThinkingMode(options.thinkingMode);
   const requestTimeoutMs = normalizeNvidiaRequestTimeoutMs(
-    options.requestTimeoutMs
+    options.requestTimeoutMs,
   );
   const transportRetryDelaysMs = normalizeNvidiaTransportRetryDelays(
-    options.transportRetryDelaysMs
+    options.transportRetryDelaysMs,
   );
 
   return Object.freeze({
@@ -158,7 +160,7 @@ export function createNvidiaRoleModelProviderAdapter(
           code: 'missing_api_key',
           endpoint,
           message: `NVIDIA provider requires ${nvidiaApiKeyEnvName}.`,
-          model
+          model,
         });
       }
 
@@ -167,17 +169,17 @@ export function createNvidiaRoleModelProviderAdapter(
         createNvidiaProviderToolNameMappings(turnContext);
       const messages = renderNvidiaMessagesForTurnContext(
         turnContext,
-        toolNameMappings
+        toolNameMappings,
       );
       const tools = renderNvidiaToolsForTurnContext(
         turnContext,
-        toolNameMappings
+        toolNameMappings,
       );
       const requestBody = createNvidiaRequestBody({
         model,
         messages,
         tools,
-        thinkingMode
+        thinkingMode,
       });
       const body = JSON.stringify(requestBody);
       const baseProviderExchange = createBaseNvidiaProviderExchange({
@@ -187,12 +189,12 @@ export function createNvidiaRoleModelProviderAdapter(
         requestBody,
         thinkingMode,
         toolNameMappings,
-        tools
+        tools,
       });
       const baseMetadata = createProviderMetadata({
         endpoint,
         messageCount: messages.length,
-        model
+        model,
       });
       const requestDeadline = createNvidiaRequestDeadline(requestTimeoutMs);
 
@@ -203,7 +205,7 @@ export function createNvidiaRoleModelProviderAdapter(
           apiKey: options.apiKey,
           body,
           requestDeadline,
-          retryDelaysMs: transportRetryDelaysMs
+          retryDelaysMs: transportRetryDelaysMs,
         });
 
         if (transport.status === 'rejected') {
@@ -213,7 +215,7 @@ export function createNvidiaRoleModelProviderAdapter(
             message: redactProviderSecret(transport.message, options.apiKey),
             model,
             status: transport.httpStatus,
-            providerExchange: baseProviderExchange
+            providerExchange: baseProviderExchange,
           });
         }
 
@@ -221,7 +223,7 @@ export function createNvidiaRoleModelProviderAdapter(
         const rawOutput = parseNvidiaResponseMessage(
           responseBody,
           toolNameMappings,
-          inputEnvelope.allowedTools.includes(visibleReplyModelToolName)
+          inputEnvelope.allowedTools.includes(visibleReplyModelToolName),
         );
 
         if (rawOutput.status === 'rejected') {
@@ -233,8 +235,8 @@ export function createNvidiaRoleModelProviderAdapter(
             status: transport.httpStatus,
             providerExchange: createNvidiaProviderExchange({
               base: baseProviderExchange,
-              responseBody
-            })
+              responseBody,
+            }),
           });
         }
 
@@ -242,13 +244,13 @@ export function createNvidiaRoleModelProviderAdapter(
           rawOutputText: rawOutput.rawOutputText,
           nativeAssistantMessage: rawOutput.nativeAssistantMessage,
           ...nativeToolCallArgumentErrorsOption(
-            rawOutput.nativeToolCallArgumentErrors
+            rawOutput.nativeToolCallArgumentErrors,
           ),
           providerMetadata: Object.freeze({
             ...baseMetadata,
             response: Object.freeze({
-              status: transport.httpStatus
-            })
+              status: transport.httpStatus,
+            }),
           } satisfies RoleModelProviderMetadata),
           providerExchange: createNvidiaProviderExchange({
             base: baseProviderExchange,
@@ -256,15 +258,13 @@ export function createNvidiaRoleModelProviderAdapter(
             rawFinishReason: rawOutput.rawFinishReason,
             ...(rawOutput.finishReason === undefined
               ? {}
-              : { finishReason: rawOutput.finishReason }),
-            ...(rawOutput.usage === undefined
-              ? {}
-              : { usage: rawOutput.usage }),
+              : {finishReason: rawOutput.finishReason}),
+            ...(rawOutput.usage === undefined ? {} : {usage: rawOutput.usage}),
             nativeAssistantMessage: rawOutput.nativeAssistantMessage,
             ...(rawOutput.outputNormalization === undefined
               ? {}
-              : { outputNormalization: rawOutput.outputNormalization })
-          })
+              : {outputNormalization: rawOutput.outputNormalization}),
+          }),
         } satisfies RoleModelAdapterRawOutput);
       } catch (error: unknown) {
         const message =
@@ -274,7 +274,7 @@ export function createNvidiaRoleModelProviderAdapter(
                 error instanceof Error
                   ? error.message
                   : 'NVIDIA provider request failed.',
-                options.apiKey
+                options.apiKey,
               );
 
         return createProviderRejectedOutput({
@@ -285,12 +285,12 @@ export function createNvidiaRoleModelProviderAdapter(
           endpoint,
           message,
           model,
-          providerExchange: baseProviderExchange
+          providerExchange: baseProviderExchange,
         });
       } finally {
         requestDeadline.dispose();
       }
-    }
+    },
   } satisfies RoleModelAdapter);
 }
 
@@ -308,13 +308,13 @@ function createNvidiaRequestBody(options: {
       : {
           tools: options.tools,
           tool_choice: 'auto',
-          parallel_tool_calls: true
+          parallel_tool_calls: true,
         }),
     stream: false,
     temperature: nvidiaRoleModelTemperature,
     top_p: nvidiaRoleModelTopP,
     max_tokens: nvidiaRoleModelMaxTokens,
-    ...nvidiaThinkingRequestParams(options.thinkingMode)
+    ...nvidiaThinkingRequestParams(options.thinkingMode),
   });
 }
 
@@ -328,7 +328,7 @@ type NormalizedNvidiaThinkingMode =
     };
 
 function normalizeNvidiaThinkingMode(
-  mode: NvidiaRoleModelThinkingMode | undefined
+  mode: NvidiaRoleModelThinkingMode | undefined,
 ): NormalizedNvidiaThinkingMode {
   if (mode?.mode === 'none') {
     if (
@@ -337,11 +337,11 @@ function normalizeNvidiaThinkingMode(
       mode.reasoningBudgetTokens > 0
     ) {
       throw new TypeError(
-        'NVIDIA no-thinking mode must not include a positive reasoning budget.'
+        'NVIDIA no-thinking mode must not include a positive reasoning budget.',
       );
     }
 
-    return Object.freeze({ mode: 'none' } satisfies NormalizedNvidiaThinkingMode);
+    return Object.freeze({mode: 'none'} satisfies NormalizedNvidiaThinkingMode);
   }
 
   const reasoningBudgetTokens =
@@ -352,32 +352,32 @@ function normalizeNvidiaThinkingMode(
     reasoningBudgetTokens <= 0
   ) {
     throw new TypeError(
-      'NVIDIA thinking mode requires a positive integer reasoning budget.'
+      'NVIDIA thinking mode requires a positive integer reasoning budget.',
     );
   }
 
   return Object.freeze({
     mode: 'enabled',
-    reasoningBudgetTokens
+    reasoningBudgetTokens,
   } satisfies NormalizedNvidiaThinkingMode);
 }
 
 function nvidiaThinkingRequestParams(
-  thinkingMode: NormalizedNvidiaThinkingMode
+  thinkingMode: NormalizedNvidiaThinkingMode,
 ): Readonly<Record<string, unknown>> {
   if (thinkingMode.mode === 'none') {
     return Object.freeze({
       chat_template_kwargs: Object.freeze({
-        enable_thinking: false
-      })
+        enable_thinking: false,
+      }),
     });
   }
 
   return Object.freeze({
     reasoning_budget: thinkingMode.reasoningBudgetTokens,
     chat_template_kwargs: Object.freeze({
-      enable_thinking: true
-    })
+      enable_thinking: true,
+    }),
   });
 }
 
@@ -395,12 +395,12 @@ function createBaseNvidiaProviderExchange(options: {
       provider: Object.freeze({
         name: nvidiaRoleModelProviderName,
         model: redactRuntimePluginText(options.model),
-        endpoint: redactRuntimePluginText(options.endpoint)
+        endpoint: redactRuntimePluginText(options.endpoint),
       }),
       capabilities: nvidiaRoleModelProviderCapabilities,
       reasoning: Object.freeze({
         mode: options.thinkingMode.mode,
-        params: nvidiaReasoningEvidenceParams(options.thinkingMode)
+        params: nvidiaReasoningEvidenceParams(options.thinkingMode),
       }),
       renderedMessages: Object.freeze([...options.messages]),
       renderedTools: Object.freeze([...options.tools]),
@@ -409,13 +409,13 @@ function createBaseNvidiaProviderExchange(options: {
         ? {}
         : {
             toolChoice: 'auto',
-            parallelToolCalls: true
+            parallelToolCalls: true,
           }),
       requestBody: redactProviderBoundaryJson(options.requestBody),
       nativeToolResultMessages: Object.freeze(
-        options.messages.filter((message) => message.role === 'tool')
-      )
-    } satisfies RoleModelProviderExchangeSnapshot)
+        options.messages.filter(message => message.role === 'tool'),
+      ),
+    } satisfies RoleModelProviderExchangeSnapshot),
   });
 }
 
@@ -432,29 +432,29 @@ function createNvidiaProviderExchange(options: {
     ...options.base,
     ...(options.rawFinishReason === undefined
       ? {}
-      : { rawFinishReason: redactProviderBoundaryJson(options.rawFinishReason) }),
+      : {rawFinishReason: redactProviderBoundaryJson(options.rawFinishReason)}),
     ...(options.finishReason === undefined
       ? {}
-      : { finishReason: options.finishReason }),
+      : {finishReason: options.finishReason}),
     ...(options.usage === undefined
       ? {}
-      : { usage: redactProviderBoundaryJson(options.usage) }),
+      : {usage: redactProviderBoundaryJson(options.usage)}),
     ...(options.nativeAssistantMessage === undefined
       ? {}
-      : { nativeAssistantMessage: options.nativeAssistantMessage }),
+      : {nativeAssistantMessage: options.nativeAssistantMessage}),
     ...(options.responseBody === undefined
       ? {}
       : {
           responseBody: redactProviderBoundaryJson(
             providerResponseReplaySubset(
               options.responseBody,
-              options.nativeAssistantMessage
-            )
-          )
+              options.nativeAssistantMessage,
+            ),
+          ),
         }),
     ...(options.outputNormalization === undefined
       ? {}
-      : { outputNormalization: options.outputNormalization })
+      : {outputNormalization: options.outputNormalization}),
   } satisfies RoleModelProviderExchangeSnapshot);
   const snapshot = parseRoleModelProviderExchangeSnapshot(candidate);
 
@@ -466,104 +466,104 @@ function createNvidiaProviderExchange(options: {
 }
 
 function nvidiaReasoningEvidenceParams(
-  thinkingMode: NormalizedNvidiaThinkingMode
+  thinkingMode: NormalizedNvidiaThinkingMode,
 ): RuntimePluginJsonValue {
   if (thinkingMode.mode === 'none') {
     return Object.freeze({
       chat_template_kwargs: Object.freeze({
-        enable_thinking: false
-      })
+        enable_thinking: false,
+      }),
     });
   }
 
   return Object.freeze({
     reasoning_budget: thinkingMode.reasoningBudgetTokens,
     chat_template_kwargs: Object.freeze({
-      enable_thinking: true
-    })
+      enable_thinking: true,
+    }),
   });
 }
 
 export function renderNvidiaMessages(
   inputEnvelope: RoleModelInputEnvelope,
-  invocation?: RoleModelAdapterInvocation
+  invocation?: RoleModelAdapterInvocation,
 ): readonly NvidiaChatCompletionMessage[] {
   const turnContext = turnContextForNvidia(inputEnvelope, invocation);
 
   return renderNvidiaMessagesForTurnContext(
     turnContext,
-    createNvidiaProviderToolNameMappings(turnContext)
+    createNvidiaProviderToolNameMappings(turnContext),
   );
 }
 
 export function renderNvidiaTools(
   inputEnvelope: RoleModelInputEnvelope,
-  invocation?: RoleModelAdapterInvocation
+  invocation?: RoleModelAdapterInvocation,
 ): readonly NvidiaChatCompletionTool[] {
   const turnContext = turnContextForNvidia(inputEnvelope, invocation);
 
   return renderNvidiaToolsForTurnContext(
     turnContext,
-    createNvidiaProviderToolNameMappings(turnContext)
+    createNvidiaProviderToolNameMappings(turnContext),
   );
 }
 
 function turnContextForNvidia(
   inputEnvelope: RoleModelInputEnvelope,
-  invocation?: RoleModelAdapterInvocation
+  invocation?: RoleModelAdapterInvocation,
 ): RoleModelTurnContext {
   return (
     invocation?.turnContext ??
     renderRoleModelTurnContext(inputEnvelope, {
-      capabilities: nvidiaRoleModelProviderCapabilities
+      capabilities: nvidiaRoleModelProviderCapabilities,
     })
   );
 }
 
 function createNvidiaProviderToolNameMappings(
-  turnContext: RoleModelTurnContext
+  turnContext: RoleModelTurnContext,
 ): readonly RoleModelProviderToolNameMapping[] {
   return createRoleModelProviderToolNameMappings(
-    turnContext.tools.map((tool) => tool.function.name)
+    turnContext.tools.map(tool => tool.function.name),
   );
 }
 
 function renderNvidiaMessagesForTurnContext(
   turnContext: RoleModelTurnContext,
-  toolNameMappings: readonly RoleModelProviderToolNameMapping[]
+  toolNameMappings: readonly RoleModelProviderToolNameMapping[],
 ): readonly NvidiaChatCompletionMessage[] {
   return Object.freeze(
-    turnContext.messages.map((message) =>
-      sanitizeNvidiaMessage(message, toolNameMappings)
-    )
+    turnContext.messages.map(message =>
+      sanitizeNvidiaMessage(message, toolNameMappings),
+    ),
   );
 }
 
 function renderNvidiaToolsForTurnContext(
   turnContext: RoleModelTurnContext,
-  toolNameMappings: readonly RoleModelProviderToolNameMapping[]
+  toolNameMappings: readonly RoleModelProviderToolNameMapping[],
 ): readonly NvidiaChatCompletionTool[] {
   return Object.freeze(
-    turnContext.tools.map((tool) =>
+    turnContext.tools.map(tool =>
       Object.freeze({
         type: 'function',
         function: Object.freeze({
           name: providerToolNameForRuntimeToolName(
             tool.function.name,
-            toolNameMappings
+            toolNameMappings,
           ),
           description: tool.function.description,
           parameters: tool.function.parameters,
-          ...(tool.function.strict === undefined ? {} : { strict: true })
-        })
-      } satisfies NvidiaChatCompletionTool)
-    )
+          ...(tool.function.strict === undefined ? {} : {strict: true}),
+        }),
+      } satisfies NvidiaChatCompletionTool),
+    ),
   );
 }
 
 function sanitizeNvidiaMessage(
   message: RoleModelChatMessage,
-  toolNameMappings: readonly RoleModelProviderToolNameMapping[]
+  toolNameMappings: readonly RoleModelProviderToolNameMapping[],
 ): NvidiaChatCompletionMessage {
   if (message.role === 'assistant') {
     return Object.freeze({
@@ -573,11 +573,11 @@ function sanitizeNvidiaMessage(
         ? {}
         : {
             tool_calls: Object.freeze(
-              message.tool_calls.map((toolCall) =>
-                sanitizeNvidiaToolCall(toolCall, toolNameMappings)
-              )
-            )
-          })
+              message.tool_calls.map(toolCall =>
+                sanitizeNvidiaToolCall(toolCall, toolNameMappings),
+              ),
+            ),
+          }),
     } satisfies NvidiaChatCompletionMessage);
   }
 
@@ -585,19 +585,19 @@ function sanitizeNvidiaMessage(
     return Object.freeze({
       role: 'tool',
       content: message.content,
-      tool_call_id: message.tool_call_id
+      tool_call_id: message.tool_call_id,
     } satisfies NvidiaChatCompletionMessage);
   }
 
   return Object.freeze({
     role: message.role,
-    content: message.content
+    content: message.content,
   } satisfies NvidiaChatCompletionMessage);
 }
 
 function sanitizeNvidiaToolCall(
   toolCall: RoleModelChatToolCall,
-  toolNameMappings: readonly RoleModelProviderToolNameMapping[]
+  toolNameMappings: readonly RoleModelProviderToolNameMapping[],
 ): RoleModelChatToolCall {
   return Object.freeze({
     id: toolCall.id,
@@ -605,20 +605,18 @@ function sanitizeNvidiaToolCall(
     function: Object.freeze({
       name: providerToolNameForNvidiaAssistantHistoryToolName(
         toolCall.function.name,
-        toolNameMappings
+        toolNameMappings,
       ),
-      arguments: toolCall.function.arguments
-    })
+      arguments: toolCall.function.arguments,
+    }),
   } satisfies RoleModelChatToolCall);
 }
 
 function providerToolNameForNvidiaAssistantHistoryToolName(
   toolName: string,
-  toolNameMappings: readonly RoleModelProviderToolNameMapping[]
+  toolNameMappings: readonly RoleModelProviderToolNameMapping[],
 ): string {
-  if (
-    toolNameMappings.some((mapping) => mapping.providerName === toolName)
-  ) {
+  if (toolNameMappings.some(mapping => mapping.providerName === toolName)) {
     return toolName;
   }
 
@@ -638,7 +636,7 @@ function createProviderRejectedOutput(options: {
     endpoint: options.endpoint,
     message: options.message,
     model: options.model,
-    ...(options.status === undefined ? {} : { status: options.status })
+    ...(options.status === undefined ? {} : {status: options.status}),
   });
   const rejectionDetails =
     providerMetadata.error?.message ?? redactRuntimePluginText(options.message);
@@ -648,11 +646,11 @@ function createProviderRejectedOutput(options: {
     providerMetadata,
     ...(options.providerExchange === undefined
       ? {}
-      : { providerExchange: options.providerExchange }),
+      : {providerExchange: options.providerExchange}),
     rejection: Object.freeze({
       reason: roleModelProviderErrorRejectionReason,
-      details: rejectionDetails
-    })
+      details: rejectionDetails,
+    }),
   } satisfies RoleModelAdapterRawOutput);
 }
 
@@ -677,24 +675,24 @@ function createProviderMetadata(options: {
       endpoint: redactedEndpoint,
       ...(options.messageCount === undefined
         ? {}
-        : { messageCount: options.messageCount }),
-      stream: false
+        : {messageCount: options.messageCount}),
+      stream: false,
     }),
     ...(options.status === undefined
       ? {}
       : {
           response: Object.freeze({
-            status: options.status
-          })
+            status: options.status,
+          }),
         }),
     ...(options.code === undefined || redactedMessage === undefined
       ? {}
       : {
           error: Object.freeze({
             code: options.code,
-            message: redactedMessage
-          })
-        })
+            message: redactedMessage,
+          }),
+        }),
   } satisfies RoleModelProviderMetadata);
 }
 
@@ -720,10 +718,13 @@ type RejectedNvidiaProviderParseResult = {
 function parseNvidiaResponseMessage(
   value: unknown,
   toolNameMappings: readonly RoleModelProviderToolNameMapping[],
-  visibleReplyAvailable: boolean
+  visibleReplyAvailable: boolean,
 ): ParsedNvidiaResponseMessage {
   if (!isJsonRecord(value)) {
-    return rejectResponse('malformed_response', 'NVIDIA response must be an object.');
+    return rejectResponse(
+      'malformed_response',
+      'NVIDIA response must be an object.',
+    );
   }
 
   const choicesValue = value['choices'];
@@ -731,7 +732,7 @@ function parseNvidiaResponseMessage(
   if (!Array.isArray(choicesValue)) {
     return rejectResponse(
       'malformed_response',
-      'NVIDIA response choices must be an array.'
+      'NVIDIA response choices must be an array.',
     );
   }
 
@@ -741,12 +742,12 @@ function parseNvidiaResponseMessage(
   if (!isJsonRecord(firstChoice)) {
     return rejectResponse(
       'malformed_response',
-      'NVIDIA response must include at least one choice.'
+      'NVIDIA response must include at least one choice.',
     );
   }
 
   const finishReasonResult = parseNvidiaFinishReason(
-    firstChoice['finish_reason']
+    firstChoice['finish_reason'],
   );
 
   if (finishReasonResult.status === 'rejected') {
@@ -758,7 +759,7 @@ function parseNvidiaResponseMessage(
   if (!isJsonRecord(message)) {
     return rejectResponse(
       'malformed_response',
-      'NVIDIA response choice.message must be an object.'
+      'NVIDIA response choice.message must be an object.',
     );
   }
 
@@ -780,7 +781,7 @@ function parseNvidiaResponseMessage(
     content,
     toolCalls,
     toolNameMappings,
-    visibleReplyAvailable
+    visibleReplyAvailable,
   });
 
   if (rawOutputResult.status === 'rejected') {
@@ -792,51 +793,49 @@ function parseNvidiaResponseMessage(
     rawOutputText: rawOutputResult.rawOutputText,
     ...(firstChoice['finish_reason'] === undefined
       ? {}
-      : { rawFinishReason: firstChoice['finish_reason'] }),
+      : {rawFinishReason: firstChoice['finish_reason']}),
     finishReason: finishReasonResult.finishReason,
-    ...(value['usage'] === undefined ? {} : { usage: value['usage'] }),
+    ...(value['usage'] === undefined ? {} : {usage: value['usage']}),
     nativeAssistantMessage: Object.freeze({
       role: 'assistant',
       content,
-      ...(toolCalls.length === 0
-        ? {}
-        : { tool_calls: toolCalls })
+      ...(toolCalls.length === 0 ? {} : {tool_calls: toolCalls}),
     } satisfies RoleModelAssistantChatMessage),
     ...nativeToolCallArgumentErrorsOption(
-      rawOutputResult.nativeToolCallArgumentErrors
+      rawOutputResult.nativeToolCallArgumentErrors,
     ),
     ...(rawOutputResult.outputNormalization === undefined
       ? {}
-      : { outputNormalization: rawOutputResult.outputNormalization })
+      : {outputNormalization: rawOutputResult.outputNormalization}),
   } satisfies ParsedNvidiaResponseMessage);
 }
 
 function parseNvidiaFinishReason(
-  value: unknown
+  value: unknown,
 ):
-  | { readonly status: 'accepted'; readonly finishReason: string }
+  | {readonly status: 'accepted'; readonly finishReason: string}
   | RejectedNvidiaProviderParseResult {
   if (value === undefined || value === null) {
     return rejectResponse(
       'malformed_response',
-      'NVIDIA response choice.finish_reason is required.'
+      'NVIDIA response choice.finish_reason is required.',
     );
   }
 
   if (typeof value !== 'string') {
     return rejectResponse(
       'malformed_response',
-      'NVIDIA response choice.finish_reason must be a string.'
+      'NVIDIA response choice.finish_reason must be a string.',
     );
   }
 
   if (terminalNvidiaFinishReasons.includes(value)) {
-    return Object.freeze({ status: 'accepted', finishReason: value });
+    return Object.freeze({status: 'accepted', finishReason: value});
   }
 
   return rejectResponse(
     'provider_error',
-    `NVIDIA response finish_reason "${value}" is not terminal.`
+    `NVIDIA response finish_reason "${value}" is not terminal.`,
   );
 }
 
@@ -848,19 +847,19 @@ type ParsedNvidiaMessageContent =
   | RejectedNvidiaProviderParseResult;
 
 function parseOptionalNvidiaMessageContent(
-  value: unknown
+  value: unknown,
 ): ParsedNvidiaMessageContent {
   if (value === undefined || value === null) {
     return Object.freeze({
       status: 'accepted',
-      content: null
+      content: null,
     } satisfies ParsedNvidiaMessageContent);
   }
 
   if (typeof value !== 'string') {
     return rejectResponse(
       'malformed_response',
-      'NVIDIA response message.content must be a string or null.'
+      'NVIDIA response message.content must be a string or null.',
     );
   }
 
@@ -869,13 +868,13 @@ function parseOptionalNvidiaMessageContent(
   if (scrubbed.status === 'rejected') {
     return rejectResponse(
       'malformed_response',
-      'NVIDIA response message.content contains an unterminated reasoning block.'
+      'NVIDIA response message.content contains an unterminated reasoning block.',
     );
   }
 
   return Object.freeze({
     status: 'accepted',
-    content: scrubbed.text
+    content: scrubbed.text,
   } satisfies ParsedNvidiaMessageContent);
 }
 
@@ -890,14 +889,14 @@ function parseOptionalNvidiaToolCalls(value: unknown): ParsedNvidiaToolCalls {
   if (value === undefined || value === null) {
     return Object.freeze({
       status: 'accepted',
-      toolCalls: Object.freeze([])
+      toolCalls: Object.freeze([]),
     } satisfies ParsedNvidiaToolCalls);
   }
 
   if (!Array.isArray(value)) {
     return rejectResponse(
       'malformed_response',
-      'NVIDIA response message.tool_calls must be an array.'
+      'NVIDIA response message.tool_calls must be an array.',
     );
   }
 
@@ -915,7 +914,7 @@ function parseOptionalNvidiaToolCalls(value: unknown): ParsedNvidiaToolCalls {
 
   return Object.freeze({
     status: 'accepted',
-    toolCalls: Object.freeze(toolCalls)
+    toolCalls: Object.freeze(toolCalls),
   } satisfies ParsedNvidiaToolCalls);
 }
 
@@ -928,12 +927,12 @@ type ParsedNvidiaToolCall =
 
 function parseNvidiaToolCall(
   value: unknown,
-  index: number
+  index: number,
 ): ParsedNvidiaToolCall {
   if (!isJsonRecord(value)) {
     return rejectResponse(
       'malformed_response',
-      `NVIDIA response message.tool_calls[${String(index)}] must be an object.`
+      `NVIDIA response message.tool_calls[${String(index)}] must be an object.`,
     );
   }
 
@@ -944,14 +943,14 @@ function parseNvidiaToolCall(
   if (typeof id !== 'string' || id.length === 0) {
     return rejectResponse(
       'malformed_response',
-      `NVIDIA response message.tool_calls[${String(index)}].id must be a string.`
+      `NVIDIA response message.tool_calls[${String(index)}].id must be a string.`,
     );
   }
 
   if (type !== 'function' || !isJsonRecord(fn)) {
     return rejectResponse(
       'malformed_response',
-      `NVIDIA response message.tool_calls[${String(index)}] must be a function tool call.`
+      `NVIDIA response message.tool_calls[${String(index)}] must be a function tool call.`,
     );
   }
 
@@ -961,14 +960,14 @@ function parseNvidiaToolCall(
   if (typeof name !== 'string' || name.length === 0) {
     return rejectResponse(
       'malformed_response',
-      `NVIDIA response message.tool_calls[${String(index)}].function.name must be a string.`
+      `NVIDIA response message.tool_calls[${String(index)}].function.name must be a string.`,
     );
   }
 
   if (typeof args !== 'string') {
     return rejectResponse(
       'malformed_response',
-      `NVIDIA response message.tool_calls[${String(index)}].function.arguments must be a JSON string.`
+      `NVIDIA response message.tool_calls[${String(index)}].function.arguments must be a JSON string.`,
     );
   }
 
@@ -979,9 +978,9 @@ function parseNvidiaToolCall(
       type: 'function',
       function: Object.freeze({
         name,
-        arguments: args
-      })
-    } satisfies RoleModelChatToolCall)
+        arguments: args,
+      }),
+    } satisfies RoleModelChatToolCall),
   } satisfies ParsedNvidiaToolCall);
 }
 
@@ -1007,7 +1006,7 @@ function createRawOutputTextFromNvidiaMessage(options: {
     if (options.content === null || options.content.length === 0) {
       return Object.freeze({
         status: 'accepted',
-        rawOutputText: JSON.stringify({ toolCalls: [] })
+        rawOutputText: JSON.stringify({toolCalls: []}),
       } satisfies NvidiaRawOutputTextResult);
     }
 
@@ -1016,7 +1015,7 @@ function createRawOutputTextFromNvidiaMessage(options: {
     if (scrubbedContent.status === 'rejected') {
       return rejectResponse(
         'malformed_response',
-        'Visible reply contains an unterminated reasoning block.'
+        'Visible reply contains an unterminated reasoning block.',
       );
     }
 
@@ -1029,36 +1028,39 @@ function createRawOutputTextFromNvidiaMessage(options: {
                 {
                   name: visibleReplyModelToolName,
                   input: {
-                    text: scrubbedContent.text
-                  }
-                }
-              ]
+                    text: scrubbedContent.text,
+                  },
+                },
+              ],
             }
           : {
               toolCalls: [],
-              text: scrubbedContent.text
-            }
+              text: scrubbedContent.text,
+            },
       ),
       outputNormalization: Object.freeze({
         source: 'terminal_assistant_content',
-        committed: false
-      } satisfies NonNullable<RoleModelProviderExchangeSnapshot['outputNormalization']>)
+        committed: false,
+      } satisfies NonNullable<
+        RoleModelProviderExchangeSnapshot['outputNormalization']
+      >),
     } satisfies NvidiaRawOutputTextResult);
   }
 
   const toolCalls: ModelToolCall[] = [];
-  const nativeToolCallArgumentErrors: RoleModelNativeToolCallArgumentError[] = [];
+  const nativeToolCallArgumentErrors: RoleModelNativeToolCallArgumentError[] =
+    [];
   let executableIndex = 0;
 
   for (const [index, call] of options.toolCalls.entries()) {
     const runtimeToolName = runtimeToolNameForProviderToolName(
       call.function.name,
-      options.toolNameMappings
+      options.toolNameMappings,
     );
     const parsedArgs = parseNvidiaToolCallArguments({
       call,
       index,
-      runtimeToolName
+      runtimeToolName,
     });
 
     if (parsedArgs.status === 'rejected') {
@@ -1068,7 +1070,7 @@ function createRawOutputTextFromNvidiaMessage(options: {
       if (runtimeToolName === visibleReplyModelToolName) {
         toolCalls.push({
           name: visibleReplyModelToolName,
-          input: Object.freeze({ text: '' })
+          input: Object.freeze({text: ''}),
         });
         continue;
       }
@@ -1078,12 +1080,12 @@ function createRawOutputTextFromNvidiaMessage(options: {
           executableIndex,
           toolName: runtimeToolName,
           reason: 'invalid_native_tool_arguments',
-          message: parsedArgs.message
-        } satisfies RoleModelNativeToolCallArgumentError)
+          message: parsedArgs.message,
+        } satisfies RoleModelNativeToolCallArgumentError),
       );
       toolCalls.push({
         name: runtimeToolName,
-        input: Object.freeze({})
+        input: Object.freeze({}),
       });
       executableIndex += 1;
       continue;
@@ -1091,7 +1093,7 @@ function createRawOutputTextFromNvidiaMessage(options: {
 
     toolCalls.push({
       name: runtimeToolName,
-      input: parsedArgs.input
+      input: parsedArgs.input,
     });
 
     if (runtimeToolName !== visibleReplyModelToolName) {
@@ -1102,7 +1104,7 @@ function createRawOutputTextFromNvidiaMessage(options: {
   return Object.freeze({
     status: 'accepted',
     rawOutputText: JSON.stringify({
-      toolCalls
+      toolCalls,
     }),
     ...nativeToolCallArgumentErrorsOption(nativeToolCallArgumentErrors),
     ...(options.content === null || options.content.length === 0
@@ -1110,22 +1112,22 @@ function createRawOutputTextFromNvidiaMessage(options: {
       : {
           outputNormalization: Object.freeze({
             source: 'native_tool_calls',
-            committed: false
+            committed: false,
           } satisfies NonNullable<
             RoleModelProviderExchangeSnapshot['outputNormalization']
-          >)
-        })
+          >),
+        }),
   } satisfies NvidiaRawOutputTextResult);
 }
 
 function nativeToolCallArgumentErrorsOption(
-  errors: readonly RoleModelNativeToolCallArgumentError[] | undefined
+  errors: readonly RoleModelNativeToolCallArgumentError[] | undefined,
 ): {
   readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
 } {
   return errors === undefined || errors.length === 0
     ? {}
-    : { nativeToolCallArgumentErrors: Object.freeze([...errors]) };
+    : {nativeToolCallArgumentErrors: Object.freeze([...errors])};
 }
 
 type ParsedNvidiaToolCallArguments =
@@ -1147,52 +1149,52 @@ function parseNvidiaToolCallArguments(options: {
   } catch {
     return rejectResponse(
       'malformed_response',
-      `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments must be valid JSON.`
+      `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments must be valid JSON.`,
     );
   }
 
   if (!isJsonRecord(parsed)) {
     return rejectResponse(
       'malformed_response',
-      `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments must parse to an object.`
+      `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments must parse to an object.`,
     );
   }
 
   const validatedInput = validateModelToolInputAgainstContract({
     toolName: options.runtimeToolName,
     input: parsed,
-    inputContract: nvidiaNativeToolArgumentsContract
+    inputContract: nvidiaNativeToolArgumentsContract,
   });
 
   if (validatedInput.status === 'rejected') {
     return rejectResponse(
       'malformed_response',
-      `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments must contain JSON-compatible finite values: ${validatedInput.details}`
+      `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments must contain JSON-compatible finite values: ${validatedInput.details}`,
     );
   }
 
   return Object.freeze({
     status: 'accepted',
     input: createJsonBoundaryObjectSnapshot(validatedInput.input, {
-      field: `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments`
-    })
+      field: `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments`,
+    }),
   } satisfies ParsedNvidiaToolCallArguments);
 }
 
 function rejectResponse(
   code: NvidiaProviderErrorCode,
-  message: string
+  message: string,
 ): RejectedNvidiaProviderParseResult {
   return Object.freeze({
     status: 'rejected',
     code,
-    message
+    message,
   } satisfies RejectedNvidiaProviderParseResult);
 }
 
 function providerResponseReplaySubset(
   value: unknown,
-  nativeAssistantMessage?: RoleModelAssistantChatMessage
+  nativeAssistantMessage?: RoleModelAssistantChatMessage,
 ): RuntimePluginJsonValue {
   if (!isJsonRecord(value)) {
     return redactProviderBoundaryJson(value);
@@ -1216,19 +1218,19 @@ function providerResponseReplaySubset(
                     nativeAssistantMessage !== undefined
                       ? nativeAssistantMessage
                       : firstChoice['message'] === undefined
-                      ? '[missing]'
-                      : firstChoice['message']
+                        ? '[missing]'
+                        : firstChoice['message'],
                 }
-              : firstChoice
+              : firstChoice,
           ],
-    ...(value['usage'] === undefined ? {} : { usage: value['usage'] })
+    ...(value['usage'] === undefined ? {} : {usage: value['usage']}),
   });
 }
 
 function redactProviderBoundaryJson(value: unknown): RuntimePluginJsonValue {
   return createJsonBoundarySnapshot(value, {
     field: 'NVIDIA provider exchange',
-    redact: true
+    redact: true,
   });
 }
 
@@ -1237,14 +1239,17 @@ function unknownArray(value: unknown): readonly unknown[] {
     return Object.freeze([]);
   }
 
-  return Object.freeze(value.map((item) => item));
+  return Object.freeze(value.map(item => item));
 }
 
 function isReadonlyUnknownArray(value: unknown): value is readonly unknown[] {
   return Array.isArray(value);
 }
 
-function redactProviderSecret(message: string, secret: string | undefined): string {
+function redactProviderSecret(
+  message: string,
+  secret: string | undefined,
+): string {
   if (secret === undefined || secret.length === 0) {
     return message;
   }
@@ -1252,7 +1257,9 @@ function redactProviderSecret(message: string, secret: string | undefined): stri
   return message.split(secret).join('[redacted]');
 }
 
-function optionalNvidiaProviderEnvValue(value: string | undefined): string | undefined {
+function optionalNvidiaProviderEnvValue(
+  value: string | undefined,
+): string | undefined {
   if (value === undefined || value.trim().length === 0) {
     return undefined;
   }
@@ -1262,13 +1269,13 @@ function optionalNvidiaProviderEnvValue(value: string | undefined): string | und
 
 async function defaultFetchClient(
   url: string,
-  request: NvidiaFetchRequest
+  request: NvidiaFetchRequest,
 ): Promise<NvidiaFetchResponse> {
   const response = await fetch(url, {
     method: request.method,
     headers: request.headers,
     body: request.body,
-    signal: request.signal
+    signal: request.signal,
   });
 
   return Object.freeze({
@@ -1279,12 +1286,12 @@ async function defaultFetchClient(
     },
     async text() {
       return await response.text();
-    }
+    },
   } satisfies NvidiaFetchResponse);
 }
 
 function isJsonRecord(
-  value: unknown
+  value: unknown,
 ): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

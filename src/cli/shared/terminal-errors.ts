@@ -1,7 +1,7 @@
-import { ConversationRehydrationError } from '../../core/index.ts';
+import {ConversationRehydrationError} from '../../core/index.ts';
 import {
   LocalRuntimeSessionStoreError,
-  LocalRuntimeStorageContractError
+  LocalRuntimeStorageContractError,
 } from '../../runtime/storage/index.ts';
 
 export type LocalRuntimeTerminalError =
@@ -10,7 +10,7 @@ export type LocalRuntimeTerminalError =
   | LocalRuntimeStorageContractError;
 
 export function isLocalRuntimeTerminalError(
-  error: unknown
+  error: unknown,
 ): error is LocalRuntimeTerminalError {
   return (
     error instanceof ConversationRehydrationError ||
@@ -20,7 +20,7 @@ export function isLocalRuntimeTerminalError(
 }
 
 export function formatLocalRuntimeTerminalError(
-  error: LocalRuntimeTerminalError
+  error: LocalRuntimeTerminalError,
 ): string {
   if (error instanceof LocalRuntimeStorageContractError) {
     return formatLocalRuntimeStorageContractError(error);
@@ -30,7 +30,7 @@ export function formatLocalRuntimeTerminalError(
 }
 
 function formatLocalRuntimeStorageContractError(
-  error: LocalRuntimeStorageContractError
+  error: LocalRuntimeStorageContractError,
 ): string {
   switch (error.code) {
     case 'missing_file':

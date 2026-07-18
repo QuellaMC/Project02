@@ -1,8 +1,8 @@
-import { isBuiltInModelToolName } from '../../role-model/api/index.ts';
+import {isBuiltInModelToolName} from '../../role-model/api/index.ts';
 
 import type {
   RuntimePluginManifest,
-  RuntimePluginProvidedTool
+  RuntimePluginProvidedTool,
 } from './types.ts';
 
 export function isModelFacingRuntimePluginTool(options: {
@@ -25,7 +25,7 @@ export function isModelFacingRuntimePluginTool(options: {
 }
 
 export function isApprovalGatedRuntimePluginTool(
-  tool: RuntimePluginProvidedTool
+  tool: RuntimePluginProvidedTool,
 ): boolean {
   return (
     !isBuiltInModelToolName(tool.name) &&
@@ -39,11 +39,11 @@ export function validateRuntimePluginModelFacingToolAccess(options: {
   readonly manifest: RuntimePluginManifest;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
 }): void {
-  const hasModelFacingTool = options.providedTools.some((tool) =>
+  const hasModelFacingTool = options.providedTools.some(tool =>
     isModelFacingRuntimePluginTool({
       manifest: options.manifest,
-      tool
-    })
+      tool,
+    }),
   );
 
   if (
@@ -51,7 +51,7 @@ export function validateRuntimePluginModelFacingToolAccess(options: {
     options.manifest.requestedAccess.model_input !== 'write'
   ) {
     throw new TypeError(
-      'Model-facing tools require requestedAccess.model_input = "write".'
+      'Model-facing tools require requestedAccess.model_input = "write".',
     );
   }
 }

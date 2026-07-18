@@ -1,14 +1,14 @@
-import type { RuntimeLogStore } from '../evidence/records.ts';
-import { type createLocalRuntimeMutationLockOwnerToken } from './mutation-lock.ts';
+import type {RuntimeLogStore} from '../evidence/records.ts';
+import {type createLocalRuntimeMutationLockOwnerToken} from './mutation-lock.ts';
 
 export function runtimeLogStoreWithWriterOwner(
   logStore: RuntimeLogStore,
-  ownerToken: ReturnType<typeof createLocalRuntimeMutationLockOwnerToken>
+  ownerToken: ReturnType<typeof createLocalRuntimeMutationLockOwnerToken>,
 ): RuntimeLogStore {
   return Object.freeze({
     ...(logStore.localRuntimeSessionPaths === undefined
       ? {}
-      : { localRuntimeSessionPaths: logStore.localRuntimeSessionPaths }),
+      : {localRuntimeSessionPaths: logStore.localRuntimeSessionPaths}),
     localRuntimeWriterLockOwnerToken: ownerToken,
     appendTrace(entry) {
       return logStore.appendTrace(entry);
@@ -27,14 +27,14 @@ export function runtimeLogStoreWithWriterOwner(
       : {
           checkpointWriterEvidence() {
             logStore.checkpointWriterEvidence?.();
-          }
+          },
         }),
     ...(logStore.recoverAbandonedWriterEvidence === undefined
       ? {}
       : {
           recoverAbandonedWriterEvidence() {
             return logStore.recoverAbandonedWriterEvidence?.() ?? false;
-          }
+          },
         }),
     readSessionEvidence() {
       return logStore.readSessionEvidence();
@@ -47,7 +47,6 @@ export function runtimeLogStoreWithWriterOwner(
     },
     conversationMessages() {
       return logStore.conversationMessages();
-    }
+    },
   } satisfies RuntimeLogStore);
 }
-

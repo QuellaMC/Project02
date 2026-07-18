@@ -5,7 +5,7 @@ import {
   runCharacterTurn,
   type CharacterAgent,
   type CharacterAgentReply,
-  type CharacterTurnResult
+  type CharacterTurnResult,
 } from '../../core/index.ts';
 import {
   createRuntimePluginAfterTurnCommittedContext,
@@ -14,48 +14,48 @@ import {
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult,
-  type RuntimePluginToolInvocationSnapshot
+  type RuntimePluginToolInvocationSnapshot,
 } from '../../plugins/api/index.ts';
 import type {
   RuntimePluginHealthHostResult,
-  RuntimePluginHost
+  RuntimePluginHost,
 } from '../../plugins/index.ts';
 import {
   assertRuntimeConfigEffectsCanCommit,
   reconcileCompletedRuntimeConfigEffects,
   runtimeConfigEffectsForCompletedTurn,
-  runtimePostCommitFailureMessage
+  runtimePostCommitFailureMessage,
 } from './config-effects.ts';
-import { createRoleModelCommitValidationSnapshot } from '../evidence/records.ts';
+import {createRoleModelCommitValidationSnapshot} from '../evidence/records.ts';
 import {
   runtimePluginEvidenceOption,
-  runtimePluginTurnEvidenceOption
+  runtimePluginTurnEvidenceOption,
 } from './plugin-evidence.ts';
 import type {
   ConversationLogRecord,
   RawEventLogRecord,
   RawEventLogRecordInput,
   RuntimeTraceEntry,
-  RuntimeTraceStepName
+  RuntimeTraceStepName,
 } from '../evidence/records.ts';
 import type {
   DecisionContext,
   ParsedRoleModelDecisionSnapshot,
-  RoleModelIOSnapshot
+  RoleModelIOSnapshot,
 } from '../../role-model/index.ts';
-import type { RoleModelLoopResult } from '../../role-model/index.ts';
-import { findValidatedTerminalRawEventForSession } from '../storage/file-runtime-log-store.ts';
+import type {RoleModelLoopResult} from '../../role-model/index.ts';
+import {findValidatedTerminalRawEventForSession} from '../storage/file-runtime-log-store.ts';
 import type {
   AppendVisibleReplyOptions,
   LocalRuntimeTurnProgressEvent,
   LocalRuntimeUserMessageCompletedResult,
-  RuntimeTurnState
+  RuntimeTurnState,
 } from './contracts.ts';
-import { roleModelIOSnapshotSessionId } from './contracts.ts';
+import {roleModelIOSnapshotSessionId} from './contracts.ts';
 
 type AcceptedRoleModelLoopResult = Extract<
   RoleModelLoopResult,
-  { readonly status: 'accepted' }
+  {readonly status: 'accepted'}
 >;
 
 export class IncompleteConversationRollbackError extends AggregateError {
@@ -63,7 +63,7 @@ export class IncompleteConversationRollbackError extends AggregateError {
     super(
       cleanupErrors,
       'Runtime conversation commit failed and rollback was incomplete.',
-      { cause: originalError }
+      {cause: originalError},
     );
     this.name = 'IncompleteConversationRollbackError';
   }
@@ -87,25 +87,25 @@ export function initializeRuntimeTurnEvidence(state: RuntimeTurnState): void {
     ...state.identity,
     kind: 'runtime_event_received',
     eventType: state.event.type,
-    payloadSummary: state.payloadSummary
+    payloadSummary: state.payloadSummary,
   });
   appendTrace(state, 'runtime_event_normalized');
   appendRawEvent(state, {
     ...state.identity,
     kind: 'runtime_event_normalized',
     eventType: state.event.type,
-    payloadSummary: state.payloadSummary
+    payloadSummary: state.payloadSummary,
   });
   appendTrace(state, 'runtime_turn_started');
 }
 
 export function appendTrace(
   state: RuntimeTurnState,
-  step: RuntimeTraceStepName
+  step: RuntimeTraceStepName,
 ): RuntimeTraceEntry {
   const traceEntry = state.options.logStore.appendTrace({
     ...state.identity,
-    step
+    step,
   });
 
   state.traceEntries.push(traceEntry);
@@ -114,7 +114,7 @@ export function appendTrace(
 
 export function appendRawEvent(
   state: RuntimeTurnState,
-  record: RawEventLogRecordInput
+  record: RawEventLogRecordInput,
 ): RawEventLogRecord {
   const rawEvent = state.options.logStore.appendRawEvent(record);
 
@@ -124,7 +124,7 @@ export function appendRawEvent(
 
 export async function emitProgress(
   state: RuntimeTurnState,
-  progressEvent: LocalRuntimeTurnProgressEvent
+  progressEvent: LocalRuntimeTurnProgressEvent,
 ): Promise<void> {
   try {
     await state.options.onProgress?.(progressEvent);
@@ -135,7 +135,7 @@ export async function emitProgress(
 
 export function beginPluginFileStoreTransaction(
   state: RuntimeTurnState,
-  pluginHost: RuntimePluginHost
+  pluginHost: RuntimePluginHost,
 ): void {
   pluginHost.beginFileStoreTransaction?.();
   state.pluginFileStoreTransactionActive =
@@ -143,21 +143,21 @@ export function beginPluginFileStoreTransaction(
 }
 
 export async function preparePluginFileStoreTransaction(
-  state: RuntimeTurnState
+  state: RuntimeTurnState,
 ): Promise<void> {
   if (!state.pluginFileStoreTransactionActive) {
     return;
   }
 
-  state.preparedPluginFileStoreTransaction = await
-    state.runtimePluginHostForTurn?.prepareFileStoreTransaction?.(
-      state.identity
+  state.preparedPluginFileStoreTransaction =
+    await state.runtimePluginHostForTurn?.prepareFileStoreTransaction?.(
+      state.identity,
     );
   state.pluginFileStoreTransactionActive = false;
 }
 
 export async function rollbackPluginFileStoreTransaction(
-  state: RuntimeTurnState
+  state: RuntimeTurnState,
 ): Promise<void> {
   if (state.pluginFileStoreTransactionActive) {
     state.runtimePluginHostForTurn?.rollbackFileStoreTransaction?.();
@@ -169,7 +169,7 @@ export async function rollbackPluginFileStoreTransaction(
 }
 
 async function finalizePluginFileStoreTransaction(
-  state: RuntimeTurnState
+  state: RuntimeTurnState,
 ): Promise<void> {
   const prepared = state.preparedPluginFileStoreTransaction;
 
@@ -179,10 +179,10 @@ async function finalizePluginFileStoreTransaction(
 
 export async function appendVisibleReplyForDecision(
   state: RuntimeTurnState,
-  optionsForReply: AppendVisibleReplyOptions
+  optionsForReply: AppendVisibleReplyOptions,
 ): Promise<CharacterTurnResult | undefined> {
   const normalizedReply = normalizeCharacterAgentReply({
-    text: optionsForReply.text
+    text: optionsForReply.text,
   });
 
   if (!optionsForReply.final) {
@@ -190,33 +190,33 @@ export async function appendVisibleReplyForDecision(
     await emitProgress(state, {
       kind: 'visible_reply',
       final: false,
-      text: normalizedReply.text
+      text: normalizedReply.text,
     });
     return undefined;
   }
 
   if (state.userConversationMessage !== undefined) {
     throw new CharacterReplyValidationError(
-      'Runtime cannot commit more than one final visible reply per turn.'
+      'Runtime cannot commit more than one final visible reply per turn.',
     );
   }
 
   const turn = await commitFinalVisibleReply(
     state,
     optionsForReply,
-    normalizedReply.text
+    normalizedReply.text,
   );
   await emitProgress(state, {
     kind: 'visible_reply',
     final: true,
-    text: turn.reply.text
+    text: turn.reply.text,
   });
   return turn;
 }
 
 function appendInterimVisibleReply(
   state: RuntimeTurnState,
-  optionsForReply: AppendVisibleReplyOptions
+  optionsForReply: AppendVisibleReplyOptions,
 ): void {
   appendRawEvent(state, {
     ...state.identity,
@@ -226,7 +226,7 @@ function appendInterimVisibleReply(
     roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
     parsedRoleModelDecisionSnapshot:
       optionsForReply.parsedRoleModelDecisionSnapshot,
-    ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence)
+    ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
   });
   appendTrace(state, 'interim_visible_reply_emitted');
 }
@@ -234,23 +234,23 @@ function appendInterimVisibleReply(
 async function commitFinalVisibleReply(
   state: RuntimeTurnState,
   optionsForReply: AppendVisibleReplyOptions,
-  replyText: string
+  replyText: string,
 ): Promise<CharacterTurnResult> {
   const commitValidation = createRoleModelCommitValidationSnapshot({
     ...state.identity,
     sessionId: roleModelIOSnapshotSessionId(
-      optionsForReply.roleModelIOSnapshot
+      optionsForReply.roleModelIOSnapshot,
     ),
     result: {
       status: 'accepted',
-      acceptedVisibleReplyText: replyText
-    }
+      acceptedVisibleReplyText: replyText,
+    },
   });
   const turn = await runCharacterTurn(
     state.options.session,
     state.event.payload.currentUserMessage,
     createFixedReplyAgent(replyText),
-    state.options.characterTurnOptions
+    state.options.characterTurnOptions,
   );
   const visibleMessages = appendConversationTurn(state, turn);
 
@@ -259,13 +259,13 @@ async function commitFinalVisibleReply(
       ...state.identity,
       kind: 'visible_reply_committed',
       eventType: state.event.type,
-      visibleMessageIds: visibleMessages.map((message) => message.id),
+      visibleMessageIds: visibleMessages.map(message => message.id),
       payloadSummary: state.payloadSummary,
       roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
       parsedRoleModelDecisionSnapshot:
         optionsForReply.parsedRoleModelDecisionSnapshot,
       commitValidation,
-      ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence)
+      ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
     });
   } catch (error: unknown) {
     rollbackFailedConversationCommit(state, turn, error);
@@ -280,7 +280,7 @@ async function commitFinalVisibleReply(
 
 function appendConversationTurn(
   state: RuntimeTurnState,
-  turn: CharacterTurnResult
+  turn: CharacterTurnResult,
 ): readonly [ConversationLogRecord, ConversationLogRecord] {
   const committedAt =
     state.options.committedAt ?? state.options.event.createdAt;
@@ -292,17 +292,17 @@ function appendConversationTurn(
       {
         ...turn.userMessage,
         ...state.identity,
-        committedAt
+        committedAt,
       },
-      state.options.session.character
+      state.options.session.character,
     );
     characterRecord = state.options.logStore.appendConversationMessage(
       {
         ...turn.characterMessage,
         ...state.identity,
-        committedAt
+        committedAt,
       },
-      state.options.session.character
+      state.options.session.character,
     );
   } catch (error: unknown) {
     rollbackFailedConversationCommit(state, turn, error);
@@ -315,14 +315,14 @@ function appendConversationTurn(
 function rollbackFailedConversationCommit(
   state: RuntimeTurnState,
   turn: CharacterTurnResult,
-  originalError: unknown
+  originalError: unknown,
 ): void {
   const cleanupErrors: unknown[] = [];
 
   try {
     state.options.logStore.removeConversationMessages([
       turn.userMessage.id,
-      turn.characterMessage.id
+      turn.characterMessage.id,
     ]);
   } catch (error: unknown) {
     cleanupErrors.push(error);
@@ -335,10 +335,7 @@ function rollbackFailedConversationCommit(
   }
 
   if (cleanupErrors.length > 0) {
-    throw new IncompleteConversationRollbackError(
-      cleanupErrors,
-      originalError
-    );
+    throw new IncompleteConversationRollbackError(cleanupErrors, originalError);
   }
 }
 
@@ -350,7 +347,7 @@ export function appendToolCallStarted(
     readonly call: RuntimePluginToolCall;
     readonly roleModelIOSnapshot: RoleModelIOSnapshot;
     readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
-  }
+  },
 ): void {
   appendRawEvent(state, {
     ...state.identity,
@@ -364,7 +361,7 @@ export function appendToolCallStarted(
     roleModelIOSnapshot: optionsForTool.roleModelIOSnapshot,
     parsedRoleModelDecisionSnapshot:
       optionsForTool.parsedRoleModelDecisionSnapshot,
-    payloadSummary: state.payloadSummary
+    payloadSummary: state.payloadSummary,
   });
   appendTrace(state, 'tool_call_started');
 }
@@ -378,7 +375,7 @@ export function appendToolCallFinished(
     readonly pluginId: string;
     readonly toolName: string;
     readonly result: RuntimePluginToolCallResult;
-  }
+  },
 ): void {
   appendRawEvent(state, {
     ...state.identity,
@@ -391,73 +388,73 @@ export function appendToolCallFinished(
     toolPluginId: optionsForTool.pluginId,
     toolResult: optionsForTool.result,
     ...pluginStoreRevisionOption(optionsForTool.result),
-    payloadSummary: state.payloadSummary
+    payloadSummary: state.payloadSummary,
   });
   state.finishedToolCallIds.push(optionsForTool.callId);
   appendTrace(state, 'tool_call_finished');
 }
 
 export async function completeRuntimeTurn(
-  options: CompleteRuntimeTurnOptions
+  options: CompleteRuntimeTurnOptions,
 ): Promise<LocalRuntimeUserMessageCompletedResult> {
-  const { state } = options;
+  const {state} = options;
   const runtimeConfigEffects = runtimeConfigEffectsForCompletedTurn(options);
 
   assertRuntimeConfigEffectsCanCommit({
     state,
     pluginHost: options.pluginHost,
-    effects: runtimeConfigEffects
+    effects: runtimeConfigEffects,
   });
 
   await preparePluginFileStoreTransaction(state);
   const turn = await commitTerminalVisibleReply(options);
   const terminalPluginEvidence = Object.freeze([
     ...options.roleModelPluginEvidence,
-    ...options.preCommitHealthResult.evidence
+    ...options.preCommitHealthResult.evidence,
   ]);
   const terminalAppend = appendCompletedTerminalRawEvent({
     ...options,
     terminalPluginEvidence,
     runtimeConfigEffects,
-    turn
+    turn,
   });
   const durability = await finalizeCompletedDurability(
     state,
-    terminalAppend.terminalAppendFailure
+    terminalAppend.terminalAppendFailure,
   );
   const configEffectEvidence = reconcileCompletedRuntimeConfigEffects({
     pluginHost: options.pluginHost,
     effects: runtimeConfigEffects,
-    postCommitFailures: durability.postCommitFailures
+    postCommitFailures: durability.postCommitFailures,
   });
 
   await recordAfterTurnCommitted(
     options,
     durability.postCommitFailures,
-    configEffectEvidence
+    configEffectEvidence,
   );
 
   return Object.freeze({
     status: 'completed',
     event: state.event,
-    ...(turn === undefined ? {} : { turn }),
+    ...(turn === undefined ? {} : {turn}),
     conversationMessages: Object.freeze([...state.committedVisibleMessages]),
     rawEvent: terminalAppend.rawEvent,
     rawEventLogRecords: Object.freeze([...state.rawEventLogRecords]),
     traceEntries: Object.freeze([...state.traceEntries]),
     ...(durability.pluginFileStoreRecoveryPending
-      ? { pluginFileStoreRecoveryPending: true }
+      ? {pluginFileStoreRecoveryPending: true}
       : {}),
     ...(durability.postCommitFailures.length === 0
       ? {}
       : {
-          postCommitFailures: Object.freeze(durability.postCommitFailures)
-        })
+          postCommitFailures: Object.freeze(durability.postCommitFailures),
+        }),
   } satisfies LocalRuntimeUserMessageCompletedResult);
 }
 
 async function commitTerminalVisibleReply(
-  options: CompleteRuntimeTurnOptions
+  options: CompleteRuntimeTurnOptions,
 ): Promise<CharacterTurnResult | undefined> {
   if (options.visibleReplyText === undefined) {
     return undefined;
@@ -469,7 +466,7 @@ async function commitTerminalVisibleReply(
     roleModelIOSnapshot: options.roleModelResult.ioSnapshot,
     parsedRoleModelDecisionSnapshot:
       options.roleModelResult.parsedDecisionSnapshot,
-    text: options.visibleReplyText
+    text: options.visibleReplyText,
   });
 }
 
@@ -478,19 +475,19 @@ function appendCompletedTerminalRawEvent(
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
     readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
     readonly turn: CharacterTurnResult | undefined;
-  }
+  },
 ): {
   readonly rawEvent: RawEventLogRecord;
   readonly terminalAppendFailure?: string;
 } {
-  const { state } = options;
+  const {state} = options;
   const terminalRawEventInput = createTerminalRawEventInput(options);
 
   try {
     const rawEvent = appendRawEvent(state, terminalRawEventInput);
 
     state.terminalRawEventMayBeDurable = true;
-    return { rawEvent };
+    return {rawEvent};
   } catch (error: unknown) {
     return recoverCompletedTerminalRawEvent(state, error);
   }
@@ -501,9 +498,9 @@ function createTerminalRawEventInput(
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
     readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
     readonly turn: CharacterTurnResult | undefined;
-  }
+  },
 ): RawEventLogRecordInput {
-  const { state } = options;
+  const {state} = options;
 
   return {
     ...state.identity,
@@ -518,7 +515,7 @@ function createTerminalRawEventInput(
       options.roleModelResult.parsedDecisionSnapshot,
     ...(options.runtimeConfigEffects.length === 0
       ? {}
-      : { runtimeConfigEffects: options.runtimeConfigEffects }),
+      : {runtimeConfigEffects: options.runtimeConfigEffects}),
     commitValidation: createRoleModelCommitValidationSnapshot({
       ...state.identity,
       sessionId: options.decisionContext.sessionId,
@@ -526,8 +523,8 @@ function createTerminalRawEventInput(
         status: 'accepted',
         ...(options.turn === undefined
           ? {}
-          : { acceptedVisibleReplyText: options.turn.reply.text })
-      }
+          : {acceptedVisibleReplyText: options.turn.reply.text}),
+      },
     }),
     ...runtimePluginEvidenceOption(options.terminalPluginEvidence),
     ...runtimePluginTurnEvidenceOption({
@@ -536,14 +533,14 @@ function createTerminalRawEventInput(
       contextItems: options.contextItems,
       toolInvocations: options.roleModelPluginToolInvocations,
       evidence: options.terminalPluginEvidence,
-      health: options.preCommitHealthResult.snapshots
-    })
+      health: options.preCommitHealthResult.snapshots,
+    }),
   } satisfies RawEventLogRecordInput;
 }
 
 function recoverCompletedTerminalRawEvent(
   state: RuntimeTurnState,
-  error: unknown
+  error: unknown,
 ): {
   readonly rawEvent: RawEventLogRecord;
   readonly terminalAppendFailure?: string;
@@ -559,7 +556,7 @@ function recoverCompletedTerminalRawEvent(
   try {
     durableTerminal = findValidatedTerminalRawEventForSession(
       sessionPaths,
-      state.identity
+      state.identity,
     );
   } catch {
     state.terminalRawEventMayBeDurable = true;
@@ -578,13 +575,13 @@ function recoverCompletedTerminalRawEvent(
   state.terminalRawEventMayBeDurable = true;
   return {
     rawEvent: durableTerminal,
-    terminalAppendFailure: runtimePostCommitFailureMessage(error)
+    terminalAppendFailure: runtimePostCommitFailureMessage(error),
   };
 }
 
 async function finalizeCompletedDurability(
   state: RuntimeTurnState,
-  terminalAppendFailure: string | undefined
+  terminalAppendFailure: string | undefined,
 ): Promise<{
   readonly pluginFileStoreRecoveryPending: boolean;
   readonly postCommitFailures: string[];
@@ -607,21 +604,21 @@ async function finalizeCompletedDurability(
     reconcileCompletedTerminalTrace(state, error, postCommitFailures);
   }
 
-  return { pluginFileStoreRecoveryPending, postCommitFailures };
+  return {pluginFileStoreRecoveryPending, postCommitFailures};
 }
 
 function reconcileCompletedTerminalTrace(
   state: RuntimeTurnState,
   originalError: unknown,
-  postCommitFailures: string[]
+  postCommitFailures: string[],
 ): void {
   try {
     const terminalSteps = [
       'raw_event_log_appended',
-      'runtime_turn_completed'
+      'runtime_turn_completed',
     ] as const;
     const persisted = [
-      ...state.options.logStore.readSessionEvidence().stored.traceEntries
+      ...state.options.logStore.readSessionEvidence().stored.traceEntries,
     ];
 
     for (const step of terminalSteps) {
@@ -636,7 +633,7 @@ function reconcileCompletedTerminalTrace(
   } catch (reconciliationError: unknown) {
     postCommitFailures.push(
       `${runtimePostCommitFailureMessage(originalError)} ` +
-      `Trace reconciliation failed: ${runtimePostCommitFailureMessage(reconciliationError)}`
+        `Trace reconciliation failed: ${runtimePostCommitFailureMessage(reconciliationError)}`,
     );
   }
 }
@@ -644,30 +641,30 @@ function reconcileCompletedTerminalTrace(
 function hasTerminalTraceEntry(
   state: RuntimeTurnState,
   entries: readonly RuntimeTraceEntry[],
-  step: RuntimeTraceStepName
+  step: RuntimeTraceStepName,
 ): boolean {
   return entries.some(
-    (entry) =>
+    entry =>
       entry.eventId === state.identity.eventId &&
       entry.traceId === state.identity.traceId &&
-      entry.step === step
+      entry.step === step,
   );
 }
 
 function restoreTerminalTraceEntry(
   state: RuntimeTurnState,
   persisted: readonly RuntimeTraceEntry[],
-  step: RuntimeTraceStepName
+  step: RuntimeTraceStepName,
 ): void {
-  if (state.traceEntries.some((entry) => entry.step === step)) {
+  if (state.traceEntries.some(entry => entry.step === step)) {
     return;
   }
 
   const storedEntry = persisted.find(
-    (entry) =>
+    entry =>
       entry.eventId === state.identity.eventId &&
       entry.traceId === state.identity.traceId &&
-      entry.step === step
+      entry.step === step,
   );
 
   if (storedEntry === undefined) {
@@ -680,9 +677,9 @@ function restoreTerminalTraceEntry(
 async function recordAfterTurnCommitted(
   options: CompleteRuntimeTurnOptions,
   postCommitFailures: string[],
-  configEffectEvidence: readonly RuntimePluginEvidenceSnapshot[]
+  configEffectEvidence: readonly RuntimePluginEvidenceSnapshot[],
 ): Promise<void> {
-  const { state } = options;
+  const {state} = options;
   let afterCommitResult:
     | {
         readonly status: 'completed' | 'completed_with_failures';
@@ -698,12 +695,11 @@ async function recordAfterTurnCommitted(
         eventType: state.event.type,
         currentUserMessage: state.event.payload.currentUserMessage,
         character: options.decisionContext.characterSnapshot,
-        committedAt:
-          state.options.committedAt ?? state.options.event.createdAt,
-        visibleMessages: state.committedVisibleMessages
+        committedAt: state.options.committedAt ?? state.options.event.createdAt,
+        visibleMessages: state.committedVisibleMessages,
       });
     afterCommitResult = await options.pluginHost.afterTurnCommitted(
-      afterCommitPluginContext
+      afterCommitPluginContext,
     );
   } catch (error: unknown) {
     // The completed turn is already durable; follow-up work cannot change the
@@ -713,17 +709,15 @@ async function recordAfterTurnCommitted(
 
   const evidence = Object.freeze([
     ...(afterCommitResult?.evidence ?? []),
-    ...configEffectEvidence
+    ...configEffectEvidence,
   ]);
   const status =
     afterCommitResult?.status ??
-    (configEffectEvidence.length === 0
-      ? undefined
-      : 'completed_with_failures');
+    (configEffectEvidence.length === 0 ? undefined : 'completed_with_failures');
 
   if (
     status === undefined ||
-    !shouldRecordAfterTurnCommittedEvent({ status, evidence })
+    !shouldRecordAfterTurnCommittedEvent({status, evidence})
   ) {
     return;
   }
@@ -737,7 +731,7 @@ async function recordAfterTurnCommitted(
       ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
       toolCallIds: Object.freeze([...state.finishedToolCallIds]),
       payloadSummary: state.payloadSummary,
-      ...runtimePluginEvidenceOption(evidence)
+      ...runtimePluginEvidenceOption(evidence),
     });
   } catch (error: unknown) {
     postCommitFailures.push(runtimePostCommitFailureMessage(error));
@@ -745,20 +739,20 @@ async function recordAfterTurnCommitted(
 }
 
 export function visibleMessageIdsForTurnOption(
-  messages: readonly ConversationLogRecord[]
-): { readonly visibleMessageIds?: readonly string[] } {
+  messages: readonly ConversationLogRecord[],
+): {readonly visibleMessageIds?: readonly string[]} {
   if (messages.length === 0) {
     return {};
   }
 
   return {
-    visibleMessageIds: Object.freeze(messages.map((message) => message.id))
+    visibleMessageIds: Object.freeze(messages.map(message => message.id)),
   };
 }
 
-function pluginStoreRevisionOption(
-  result: RuntimePluginToolCallResult
-): { readonly pluginStoreRevision?: number } {
+function pluginStoreRevisionOption(result: RuntimePluginToolCallResult): {
+  readonly pluginStoreRevision?: number;
+} {
   if (result.status !== 'accepted') {
     return {};
   }
@@ -781,7 +775,7 @@ function pluginStoreRevisionOption(
     return {};
   }
 
-  return { pluginStoreRevision: revision };
+  return {pluginStoreRevision: revision};
 }
 
 function shouldRecordAfterTurnCommittedEvent(afterCommitResult: {
@@ -797,7 +791,7 @@ function shouldRecordAfterTurnCommittedEvent(afterCommitResult: {
 function createFixedReplyAgent(replyText: string): CharacterAgent {
   return Object.freeze({
     reply(): CharacterAgentReply {
-      return { text: replyText };
-    }
+      return {text: replyText};
+    },
   } satisfies CharacterAgent);
 }

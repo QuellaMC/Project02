@@ -1,10 +1,8 @@
-import {
-  createRuntimePluginEvidenceSnapshot
-} from './constructors.ts';
-import type { RuntimePluginEvidenceStatus } from './contract.ts';
+import {createRuntimePluginEvidenceSnapshot} from './constructors.ts';
+import type {RuntimePluginEvidenceStatus} from './contract.ts';
 import type {
   RuntimePluginContext,
-  RuntimePluginEvidenceSnapshot
+  RuntimePluginEvidenceSnapshot,
 } from './types.ts';
 
 export function createPluginToolEvidence(options: {
@@ -22,7 +20,7 @@ export function createPluginToolEvidence(options: {
     evidenceKind: 'tool_invocation',
     status: options.status,
     summary: options.summary,
-    redactionLabels: options.context.privacy.redactionLabels
+    redactionLabels: options.context.privacy.redactionLabels,
   });
 }
 
@@ -41,6 +39,6 @@ export function createPluginContextEvidence(options: {
     evidenceKind: 'before_role_model_call',
     status: options.status,
     summary: options.summary,
-    redactionLabels: options.context.privacy.redactionLabels
+    redactionLabels: options.context.privacy.redactionLabels,
   });
 }

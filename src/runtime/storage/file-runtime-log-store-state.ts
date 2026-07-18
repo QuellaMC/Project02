@@ -3,41 +3,41 @@ import {
   createLocalRuntimeStorageLayout,
   LocalRuntimeStorageContractError,
   type LocalRuntimeSessionPaths,
-  type LocalRuntimeSessionPathsOptions
+  type LocalRuntimeSessionPathsOptions,
 } from './layout-contract.ts';
-import { assertLocalRuntimeSessionReadable } from './session-store.ts';
+import {assertLocalRuntimeSessionReadable} from './session-store.ts';
 import {
   createLocalRuntimeMutationLockOwnerToken,
   localRuntimeMutationLockOwnerOwnsResource,
-  type LocalRuntimeMutationLockOwnerToken
+  type LocalRuntimeMutationLockOwnerToken,
 } from './mutation-lock.ts';
 import type {
   CachedRuntimeSessionEvidence,
   DurableRuntimeSessionEvidence,
-  MutableDurableRuntimeSessionEvidence
+  MutableDurableRuntimeSessionEvidence,
 } from '../evidence/contract.ts';
 import {
   createMutableDurableRuntimeSessionEvidence,
   readCoherentRuntimeSessionEvidence,
   readRuntimeEvidenceFileStamps,
   sameRuntimeEvidenceFileStamps,
-  scavengeAbandonedRuntimeEvidenceTemporaryFiles
+  scavengeAbandonedRuntimeEvidenceTemporaryFiles,
 } from '../evidence/cache.ts';
 import {
   createRuntimeEvidenceTransitionMachine,
-  type RuntimeEvidenceTransitionMachine
+  type RuntimeEvidenceTransitionMachine,
 } from '../evidence/transition.ts';
 import {
   assertDurableRuntimeSessionEvidence,
-  reconcileTerminalRawTraceEvidence
+  reconcileTerminalRawTraceEvidence,
 } from '../evidence/validation.ts';
-import { recoverAbandonedRuntimeWriterEvidence } from '../evidence/recovery.ts';
+import {recoverAbandonedRuntimeWriterEvidence} from '../evidence/recovery.ts';
 
 export type FileRuntimeLogStoreStateOptions =
   LocalRuntimeSessionPathsOptions & {
     readonly writerLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
     readonly onEvidenceValidation?: (
-      mode: 'cold_snapshot' | 'incremental_append'
+      mode: 'cold_snapshot' | 'incremental_append',
     ) => void;
     readonly onEvidenceFileRead?: (event: {
       readonly filePath: string;
@@ -61,11 +61,12 @@ export class FileRuntimeLogStoreState {
     this.options = options;
     this.paths = createLocalRuntimeSessionPaths(options);
     this.locksRoot = createLocalRuntimeStorageLayout({
-      storeRoot: this.paths.storeRoot
+      storeRoot: this.paths.storeRoot,
     }).locksRoot;
     this.writerResourceKey = `session-writer:${this.paths.sessionId}`;
     this.writerLockOwnerToken =
-      options.writerLockOwnerToken ?? createLocalRuntimeMutationLockOwnerToken();
+      options.writerLockOwnerToken ??
+      createLocalRuntimeMutationLockOwnerToken();
   }
 
   assertSessionReadable(): void {
@@ -76,8 +77,8 @@ export class FileRuntimeLogStoreState {
     assertLocalRuntimeSessionReadable({
       ...(this.options.storeRoot === undefined
         ? {}
-        : { storeRoot: this.options.storeRoot }),
-      sessionId: this.paths.sessionId
+        : {storeRoot: this.options.storeRoot}),
+      sessionId: this.paths.sessionId,
     });
     this.sessionReadabilityChecked = true;
   }
@@ -89,7 +90,7 @@ export class FileRuntimeLogStoreState {
 
     throw new LocalRuntimeStorageContractError(
       'session_busy',
-      `Durable runtime mutation requires the active session writer lease: ${this.paths.sessionId}.`
+      `Durable runtime mutation requires the active session writer lease: ${this.paths.sessionId}.`,
     );
   }
 
@@ -114,7 +115,7 @@ export class FileRuntimeLogStoreState {
 
     const loaded = readCoherentRuntimeSessionEvidence(
       this.paths,
-      this.options.onEvidenceFileRead
+      this.options.onEvidenceFileRead,
     );
     this.cachedEvidence = loaded;
     this.transitionMachine = undefined;
@@ -123,18 +124,18 @@ export class FileRuntimeLogStoreState {
   }
 
   ensureTransitionMachine(
-    evidence: MutableDurableRuntimeSessionEvidence
+    evidence: MutableDurableRuntimeSessionEvidence,
   ): RuntimeEvidenceTransitionMachine {
     if (this.transitionMachine === undefined) {
       this.options.onEvidenceValidation?.('cold_snapshot');
       assertDurableRuntimeSessionEvidence({
         paths: this.paths,
         evidence: reconcileTerminalRawTraceEvidence(evidence),
-        mode: 'public'
+        mode: 'public',
       });
       this.transitionMachine = createRuntimeEvidenceTransitionMachine({
         evidence,
-        sessionId: this.paths.sessionId
+        sessionId: this.paths.sessionId,
       });
     }
 
@@ -152,7 +153,7 @@ export class FileRuntimeLogStoreState {
 
     this.cachedEvidence = {
       evidence: this.cachedEvidence.evidence,
-      stamps: readRuntimeEvidenceFileStamps(this.paths)
+      stamps: readRuntimeEvidenceFileStamps(this.paths),
     };
   }
 
@@ -201,12 +202,12 @@ export class FileRuntimeLogStoreState {
     return localRuntimeMutationLockOwnerOwnsResource({
       locksRoot: this.locksRoot,
       resourceKey: this.writerResourceKey,
-      ownerToken: this.writerLockOwnerToken
+      ownerToken: this.writerLockOwnerToken,
     });
   }
 
   private recoveryStateIsAlreadyClean(
-    cacheBeforeRefresh: CachedRuntimeSessionEvidence | undefined
+    cacheBeforeRefresh: CachedRuntimeSessionEvidence | undefined,
   ): boolean {
     return (
       cacheBeforeRefresh === this.cachedEvidence &&
@@ -218,12 +219,12 @@ export class FileRuntimeLogStoreState {
   }
 
   private recoverEvidence(
-    evidence: MutableDurableRuntimeSessionEvidence
+    evidence: MutableDurableRuntimeSessionEvidence,
   ): DurableRuntimeSessionEvidence | undefined {
     try {
       const recovered = recoverAbandonedRuntimeWriterEvidence({
         paths: this.paths,
-        evidence
+        evidence,
       });
 
       if (recovered === undefined) {
@@ -242,19 +243,20 @@ export class FileRuntimeLogStoreState {
       throw new LocalRuntimeStorageContractError(
         'partial_write',
         `Local runtime evidence cannot safely recover the abandoned writer for session "${this.paths.sessionId}".`,
-        { cause: error }
+        {cause: error},
       );
     }
   }
 
   private replaceCachedEvidence(
-    evidence: DurableRuntimeSessionEvidence
+    evidence: DurableRuntimeSessionEvidence,
   ): MutableDurableRuntimeSessionEvidence {
-    const mutableEvidence = createMutableDurableRuntimeSessionEvidence(evidence);
+    const mutableEvidence =
+      createMutableDurableRuntimeSessionEvidence(evidence);
 
     this.cachedEvidence = {
       evidence: mutableEvidence,
-      stamps: readRuntimeEvidenceFileStamps(this.paths)
+      stamps: readRuntimeEvidenceFileStamps(this.paths),
     };
     this.transitionMachine = undefined;
     return mutableEvidence;

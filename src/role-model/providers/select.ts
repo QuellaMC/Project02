@@ -1,9 +1,9 @@
-import type { RoleModelAdapter } from '../api/adapter.ts';
+import type {RoleModelAdapter} from '../api/adapter.ts';
 import {
   createNvidiaRoleModelProviderAdapter,
-  createNvidiaRoleModelProviderConfigFromEnv
+  createNvidiaRoleModelProviderConfigFromEnv,
 } from './nvidia.ts';
-import { roleModelProviderEnvVarName } from '../../runtime/config/index.ts';
+import {roleModelProviderEnvVarName} from '../../runtime/config/index.ts';
 
 export class RoleModelProviderSelectionError extends Error {
   constructor(message: string) {
@@ -20,12 +20,12 @@ export function parseProviderName(value: string): ChatProviderName {
   }
 
   throw new RoleModelProviderSelectionError(
-    '--provider must be either "local" or "nvidia".'
+    '--provider must be either "local" or "nvidia".',
   );
 }
 
 function providerFromEnvironment(
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
 ): ChatProviderName | undefined {
   const value = env[roleModelProviderEnvVarName];
 
@@ -37,7 +37,7 @@ function providerFromEnvironment(
     return parseProviderName(value);
   } catch {
     throw new RoleModelProviderSelectionError(
-      `${roleModelProviderEnvVarName} must be either "local" or "nvidia".`
+      `${roleModelProviderEnvVarName} must be either "local" or "nvidia".`,
     );
   }
 }
@@ -45,27 +45,26 @@ function providerFromEnvironment(
 export function providerOption(provider: ChatProviderName | undefined): {
   readonly provider?: ChatProviderName;
 } {
-  return provider === undefined ? {} : { provider };
+  return provider === undefined ? {} : {provider};
 }
 
 export function selectChatProvider(
   provider: ChatProviderName | undefined,
   env: NodeJS.ProcessEnv,
-  configuredProvider?: ChatProviderName
+  configuredProvider?: ChatProviderName,
 ): ChatProviderName | undefined {
   return provider ?? providerFromEnvironment(env) ?? configuredProvider;
 }
 
 export function createSelectedRoleModelAdapter(
   provider: ChatProviderName | undefined,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): RoleModelAdapter | undefined {
   if (provider !== 'nvidia') {
     return undefined;
   }
 
   return createNvidiaRoleModelProviderAdapter(
-    createNvidiaRoleModelProviderConfigFromEnv(env)
+    createNvidiaRoleModelProviderConfigFromEnv(env),
   );
 }
-

@@ -1,33 +1,31 @@
-import {
-  hostFirstPartyRuntimePluginIds
-} from '../../src/plugins/host/catalog.ts';
-import { testRuntimePluginFileStoreProvider } from './plugin-host-fixtures.ts';
+import {hostFirstPartyRuntimePluginIds} from '../../src/plugins/host/catalog.ts';
+import {testRuntimePluginFileStoreProvider} from './plugin-host-fixtures.ts';
 import {
   characterStatePluginId,
   firstPartyModelToolsPluginId,
-  runtimePluginId
+  runtimePluginId,
 } from '../../src/plugins/api/contract.ts';
 import {
   createRuntimePluginHost,
   type CreateRuntimePluginHostOptions,
-  type RuntimePluginHost
+  type RuntimePluginHost,
 } from '../../src/plugins/host/index.ts';
 import {
   bundledRuntimePluginPackageRoot,
-  discoverRuntimePluginPackages
+  discoverRuntimePluginPackages,
 } from '../../src/plugins/package-loader/index.ts';
 
 const bundledPackageDiscovery = discoverRuntimePluginPackages({
   sources: [
     {
       root: bundledRuntimePluginPackageRoot,
-      provenance: 'bundled'
-    }
+      provenance: 'bundled',
+    },
   ],
-  reservedPluginIds: hostFirstPartyRuntimePluginIds
+  reservedPluginIds: hostFirstPartyRuntimePluginIds,
 });
 const characterStatePackage = bundledPackageDiscovery.packages.find(
-  (entry) => entry.manifest.id === characterStatePluginId
+  entry => entry.manifest.id === characterStatePluginId,
 );
 
 if (
@@ -35,7 +33,7 @@ if (
   characterStatePackage === undefined
 ) {
   throw new TypeError(
-    'Default test plugin host could not discover the bundled Character State package.'
+    'Default test plugin host could not discover the bundled Character State package.',
   );
 }
 
@@ -44,21 +42,20 @@ const characterStatePlugin = await characterStatePackage.load({
   manifest: characterStatePackage.manifest,
   storeRoot: bundledRuntimePluginPackageRoot,
   resolvedConfig: Object.freeze({}),
-  redactedConfig: Object.freeze({})
+  redactedConfig: Object.freeze({}),
 });
 
 export function createDefaultProject02PluginHost(
-  options: Omit<CreateRuntimePluginHostOptions, 'plugins'> = {}
+  options: Omit<CreateRuntimePluginHostOptions, 'plugins'> = {},
 ): RuntimePluginHost {
   return createRuntimePluginHost({
     fileStore: testRuntimePluginFileStoreProvider,
     ...options,
     plugins: [characterStatePlugin],
-    enabledPluginIds:
-      options.enabledPluginIds ?? [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        characterStatePluginId
-      ]
+    enabledPluginIds: options.enabledPluginIds ?? [
+      runtimePluginId,
+      firstPartyModelToolsPluginId,
+      characterStatePluginId,
+    ],
   });
 }

@@ -1,9 +1,9 @@
-import type { createConfiguredProject02PluginHost } from '../../src/app/index.ts';
+import type {createConfiguredProject02PluginHost} from '../../src/app/index.ts';
 import {
   createMemoryProviderRuntimePlugin,
   createRuntimePlugin,
   hostScopedFirstPartyRuntimePluginIds,
-  runtimePluginContractVersion
+  runtimePluginContractVersion,
 } from '../../src/plugins/index.ts';
 
 export function requiredSecretPlugin(id = 'memory.required') {
@@ -17,7 +17,7 @@ export function requiredSecretPlugin(id = 'memory.required') {
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02'
+        sourceSystem: 'project02',
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
@@ -28,9 +28,9 @@ export function requiredSecretPlugin(id = 'memory.required') {
             required: true,
             secret: true,
             valueType: 'secret',
-            redactionLabels: ['secret']
-          }
-        ]
+            redactionLabels: ['secret'],
+          },
+        ],
       },
       localTrustLevel: 'trusted_adapter',
       runtimePolicy: {
@@ -44,34 +44,40 @@ export function requiredSecretPlugin(id = 'memory.required') {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'degrade',
           afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
+          health: 'degrade',
+        },
       },
       activation: {
         defaultEnabled: true,
-        reasons: ['test_required_secret']
+        reasons: ['test_required_secret'],
       },
-      requestedAccess: {}
-    }
+      requestedAccess: {},
+    },
   });
 }
 
-export function requiredSecretPluginWithManifestEnvVar(id: string, envVar: string) {
+export function requiredSecretPluginWithManifestEnvVar(
+  id: string,
+  envVar: string,
+) {
   const plugin = requiredSecretPlugin(id);
 
   return createRuntimePlugin({
     manifest: {
       ...plugin.manifest,
       config: {
-        fields: plugin.manifest.config.fields.map((field) =>
-          field.name === 'apiKey' ? { ...field, envVar } : field
-        )
-      }
-    }
+        fields: plugin.manifest.config.fields.map(field =>
+          field.name === 'apiKey' ? {...field, envVar} : field,
+        ),
+      },
+    },
   });
 }
 
-export function requiredDottedConfigPlugin(id = 'memory', fieldName = 'api.config.key') {
+export function requiredDottedConfigPlugin(
+  id = 'memory',
+  fieldName = 'api.config.key',
+) {
   const plugin = requiredSecretPlugin(id);
 
   return createRuntimePlugin({
@@ -86,15 +92,15 @@ export function requiredDottedConfigPlugin(id = 'memory', fieldName = 'api.confi
             required: true,
             secret: false,
             valueType: 'string',
-            redactionLabels: []
-          }
-        ]
+            redactionLabels: [],
+          },
+        ],
       },
       activation: {
         defaultEnabled: true,
-        reasons: ['test_required_dotted_config']
-      }
-    }
+        reasons: ['test_required_dotted_config'],
+      },
+    },
   });
 }
 
@@ -113,7 +119,7 @@ export function structuredConfigPlugin(id: string) {
             required: true,
             secret: false,
             valueType: 'object',
-            redactionLabels: []
+            redactionLabels: [],
           },
           {
             name: 'endpoints',
@@ -121,15 +127,15 @@ export function structuredConfigPlugin(id: string) {
             required: true,
             secret: false,
             valueType: 'array',
-            redactionLabels: []
-          }
-        ]
+            redactionLabels: [],
+          },
+        ],
       },
       activation: {
         defaultEnabled: true,
-        reasons: ['test_structured_config']
-      }
-    }
+        reasons: ['test_structured_config'],
+      },
+    },
   });
 }
 
@@ -138,12 +144,15 @@ export function memoryProviderPlugin(id: string) {
     id,
     displayName: id,
     recall() {
-      return Promise.resolve({ items: [] });
-    }
+      return Promise.resolve({items: []});
+    },
   });
 }
 
-export function restoreProcessEnvValue(name: string, value: string | undefined): void {
+export function restoreProcessEnvValue(
+  name: string,
+  value: string | undefined,
+): void {
   if (value === undefined) {
     Reflect.deleteProperty(process.env, name);
     return;
@@ -158,17 +167,17 @@ export type ActivationPluginSnapshot = Awaited<
 
 export function activationPluginById(
   plugins: readonly ActivationPluginSnapshot[],
-  pluginId: string
+  pluginId: string,
 ): ActivationPluginSnapshot | undefined {
-  return plugins.find((plugin) => plugin.pluginId === pluginId);
+  return plugins.find(plugin => plugin.pluginId === pluginId);
 }
 
 export function nonHostScopedActivationPlugins(
-  plugins: readonly ActivationPluginSnapshot[]
+  plugins: readonly ActivationPluginSnapshot[],
 ): readonly ActivationPluginSnapshot[] {
   const hostScopedPluginIds = new Set(hostScopedFirstPartyRuntimePluginIds);
 
   return Object.freeze(
-    plugins.filter((plugin) => !hostScopedPluginIds.has(plugin.pluginId))
+    plugins.filter(plugin => !hostScopedPluginIds.has(plugin.pluginId)),
   );
 }

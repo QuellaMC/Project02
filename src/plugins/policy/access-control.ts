@@ -4,14 +4,12 @@ import {
   type RuntimePluginAccessLevel,
   type RuntimePluginAccessMap,
   type RuntimePluginAccessName,
-  type RuntimePluginAccessSnapshot
+  type RuntimePluginAccessSnapshot,
 } from '../api/contract.ts';
-import type {
-  RuntimePlugin
-} from '../api/types.ts';
-import { assertUniqueRuntimePluginIds } from '../api/identity.ts';
-import { isRecord } from '../api/validation-primitives.ts';
-import { ownJsonRecordValue } from '../../shared/json-boundary.ts';
+import type {RuntimePlugin} from '../api/types.ts';
+import {assertUniqueRuntimePluginIds} from '../api/identity.ts';
+import {isRecord} from '../api/validation-primitives.ts';
+import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 
 export type RuntimePluginAccessMapByPluginId = Readonly<
   Record<string, RuntimePluginAccessSnapshot>
@@ -27,14 +25,14 @@ export function resolveRuntimePluginAccessForPlugins(options: {
 
   return Object.freeze(
     Object.fromEntries(
-      options.plugins.map((plugin) => [
+      options.plugins.map(plugin => [
         plugin.manifest.id,
         resolveRuntimePluginAccessForPlugin({
           plugin,
-          enabled: enabledPluginIds.has(plugin.manifest.id)
-        })
-      ])
-    )
+          enabled: enabledPluginIds.has(plugin.manifest.id),
+        }),
+      ]),
+    ),
   );
 }
 
@@ -44,12 +42,12 @@ export function runtimePluginAccessForPlugin(options: {
 }): RuntimePluginAccessSnapshot {
   const access = ownJsonRecordValue(
     options.accessByPluginId,
-    options.plugin.manifest.id
+    options.plugin.manifest.id,
   );
 
   if (access === undefined) {
     throw new TypeError(
-      `Plugin "${options.plugin.manifest.id}" is missing resolved access.`
+      `Plugin "${options.plugin.manifest.id}" is missing resolved access.`,
     );
   }
 
@@ -63,7 +61,7 @@ export function resolveRuntimePluginAccessForPlugin(options: {
   return runtimePluginAccessSnapshot({
     requestedAccess: options.plugin.manifest.requestedAccess,
     enabled: options.enabled,
-    fieldPrefix: options.plugin.manifest.id
+    fieldPrefix: options.plugin.manifest.id,
   });
 }
 
@@ -75,12 +73,12 @@ export function runtimePluginAccessSnapshot(options: {
   const fieldPrefix = options.fieldPrefix ?? 'plugin';
   const requestedAccess = normalizeRuntimePluginAccessMap(
     options.requestedAccess,
-    `${fieldPrefix}.requestedAccess`
+    `${fieldPrefix}.requestedAccess`,
   );
 
   return Object.freeze({
     requestedAccess,
-    grantedAccess: options.enabled ? requestedAccess : Object.freeze({})
+    grantedAccess: options.enabled ? requestedAccess : Object.freeze({}),
   } satisfies RuntimePluginAccessSnapshot);
 }
 
@@ -91,12 +89,12 @@ export function runtimePluginGrantsAccess(options: {
 }): boolean {
   return runtimePluginAccessAllows(
     runtimePluginAccessFor(options.access.grantedAccess, options.accessName),
-    options.requiredAccess
+    options.requiredAccess,
   );
 }
 
 export function runtimePluginAccessRank(
-  access: RuntimePluginAccessLevel
+  access: RuntimePluginAccessLevel,
 ): number {
   switch (access) {
     case 'none':
@@ -110,7 +108,7 @@ export function runtimePluginAccessRank(
 
 export function normalizeRuntimePluginAccessLevel(
   value: unknown,
-  field = 'access level'
+  field = 'access level',
 ): RuntimePluginAccessLevel {
   if (!isOneOf(value, runtimePluginAccessLevelValues)) {
     throw new TypeError(`${field} must be "none", "read", or "write".`);
@@ -121,7 +119,7 @@ export function normalizeRuntimePluginAccessLevel(
 
 export function runtimePluginAccessFor(
   accessMap: RuntimePluginAccessMap,
-  accessName: RuntimePluginAccessName
+  accessName: RuntimePluginAccessName,
 ): RuntimePluginAccessLevel {
   if (!Object.hasOwn(accessMap, accessName)) {
     return 'none';
@@ -132,14 +130,14 @@ export function runtimePluginAccessFor(
 
 export function runtimePluginAccessAllows(
   access: RuntimePluginAccessLevel,
-  required: RuntimePluginAccessLevel
+  required: RuntimePluginAccessLevel,
 ): boolean {
   return runtimePluginAccessRank(access) >= runtimePluginAccessRank(required);
 }
 
 export function normalizeRuntimePluginAccessMap(
   value: unknown,
-  field = 'access map'
+  field = 'access map',
 ): RuntimePluginAccessMap {
   if (value === undefined) {
     return Object.freeze({});
@@ -173,21 +171,20 @@ export function normalizeRuntimePluginAccessMap(
 
     accessMap[accessName] = normalizeRuntimePluginAccessLevel(
       access,
-      `${field}.${accessName}`
+      `${field}.${accessName}`,
     );
   }
 
   return Object.freeze(accessMap);
 }
 
-
 function isOneOf<T extends string>(
   value: unknown,
-  allowedValues: readonly T[]
+  allowedValues: readonly T[],
 ): value is T {
   return (
     typeof value === 'string' &&
-    allowedValues.some((allowedValue) => allowedValue === value)
+    allowedValues.some(allowedValue => allowedValue === value)
   );
 }
 
@@ -207,15 +204,15 @@ export function assertRuntimePluginFileStoreProviderPresent(options: {
     return;
   }
 
-  const grantedPlugin = options.enabledPlugins.find((plugin) =>
+  const grantedPlugin = options.enabledPlugins.find(plugin =>
     runtimePluginGrantsAccess({
       access: runtimePluginAccessForPlugin({
         plugin,
-        accessByPluginId: options.accessByPluginId
+        accessByPluginId: options.accessByPluginId,
       }),
       accessName: 'file_store',
-      requiredAccess: 'read'
-    })
+      requiredAccess: 'read',
+    }),
   );
 
   if (grantedPlugin !== undefined) {
@@ -223,7 +220,7 @@ export function assertRuntimePluginFileStoreProviderPresent(options: {
       `Plugin "${grantedPlugin.manifest.id}" is granted file_store access, ` +
         'but the host was created without a file-store provider. Pass ' +
         'createRuntimePluginHost({ fileStore }) or compose the host through ' +
-        'the configured plugin activation factory.'
+        'the configured plugin activation factory.',
     );
   }
 }

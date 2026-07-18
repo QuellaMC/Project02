@@ -1,4 +1,4 @@
-import { randomUUID, type Hash } from 'node:crypto';
+import {randomUUID, type Hash} from 'node:crypto';
 import {
   appendFileSync,
   closeSync,
@@ -9,31 +9,31 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  writeSync
+  writeSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { hostname } from 'node:os';
+import {dirname, join} from 'node:path';
+import {hostname} from 'node:os';
 
-import { canonicalJsonStringify } from '../../../shared/canonical-json.ts';
-import { processIsAlive } from '../process-liveness.ts';
-import type { RuntimeEventIdentity } from '../../../core/index.ts';
-import { parseAtomicReplacementFileName } from '../atomic-file.ts';
-import { findValidatedTerminalRawEventForSession } from '../file-runtime-log-store.ts';
+import {canonicalJsonStringify} from '../../../shared/canonical-json.ts';
+import {processIsAlive} from '../process-liveness.ts';
+import type {RuntimeEventIdentity} from '../../../core/index.ts';
+import {parseAtomicReplacementFileName} from '../atomic-file.ts';
+import {findValidatedTerminalRawEventForSession} from '../file-runtime-log-store.ts';
 import {
   createLocalRuntimeSessionPaths,
-  type LocalRuntimeSessionPaths
+  type LocalRuntimeSessionPaths,
 } from '../layout-contract.ts';
 import {
   createLocalRuntimeMutationLockOwnerToken,
   LocalRuntimeMutationLockBusyError,
-  type LocalRuntimeMutationLockOwnerToken
+  type LocalRuntimeMutationLockOwnerToken,
 } from '../mutation-lock.ts';
 import type {
   CreateRuntimePluginFileStoreOptions,
   RuntimePluginFileStorePathMode,
-  RuntimePluginFileStorePreparedTransaction
+  RuntimePluginFileStorePreparedTransaction,
 } from '../../../plugins/index.ts';
-import type { StagedPluginFileStoreOperation } from './contracts.ts';
+import type {StagedPluginFileStoreOperation} from './contracts.ts';
 import {
   assertDurableOperationPathMode,
   assertRegularFile,
@@ -56,17 +56,17 @@ import {
   withDurablePluginStoreMutations,
   writeDurablePathModes,
   writeDurableRevision,
-  writeTextAtomic
+  writeTextAtomic,
 } from './durable-primitives.ts';
-import type { RuntimePluginJsonValue } from '../../../plugins/index.ts';
+import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
 import {
   durableDirectMutationJournalFileName,
-  isMissingFileError
+  isMissingFileError,
 } from './shared.ts';
 import {
   durableTransactionProgressVersion,
   parseDurablePluginFileStoreTransactionProgress,
-  type DurablePluginFileStoreTransactionProgress
+  type DurablePluginFileStoreTransactionProgress,
 } from './wal-progress.ts';
 import {
   assertDurableTransactionJournalDoesNotExist,
@@ -75,18 +75,17 @@ import {
   readDurablePluginFileStoreJournal,
   type DurablePluginFileStoreJournal,
   type DurablePluginFileStoreJournalOperation,
-  writeDurablePluginFileStoreJournal
+  writeDurablePluginFileStoreJournal,
 } from './wal-codec.ts';
 
 const durableTransactionDirectoryName = '.plugin-transactions';
 const durableTransactionProgressSuffix = '.progress';
 const activeDurableTransactionJournalPaths = new Set<string>();
 
-export type DurablePluginFileStoreFaultPoint =
-  'after_content_persisted';
+export type DurablePluginFileStoreFaultPoint = 'after_content_persisted';
 
 export type DurablePluginFileStoreFaultInjector = (
-  point: DurablePluginFileStoreFaultPoint
+  point: DurablePluginFileStoreFaultPoint,
 ) => void;
 
 export function recoverDirectDurablePluginFileStoreMutation(options: {
@@ -100,11 +99,11 @@ export function recoverDirectDurablePluginFileStoreMutation(options: {
     {
       storeRoot: options.storeRoot,
       root: options.root,
-      ownerToken: options.ownerToken
+      ownerToken: options.ownerToken,
     },
     () => {
       recoverDirectDurablePluginFileStoreMutationLocked(options);
-    }
+    },
   );
 }
 
@@ -123,7 +122,7 @@ export function applyRecoverableDurablePluginFileStoreOperation(options: {
     {
       storeRoot: options.storeRoot,
       root: options.root,
-      ownerToken: options.ownerToken
+      ownerToken: options.ownerToken,
     },
     () => {
       recoverDirectDurablePluginFileStoreMutationLocked(options);
@@ -146,15 +145,15 @@ export function applyRecoverableDurablePluginFileStoreOperation(options: {
             kind: options.kind,
             value: options.value,
             expectedBeforeHash: hashOptionalFileContent(
-              readOptionalRegularFile(filePath)
+              readOptionalRegularFile(filePath),
             ),
-            status: 'pending'
-          } satisfies DurablePluginFileStoreJournalOperation)
-        ])
+            status: 'pending',
+          } satisfies DurablePluginFileStoreJournalOperation),
+        ]),
       } satisfies DurablePluginFileStoreJournal);
       const journal = materializeDurablePluginFileStoreJournal({
         storeRoot: options.storeRoot,
-        journal: pendingJournal
+        journal: pendingJournal,
       });
       const journalPath = directDurablePluginFileStoreJournalPath(options.root);
 
@@ -163,7 +162,7 @@ export function applyRecoverableDurablePluginFileStoreOperation(options: {
 
       if (operation === undefined) {
         throw new TypeError(
-          'Plugin fileStore direct mutation journal is malformed.'
+          'Plugin fileStore direct mutation journal is malformed.',
         );
       }
 
@@ -174,10 +173,10 @@ export function applyRecoverableDurablePluginFileStoreOperation(options: {
         ownerToken: options.ownerToken,
         ...(options.faultInjector === undefined
           ? {}
-          : { faultInjector: options.faultInjector })
+          : {faultInjector: options.faultInjector}),
       });
-      rmSync(journalPath, { force: true });
-    }
+      rmSync(journalPath, {force: true});
+    },
   );
 }
 
@@ -192,12 +191,12 @@ export async function prepareDurablePluginFileStoreTransaction(options: {
   const journalPath = durablePluginFileStoreTransactionJournalPath({
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
-    identity: options.identity
+    identity: options.identity,
   });
   const journalResourceKey = durablePluginJournalMutationResourceKey({
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
-    identity: options.identity
+    identity: options.identity,
   });
   const owner = createDurablePluginFileStoreJournalOwner();
   const pendingJournal = Object.freeze({
@@ -216,15 +215,15 @@ export async function prepareDurablePluginFileStoreTransaction(options: {
           kind: operation.kind,
           value: operation.value,
           expectedBeforeHash: operation.expectedBeforeHash,
-          status: 'pending'
-        } satisfies DurablePluginFileStoreJournalOperation)
-      )
-    )
+          status: 'pending',
+        } satisfies DurablePluginFileStoreJournalOperation),
+      ),
+    ),
   } satisfies DurablePluginFileStoreJournal);
   const roots = durablePluginRootsForOperations({
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
-    operations: options.operations
+    operations: options.operations,
   });
 
   await withDurablePluginStoreMutationsAsync(
@@ -232,24 +231,24 @@ export async function prepareDurablePluginFileStoreTransaction(options: {
       storeRoot: options.storeRoot,
       roots,
       resourceKeys: [journalResourceKey],
-      ownerToken: options.ownerToken
+      ownerToken: options.ownerToken,
     },
     () => {
       recoverDirectDurablePluginFileStoreMutationsForOperationsLocked({
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         operations: options.operations,
-        ownerToken: options.ownerToken
+        ownerToken: options.ownerToken,
       });
       const journal = materializeDurablePluginFileStoreJournal({
         storeRoot: options.storeRoot,
-        journal: pendingJournal
+        journal: pendingJournal,
       });
 
       assertDurableTransactionJournalDoesNotExist(journalPath);
       writeDurablePluginFileStoreJournal(journalPath, journal);
       activeDurableTransactionJournalPaths.add(journalPath);
-    }
+    },
   );
 
   let state:
@@ -277,28 +276,27 @@ export async function prepareDurablePluginFileStoreTransaction(options: {
           storeRoot: options.storeRoot,
           roots,
           resourceKeys: [journalResourceKey],
-          ownerToken: options.ownerToken
+          ownerToken: options.ownerToken,
         },
         () => {
-          const currentJournal = readDurablePluginFileStoreJournalIfPresent(
-            journalPath
-          );
+          const currentJournal =
+            readDurablePluginFileStoreJournalIfPresent(journalPath);
 
           if (currentJournal !== undefined) {
             assertJournalIdentityUnchanged(pendingJournal, currentJournal);
             assertJournalPathMatchesIdentity(
               options.storeRoot,
               journalPath,
-              currentJournal
+              currentJournal,
             );
           }
 
           activeDurableTransactionJournalPaths.delete(journalPath);
           rmSync(durablePluginFileStoreProgressPath(journalPath), {
-            force: true
+            force: true,
           });
-          rmSync(journalPath, { force: true });
-        }
+          rmSync(journalPath, {force: true});
+        },
       ).then(
         () => {
           state = 'discarded';
@@ -308,7 +306,7 @@ export async function prepareDurablePluginFileStoreTransaction(options: {
           state = 'prepared';
           activeTransition = undefined;
           throw error;
-        }
+        },
       );
 
       activeTransition = transition;
@@ -331,7 +329,7 @@ export async function prepareDurablePluginFileStoreTransaction(options: {
         ownerToken: options.ownerToken,
         ...(options.faultInjector === undefined
           ? {}
-          : { faultInjector: options.faultInjector })
+          : {faultInjector: options.faultInjector}),
       }).then(
         () => {
           activeDurableTransactionJournalPaths.delete(journalPath);
@@ -347,12 +345,12 @@ export async function prepareDurablePluginFileStoreTransaction(options: {
           }
           activeTransition = undefined;
           throw error;
-        }
+        },
       );
 
       activeTransition = transition;
       return transition;
-    }
+    },
   } satisfies RuntimePluginFileStorePreparedTransaction);
 }
 
@@ -364,7 +362,7 @@ async function finalizeDurablePluginFileStoreJournal(options: {
   readonly faultInjector?: DurablePluginFileStoreFaultInjector;
 }): Promise<void> {
   const initialJournal = readDurablePluginFileStoreJournalIfPresent(
-    options.journalPath
+    options.journalPath,
   );
 
   if (initialJournal === undefined) {
@@ -373,19 +371,19 @@ async function finalizeDurablePluginFileStoreJournal(options: {
 
   assertJournalIdentityUnchanged(
     options.expectedJournalIdentity,
-    initialJournal
+    initialJournal,
   );
   assertJournalPathMatchesIdentity(
     options.storeRoot,
     options.journalPath,
-    initialJournal
+    initialJournal,
   );
 
   const roots = durablePluginRootsForJournal(options.storeRoot, initialJournal);
   const journalResourceKey = durablePluginJournalMutationResourceKey({
     storeRoot: options.storeRoot,
     sessionId: initialJournal.sessionId,
-    identity: initialJournal
+    identity: initialJournal,
   });
 
   await withDurablePluginStoreMutationsAsync(
@@ -393,14 +391,14 @@ async function finalizeDurablePluginFileStoreJournal(options: {
       storeRoot: options.storeRoot,
       roots,
       resourceKeys: [journalResourceKey],
-      ownerToken: options.ownerToken
+      ownerToken: options.ownerToken,
     },
     () => {
       finalizeLockedDurablePluginFileStoreJournal({
         ...options,
-        lockedRoots: roots
+        lockedRoots: roots,
       });
-    }
+    },
   );
 }
 
@@ -416,11 +414,11 @@ function finalizeLockedDurablePluginFileStoreJournal(options: {
     storeRoot: options.storeRoot,
     sessionId: options.expectedJournalIdentity.sessionId,
     operations: options.expectedJournalIdentity.operations,
-    ownerToken: options.ownerToken
+    ownerToken: options.ownerToken,
   });
 
   const preflightJournal = readDurablePluginFileStoreJournalIfPresent(
-    options.journalPath
+    options.journalPath,
   );
 
   if (preflightJournal === undefined) {
@@ -429,52 +427,54 @@ function finalizeLockedDurablePluginFileStoreJournal(options: {
 
   assertJournalIdentityUnchanged(
     options.expectedJournalIdentity,
-    preflightJournal
+    preflightJournal,
   );
   assertJournalPathMatchesIdentity(
     options.storeRoot,
     options.journalPath,
-    preflightJournal
+    preflightJournal,
   );
   assertJournalRootsAreLocked(
     options.storeRoot,
     preflightJournal,
-    options.lockedRoots
+    options.lockedRoots,
   );
 
   if (
     preflightJournal.operations.some(
-      (operation) => operation.status === 'pending'
+      operation => operation.status === 'pending',
     )
   ) {
-    throw new Error('Plugin fileStore transaction journal was not materialized.');
+    throw new Error(
+      'Plugin fileStore transaction journal was not materialized.',
+    );
   }
 
   const progress = readDurablePluginFileStoreTransactionProgress(
     options.journalPath,
-    preflightJournal
+    preflightJournal,
   );
 
   if (
     progress !== undefined ||
     preflightJournal.operations.every(
-      (operation) => operation.status === 'planned'
+      operation => operation.status === 'planned',
     )
   ) {
     finalizeBatchedDurablePluginFileStoreJournal({
       ...options,
       journal: preflightJournal,
-      ...(progress === undefined ? {} : { progress }),
+      ...(progress === undefined ? {} : {progress}),
       ...(options.faultInjector === undefined
         ? {}
-        : { faultInjector: options.faultInjector })
+        : {faultInjector: options.faultInjector}),
     });
     return;
   }
 
   preflightDurablePluginFileStoreJournal({
     storeRoot: options.storeRoot,
-    journal: preflightJournal
+    journal: preflightJournal,
   });
   finalizeLegacyDurablePluginFileStoreJournal(options);
 }
@@ -488,7 +488,7 @@ function finalizeLegacyDurablePluginFileStoreJournal(options: {
 }): void {
   for (;;) {
     let journal = readDurablePluginFileStoreJournalIfPresent(
-      options.journalPath
+      options.journalPath,
     );
 
     if (journal === undefined) {
@@ -499,34 +499,40 @@ function finalizeLegacyDurablePluginFileStoreJournal(options: {
     assertJournalPathMatchesIdentity(
       options.storeRoot,
       options.journalPath,
-      journal
+      journal,
     );
-    assertJournalRootsAreLocked(options.storeRoot, journal, options.lockedRoots);
+    assertJournalRootsAreLocked(
+      options.storeRoot,
+      journal,
+      options.lockedRoots,
+    );
     const operation = journal.operations.find(
-      (item) => item.status !== 'applied'
+      item => item.status !== 'applied',
     );
 
     if (operation === undefined) {
-      rmSync(options.journalPath, { force: true });
+      rmSync(options.journalPath, {force: true});
       return;
     }
 
     const current = journal.operations[operation.index];
 
     if (current === undefined || current.status === 'pending') {
-      throw new Error('Plugin fileStore transaction journal was not materialized.');
+      throw new Error(
+        'Plugin fileStore transaction journal was not materialized.',
+      );
     }
 
     const reconciled = reconcileDurableJournalOperationRevision({
       storeRoot: options.storeRoot,
       sessionId: journal.sessionId,
-      operation: current
+      operation: current,
     });
 
     if (reconciled !== current) {
       journal = replaceDurablePluginFileStoreJournalOperation(
         journal,
-        reconciled
+        reconciled,
       );
       writeDurablePluginFileStoreJournal(options.journalPath, journal);
     }
@@ -535,15 +541,15 @@ function finalizeLegacyDurablePluginFileStoreJournal(options: {
       storeRoot: options.storeRoot,
       sessionId: journal.sessionId,
       operation: reconciled,
-      ownerToken: options.ownerToken
+      ownerToken: options.ownerToken,
     });
 
     journal = replaceDurablePluginFileStoreJournalOperation(
       journal,
       Object.freeze({
         ...reconciled,
-        status: 'applied'
-      } satisfies DurablePluginFileStoreJournalOperation)
+        status: 'applied',
+      } satisfies DurablePluginFileStoreJournalOperation),
     );
     writeDurablePluginFileStoreJournal(options.journalPath, journal);
   }
@@ -559,7 +565,7 @@ function finalizeBatchedDurablePluginFileStoreJournal(options: {
   preflightDurablePluginFileStoreJournal({
     storeRoot: options.storeRoot,
     journal: options.journal,
-    appliedCount: options.progress?.appliedCount ?? 0
+    appliedCount: options.progress?.appliedCount ?? 0,
   });
 
   const progress =
@@ -567,13 +573,13 @@ function finalizeBatchedDurablePluginFileStoreJournal(options: {
     createDurablePluginFileStoreTransactionProgress({
       storeRoot: options.storeRoot,
       journalPath: options.journalPath,
-      journal: options.journal
+      journal: options.journal,
     });
 
   assertDurablePluginFileStoreProgressRevisions({
     storeRoot: options.storeRoot,
     journal: options.journal,
-    progress
+    progress,
   });
 
   let appliedCount = progress.appliedCount;
@@ -588,20 +594,18 @@ function finalizeBatchedDurablePluginFileStoreJournal(options: {
 
     if (operation === undefined) {
       throw new TypeError(
-        'Plugin fileStore transaction progress is malformed.'
+        'Plugin fileStore transaction progress is malformed.',
       );
     }
 
     applyPlannedDurablePluginFileStoreJournalContent({
       storeRoot: options.storeRoot,
       sessionId: options.journal.sessionId,
-      operation
+      operation,
     });
     options.faultInjector?.('after_content_persisted');
     appliedCount += 1;
-    pathsSinceProgress.add(
-      `${operation.pluginId}\u0000${operation.path}`
-    );
+    pathsSinceProgress.add(`${operation.pluginId}\u0000${operation.path}`);
     const nextOperation = options.journal.operations[appliedCount];
     const nextPathKey =
       nextOperation === undefined
@@ -615,7 +619,7 @@ function finalizeBatchedDurablePluginFileStoreJournal(options: {
     ) {
       appendDurablePluginFileStoreTransactionProgress(
         options.journalPath,
-        appliedCount
+        appliedCount,
       );
       pathsSinceProgress.clear();
     }
@@ -624,11 +628,11 @@ function finalizeBatchedDurablePluginFileStoreJournal(options: {
   persistBatchedDurablePluginFileStoreMetadata({
     storeRoot: options.storeRoot,
     journal: options.journal,
-    progress
+    progress,
   });
-  rmSync(options.journalPath, { force: true });
+  rmSync(options.journalPath, {force: true});
   rmSync(durablePluginFileStoreProgressPath(options.journalPath), {
-    force: true
+    force: true,
   });
 }
 
@@ -654,14 +658,12 @@ function preflightDurablePluginFileStoreJournal(options: {
   }
 
   for (const pathOperations of operationsByPath.values()) {
-    const firstPending = pathOperations.find(
-      (operation) =>
-        options.appliedCount === undefined
-          ? operation.status !== 'applied'
-          : operation.index >= options.appliedCount
+    const firstPending = pathOperations.find(operation =>
+      options.appliedCount === undefined
+        ? operation.status !== 'applied'
+        : operation.index >= options.appliedCount,
     );
-    const operation =
-      firstPending ?? pathOperations[pathOperations.length - 1];
+    const operation = firstPending ?? pathOperations[pathOperations.length - 1];
 
     if (operation === undefined) {
       continue;
@@ -670,13 +672,13 @@ function preflightDurablePluginFileStoreJournal(options: {
     const root = durablePluginRoot({
       storeRoot: options.storeRoot,
       sessionId: options.journal.sessionId,
-      pluginId: operation.pluginId
+      pluginId: operation.pluginId,
     });
 
     assertSafeDurablePluginPath(root, operation.path);
     const inspection = inspectDurableJournalOperationContent(
       join(root, operation.path),
-      operation
+      operation,
     );
 
     if (
@@ -698,9 +700,7 @@ function createDurablePluginFileStoreTransactionProgress(options: {
   readonly journal: DurablePluginFileStoreJournal;
 }): DurablePluginFileStoreTransactionProgress {
   const pluginIds = [
-    ...new Set(
-      options.journal.operations.map((operation) => operation.pluginId)
-    )
+    ...new Set(options.journal.operations.map(operation => operation.pluginId)),
   ].sort((left, right) => left.localeCompare(right));
   const progress = Object.freeze({
     version: durableTransactionProgressVersion,
@@ -710,23 +710,23 @@ function createDurablePluginFileStoreTransactionProgress(options: {
     ownerNonce: options.journal.ownerNonce,
     sessionId: options.journal.sessionId,
     baseRevisions: Object.freeze(
-      pluginIds.map((pluginId) =>
+      pluginIds.map(pluginId =>
         Object.freeze({
           pluginId,
           revision: baseDurablePluginFileStoreTransactionRevision({
             storeRoot: options.storeRoot,
             journal: options.journal,
-            pluginId
-          })
-        })
-      )
+            pluginId,
+          }),
+        }),
+      ),
     ),
-    appliedCount: 0
+    appliedCount: 0,
   } satisfies DurablePluginFileStoreTransactionProgress);
 
   writeTextAtomic(
     durablePluginFileStoreProgressPath(options.journalPath),
-    `${JSON.stringify(progress)}\n`
+    `${JSON.stringify(progress)}\n`,
   );
   return progress;
 }
@@ -739,7 +739,7 @@ function baseDurablePluginFileStoreTransactionRevision(options: {
   const root = durablePluginRoot({
     storeRoot: options.storeRoot,
     sessionId: options.journal.sessionId,
-    pluginId: options.pluginId
+    pluginId: options.pluginId,
   });
   const persistedRevision = readPersistedDurableRevision(root);
 
@@ -752,7 +752,7 @@ function baseDurablePluginFileStoreTransactionRevision(options: {
         requiredJournalOperationRevision(firstOperation.afterRevision) &&
       durableJournalOperationMetadataMayAlreadyBeReflected({
         root,
-        operation: firstOperation
+        operation: firstOperation,
       })
     ) {
       return persistedRevision - 1;
@@ -762,7 +762,7 @@ function baseDurablePluginFileStoreTransactionRevision(options: {
   }
 
   const firstOperation = options.journal.operations.find(
-    (operation) => operation.pluginId === options.pluginId
+    operation => operation.pluginId === options.pluginId,
   );
 
   return firstOperation === undefined
@@ -775,7 +775,7 @@ function durableJournalOperationMetadataMayAlreadyBeReflected(options: {
   readonly operation: DurablePluginFileStoreJournalOperation;
 }): boolean {
   const beforeHash = requiredJournalOperationString(
-    options.operation.beforeHash
+    options.operation.beforeHash,
   );
   const afterHash = requiredJournalOperationString(options.operation.afterHash);
 
@@ -786,25 +786,25 @@ function durableJournalOperationMetadataMayAlreadyBeReflected(options: {
   return (
     inspectDurableJournalOperationContent(
       join(options.root, options.operation.path),
-      options.operation
+      options.operation,
     ).kind === 'after'
   );
 }
 
 function readDurablePluginFileStoreTransactionProgress(
   journalPath: string,
-  journal: DurablePluginFileStoreJournal
+  journal: DurablePluginFileStoreJournal,
 ): DurablePluginFileStoreTransactionProgress | undefined {
   let content: string;
 
   try {
     assertRegularFile(
       durablePluginFileStoreProgressPath(journalPath),
-      'Plugin fileStore transaction progress'
+      'Plugin fileStore transaction progress',
     );
     content = readFileSync(
       durablePluginFileStoreProgressPath(journalPath),
-      'utf8'
+      'utf8',
     );
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
@@ -819,7 +819,7 @@ function readDurablePluginFileStoreTransactionProgress(
 
 function appendDurablePluginFileStoreTransactionProgress(
   journalPath: string,
-  appliedCount: number
+  appliedCount: number,
 ): void {
   const path = durablePluginFileStoreProgressPath(journalPath);
   const descriptor = openSync(path, 'a', 0o600);
@@ -842,7 +842,7 @@ function assertDurablePluginFileStoreProgressRevisions(options: {
   for (const operation of options.journal.operations) {
     operationCountByPlugin.set(
       operation.pluginId,
-      (operationCountByPlugin.get(operation.pluginId) ?? 0) + 1
+      (operationCountByPlugin.get(operation.pluginId) ?? 0) + 1,
     );
   }
 
@@ -850,7 +850,7 @@ function assertDurablePluginFileStoreProgressRevisions(options: {
     const root = durablePluginRoot({
       storeRoot: options.storeRoot,
       sessionId: options.journal.sessionId,
-      pluginId: base.pluginId
+      pluginId: base.pluginId,
     });
     const currentRevision = readDurableRevision(root);
     const finalRevision =
@@ -861,7 +861,7 @@ function assertDurablePluginFileStoreProgressRevisions(options: {
       currentRevision !== finalRevision
     ) {
       throw new Error(
-        `Plugin fileStore transaction conflict for ${base.pluginId}/revision.`
+        `Plugin fileStore transaction conflict for ${base.pluginId}/revision.`,
       );
     }
   }
@@ -875,14 +875,14 @@ function applyPlannedDurablePluginFileStoreJournalContent(options: {
   const root = durablePluginRoot({
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
-    pluginId: options.operation.pluginId
+    pluginId: options.operation.pluginId,
   });
 
   assertSafeDurablePluginPath(root, options.operation.path);
   const filePath = join(root, options.operation.path);
   const contentState = classifyDurableJournalOperationContent(
     filePath,
-    options.operation
+    options.operation,
   );
 
   if (contentState.kind === 'after') {
@@ -892,18 +892,18 @@ function applyPlannedDurablePluginFileStoreJournalContent(options: {
   if (options.operation.kind === 'write_json') {
     writeTextAtomic(
       filePath,
-      requiredJournalOperationString(options.operation.afterContent)
+      requiredJournalOperationString(options.operation.afterContent),
     );
   } else {
     const remaining =
       contentState.kind === 'before'
         ? Buffer.from(
             requiredJournalOperationString(options.operation.appendedLine),
-            'utf8'
+            'utf8',
           )
         : contentState.remaining;
 
-    mkdirSync(dirname(filePath), { recursive: true });
+    mkdirSync(dirname(filePath), {recursive: true});
     appendFileSync(filePath, remaining);
   }
 
@@ -946,14 +946,14 @@ function persistBatchedDurablePluginFileStoreMetadata(options: {
     const root = durablePluginRoot({
       storeRoot: options.storeRoot,
       sessionId: options.journal.sessionId,
-      pluginId: base.pluginId
+      pluginId: base.pluginId,
     });
     const pathModes = readDurablePathModes(root);
 
     for (const operation of operations) {
       pathModes.set(
         operation.path,
-        operation.kind === 'write_json' ? 'json' : 'jsonl'
+        operation.kind === 'write_json' ? 'json' : 'jsonl',
       );
     }
 
@@ -971,7 +971,7 @@ function materializeDurablePluginFileStoreJournal(options: {
     {
       readonly appendStates: Map<
         string,
-        { hash: Hash | undefined; length: number }
+        {hash: Hash | undefined; length: number}
       >;
       readonly contents: Map<string, string | undefined>;
       readonly modes: Map<string, RuntimePluginFileStorePathMode>;
@@ -990,7 +990,7 @@ function materializeDurablePluginFileStoreJournal(options: {
       const root = durablePluginRoot({
         storeRoot: options.storeRoot,
         sessionId: options.journal.sessionId,
-        pluginId: operation.pluginId
+        pluginId: operation.pluginId,
       });
 
       assertSafeDurablePluginRoot(root);
@@ -999,7 +999,7 @@ function materializeDurablePluginFileStoreJournal(options: {
         contents: new Map(),
         modes: readDurablePathModes(root),
         root,
-        revision: readDurableRevision(root)
+        revision: readDurableRevision(root),
       };
       virtualStores.set(storeKey, virtualStore);
     }
@@ -1009,7 +1009,7 @@ function materializeDurablePluginFileStoreJournal(options: {
 
     if (!virtualStore.contents.has(operation.path)) {
       beforeContent = readOptionalRegularFile(
-        join(virtualStore.root, operation.path)
+        join(virtualStore.root, operation.path),
       );
       virtualStore.contents.set(operation.path, beforeContent);
     }
@@ -1017,7 +1017,7 @@ function materializeDurablePluginFileStoreJournal(options: {
     assertDurableOperationPathMode({
       filePath: join(virtualStore.root, operation.path),
       mode: virtualStore.modes.get(operation.path),
-      operation
+      operation,
     });
 
     let beforeHash: string;
@@ -1036,13 +1036,13 @@ function materializeDurablePluginFileStoreJournal(options: {
     if (operation.kind === 'write_json') {
       const afterContent = durableOperationAfterContent({
         beforeContent,
-        operation
+        operation,
       });
 
       beforeHash = hashOptionalFileContent(beforeContent);
       plannedContent = {
         afterContent,
-        afterHash: hashOptionalFileContent(afterContent)
+        afterHash: hashOptionalFileContent(afterContent),
       };
       virtualStore.contents.set(operation.path, afterContent);
     } else {
@@ -1055,7 +1055,7 @@ function materializeDurablePluginFileStoreJournal(options: {
               ? undefined
               : createPresentFileContentHash(beforeContent),
           length:
-            beforeContent === undefined ? 0 : Buffer.byteLength(beforeContent)
+            beforeContent === undefined ? 0 : Buffer.byteLength(beforeContent),
         };
         virtualStore.appendStates.set(operation.path, appendState);
       }
@@ -1077,7 +1077,7 @@ function materializeDurablePluginFileStoreJournal(options: {
         afterHash: appendState.hash.copy().digest('hex'),
         afterLength: appendState.length,
         appendedLine,
-        beforeLength
+        beforeLength,
       };
     }
 
@@ -1098,20 +1098,20 @@ function materializeDurablePluginFileStoreJournal(options: {
       beforeHash,
       ...plannedContent,
       beforeRevision,
-      afterRevision: beforeRevision + 1
+      afterRevision: beforeRevision + 1,
     } satisfies DurablePluginFileStoreJournalOperation);
 
     operations.push(planned);
     virtualStore.modes.set(
       operation.path,
-      operation.kind === 'write_json' ? 'json' : 'jsonl'
+      operation.kind === 'write_json' ? 'json' : 'jsonl',
     );
     virtualStore.revision += 1;
   }
 
   return Object.freeze({
     ...options.journal,
-    operations: Object.freeze(operations)
+    operations: Object.freeze(operations),
   } satisfies DurablePluginFileStoreJournal);
 }
 
@@ -1123,13 +1123,13 @@ function reconcileDurableJournalOperationRevision(options: {
   const root = durablePluginRoot({
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
-    pluginId: options.operation.pluginId
+    pluginId: options.operation.pluginId,
   });
 
   assertSafeDurablePluginPath(root, options.operation.path);
   const contentState = classifyDurableJournalOperationContent(
     join(root, options.operation.path),
-    options.operation
+    options.operation,
   );
 
   if (contentState.kind === 'after') {
@@ -1138,8 +1138,8 @@ function reconcileDurableJournalOperationRevision(options: {
 
   const currentRevision =
     contentState.kind === 'partial'
-      ? readPersistedDurableRevision(root) ??
-        requiredJournalOperationRevision(options.operation.beforeRevision)
+      ? (readPersistedDurableRevision(root) ??
+        requiredJournalOperationRevision(options.operation.beforeRevision))
       : readDurableRevision(root);
 
   if (currentRevision === options.operation.beforeRevision) {
@@ -1149,7 +1149,7 @@ function reconcileDurableJournalOperationRevision(options: {
   return Object.freeze({
     ...options.operation,
     beforeRevision: currentRevision,
-    afterRevision: currentRevision + 1
+    afterRevision: currentRevision + 1,
   } satisfies DurablePluginFileStoreJournalOperation);
 }
 
@@ -1163,39 +1163,39 @@ function applyPlannedDurablePluginFileStoreJournalOperation(options: {
   const root = durablePluginRoot({
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
-    pluginId: options.operation.pluginId
+    pluginId: options.operation.pluginId,
   });
 
   withDurablePluginStoreMutation(
     {
       storeRoot: options.storeRoot,
       root,
-      ownerToken: options.ownerToken
+      ownerToken: options.ownerToken,
     },
     () => {
       assertSafeDurablePluginPath(root, options.operation.path);
       const filePath = join(root, options.operation.path);
       const contentState = classifyDurableJournalOperationContent(
         filePath,
-        options.operation
+        options.operation,
       );
 
       if (contentState.kind !== 'after') {
         if (options.operation.kind === 'write_json') {
           writeTextAtomic(
             filePath,
-            requiredJournalOperationString(options.operation.afterContent)
+            requiredJournalOperationString(options.operation.afterContent),
           );
         } else {
           const appendedLine = requiredJournalOperationString(
-            options.operation.appendedLine
+            options.operation.appendedLine,
           );
           const remaining =
             contentState.kind === 'before'
               ? Buffer.from(appendedLine, 'utf8')
               : contentState.remaining;
 
-          mkdirSync(dirname(filePath), { recursive: true });
+          mkdirSync(dirname(filePath), {recursive: true});
           appendFileSync(filePath, remaining);
         }
 
@@ -1218,12 +1218,12 @@ function applyPlannedDurablePluginFileStoreJournalOperation(options: {
       const pathModes = readDurablePathModes(root);
       pathModes.set(
         options.operation.path,
-        options.operation.kind === 'write_json' ? 'json' : 'jsonl'
+        options.operation.kind === 'write_json' ? 'json' : 'jsonl',
       );
       writeDurablePathModes(root, pathModes);
 
       const afterRevision = requiredJournalOperationRevision(
-        options.operation.afterRevision
+        options.operation.afterRevision,
       );
       const persistedRevision = readPersistedDurableRevision(root);
       const currentRevision = persistedRevision ?? readDurableRevision(root);
@@ -1231,27 +1231,23 @@ function applyPlannedDurablePluginFileStoreJournalOperation(options: {
       if (persistedRevision === undefined || currentRevision < afterRevision) {
         writeDurableRevision(root, afterRevision);
       }
-    }
+    },
   );
 }
 
 type DurableJournalOperationContentState =
-  | { readonly kind: 'after' }
-  | { readonly kind: 'before' }
-  | { readonly kind: 'partial'; readonly remaining: Buffer };
+  | {readonly kind: 'after'}
+  | {readonly kind: 'before'}
+  | {readonly kind: 'partial'; readonly remaining: Buffer};
 
 type DurableJournalOperationContentInspection =
-  | DurableJournalOperationContentState
-  | { readonly kind: 'conflict' };
+  DurableJournalOperationContentState | {readonly kind: 'conflict'};
 
 function classifyDurableJournalOperationContent(
   filePath: string,
-  operation: DurablePluginFileStoreJournalOperation
+  operation: DurablePluginFileStoreJournalOperation,
 ): DurableJournalOperationContentState {
-  const inspection = inspectDurableJournalOperationContent(
-    filePath,
-    operation
-  );
+  const inspection = inspectDurableJournalOperationContent(filePath, operation);
 
   if (inspection.kind === 'conflict') {
     throwDurablePluginFileStoreTransactionConflict(operation);
@@ -1262,7 +1258,7 @@ function classifyDurableJournalOperationContent(
 
 function inspectDurableJournalOperationContent(
   filePath: string,
-  operation: DurablePluginFileStoreJournalOperation
+  operation: DurablePluginFileStoreJournalOperation,
 ): DurableJournalOperationContentInspection {
   const beforeHash = requiredJournalOperationString(operation.beforeHash);
   const afterHash = requiredJournalOperationString(operation.afterHash);
@@ -1270,15 +1266,15 @@ function inspectDurableJournalOperationContent(
   const currentHash = hashOptionalFileContent(currentContent);
 
   if (currentHash === beforeHash) {
-    return { kind: 'before' };
+    return {kind: 'before'};
   }
 
   if (currentHash === afterHash) {
-    return { kind: 'after' };
+    return {kind: 'after'};
   }
 
   if (operation.kind === 'write_json' || currentContent === undefined) {
-    return { kind: 'conflict' };
+    return {kind: 'conflict'};
   }
 
   const beforeLength = requiredJournalOperationRevision(operation.beforeLength);
@@ -1287,7 +1283,7 @@ function inspectDurableJournalOperationContent(
   const current = currentContent;
 
   if (current.length < beforeLength || current.length >= afterLength) {
-    return { kind: 'conflict' };
+    return {kind: 'conflict'};
   }
 
   const prefix = current.subarray(0, beforeLength);
@@ -1304,39 +1300,39 @@ function inspectDurableJournalOperationContent(
     suffix.length > appended.length ||
     !suffix.equals(appended.subarray(0, suffix.length))
   ) {
-    return { kind: 'conflict' };
+    return {kind: 'conflict'};
   }
 
   return {
     kind: 'partial',
-    remaining: appended.subarray(suffix.length)
+    remaining: appended.subarray(suffix.length),
   };
 }
 
 function throwDurablePluginFileStoreTransactionConflict(
-  operation: Pick<DurablePluginFileStoreJournalOperation, 'path' | 'pluginId'>
+  operation: Pick<DurablePluginFileStoreJournalOperation, 'path' | 'pluginId'>,
 ): never {
   throw new Error(
-    `Plugin fileStore transaction conflict for ${operation.pluginId}/${operation.path}.`
+    `Plugin fileStore transaction conflict for ${operation.pluginId}/${operation.path}.`,
   );
 }
 
 function replaceDurablePluginFileStoreJournalOperation(
   journal: DurablePluginFileStoreJournal,
-  operation: DurablePluginFileStoreJournalOperation
+  operation: DurablePluginFileStoreJournalOperation,
 ): DurablePluginFileStoreJournal {
   return Object.freeze({
     ...journal,
     operations: Object.freeze(
-      journal.operations.map((item) =>
-        item.index === operation.index ? operation : item
-      )
-    )
+      journal.operations.map(item =>
+        item.index === operation.index ? operation : item,
+      ),
+    ),
   } satisfies DurablePluginFileStoreJournal);
 }
 
 function readDurablePluginFileStoreJournalIfPresent(
-  journalPath: string
+  journalPath: string,
 ): DurablePluginFileStoreJournal | undefined {
   try {
     return readDurablePluginFileStoreJournal(journalPath);
@@ -1360,33 +1356,33 @@ function durablePluginRootsForOperations(options: {
   return Object.freeze(
     [
       ...new Set(
-        options.operations.map((operation) =>
+        options.operations.map(operation =>
           durablePluginRoot({
             storeRoot: options.storeRoot,
             sessionId: options.sessionId,
-            pluginId: operation.pluginId
-          })
-        )
-      )
-    ].sort((left, right) => left.localeCompare(right))
+            pluginId: operation.pluginId,
+          }),
+        ),
+      ),
+    ].sort((left, right) => left.localeCompare(right)),
   );
 }
 
 function durablePluginRootsForJournal(
   storeRoot: string,
-  journal: DurablePluginFileStoreJournal
+  journal: DurablePluginFileStoreJournal,
 ): readonly string[] {
   return durablePluginRootsForOperations({
     storeRoot,
     sessionId: journal.sessionId,
-    operations: journal.operations
+    operations: journal.operations,
   });
 }
 
 function assertJournalRootsAreLocked(
   storeRoot: string,
   journal: DurablePluginFileStoreJournal,
-  lockedRoots: readonly string[]
+  lockedRoots: readonly string[],
 ): void {
   const currentRoots = durablePluginRootsForJournal(storeRoot, journal);
 
@@ -1395,7 +1391,7 @@ function assertJournalRootsAreLocked(
     currentRoots.some((root, index) => root !== lockedRoots[index])
   ) {
     throw new TypeError(
-      'Plugin fileStore transaction journal changed its plugin roots while locked.'
+      'Plugin fileStore transaction journal changed its plugin roots while locked.',
     );
   }
 }
@@ -1404,19 +1400,17 @@ function directDurablePluginFileStoreJournalPath(root: string): string {
   return join(root, durableDirectMutationJournalFileName);
 }
 
-function recoverDirectDurablePluginFileStoreMutationsForOperationsLocked(
-  options: {
-    readonly storeRoot: string;
-    readonly sessionId: string;
-    readonly operations: readonly Pick<
-      DurablePluginFileStoreJournalOperation,
-      'pluginId'
-    >[];
-    readonly ownerToken: LocalRuntimeMutationLockOwnerToken;
-  }
-): void {
+function recoverDirectDurablePluginFileStoreMutationsForOperationsLocked(options: {
+  readonly storeRoot: string;
+  readonly sessionId: string;
+  readonly operations: readonly Pick<
+    DurablePluginFileStoreJournalOperation,
+    'pluginId'
+  >[];
+  readonly ownerToken: LocalRuntimeMutationLockOwnerToken;
+}): void {
   const pluginIds = [
-    ...new Set(options.operations.map((operation) => operation.pluginId))
+    ...new Set(options.operations.map(operation => operation.pluginId)),
   ].sort((left, right) => left.localeCompare(right));
 
   for (const pluginId of pluginIds) {
@@ -1427,9 +1421,9 @@ function recoverDirectDurablePluginFileStoreMutationsForOperationsLocked(
       root: durablePluginRoot({
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
-        pluginId
+        pluginId,
       }),
-      ownerToken: options.ownerToken
+      ownerToken: options.ownerToken,
     });
   }
 }
@@ -1461,7 +1455,7 @@ function recoverDirectDurablePluginFileStoreMutationLocked(options: {
     operation.status !== 'planned'
   ) {
     throw new TypeError(
-      'Plugin fileStore direct mutation journal is malformed.'
+      'Plugin fileStore direct mutation journal is malformed.',
     );
   }
 
@@ -1469,9 +1463,9 @@ function recoverDirectDurablePluginFileStoreMutationLocked(options: {
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     operation,
-    ownerToken: options.ownerToken
+    ownerToken: options.ownerToken,
   });
-  rmSync(journalPath, { force: true });
+  rmSync(journalPath, {force: true});
 }
 
 function createDurablePluginFileStoreJournalOwner(): Pick<
@@ -1481,7 +1475,7 @@ function createDurablePluginFileStoreJournalOwner(): Pick<
   return Object.freeze({
     ownerHostname: hostname(),
     ownerNonce: randomUUID(),
-    ownerPid: process.pid
+    ownerPid: process.pid,
   });
 }
 
@@ -1491,31 +1485,31 @@ function durablePluginJournalMutationResourceKey(options: {
   readonly identity: RuntimeEventIdentity;
 }): string {
   return `plugin-journal:${durablePluginFileStoreTransactionJournalPath(
-    options
+    options,
   )}`;
 }
 
 function assertJournalPathMatchesIdentity(
   storeRoot: string,
   journalPath: string,
-  journal: DurablePluginFileStoreJournal
+  journal: DurablePluginFileStoreJournal,
 ): void {
   const expectedPath = durablePluginFileStoreTransactionJournalPath({
     storeRoot,
     sessionId: journal.sessionId,
-    identity: journal
+    identity: journal,
   });
 
   if (journalPath !== expectedPath) {
     throw new TypeError(
-      'Plugin fileStore transaction journal identity does not match its path.'
+      'Plugin fileStore transaction journal identity does not match its path.',
     );
   }
 }
 
 function assertJournalIdentityUnchanged(
   expected: DurablePluginFileStoreJournal,
-  current: DurablePluginFileStoreJournal
+  current: DurablePluginFileStoreJournal,
 ): void {
   if (
     expected.eventId !== current.eventId ||
@@ -1529,39 +1523,38 @@ function assertJournalIdentityUnchanged(
       immutableJournalOperationsKey(current)
   ) {
     throw new TypeError(
-      'Plugin fileStore transaction journal identity changed while locked.'
+      'Plugin fileStore transaction journal identity changed while locked.',
     );
   }
 }
 
 function immutableJournalOperationsKey(
-  journal: DurablePluginFileStoreJournal
+  journal: DurablePluginFileStoreJournal,
 ): string {
   return canonicalJsonStringify(
-    journal.operations.map((operation) => ({
+    journal.operations.map(operation => ({
       index: operation.index,
       pluginId: operation.pluginId,
       path: operation.path,
       kind: operation.kind,
       value: operation.value,
-      expectedBeforeHash: operation.expectedBeforeHash
-    }))
+      expectedBeforeHash: operation.expectedBeforeHash,
+    })),
   );
 }
 
 export function recoverPreparedDurablePluginFileStoreTransactions(
-  options: CreateRuntimePluginFileStoreOptions & { readonly storeRoot: string },
-  ownerToken: LocalRuntimeMutationLockOwnerToken =
-    createLocalRuntimeMutationLockOwnerToken(),
+  options: CreateRuntimePluginFileStoreOptions & {readonly storeRoot: string},
+  ownerToken: LocalRuntimeMutationLockOwnerToken = createLocalRuntimeMutationLockOwnerToken(),
   recoveryOptions: {
     readonly recoverDirectMutation?: boolean;
-  } = {}
+  } = {},
 ): void {
   const sessionPaths = createLocalRuntimeSessionPaths(options);
   const root = durablePluginRoot({
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
-    pluginId: options.pluginId
+    pluginId: options.pluginId,
   });
 
   if (recoveryOptions.recoverDirectMutation !== false) {
@@ -1570,19 +1563,19 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
       sessionId: options.sessionId,
       pluginId: options.pluginId,
       root,
-      ownerToken
+      ownerToken,
     });
   }
   const journalsRoot = join(
     sessionPaths.sessionRoot,
-    durableTransactionDirectoryName
+    durableTransactionDirectoryName,
   );
 
   let entries: Dirent[];
 
   try {
     assertSafeDurableTransactionJournalDirectory(journalsRoot);
-    entries = readdirSync(journalsRoot, { withFileTypes: true });
+    entries = readdirSync(journalsRoot, {withFileTypes: true});
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return;
@@ -1597,7 +1590,7 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
     if (entry.isFile() && entry.name.endsWith('.tmp')) {
       if (parseAtomicReplacementFileName(entry.name) === undefined) {
         throw new TypeError(
-          'Plugin fileStore transaction directory contains an unsupported temp file.'
+          'Plugin fileStore transaction directory contains an unsupported temp file.',
         );
       }
 
@@ -1612,7 +1605,7 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
 
     if (!entry.isFile() || !entry.name.endsWith('.json')) {
       throw new TypeError(
-        'Plugin fileStore transaction directory contains an unsupported entry.'
+        'Plugin fileStore transaction directory contains an unsupported entry.',
       );
     }
 
@@ -1630,11 +1623,7 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
       throw new TypeError('Plugin fileStore transaction session is malformed.');
     }
 
-    assertJournalPathMatchesIdentity(
-      options.storeRoot,
-      journalPath,
-      journal
-    );
+    assertJournalPathMatchesIdentity(options.storeRoot, journalPath, journal);
 
     if (journal.ownerHostname !== hostname()) {
       continue;
@@ -1648,7 +1637,7 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
     const journalResourceKey = durablePluginJournalMutationResourceKey({
       storeRoot: options.storeRoot,
       sessionId: journal.sessionId,
-      identity: journal
+      identity: journal,
     });
 
     withDurablePluginStoreMutations(
@@ -1656,12 +1645,11 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
         storeRoot: options.storeRoot,
         roots,
         resourceKeys: [journalResourceKey],
-        ownerToken
+        ownerToken,
       },
       () => {
-        const lockedJournal = readDurablePluginFileStoreJournalIfPresent(
-          journalPath
-        );
+        const lockedJournal =
+          readDurablePluginFileStoreJournalIfPresent(journalPath);
 
         if (lockedJournal === undefined) {
           return;
@@ -1669,7 +1657,7 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
 
         if (lockedJournal.sessionId !== sessionPaths.sessionId) {
           throw new TypeError(
-            'Plugin fileStore transaction session is malformed.'
+            'Plugin fileStore transaction session is malformed.',
           );
         }
 
@@ -1677,18 +1665,14 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
         assertJournalPathMatchesIdentity(
           options.storeRoot,
           journalPath,
-          lockedJournal
-        );
-        assertJournalRootsAreLocked(
-          options.storeRoot,
           lockedJournal,
-          roots
         );
+        assertJournalRootsAreLocked(options.storeRoot, lockedJournal, roots);
         recoverDirectDurablePluginFileStoreMutationsForOperationsLocked({
           storeRoot: options.storeRoot,
           sessionId: lockedJournal.sessionId,
           operations: lockedJournal.operations,
-          ownerToken
+          ownerToken,
         });
 
         if (lockedJournal.ownerHostname !== hostname()) {
@@ -1704,11 +1688,11 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
 
         const terminal = durableRuntimeTerminalForJournal(
           sessionPaths,
-          lockedJournal
+          lockedJournal,
         );
         const progress = readDurablePluginFileStoreTransactionProgress(
           journalPath,
-          lockedJournal
+          lockedJournal,
         );
 
         if (terminal === 'completed') {
@@ -1717,33 +1701,33 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
             journalPath,
             lockedRoots: roots,
             expectedJournalIdentity: lockedJournal,
-            ownerToken
+            ownerToken,
           });
           return;
         }
 
         if (
           lockedJournal.operations.some(
-            (operation) =>
+            operation =>
               operation.status === 'applied' ||
               durableJournalOperationMayHaveApplied({
                 storeRoot: options.storeRoot,
                 sessionId: lockedJournal.sessionId,
-                operation
-              })
+                operation,
+              }),
           ) ||
           (progress?.appliedCount ?? 0) > 0
         ) {
           throw new Error(
-            'Plugin fileStore transaction is partially applied or changed without completed terminal evidence.'
+            'Plugin fileStore transaction is partially applied or changed without completed terminal evidence.',
           );
         }
 
         rmSync(durablePluginFileStoreProgressPath(journalPath), {
-          force: true
+          force: true,
         });
-        rmSync(journalPath, { force: true });
-      }
+        rmSync(journalPath, {force: true});
+      },
     );
   }
 }
@@ -1760,32 +1744,29 @@ function durableJournalOperationMayHaveApplied(options: {
   const root = durablePluginRoot({
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
-    pluginId: options.operation.pluginId
+    pluginId: options.operation.pluginId,
   });
 
   assertSafeDurablePluginPath(root, options.operation.path);
   const beforeHash = requiredJournalOperationString(
-    options.operation.beforeHash
+    options.operation.beforeHash,
   );
   const afterHash = requiredJournalOperationString(options.operation.afterHash);
 
   if (beforeHash === afterHash) {
     const persistedRevision = readPersistedDurableRevision(root);
     const afterRevision = requiredJournalOperationRevision(
-      options.operation.afterRevision
+      options.operation.afterRevision,
     );
 
-    if (
-      persistedRevision !== undefined &&
-      persistedRevision >= afterRevision
-    ) {
+    if (persistedRevision !== undefined && persistedRevision >= afterRevision) {
       return true;
     }
   }
 
   const inspection = inspectDurableJournalOperationContent(
     join(root, options.operation.path),
-    options.operation
+    options.operation,
   );
 
   return inspection.kind === 'after' || inspection.kind === 'partial';
@@ -1796,11 +1777,11 @@ function durableRuntimeTerminalForJournal(
   journal: Pick<
     DurablePluginFileStoreJournal,
     'createdAt' | 'eventId' | 'traceId'
-  >
+  >,
 ): 'completed' | 'none' | 'rejected' {
   const terminal = findValidatedTerminalRawEventForSession(
     sessionPaths,
-    journal
+    journal,
   );
 
   if (terminal?.kind === 'runtime_turn_completed') {

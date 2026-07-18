@@ -1,22 +1,24 @@
-import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {join} from 'node:path';
 
-import type { RuntimeEventIdentity } from '../../../core/index.ts';
+import type {RuntimeEventIdentity} from '../../../core/index.ts';
 import {
   createLocalRuntimeMutationLockOwnerToken,
-  type LocalRuntimeMutationLockOwnerToken
+  type LocalRuntimeMutationLockOwnerToken,
 } from '../mutation-lock.ts';
-import type { RuntimePluginFileStore } from '../../../plugins/index.ts';
-import { createRuntimePluginFileStore } from './base-store.ts';
-import { createDurableRuntimePluginFileStore } from './durable-store.ts';
+import type {RuntimePluginFileStore} from '../../../plugins/index.ts';
+import {createRuntimePluginFileStore} from './base-store.ts';
+import {createDurableRuntimePluginFileStore} from './durable-store.ts';
 import type {
-  CreateRuntimePluginFileStoreOptions, InMemoryRuntimePluginFileStoreOptions,
-  RuntimePluginFileStorePathMode, RuntimePluginFileStorePreparedTransaction,
-  RuntimePluginFileStoreTransaction
+  CreateRuntimePluginFileStoreOptions,
+  InMemoryRuntimePluginFileStoreOptions,
+  RuntimePluginFileStorePathMode,
+  RuntimePluginFileStorePreparedTransaction,
+  RuntimePluginFileStoreTransaction,
 } from '../../../plugins/index.ts';
 import type {
   InMemoryPluginStoreState,
-  StagedPluginFileStoreOperation
+  StagedPluginFileStoreOperation,
 } from './contracts.ts';
 import {
   assertSafeDurablePluginPath,
@@ -25,24 +27,24 @@ import {
   hashOptionalFileContent,
   readDurablePathMode,
   readOptionalRegularFile,
-  withDurablePluginStoreMutation
+  withDurablePluginStoreMutation,
 } from './durable-primitives.ts';
 import {
   applyInMemoryPluginFileStoreOperation,
   inMemoryPluginFileStoreContent,
-  inMemoryPluginStoreState
+  inMemoryPluginStoreState,
 } from './memory-store.ts';
 import {
   assertJsonlPathMode,
   assertJsonPathMode,
   freezeRuntimePluginFileStoreJsonValue,
-  normalizeRuntimePluginFileStorePath
+  normalizeRuntimePluginFileStorePath,
 } from './shared.ts';
 import {
   type DurablePluginFileStoreFaultInjector,
   prepareDurablePluginFileStoreTransaction,
   recoverDirectDurablePluginFileStoreMutation,
-  recoverPreparedDurablePluginFileStoreTransactions
+  recoverPreparedDurablePluginFileStoreTransactions,
 } from './wal.ts';
 
 const transactionSessionIdentityKeys = new WeakMap<object, string>();
@@ -70,7 +72,7 @@ type PreparedInMemoryPluginFileStoreOperation =
 export function createRuntimePluginFileStoreTransaction(
   dependencies: {
     readonly durableFaultInjector?: DurablePluginFileStoreFaultInjector;
-  } = {}
+  } = {},
 ): RuntimePluginFileStoreTransaction {
   const overlays = new Map<string, TransactionalPluginStoreOverlay>();
   const operations: StagedPluginFileStoreOperation[] = [];
@@ -79,7 +81,7 @@ export function createRuntimePluginFileStoreTransaction(
   let closed = false;
 
   function overlayFor(
-    options: CreateRuntimePluginFileStoreOptions
+    options: CreateRuntimePluginFileStoreOptions,
   ): TransactionalPluginStoreOverlay {
     assertTransactionOpen(closed);
 
@@ -88,7 +90,7 @@ export function createRuntimePluginFileStoreTransaction(
         inMemorySessionBoundary = options.sessionIdentity;
       } else if (inMemorySessionBoundary !== options.sessionIdentity) {
         throw new TypeError(
-          'Plugin fileStore transaction cannot mix distinct in-memory session identities.'
+          'Plugin fileStore transaction cannot mix distinct in-memory session identities.',
         );
       }
     }
@@ -104,7 +106,7 @@ export function createRuntimePluginFileStoreTransaction(
         ownerToken: durableOwnerToken,
         pathModes: new Map(),
         pathSnapshots: new Map(),
-        durableRecoveryComplete: false
+        durableRecoveryComplete: false,
       };
       overlays.set(key, overlay);
     }
@@ -125,14 +127,16 @@ export function createRuntimePluginFileStoreTransaction(
           captureTransactionalPluginStorePathHash(
             overlay,
             safePath,
-            'write_json'
+            'write_json',
           );
-          const stagedWrite = [...operations].reverse().find(
-            (operation) =>
-              operation.storeKey === transactionStoreKey(overlay.options) &&
-              operation.path === safePath &&
-              operation.kind === 'write_json'
-          );
+          const stagedWrite = [...operations]
+            .reverse()
+            .find(
+              operation =>
+                operation.storeKey === transactionStoreKey(overlay.options) &&
+                operation.path === safePath &&
+                operation.kind === 'write_json',
+            );
 
           if (stagedWrite !== undefined) {
             return freezeRuntimePluginFileStoreJsonValue(stagedWrite.value);
@@ -148,20 +152,20 @@ export function createRuntimePluginFileStoreTransaction(
           captureTransactionalPluginStorePathHash(
             overlay,
             safePath,
-            'append_jsonl'
+            'append_jsonl',
           );
           const appends = operations.filter(
-            (operation) =>
+            operation =>
               operation.storeKey === transactionStoreKey(overlay.options) &&
               operation.path === safePath &&
-              operation.kind === 'append_jsonl'
+              operation.kind === 'append_jsonl',
           );
 
           return Object.freeze([
             ...runtimePluginFileStoreForOverlay(overlay).readJsonl(safePath),
-            ...appends.map((operation) =>
-              freezeRuntimePluginFileStoreJsonValue(operation.value)
-            )
+            ...appends.map(operation =>
+              freezeRuntimePluginFileStoreJsonValue(operation.value),
+            ),
           ]);
         },
         writeJsonAtomic(path, value) {
@@ -172,7 +176,7 @@ export function createRuntimePluginFileStoreTransaction(
           const expectedBeforeHash = captureTransactionalPluginStorePathHash(
             overlay,
             safePath,
-            'write_json'
+            'write_json',
           );
           operations.push(
             Object.freeze({
@@ -182,8 +186,8 @@ export function createRuntimePluginFileStoreTransaction(
               path: safePath,
               kind: 'write_json',
               value: freezeRuntimePluginFileStoreJsonValue(value),
-              expectedBeforeHash
-            } satisfies StagedPluginFileStoreOperation)
+              expectedBeforeHash,
+            } satisfies StagedPluginFileStoreOperation),
           );
           overlay.pathModes.set(safePath, 'json');
         },
@@ -195,7 +199,7 @@ export function createRuntimePluginFileStoreTransaction(
           const expectedBeforeHash = captureTransactionalPluginStorePathHash(
             overlay,
             safePath,
-            'append_jsonl'
+            'append_jsonl',
           );
           operations.push(
             Object.freeze({
@@ -205,8 +209,8 @@ export function createRuntimePluginFileStoreTransaction(
               path: safePath,
               kind: 'append_jsonl',
               value: freezeRuntimePluginFileStoreJsonValue(value),
-              expectedBeforeHash
-            } satisfies StagedPluginFileStoreOperation)
+              expectedBeforeHash,
+            } satisfies StagedPluginFileStoreOperation),
           );
           overlay.pathModes.set(safePath, 'jsonl');
         },
@@ -215,11 +219,11 @@ export function createRuntimePluginFileStoreTransaction(
           return (
             runtimePluginFileStoreForOverlay(overlay).revision() +
             operations.filter(
-              (operation) =>
-                operation.storeKey === transactionStoreKey(overlay.options)
+              operation =>
+                operation.storeKey === transactionStoreKey(overlay.options),
             ).length
           );
-        }
+        },
       } satisfies RuntimePluginFileStore);
     },
     async prepare(identity) {
@@ -231,7 +235,7 @@ export function createRuntimePluginFileStoreTransaction(
         ownerToken: durableOwnerToken,
         ...(dependencies.durableFaultInjector === undefined
           ? {}
-          : { faultInjector: dependencies.durableFaultInjector })
+          : {faultInjector: dependencies.durableFaultInjector}),
       });
     },
     rollback() {
@@ -242,12 +246,12 @@ export function createRuntimePluginFileStoreTransaction(
     },
     hasPendingWrites() {
       return operations.length > 0;
-    }
+    },
   } satisfies RuntimePluginFileStoreTransaction);
 }
 
 function runtimePluginFileStoreForOverlay(
-  overlay: TransactionalPluginStoreOverlay
+  overlay: TransactionalPluginStoreOverlay,
 ): RuntimePluginFileStore {
   if (overlay.base === undefined) {
     if (overlay.options.storeRoot === undefined) {
@@ -256,7 +260,7 @@ function runtimePluginFileStoreForOverlay(
       ensureDurableTransactionalPluginStoreReady(overlay);
       overlay.base = createDurableRuntimePluginFileStore(overlay.options, {
         skipInitialCleanup: true,
-        skipPreparedTransactionRecovery: true
+        skipPreparedTransactionRecovery: true,
       });
     }
   }
@@ -265,7 +269,7 @@ function runtimePluginFileStoreForOverlay(
 }
 
 function ensureDurableTransactionalPluginStoreReady(
-  overlay: TransactionalPluginStoreOverlay
+  overlay: TransactionalPluginStoreOverlay,
 ): void {
   if (
     overlay.options.storeRoot === undefined ||
@@ -277,7 +281,7 @@ function ensureDurableTransactionalPluginStoreReady(
   recoverPreparedDurablePluginFileStoreTransactions(
     overlay.options,
     overlay.ownerToken,
-    { recoverDirectMutation: false }
+    {recoverDirectMutation: false},
   );
   overlay.durableRecoveryComplete = true;
 }
@@ -299,7 +303,7 @@ async function prepareRuntimePluginFileStoreOperations(options: {
   for (const operation of options.operations) {
     if ((operation.options.storeRoot !== undefined) !== durable) {
       throw new TypeError(
-        'Plugin fileStore transaction cannot mix durable and in-memory stores.'
+        'Plugin fileStore transaction cannot mix durable and in-memory stores.',
       );
     }
 
@@ -308,7 +312,7 @@ async function prepareRuntimePluginFileStoreOperations(options: {
       operation.options.sessionId !== firstOperation.options.sessionId
     ) {
       throw new TypeError(
-        'Plugin fileStore transaction must stay within one runtime session.'
+        'Plugin fileStore transaction must stay within one runtime session.',
       );
     }
   }
@@ -327,21 +331,21 @@ async function prepareRuntimePluginFileStoreOperations(options: {
     storeRoot,
     ...(options.faultInjector === undefined
       ? {}
-      : { faultInjector: options.faultInjector })
+      : {faultInjector: options.faultInjector}),
   });
 }
 
 function createNoopPreparedPluginFileStoreTransaction(): RuntimePluginFileStorePreparedTransaction {
   return Object.freeze({
     async discard() {},
-    async finalize() {}
+    async finalize() {},
   } satisfies RuntimePluginFileStorePreparedTransaction);
 }
 
 function captureTransactionalPluginStorePathHash(
   overlay: TransactionalPluginStoreOverlay,
   path: string,
-  kind: StagedPluginFileStoreOperation['kind']
+  kind: StagedPluginFileStoreOperation['kind'],
 ): string {
   const existing = overlay.pathSnapshots.get(path);
 
@@ -356,7 +360,7 @@ function captureTransactionalPluginStorePathHash(
     overlay.options,
     path,
     kind,
-    overlay.ownerToken
+    overlay.ownerToken,
   );
 
   overlay.pathSnapshots.set(path, snapshot);
@@ -367,42 +371,44 @@ function currentPluginFileStorePathSnapshot(
   options: CreateRuntimePluginFileStoreOptions,
   path: string,
   kind: StagedPluginFileStoreOperation['kind'],
-  ownerToken: LocalRuntimeMutationLockOwnerToken
+  ownerToken: LocalRuntimeMutationLockOwnerToken,
 ): TransactionalPluginStorePathSnapshot {
   if (options.storeRoot === undefined) {
     const state = inMemoryPluginStoreState(
-      options satisfies InMemoryRuntimePluginFileStoreOptions
+      options satisfies InMemoryRuntimePluginFileStoreOptions,
     );
     const mode = state.pathModes.get(path);
 
     assertOperationPathMode(kind, mode);
     return Object.freeze({
       hash: hashOptionalFileContent(
-        inMemoryPluginFileStoreContent(state, path)
+        inMemoryPluginFileStoreContent(state, path),
       ),
-      mode
+      mode,
     });
   }
 
   const durableOptions = Object.freeze({
     ...options,
-    storeRoot: options.storeRoot
-  } satisfies CreateRuntimePluginFileStoreOptions & { readonly storeRoot: string });
+    storeRoot: options.storeRoot,
+  } satisfies CreateRuntimePluginFileStoreOptions & {
+    readonly storeRoot: string;
+  });
   const root = durablePluginRoot({
     storeRoot: durableOptions.storeRoot,
     sessionId: durableOptions.sessionId,
-    pluginId: durableOptions.pluginId
+    pluginId: durableOptions.pluginId,
   });
 
   return withDurablePluginStoreMutation(
-    { storeRoot: durableOptions.storeRoot, root, ownerToken },
+    {storeRoot: durableOptions.storeRoot, root, ownerToken},
     () => {
       recoverDirectDurablePluginFileStoreMutation({
         storeRoot: durableOptions.storeRoot,
         sessionId: durableOptions.sessionId,
         pluginId: durableOptions.pluginId,
         root,
-        ownerToken
+        ownerToken,
       });
       assertSafeDurablePluginPath(root, path);
       const mode = readDurablePathMode(root, path);
@@ -410,17 +416,17 @@ function currentPluginFileStorePathSnapshot(
       assertOperationPathMode(kind, mode);
       return Object.freeze({
         hash: hashOptionalFileContent(
-          readOptionalRegularFile(join(root, path))
+          readOptionalRegularFile(join(root, path)),
         ),
-        mode
+        mode,
       });
-    }
+    },
   );
 }
 
 function assertOperationPathMode(
   kind: StagedPluginFileStoreOperation['kind'],
-  mode: RuntimePluginFileStorePathMode | undefined
+  mode: RuntimePluginFileStorePathMode | undefined,
 ): void {
   if (kind === 'write_json') {
     assertJsonPathMode(mode);
@@ -431,11 +437,10 @@ function assertOperationPathMode(
 }
 
 function createPreparedInMemoryPluginFileStoreTransaction(
-  operations: readonly StagedPluginFileStoreOperation[]
+  operations: readonly StagedPluginFileStoreOperation[],
 ): RuntimePluginFileStorePreparedTransaction {
-  const preparedOperations = materializeInMemoryPluginFileStoreOperations(
-    operations
-  );
+  const preparedOperations =
+    materializeInMemoryPluginFileStoreOperations(operations);
   let state: 'discarded' | 'finalized' | 'finalizing' | 'prepared' = 'prepared';
 
   return Object.freeze({
@@ -468,7 +473,7 @@ function createPreparedInMemoryPluginFileStoreTransaction(
 
         if (states === undefined) {
           const actual = inMemoryPluginStoreState(
-            requireInMemoryPluginFileStoreOptions(operation.options)
+            requireInMemoryPluginFileStoreOptions(operation.options),
           );
 
           states = {
@@ -476,26 +481,26 @@ function createPreparedInMemoryPluginFileStoreTransaction(
             next: {
               files: new Map(actual.files),
               pathModes: new Map(actual.pathModes),
-              revision: actual.revision
-            }
+              revision: actual.revision,
+            },
           };
           nextStates.set(operation.storeKey, states);
         }
 
         const currentHash = hashOptionalFileContent(
-          inMemoryPluginFileStoreContent(states.next, operation.path)
+          inMemoryPluginFileStoreContent(states.next, operation.path),
         );
 
         if (currentHash === operation.beforeHash) {
           applyInMemoryPluginFileStoreOperation(states.next, operation);
         } else if (currentHash !== operation.afterHash) {
           throw new Error(
-            `Plugin fileStore transaction conflict for ${operation.pluginId}/${operation.path}.`
+            `Plugin fileStore transaction conflict for ${operation.pluginId}/${operation.path}.`,
           );
         }
       }
 
-      for (const { actual, next } of nextStates.values()) {
+      for (const {actual, next} of nextStates.values()) {
         actual.files.clear();
         actual.pathModes.clear();
 
@@ -511,35 +516,35 @@ function createPreparedInMemoryPluginFileStoreTransaction(
       }
 
       state = 'finalized';
-    }
+    },
   } satisfies RuntimePluginFileStorePreparedTransaction);
 }
 
 function materializeInMemoryPluginFileStoreOperations(
-  operations: readonly StagedPluginFileStoreOperation[]
+  operations: readonly StagedPluginFileStoreOperation[],
 ): readonly PreparedInMemoryPluginFileStoreOperation[] {
   const virtualStates = new Map<string, InMemoryPluginStoreState>();
   const materializedPaths = new Set<string>();
 
   return Object.freeze(
-    operations.map((operation) => {
+    operations.map(operation => {
       let state = virtualStates.get(operation.storeKey);
 
       if (state === undefined) {
         const actual = inMemoryPluginStoreState(
-          requireInMemoryPluginFileStoreOptions(operation.options)
+          requireInMemoryPluginFileStoreOptions(operation.options),
         );
 
         state = {
           files: new Map(actual.files),
           pathModes: new Map(actual.pathModes),
-          revision: actual.revision
+          revision: actual.revision,
         };
         virtualStates.set(operation.storeKey, state);
       }
 
       const beforeHash = hashOptionalFileContent(
-        inMemoryPluginFileStoreContent(state, operation.path)
+        inMemoryPluginFileStoreContent(state, operation.path),
       );
       const operationPathKey = `${operation.storeKey}\u0000${operation.path}`;
 
@@ -548,7 +553,7 @@ function materializeInMemoryPluginFileStoreOperations(
         beforeHash !== operation.expectedBeforeHash
       ) {
         throw new Error(
-          `Plugin fileStore transaction conflict for ${operation.pluginId}/${operation.path}.`
+          `Plugin fileStore transaction conflict for ${operation.pluginId}/${operation.path}.`,
         );
       }
 
@@ -559,15 +564,15 @@ function materializeInMemoryPluginFileStoreOperations(
         ...operation,
         beforeHash,
         afterHash: hashOptionalFileContent(
-          inMemoryPluginFileStoreContent(state, operation.path)
-        )
+          inMemoryPluginFileStoreContent(state, operation.path),
+        ),
       } satisfies PreparedInMemoryPluginFileStoreOperation);
-    })
+    }),
   );
 }
 
 function transactionStoreKey(
-  options: CreateRuntimePluginFileStoreOptions
+  options: CreateRuntimePluginFileStoreOptions,
 ): string {
   const rootKey =
     options.storeRoot ??
@@ -577,13 +582,13 @@ function transactionStoreKey(
 }
 
 function freezePluginFileStoreOptions(
-  options: CreateRuntimePluginFileStoreOptions
+  options: CreateRuntimePluginFileStoreOptions,
 ): CreateRuntimePluginFileStoreOptions {
   if (options.storeRoot === undefined) {
     return Object.freeze({
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     } satisfies InMemoryRuntimePluginFileStoreOptions);
   }
 
@@ -592,18 +597,16 @@ function freezePluginFileStoreOptions(
     sessionId: options.sessionId,
     ...(options.sessionIdentity === undefined
       ? {}
-      : { sessionIdentity: options.sessionIdentity }),
-    pluginId: options.pluginId
+      : {sessionIdentity: options.sessionIdentity}),
+    pluginId: options.pluginId,
   } satisfies CreateRuntimePluginFileStoreOptions);
 }
 
 function requireInMemoryPluginFileStoreOptions(
-  options: CreateRuntimePluginFileStoreOptions
+  options: CreateRuntimePluginFileStoreOptions,
 ): InMemoryRuntimePluginFileStoreOptions {
   if (options.storeRoot !== undefined) {
-    throw new TypeError(
-      'Expected an in-memory plugin fileStore operation.'
-    );
+    throw new TypeError('Expected an in-memory plugin fileStore operation.');
   }
 
   return options;

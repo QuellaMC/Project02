@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { expect } from 'vitest';
-import { createRuntimeEventIdentity } from '../../src/core/index.ts';
+import {readFileSync} from 'node:fs';
+import {expect} from 'vitest';
+import {createRuntimeEventIdentity} from '../../src/core/index.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginAfterTurnCommittedContext,
@@ -11,12 +11,12 @@ import {
   createRuntimePluginManifest,
   createRuntimePluginProvidedTool,
   runtimePluginContractVersion,
-  runtimePluginId
+  runtimePluginId,
 } from '../../src/plugins/api/index.ts';
 import {
   createRuntimePluginHost,
   type CreateRuntimePluginHostOptions,
-  type RuntimePluginHost
+  type RuntimePluginHost,
 } from '../../src/plugins/host/index.ts';
 import type {
   RuntimePlugin,
@@ -24,27 +24,28 @@ import type {
   RuntimePluginFileStore,
   RuntimePluginJsonObject,
   RuntimePluginJsonValue,
-  RuntimePluginToolCallResult
+  RuntimePluginToolCallResult,
 } from '../../src/plugins/api/index.ts';
 import {
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction,
-  type RuntimePluginFileStoreProvider
+  type RuntimePluginFileStoreProvider,
 } from '../../src/runtime/storage/plugin-file-store/index.ts';
-import { createRuntimePluginConfigControlCapability } from '../../src/runtime/config/index.ts';
+import {createRuntimePluginConfigControlCapability} from '../../src/runtime/config/index.ts';
 
 export type Deferred<T> = {
   readonly promise: Promise<T>;
   readonly resolve: (value: T | PromiseLike<T>) => void;
 };
 
-export type LateFileStoreWriteOutcome = 'blocked' | 'missing_file_store' | 'written';
+export type LateFileStoreWriteOutcome =
+  'blocked' | 'missing_file_store' | 'written';
 
 export type TurnContextCapture = {
   beforeCurrentUserMessage?: string;
   afterCurrentUserMessage?: string;
   visibleMessageIds?: readonly string[];
-  visibleMessages?: readonly { readonly text: string }[];
+  visibleMessages?: readonly {readonly text: string}[];
 };
 
 export type TestRuntimePluginHostOptions = Omit<
@@ -58,7 +59,7 @@ export type TestRuntimePluginHostOptions = Omit<
 export const testRuntimePluginFileStoreProvider: RuntimePluginFileStoreProvider =
   Object.freeze({
     createFileStore: createRuntimePluginFileStore,
-    createFileStoreTransaction: createRuntimePluginFileStoreTransaction
+    createFileStoreTransaction: createRuntimePluginFileStoreTransaction,
   });
 
 /** Real config-control capability wired the way the composition root does. */
@@ -66,31 +67,31 @@ export const testRuntimePluginConfigControlCapability =
   createRuntimePluginConfigControlCapability();
 
 export function createExplicitlyEnabledRuntimePluginHost(
-  options: TestRuntimePluginHostOptions
+  options: TestRuntimePluginHostOptions,
 ): RuntimePluginHost {
   return createRuntimePluginHost({
     fileStore: testRuntimePluginFileStoreProvider,
     ...options,
     enabledPluginIds: options.enabledPluginIds ?? [
       runtimePluginId,
-      ...options.plugins.map((plugin) => plugin.manifest.id)
-    ]
+      ...options.plugins.map(plugin => plugin.manifest.id),
+    ],
   });
 }
 
 export function pluginDiscoveryToolNames(
-  output: RuntimePluginJsonValue
+  output: RuntimePluginJsonValue,
 ): readonly string[] {
   return Object.freeze(
     pluginDiscoveryPluginSummaries(output)
-      .flatMap((plugin) => {
+      .flatMap(plugin => {
         const tools = plugin['providedTools'];
 
         if (!isRuntimePluginJsonArray(tools)) {
           throw new TypeError('Expected plugin discovery tools array.');
         }
 
-        return tools.map((tool) => {
+        return tools.map(tool => {
           if (
             !isRuntimePluginJsonObject(tool) ||
             typeof tool['name'] !== 'string'
@@ -101,12 +102,12 @@ export function pluginDiscoveryToolNames(
           return tool['name'];
         });
       })
-      .sort((left, right) => left.localeCompare(right))
+      .sort((left, right) => left.localeCompare(right)),
   );
 }
 
 export function pluginDiscoveryPluginSummaries(
-  output: RuntimePluginJsonValue
+  output: RuntimePluginJsonValue,
 ): readonly RuntimePluginJsonObject[] {
   if (!isRuntimePluginJsonObject(output)) {
     throw new TypeError('Expected plugin discovery output object.');
@@ -119,24 +120,24 @@ export function pluginDiscoveryPluginSummaries(
   }
 
   return Object.freeze(
-    plugins.map((plugin) => {
+    plugins.map(plugin => {
       if (!isRuntimePluginJsonObject(plugin)) {
         throw new TypeError('Expected plugin discovery plugin object.');
       }
 
       return plugin;
-    })
+    }),
   );
 }
 
 export function isRuntimePluginJsonObject(
-  value: RuntimePluginJsonValue
+  value: RuntimePluginJsonValue,
 ): value is RuntimePluginJsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function isRuntimePluginJsonArray(
-  value: RuntimePluginJsonValue | undefined
+  value: RuntimePluginJsonValue | undefined,
 ): value is readonly RuntimePluginJsonValue[] {
   return Array.isArray(value);
 }
@@ -145,7 +146,7 @@ export function createMemorySearchPlugin(
   id = 'memory.search.fixture',
   fails = false,
   failureMessage = 'search backend failed',
-  onHandle?: () => void
+  onHandle?: () => void,
 ): RuntimePlugin {
   return createRuntimePlugin({
     manifest: memorySearchPluginManifest(id),
@@ -166,21 +167,21 @@ export function createMemorySearchPlugin(
         return createAcceptedMemorySearchResult({
           pluginId: id,
           query,
-          context
+          context,
         });
-      }
-    }
+      },
+    },
   });
 }
 
 export function createMemorySearchPluginWithInvocationProbe(
-  onHandle: () => void
+  onHandle: () => void,
 ): RuntimePlugin {
   return createMemorySearchPlugin(
     'memory.identity-probe.fixture',
     false,
     'search backend failed',
-    onHandle
+    onHandle,
   );
 }
 
@@ -193,7 +194,7 @@ export function createTurnContextCapturePlugin(options: {
     manifest: {
       ...memorySearchPluginManifest(options.pluginId),
       declaredPlugins: ['before_role_model_call', 'after_turn_committed'],
-      requestedAccess: options.requestedAccess
+      requestedAccess: options.requestedAccess,
     },
     providedTools: [],
     lifecycleHooks: {
@@ -202,22 +203,21 @@ export function createTurnContextCapturePlugin(options: {
 
         return {
           contextItems: [],
-          evidence: []
+          evidence: [],
         };
       },
       afterTurnCommitted(context) {
         options.capture.afterCurrentUserMessage = context.currentUserMessage;
         options.capture.visibleMessageIds =
           context.committedTurn.visibleMessageIds;
-        options.capture.visibleMessages =
-          context.committedTurn.visibleMessages;
+        options.capture.visibleMessages = context.committedTurn.visibleMessages;
 
         return {
           status: 'completed',
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -228,7 +228,7 @@ export function createRuntimeNotesWithoutModelInputPlugin(): RuntimePlugin {
     manifest: {
       ...memorySearchPluginManifest(pluginId),
       declaredPlugins: ['before_role_model_call'],
-      requestedAccess: {}
+      requestedAccess: {},
     },
     providedTools: [],
     lifecycleHooks: {
@@ -240,30 +240,30 @@ export function createRuntimeNotesWithoutModelInputPlugin(): RuntimePlugin {
               id: 'undeclared-model-input',
               kind: 'runtime_note',
               text: 'undeclared model input note',
-              budget: { estimatedTokens: 6, priority: 50 },
+              budget: {estimatedTokens: 6, priority: 50},
               sourceReferences: [],
-              redactionLabels: []
-            })
+              redactionLabels: [],
+            }),
           ],
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
 export function createModelFacingToolWithoutModelInputPlugin(
-  onHandle: () => void
+  onHandle: () => void,
 ): RuntimePlugin {
   const pluginId = 'memory.tool-no-model-input.fixture';
 
   return Object.freeze({
     manifest: createRuntimePluginManifest({
       ...memorySearchPluginManifest(pluginId),
-      requestedAccess: {}
+      requestedAccess: {},
     }),
     providedTools: Object.freeze(
-      memorySearchProvidedTools().map(createRuntimePluginProvidedTool)
+      memorySearchProvidedTools().map(createRuntimePluginProvidedTool),
     ),
     lifecycleHooks: {
       handleToolCall(call, context) {
@@ -273,22 +273,22 @@ export function createModelFacingToolWithoutModelInputPlugin(
         return createAcceptedMemorySearchResult({
           pluginId,
           query: typeof query === 'string' ? query : '',
-          context
+          context,
         });
-      }
-    }
+      },
+    },
   } satisfies RuntimePlugin);
 }
 
 export function createLocalMemoryWriteToolWithoutFileStorePlugin(
-  onHandle: () => void
+  onHandle: () => void,
 ): RuntimePlugin {
   const pluginId = 'memory.tool-no-file-store-write.fixture';
 
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedAccess: { file_store: 'read', model_input: 'write' }
+      requestedAccess: {file_store: 'read', model_input: 'write'},
     },
     providedTools: localMemoryWriteSearchProvidedTools(),
     lifecycleHooks: {
@@ -299,14 +299,16 @@ export function createLocalMemoryWriteToolWithoutFileStorePlugin(
         return createAcceptedMemorySearchResult({
           pluginId,
           query: typeof query === 'string' ? query : '',
-          context
+          context,
         });
-      }
-    }
+      },
+    },
   });
 }
 
-export function createDegradableMemorySearchPlugin(onHandle: () => void): RuntimePlugin {
+export function createDegradableMemorySearchPlugin(
+  onHandle: () => void,
+): RuntimePlugin {
   const id = 'memory.degradable.fixture';
   const manifest = memorySearchPluginManifest(id);
 
@@ -317,9 +319,9 @@ export function createDegradableMemorySearchPlugin(onHandle: () => void): Runtim
         ...manifest.runtimePolicy,
         failureBehavior: {
           ...manifest.runtimePolicy.failureBehavior,
-          handleToolCall: 'degrade'
-        }
-      }
+          handleToolCall: 'degrade',
+        },
+      },
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -334,15 +336,15 @@ export function createDegradableMemorySearchPlugin(onHandle: () => void): Runtim
         return createAcceptedMemorySearchResult({
           pluginId: id,
           query,
-          context
+          context,
         });
-      }
-    }
+      },
+    },
   });
 }
 
 export function createConfirmationRequiredMemorySearchPlugin(
-  onHandle: () => void = () => {}
+  onHandle: () => void = () => {},
 ): RuntimePlugin {
   const id = 'memory.confirmation-required.fixture';
   const manifest = memorySearchPluginManifest(id);
@@ -352,8 +354,8 @@ export function createConfirmationRequiredMemorySearchPlugin(
       ...manifest,
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        confirmation: 'required'
-      }
+        confirmation: 'required',
+      },
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -368,14 +370,16 @@ export function createConfirmationRequiredMemorySearchPlugin(
         return createAcceptedMemorySearchResult({
           pluginId: id,
           query,
-          context
+          context,
         });
-      }
-    }
+      },
+    },
   });
 }
 
-export function createExternalReadMemorySearchPlugin(onHandle: () => void): RuntimePlugin {
+export function createExternalReadMemorySearchPlugin(
+  onHandle: () => void,
+): RuntimePlugin {
   const id = 'memory.external-read.fixture';
   const manifest = memorySearchPluginManifest(id);
 
@@ -384,12 +388,12 @@ export function createExternalReadMemorySearchPlugin(onHandle: () => void): Runt
       ...manifest,
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        sideEffectLevel: 'external_read'
-      }
+        sideEffectLevel: 'external_read',
+      },
     },
-    providedTools: memorySearchProvidedTools().map((tool) => ({
+    providedTools: memorySearchProvidedTools().map(tool => ({
       ...tool,
-      sideEffectLevel: 'external_read' as const
+      sideEffectLevel: 'external_read' as const,
     })),
     lifecycleHooks: {
       handleToolCall(call, context) {
@@ -403,10 +407,10 @@ export function createExternalReadMemorySearchPlugin(onHandle: () => void): Runt
         return createAcceptedMemorySearchResult({
           pluginId: id,
           query,
-          context
+          context,
         });
-      }
-    }
+      },
+    },
   });
 }
 
@@ -424,14 +428,14 @@ export function createCredentialKeyOutputPlugin(): RuntimePlugin {
             api_key: 'super-secret',
             nested: {
               password: 'open-sesame',
-              safe: 'kept'
+              safe: 'kept',
             },
             list: [
               {
                 access_token: 'secret-token',
-                label: 'kept'
-              }
-            ]
+                label: 'kept',
+              },
+            ],
           },
           evidence: [
             createRuntimePluginEvidenceSnapshot({
@@ -443,12 +447,12 @@ export function createCredentialKeyOutputPlugin(): RuntimePlugin {
               evidenceKind: 'tool_invocation',
               status: 'accepted',
               summary: 'Search completed.',
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -473,12 +477,12 @@ export function createProtoKeyOutputPlugin(): RuntimePlugin {
               evidenceKind: 'tool_invocation',
               status: 'accepted',
               summary: 'Search completed.',
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -486,28 +490,30 @@ export function createProtoKeyOutput(): RuntimePluginJsonObject {
   const nested: Record<string, RuntimePluginJsonValue> = {};
   Object.defineProperty(nested, '__proto__', {
     value: 'nested-value',
-    enumerable: true
+    enumerable: true,
   });
 
   const output: Record<string, RuntimePluginJsonValue> = {
-    nested
+    nested,
   };
   Object.defineProperty(output, '__proto__', {
     value: {
-      polluted: true
+      polluted: true,
     },
-    enumerable: true
+    enumerable: true,
   });
 
   return output;
 }
 
-export function createRejectingMemorySearchPlugin(options: {
-  readonly id?: string;
-  readonly handleToolCallFailure?: 'reject_tool_call' | 'degrade';
-  readonly rejectionReason?: string;
-  readonly rejectionMessage?: string;
-} = {}): RuntimePlugin {
+export function createRejectingMemorySearchPlugin(
+  options: {
+    readonly id?: string;
+    readonly handleToolCallFailure?: 'reject_tool_call' | 'degrade';
+    readonly rejectionReason?: string;
+    readonly rejectionMessage?: string;
+  } = {},
+): RuntimePlugin {
   const id = options.id ?? 'memory.rejecting.fixture';
   const manifest = memorySearchPluginManifest(id);
 
@@ -520,9 +526,9 @@ export function createRejectingMemorySearchPlugin(options: {
           ...manifest.runtimePolicy.failureBehavior,
           handleToolCall:
             options.handleToolCallFailure ??
-            manifest.runtimePolicy.failureBehavior.handleToolCall
-        }
-      }
+            manifest.runtimePolicy.failureBehavior.handleToolCall,
+        },
+      },
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -533,10 +539,10 @@ export function createRejectingMemorySearchPlugin(options: {
           message:
             options.rejectionMessage ??
             'lookup failed credential="open-sesame" https://user:pass@example.test/?token=abc',
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -563,17 +569,17 @@ export function createDegradedRejectingMemorySearchPlugin(): RuntimePlugin {
               status: 'degraded',
               summary: 'search backend degraded',
               policyOutcome: 'optional_degraded',
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
-      }
-    }
+      },
+    },
   });
 }
 
 export function createAcceptedBlockingEvidenceMemorySearchPlugin(
-  evidenceStatus: 'rejected' | 'failed'
+  evidenceStatus: 'rejected' | 'failed',
 ): RuntimePlugin {
   const id = `memory.accepted-blocking.${evidenceStatus}.fixture`;
 
@@ -591,7 +597,7 @@ export function createAcceptedBlockingEvidenceMemorySearchPlugin(
         return {
           status: 'accepted',
           output: {
-            matched: query
+            matched: query,
           },
           evidence: [
             createRuntimePluginEvidenceSnapshot({
@@ -605,12 +611,12 @@ export function createAcceptedBlockingEvidenceMemorySearchPlugin(
               summary: 'Search did not complete.',
               policyOutcome:
                 evidenceStatus === 'failed' ? 'timeout' : 'handler_rejected',
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -630,15 +636,15 @@ export function createSourceRequiredMemorySearchPlugin(options: {
           ...manifest.runtimePolicy.failureBehavior,
           handleToolCall:
             options.handleToolCallFailure ??
-            manifest.runtimePolicy.failureBehavior.handleToolCall
-        }
-      }
+            manifest.runtimePolicy.failureBehavior.handleToolCall,
+        },
+      },
     },
-    providedTools: memorySearchProvidedTools().map((tool) =>
+    providedTools: memorySearchProvidedTools().map(tool =>
       Object.freeze({
         ...tool,
-        sourceReferencesRequired: true
-      })
+        sourceReferencesRequired: true,
+      }),
     ),
     lifecycleHooks: {
       handleToolCall(call, context) {
@@ -651,9 +657,9 @@ export function createSourceRequiredMemorySearchPlugin(options: {
         return {
           status: 'accepted',
           output: {
-            matched: query
+            matched: query,
           },
-          evidence: options.evidenceKinds.map((evidenceKind) =>
+          evidence: options.evidenceKinds.map(evidenceKind =>
             createRuntimePluginEvidenceSnapshot({
               eventId: context.eventId,
               traceId: context.traceId,
@@ -667,15 +673,15 @@ export function createSourceRequiredMemorySearchPlugin(options: {
                 {
                   kind: 'memory',
                   id: `source.${evidenceKind}`,
-                  title: `${evidenceKind} source`
-                }
+                  title: `${evidenceKind} source`,
+                },
               ],
-              redactionLabels: []
-            })
-          )
+              redactionLabels: [],
+            }),
+          ),
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -687,7 +693,7 @@ export function createAcceptedMemorySearchResult(options: {
   return {
     status: 'accepted',
     output: {
-      matched: options.query
+      matched: options.query,
     },
     evidence: [
       createRuntimePluginEvidenceSnapshot({
@@ -699,9 +705,9 @@ export function createAcceptedMemorySearchResult(options: {
         evidenceKind: 'tool_invocation',
         status: 'accepted',
         summary: 'Search completed.',
-        redactionLabels: []
-      })
-    ]
+        redactionLabels: [],
+      }),
+    ],
   };
 }
 
@@ -709,10 +715,10 @@ export function createMemorySearchToolProviderOnlyPlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest('memory.tool-provider-only.fixture'),
-      declaredPlugins: ['tool_provider']
+      declaredPlugins: ['tool_provider'],
     },
     providedTools: memorySearchProvidedTools(),
-    lifecycleHooks: {}
+    lifecycleHooks: {},
   });
 }
 
@@ -722,7 +728,7 @@ export function createRuntimeNotesPlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      declaredPlugins: ['before_role_model_call']
+      declaredPlugins: ['before_role_model_call'],
     },
     providedTools: [],
     lifecycleHooks: {
@@ -731,7 +737,7 @@ export function createRuntimeNotesPlugin(): RuntimePlugin {
           contextItems: [],
           runtimeNotes: [
             `${'large note '.repeat(140)}api_key=super-secret`,
-            'short note'
+            'short note',
           ],
           evidence: [
             createRuntimePluginEvidenceSnapshot({
@@ -743,12 +749,12 @@ export function createRuntimeNotesPlugin(): RuntimePlugin {
               evidenceKind: 'before_role_model_call',
               status: 'accepted',
               summary: 'Notes loaded.',
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -760,43 +766,41 @@ export function createBoundedHookRecordsPlugin(options: {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(options.id),
-      declaredPlugins: ['before_role_model_call']
+      declaredPlugins: ['before_role_model_call'],
     },
     providedTools: [],
     lifecycleHooks: {
       beforeRoleModelCall(context) {
         return {
           contextItems: Array.from(
-            { length: options.contextItemCount },
+            {length: options.contextItemCount},
             (_value, index) =>
               createRuntimePluginContextItem({
                 pluginId: options.id,
                 id: `context-${String(index)}`,
                 kind: 'memory',
                 text: 'x',
-                budget: { estimatedTokens: 1, priority: 1 },
+                budget: {estimatedTokens: 1, priority: 1},
                 sourceReferences: [],
-                redactionLabels: []
-              })
+                redactionLabels: [],
+              }),
           ),
-          evidence: Array.from(
-            { length: options.evidenceCount },
-            () =>
-              createRuntimePluginEvidenceSnapshot({
-                eventId: context.eventId,
-                traceId: context.traceId,
-                createdAt: context.timestamp,
-                kind: 'runtime_plugin_evidence_snapshot',
-                pluginId: options.id,
-                evidenceKind: 'before_role_model_call',
-                status: 'accepted',
-                summary: 'bounded evidence',
-                redactionLabels: []
-              })
-          )
+          evidence: Array.from({length: options.evidenceCount}, () =>
+            createRuntimePluginEvidenceSnapshot({
+              eventId: context.eventId,
+              traceId: context.traceId,
+              createdAt: context.timestamp,
+              kind: 'runtime_plugin_evidence_snapshot',
+              pluginId: options.id,
+              evidenceKind: 'before_role_model_call',
+              status: 'accepted',
+              summary: 'bounded evidence',
+              redactionLabels: [],
+            }),
+          ),
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -810,8 +814,8 @@ export function createSlowNormalizationPlugin(): RuntimePlugin {
       declaredPlugins: ['before_role_model_call'],
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        timeoutMs: 1
-      }
+        timeoutMs: 1,
+      },
     },
     providedTools: [],
     lifecycleHooks: {
@@ -824,10 +828,10 @@ export function createSlowNormalizationPlugin(): RuntimePlugin {
             }
             return [];
           },
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -844,8 +848,8 @@ export function createSourceRequiredRuntimeNotesPlugin(options: {
       runtimePolicy: {
         ...manifest.runtimePolicy,
         requiredForTurn: options.requiredForTurn ?? false,
-        sourceReferencesRequired: true
-      }
+        sourceReferencesRequired: true,
+      },
     },
     providedTools: [],
     lifecycleHooks: {
@@ -857,10 +861,10 @@ export function createSourceRequiredRuntimeNotesPlugin(options: {
               id: 'unsourced-note',
               kind: 'runtime_note',
               text: 'unsourced runtime note',
-              budget: { estimatedTokens: 5, priority: 50 },
+              budget: {estimatedTokens: 5, priority: 50},
               sourceReferences: [],
-              redactionLabels: []
-            })
+              redactionLabels: [],
+            }),
           ],
           evidence: [
             createRuntimePluginEvidenceSnapshot({
@@ -875,15 +879,15 @@ export function createSourceRequiredRuntimeNotesPlugin(options: {
               sourceReferences: [
                 {
                   kind: 'memory',
-                  id: 'source.before_role_model_call'
-                }
+                  id: 'source.before_role_model_call',
+                },
               ],
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -900,8 +904,8 @@ export function createAcceptedBlockingBeforeRoleModelCallPlugin(options: {
       declaredPlugins: ['before_role_model_call'],
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        requiredForTurn: options.requiredForTurn ?? false
-      }
+        requiredForTurn: options.requiredForTurn ?? false,
+      },
     },
     providedTools: [],
     lifecycleHooks: {
@@ -915,11 +919,11 @@ export function createAcceptedBlockingBeforeRoleModelCallPlugin(options: {
               text: 'blocked context',
               budget: {
                 estimatedTokens: 1,
-                priority: 1
+                priority: 1,
               },
               sourceReferences: [],
-              redactionLabels: context.privacy.redactionLabels
-            })
+              redactionLabels: context.privacy.redactionLabels,
+            }),
           ],
           evidence: [
             createRuntimePluginEvidenceSnapshot({
@@ -937,12 +941,12 @@ export function createAcceptedBlockingBeforeRoleModelCallPlugin(options: {
                   : options.requiredForTurn === true
                     ? 'required_rejected'
                     : 'handler_rejected',
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -952,7 +956,7 @@ export function createUnderestimatedContextItemPlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      declaredPlugins: ['before_role_model_call']
+      declaredPlugins: ['before_role_model_call'],
     },
     providedTools: [],
     lifecycleHooks: {
@@ -966,11 +970,11 @@ export function createUnderestimatedContextItemPlugin(): RuntimePlugin {
               text: 'oversized context '.repeat(160),
               budget: {
                 estimatedTokens: 1,
-                priority: 1
+                priority: 1,
               },
               sourceReferences: [],
-              redactionLabels: context.privacy.redactionLabels
-            })
+              redactionLabels: context.privacy.redactionLabels,
+            }),
           ],
           evidence: [
             createRuntimePluginEvidenceSnapshot({
@@ -982,12 +986,12 @@ export function createUnderestimatedContextItemPlugin(): RuntimePlugin {
               evidenceKind: 'before_role_model_call',
               status: 'accepted',
               summary: 'Loaded oversized context item.',
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -997,7 +1001,7 @@ export function createLowPriorityBudgetPressurePlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      declaredPlugins: ['before_role_model_call']
+      declaredPlugins: ['before_role_model_call'],
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1011,10 +1015,10 @@ export function createLowPriorityBudgetPressurePlugin(): RuntimePlugin {
               text: 'low '.repeat(254),
               budget: {
                 estimatedTokens: 254,
-                priority: 1
+                priority: 1,
               },
               sourceReferences: [],
-              redactionLabels: context.privacy.redactionLabels
+              redactionLabels: context.privacy.redactionLabels,
             }),
             createRuntimePluginContextItem({
               pluginId,
@@ -1023,11 +1027,11 @@ export function createLowPriorityBudgetPressurePlugin(): RuntimePlugin {
               text: 'runtime note from host',
               budget: {
                 estimatedTokens: 6,
-                priority: 100
+                priority: 100,
               },
               sourceReferences: [],
-              redactionLabels: context.privacy.redactionLabels
-            })
+              redactionLabels: context.privacy.redactionLabels,
+            }),
           ],
           evidence: [
             createRuntimePluginEvidenceSnapshot({
@@ -1039,17 +1043,17 @@ export function createLowPriorityBudgetPressurePlugin(): RuntimePlugin {
               evidenceKind: 'before_role_model_call',
               status: 'accepted',
               summary: 'Loaded low-priority budget pressure context.',
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
-      }
-    }
+      },
+    },
   });
 }
 
 export function createRetainedBeforeRoleModelFileStorePlugin(
-  retainFileStore: (fileStore: RuntimePluginFileStore) => void
+  retainFileStore: (fileStore: RuntimePluginFileStore) => void,
 ): RuntimePlugin {
   const pluginId = 'memory.retained-before.fixture';
   const manifest = memorySearchPluginManifest(pluginId);
@@ -1059,10 +1063,10 @@ export function createRetainedBeforeRoleModelFileStorePlugin(
       ...manifest,
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write'
+        sideEffectLevel: 'local_memory_write',
       },
       declaredPlugins: ['before_role_model_call'],
-      requestedAccess: { file_store: 'write' }
+      requestedAccess: {file_store: 'write'},
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1070,15 +1074,15 @@ export function createRetainedBeforeRoleModelFileStorePlugin(
         writeDuringHookAndRetainFileStore({
           context,
           path: 'during-before.json',
-          retainFileStore
+          retainFileStore,
         });
 
         return {
           contextItems: [],
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -1088,13 +1092,15 @@ export function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedAccess: { file_store: 'write', model_input: 'write' }
+      requestedAccess: {file_store: 'write', model_input: 'write'},
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
       handleToolCall(_call, context) {
         if (context.fileStore === undefined) {
-          throw new Error('Expected read-only tool context to include fileStore.');
+          throw new Error(
+            'Expected read-only tool context to include fileStore.',
+          );
         }
 
         const seed = context.fileStore.readJson('seed.json');
@@ -1105,7 +1111,7 @@ export function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
 
         try {
           context.fileStore.writeJsonAtomic('read-only-write.json', {
-            value: 'blocked'
+            value: 'blocked',
           });
         } catch {
           writeBlocked = true;
@@ -1115,7 +1121,7 @@ export function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
           status: 'accepted',
           output: {
             seed,
-            writeBlocked
+            writeBlocked,
           },
           evidence: [
             createRuntimePluginEvidenceSnapshot({
@@ -1127,12 +1133,12 @@ export function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
               evidenceKind: 'tool_invocation',
               status: 'accepted',
               summary: 'Read-only fileStore probe completed.',
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -1143,13 +1149,15 @@ export function createReadOnlyBeforeRoleModelFileStoreProbePlugin(): RuntimePlug
     manifest: {
       ...memorySearchPluginManifest(pluginId),
       declaredPlugins: ['before_role_model_call'],
-      requestedAccess: { file_store: 'write', model_input: 'write' }
+      requestedAccess: {file_store: 'write', model_input: 'write'},
     },
     providedTools: [],
     lifecycleHooks: {
       beforeRoleModelCall(context) {
         if (context.fileStore === undefined) {
-          throw new Error('Expected read-only hook context to include fileStore.');
+          throw new Error(
+            'Expected read-only hook context to include fileStore.',
+          );
         }
 
         const seed = context.fileStore.readJson('seed.json');
@@ -1160,7 +1168,7 @@ export function createReadOnlyBeforeRoleModelFileStoreProbePlugin(): RuntimePlug
 
         try {
           context.fileStore.writeJsonAtomic('read-only-hook-write.json', {
-            value: 'blocked'
+            value: 'blocked',
           });
         } catch {
           writeBlocked = true;
@@ -1172,28 +1180,28 @@ export function createReadOnlyBeforeRoleModelFileStoreProbePlugin(): RuntimePlug
               pluginId,
               id: 'read-only-probe',
               kind: 'runtime_note',
-              text: JSON.stringify({ seed, writeBlocked }),
-              budget: { estimatedTokens: 16, priority: 50 },
+              text: JSON.stringify({seed, writeBlocked}),
+              budget: {estimatedTokens: 16, priority: 50},
               sourceReferences: [],
-              redactionLabels: []
-            })
+              redactionLabels: [],
+            }),
           ],
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
 export function createRetainedHandleToolCallFileStorePlugin(
-  retainFileStore: (fileStore: RuntimePluginFileStore) => void
+  retainFileStore: (fileStore: RuntimePluginFileStore) => void,
 ): RuntimePlugin {
   const pluginId = 'memory.retained-handle.fixture';
 
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedAccess: { file_store: 'write', model_input: 'write' }
+      requestedAccess: {file_store: 'write', model_input: 'write'},
     },
     providedTools: localMemoryWriteSearchProvidedTools(),
     lifecycleHooks: {
@@ -1201,7 +1209,7 @@ export function createRetainedHandleToolCallFileStorePlugin(
         writeDuringHookAndRetainFileStore({
           context,
           path: 'during-handle.json',
-          retainFileStore
+          retainFileStore,
         });
 
         const query = call.input['query'];
@@ -1212,10 +1220,10 @@ export function createRetainedHandleToolCallFileStorePlugin(
         return createAcceptedMemorySearchResult({
           pluginId,
           query,
-          context
+          context,
         });
-      }
-    }
+      },
+    },
   });
 }
 
@@ -1225,13 +1233,15 @@ export function createStagedAppendFileStorePlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedAccess: { file_store: 'write', model_input: 'write' }
+      requestedAccess: {file_store: 'write', model_input: 'write'},
     },
     providedTools: localMemoryWriteSearchProvidedTools(),
     lifecycleHooks: {
       handleToolCall(call, context) {
         if (context.fileStore === undefined) {
-          throw new Error('Expected staged append fixture to receive fileStore.');
+          throw new Error(
+            'Expected staged append fixture to receive fileStore.',
+          );
         }
 
         const query = call.input['query'];
@@ -1241,21 +1251,21 @@ export function createStagedAppendFileStorePlugin(): RuntimePlugin {
 
         context.fileStore.appendJsonl('events.jsonl', {
           value: query,
-          traceId: context.traceId
+          traceId: context.traceId,
         });
 
         return createAcceptedMemorySearchResult({
           pluginId,
           query,
-          context
+          context,
         });
-      }
-    }
+      },
+    },
   });
 }
 
 export function createRetainedHealthFileStorePlugin(
-  retainFileStore: (fileStore: RuntimePluginFileStore) => void
+  retainFileStore: (fileStore: RuntimePluginFileStore) => void,
 ): RuntimePlugin {
   const pluginId = 'memory.retained-health.fixture';
   const manifest = memorySearchPluginManifest(pluginId);
@@ -1265,10 +1275,10 @@ export function createRetainedHealthFileStorePlugin(
       ...manifest,
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write'
+        sideEffectLevel: 'local_memory_write',
       },
       declaredPlugins: ['health'],
-      requestedAccess: { file_store: 'write' }
+      requestedAccess: {file_store: 'write'},
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1276,7 +1286,7 @@ export function createRetainedHealthFileStorePlugin(
         writeDuringHookAndRetainFileStore({
           context,
           path: 'during-health.json',
-          retainFileStore
+          retainFileStore,
         });
 
         return createRuntimePluginHealthSnapshot({
@@ -1284,10 +1294,10 @@ export function createRetainedHealthFileStorePlugin(
           status: 'ok',
           checkedAt: context.timestamp,
           summary: 'Health check completed.',
-          redactionLabels: []
+          redactionLabels: [],
         });
-      }
-    }
+      },
+    },
   });
 }
 
@@ -1301,14 +1311,14 @@ export function writeDuringHookAndRetainFileStore(options: {
   }
 
   options.context.fileStore.writeJsonAtomic(options.path, {
-    value: 'during'
+    value: 'during',
   });
   options.retainFileStore(options.context.fileStore);
 }
 
 export function expectRetainedFileStoreWriteBlocked(
   fileStore: RuntimePluginFileStore | undefined,
-  path: string
+  path: string,
 ): void {
   if (fileStore === undefined) {
     throw new Error('Expected retained fileStore.');
@@ -1316,7 +1326,7 @@ export function expectRetainedFileStoreWriteBlocked(
 
   expect(() => {
     fileStore.writeJsonAtomic(path, {
-      value: 'after'
+      value: 'after',
     });
   }).toThrow(/after hook completion/iu);
 }
@@ -1328,7 +1338,7 @@ export function createPluginHostTestFileStore(options: {
   return createRuntimePluginFileStore({
     sessionId: 'session-plugin-host',
     sessionIdentity: options.sessionIdentity,
-    pluginId: options.pluginId
+    pluginId: options.pluginId,
   });
 }
 
@@ -1348,16 +1358,16 @@ export function createLateFileStoreWritePlugin(options: {
       ...manifest,
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        timeoutMs: 5
+        timeoutMs: 5,
       },
-      requestedAccess: { file_store: 'write', model_input: 'write' }
+      requestedAccess: {file_store: 'write', model_input: 'write'},
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
       async handleToolCall(_call, context) {
         options.recordExecutionScope?.({
           deadlineAt: context.deadlineAt,
-          signal: context.signal
+          signal: context.signal,
         });
         await options.continueAfterTimeout;
 
@@ -1366,13 +1376,13 @@ export function createLateFileStoreWritePlugin(options: {
           return createAcceptedMemorySearchResult({
             pluginId,
             query: 'missing-file-store',
-            context
+            context,
           });
         }
 
         try {
           context.fileStore.writeJsonAtomic('late-write.json', {
-            value: 'late'
+            value: 'late',
           });
           options.recordLateWriteOutcome('written');
         } catch {
@@ -1382,10 +1392,10 @@ export function createLateFileStoreWritePlugin(options: {
         return createAcceptedMemorySearchResult({
           pluginId,
           query: 'late-write',
-          context
+          context,
         });
-      }
-    }
+      },
+    },
   });
 }
 
@@ -1393,21 +1403,21 @@ export function createMemorySearchPluginWithoutHandlerDeclaration(): RuntimePlug
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest('memory.handler-mismatch.fixture'),
-      declaredPlugins: ['tool_provider']
+      declaredPlugins: ['tool_provider'],
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
       handleToolCall() {
         throw new Error('Handler should not run for invalid plugin fixture.');
-      }
-    }
+      },
+    },
   });
 }
 
 export async function callFileStoreAvailabilityProbe(
   host: RuntimePluginHost,
   plugin: RuntimePlugin,
-  context: RuntimePluginContext = testPluginContext()
+  context: RuntimePluginContext = testPluginContext(),
 ): Promise<RuntimePluginToolCallResult> {
   return await host.handleToolCall(
     {
@@ -1415,10 +1425,10 @@ export async function callFileStoreAvailabilityProbe(
       pluginId: plugin.manifest.id,
       toolName: 'memory.search',
       input: {
-        query: 'Mira'
-      }
+        query: 'Mira',
+      },
     },
-    context
+    context,
   );
 }
 
@@ -1433,7 +1443,7 @@ export function createFileStoreAvailabilityProbePlugin(options: {
     manifest: {
       ...manifest,
       localTrustLevel: options.localTrustLevel ?? manifest.localTrustLevel,
-      requestedAccess: options.requestedAccess
+      requestedAccess: options.requestedAccess,
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -1441,7 +1451,7 @@ export function createFileStoreAvailabilityProbePlugin(options: {
         return {
           status: 'accepted',
           output: {
-            fileStoreAvailable: context.fileStore !== undefined
+            fileStoreAvailable: context.fileStore !== undefined,
           },
           evidence: [
             createRuntimePluginEvidenceSnapshot({
@@ -1453,12 +1463,12 @@ export function createFileStoreAvailabilityProbePlugin(options: {
               evidenceKind: 'tool_invocation',
               status: 'accepted',
               summary: 'File store availability probe completed.',
-              redactionLabels: []
-            })
-          ]
+              redactionLabels: [],
+            }),
+          ],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -1475,9 +1485,9 @@ export function createSessionEndFileStoreProbePlugin(options: {
       declaredPlugins: ['on_session_end'],
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write'
+        sideEffectLevel: 'local_memory_write',
       },
-      requestedAccess: options.requestedAccess
+      requestedAccess: options.requestedAccess,
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1486,10 +1496,10 @@ export function createSessionEndFileStoreProbePlugin(options: {
 
         return {
           status: 'completed',
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -1503,11 +1513,11 @@ export function memorySearchPluginManifest(id: string) {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'test'
+      sourceSystem: 'test',
     },
     declaredPlugins: ['tool_provider', 'handle_tool_call'],
     config: {
-      fields: []
+      fields: [],
     },
     localTrustLevel: 'test_fixture',
     runtimePolicy: {
@@ -1521,14 +1531,14 @@ export function memorySearchPluginManifest(id: string) {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
         afterTurnCommitted: 'log_failure',
-        health: 'degrade'
-      }
+        health: 'degrade',
+      },
     },
     activation: {
       defaultEnabled: true,
-      reasons: ['test']
+      reasons: ['test'],
     },
-    requestedAccess: { model_input: 'write' }
+    requestedAccess: {model_input: 'write'},
   };
 }
 
@@ -1540,7 +1550,7 @@ export function memorySearchProvidedTools() {
       requiredForUserTurn: false,
       callLimit: {
         scope: 'user_turn',
-        maxCalls: 1
+        maxCalls: 1,
       },
       inputContract: {
         type: 'object',
@@ -1548,25 +1558,25 @@ export function memorySearchProvidedTools() {
           {
             name: 'query',
             description: 'Search query.',
-            required: true
-          }
+            required: true,
+          },
         ],
-        additionalFields: false
+        additionalFields: false,
       },
       validationOwner: 'plugin_host',
       sideEffectLevel: 'runtime_read',
       requiresConfirmation: false,
-      sourceReferencesRequired: false
-    }
+      sourceReferencesRequired: false,
+    },
   ];
 }
 
 export function localMemoryWriteSearchProvidedTools() {
-  return memorySearchProvidedTools().map((tool) =>
+  return memorySearchProvidedTools().map(tool =>
     Object.freeze({
       ...tool,
-      sideEffectLevel: 'local_memory_write' as const
-    })
+      sideEffectLevel: 'local_memory_write' as const,
+    }),
   );
 }
 
@@ -1575,7 +1585,7 @@ export function testPluginContext(
     readonly eventId?: string;
     readonly traceId?: string;
     readonly createdAt?: string;
-  } = {}
+  } = {},
 ) {
   return createRuntimePluginContext({
     ...testIdentity(identity),
@@ -1584,8 +1594,8 @@ export function testPluginContext(
     currentUserMessage: 'hello',
     character: {
       id: 'mira',
-      displayName: 'Mira'
-    }
+      displayName: 'Mira',
+    },
   });
 }
 
@@ -1593,7 +1603,7 @@ export function testPluginAfterTurnCommittedContext(
   identity: {
     readonly eventId?: string;
     readonly traceId?: string;
-  } = {}
+  } = {},
 ) {
   return createRuntimePluginAfterTurnCommittedContext({
     ...testIdentity(identity),
@@ -1602,10 +1612,10 @@ export function testPluginAfterTurnCommittedContext(
     currentUserMessage: 'hello',
     character: {
       id: 'mira',
-      displayName: 'Mira'
+      displayName: 'Mira',
     },
     committedAt: '2026-06-15T00:00:00.000Z',
-    visibleMessages: []
+    visibleMessages: [],
   });
 }
 
@@ -1614,12 +1624,12 @@ export function testIdentity(
     readonly eventId?: string;
     readonly traceId?: string;
     readonly createdAt?: string;
-  } = {}
+  } = {},
 ) {
   return createRuntimeEventIdentity({
     eventId: options.eventId ?? 'evt_plugin_host',
     traceId: options.traceId ?? 'trace_plugin_host',
-    createdAt: options.createdAt ?? '2026-06-15T00:00:00.000Z'
+    createdAt: options.createdAt ?? '2026-06-15T00:00:00.000Z',
   });
 }
 
@@ -1627,15 +1637,15 @@ export function readAgentCapabilityFixture(fileName: string): unknown {
   const parsed: unknown = JSON.parse(
     readFileSync(
       new URL(`../fixtures/agent-capabilities/${fileName}`, import.meta.url),
-      'utf8'
-    )
+      'utf8',
+    ),
   );
 
   return parsed;
 }
 
 export function expectJsonObject(
-  value: RuntimePluginJsonValue | undefined
+  value: RuntimePluginJsonValue | undefined,
 ): RuntimePluginJsonObject {
   if (
     value === undefined ||
@@ -1650,14 +1660,14 @@ export function expectJsonObject(
 }
 
 export function isJsonArray(
-  value: RuntimePluginJsonValue
+  value: RuntimePluginJsonValue,
 ): value is readonly RuntimePluginJsonValue[] {
   return Array.isArray(value);
 }
 
 export function createDeferred<T>(): Deferred<T> {
   let resolve: Deferred<T>['resolve'] | undefined;
-  const promise = new Promise<T>((resolveValue) => {
+  const promise = new Promise<T>(resolveValue => {
     resolve = resolveValue;
   });
 
@@ -1667,6 +1677,6 @@ export function createDeferred<T>(): Deferred<T> {
 
   return Object.freeze({
     promise,
-    resolve
+    resolve,
   });
 }

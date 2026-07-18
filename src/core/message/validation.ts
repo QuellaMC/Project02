@@ -1,4 +1,5 @@
-export const oneLineMessageMissingErrorMessage = 'Provide exactly one non-empty message.';
+export const oneLineMessageMissingErrorMessage =
+  'Provide exactly one non-empty message.';
 export const oneLineMessageMultilineErrorMessage =
   'Provide exactly one non-empty single-line message.';
 
@@ -14,7 +15,7 @@ export class OneLineMessageValidationError extends Error {
     super(
       reason === 'empty'
         ? oneLineMessageMissingErrorMessage
-        : oneLineMessageMultilineErrorMessage
+        : oneLineMessageMultilineErrorMessage,
     );
     this.name = 'OneLineMessageValidationError';
     this.reason = reason;
@@ -47,7 +48,7 @@ export function normalizeOneLineMessage(message: string | undefined): string {
 }
 
 export function normalizeVisibleMessageText(
-  message: string | undefined
+  message: string | undefined,
 ): string {
   const normalizedMessage = message?.replace(/\r\n?/gu, '\n').trim() ?? '';
 

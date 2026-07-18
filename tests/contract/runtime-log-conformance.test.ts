@@ -1,28 +1,25 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import type { CharacterProfile } from '../../src/core/index.ts';
-import {
-  type RuntimeLogStore
-} from '../../src/runtime/evidence/records.ts';
-import { createRuntimeLogStore } from '../../src/runtime/evidence/index.ts';
-import { createFileRuntimeLogStore } from '../../src/runtime/storage/file-runtime-log-store.ts';
-import { LocalRuntimeStorageContractError } from '../../src/runtime/storage/layout-contract.ts';
+import type {CharacterProfile} from '../../src/core/index.ts';
+import {type RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
+import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
+import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
+import {LocalRuntimeStorageContractError} from '../../src/runtime/storage/layout-contract.ts';
 import {
   runtimePluginConfigUpdateToolName,
-  runtimePluginId
+  runtimePluginId,
 } from '../../src/plugins/api/contract.ts';
-import { createLocalRuntimeMutationLockOwnerToken } from '../../src/runtime/storage/mutation-lock.ts';
+import {createLocalRuntimeMutationLockOwnerToken} from '../../src/runtime/storage/mutation-lock.ts';
 import {
   acquireLocalRuntimeSessionWriterLease,
-  createLocalRuntimeSessionStore
+  createLocalRuntimeSessionStore,
 } from '../../src/runtime/storage/session-store.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 
 type RuntimeLogBackend = 'memory' | 'file';
 
 type RuntimeLogConformanceOutcome =
-  | 'accepted'
-  | LocalRuntimeStorageContractError['code'];
+  'accepted' | LocalRuntimeStorageContractError['code'];
 
 type RuntimeLogConformanceScenario = {
   readonly name: string;
@@ -39,15 +36,15 @@ const sessionId = 'matrix-session';
 const identity = {
   eventId: 'evt_runtime_log_conformance',
   traceId: 'trace_runtime_log_conformance',
-  createdAt: '2026-07-16T00:00:00.000Z'
+  createdAt: '2026-07-16T00:00:00.000Z',
 } as const;
 const miraCharacter = Object.freeze({
   id: 'mira',
-  displayName: 'Mira'
+  displayName: 'Mira',
 } satisfies CharacterProfile);
 const novaCharacter = Object.freeze({
   id: 'nova',
-  displayName: 'Nova'
+  displayName: 'Nova',
 } satisfies CharacterProfile);
 
 const acceptedScenarios = [
@@ -60,9 +57,9 @@ const acceptedScenarios = [
         ...identity,
         kind: 'runtime_turn_completed',
         eventType: 'USER_MESSAGE',
-        status: 'completed'
+        status: 'completed',
       });
-    }
+    },
   },
   {
     name: 'accepts a canonical completed turn for the expected character',
@@ -72,7 +69,7 @@ const acceptedScenarios = [
       appendUserMessage(logStore, currentSessionId);
       logStore.appendConversationMessage(
         characterMessage(currentSessionId),
-        miraCharacter
+        miraCharacter,
       );
       logStore.appendRawEvent({
         ...identity,
@@ -81,11 +78,11 @@ const acceptedScenarios = [
         status: 'completed',
         visibleMessageIds: [
           `${currentSessionId}:message-1`,
-          `${currentSessionId}:message-2`
-        ]
+          `${currentSessionId}:message-2`,
+        ],
       });
-    }
-  }
+    },
+  },
 ] as const satisfies readonly RuntimeLogConformanceScenario[];
 
 const rejectedScenarios = [
@@ -95,15 +92,15 @@ const rejectedScenarios = [
     run(logStore) {
       logStore.appendTrace({
         ...identity,
-        step: 'runtime_event_received'
+        step: 'runtime_event_received',
       });
       logStore.appendRawEvent({
         ...identity,
         kind: 'runtime_event_received',
         eventType: 'USER_MESSAGE',
-        toolRound: 1
+        toolRound: 1,
       });
-    }
+    },
   },
   {
     name: 'rejects runtime_turn_completed as the first raw record',
@@ -113,9 +110,9 @@ const rejectedScenarios = [
         ...identity,
         kind: 'runtime_turn_completed',
         eventType: 'USER_MESSAGE',
-        status: 'completed'
+        status: 'completed',
       });
-    }
+    },
   },
   {
     name: 'rejects runtime_turn_started as the first trace record',
@@ -123,9 +120,9 @@ const rejectedScenarios = [
     run(logStore) {
       logStore.appendTrace({
         ...identity,
-        step: 'runtime_turn_started'
+        step: 'runtime_turn_started',
       });
-    }
+    },
   },
   {
     name: 'rejects a tool finish before its matching start',
@@ -144,11 +141,11 @@ const rejectedScenarios = [
         toolPluginId: 'memory.fixture',
         toolResult: {
           status: 'accepted',
-          output: { ok: true },
-          evidence: []
-        }
+          output: {ok: true},
+          evidence: [],
+        },
       });
-    }
+    },
   },
   {
     name: 'rejects a config effect attached to an unrelated finished tool call',
@@ -172,8 +169,8 @@ const rejectedScenarios = [
           fieldName: 'tone',
           operation: 'set',
           value: 'warm',
-          expectedFingerprint
-        }
+          expectedFingerprint,
+        },
       });
       logStore.appendRawEvent({
         ...identity,
@@ -191,7 +188,7 @@ const rejectedScenarios = [
             pluginId: 'config-target.fixture',
             fieldName: 'tone',
             operation: 'set',
-            fingerprint: resultFingerprint
+            fingerprint: resultFingerprint,
           },
           evidence: [
             {
@@ -202,10 +199,10 @@ const rejectedScenarios = [
               status: 'accepted',
               summary: 'Approved config update.',
               redactionLabels: [],
-              configFingerprint: resultFingerprint
-            }
-          ]
-        }
+              configFingerprint: resultFingerprint,
+            },
+          ],
+        },
       });
       logStore.appendRawEvent({
         ...identity,
@@ -223,11 +220,11 @@ const rejectedScenarios = [
             fieldName: 'tone',
             expectedFingerprint,
             resultFingerprint,
-            operation: { kind: 'set', value: 'warm' }
-          }
-        ]
+            operation: {kind: 'set', value: 'warm'},
+          },
+        ],
       });
-    }
+    },
   },
   {
     name: 'rejects a conversation speaker that differs from expectedCharacter',
@@ -237,9 +234,9 @@ const rejectedScenarios = [
       appendUserMessage(logStore, currentSessionId);
       logStore.appendConversationMessage(
         characterMessage(currentSessionId),
-        novaCharacter
+        novaCharacter,
       );
-    }
+    },
   },
   {
     name: 'rejects an empty conversation message session ID',
@@ -247,8 +244,8 @@ const rejectedScenarios = [
     run(logStore) {
       appendTurnStart(logStore);
       appendUserMessage(logStore, '');
-    }
-  }
+    },
+  },
 ] as const satisfies readonly RuntimeLogConformanceScenario[];
 
 const readScenarios = [
@@ -258,7 +255,7 @@ const readScenarios = [
     run(logStore) {
       appendTurnStart(logStore);
       logStore.readSessionEvidence();
-    }
+    },
   },
   {
     name: 'blocks rawEvents while a turn is open',
@@ -266,7 +263,7 @@ const readScenarios = [
     run(logStore) {
       appendTurnStart(logStore);
       logStore.rawEvents();
-    }
+    },
   },
   {
     name: 'blocks conversationMessages while a turn is open',
@@ -274,7 +271,7 @@ const readScenarios = [
     run(logStore) {
       appendTurnStart(logStore);
       logStore.conversationMessages();
-    }
+    },
   },
   {
     name: 'blocks traceEntries while a turn is open',
@@ -282,20 +279,20 @@ const readScenarios = [
     run(logStore) {
       appendTurnStart(logStore);
       logStore.traceEntries();
-    }
-  }
+    },
+  },
 ] as const satisfies readonly RuntimeLogConformanceScenario[];
 
 describe('runtime log store evidence conformance', () => {
-  it.each(acceptedScenarios)('$name', async (scenario) => {
+  it.each(acceptedScenarios)('$name', async scenario => {
     await expectScenarioOutcomes(scenario);
   });
 
-  it.each(rejectedScenarios)('$name', async (scenario) => {
+  it.each(rejectedScenarios)('$name', async scenario => {
     await expectScenarioOutcomes(scenario);
   });
 
-  it.each(readScenarios)('$name', async (scenario) => {
+  it.each(readScenarios)('$name', async scenario => {
     await expectScenarioOutcomes(scenario);
   });
 });
@@ -306,21 +303,21 @@ type RuntimeLogScenarioResult = {
 };
 
 async function expectScenarioOutcomes(
-  scenario: RuntimeLogConformanceScenario
+  scenario: RuntimeLogConformanceScenario,
 ): Promise<void> {
   const memory = await runScenario('memory', scenario);
   const file = await runScenario('file', scenario);
 
-  expect({ memory: memory.outcome, file: file.outcome }).toEqual({
+  expect({memory: memory.outcome, file: file.outcome}).toEqual({
     memory: scenario.expected,
-    file: scenario.expected
+    file: scenario.expected,
   });
   expect(memory.message).toBe(file.message);
 }
 
 async function runScenario(
   backend: RuntimeLogBackend,
-  scenario: RuntimeLogConformanceScenario
+  scenario: RuntimeLogConformanceScenario,
 ): Promise<RuntimeLogScenarioResult> {
   const fixture = await createRuntimeLogStoreFixture(backend);
 
@@ -334,47 +331,47 @@ async function runScenario(
 }
 
 async function createRuntimeLogStoreFixture(
-  backend: RuntimeLogBackend
+  backend: RuntimeLogBackend,
 ): Promise<RuntimeLogStoreFixture> {
   if (backend === 'memory') {
     return {
-      logStore: createRuntimeLogStore({ sessionId }),
-      release: () => Promise.resolve()
+      logStore: createRuntimeLogStore({sessionId}),
+      release: () => Promise.resolve(),
     };
   }
 
   const storeRoot = createTestTempRoot('project02-log-conformance-');
-  await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+  await createLocalRuntimeSessionStore({storeRoot}).createSession({
     sessionId,
-    createdAt: identity.createdAt
+    createdAt: identity.createdAt,
   });
   const ownerToken = createLocalRuntimeMutationLockOwnerToken();
   const logStore = createFileRuntimeLogStore({
     storeRoot,
     sessionId,
-    writerLockOwnerToken: ownerToken
+    writerLockOwnerToken: ownerToken,
   });
   const writerLease = await acquireLocalRuntimeSessionWriterLease({
     storeRoot,
     sessionId,
-    ownerToken
+    ownerToken,
   });
 
   return {
     logStore,
     release: async () => {
       await writerLease.release();
-    }
+    },
   };
 }
 
 function captureOutcome(operation: () => void): RuntimeLogScenarioResult {
   try {
     operation();
-    return { outcome: 'accepted', message: undefined };
+    return {outcome: 'accepted', message: undefined};
   } catch (error: unknown) {
     if (error instanceof LocalRuntimeStorageContractError) {
-      return { outcome: error.code, message: error.message };
+      return {outcome: error.code, message: error.message};
     }
 
     throw error;
@@ -384,18 +381,18 @@ function captureOutcome(operation: () => void): RuntimeLogScenarioResult {
 function appendTurnStart(logStore: RuntimeLogStore): void {
   logStore.appendTrace({
     ...identity,
-    step: 'runtime_event_received'
+    step: 'runtime_event_received',
   });
   logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_event_received',
-    eventType: 'USER_MESSAGE'
+    eventType: 'USER_MESSAGE',
   });
 }
 
 function appendUserMessage(
   logStore: RuntimeLogStore,
-  currentSessionId: string
+  currentSessionId: string,
 ): void {
   logStore.appendConversationMessage({
     ...identity,
@@ -404,7 +401,7 @@ function appendUserMessage(
     speakerId: 'local-user',
     speakerName: 'You',
     text: 'hello',
-    committedAt: '2026-07-16T00:00:01.000Z'
+    committedAt: '2026-07-16T00:00:01.000Z',
   });
 }
 
@@ -416,6 +413,6 @@ function characterMessage(currentSessionId: string) {
     speakerId: miraCharacter.id,
     speakerName: miraCharacter.displayName,
     text: 'hi',
-    committedAt: '2026-07-16T00:00:02.000Z'
+    committedAt: '2026-07-16T00:00:02.000Z',
   } as const;
 }

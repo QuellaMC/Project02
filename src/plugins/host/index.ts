@@ -16,13 +16,13 @@ export {
   type RuntimePluginHealthHostResult,
   type RuntimePluginHookHostResult,
   type RuntimePluginHost,
-  type RuntimePluginSessionEndOptions
+  type RuntimePluginSessionEndOptions,
 } from './host.ts';
 export {
   type RuntimePluginToolConfirmationHandler,
-  type RuntimePluginToolConfirmationRequest
+  type RuntimePluginToolConfirmationRequest,
 } from './tool-confirmation.ts';
 export {
   runBestEffortPluginSessionEnd,
-  runBestEffortPluginShutdown
+  runBestEffortPluginShutdown,
 } from './lifecycle.ts';

@@ -1,18 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {
   createMemoryProviderRuntimePlugin,
-  type Project02MemoryProvider
+  type Project02MemoryProvider,
 } from '../../src/plugins/builtin/memory-provider/index.ts';
-import {
-  createRuntimePluginContext
-} from '../../src/plugins/index.ts';
-import {
-  createRuntimePluginHost
-} from '../../src/plugins/host/index.ts';
-import {
-  createRuntimePluginAfterTurnCommittedContext
-} from '../../src/plugins/api/index.ts';
+import {createRuntimePluginContext} from '../../src/plugins/index.ts';
+import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
+import {createRuntimePluginAfterTurnCommittedContext} from '../../src/plugins/api/index.ts';
 
 describe('memory provider runtime plugin helper', () => {
   it('declares only implemented provider methods', () => {
@@ -20,21 +14,21 @@ describe('memory provider runtime plugin helper', () => {
       id: 'memory.recall-only',
       displayName: 'Recall Only',
       recall() {
-        return Promise.resolve({ items: [] });
-      }
+        return Promise.resolve({items: []});
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
 
     expect(plugin.manifest.kind).toBe('memory_provider');
     expect(plugin.manifest.declaredPlugins).toEqual(
-      expect.arrayContaining(['before_role_model_call'])
+      expect.arrayContaining(['before_role_model_call']),
     );
     expect(plugin.manifest.declaredPlugins).not.toContain('handle_tool_call');
     expect(plugin.providedTools).toEqual([]);
     expect(plugin.manifest.runtimePolicy.failureBehavior).toMatchObject({
       beforeRoleModelCall: 'degrade',
       afterTurnCommitted: 'log_failure',
-      health: 'degrade'
+      health: 'degrade',
     });
   });
 
@@ -52,19 +46,18 @@ describe('memory provider runtime plugin helper', () => {
                 {
                   kind: 'memory',
                   id: 'memory-1',
-                  title: 'Memory row'
-                }
+                  title: 'Memory row',
+                },
               ],
-              confidence: 0.8
-            }
-          ]
+              confidence: 0.8,
+            },
+          ],
         });
-      }
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
-    const result = await plugin.lifecycleHooks.beforeRoleModelCall?.(
-      testContext()
-    );
+    const result =
+      await plugin.lifecycleHooks.beforeRoleModelCall?.(testContext());
 
     expect(result?.contextItems[0]).toMatchObject({
       pluginId: 'memory.recall',
@@ -72,16 +65,16 @@ describe('memory provider runtime plugin helper', () => {
       sourceReferences: [
         {
           kind: 'memory',
-          id: 'memory-1'
-        }
+          id: 'memory-1',
+        },
       ],
-      confidence: 0.8
+      confidence: 0.8,
     });
     expect(result?.contextItems[0]?.text.length).toBeLessThanOrEqual(600);
     expect(result?.evidence[0]).toMatchObject({
       pluginId: 'memory.recall',
       evidenceKind: 'before_role_model_call',
-      status: 'accepted'
+      status: 'accepted',
     });
   });
 
@@ -99,18 +92,18 @@ describe('memory provider runtime plugin helper', () => {
                 {
                   kind: 'memory',
                   id: '123',
-                  title: 'Provider memory row'
-                }
-              ]
-            }
-          ]
+                  title: 'Provider memory row',
+                },
+              ],
+            },
+          ],
         });
-      }
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id]
+      enabledPluginIds: [plugin.manifest.id],
     });
 
     const result = await host.beforeRoleModelCall(testContext());
@@ -125,26 +118,26 @@ describe('memory provider runtime plugin helper', () => {
         {
           kind: 'memory',
           id: '123',
-          title: 'Provider memory row'
-        }
-      ]
+          title: 'Provider memory row',
+        },
+      ],
     });
     expect(result.evidence).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           pluginId: 'memory.recall-id-normalization',
           evidenceKind: 'before_role_model_call',
-          status: 'accepted'
-        })
-      ])
+          status: 'accepted',
+        }),
+      ]),
     );
     expect(result.evidence).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           pluginId: 'memory.recall-id-normalization',
-          status: 'degraded'
-        })
-      ])
+          status: 'degraded',
+        }),
+      ]),
     );
   });
 
@@ -158,7 +151,7 @@ describe('memory provider runtime plugin helper', () => {
             {
               id: 'source-less',
               text: 'This unauditable item should be omitted.',
-              sourceReferences: []
+              sourceReferences: [],
             },
             {
               id: 'source-backed',
@@ -166,18 +159,18 @@ describe('memory provider runtime plugin helper', () => {
               sourceReferences: [
                 {
                   kind: 'memory',
-                  id: 'source-backed'
-                }
-              ]
-            }
-          ]
+                  id: 'source-backed',
+                },
+              ],
+            },
+          ],
         });
-      }
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id]
+      enabledPluginIds: [plugin.manifest.id],
     });
 
     const result = await host.beforeRoleModelCall(testContext());
@@ -186,14 +179,14 @@ describe('memory provider runtime plugin helper', () => {
     if (result.status !== 'completed') {
       throw new Error('Expected source-backed recall row to be accepted.');
     }
-    expect(result.contextItems.map((item) => item.id)).toEqual([
-      'memory.source-backed'
+    expect(result.contextItems.map(item => item.id)).toEqual([
+      'memory.source-backed',
     ]);
     expect(result.contextItems[0]?.sourceReferences).toEqual([
       {
         kind: 'memory',
-        id: 'source-backed'
-      }
+        id: 'source-backed',
+      },
     ]);
     expect(result.evidence).toEqual(
       expect.arrayContaining([
@@ -201,9 +194,9 @@ describe('memory provider runtime plugin helper', () => {
           pluginId: 'memory.recall-source-filter',
           evidenceKind: 'before_role_model_call',
           status: 'accepted',
-          summary: 'Provided 1 memory item(s).'
-        })
-      ])
+          summary: 'Provided 1 memory item(s).',
+        }),
+      ]),
     );
   });
 
@@ -214,14 +207,14 @@ describe('memory provider runtime plugin helper', () => {
       captureTurn() {
         return Promise.resolve({
           captured: true,
-          summary: 'Captured.'
+          summary: 'Captured.',
         });
-      }
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
 
     expect(plugin.manifest.runtimePolicy.sideEffectLevel).toBe(
-      'local_memory_write'
+      'local_memory_write',
     );
     expect(plugin.manifest.declaredPlugins).toContain('after_turn_committed');
     expect(plugin.manifest.declaredPlugins).not.toContain('handle_tool_call');
@@ -229,7 +222,11 @@ describe('memory provider runtime plugin helper', () => {
 
   it('degrades source-less after-turn capture evidence before accepting it', async () => {
     let captureSourceReferences:
-      | readonly { readonly kind: string; readonly id: string; readonly title?: string }[]
+      | readonly {
+          readonly kind: string;
+          readonly id: string;
+          readonly title?: string;
+        }[]
       | undefined;
     const provider: Project02MemoryProvider = {
       id: 'memory.capture',
@@ -239,14 +236,14 @@ describe('memory provider runtime plugin helper', () => {
 
         return Promise.resolve({
           captured: true,
-          summary: 'Captured.'
+          summary: 'Captured.',
         });
-      }
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id]
+      enabledPluginIds: [plugin.manifest.id],
     });
     const result = await host.afterTurnCommitted(afterTurnContext());
 
@@ -254,8 +251,8 @@ describe('memory provider runtime plugin helper', () => {
       {
         kind: 'conversation',
         id: 'evt_memory',
-        title: 'Current conversation turn'
-      }
+        title: 'Current conversation turn',
+      },
     ]);
     expect(result.status).toBe('completed');
 
@@ -268,9 +265,9 @@ describe('memory provider runtime plugin helper', () => {
         {
           kind: 'conversation',
           id: 'evt_memory',
-          title: 'Current conversation turn'
-        }
-      ]
+          title: 'Current conversation turn',
+        },
+      ],
     });
   });
 
@@ -286,19 +283,19 @@ describe('memory provider runtime plugin helper', () => {
             {
               kind: 'memory',
               id: 'memory-capture-1',
-              title: 'Captured memory row'
-            }
-          ]
+              title: 'Captured memory row',
+            },
+          ],
         });
-      }
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
     const result = await plugin.lifecycleHooks.afterTurnCommitted?.(
       afterTurnContext({
         eventId: 'evt_memory_capture_sources',
         traceId: 'trace_memory_capture_sources',
-        currentUserMessage: 'remember this with a source'
-      })
+        currentUserMessage: 'remember this with a source',
+      }),
     );
 
     expect(result?.evidence[0]).toMatchObject({
@@ -309,9 +306,9 @@ describe('memory provider runtime plugin helper', () => {
         {
           kind: 'memory',
           id: 'memory-capture-1',
-          title: 'Captured memory row'
-        }
-      ]
+          title: 'Captured memory row',
+        },
+      ],
     });
   });
 
@@ -334,23 +331,25 @@ describe('memory provider runtime plugin helper', () => {
         closeSignal = scope.signal;
 
         return Promise.resolve();
-      }
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id]
+      enabledPluginIds: [plugin.manifest.id],
     });
     const result = await host.onSessionEnd(testContext());
     const shutdownResult = await host.shutdown(testContext());
     const repeatedShutdownResult = await host.shutdown(testContext());
     const registeredPlugin = host
       .registrySnapshot()
-      .plugins.find((snapshot) => snapshot.manifest.id === 'memory.close');
+      .plugins.find(snapshot => snapshot.manifest.id === 'memory.close');
 
     expect(plugin.manifest.declaredPlugins).toContain('on_session_end');
     expect(plugin.manifest.declaredPlugins).toContain('on_shutdown');
-    expect(registeredPlugin?.registeredLifecycleHooks).toContain('on_session_end');
+    expect(registeredPlugin?.registeredLifecycleHooks).toContain(
+      'on_session_end',
+    );
     expect(registeredPlugin?.registeredLifecycleHooks).toContain('on_shutdown');
     expect(endedSessions).toEqual(['session-memory']);
     expect(closeCalls).toBe(1);
@@ -363,9 +362,9 @@ describe('memory provider runtime plugin helper', () => {
         {
           pluginId: 'memory.close',
           evidenceKind: 'session_end',
-          status: 'accepted'
-        }
-      ]
+          status: 'accepted',
+        },
+      ],
     });
     expect(shutdownResult).toMatchObject({
       status: 'completed',
@@ -373,9 +372,9 @@ describe('memory provider runtime plugin helper', () => {
         {
           pluginId: 'memory.close',
           evidenceKind: 'shutdown',
-          status: 'accepted'
-        }
-      ]
+          status: 'accepted',
+        },
+      ],
     });
     expect(repeatedShutdownResult).toBe(shutdownResult);
   });
@@ -394,34 +393,36 @@ describe('memory provider runtime plugin helper', () => {
             {
               id: 'result',
               text: 'Prior session detail.',
-              sourceReferences: [{ kind: 'memory', id: 'result-1' }]
-            }
-          ]
+              sourceReferences: [{kind: 'memory', id: 'result-1'}],
+            },
+          ],
         });
       },
       add() {
         return Promise.resolve({
           id: 'added',
-          sourceReferences: [{ kind: 'memory', id: 'added' }]
+          sourceReferences: [{kind: 'memory', id: 'added'}],
         });
-      }
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id]
+      enabledPluginIds: [plugin.manifest.id],
     });
 
-    expect(plugin.manifest.requestedAccess).toEqual({ model_input: 'write' });
-    expect(plugin.providedTools.map((tool) => tool.name)).toEqual([
+    expect(plugin.manifest.requestedAccess).toEqual({model_input: 'write'});
+    expect(plugin.providedTools.map(tool => tool.name)).toEqual([
       'memory.search',
-      'memory.add'
+      'memory.add',
     ]);
-    expect(host.pluginToolDefinitions().map((tool) => tool.name)).toEqual([
+    expect(host.pluginToolDefinitions().map(tool => tool.name)).toEqual([
       'memory.search',
-      'memory.add'
+      'memory.add',
     ]);
-    expect(plugin.providedTools.every((tool) => tool.sourceReferencesRequired)).toBe(true);
+    expect(
+      plugin.providedTools.every(tool => tool.sourceReferencesRequired),
+    ).toBe(true);
 
     const search = await host.handleToolCall(
       {
@@ -430,9 +431,9 @@ describe('memory provider runtime plugin helper', () => {
         createdAt: '2026-06-21T00:00:00.000Z',
         pluginId: 'memory.tools',
         toolName: 'memory.search',
-        input: { query: 'prior' }
+        input: {query: 'prior'},
       },
-      testContext()
+      testContext(),
     );
 
     expect(search.status).toBe('accepted');
@@ -444,10 +445,10 @@ describe('memory provider runtime plugin helper', () => {
       output: {
         items: [
           {
-            id: 'result'
-          }
-        ]
-      }
+            id: 'result',
+          },
+        ],
+      },
     });
     expect(search.evidence[0]).toMatchObject({
       evidenceKind: 'tool_invocation',
@@ -455,9 +456,9 @@ describe('memory provider runtime plugin helper', () => {
       sourceReferences: [
         {
           kind: 'memory',
-          id: 'result-1'
-        }
-      ]
+          id: 'result-1',
+        },
+      ],
     });
     expect(searchDeadlineAt).toBeTypeOf('number');
     expect(searchDeadlineAt).toBeLessThan(Number.MAX_SAFE_INTEGER);
@@ -470,9 +471,9 @@ describe('memory provider runtime plugin helper', () => {
         createdAt: '2026-06-21T00:00:00.000Z',
         pluginId: 'memory.tools',
         toolName: 'memory.add',
-        input: { text: 'New durable memory.' }
+        input: {text: 'New durable memory.'},
       },
-      testContext()
+      testContext(),
     );
 
     expect(add.status).toBe('accepted');
@@ -486,10 +487,10 @@ describe('memory provider runtime plugin helper', () => {
         sourceReferences: [
           {
             kind: 'memory',
-            id: 'added'
-          }
-        ]
-      }
+            id: 'added',
+          },
+        ],
+      },
     });
     expect(add.evidence[0]).toMatchObject({
       evidenceKind: 'tool_invocation',
@@ -497,13 +498,13 @@ describe('memory provider runtime plugin helper', () => {
       sourceReferences: [
         {
           kind: 'conversation',
-          id: 'evt_memory'
+          id: 'evt_memory',
         },
         {
           kind: 'memory',
-          id: 'added'
-        }
-      ]
+          id: 'added',
+        },
+      ],
     });
   });
 
@@ -514,14 +515,14 @@ describe('memory provider runtime plugin helper', () => {
       add() {
         return Promise.resolve({
           id: 'persisted-memory-1',
-          sourceReferences: []
+          sourceReferences: [],
         });
-      }
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id]
+      enabledPluginIds: [plugin.manifest.id],
     });
 
     const add = await host.handleToolCall(
@@ -531,9 +532,9 @@ describe('memory provider runtime plugin helper', () => {
         createdAt: '2026-06-21T00:00:00.000Z',
         pluginId: 'memory.add-source-synthesis',
         toolName: 'memory.add',
-        input: { text: 'New durable memory.' }
+        input: {text: 'New durable memory.'},
       },
-      testContext()
+      testContext(),
     );
 
     expect(add.status).toBe('accepted');
@@ -546,9 +547,9 @@ describe('memory provider runtime plugin helper', () => {
         {
           kind: 'memory',
           id: 'persisted-memory-1',
-          title: 'Persisted memory item'
-        }
-      ]
+          title: 'Persisted memory item',
+        },
+      ],
     });
     expect(add.evidence[0]).toMatchObject({
       evidenceKind: 'tool_invocation',
@@ -556,14 +557,14 @@ describe('memory provider runtime plugin helper', () => {
       sourceReferences: [
         {
           kind: 'conversation',
-          id: 'evt_memory'
+          id: 'evt_memory',
         },
         {
           kind: 'memory',
           id: 'persisted-memory-1',
-          title: 'Persisted memory item'
-        }
-      ]
+          title: 'Persisted memory item',
+        },
+      ],
     });
   });
 
@@ -573,14 +574,14 @@ describe('memory provider runtime plugin helper', () => {
       displayName: 'Empty Search Provider',
       search() {
         return Promise.resolve({
-          items: []
+          items: [],
         });
-      }
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id]
+      enabledPluginIds: [plugin.manifest.id],
     });
 
     const search = await host.handleToolCall(
@@ -590,9 +591,9 @@ describe('memory provider runtime plugin helper', () => {
         createdAt: '2026-06-21T00:00:00.000Z',
         pluginId: 'memory.search-empty',
         toolName: 'memory.search',
-        input: { query: 'missing memory' }
+        input: {query: 'missing memory'},
       },
-      testContext()
+      testContext(),
     );
 
     expect(search.status).toBe('accepted');
@@ -600,7 +601,7 @@ describe('memory provider runtime plugin helper', () => {
       throw new Error('Expected empty memory.search to be accepted.');
     }
     expect(search.output).toEqual({
-      items: []
+      items: [],
     });
     expect(search.evidence[0]).toMatchObject({
       evidenceKind: 'tool_invocation',
@@ -608,9 +609,9 @@ describe('memory provider runtime plugin helper', () => {
       sourceReferences: [
         {
           kind: 'runtime',
-          id: 'evt_memory:memory.search.no_results'
-        }
-      ]
+          id: 'evt_memory:memory.search.no_results',
+        },
+      ],
     });
   });
 
@@ -624,16 +625,16 @@ describe('memory provider runtime plugin helper', () => {
             {
               id: 'source-less',
               text: 'This item lacks evidence.',
-              sourceReferences: []
-            }
-          ]
+              sourceReferences: [],
+            },
+          ],
         });
-      }
+      },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id]
+      enabledPluginIds: [plugin.manifest.id],
     });
 
     const search = await host.handleToolCall(
@@ -643,9 +644,9 @@ describe('memory provider runtime plugin helper', () => {
         createdAt: '2026-06-21T00:00:00.000Z',
         pluginId: 'memory.search-source-filter',
         toolName: 'memory.search',
-        input: { query: 'source-less memory' }
+        input: {query: 'source-less memory'},
       },
-      testContext()
+      testContext(),
     );
 
     expect(search.status).toBe('accepted');
@@ -653,7 +654,7 @@ describe('memory provider runtime plugin helper', () => {
       throw new Error('Expected source-filtered memory.search to be accepted.');
     }
     expect(search.output).toEqual({
-      items: []
+      items: [],
     });
     expect(search.evidence[0]).toMatchObject({
       evidenceKind: 'tool_invocation',
@@ -661,9 +662,9 @@ describe('memory provider runtime plugin helper', () => {
       sourceReferences: [
         {
           kind: 'runtime',
-          id: 'evt_memory:memory.search.no_results'
-        }
-      ]
+          id: 'evt_memory:memory.search.no_results',
+        },
+      ],
     });
   });
 });
@@ -678,8 +679,8 @@ function testContext() {
     currentUserMessage: 'remember this',
     character: {
       id: 'mira',
-      displayName: 'Mira'
-    }
+      displayName: 'Mira',
+    },
   });
 }
 
@@ -688,7 +689,7 @@ function afterTurnContext(
     readonly eventId?: string;
     readonly traceId?: string;
     readonly currentUserMessage?: string;
-  } = {}
+  } = {},
 ) {
   return createRuntimePluginAfterTurnCommittedContext({
     eventId: options.eventId ?? 'evt_memory',
@@ -699,7 +700,7 @@ function afterTurnContext(
     currentUserMessage: options.currentUserMessage ?? 'remember this',
     character: {
       id: 'mira',
-      displayName: 'Mira'
+      displayName: 'Mira',
     },
     committedAt: '2026-06-21T00:00:01.000Z',
     visibleMessages: [
@@ -708,8 +709,8 @@ function afterTurnContext(
         role: 'character',
         speakerId: 'mira',
         speakerName: 'Mira',
-        text: 'done'
-      }
-    ]
+        text: 'done',
+      },
+    ],
   });
 }

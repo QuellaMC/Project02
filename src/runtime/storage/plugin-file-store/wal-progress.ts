@@ -1,6 +1,6 @@
-import { splitCompleteJsonLines } from '../json-lines.ts';
-import { isPlainObject } from './shared.ts';
-import type { DurablePluginFileStoreJournal } from './wal-codec.ts';
+import {splitCompleteJsonLines} from '../json-lines.ts';
+import {isPlainObject} from './shared.ts';
+import type {DurablePluginFileStoreJournal} from './wal-codec.ts';
 
 export const durableTransactionProgressVersion =
   'project02.plugin_transaction_progress.v1';
@@ -21,13 +21,13 @@ export type DurablePluginFileStoreTransactionProgress = {
 
 export function parseDurablePluginFileStoreTransactionProgress(
   content: string,
-  journal: DurablePluginFileStoreJournal
+  journal: DurablePluginFileStoreJournal,
 ): DurablePluginFileStoreTransactionProgress {
   const lines = requiredProgressLines(content);
   const header = requiredProgressHeader(lines[0] ?? '', journal);
   const baseRevisions = requiredProgressBaseRevisions(
     header['baseRevisions'],
-    journal
+    journal,
   );
   const appliedCount = requiredAppliedOperationCount(lines, journal);
 
@@ -39,7 +39,7 @@ export function parseDurablePluginFileStoreTransactionProgress(
     ownerNonce: journal.ownerNonce,
     sessionId: journal.sessionId,
     baseRevisions,
-    appliedCount
+    appliedCount,
   } satisfies DurablePluginFileStoreTransactionProgress);
 }
 
@@ -61,7 +61,7 @@ function requiredProgressLines(content: string): readonly string[] {
 
 function requiredProgressHeader(
   line: string,
-  journal: DurablePluginFileStoreJournal
+  journal: DurablePluginFileStoreJournal,
 ): Readonly<Record<string, unknown>> {
   let header: unknown;
 
@@ -80,7 +80,7 @@ function requiredProgressHeader(
 
 function progressHeaderMatchesJournal(
   header: unknown,
-  journal: DurablePluginFileStoreJournal
+  journal: DurablePluginFileStoreJournal,
 ): header is Readonly<Record<string, unknown>> {
   return (
     isPlainObject(header) &&
@@ -92,23 +92,23 @@ function progressHeaderMatchesJournal(
     header['sessionId'] === journal.sessionId &&
     header['appliedCount'] === 0 &&
     Array.isArray(header['baseRevisions']) &&
-    journal.operations.every((operation) => operation.status === 'planned')
+    journal.operations.every(operation => operation.status === 'planned')
   );
 }
 
 function requiredProgressBaseRevisions(
   value: unknown,
-  journal: DurablePluginFileStoreJournal
+  journal: DurablePluginFileStoreJournal,
 ): DurablePluginFileStoreTransactionProgress['baseRevisions'] {
   if (!Array.isArray(value)) {
     throw malformedProgress();
   }
 
   const expectedPluginIds = [
-    ...new Set(journal.operations.map((operation) => operation.pluginId))
+    ...new Set(journal.operations.map(operation => operation.pluginId)),
   ].sort((left, right) => left.localeCompare(right));
   const baseRevisions = value.map((revision, index) =>
-    requiredProgressBaseRevision(revision, expectedPluginIds[index])
+    requiredProgressBaseRevision(revision, expectedPluginIds[index]),
   );
 
   if (baseRevisions.length !== expectedPluginIds.length) {
@@ -120,7 +120,7 @@ function requiredProgressBaseRevisions(
 
 function requiredProgressBaseRevision(
   value: unknown,
-  expectedPluginId: string | undefined
+  expectedPluginId: string | undefined,
 ): DurablePluginFileStoreTransactionProgress['baseRevisions'][number] {
   if (
     expectedPluginId === undefined ||
@@ -133,13 +133,13 @@ function requiredProgressBaseRevision(
 
   return Object.freeze({
     pluginId: expectedPluginId,
-    revision: value['revision']
+    revision: value['revision'],
   });
 }
 
 function requiredAppliedOperationCount(
   lines: readonly string[],
-  journal: DurablePluginFileStoreJournal
+  journal: DurablePluginFileStoreJournal,
 ): number {
   let appliedCount = 0;
 
@@ -172,6 +172,6 @@ function malformedProgress(cause?: unknown): TypeError {
   return cause === undefined
     ? new TypeError('Plugin fileStore transaction progress is malformed.')
     : new TypeError('Plugin fileStore transaction progress is malformed.', {
-        cause
+        cause,
       });
 }

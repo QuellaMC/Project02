@@ -1,4 +1,4 @@
-import type { RuntimePluginConfigValueType } from '../../plugins/api/index.ts';
+import type {RuntimePluginConfigValueType} from '../../plugins/api/index.ts';
 
 export const runtimeConfigVersion = 'project02.config.v2';
 export const runtimeConfigEnvVarName = 'PROJECT02_RUNTIME_CONFIG';
@@ -6,7 +6,7 @@ export const roleModelProviderEnvVarName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 export const project02RoleModelProviderValues = ['local', 'nvidia'] as const;
 export const runtimeControlEnvVarNames: readonly string[] = Object.freeze([
   runtimeConfigEnvVarName,
-  roleModelProviderEnvVarName
+  roleModelProviderEnvVarName,
 ]);
 
 export function isRuntimeControlEnvVarName(name: string): boolean {
@@ -93,11 +93,7 @@ export type LoadedProject02RuntimeConfig = {
 };
 
 export type RuntimeConfigFieldSource =
-  | 'config'
-  | 'default'
-  | 'missing'
-  | 'plaintext_override'
-  | `env:${string}`;
+  'config' | 'default' | 'missing' | 'plaintext_override' | `env:${string}`;
 
 export type ResolvedRuntimeConfigField = {
   readonly name: string;
@@ -132,7 +128,9 @@ export type ResolvedProject02RuntimeConfig = {
     readonly roleModelProvider: Project02RoleModelProvider;
   };
   readonly pluginConfigs: Readonly<Record<string, ResolvedPluginRuntimeConfig>>;
-  readonly redactedPluginConfigs: Readonly<Record<string, RedactedPluginRuntimeConfig>>;
+  readonly redactedPluginConfigs: Readonly<
+    Record<string, RedactedPluginRuntimeConfig>
+  >;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly effectiveConfigFingerprint: string;
 };

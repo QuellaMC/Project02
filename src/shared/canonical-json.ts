@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto';
+import {createHash} from 'node:crypto';
 
 export function canonicalJsonValuesEqual(
   left: unknown,
-  right: unknown
+  right: unknown,
 ): boolean {
   if (left === right) {
     return true;
@@ -14,7 +14,7 @@ export function canonicalJsonValuesEqual(
     }
 
     return left.every((value, index) =>
-      canonicalJsonValuesEqual(value, right[index])
+      canonicalJsonValuesEqual(value, right[index]),
     );
   }
 
@@ -39,9 +39,9 @@ export function canonicalJsonValuesEqual(
   return (
     leftKeys.length === rightKeys.length &&
     leftKeys.every(
-      (key) =>
+      key =>
         Object.hasOwn(rightRecord, key) &&
-        canonicalJsonValuesEqual(leftRecord[key], rightRecord[key])
+        canonicalJsonValuesEqual(leftRecord[key], rightRecord[key]),
     )
   );
 }
@@ -66,8 +66,7 @@ export function canonicalJsonStringify(value: unknown): string {
     return `{${Object.keys(record)
       .sort()
       .map(
-        (key) =>
-          `${JSON.stringify(key)}:${canonicalJsonStringify(record[key])}`
+        key => `${JSON.stringify(key)}:${canonicalJsonStringify(record[key])}`,
       )
       .join(',')}}`;
   }

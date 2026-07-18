@@ -1,17 +1,15 @@
 import {
   runtimePluginId,
   runtimePluginListToolName,
-  type RuntimePluginAccessSnapshot
+  type RuntimePluginAccessSnapshot,
 } from '../../api/contract.ts';
 import {
   runtimePluginAccessForPlugin,
-  type RuntimePluginAccessMapByPluginId
+  type RuntimePluginAccessMapByPluginId,
 } from '../../policy/access-control.ts';
-import { isFirstPartyModelToolsPlugin } from '../model-tools/index.ts';
-import {
-  discoverableCurrentTurnPluginTools
-} from '../../policy/tool-policy.ts';
-import { createRuntimePluginEvidenceSnapshot } from '../../api/constructors.ts';
+import {isFirstPartyModelToolsPlugin} from '../model-tools/index.ts';
+import {discoverableCurrentTurnPluginTools} from '../../policy/tool-policy.ts';
+import {createRuntimePluginEvidenceSnapshot} from '../../api/constructors.ts';
 import type {
   RuntimePlugin,
   RuntimePluginContext,
@@ -20,7 +18,7 @@ import type {
   RuntimePluginManifest,
   RuntimePluginProvidedTool,
   RuntimePluginToolCall,
-  RuntimePluginToolCallResult
+  RuntimePluginToolCallResult,
 } from '../../api/types.ts';
 
 const runtimePluginListMaxPlugins = 16;
@@ -28,9 +26,7 @@ const runtimePluginListMaxToolsPerPlugin = 8;
 const runtimePluginListMaxTextLength = 160;
 
 export type RuntimePluginListActivationStatus =
-  | 'active'
-  | 'disabled'
-  | 'blocked';
+  'active' | 'disabled' | 'blocked';
 
 export type RuntimePluginListActivationState = {
   readonly pluginId: string;
@@ -59,22 +55,22 @@ export function createRuntimePluginListTool(): RuntimePluginProvidedTool {
           name: 'includeDisabled',
           description: 'Include disabled or unavailable plugins when true.',
           required: false,
-          valueType: 'boolean'
+          valueType: 'boolean',
         },
         {
           name: 'scope',
           description:
             'Use "enabled" for current-turn plugins or "all" for every installed plugin.',
           required: false,
-          allowedValues: ['enabled', 'all']
-        }
+          allowedValues: ['enabled', 'all'],
+        },
       ],
-      additionalFields: false
+      additionalFields: false,
     },
     validationOwner: 'plugin_host',
     sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
-    sourceReferencesRequired: false
+    sourceReferencesRequired: false,
   };
 }
 
@@ -90,12 +86,12 @@ export function handleRuntimePluginListToolCall(options: {
     accessByPluginId: hostState.accessByPluginId,
     ...(hostState.installedPluginManifests === undefined
       ? {}
-      : { installedPluginManifests: hostState.installedPluginManifests }),
+      : {installedPluginManifests: hostState.installedPluginManifests}),
     ...(hostState.activationStates === undefined
       ? {}
-      : { activationStates: hostState.activationStates }),
+      : {activationStates: hostState.activationStates}),
     confirmationAvailable: hostState.confirmationAvailable,
-    includeDisabled: runtimePluginListIncludesDisabled(options.call.input)
+    includeDisabled: runtimePluginListIncludesDisabled(options.call.input),
   });
 
   return {
@@ -111,9 +107,9 @@ export function handleRuntimePluginListToolCall(options: {
         evidenceKind: 'tool_invocation',
         status: 'accepted',
         summary: `Returned ${String(output.plugins.length)} plugin summaries.`,
-        redactionLabels: options.context.privacy.redactionLabels
-      })
-    ]
+        redactionLabels: options.context.privacy.redactionLabels,
+      }),
+    ],
   };
 }
 
@@ -129,22 +125,21 @@ export function createRuntimePluginListOutput(options: {
   readonly plugins: readonly RuntimePluginJsonValue[];
 } {
   const enabledPluginIds = new Set(
-    options.enabledPlugins.map((plugin) => plugin.manifest.id)
+    options.enabledPlugins.map(plugin => plugin.manifest.id),
   );
   const activationByPluginId = new Map(
-    (options.activationStates ?? []).map((activation) => [
-      activation.pluginId,
-      activation
-    ] as const)
+    (options.activationStates ?? []).map(
+      activation => [activation.pluginId, activation] as const,
+    ),
   );
   const runtimePluginIds = new Set(
-    options.plugins.map((plugin) => plugin.manifest.id)
+    options.plugins.map(plugin => plugin.manifest.id),
   );
   const listedRuntimePlugins =
     options.includeDisabled === true ? options.plugins : options.enabledPlugins;
   const coldInstalledManifests =
     options.includeDisabled === true
-      ? (options.installedPluginManifests ?? []).filter((manifest) => {
+      ? (options.installedPluginManifests ?? []).filter(manifest => {
           const activation = activationByPluginId.get(manifest.id);
 
           return (
@@ -157,44 +152,43 @@ export function createRuntimePluginListOutput(options: {
     listedRuntimePlugins.length + coldInstalledManifests.length;
   const boundedRuntimePlugins = listedRuntimePlugins.slice(
     0,
-    runtimePluginListMaxPlugins
+    runtimePluginListMaxPlugins,
   );
   const boundedColdManifests = coldInstalledManifests.slice(
     0,
-    Math.max(0, runtimePluginListMaxPlugins - boundedRuntimePlugins.length)
+    Math.max(0, runtimePluginListMaxPlugins - boundedRuntimePlugins.length),
   );
 
   return Object.freeze({
-    plugins: Object.freeze(
-      [
-        ...boundedRuntimePlugins.map((plugin) => {
-          const enabled = enabledPluginIds.has(plugin.manifest.id);
+    plugins: Object.freeze([
+      ...boundedRuntimePlugins.map(plugin => {
+        const enabled = enabledPluginIds.has(plugin.manifest.id);
 
-          return createRuntimePluginListSummary({
-            plugin,
+        return createRuntimePluginListSummary({
+          plugin,
+          enabled,
+          confirmationAvailable: options.confirmationAvailable,
+          activationStatus: effectiveRuntimePluginActivationStatus({
             enabled,
-            confirmationAvailable: options.confirmationAvailable,
-            activationStatus: effectiveRuntimePluginActivationStatus({
-              enabled,
-              configuredStatus: activationByPluginId.get(plugin.manifest.id)
-                ?.activationStatus
-            }),
-            access: runtimePluginAccessForPlugin({
-              plugin,
-              accessByPluginId: options.accessByPluginId
-            })
-          });
+            configuredStatus: activationByPluginId.get(plugin.manifest.id)
+              ?.activationStatus,
+          }),
+          access: runtimePluginAccessForPlugin({
+            plugin,
+            accessByPluginId: options.accessByPluginId,
+          }),
+        });
+      }),
+      ...boundedColdManifests.map(manifest =>
+        createColdRuntimePluginListSummary({
+          manifest,
+          activationStatus:
+            activationByPluginId.get(manifest.id)?.activationStatus ??
+            'disabled',
         }),
-        ...boundedColdManifests.map((manifest) =>
-          createColdRuntimePluginListSummary({
-            manifest,
-            activationStatus:
-              activationByPluginId.get(manifest.id)?.activationStatus ?? 'disabled'
-          })
-        )
-      ]
-    ),
-    truncated: listedPluginCount > runtimePluginListMaxPlugins
+      ),
+    ]),
+    truncated: listedPluginCount > runtimePluginListMaxPlugins,
   } satisfies RuntimePluginJsonObject & {
     readonly plugins: readonly RuntimePluginJsonValue[];
   });
@@ -211,7 +205,7 @@ export function createRuntimePluginListSummary(options: {
     plugin: options.plugin,
     access: options.access,
     confirmationAvailable: options.confirmationAvailable,
-    isHostOwnedFirstPartyModelToolsPlugin: isFirstPartyModelToolsPlugin
+    isHostOwnedFirstPartyModelToolsPlugin: isFirstPartyModelToolsPlugin,
   });
   const safeTools = discoverableTools
     .slice(0, runtimePluginListMaxToolsPerPlugin)
@@ -219,11 +213,13 @@ export function createRuntimePluginListSummary(options: {
 
   return Object.freeze({
     id: boundedRuntimePluginListText(options.plugin.manifest.id),
-    displayName: boundedRuntimePluginListText(options.plugin.manifest.displayName),
+    displayName: boundedRuntimePluginListText(
+      options.plugin.manifest.displayName,
+    ),
     version: boundedRuntimePluginListText(options.plugin.manifest.version),
     kind: options.plugin.manifest.kind,
     description: boundedRuntimePluginListText(
-      options.plugin.manifest.description
+      options.plugin.manifest.description,
     ),
     enabled: options.enabled,
     availableForTurn: options.enabled,
@@ -234,11 +230,11 @@ export function createRuntimePluginListSummary(options: {
       ? options.access.grantedAccess
       : Object.freeze({}),
     registeredLifecycleHooks: Object.freeze(
-      registeredLifecycleHookNames(options.plugin)
+      registeredLifecycleHookNames(options.plugin),
     ),
     providedTools: Object.freeze(safeTools),
     toolsTruncated:
-      discoverableTools.length > runtimePluginListMaxToolsPerPlugin
+      discoverableTools.length > runtimePluginListMaxToolsPerPlugin,
   } satisfies RuntimePluginJsonObject);
 }
 
@@ -262,7 +258,7 @@ function createColdRuntimePluginListSummary(options: {
     grantedAccess: Object.freeze({}),
     registeredLifecycleHooks: Object.freeze([]),
     providedTools: Object.freeze([]),
-    toolsTruncated: false
+    toolsTruncated: false,
   } satisfies RuntimePluginJsonObject);
 }
 
@@ -278,28 +274,28 @@ function effectiveRuntimePluginActivationStatus(options: {
 }
 
 function createRuntimePluginListToolSummary(
-  tool: RuntimePluginProvidedTool
+  tool: RuntimePluginProvidedTool,
 ): RuntimePluginJsonObject {
   return Object.freeze({
     name: boundedRuntimePluginListText(tool.name),
     description: boundedRuntimePluginListText(tool.description),
     sideEffectLevel: tool.sideEffectLevel,
     requiredForUserTurn: tool.requiredForUserTurn,
-    ...(tool.callLimit === undefined ? {} : { callLimit: tool.callLimit }),
+    ...(tool.callLimit === undefined ? {} : {callLimit: tool.callLimit}),
     requiresConfirmation: tool.requiresConfirmation,
     validationOwner: tool.validationOwner,
-    sourceReferencesRequired: tool.sourceReferencesRequired
+    sourceReferencesRequired: tool.sourceReferencesRequired,
   } satisfies RuntimePluginJsonObject);
 }
 
 function runtimePluginListIncludesDisabled(
-  input: Readonly<Record<string, RuntimePluginJsonValue>>
+  input: Readonly<Record<string, RuntimePluginJsonValue>>,
 ): boolean {
   return input['includeDisabled'] === true || input['scope'] === 'all';
 }
 
 function registeredLifecycleHookNames(
-  plugin: RuntimePlugin
+  plugin: RuntimePlugin,
 ): readonly string[] {
   const hooks: string[] = [];
 

@@ -1,15 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import {
-  buildUserTurnDecisionContext
-} from '../../src/role-model/api/decision-context.ts';
+import {buildUserTurnDecisionContext} from '../../src/role-model/api/decision-context.ts';
 import {
   type CharacterAgent,
   createConversationSession,
   defaultRecentVisibleMessageLimit,
   localCharacterProfile,
   runCharacterTurn,
-  type VisibleMessage
+  type VisibleMessage,
 } from '../../src/core/index.ts';
 
 type MutableVisibleMessage = {
@@ -23,13 +21,13 @@ type MutableVisibleMessage = {
 describe('user-turn decision context builder', () => {
   it('builds an immutable fresh-session context with local identity and runtime notes', () => {
     const session = createConversationSession({
-      id: 'session-fresh'
+      id: 'session-fresh',
     });
     const runtimeNotes = ['local USER_MESSAGE turn', 'recent visible only'];
 
     const context = buildUserTurnDecisionContext({
       session,
-      runtimeNotes
+      runtimeNotes,
     });
 
     runtimeNotes.push('mutated after build');
@@ -39,7 +37,7 @@ describe('user-turn decision context builder', () => {
       characterSnapshot: localCharacterProfile,
       recentVisibleMessages: [],
       runtimeNotes: ['local USER_MESSAGE turn', 'recent visible only'],
-      pluginContextItems: []
+      pluginContextItems: [],
     });
     expect(Object.isFrozen(context)).toBe(true);
     expect(Object.isFrozen(context.characterSnapshot)).toBe(true);
@@ -54,29 +52,29 @@ describe('user-turn decision context builder', () => {
   it('uses the same recent visible message selection as the deterministic chat path', async () => {
     const session = createConversationSession({
       id: 'session-resumed',
-      visibleTranscript: createVisibleTranscriptSeed('session-resumed', 5)
+      visibleTranscript: createVisibleTranscriptSeed('session-resumed', 5),
     });
     const context = buildUserTurnDecisionContext({
-      session
+      session,
     });
     const observedRecentMessages: VisibleMessage[][] = [];
     const agent: CharacterAgent = {
       reply(input) {
         observedRecentMessages.push([...input.recentVisibleMessages]);
         return {
-          text: 'reply after selected context'
+          text: 'reply after selected context',
         };
-      }
+      },
     };
 
     await runCharacterTurn(session, 'current user message', agent);
 
     expect(context.recentVisibleMessages).toEqual(
       createVisibleTranscriptSeed('session-resumed', 5).slice(
-        -defaultRecentVisibleMessageLimit
-      )
+        -defaultRecentVisibleMessageLimit,
+      ),
     );
-    expect(context.recentVisibleMessages.map((message) => message.id)).toEqual([
+    expect(context.recentVisibleMessages.map(message => message.id)).toEqual([
       'session-resumed:message-3',
       'session-resumed:message-4',
       'session-resumed:message-5',
@@ -84,7 +82,7 @@ describe('user-turn decision context builder', () => {
       'session-resumed:message-7',
       'session-resumed:message-8',
       'session-resumed:message-9',
-      'session-resumed:message-10'
+      'session-resumed:message-10',
     ]);
     expect(observedRecentMessages).toEqual([context.recentVisibleMessages]);
   });
@@ -92,28 +90,28 @@ describe('user-turn decision context builder', () => {
   it('honors an explicit recent message limit without reordering selected messages', () => {
     const session = createConversationSession({
       id: 'session-limited',
-      visibleTranscript: createVisibleTranscriptSeed('session-limited', 3)
+      visibleTranscript: createVisibleTranscriptSeed('session-limited', 3),
     });
 
     const context = buildUserTurnDecisionContext({
       session,
-      recentMessageLimit: 2
+      recentMessageLimit: 2,
     });
 
-    expect(context.recentVisibleMessages.map((message) => message.id)).toEqual([
+    expect(context.recentVisibleMessages.map(message => message.id)).toEqual([
       'session-limited:message-5',
-      'session-limited:message-6'
+      'session-limited:message-6',
     ]);
   });
 
   it('does not accept or duplicate the current user message in the context output', () => {
     const session = createConversationSession({
-      id: 'session-current-message'
+      id: 'session-current-message',
     });
     const optionsWithCurrentMessage = {
       session,
       runtimeNotes: ['top-level event envelope owns the current message'],
-      currentUserMessage: 'do not put me in DecisionContext'
+      currentUserMessage: 'do not put me in DecisionContext',
     };
 
     const context = buildUserTurnDecisionContext(optionsWithCurrentMessage);
@@ -122,7 +120,7 @@ describe('user-turn decision context builder', () => {
     expect('currentUserMessage' in context.characterSnapshot).toBe(false);
     expect(context.recentVisibleMessages).toEqual([]);
     expect(JSON.stringify(context)).not.toContain(
-      optionsWithCurrentMessage.currentUserMessage
+      optionsWithCurrentMessage.currentUserMessage,
     );
   });
 
@@ -131,12 +129,12 @@ describe('user-turn decision context builder', () => {
     const runtimeNotes = ['immutable note'];
     const session = createConversationSession({
       id: 'session-snapshots',
-      visibleTranscript: seedMessages
+      visibleTranscript: seedMessages,
     });
 
     const context = buildUserTurnDecisionContext({
       session,
-      runtimeNotes
+      runtimeNotes,
     });
     const firstRecentMessage = context.recentVisibleMessages[0];
     const firstSeedMessage = seedMessages[0];
@@ -162,21 +160,21 @@ describe('user-turn decision context builder', () => {
         role: 'user',
         speakerId: 'local-user',
         speakerName: 'You',
-        text: 'user 1'
+        text: 'user 1',
       },
       {
         id: 'session-snapshots:message-2',
         role: 'character',
         speakerId: 'mira',
         speakerName: 'Mira',
-        text: 'reply 1'
-      }
+        text: 'reply 1',
+      },
     ]);
     expect(context.runtimeNotes).toEqual(['immutable note']);
     expect(Object.isFrozen(firstRecentMessage)).toBe(true);
     expect(() => {
       Object.defineProperty(firstRecentMessage, 'text', {
-        value: 'tampered'
+        value: 'tampered',
       });
     }).toThrow(TypeError);
     expect(() => {
@@ -186,8 +184,8 @@ describe('user-turn decision context builder', () => {
           role: 'user',
           speakerId: 'local-user',
           speakerName: 'You',
-          text: 'tampered'
-        } satisfies VisibleMessage
+          text: 'tampered',
+        } satisfies VisibleMessage,
       ]);
     }).toThrow(TypeError);
   });
@@ -195,7 +193,7 @@ describe('user-turn decision context builder', () => {
 
 function createVisibleTranscriptSeed(
   sessionId: string,
-  turnCount: number
+  turnCount: number,
 ): MutableVisibleMessage[] {
   const messages: MutableVisibleMessage[] = [];
 
@@ -208,15 +206,15 @@ function createVisibleTranscriptSeed(
         role: 'user',
         speakerId: 'local-user',
         speakerName: 'You',
-        text: `user ${String(turnNumber)}`
+        text: `user ${String(turnNumber)}`,
       },
       {
         id: `${sessionId}:message-${String(firstMessageNumber + 1)}`,
         role: 'character',
         speakerId: 'mira',
         speakerName: 'Mira',
-        text: `reply ${String(turnNumber)}`
-      }
+        text: `reply ${String(turnNumber)}`,
+      },
     );
   }
 

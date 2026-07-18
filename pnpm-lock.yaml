@@ -23,6 +23,9 @@ importers:
       eslint:
         specifier: ^10.4.0
         version: 10.4.0
+      prettier:
+        specifier: 3.9.5
+        version: 3.9.5
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -814,6 +817,11 @@ packages:
   prelude-ls@1.2.1:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
     engines: {node: '>= 0.8.0'}
+
+  prettier@3.9.5:
+    resolution: {integrity: sha512-/FVl766LpUfB5vXgCYOYa0MeV/441Ia99AeICQIQFTY/Nw0roZwULcXpku5i1/m5kt/baz+s4Zogspd839HSMg==}
+    engines: {node: '>=14'}
+    hasBin: true
 
   prompts@2.4.2:
     resolution: {integrity: sha512-NxNv/kLguCA7p3jE8oL2aEBsrJWgAakBpgmgK6lpPWV+WuOmY6r2/zbAVnP+T8bQlA0nzHXSJSJW0Hq7ylaD2Q==}
@@ -1791,6 +1799,8 @@ snapshots:
 
   prelude-ls@1.2.1: {}
 
+  prettier@3.9.5: {}
+
   prompts@2.4.2:
     dependencies:
       kleur: 3.0.3
@@ -1923,7 +1933,7 @@ snapshots:
   vite@8.0.14(@types/node@24.12.4):
     dependencies:
       lightningcss: 1.32.0
-      picomatch: 4.0.4
+      picomatch: 4.0.5
       postcss: 8.5.15
       rolldown: 1.0.2
       tinyglobby: 0.2.16

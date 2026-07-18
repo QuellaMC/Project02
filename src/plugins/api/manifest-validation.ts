@@ -1,8 +1,8 @@
 import {
   createJsonBoundarySnapshot,
-  jsonBoundaryUtf8ByteLength
+  jsonBoundaryUtf8ByteLength,
 } from '../../shared/json-boundary.ts';
-import { normalizeRuntimePluginAccessMap } from '../policy/access-control.ts';
+import {normalizeRuntimePluginAccessMap} from '../policy/access-control.ts';
 import {
   afterTurnCommittedFailureBehaviorValues,
   beforeRoleModelFailureBehaviorValues,
@@ -19,7 +19,7 @@ import {
   runtimePluginTrustLevelValues,
   type RuntimePluginAccessMap,
   type RuntimePluginConfigValueType,
-  type RuntimePluginDeclaration
+  type RuntimePluginDeclaration,
 } from './contract.ts';
 import type {
   RuntimePluginActivationMetadata,
@@ -30,11 +30,11 @@ import type {
   RuntimePluginManifest,
   RuntimePluginProvidedTool,
   RuntimePluginRuntimePolicy,
-  RuntimePluginValidationResult
+  RuntimePluginValidationResult,
 } from './types.ts';
 import {
   optionalModelToolCallLimit,
-  requiredModelToolInputContract
+  requiredModelToolInputContract,
 } from './tool-schema-validation.ts';
 import {
   accept,
@@ -54,17 +54,17 @@ import {
   requiredNonEmptyString,
   requiredPositiveInteger,
   requiredSourceReferences,
-  requiredStringArray
+  requiredStringArray,
 } from './validation-primitives.ts';
 
 export function createRuntimePluginManifest(
-  value: unknown
+  value: unknown,
 ): RuntimePluginManifest {
   return acceptedOrThrow(validateRuntimePluginManifest(value));
 }
 
 export function validateRuntimePluginManifest(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginManifest> {
   if (!isRecord(value)) {
     return reject('malformed_manifest', 'Plugin manifest must be an object.');
@@ -75,7 +75,7 @@ export function validateRuntimePluginManifest(
   if (contractVersion !== runtimePluginContractVersion) {
     return reject(
       'unsupported_contract_version',
-      `Plugin contractVersion must be "${runtimePluginContractVersion}".`
+      `Plugin contractVersion must be "${runtimePluginContractVersion}".`,
     );
   }
 
@@ -84,13 +84,11 @@ export function validateRuntimePluginManifest(
   if (!isOneOf(kind, runtimePluginKindValues)) {
     return reject(
       'unsupported_plugin_kind',
-      'Plugin manifest kind is not supported.'
+      'Plugin manifest kind is not supported.',
     );
   }
 
-  const declaredPlugins = requiredDeclarationArray(
-    value['declaredPlugins']
-  );
+  const declaredPlugins = requiredDeclarationArray(value['declaredPlugins']);
 
   if (declaredPlugins.status === 'rejected') {
     return declaredPlugins;
@@ -113,7 +111,7 @@ export function validateRuntimePluginManifest(
   if (!isOneOf(localTrustLevel, runtimePluginTrustLevelValues)) {
     return reject(
       'malformed_manifest',
-      'Plugin manifest localTrustLevel is not supported.'
+      'Plugin manifest localTrustLevel is not supported.',
     );
   }
 
@@ -131,7 +129,7 @@ export function validateRuntimePluginManifest(
 
   const requestedAccess = requiredAccess(
     value['requestedAccess'],
-    'Plugin manifest requestedAccess'
+    'Plugin manifest requestedAccess',
   );
 
   if (requestedAccess.status === 'rejected') {
@@ -139,11 +137,14 @@ export function validateRuntimePluginManifest(
   }
 
   const id = requiredIdentifier(value['id'], 'id');
-  const displayName = requiredNonEmptyString(value['displayName'], 'displayName');
+  const displayName = requiredNonEmptyString(
+    value['displayName'],
+    'displayName',
+  );
   const version = requiredNonEmptyString(value['version'], 'version');
   const description = requiredNonEmptyString(
     value['description'],
-    'description'
+    'description',
   );
 
   if (
@@ -169,32 +170,35 @@ export function validateRuntimePluginManifest(
       localTrustLevel,
       runtimePolicy: runtimePolicy.value,
       activation: activation.value,
-      requestedAccess: requestedAccess.value
-    } satisfies RuntimePluginManifest)
+      requestedAccess: requestedAccess.value,
+    } satisfies RuntimePluginManifest),
   );
 }
 
 export function createRuntimePluginProvidedTool(
-  value: unknown
+  value: unknown,
 ): RuntimePluginProvidedTool {
   return acceptedOrThrow(validateRuntimePluginProvidedTool(value));
 }
 
 export function validateRuntimePluginProvidedTool(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginProvidedTool> {
   if (!isRecord(value)) {
     return reject(
       'malformed_tool_definition',
-      'Plugin provided tool must be an object.'
+      'Plugin provided tool must be an object.',
     );
   }
 
   const name = requiredIdentifier(value['name'], 'name');
-  const description = requiredNonEmptyString(value['description'], 'description');
+  const description = requiredNonEmptyString(
+    value['description'],
+    'description',
+  );
   const requiredForUserTurn = requiredBoolean(
     value['requiredForUserTurn'],
-    'requiredForUserTurn'
+    'requiredForUserTurn',
   );
   const callLimit = optionalModelToolCallLimit(value['callLimit']);
   const inputContract = requiredModelToolInputContract(value['inputContract']);
@@ -202,11 +206,11 @@ export function validateRuntimePluginProvidedTool(
   const sideEffectLevel = value['sideEffectLevel'];
   const requiresConfirmation = requiredBoolean(
     value['requiresConfirmation'],
-    'requiresConfirmation'
+    'requiresConfirmation',
   );
   const sourceReferencesRequired = requiredBoolean(
     value['sourceReferencesRequired'],
-    'sourceReferencesRequired'
+    'sourceReferencesRequired',
   );
 
   if (
@@ -225,21 +229,21 @@ export function validateRuntimePluginProvidedTool(
       callLimit,
       inputContract,
       requiresConfirmation,
-      sourceReferencesRequired
+      sourceReferencesRequired,
     ]);
   }
 
   if (!isOneOf(validationOwner, runtimePluginToolValidationOwnerValues)) {
     return reject(
       'malformed_tool_definition',
-      'Plugin provided tool validationOwner is not supported.'
+      'Plugin provided tool validationOwner is not supported.',
     );
   }
 
   if (!isOneOf(sideEffectLevel, runtimePluginSideEffectLevelValues)) {
     return reject(
       'malformed_tool_definition',
-      'Plugin provided tool sideEffectLevel is not supported.'
+      'Plugin provided tool sideEffectLevel is not supported.',
     );
   }
 
@@ -248,43 +252,43 @@ export function validateRuntimePluginProvidedTool(
       name: name.value,
       description: redactRuntimePluginText(description.value),
       requiredForUserTurn: requiredForUserTurn.value,
-      ...(callLimit.value === undefined ? {} : { callLimit: callLimit.value }),
+      ...(callLimit.value === undefined ? {} : {callLimit: callLimit.value}),
       inputContract: inputContract.value,
       validationOwner,
       sideEffectLevel,
       requiresConfirmation: requiresConfirmation.value,
-      sourceReferencesRequired: sourceReferencesRequired.value
-    } satisfies RuntimePluginProvidedTool)
+      sourceReferencesRequired: sourceReferencesRequired.value,
+    } satisfies RuntimePluginProvidedTool),
   );
 }
 
 export function createRuntimePluginContextItem(
-  value: unknown
+  value: unknown,
 ): RuntimePluginContextItem {
   return acceptedOrThrow(validateRuntimePluginContextItem(value));
 }
 
 export function validateRuntimePluginContextItem(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginContextItem> {
   try {
     value = createJsonBoundarySnapshot(value, {
       field: 'Plugin context item',
-      redact: true
+      redact: true,
     });
   } catch (error: unknown) {
     return reject(
       'malformed_context_item',
       error instanceof Error
         ? error.message
-        : 'Plugin context item exceeds the JSON boundary.'
+        : 'Plugin context item exceeds the JSON boundary.',
     );
   }
 
   if (!isRecord(value)) {
     return reject(
       'malformed_context_item',
-      'Plugin context item must be an object.'
+      'Plugin context item must be an object.',
     );
   }
 
@@ -295,7 +299,10 @@ export function validateRuntimePluginContextItem(
   const budget = requiredContextBudget(value['budget']);
   const sourceReferences = requiredSourceReferences(value['sourceReferences']);
   const confidence = optionalConfidence(value['confidence']);
-  const redactionLabels = requiredStringArray(value['redactionLabels'], 'redactionLabels');
+  const redactionLabels = requiredStringArray(
+    value['redactionLabels'],
+    'redactionLabels',
+  );
 
   if (
     pluginId.status === 'rejected' ||
@@ -313,21 +320,21 @@ export function validateRuntimePluginContextItem(
       budget,
       sourceReferences,
       confidence,
-      redactionLabels
+      redactionLabels,
     ]);
   }
 
   if (!isOneOf(kind, runtimePluginContextItemKindValues)) {
     return reject(
       'malformed_context_item',
-      'Plugin context item kind is not supported.'
+      'Plugin context item kind is not supported.',
     );
   }
 
   if (jsonBoundaryUtf8ByteLength(text.value) > 16 * 1_024) {
     return reject(
       'malformed_context_item',
-      'Plugin context item text exceeds the 16384-byte limit.'
+      'Plugin context item text exceeds the 16384-byte limit.',
     );
   }
 
@@ -339,32 +346,32 @@ export function validateRuntimePluginContextItem(
       text: redactRuntimePluginText(text.value),
       budget: budget.value,
       sourceReferences: freezeSourceReferences(sourceReferences.value),
-      ...(confidence.value === undefined ? {} : { confidence: confidence.value }),
-      redactionLabels: freezeRedactedStrings(redactionLabels.value)
-    } satisfies RuntimePluginContextItem)
+      ...(confidence.value === undefined ? {} : {confidence: confidence.value}),
+      redactionLabels: freezeRedactedStrings(redactionLabels.value),
+    } satisfies RuntimePluginContextItem),
   );
 }
 
 function requiredDeclarationArray(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<readonly RuntimePluginDeclaration[]> {
   return requiredDeclarationList({
     value,
     field: 'declaredPlugins',
-    allowEmpty: false
+    allowEmpty: false,
   });
 }
 
 function requiredAccess(
   value: unknown,
-  field: string
+  field: string,
 ): RuntimePluginValidationResult<RuntimePluginAccessMap> {
   try {
     return accept(normalizeRuntimePluginAccessMap(value, field));
   } catch (error: unknown) {
     return reject(
       'malformed_manifest',
-      error instanceof Error ? error.message : `${field} is malformed.`
+      error instanceof Error ? error.message : `${field} is malformed.`,
     );
   }
 }
@@ -380,7 +387,7 @@ export function requiredDeclarationList(options: {
   ) {
     return reject(
       'malformed_manifest',
-      `Plugin manifest ${options.field} must be a non-empty array.`
+      `Plugin manifest ${options.field} must be a non-empty array.`,
     );
   }
 
@@ -391,14 +398,14 @@ export function requiredDeclarationList(options: {
     if (!isOneOf(item, runtimePluginDeclarationValues)) {
       return reject(
         'malformed_manifest',
-        `Plugin manifest ${options.field} includes an unsupported value.`
+        `Plugin manifest ${options.field} includes an unsupported value.`,
       );
     }
 
     if (seen.has(item)) {
       return reject(
         'duplicate_declaration',
-        `Plugin manifest ${options.field} declares "${item}" more than once.`
+        `Plugin manifest ${options.field} declares "${item}" more than once.`,
       );
     }
 
@@ -410,18 +417,18 @@ export function requiredDeclarationList(options: {
 }
 
 function requiredCompatibilityMetadata(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginCompatibilityMetadata> {
   if (!isRecord(value)) {
     return reject(
       'malformed_manifest',
-      'Plugin compatibility metadata must be an object.'
+      'Plugin compatibility metadata must be an object.',
     );
   }
 
   const hostContractVersions = requiredStringArray(
     value['hostContractVersions'],
-    'hostContractVersions'
+    'hostContractVersions',
   );
 
   if (hostContractVersions.status === 'rejected') {
@@ -431,7 +438,7 @@ function requiredCompatibilityMetadata(
   if (!hostContractVersions.value.includes(runtimePluginContractVersion)) {
     return reject(
       'unsupported_contract_version',
-      `Plugin compatibility must include "${runtimePluginContractVersion}".`
+      `Plugin compatibility must include "${runtimePluginContractVersion}".`,
     );
   }
 
@@ -439,7 +446,7 @@ function requiredCompatibilityMetadata(
   const sourceVersion = optionalString(value['sourceVersion'], 'sourceVersion');
   const externalContract = optionalString(
     value['externalContract'],
-    'externalContract'
+    'externalContract',
   );
   const notes =
     value['notes'] === undefined
@@ -452,7 +459,12 @@ function requiredCompatibilityMetadata(
     externalContract.status === 'rejected' ||
     notes.status === 'rejected'
   ) {
-    return firstRejected([sourceSystem, sourceVersion, externalContract, notes]);
+    return firstRejected([
+      sourceSystem,
+      sourceVersion,
+      externalContract,
+      notes,
+    ]);
   }
 
   return accept(
@@ -460,27 +472,27 @@ function requiredCompatibilityMetadata(
       hostContractVersions: hostContractVersions.value,
       ...(sourceSystem.value === undefined
         ? {}
-        : { sourceSystem: redactRuntimePluginText(sourceSystem.value) }),
+        : {sourceSystem: redactRuntimePluginText(sourceSystem.value)}),
       ...(sourceVersion.value === undefined
         ? {}
-        : { sourceVersion: redactRuntimePluginText(sourceVersion.value) }),
+        : {sourceVersion: redactRuntimePluginText(sourceVersion.value)}),
       ...(externalContract.value === undefined
         ? {}
-        : { externalContract: redactRuntimePluginText(externalContract.value) }),
+        : {externalContract: redactRuntimePluginText(externalContract.value)}),
       ...(notes.value === undefined
         ? {}
-        : { notes: Object.freeze(notes.value.map(redactRuntimePluginText)) })
-    } satisfies RuntimePluginCompatibilityMetadata)
+        : {notes: Object.freeze(notes.value.map(redactRuntimePluginText))}),
+    } satisfies RuntimePluginCompatibilityMetadata),
   );
 }
 
 function requiredConfigMetadata(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginConfigMetadata> {
   if (!isRecord(value)) {
     return reject(
       'malformed_manifest',
-      'Plugin config metadata must be an object.'
+      'Plugin config metadata must be an object.',
     );
   }
 
@@ -489,7 +501,7 @@ function requiredConfigMetadata(
   if (!Array.isArray(fieldsValue)) {
     return reject(
       'malformed_manifest',
-      'Plugin config fields must be an array.'
+      'Plugin config fields must be an array.',
     );
   }
 
@@ -506,7 +518,7 @@ function requiredConfigMetadata(
     if (seenNames.has(field.value.name)) {
       return reject(
         'duplicate_declaration',
-        `Plugin config field "${field.value.name}" is declared more than once.`
+        `Plugin config field "${field.value.name}" is declared more than once.`,
       );
     }
 
@@ -525,29 +537,32 @@ function requiredConfigMetadata(
       fields: Object.freeze(fields),
       ...(fingerprint.value === undefined
         ? {}
-        : { fingerprint: redactRuntimePluginText(fingerprint.value) })
-    } satisfies RuntimePluginConfigMetadata)
+        : {fingerprint: redactRuntimePluginText(fingerprint.value)}),
+    } satisfies RuntimePluginConfigMetadata),
   );
 }
 
 function requiredConfigField(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginConfigField> {
   if (!isRecord(value)) {
     return reject(
       'malformed_manifest',
-      'Plugin config field must be an object.'
+      'Plugin config field must be an object.',
     );
   }
 
   const name = requiredIdentifier(value['name'], 'name');
-  const description = requiredNonEmptyString(value['description'], 'description');
+  const description = requiredNonEmptyString(
+    value['description'],
+    'description',
+  );
   const required = requiredBoolean(value['required'], 'required');
   const secret = requiredBoolean(value['secret'], 'secret');
   const valueType = optionalRuntimePluginConfigValueType(value['valueType']);
   const defaultValueSummary = optionalString(
     value['defaultValueSummary'],
-    'defaultValueSummary'
+    'defaultValueSummary',
   );
   const envVar = optionalString(value['envVar'], 'envVar');
   const allowedValues =
@@ -564,11 +579,11 @@ function requiredConfigField(
       : requiredBoolean(value['reloadRequired'], 'reloadRequired');
   const redactionLabels = requiredStringArray(
     value['redactionLabels'],
-    'redactionLabels'
+    'redactionLabels',
   );
   const configFingerprint = optionalString(
     value['configFingerprint'],
-    'configFingerprint'
+    'configFingerprint',
   );
 
   if (name.status === 'rejected') return name;
@@ -587,7 +602,7 @@ function requiredConfigField(
   if (secret.value && agentMutable.value === true) {
     return reject(
       'malformed_manifest',
-      'Secret plugin config fields cannot allow agent mutation.'
+      'Secret plugin config fields cannot allow agent mutation.',
     );
   }
 
@@ -603,7 +618,7 @@ function requiredConfigField(
     agentMutable: agentMutable.value,
     reloadRequired: reloadRequired.value,
     redactionLabels: redactionLabels.value,
-    configFingerprint: configFingerprint.value
+    configFingerprint: configFingerprint.value,
   });
 }
 
@@ -627,44 +642,46 @@ function acceptRuntimePluginConfigField(options: {
       description: redactRuntimePluginText(options.description),
       required: options.required,
       secret: options.secret,
-      ...(options.valueType === undefined ? {} : { valueType: options.valueType }),
+      ...(options.valueType === undefined
+        ? {}
+        : {valueType: options.valueType}),
       ...(options.defaultValueSummary === undefined
         ? {}
         : {
             defaultValueSummary: redactRuntimePluginText(
-              options.defaultValueSummary
-            )
+              options.defaultValueSummary,
+            ),
           }),
       ...(options.envVar === undefined
         ? {}
-        : { envVar: redactRuntimePluginText(options.envVar) }),
+        : {envVar: redactRuntimePluginText(options.envVar)}),
       ...(options.allowedValues === undefined
         ? {}
         : {
             allowedValues: Object.freeze(
-              options.allowedValues.map(redactRuntimePluginText)
-            )
+              options.allowedValues.map(redactRuntimePluginText),
+            ),
           }),
       ...(options.agentMutable === undefined
         ? {}
-        : { agentMutable: options.agentMutable }),
+        : {agentMutable: options.agentMutable}),
       ...(options.reloadRequired === undefined
         ? {}
-        : { reloadRequired: options.reloadRequired }),
+        : {reloadRequired: options.reloadRequired}),
       redactionLabels: freezeRedactedStrings(options.redactionLabels),
       ...(options.configFingerprint === undefined
         ? {}
         : {
             configFingerprint: redactRuntimePluginText(
-              options.configFingerprint
-            )
-          })
-    } satisfies RuntimePluginConfigField)
+              options.configFingerprint,
+            ),
+          }),
+    } satisfies RuntimePluginConfigField),
   );
 }
 
 function optionalRuntimePluginConfigValueType(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginConfigValueType | undefined> {
   if (value === undefined) {
     return accept(undefined);
@@ -673,7 +690,7 @@ function optionalRuntimePluginConfigValueType(
   if (!isOneOf(value, runtimePluginConfigValueTypeValues)) {
     return reject(
       'malformed_manifest',
-      'Plugin config field valueType is not supported.'
+      'Plugin config field valueType is not supported.',
     );
   }
 
@@ -681,29 +698,29 @@ function optionalRuntimePluginConfigValueType(
 }
 
 function requiredRuntimePolicy(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginRuntimePolicy> {
   if (!isRecord(value)) {
     return reject(
       'malformed_manifest',
-      'Plugin runtimePolicy must be an object.'
+      'Plugin runtimePolicy must be an object.',
     );
   }
 
   const requiredForTurn = requiredBoolean(
     value['requiredForTurn'],
-    'requiredForTurn'
+    'requiredForTurn',
   );
   const sideEffectLevel = value['sideEffectLevel'];
   const confirmation = value['confirmation'];
   const timeoutMs = requiredPositiveInteger(value['timeoutMs'], 'timeoutMs');
   const sourceReferencesRequired = requiredBoolean(
     value['sourceReferencesRequired'],
-    'sourceReferencesRequired'
+    'sourceReferencesRequired',
   );
   const redactionLabels = requiredStringArray(
     value['redactionLabels'],
-    'redactionLabels'
+    'redactionLabels',
   );
   const failureBehavior = requiredFailureBehavior(value['failureBehavior']);
 
@@ -719,21 +736,21 @@ function requiredRuntimePolicy(
       timeoutMs,
       sourceReferencesRequired,
       redactionLabels,
-      failureBehavior
+      failureBehavior,
     ]);
   }
 
   if (!isOneOf(sideEffectLevel, runtimePluginSideEffectLevelValues)) {
     return reject(
       'malformed_manifest',
-      'Plugin runtimePolicy.sideEffectLevel is not supported.'
+      'Plugin runtimePolicy.sideEffectLevel is not supported.',
     );
   }
 
   if (!isOneOf(confirmation, confirmationRequirementValues)) {
     return reject(
       'malformed_manifest',
-      'Plugin runtimePolicy.confirmation is not supported.'
+      'Plugin runtimePolicy.confirmation is not supported.',
     );
   }
 
@@ -745,18 +762,20 @@ function requiredRuntimePolicy(
       timeoutMs: timeoutMs.value,
       sourceReferencesRequired: sourceReferencesRequired.value,
       redactionLabels: freezeRedactedStrings(redactionLabels.value),
-      failureBehavior: failureBehavior.value
-    } satisfies RuntimePluginRuntimePolicy)
+      failureBehavior: failureBehavior.value,
+    } satisfies RuntimePluginRuntimePolicy),
   );
 }
 
 function requiredFailureBehavior(
-  value: unknown
-): RuntimePluginValidationResult<RuntimePluginRuntimePolicy['failureBehavior']> {
+  value: unknown,
+): RuntimePluginValidationResult<
+  RuntimePluginRuntimePolicy['failureBehavior']
+> {
   if (!isRecord(value)) {
     return reject(
       'malformed_manifest',
-      'Plugin failureBehavior must be an object.'
+      'Plugin failureBehavior must be an object.',
     );
   }
 
@@ -773,7 +792,7 @@ function requiredFailureBehavior(
   ) {
     return reject(
       'malformed_manifest',
-      'Plugin failureBehavior includes an unsupported value.'
+      'Plugin failureBehavior includes an unsupported value.',
     );
   }
 
@@ -782,22 +801,25 @@ function requiredFailureBehavior(
       beforeRoleModelCall,
       handleToolCall,
       afterTurnCommitted,
-      health
-    } satisfies RuntimePluginRuntimePolicy['failureBehavior'])
+      health,
+    } satisfies RuntimePluginRuntimePolicy['failureBehavior']),
   );
 }
 
 function requiredActivationMetadata(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginActivationMetadata> {
   if (!isRecord(value)) {
     return reject(
       'malformed_manifest',
-      'Plugin activation metadata must be an object.'
+      'Plugin activation metadata must be an object.',
     );
   }
 
-  const defaultEnabled = requiredBoolean(value['defaultEnabled'], 'defaultEnabled');
+  const defaultEnabled = requiredBoolean(
+    value['defaultEnabled'],
+    'defaultEnabled',
+  );
   const reasons = requiredStringArray(value['reasons'], 'reasons');
 
   if (defaultEnabled.status === 'rejected' || reasons.status === 'rejected') {
@@ -807,7 +829,7 @@ function requiredActivationMetadata(
   return accept(
     Object.freeze({
       defaultEnabled: defaultEnabled.value,
-      reasons: freezeRedactedStrings(reasons.value)
-    } satisfies RuntimePluginActivationMetadata)
+      reasons: freezeRedactedStrings(reasons.value),
+    } satisfies RuntimePluginActivationMetadata),
   );
 }

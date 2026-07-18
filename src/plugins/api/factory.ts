@@ -1,10 +1,7 @@
-import type {
-  RuntimePlugin,
-  RuntimePluginManifest
-} from './types.ts';
+import type {RuntimePlugin, RuntimePluginManifest} from './types.ts';
 import type {
   RedactedPluginRuntimeConfig,
-  ResolvedPluginRuntimeConfig
+  ResolvedPluginRuntimeConfig,
 } from '../../runtime/config/index.ts';
 
 export type RuntimePluginFactoryInput = {
@@ -16,7 +13,7 @@ export type RuntimePluginFactoryInput = {
 };
 
 export type RuntimePluginFactoryFunction = (
-  input: RuntimePluginFactoryInput
+  input: RuntimePluginFactoryInput,
 ) => Promise<RuntimePlugin> | RuntimePlugin;
 
 export type RuntimePluginFactoryCreate = (
@@ -24,7 +21,7 @@ export type RuntimePluginFactoryCreate = (
 ) => Promise<RuntimePlugin> | RuntimePlugin;
 
 export type RuntimePluginFactoryDefinition<
-  TCreate extends RuntimePluginFactoryCreate = RuntimePluginFactoryCreate
+  TCreate extends RuntimePluginFactoryCreate = RuntimePluginFactoryCreate,
 > = {
   readonly manifest: RuntimePluginManifest;
   readonly create: TCreate;

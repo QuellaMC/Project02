@@ -1,5 +1,5 @@
-import type { RuntimeEventIdentity } from '../../core/index.ts';
-import type { RuntimePluginFileStore } from './types.ts';
+import type {RuntimeEventIdentity} from '../../core/index.ts';
+import type {RuntimePluginFileStore} from './types.ts';
 
 type RuntimePluginFileStoreIdentity = {
   readonly sessionId: string;
@@ -19,15 +19,14 @@ export type InMemoryRuntimePluginFileStoreOptions =
   };
 
 export type CreateRuntimePluginFileStoreOptions =
-  | DurableRuntimePluginFileStoreOptions
-  | InMemoryRuntimePluginFileStoreOptions;
+  DurableRuntimePluginFileStoreOptions | InMemoryRuntimePluginFileStoreOptions;
 
 export type RuntimePluginFileStoreTransaction = {
   fileStoreFor(
-    options: CreateRuntimePluginFileStoreOptions
+    options: CreateRuntimePluginFileStoreOptions,
   ): RuntimePluginFileStore;
   prepare(
-    identity: RuntimeEventIdentity
+    identity: RuntimeEventIdentity,
   ): Promise<RuntimePluginFileStorePreparedTransaction>;
   rollback(): void;
   hasPendingWrites(): boolean;
@@ -47,7 +46,7 @@ export type RuntimePluginFileStorePathMode = 'json' | 'jsonl';
  */
 export type RuntimePluginFileStoreProvider = {
   readonly createFileStore: (
-    options: CreateRuntimePluginFileStoreOptions
+    options: CreateRuntimePluginFileStoreOptions,
   ) => RuntimePluginFileStore;
   readonly createFileStoreTransaction: () => RuntimePluginFileStoreTransaction;
 };

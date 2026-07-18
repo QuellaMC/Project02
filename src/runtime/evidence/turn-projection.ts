@@ -1,23 +1,21 @@
-import {
-  runtimeEventIdentityKey
-} from '../../core/index.ts';
+import {runtimeEventIdentityKey} from '../../core/index.ts';
 import type {
-  ConversationLogRecord, RawEventLogRecord,
-  RuntimeTraceEntry, RuntimeTurnStatus
+  ConversationLogRecord,
+  RawEventLogRecord,
+  RuntimeTraceEntry,
+  RuntimeTurnStatus,
 } from './records.ts';
-import type { RuntimeDerivedTraceEntry } from './records.ts';
-import { isTerminalRawEventLogRecordKind } from './records.ts';
-import { canonicalJsonStringify } from '../../shared/canonical-json.ts';
-import { LocalRuntimeStorageContractError } from '../storage/layout-contract.ts';
-import type { RuntimePluginAccessMap } from '../../plugins/api/index.ts';
-import type {
-  RoleModelDecisionResult
-} from '../../role-model/index.ts';
-import type { RoleModelCommitValidationResult } from './records.ts';
+import type {RuntimeDerivedTraceEntry} from './records.ts';
+import {isTerminalRawEventLogRecordKind} from './records.ts';
+import {canonicalJsonStringify} from '../../shared/canonical-json.ts';
+import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
+import type {RuntimePluginAccessMap} from '../../plugins/api/index.ts';
+import type {RoleModelDecisionResult} from '../../role-model/index.ts';
+import type {RoleModelCommitValidationResult} from './records.ts';
 import type {
   RuntimePluginContextItem,
   RuntimePluginEvidenceSnapshot,
-  RuntimePluginTurnEvidenceSnapshot
+  RuntimePluginTurnEvidenceSnapshot,
 } from '../../plugins/api/index.ts';
 
 export type InspectTurnEvidence = {
@@ -216,8 +214,6 @@ export type InspectPluginSourceReference = {
   readonly uri?: string;
 };
 
-
-
 export function createTurnEvidence(options: {
   readonly conversationMessages: readonly ConversationLogRecord[];
   readonly derivedTraceEntries: readonly RuntimeDerivedTraceEntry[];
@@ -227,12 +223,12 @@ export function createTurnEvidence(options: {
   const indexes = createInspectEvidenceIndexes(options);
 
   return Object.freeze(
-    indexes.terminalRawEvents.map((terminalRawEvent) =>
+    indexes.terminalRawEvents.map(terminalRawEvent =>
       createTurnEvidenceEntry({
         indexes,
-        terminalRawEvent
-      })
-    )
+        terminalRawEvent,
+      }),
+    ),
   );
 }
 
@@ -283,19 +279,19 @@ export function createInspectEvidenceIndexes(options: {
 
   return Object.freeze({
     conversationById: new Map(
-      options.conversationMessages.map((message) => [message.id, message])
+      options.conversationMessages.map(message => [message.id, message]),
     ),
     derivedTraceByIdentity: groupEvidenceByIdentity(
-      options.derivedTraceEntries
+      options.derivedTraceEntries,
     ),
     terminalRawEvents: rawEventIndexes.terminalRawEvents,
     turnProjectionsByIdentity: rawEventIndexes.turnProjectionsByIdentity,
-    traceEntriesByIdentity: groupEvidenceByIdentity(options.traceEntries)
+    traceEntriesByIdentity: groupEvidenceByIdentity(options.traceEntries),
   });
 }
 
 export function createInspectRawEventIndexes(
-  rawEvents: readonly RawEventLogRecord[]
+  rawEvents: readonly RawEventLogRecord[],
 ): Pick<
   InspectEvidenceIndexes,
   'terminalRawEvents' | 'turnProjectionsByIdentity'
@@ -311,14 +307,14 @@ export function createInspectRawEventIndexes(
     const rawEventKind = rawEvent.kind;
     const projection = mutableInspectTurnProjection(
       mutableProjections,
-      identityKey
+      identityKey,
     );
     const roleModelEvidence = roleModelEvidenceForRawEvent(rawEvent);
 
     appendInspectModelRound({
       projection,
       rawEventKind,
-      roleModelEvidence
+      roleModelEvidence,
     });
 
     if (
@@ -334,7 +330,7 @@ export function createInspectRawEventIndexes(
       isTerminalRawEventLogRecordKind(rawEventKind)
     ) {
       projection.simplePluginEvidence.push(
-        ...(rawEvent.runtimePluginEvidence ?? [])
+        ...(rawEvent.runtimePluginEvidence ?? []),
       );
     }
 
@@ -342,21 +338,21 @@ export function createInspectRawEventIndexes(
       terminalRawEvents.push(
         Object.freeze({
           rawEvent,
-          roleModelEvidence
-        } satisfies InspectTerminalRawEvent)
+          roleModelEvidence,
+        } satisfies InspectTerminalRawEvent),
       );
     }
   }
 
   return Object.freeze({
     terminalRawEvents: Object.freeze(terminalRawEvents),
-    turnProjectionsByIdentity: freezeInspectTurnProjections(mutableProjections)
+    turnProjectionsByIdentity: freezeInspectTurnProjections(mutableProjections),
   });
 }
 
 function mutableInspectTurnProjection(
   projections: Map<string, MutableInspectTurnRawEventProjection>,
-  identityKey: string
+  identityKey: string,
 ): MutableInspectTurnRawEventProjection {
   const existing = projections.get(identityKey);
 
@@ -368,7 +364,7 @@ function mutableInspectTurnProjection(
     modelRounds: [],
     seenModelRoundEvidenceKeys: new Set(),
     simplePluginEvidence: [],
-    toolEvents: []
+    toolEvents: [],
   };
   projections.set(identityKey, created);
   return created;
@@ -397,16 +393,13 @@ function appendInspectModelRound(options: {
   options.projection.modelRounds.push(
     Object.freeze({
       rawEventKind: options.rawEventKind,
-      roleModelEvidence: evidence
-    } satisfies InspectRoleModelRoundEvidence)
+      roleModelEvidence: evidence,
+    } satisfies InspectRoleModelRoundEvidence),
   );
 }
 
 function freezeInspectTurnProjections(
-  mutableProjections: ReadonlyMap<
-    string,
-    MutableInspectTurnRawEventProjection
-  >
+  mutableProjections: ReadonlyMap<string, MutableInspectTurnRawEventProjection>,
 ): ReadonlyMap<string, InspectTurnRawEventProjection> {
   const projections = new Map<string, InspectTurnRawEventProjection>();
 
@@ -416,19 +409,21 @@ function freezeInspectTurnProjections(
       Object.freeze({
         modelRounds: Object.freeze(projection.modelRounds),
         simplePluginEvidence: Object.freeze(projection.simplePluginEvidence),
-        toolEvents: Object.freeze(projection.toolEvents)
-      } satisfies InspectTurnRawEventProjection)
+        toolEvents: Object.freeze(projection.toolEvents),
+      } satisfies InspectTurnRawEventProjection),
     );
   }
 
   return projections;
 }
 
-export function groupEvidenceByIdentity<T extends {
-  readonly eventId: string;
-  readonly traceId: string;
-  readonly createdAt: string;
-}>(records: readonly T[]): ReadonlyMap<string, readonly T[]> {
+export function groupEvidenceByIdentity<
+  T extends {
+    readonly eventId: string;
+    readonly traceId: string;
+    readonly createdAt: string;
+  },
+>(records: readonly T[]): ReadonlyMap<string, readonly T[]> {
   const grouped = new Map<string, T[]>();
 
   for (const record of records) {
@@ -445,7 +440,7 @@ function createTurnEvidenceEntry(options: {
   readonly indexes: InspectEvidenceIndexes;
   readonly terminalRawEvent: InspectTerminalRawEvent;
 }): InspectTurnEvidence {
-  const { rawEvent, roleModelEvidence } = options.terminalRawEvent;
+  const {rawEvent, roleModelEvidence} = options.terminalRawEvent;
   const visibleMessageIds = rawEvent.visibleMessageIds ?? [];
   const identityKey = runtimeEventIdentityKey(rawEvent);
   const projection = options.indexes.turnProjectionsByIdentity.get(identityKey);
@@ -458,43 +453,39 @@ function createTurnEvidenceEntry(options: {
     eventId: rawEvent.eventId,
     traceId: rawEvent.traceId,
     status: terminalTurnStatus(rawEvent),
-    steps: Object.freeze(
-      storedTraceEntries.map((entry) => entry.step)
-    ),
+    steps: Object.freeze(storedTraceEntries.map(entry => entry.step)),
     derivedSteps: Object.freeze(
-      derivedTraceEntries.map((entry) =>
+      derivedTraceEntries.map(entry =>
         Object.freeze({
           step: entry.step,
           source: entry.provenance.source,
           reason: entry.provenance.reason,
-          rawEventAnchor: entry.provenance.rawEventAnchor
-        })
-      )
+          rawEventAnchor: entry.provenance.rawEventAnchor,
+        }),
+      ),
     ),
     visibleMessages: Object.freeze(
-      visibleMessageIds.flatMap((messageId) =>
-        visibleMessagesForId(options.indexes.conversationById, messageId)
-      )
+      visibleMessageIds.flatMap(messageId =>
+        visibleMessagesForId(options.indexes.conversationById, messageId),
+      ),
     ),
     modelRounds: projection?.modelRounds ?? Object.freeze([]),
     toolEvents: toolEventsForTurn({
       toolEvents: projection?.toolEvents ?? [],
-      terminalRawEvent: rawEvent
+      terminalRawEvent: rawEvent,
     }),
     ...roleModelEvidence,
     ...pluginEvidenceForTurn({
       simpleEvidence: projection?.simplePluginEvidence ?? [],
-      turnEvidence: rawEvent.runtimePluginTurnEvidence
+      turnEvidence: rawEvent.runtimePluginTurnEvidence,
     }),
-    ...(rawEvent.reason === undefined
-      ? {}
-      : { reason: rawEvent.reason })
+    ...(rawEvent.reason === undefined ? {} : {reason: rawEvent.reason}),
   } satisfies InspectTurnEvidence);
 }
 
-function roleModelEvidenceForRawEvent(
-  rawEvent: RawEventLogRecord
-): { readonly roleModelEvidence?: InspectRoleModelEvidence } {
+function roleModelEvidenceForRawEvent(rawEvent: RawEventLogRecord): {
+  readonly roleModelEvidence?: InspectRoleModelEvidence;
+} {
   if (
     rawEvent.roleModelIOSnapshot === undefined &&
     rawEvent.parsedRoleModelDecisionSnapshot === undefined &&
@@ -520,16 +511,16 @@ function roleModelEvidenceForRawEvent(
                 inputEnvelope.event.payload.currentUserMessage,
               recentVisibleMessages: Object.freeze(
                 inputEnvelope.decisionContext.recentVisibleMessages.map(
-                  visibleMessageFromSnapshot
-                )
+                  visibleMessageFromSnapshot,
+                ),
               ),
               runtimeNotes: Object.freeze([
-                ...inputEnvelope.decisionContext.runtimeNotes
+                ...inputEnvelope.decisionContext.runtimeNotes,
               ]),
               pluginContextItems: pluginContextItemsFromSnapshots(
-                inputEnvelope.decisionContext.pluginContextItems
-              )
-            })
+                inputEnvelope.decisionContext.pluginContextItems,
+              ),
+            }),
           }),
       ...(rawEvent.roleModelIOSnapshot === undefined
         ? {}
@@ -540,36 +531,33 @@ function roleModelEvidenceForRawEvent(
                 ? {}
                 : {
                     providerMetadata:
-                      rawEvent.roleModelIOSnapshot.providerMetadata
+                      rawEvent.roleModelIOSnapshot.providerMetadata,
                   }),
               ...(rawEvent.roleModelIOSnapshot.providerExchange === undefined
                 ? {}
                 : {
                     providerExchange:
-                      rawEvent.roleModelIOSnapshot.providerExchange
-                  })
-            })
+                      rawEvent.roleModelIOSnapshot.providerExchange,
+                  }),
+            }),
           }),
       ...(parsedDecision === undefined
         ? {}
-        : { parsedDecision: parsedRoleModelDecision(parsedDecision) }),
+        : {parsedDecision: parsedRoleModelDecision(parsedDecision)}),
       ...(commitValidation === undefined
         ? {}
         : {
-            commitValidation:
-              roleModelCommitValidation(commitValidation)
-          })
-    } satisfies InspectRoleModelEvidence)
+            commitValidation: roleModelCommitValidation(commitValidation),
+          }),
+    } satisfies InspectRoleModelEvidence),
   };
 }
 
-function roleModelRoundEvidenceKey(
-  evidence: InspectRoleModelEvidence
-): string {
+function roleModelRoundEvidenceKey(evidence: InspectRoleModelEvidence): string {
   return canonicalJsonStringify({
     input: evidence.input,
     output: evidence.output,
-    parsedDecision: evidence.parsedDecision
+    parsedDecision: evidence.parsedDecision,
   });
 }
 
@@ -584,63 +572,70 @@ function toolEventsForTurn(options: {
   }
 
   return Object.freeze(
-    options.toolEvents.filter((toolEvent) => referencedCallIds.has(toolEvent.callId))
+    options.toolEvents.filter(toolEvent =>
+      referencedCallIds.has(toolEvent.callId),
+    ),
   );
 }
 
-function inspectToolCallEvent(rawEvent: RawEventLogRecord): InspectToolCallEvent {
+function inspectToolCallEvent(
+  rawEvent: RawEventLogRecord,
+): InspectToolCallEvent {
   return Object.freeze({
     callId: rawEvent.toolCallId ?? '',
     round: rawEvent.toolRound ?? 0,
     toolName: rawEvent.toolName ?? '',
     pluginId: rawEvent.toolPluginId ?? '',
-    ...(rawEvent.toolInput === undefined ? {} : { input: rawEvent.toolInput }),
+    ...(rawEvent.toolInput === undefined ? {} : {input: rawEvent.toolInput}),
     ...(rawEvent.toolResult === undefined
       ? {}
-      : { result: pluginToolInvocationResult(rawEvent.toolResult) }),
+      : {result: pluginToolInvocationResult(rawEvent.toolResult)}),
     ...(rawEvent.pluginStoreRevision === undefined
       ? {}
-      : { pluginStoreRevision: rawEvent.pluginStoreRevision })
+      : {pluginStoreRevision: rawEvent.pluginStoreRevision}),
   } satisfies InspectToolCallEvent);
 }
 
 function pluginEvidenceForTurn(options: {
   readonly simpleEvidence: readonly RuntimePluginEvidenceSnapshot[];
   readonly turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined;
-}): { readonly pluginEvidence?: InspectPluginEvidence } {
-  if (options.turnEvidence === undefined && options.simpleEvidence.length === 0) {
+}): {readonly pluginEvidence?: InspectPluginEvidence} {
+  if (
+    options.turnEvidence === undefined &&
+    options.simpleEvidence.length === 0
+  ) {
     return {};
   }
 
   const evidence = uniquePluginEvidenceSnapshots([
     ...options.simpleEvidence,
-    ...(options.turnEvidence?.evidence ?? [])
+    ...(options.turnEvidence?.evidence ?? []),
   ]);
 
   return {
     pluginEvidence: Object.freeze({
       ...(options.turnEvidence === undefined
         ? {}
-        : { contractVersion: options.turnEvidence.contractVersion }),
+        : {contractVersion: options.turnEvidence.contractVersion}),
       plugins: pluginListings(options.turnEvidence),
       contextItems: pluginContextItems(options.turnEvidence),
       toolInvocations: pluginToolInvocations(options.turnEvidence),
       evidence: Object.freeze(evidence.map(pluginEvidenceSnapshot)),
       policyOutcomes: policyOutcomes(evidence),
-      health: pluginHealthSnapshots(options.turnEvidence)
-    } satisfies InspectPluginEvidence)
+      health: pluginHealthSnapshots(options.turnEvidence),
+    } satisfies InspectPluginEvidence),
   };
 }
 
 function pluginListings(
-  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined
+  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined,
 ): readonly InspectPluginListing[] {
   if (turnEvidence === undefined) {
     return Object.freeze([]);
   }
 
   return Object.freeze(
-    turnEvidence.plugins.map((plugin) =>
+    turnEvidence.plugins.map(plugin =>
       Object.freeze({
         pluginId: plugin.pluginId,
         displayName: plugin.manifest.displayName,
@@ -654,36 +649,36 @@ function pluginListings(
         requestedAccess: plugin.requestedAccess,
         grantedAccess: plugin.grantedAccess,
         providedTools: Object.freeze(
-          plugin.providedTools.map((tool) =>
+          plugin.providedTools.map(tool =>
             Object.freeze({
               name: tool.name,
               validationOwner: tool.validationOwner,
               sideEffectLevel: tool.sideEffectLevel,
               requiresConfirmation: tool.requiresConfirmation,
-              sourceReferencesRequired: tool.sourceReferencesRequired
-            } satisfies InspectPluginToolListing)
-          )
+              sourceReferencesRequired: tool.sourceReferencesRequired,
+            } satisfies InspectPluginToolListing),
+          ),
         ),
         registeredLifecycleHooks: Object.freeze([
-          ...plugin.registeredLifecycleHooks
+          ...plugin.registeredLifecycleHooks,
         ]),
         redactionLabels: Object.freeze([...plugin.redactionLabels]),
         ...(plugin.configFingerprint === undefined
           ? {}
-          : { configFingerprint: plugin.configFingerprint }),
+          : {configFingerprint: plugin.configFingerprint}),
         ...(plugin.healthStatus === undefined
           ? {}
-          : { healthStatus: plugin.healthStatus })
-      } satisfies InspectPluginListing)
-    )
+          : {healthStatus: plugin.healthStatus}),
+      } satisfies InspectPluginListing),
+    ),
   );
 }
 
 function pluginContextItemsFromSnapshots(
-  items: readonly RuntimePluginContextItem[]
+  items: readonly RuntimePluginContextItem[],
 ): readonly InspectPluginContextItem[] {
   return Object.freeze(
-    items.map((item) =>
+    items.map(item =>
       Object.freeze({
         pluginId: item.pluginId,
         id: item.id,
@@ -691,49 +686,49 @@ function pluginContextItemsFromSnapshots(
         text: item.text,
         budget: Object.freeze({
           estimatedTokens: item.budget.estimatedTokens,
-          priority: item.budget.priority
+          priority: item.budget.priority,
         }),
         sourceReferences: sourceReferences(item.sourceReferences),
         redactionLabels: Object.freeze([...item.redactionLabels]),
-        ...(item.confidence === undefined ? {} : { confidence: item.confidence })
-      } satisfies InspectPluginContextItem)
-    )
+        ...(item.confidence === undefined ? {} : {confidence: item.confidence}),
+      } satisfies InspectPluginContextItem),
+    ),
   );
 }
 
 function pluginContextItems(
-  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined
+  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined,
 ): readonly InspectPluginContextItem[] {
   return pluginContextItemsFromSnapshots(turnEvidence?.contextItems ?? []);
 }
 
 function pluginToolInvocations(
-  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined
+  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined,
 ): readonly InspectPluginToolInvocation[] {
   if (turnEvidence === undefined) {
     return Object.freeze([]);
   }
 
   return Object.freeze(
-    turnEvidence.toolInvocations.map((invocation) =>
+    turnEvidence.toolInvocations.map(invocation =>
       Object.freeze({
         pluginId: invocation.pluginId,
         toolName: invocation.toolName,
         input: invocation.input,
-        result: pluginToolInvocationResult(invocation.result)
-      } satisfies InspectPluginToolInvocation)
-    )
+        result: pluginToolInvocationResult(invocation.result),
+      } satisfies InspectPluginToolInvocation),
+    ),
   );
 }
 
 function pluginToolInvocationResult(
-  result: RuntimePluginTurnEvidenceSnapshot['toolInvocations'][number]['result']
+  result: RuntimePluginTurnEvidenceSnapshot['toolInvocations'][number]['result'],
 ): InspectPluginToolInvocationResult {
   if (result.status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
       output: result.output,
-      evidence: Object.freeze(result.evidence.map(pluginEvidenceSnapshot))
+      evidence: Object.freeze(result.evidence.map(pluginEvidenceSnapshot)),
     } satisfies InspectPluginToolInvocationResult);
   }
 
@@ -741,12 +736,12 @@ function pluginToolInvocationResult(
     status: 'rejected',
     reason: result.reason,
     message: result.message,
-    evidence: Object.freeze(result.evidence.map(pluginEvidenceSnapshot))
+    evidence: Object.freeze(result.evidence.map(pluginEvidenceSnapshot)),
   } satisfies InspectPluginToolInvocationResult);
 }
 
 function pluginEvidenceSnapshot(
-  snapshot: RuntimePluginEvidenceSnapshot
+  snapshot: RuntimePluginEvidenceSnapshot,
 ): InspectPluginEvidenceSnapshot {
   return Object.freeze({
     pluginId: snapshot.pluginId,
@@ -756,18 +751,18 @@ function pluginEvidenceSnapshot(
     redactionLabels: Object.freeze([...snapshot.redactionLabels]),
     ...(snapshot.policyOutcome === undefined
       ? {}
-      : { policyOutcome: snapshot.policyOutcome }),
+      : {policyOutcome: snapshot.policyOutcome}),
     ...(snapshot.sourceReferences === undefined
       ? {}
-      : { sourceReferences: sourceReferences(snapshot.sourceReferences) }),
+      : {sourceReferences: sourceReferences(snapshot.sourceReferences)}),
     ...(snapshot.configFingerprint === undefined
       ? {}
-      : { configFingerprint: snapshot.configFingerprint })
+      : {configFingerprint: snapshot.configFingerprint}),
   } satisfies InspectPluginEvidenceSnapshot);
 }
 
 function uniquePluginEvidenceSnapshots(
-  snapshots: readonly RuntimePluginEvidenceSnapshot[]
+  snapshots: readonly RuntimePluginEvidenceSnapshot[],
 ): readonly RuntimePluginEvidenceSnapshot[] {
   const seen = new Set<string>();
   const uniqueSnapshots: RuntimePluginEvidenceSnapshot[] = [];
@@ -787,7 +782,7 @@ function uniquePluginEvidenceSnapshots(
 }
 
 function pluginEvidenceSnapshotKey(
-  snapshot: RuntimePluginEvidenceSnapshot
+  snapshot: RuntimePluginEvidenceSnapshot,
 ): string {
   return canonicalJsonStringify({
     eventId: snapshot.eventId,
@@ -801,32 +796,32 @@ function pluginEvidenceSnapshotKey(
     policyOutcome: snapshot.policyOutcome,
     sourceReferences: snapshot.sourceReferences,
     redactionLabels: snapshot.redactionLabels,
-    configFingerprint: snapshot.configFingerprint
+    configFingerprint: snapshot.configFingerprint,
   });
 }
 
 function pluginHealthSnapshots(
-  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined
+  turnEvidence: RuntimePluginTurnEvidenceSnapshot | undefined,
 ): readonly InspectPluginHealthSnapshot[] {
   if (turnEvidence === undefined) {
     return Object.freeze([]);
   }
 
   return Object.freeze(
-    turnEvidence.health.map((snapshot) =>
+    turnEvidence.health.map(snapshot =>
       Object.freeze({
         pluginId: snapshot.pluginId,
         status: snapshot.status,
         checkedAt: snapshot.checkedAt,
         summary: snapshot.summary,
-        redactionLabels: Object.freeze([...snapshot.redactionLabels])
-      } satisfies InspectPluginHealthSnapshot)
-    )
+        redactionLabels: Object.freeze([...snapshot.redactionLabels]),
+      } satisfies InspectPluginHealthSnapshot),
+    ),
   );
 }
 
 function policyOutcomes(
-  evidence: readonly RuntimePluginEvidenceSnapshot[]
+  evidence: readonly RuntimePluginEvidenceSnapshot[],
 ): readonly string[] {
   const outcomes: string[] = [];
 
@@ -843,43 +838,43 @@ function policyOutcomes(
 }
 
 function sourceReferences(
-  references: readonly InspectPluginSourceReference[]
+  references: readonly InspectPluginSourceReference[],
 ): readonly InspectPluginSourceReference[] {
   return Object.freeze(
-    references.map((reference) =>
+    references.map(reference =>
       Object.freeze({
         kind: reference.kind,
         id: reference.id,
-        ...(reference.title === undefined ? {} : { title: reference.title }),
-        ...(reference.uri === undefined ? {} : { uri: reference.uri })
-      } satisfies InspectPluginSourceReference)
-    )
+        ...(reference.title === undefined ? {} : {title: reference.title}),
+        ...(reference.uri === undefined ? {} : {uri: reference.uri}),
+      } satisfies InspectPluginSourceReference),
+    ),
   );
 }
 
 function parsedRoleModelDecision(
-  result: RoleModelDecisionResult
+  result: RoleModelDecisionResult,
 ): InspectParsedRoleModelDecision {
   if (result.status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
       toolCalls: Object.freeze(
-        result.decision.toolCalls.map((toolCall) =>
+        result.decision.toolCalls.map(toolCall =>
           Object.freeze({
             name: toolCall.name,
-            input: Object.freeze({ ...toolCall.input })
-          } satisfies InspectModelToolCall)
-        )
+            input: Object.freeze({...toolCall.input}),
+          } satisfies InspectModelToolCall),
+        ),
       ),
       ...(result.nonCommittedText !== undefined
         ? {
             nonCommittedTopLevelText: Object.freeze({
               source: 'model_top_level_text',
               committed: false,
-              text: result.nonCommittedText
-            } satisfies InspectNonCommittedTopLevelText)
+              text: result.nonCommittedText,
+            } satisfies InspectNonCommittedTopLevelText),
           }
-        : {})
+        : {}),
     } satisfies InspectParsedRoleModelDecision);
   }
 
@@ -888,19 +883,19 @@ function parsedRoleModelDecision(
     rejectionReason: result.rejection.reason,
     ...(result.rejection.details === undefined
       ? {}
-      : { rejectionDetails: result.rejection.details })
+      : {rejectionDetails: result.rejection.details}),
   } satisfies InspectParsedRoleModelDecision);
 }
 
 function roleModelCommitValidation(
-  result: RoleModelCommitValidationResult
+  result: RoleModelCommitValidationResult,
 ): InspectRoleModelCommitValidation {
   if (result.status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
       ...(result.acceptedVisibleReplyText === undefined
         ? {}
-        : { acceptedVisibleReplyText: result.acceptedVisibleReplyText })
+        : {acceptedVisibleReplyText: result.acceptedVisibleReplyText}),
     } satisfies InspectRoleModelCommitValidation);
   }
 
@@ -909,24 +904,26 @@ function roleModelCommitValidation(
     rejectionReason: result.rejection.reason,
     ...(result.rejection.details === undefined
       ? {}
-      : { rejectionDetails: result.rejection.details })
+      : {rejectionDetails: result.rejection.details}),
   } satisfies InspectRoleModelCommitValidation);
 }
 
-export function terminalTurnStatus(record: RawEventLogRecord): RuntimeTurnStatus {
+export function terminalTurnStatus(
+  record: RawEventLogRecord,
+): RuntimeTurnStatus {
   if (record.status !== undefined) {
     return record.status;
   }
 
   throw new LocalRuntimeStorageContractError(
     'malformed_record',
-    'Stored terminal raw event is missing a turn status.'
+    'Stored terminal raw event is missing a turn status.',
   );
 }
 
 export function visibleMessagesForId(
   conversationById: ReadonlyMap<string, ConversationLogRecord>,
-  messageId: string
+  messageId: string,
 ): readonly InspectVisibleMessage[] {
   const message = conversationById.get(messageId);
 
@@ -939,8 +936,8 @@ export function visibleMessagesForId(
       id: message.id,
       role: message.role,
       speakerName: message.speakerName,
-      text: message.text
-    } satisfies InspectVisibleMessage)
+      text: message.text,
+    } satisfies InspectVisibleMessage),
   ];
 }
 
@@ -954,7 +951,6 @@ function visibleMessageFromSnapshot(message: {
     id: message.id,
     role: message.role,
     speakerName: message.speakerName,
-    text: message.text
+    text: message.text,
   } satisfies InspectVisibleMessage);
 }
-

@@ -1,20 +1,18 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { createTestTempRoot } from '../support/temp-root.ts';
+import {mkdirSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {describe, expect, it} from 'vitest';
+import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   defaultRuntimeConfigPath,
-  runtimeConfigEnvVarName
+  runtimeConfigEnvVarName,
 } from '../../src/runtime/config/index.ts';
-import { runRuntimeConfigCliFromArgs } from '../../src/cli/config/main.ts';
-import {
-  writeRuntimeConfig
-} from '../support/runtime-config.ts';
-import { collect } from '../support/streams.ts';
+import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {collect} from '../support/streams.ts';
 import {
   requiredDottedConfigPlugin,
   requiredSecretPlugin,
-  restoreProcessEnvValue
+  restoreProcessEnvValue,
 } from '../support/runtime-config-fixtures.ts';
 
 describe('runtime config CLI reads and checks', () => {
@@ -25,42 +23,44 @@ describe('runtime config CLI reads and checks', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         'unknown-plugin': {
-          enabled: true
-        }
-      }
+          enabled: true,
+        },
+      },
     });
 
     expect(
       await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect(() => {})
-      })
+        stderr: collect(() => {}),
+      }),
     ).toBe(0);
     expect(stdout).toContain('"activationDiagnostics"');
     expect(stdout).toContain('"runtime_config_unknown_plugin"');
   });
 
   it('reports check config load errors before runtime env file errors', async () => {
-    const storeRoot = createTestTempRoot('project02-config-check-load-error-before-env-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-check-load-error-before-env-',
+    );
     let stdout = '';
     let stderr = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      storeRoot: 42
+      storeRoot: 42,
     });
     mkdirSync(join(storeRoot, '.env'));
 
     expect(
       await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
-        })
-      })
+        }),
+      }),
     ).toBe(1);
 
     const output = JSON.parse(stdout) as {
@@ -79,48 +79,55 @@ describe('runtime config CLI reads and checks', () => {
     expect(stderr).toBe('');
     expect(output.runtimeConfig.diagnostics[0]).toMatchObject({
       code: 'runtime_config_string_invalid',
-      path: 'project02.storeRoot'
+      path: 'project02.storeRoot',
     });
     expect(output.activationDiagnostics[0]).toMatchObject({
       code: 'runtime_config_string_invalid',
-      path: 'project02.storeRoot'
+      path: 'project02.storeRoot',
     });
     expect(stdout).not.toContain('Could not load runtime config env file');
     expect(stderr).not.toContain('Could not load runtime config env file');
   });
 
   it('reports check activation config errors before runtime env file errors', async () => {
-    const storeRoot = createTestTempRoot('project02-config-check-activation-before-env-');
-    const plugin = requiredDottedConfigPlugin('memory.required-config', 'endpoint');
+    const storeRoot = createTestTempRoot(
+      'project02-config-check-activation-before-env-',
+    );
+    const plugin = requiredDottedConfigPlugin(
+      'memory.required-config',
+      'endpoint',
+    );
     let stdout = '';
     let stderr = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true
-        }
-      }
+          enabled: true,
+        },
+      },
     });
     mkdirSync(join(storeRoot, '.env'));
 
     expect(
       await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
         }),
         factories: {
           [plugin.manifest.id]: {
             manifest: plugin.manifest,
             create() {
-              throw new Error('runtime-config check should not construct plugins');
-            }
-          }
-        }
-      })
+              throw new Error(
+                'runtime-config check should not construct plugins',
+              );
+            },
+          },
+        },
+      }),
     ).toBe(1);
 
     const output = JSON.parse(stdout) as {
@@ -135,27 +142,31 @@ describe('runtime config CLI reads and checks', () => {
       expect.arrayContaining([
         expect.objectContaining({
           code: 'runtime_config_required_value_missing',
-          path: `plugins.${plugin.manifest.id}.config.endpoint`
-        })
-      ])
+          path: `plugins.${plugin.manifest.id}.config.endpoint`,
+        }),
+      ]),
     );
     expect(stdout).not.toContain('Could not load runtime config env file');
   });
 
   it('reports explicit check config load errors before unrelated cwd dotenv errors', async () => {
-    const cwdRoot = createTestTempRoot('project02-config-check-cwd-dotenv-error-');
-    const storeRoot = createTestTempRoot('project02-config-check-selected-store-error-');
+    const cwdRoot = createTestTempRoot(
+      'project02-config-check-cwd-dotenv-error-',
+    );
+    const storeRoot = createTestTempRoot(
+      'project02-config-check-selected-store-error-',
+    );
     const configPath = join(
       createTestTempRoot('project02-config-check-selected-path-error-'),
-      'runtime.json'
+      'runtime.json',
     );
     const previousCwd = process.cwd();
 
     writeRuntimeConfig(defaultRuntimeConfigPath(storeRoot), {
-      storeRoot: 42
+      storeRoot: 42,
     });
     writeRuntimeConfig(configPath, {
-      storeRoot: 42
+      storeRoot: 42,
     });
     mkdirSync(join(cwdRoot, '.env'));
 
@@ -164,20 +175,20 @@ describe('runtime config CLI reads and checks', () => {
 
       for (const example of [
         ['--store', storeRoot, 'check'],
-        ['--config', configPath, 'check']
+        ['--config', configPath, 'check'],
       ] as const) {
         let stdout = '';
         let stderr = '';
 
         expect(
           await runRuntimeConfigCliFromArgs(example, {
-            stdout: collect((chunk) => {
+            stdout: collect(chunk => {
               stdout += chunk;
             }),
-            stderr: collect((chunk) => {
+            stderr: collect(chunk => {
               stderr += chunk;
-            })
-          })
+            }),
+          }),
         ).toBe(1);
 
         const output = JSON.parse(stdout) as {
@@ -196,11 +207,11 @@ describe('runtime config CLI reads and checks', () => {
         expect(stderr).toBe('');
         expect(output.runtimeConfig.diagnostics[0]).toMatchObject({
           code: 'runtime_config_string_invalid',
-          path: 'project02.storeRoot'
+          path: 'project02.storeRoot',
         });
         expect(output.activationDiagnostics[0]).toMatchObject({
           code: 'runtime_config_string_invalid',
-          path: 'project02.storeRoot'
+          path: 'project02.storeRoot',
         });
         expect(stdout).not.toContain('Could not load .env file');
         expect(stderr).not.toContain('Could not load .env file');
@@ -211,8 +222,12 @@ describe('runtime config CLI reads and checks', () => {
   });
 
   it('reports env-selected check config load errors before unrelated cwd dotenv errors', async () => {
-    const cwdRoot = createTestTempRoot('project02-config-check-env-cwd-dotenv-error-');
-    const storeRoot = createTestTempRoot('project02-config-check-env-selected-store-error-');
+    const cwdRoot = createTestTempRoot(
+      'project02-config-check-env-cwd-dotenv-error-',
+    );
+    const storeRoot = createTestTempRoot(
+      'project02-config-check-env-selected-store-error-',
+    );
     const configPath = defaultRuntimeConfigPath(storeRoot);
     const previousCwd = process.cwd();
     const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
@@ -220,7 +235,7 @@ describe('runtime config CLI reads and checks', () => {
     let stderr = '';
 
     writeRuntimeConfig(configPath, {
-      storeRoot: 42
+      storeRoot: 42,
     });
     mkdirSync(join(cwdRoot, '.env'));
 
@@ -230,13 +245,13 @@ describe('runtime config CLI reads and checks', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(['check'], {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
-          stderr: collect((chunk) => {
+          stderr: collect(chunk => {
             stderr += chunk;
-          })
-        })
+          }),
+        }),
       ).toBe(1);
 
       const output = JSON.parse(stdout) as {
@@ -255,11 +270,11 @@ describe('runtime config CLI reads and checks', () => {
       expect(stderr).toBe('');
       expect(output.runtimeConfig.diagnostics[0]).toMatchObject({
         code: 'runtime_config_string_invalid',
-        path: 'project02.storeRoot'
+        path: 'project02.storeRoot',
       });
       expect(output.activationDiagnostics[0]).toMatchObject({
         code: 'runtime_config_string_invalid',
-        path: 'project02.storeRoot'
+        path: 'project02.storeRoot',
       });
       expect(stdout).not.toContain('Could not load .env file');
       expect(stderr).not.toContain('Could not load .env file');
@@ -271,7 +286,9 @@ describe('runtime config CLI reads and checks', () => {
 
   it('resolves check secrets from each runtime env file without leaking to later stores', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-env-');
-    const laterStoreRoot = createTestTempRoot('project02-config-check-env-later-');
+    const laterStoreRoot = createTestTempRoot(
+      'project02-config-check-env-later-',
+    );
     const envVar = 'PROJECT02_CHECK_ENV_FILE_SECRET_3447850555';
     const secretValue = 'from-runtime-env-file';
     const plugin = requiredSecretPlugin();
@@ -286,27 +303,31 @@ describe('runtime config CLI reads and checks', () => {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
+            apiKey: {$env: envVar},
+          },
+        },
+      },
     });
-    writeFileSync(join(storeRoot, '.env'), `${envVar}="${secretValue}"\n`, 'utf8');
+    writeFileSync(
+      join(storeRoot, '.env'),
+      `${envVar}="${secretValue}"\n`,
+      'utf8',
+    );
     writeRuntimeConfig(join(laterStoreRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
+            apiKey: {$env: envVar},
+          },
+        },
+      },
     });
 
     try {
       expect(
         await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
           stderr: collect(() => {}),
@@ -315,15 +336,17 @@ describe('runtime config CLI reads and checks', () => {
               manifest: plugin.manifest,
               create() {
                 factoryCalls += 1;
-                throw new Error('runtime-config check should not construct plugins');
-              }
-            }
-          }
-        })
+                throw new Error(
+                  'runtime-config check should not construct plugins',
+                );
+              },
+            },
+          },
+        }),
       ).toBe(0);
 
       const output = JSON.parse(stdout) as {
-        readonly activationDiagnostics: readonly { readonly code: string }[];
+        readonly activationDiagnostics: readonly {readonly code: string}[];
         readonly plugins: readonly {
           readonly pluginId: string;
           readonly activationStatus: string;
@@ -332,35 +355,40 @@ describe('runtime config CLI reads and checks', () => {
       };
 
       expect(factoryCalls).toBe(0);
-      expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-        'runtime_config_required_secret_missing'
+      expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
+        'runtime_config_required_secret_missing',
       );
       expect(output.plugins).toContainEqual(
         expect.objectContaining({
           pluginId: plugin.manifest.id,
           activationStatus: 'active',
-          enabled: true
-        })
+          enabled: true,
+        }),
       );
       expect(stdout).not.toContain(secretValue);
       expect(process.env[envVar]).toBeUndefined();
 
       expect(
-        await runRuntimeConfigCliFromArgs(['--store', laterStoreRoot, 'check'], {
-          stdout: collect((chunk) => {
-            laterStdout += chunk;
-          }),
-          stderr: collect(() => {}),
-          factories: {
-            [plugin.manifest.id]: {
-              manifest: plugin.manifest,
-              create() {
-                laterFactoryCalls += 1;
-                throw new Error('missing-secret check should not construct plugins');
-              }
-            }
-          }
-        })
+        await runRuntimeConfigCliFromArgs(
+          ['--store', laterStoreRoot, 'check'],
+          {
+            stdout: collect(chunk => {
+              laterStdout += chunk;
+            }),
+            stderr: collect(() => {}),
+            factories: {
+              [plugin.manifest.id]: {
+                manifest: plugin.manifest,
+                create() {
+                  laterFactoryCalls += 1;
+                  throw new Error(
+                    'missing-secret check should not construct plugins',
+                  );
+                },
+              },
+            },
+          },
+        ),
       ).toBe(1);
       expect(laterFactoryCalls).toBe(0);
       expect(laterStdout).toContain('runtime_config_required_secret_missing');
@@ -388,15 +416,15 @@ describe('runtime config CLI reads and checks', () => {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
+            apiKey: {$env: envVar},
+          },
+        },
+      },
     });
     writeFileSync(
       join(cwdRoot, '.env'),
       `${runtimeConfigEnvVarName}=${join(storeRoot, 'config.json')}\n${envVar}="${secretValue}"\n`,
-      'utf8'
+      'utf8',
     );
 
     try {
@@ -405,7 +433,7 @@ describe('runtime config CLI reads and checks', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(['check'], {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
           stderr: collect(() => {}),
@@ -414,15 +442,17 @@ describe('runtime config CLI reads and checks', () => {
               manifest: plugin.manifest,
               create() {
                 factoryCalls += 1;
-                throw new Error('runtime-config check should not construct plugins');
-              }
-            }
-          }
-        })
+                throw new Error(
+                  'runtime-config check should not construct plugins',
+                );
+              },
+            },
+          },
+        }),
       ).toBe(0);
 
       const output = JSON.parse(stdout) as {
-        readonly activationDiagnostics: readonly { readonly code: string }[];
+        readonly activationDiagnostics: readonly {readonly code: string}[];
         readonly plugins: readonly {
           readonly pluginId: string;
           readonly activationStatus: string;
@@ -431,15 +461,15 @@ describe('runtime config CLI reads and checks', () => {
       };
 
       expect(factoryCalls).toBe(0);
-      expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-        'runtime_config_required_secret_missing'
+      expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
+        'runtime_config_required_secret_missing',
       );
       expect(output.plugins).toContainEqual(
         expect.objectContaining({
           pluginId: plugin.manifest.id,
           activationStatus: 'active',
-          enabled: true
-        })
+          enabled: true,
+        }),
       );
       expect(stdout).not.toContain(secretValue);
       expect(process.env[envVar]).toBeUndefined();
@@ -451,8 +481,12 @@ describe('runtime config CLI reads and checks', () => {
   });
 
   it('does not use cwd dotenv secrets for explicit runtime config check locations', async () => {
-    const cwdRoot = createTestTempRoot('project02-config-check-explicit-cwd-env-');
-    const storeRoot = createTestTempRoot('project02-config-check-explicit-store-');
+    const cwdRoot = createTestTempRoot(
+      'project02-config-check-explicit-cwd-env-',
+    );
+    const storeRoot = createTestTempRoot(
+      'project02-config-check-explicit-store-',
+    );
     const configPath = join(storeRoot, 'config.json');
     const previousCwd = process.cwd();
     const envVar = 'PROJECT02_CHECK_EXPLICIT_CWD_DOTENV_SECRET_3450049746';
@@ -465,26 +499,30 @@ describe('runtime config CLI reads and checks', () => {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
+            apiKey: {$env: envVar},
+          },
+        },
+      },
     });
-    writeFileSync(join(cwdRoot, '.env'), `${envVar}="from-cwd-dotenv"\n`, 'utf8');
+    writeFileSync(
+      join(cwdRoot, '.env'),
+      `${envVar}="from-cwd-dotenv"\n`,
+      'utf8',
+    );
 
     try {
       process.chdir(cwdRoot);
 
       for (const args of [
         ['--store', storeRoot, 'check'],
-        ['--config', configPath, 'check']
+        ['--config', configPath, 'check'],
       ] as const) {
         let stdout = '';
         let factoryCalls = 0;
 
         expect(
           await runRuntimeConfigCliFromArgs(args, {
-            stdout: collect((chunk) => {
+            stdout: collect(chunk => {
               stdout += chunk;
             }),
             stderr: collect(() => {}),
@@ -493,11 +531,13 @@ describe('runtime config CLI reads and checks', () => {
                 manifest: plugin.manifest,
                 create() {
                   factoryCalls += 1;
-                  throw new Error('runtime-config check should not construct plugins');
-                }
-              }
-            }
-          })
+                  throw new Error(
+                    'runtime-config check should not construct plugins',
+                  );
+                },
+              },
+            },
+          }),
         ).toBe(1);
 
         expect(factoryCalls).toBe(0);
@@ -511,8 +551,12 @@ describe('runtime config CLI reads and checks', () => {
   });
 
   it('keeps runtime env file values ahead of cwd dotenv defaults during check', async () => {
-    const cwdRoot = createTestTempRoot('project02-config-check-cwd-env-override-');
-    const storeRoot = createTestTempRoot('project02-config-check-store-env-override-');
+    const cwdRoot = createTestTempRoot(
+      'project02-config-check-cwd-env-override-',
+    );
+    const storeRoot = createTestTempRoot(
+      'project02-config-check-store-env-override-',
+    );
     const previousCwd = process.cwd();
     const envVar = 'PROJECT02_CHECK_STORE_OVER_CWD_SECRET_3449004103';
     const previousEnvValue = process.env[envVar];
@@ -527,12 +571,16 @@ describe('runtime config CLI reads and checks', () => {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
+            apiKey: {$env: envVar},
+          },
+        },
+      },
     });
-    writeFileSync(join(cwdRoot, '.env'), `${envVar}="${secretValue}"\n`, 'utf8');
+    writeFileSync(
+      join(cwdRoot, '.env'),
+      `${envVar}="${secretValue}"\n`,
+      'utf8',
+    );
     writeFileSync(join(storeRoot, '.env'), `${envVar}=\n`, 'utf8');
 
     try {
@@ -540,7 +588,7 @@ describe('runtime config CLI reads and checks', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
           stderr: collect(() => {}),
@@ -549,11 +597,13 @@ describe('runtime config CLI reads and checks', () => {
               manifest: plugin.manifest,
               create() {
                 factoryCalls += 1;
-                throw new Error('runtime-config check should not construct plugins');
-              }
-            }
-          }
-        })
+                throw new Error(
+                  'runtime-config check should not construct plugins',
+                );
+              },
+            },
+          },
+        }),
       ).toBe(1);
 
       expect(factoryCalls).toBe(0);
@@ -568,7 +618,9 @@ describe('runtime config CLI reads and checks', () => {
 
   it('keeps process env values ahead of cwd dotenv defaults during check', async () => {
     const cwdRoot = createTestTempRoot('project02-config-check-process-env-');
-    const storeRoot = createTestTempRoot('project02-config-check-process-store-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-check-process-store-',
+    );
     const previousCwd = process.cwd();
     const envVar = 'PROJECT02_CHECK_PROCESS_OVER_CWD_SECRET_3449004103';
     const previousEnvValue = process.env[envVar];
@@ -582,10 +634,10 @@ describe('runtime config CLI reads and checks', () => {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
+            apiKey: {$env: envVar},
+          },
+        },
+      },
     });
     writeFileSync(join(cwdRoot, '.env'), `${envVar}=\n`, 'utf8');
 
@@ -595,7 +647,7 @@ describe('runtime config CLI reads and checks', () => {
 
       expect(
         await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
           stderr: collect(() => {}),
@@ -604,15 +656,17 @@ describe('runtime config CLI reads and checks', () => {
               manifest: plugin.manifest,
               create() {
                 factoryCalls += 1;
-                throw new Error('runtime-config check should not construct plugins');
-              }
-            }
-          }
-        })
+                throw new Error(
+                  'runtime-config check should not construct plugins',
+                );
+              },
+            },
+          },
+        }),
       ).toBe(0);
 
       const output = JSON.parse(stdout) as {
-        readonly activationDiagnostics: readonly { readonly code: string }[];
+        readonly activationDiagnostics: readonly {readonly code: string}[];
         readonly plugins: readonly {
           readonly pluginId: string;
           readonly activationStatus: string;
@@ -621,15 +675,15 @@ describe('runtime config CLI reads and checks', () => {
       };
 
       expect(factoryCalls).toBe(0);
-      expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-        'runtime_config_required_secret_missing'
+      expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
+        'runtime_config_required_secret_missing',
       );
       expect(output.plugins).toContainEqual(
         expect.objectContaining({
           pluginId: plugin.manifest.id,
           activationStatus: 'active',
-          enabled: true
-        })
+          enabled: true,
+        }),
       );
       expect(stdout).not.toContain(secretValue);
     } finally {
@@ -639,7 +693,9 @@ describe('runtime config CLI reads and checks', () => {
   });
 
   it('keeps supplied check env values ahead of runtime env file values', async () => {
-    const storeRoot = createTestTempRoot('project02-config-check-env-precedence-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-check-env-precedence-',
+    );
     const envVar = 'PROJECT02_CHECK_SUPPLIED_ENV_SECRET_3447850555';
     const suppliedSecretValue = 'from-supplied-env';
     const plugin = requiredSecretPlugin();
@@ -652,35 +708,37 @@ describe('runtime config CLI reads and checks', () => {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
+            apiKey: {$env: envVar},
+          },
+        },
+      },
     });
     writeFileSync(join(storeRoot, '.env'), `${envVar}=\n`, 'utf8');
 
     try {
       expect(
         await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
           stderr: collect(() => {}),
-          env: { [envVar]: suppliedSecretValue },
+          env: {[envVar]: suppliedSecretValue},
           factories: {
             [plugin.manifest.id]: {
               manifest: plugin.manifest,
               create() {
                 factoryCalls += 1;
-                throw new Error('runtime-config check should not construct plugins');
-              }
-            }
-          }
-        })
+                throw new Error(
+                  'runtime-config check should not construct plugins',
+                );
+              },
+            },
+          },
+        }),
       ).toBe(0);
 
       const output = JSON.parse(stdout) as {
-        readonly activationDiagnostics: readonly { readonly code: string }[];
+        readonly activationDiagnostics: readonly {readonly code: string}[];
         readonly plugins: readonly {
           readonly pluginId: string;
           readonly activationStatus: string;
@@ -689,20 +747,19 @@ describe('runtime config CLI reads and checks', () => {
       };
 
       expect(factoryCalls).toBe(0);
-      expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-        'runtime_config_required_secret_missing'
+      expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
+        'runtime_config_required_secret_missing',
       );
       expect(output.plugins).toContainEqual(
         expect.objectContaining({
           pluginId: plugin.manifest.id,
           activationStatus: 'active',
-          enabled: true
-        })
+          enabled: true,
+        }),
       );
       expect(stdout).not.toContain(suppliedSecretValue);
     } finally {
       Reflect.deleteProperty(process.env, envVar);
     }
   });
-
 });

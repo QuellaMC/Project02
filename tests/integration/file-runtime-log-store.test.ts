@@ -1,97 +1,87 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import { createTestTempRoot } from '../support/temp-root.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 
 import {
   createFileRuntimeLogStore,
   durableRuntimeSessionCharacterProfile,
-  findValidatedTerminalRawEventForSession
+  findValidatedTerminalRawEventForSession,
 } from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {
   acquireLocalRuntimeSessionWriterLease,
-  createLocalRuntimeSessionStore
+  createLocalRuntimeSessionStore,
 } from '../../src/runtime/storage/session-store.ts';
-import {
-  createLocalRuntimeMutationLockOwnerToken
-} from '../../src/runtime/storage/mutation-lock.ts';
+import {createLocalRuntimeMutationLockOwnerToken} from '../../src/runtime/storage/mutation-lock.ts';
 import {
   createConversationSession,
   createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent
+  createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
-import {
-  runLocalUserMessageEvent
-} from '../../src/runtime/turn/local.ts';
-import type { RuntimeLogStore } from '../../src/runtime/evidence/records.ts';
+import {runLocalUserMessageEvent} from '../../src/runtime/turn/local.ts';
+import type {RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
 import {
   defaultRoleModelProviderCapabilities,
   type RoleModelAdapter,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
   type RoleModelProviderExchangeSnapshot,
-  visibleReplyModelToolName
+  visibleReplyModelToolName,
 } from '../../src/role-model/index.ts';
-import {
-  characterStatePatchModelToolName
-} from '../../src/plugins/api/contract.ts';
-import {
-  firstPartyModelToolsPluginId
-} from '../../src/plugins/index.ts';
+import {characterStatePatchModelToolName} from '../../src/plugins/api/contract.ts';
+import {firstPartyModelToolsPluginId} from '../../src/plugins/index.ts';
 import {
   LocalRuntimeStorageContractError,
-  createLocalRuntimeStorageLayout
+  createLocalRuntimeStorageLayout,
 } from '../../src/runtime/storage/layout-contract.ts';
-import { decodeRawEventLogRecord } from '../../src/runtime/storage/raw-event-codec.ts';
-import { createDefaultProject02PluginHost } from '../support/default-plugin-host.ts';
-import { createRuntimePluginHost } from '../../src/plugins/host/index.ts';
+import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec.ts';
+import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
+import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   createRuntimePlugin,
-  createRuntimePluginHealthSnapshot
+  createRuntimePluginHealthSnapshot,
 } from '../../src/plugins/api/index.ts';
-import { runtimePluginContractVersion } from '../../src/plugins/api/contract.ts';
-import type {
-  RuntimePluginHealthStatus
-} from '../../src/plugins/api/contract.ts';
+import {runtimePluginContractVersion} from '../../src/plugins/api/contract.ts';
+import type {RuntimePluginHealthStatus} from '../../src/plugins/api/contract.ts';
 import {
   createNvidiaRoleModelProviderAdapter,
-  type NvidiaFetchClient
+  type NvidiaFetchClient,
 } from '../../src/role-model/providers/nvidia.ts';
 
 describe('file runtime log store plugin tool event validation', () => {
-  it('refuses a store mutation under another owner token\'s writer lease', async () => {
+  it("refuses a store mutation under another owner token's writer lease", async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-owner-token-append';
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const ownerA = createLocalRuntimeMutationLockOwnerToken();
     const ownerB = createLocalRuntimeMutationLockOwnerToken();
     const storeA = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
-      writerLockOwnerToken: ownerA
+      writerLockOwnerToken: ownerA,
     });
     const storeB = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
-      writerLockOwnerToken: ownerB
+      writerLockOwnerToken: ownerB,
     });
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
       sessionId,
-      ownerToken: ownerA
+      ownerToken: ownerA,
     });
 
     try {
       expect(() =>
         storeB.appendTrace({
           ...identity('evt_owner_token_append'),
-          step: 'runtime_event_received'
-        })
-      ).toThrow(expect.objectContaining({ code: 'session_busy' }));
+          step: 'runtime_event_received',
+        }),
+      ).toThrow(expect.objectContaining({code: 'session_busy'}));
       expect(storeA.traceEntries()).toEqual([]);
     } finally {
       await writerLease.release();
@@ -101,21 +91,21 @@ describe('file runtime log store plugin tool event validation', () => {
   it('allows only the writer lease owner to scavenge abandoned evidence temporaries', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-owner-token-scavenge';
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const ownerA = createLocalRuntimeMutationLockOwnerToken();
     const ownerB = createLocalRuntimeMutationLockOwnerToken();
     const storeA = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
-      writerLockOwnerToken: ownerA
+      writerLockOwnerToken: ownerA,
     });
     const storeB = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
-      writerLockOwnerToken: ownerB
+      writerLockOwnerToken: ownerB,
     });
     const paths = storeA.localRuntimeSessionPaths;
 
@@ -128,7 +118,7 @@ describe('file runtime log store plugin tool event validation', () => {
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
       sessionId,
-      ownerToken: ownerA
+      ownerToken: ownerA,
     });
 
     try {
@@ -145,21 +135,21 @@ describe('file runtime log store plugin tool event validation', () => {
   it('rejects low-level durable mutation without the active session writer lease', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-low-level-writer';
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
-    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
 
     expect(() =>
       logStore.appendTrace({
         ...identity('evt_low_level_writer'),
-        step: 'runtime_event_received'
-      })
+        step: 'runtime_event_received',
+      }),
     ).toThrow(
       expect.objectContaining({
-        code: 'session_busy'
-      })
+        code: 'session_busy',
+      }),
     );
     expect(logStore.readSessionEvidence().stored.traceEntries).toEqual([]);
   });
@@ -168,11 +158,11 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-created-at-agreement';
     const eventIdentity = identity('evt_created_at_agreement');
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: eventIdentity.createdAt
+      createdAt: eventIdentity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -180,19 +170,19 @@ describe('file runtime log store plugin tool event validation', () => {
     }
 
     writeJsonLines(paths.tracePath, [
-      { ...eventIdentity, step: 'runtime_event_received' }
+      {...eventIdentity, step: 'runtime_event_received'},
     ]);
     writeJsonLines(paths.rawEventsPath, [
       {
         ...eventIdentity,
         createdAt: '2026-06-15T00:00:01.000Z',
         kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE'
-      }
+        eventType: 'USER_MESSAGE',
+      },
     ]);
 
     expect(() => logStore.readSessionEvidence()).toThrow(
-      'Runtime evidence for one event identity must share one createdAt timestamp.'
+      'Runtime evidence for one event identity must share one createdAt timestamp.',
     );
   });
 
@@ -200,11 +190,11 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-canonical-created-at';
     const eventIdentity = identity('evt_canonical_created_at');
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: eventIdentity.createdAt
+      createdAt: eventIdentity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -215,12 +205,12 @@ describe('file runtime log store plugin tool event validation', () => {
       {
         ...eventIdentity,
         createdAt: '2026-06-15T00:00:00Z',
-        step: 'runtime_event_received'
-      }
+        step: 'runtime_event_received',
+      },
     ]);
 
     expect(() => logStore.readSessionEvidence()).toThrow(
-      'Stored local runtime field "createdAt" must be a canonical UTC ISO timestamp.'
+      'Stored local runtime field "createdAt" must be a canonical UTC ISO timestamp.',
     );
   });
 
@@ -228,11 +218,11 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-read-only-terminal-trace-reconciliation';
     const eventIdentity = identity('evt_legacy_schema1_patch');
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: eventIdentity.createdAt
+      createdAt: eventIdentity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -242,14 +232,14 @@ describe('file runtime log store plugin tool event validation', () => {
     writeJsonLines(paths.tracePath, [
       {
         ...eventIdentity,
-        step: 'runtime_event_received'
-      }
+        step: 'runtime_event_received',
+      },
     ]);
     writeJsonLines(paths.rawEventsPath, [
       {
         ...eventIdentity,
         kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE'
+        eventType: 'USER_MESSAGE',
       },
       {
         ...eventIdentity,
@@ -257,18 +247,21 @@ describe('file runtime log store plugin tool event validation', () => {
         eventType: 'USER_MESSAGE',
         payloadSummary: {
           rawInput: 'remember the mood',
-          normalizedCurrentUserMessage: 'remember the mood'
-        }
+          normalizedCurrentUserMessage: 'remember the mood',
+        },
       },
-      legacySchema1PatchCompletedEvent(sessionId)
+      legacySchema1PatchCompletedEvent(sessionId),
     ]);
     const traceBeforePublicReads = readFileSync(paths.tracePath, 'utf8');
-    const rawEventsBeforePublicReads = readFileSync(paths.rawEventsPath, 'utf8');
+    const rawEventsBeforePublicReads = readFileSync(
+      paths.rawEventsPath,
+      'utf8',
+    );
 
     const evidence = logStore.readSessionEvidence();
 
-    expect(evidence.stored.traceEntries.map((entry) => entry.step)).toEqual([
-      'runtime_event_received'
+    expect(evidence.stored.traceEntries.map(entry => entry.step)).toEqual([
+      'runtime_event_received',
     ]);
     expect(evidence.derived.traceEntries).toEqual([
       {
@@ -279,9 +272,9 @@ describe('file runtime log store plugin tool event validation', () => {
           reason: 'missing_persisted_trace_entry',
           rawEventAnchor: {
             ...eventIdentity,
-            kind: 'runtime_turn_completed'
-          }
-        }
+            kind: 'runtime_turn_completed',
+          },
+        },
       },
       {
         ...eventIdentity,
@@ -291,31 +284,33 @@ describe('file runtime log store plugin tool event validation', () => {
           reason: 'missing_persisted_trace_entry',
           rawEventAnchor: {
             ...eventIdentity,
-            kind: 'runtime_turn_completed'
-          }
-        }
-      }
+            kind: 'runtime_turn_completed',
+          },
+        },
+      },
     ]);
-    expect(logStore.traceEntries().map((entry) => entry.step)).toEqual([
-      'runtime_event_received'
+    expect(logStore.traceEntries().map(entry => entry.step)).toEqual([
+      'runtime_event_received',
     ]);
     expect(logStore.rawEvents().at(-1)?.kind).toBe('runtime_turn_completed');
     expect(logStore.conversationMessages()).toEqual([]);
     expect(readFileSync(paths.tracePath, 'utf8')).toBe(traceBeforePublicReads);
     expect(readFileSync(paths.rawEventsPath, 'utf8')).toBe(
-      rawEventsBeforePublicReads
+      rawEventsBeforePublicReads,
     );
   });
 
   it('keeps rejected terminal trace compatibility evidence separate from stored trace', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-read-only-rejected-trace-reconciliation';
-    const eventIdentity = identity('evt_read_only_rejected_trace_reconciliation');
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    const eventIdentity = identity(
+      'evt_read_only_rejected_trace_reconciliation',
+    );
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: eventIdentity.createdAt
+      createdAt: eventIdentity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -325,38 +320,38 @@ describe('file runtime log store plugin tool event validation', () => {
     writeJsonLines(paths.tracePath, [
       {
         ...eventIdentity,
-        step: 'runtime_event_received'
-      }
+        step: 'runtime_event_received',
+      },
     ]);
     writeJsonLines(paths.rawEventsPath, [
       {
         ...eventIdentity,
         kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE'
+        eventType: 'USER_MESSAGE',
       },
       {
         ...eventIdentity,
         kind: 'runtime_turn_rejected',
         eventType: 'USER_MESSAGE',
         status: 'rejected',
-        reason: 'fixture rejection'
-      }
+        reason: 'fixture rejection',
+      },
     ]);
     const traceBeforePublicRead = readFileSync(paths.tracePath, 'utf8');
 
     const evidence = logStore.readSessionEvidence();
 
-    expect(logStore.traceEntries().map((entry) => entry.step)).toEqual([
-      'runtime_event_received'
+    expect(logStore.traceEntries().map(entry => entry.step)).toEqual([
+      'runtime_event_received',
     ]);
-    expect(evidence.derived.traceEntries.map((entry) => entry.step)).toEqual([
+    expect(evidence.derived.traceEntries.map(entry => entry.step)).toEqual([
       'raw_event_log_appended',
-      'runtime_turn_rejected'
+      'runtime_turn_rejected',
     ]);
     expect(
       evidence.derived.traceEntries.map(
-        (entry) => entry.provenance.rawEventAnchor.kind
-      )
+        entry => entry.provenance.rawEventAnchor.kind,
+      ),
     ).toEqual(['runtime_turn_rejected', 'runtime_turn_rejected']);
     expect(readFileSync(paths.tracePath, 'utf8')).toBe(traceBeforePublicRead);
   });
@@ -365,11 +360,11 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-validated-terminal-lookup';
     const eventIdentity = identity('evt_legacy_schema1_patch');
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: eventIdentity.createdAt
+      createdAt: eventIdentity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -377,61 +372,61 @@ describe('file runtime log store plugin tool event validation', () => {
     }
 
     writeJsonLines(paths.rawEventsPath, [
-      legacySchema1PatchCompletedEvent(sessionId)
+      legacySchema1PatchCompletedEvent(sessionId),
     ]);
 
     expect(() =>
-      findValidatedTerminalRawEventForSession(paths, eventIdentity)
+      findValidatedTerminalRawEventForSession(paths, eventIdentity),
     ).toThrow(LocalRuntimeStorageContractError);
 
     writeJsonLines(paths.tracePath, [
       {
         ...eventIdentity,
-        step: 'runtime_event_received'
-      }
+        step: 'runtime_event_received',
+      },
     ]);
     writeJsonLines(paths.rawEventsPath, [
       {
         ...eventIdentity,
         kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE'
-      }
+        eventType: 'USER_MESSAGE',
+      },
     ]);
 
     expect(
-      findValidatedTerminalRawEventForSession(paths, eventIdentity)
+      findValidatedTerminalRawEventForSession(paths, eventIdentity),
     ).toBeUndefined();
 
     writeJsonLines(paths.rawEventsPath, [
       {
         ...eventIdentity,
         kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE'
+        eventType: 'USER_MESSAGE',
       },
-      legacySchema1PatchCompletedEvent(sessionId)
+      legacySchema1PatchCompletedEvent(sessionId),
     ]);
 
     expect(
-      findValidatedTerminalRawEventForSession(paths, eventIdentity)?.kind
+      findValidatedTerminalRawEventForSession(paths, eventIdentity)?.kind,
     ).toBe('runtime_turn_completed');
     expect(
       findValidatedTerminalRawEventForSession(paths, {
         ...eventIdentity,
-        createdAt: '2026-06-15T00:00:01.000Z'
-      })
+        createdAt: '2026-06-15T00:00:01.000Z',
+      }),
     ).toBeUndefined();
   });
 
   it('rejects terminal recovery for durable logs without session metadata', async () => {
     const storeRoot = createStoreRoot();
     const eventIdentity = identity('evt_orphaned_terminal_recovery');
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'catalog-session',
-      createdAt: eventIdentity.createdAt
+      createdAt: eventIdentity.createdAt,
     });
     const orphanedLogStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'orphaned-session'
+      sessionId: 'orphaned-session',
     });
     const paths = orphanedLogStore.localRuntimeSessionPaths;
 
@@ -439,29 +434,29 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    mkdirSync(paths.sessionRoot, { recursive: true });
+    mkdirSync(paths.sessionRoot, {recursive: true});
     writeJsonLines(paths.tracePath, [
       {
         ...eventIdentity,
-        step: 'runtime_event_received'
-      }
+        step: 'runtime_event_received',
+      },
     ]);
     writeJsonLines(paths.rawEventsPath, [
       {
         ...eventIdentity,
         kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE'
-      }
+        eventType: 'USER_MESSAGE',
+      },
     ]);
 
     expect(() =>
-      findValidatedTerminalRawEventForSession(paths, eventIdentity)
+      findValidatedTerminalRawEventForSession(paths, eventIdentity),
     ).toThrow(LocalRuntimeStorageContractError);
   });
 
   it('rejects malformed persisted provider exchange evidence with the storage contract error', () => {
     const malformedRecord: unknown = structuredClone(
-      legacySchema1PatchCompletedEvent('malformed-provider-exchange')
+      legacySchema1PatchCompletedEvent('malformed-provider-exchange'),
     );
     const roleModelIOSnapshot = isTestRecord(malformedRecord)
       ? malformedRecord['roleModelIOSnapshot']
@@ -472,17 +467,17 @@ describe('file runtime log store plugin tool event validation', () => {
     }
 
     roleModelIOSnapshot['providerExchange'] = {
-      provider: {}
+      provider: {},
     };
 
     expect(() =>
-      decodeRawEventLogRecord(JSON.stringify(malformedRecord))
+      decodeRawEventLogRecord(JSON.stringify(malformedRecord)),
     ).toThrow(LocalRuntimeStorageContractError);
   });
 
   it('normalizes missing legacy requested tool names from replayable raw evidence', async () => {
     const storedRecord = await persistedDisallowedToolRejectionRecord(
-      'legacy-missing-requested-tool-names'
+      'legacy-missing-requested-tool-names',
     );
     const storedDecisionResult = rejectedDecisionResultRecord(storedRecord);
 
@@ -490,81 +485,79 @@ describe('file runtime log store plugin tool event validation', () => {
 
     const decodedRecord = decodeRawEventLogRecord(JSON.stringify(storedRecord));
 
-    expect(
-      decodedRecord.parsedRoleModelDecisionSnapshot?.result
-    ).toMatchObject({
-      status: 'rejected',
-      requestedToolNames: ['memory.unknown']
-    });
+    expect(decodedRecord.parsedRoleModelDecisionSnapshot?.result).toMatchObject(
+      {
+        status: 'rejected',
+        requestedToolNames: ['memory.unknown'],
+      },
+    );
   });
 
   it('rejects present requested tool names that disagree with raw evidence', async () => {
     const storedRecord = await persistedDisallowedToolRejectionRecord(
-      'tampered-requested-tool-names'
+      'tampered-requested-tool-names',
     );
     const storedDecisionResult = rejectedDecisionResultRecord(storedRecord);
 
     storedDecisionResult['requestedToolNames'] = [visibleReplyModelToolName];
 
-    expect(() =>
-      decodeRawEventLogRecord(JSON.stringify(storedRecord))
-    ).toThrow(LocalRuntimeStorageContractError);
+    expect(() => decodeRawEventLogRecord(JSON.stringify(storedRecord))).toThrow(
+      LocalRuntimeStorageContractError,
+    );
   });
 
   it('round-trips supported persisted plugin tool schemas unchanged', () => {
     const jsonSchema = supportedPersistedPluginToolJsonSchema();
     const storedRecord = storedRecordWithPluginToolJsonSchema(jsonSchema);
-    const decodedRecord = decodeRawEventLogRecord(
-      JSON.stringify(storedRecord)
-    );
+    const decodedRecord = decodeRawEventLogRecord(JSON.stringify(storedRecord));
 
     expect(
       decodedRecord.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions.find(
-        (definition) => definition.name === 'memory.capture'
-      )?.inputContract.jsonSchema
+        definition => definition.name === 'memory.capture',
+      )?.inputContract.jsonSchema,
     ).toEqual(jsonSchema);
   });
 
   it('rejects unsupported nested keywords in persisted plugin tool schemas', () => {
     const jsonSchema = supportedPersistedPluginToolJsonSchema();
     Object.assign(jsonSchema.properties.entries.items, {
-      pattern: 'unsupported'
+      pattern: 'unsupported',
     });
     const storedRecord = storedRecordWithPluginToolJsonSchema(jsonSchema);
 
-    expect(() =>
-      decodeRawEventLogRecord(JSON.stringify(storedRecord))
-    ).toThrow(LocalRuntimeStorageContractError);
+    expect(() => decodeRawEventLogRecord(JSON.stringify(storedRecord))).toThrow(
+      LocalRuntimeStorageContractError,
+    );
   });
 
   it('reloads a durable malformed provider exchange adapter rejection', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-malformed-provider-exchange-rejection';
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
-    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
     const result = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
         'hello',
-        identity('evt_malformed_provider_exchange_rejection')
+        identity('evt_malformed_provider_exchange_rejection'),
       ),
-      session: createConversationSession({ id: sessionId }),
+      session: createConversationSession({id: sessionId}),
       logStore,
-      pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
-      roleModelAdapter: createMalformedProviderExchangeAdapter()
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+      roleModelAdapter: createMalformedProviderExchangeAdapter(),
     });
 
     expect(result).toMatchObject({
       status: 'rejected',
       reason: 'malformed_output',
-      message: 'Role-model adapter provider exchange is malformed.'
+      message: 'Role-model adapter provider exchange is malformed.',
     });
 
     const reloadedLogStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
     const reloadedTerminalEvent = reloadedLogStore.rawEvents().at(-1);
     expect(reloadedTerminalEvent).toMatchObject({
@@ -574,18 +567,18 @@ describe('file runtime log store plugin tool event validation', () => {
           status: 'rejected',
           rejection: {
             reason: 'malformed_output',
-            details: 'Role-model adapter provider exchange is malformed.'
-          }
-        }
-      }
+            details: 'Role-model adapter provider exchange is malformed.',
+          },
+        },
+      },
     });
     expect(
       reloadedTerminalEvent?.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions.find(
-        (definition) => definition.name === visibleReplyModelToolName
-      )?.callLimit
+        definition => definition.name === visibleReplyModelToolName,
+      )?.callLimit,
     ).toEqual({
       scope: 'model_response',
-      maxCalls: 1
+      maxCalls: 1,
     });
   });
 
@@ -593,9 +586,9 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-provider-exchange-credential-redaction';
     const credentialSentinel = 'durable-provider-credential-sentinel';
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const fetchClient: NvidiaFetchClient = () =>
       Promise.resolve({
@@ -608,54 +601,54 @@ describe('file runtime log store plugin tool event validation', () => {
                 finish_reason: 'stop',
                 message: {
                   role: 'assistant',
-                  content: 'Hello.'
-                }
-              }
+                  content: 'Hello.',
+                },
+              },
             ],
             usage: {
               api_key: credentialSentinel,
-              safe: 'preserved'
-            }
+              safe: 'preserved',
+            },
           });
         },
         text() {
           return Promise.resolve('');
-        }
+        },
       });
     const result = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
         'hello',
-        identity('evt_provider_exchange_credential_redaction')
+        identity('evt_provider_exchange_credential_redaction'),
       ),
-      session: createConversationSession({ id: sessionId }),
-      logStore: createFileRuntimeLogStore({ storeRoot, sessionId }),
-      pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
+      session: createConversationSession({id: sessionId}),
+      logStore: createFileRuntimeLogStore({storeRoot, sessionId}),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
       roleModelAdapter: createNvidiaRoleModelProviderAdapter({
         apiKey: 'secret',
-        fetchClient
-      })
+        fetchClient,
+      }),
     });
 
     expect(result.status).toBe('completed');
 
     const rawEvents = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     }).rawEvents();
     const completed = rawEvents.find(
-      (rawEvent) => rawEvent.kind === 'runtime_turn_completed'
+      rawEvent => rawEvent.kind === 'runtime_turn_completed',
     );
 
     expect(completed?.roleModelIOSnapshot?.providerExchange?.usage).toEqual({
       api_key: '[redacted]',
-      safe: 'preserved'
+      safe: 'preserved',
     });
     expect(JSON.stringify(rawEvents)).not.toContain(credentialSentinel);
   });
 
   it('rejects duplicate persisted allowed tools with the storage contract error', () => {
     const malformedRecord: unknown = structuredClone(
-      legacySchema1PatchCompletedEvent('duplicate-persisted-allowed-tools')
+      legacySchema1PatchCompletedEvent('duplicate-persisted-allowed-tools'),
     );
     const roleModelIOSnapshot = isTestRecord(malformedRecord)
       ? malformedRecord['roleModelIOSnapshot']
@@ -671,33 +664,33 @@ describe('file runtime log store plugin tool event validation', () => {
     inputEnvelope['allowedTools'] = [
       visibleReplyModelToolName,
       visibleReplyModelToolName,
-      characterStatePatchModelToolName
+      characterStatePatchModelToolName,
     ];
 
     expect(() =>
-      decodeRawEventLogRecord(JSON.stringify(malformedRecord))
+      decodeRawEventLogRecord(JSON.stringify(malformedRecord)),
     ).toThrow(LocalRuntimeStorageContractError);
   });
 
   it('decodes legacy schema 1 role-model snapshots with character_state.patch as a former built-in allowed tool', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'legacy-schema-1-role-model';
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     writeFileSync(
-      createLocalRuntimeStorageLayout({ storeRoot }).schemaPath,
+      createLocalRuntimeStorageLayout({storeRoot}).schemaPath,
       `${JSON.stringify({
         schemaVersion: 1,
-        createdAt: '2026-06-15T00:00:00.000Z'
+        createdAt: '2026-06-15T00:00:00.000Z',
       })}\n`,
-      'utf8'
+      'utf8',
     );
 
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
     const paths = logStore.localRuntimeSessionPaths;
 
@@ -705,22 +698,22 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    mkdirSync(paths.sessionRoot, { recursive: true });
+    mkdirSync(paths.sessionRoot, {recursive: true});
     writeJsonLines(paths.tracePath, [
       {
         ...identity('evt_legacy_schema1_patch'),
-        step: 'runtime_event_received'
+        step: 'runtime_event_received',
       },
       {
         ...identity('evt_legacy_schema1_patch'),
-        step: 'runtime_turn_completed'
-      }
+        step: 'runtime_turn_completed',
+      },
     ]);
     writeJsonLines(paths.rawEventsPath, [
       {
         ...identity('evt_legacy_schema1_patch'),
         kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE'
+        eventType: 'USER_MESSAGE',
       },
       {
         ...identity('evt_legacy_schema1_patch'),
@@ -728,130 +721,130 @@ describe('file runtime log store plugin tool event validation', () => {
         eventType: 'USER_MESSAGE',
         payloadSummary: {
           rawInput: 'remember the mood',
-          normalizedCurrentUserMessage: 'remember the mood'
-        }
+          normalizedCurrentUserMessage: 'remember the mood',
+        },
       },
-      legacySchema1PatchCompletedEvent(sessionId)
+      legacySchema1PatchCompletedEvent(sessionId),
     ]);
 
     const completed = logStore
       .rawEvents()
-      .find((event) => event.kind === 'runtime_turn_completed');
+      .find(event => event.kind === 'runtime_turn_completed');
 
     expect(completed?.roleModelIOSnapshot?.inputEnvelope.allowedTools).toEqual([
       visibleReplyModelToolName,
-      characterStatePatchModelToolName
+      characterStatePatchModelToolName,
     ]);
     expect(
-      completed?.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions
+      completed?.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions,
     ).toMatchObject([
       {
         pluginId: firstPartyModelToolsPluginId,
-        name: visibleReplyModelToolName
+        name: visibleReplyModelToolName,
       },
       {
         pluginId: 'character-state',
-        name: characterStatePatchModelToolName
-      }
+        name: characterStatePatchModelToolName,
+      },
     ]);
-    expect(
-      completed?.parsedRoleModelDecisionSnapshot?.result
-    ).toMatchObject({
+    expect(completed?.parsedRoleModelDecisionSnapshot?.result).toMatchObject({
       status: 'accepted',
       decision: {
         toolCalls: [
           {
             name: characterStatePatchModelToolName,
             input: {
-              mood: 'curious'
-            }
-          }
-        ]
-      }
+              mood: 'curious',
+            },
+          },
+        ],
+      },
     });
   });
 
   it('persists multi-line visible conversation records', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-multiline-visible',
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-multiline-visible'
+      sessionId: 'session-multiline-visible',
     });
     const session = createConversationSession({
-      id: 'session-multiline-visible'
+      id: 'session-multiline-visible',
     });
     const result = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
         'list tools',
-        identity('evt_multiline_visible')
+        identity('evt_multiline_visible'),
       ),
       session,
       logStore,
       pluginHost: createDefaultProject02PluginHost({
         storeRoot,
-        sessionId: 'session-multiline-visible'
+        sessionId: 'session-multiline-visible',
       }),
-      roleModelAdapter: createMultilineVisibleReplyAdapter()
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
     });
 
     expect(result.status).toBe('completed');
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual([
       'list tools',
-      'I can use:\n- runtime.plugin.list\n- character_state.patch'
+      'I can use:\n- runtime.plugin.list\n- character_state.patch',
     ]);
   });
 
   it('preserves a custom session character in durable conversation evidence', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-custom-character';
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const session = createConversationSession({
       id: sessionId,
       character: {
         id: 'nova',
-        displayName: 'Nova'
-      }
+        displayName: 'Nova',
+      },
     });
     const result = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
         'show me the stars',
-        identity('evt_custom_character')
+        identity('evt_custom_character'),
       ),
       session,
-      logStore: createFileRuntimeLogStore({ storeRoot, sessionId }),
-      pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
-      roleModelAdapter: createMultilineVisibleReplyAdapter()
+      logStore: createFileRuntimeLogStore({storeRoot, sessionId}),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
     });
 
     expect(result.status).toBe('completed');
-    const durableStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const durableStore = createFileRuntimeLogStore({storeRoot, sessionId});
 
     expect(
       durableStore
         .conversationMessages()
-        .map(({ role, speakerId, speakerName }) => ({
+        .map(({role, speakerId, speakerName}) => ({
           role,
           speakerId,
-          speakerName
-        }))
+          speakerName,
+        })),
     ).toEqual([
       {
         role: 'user',
         speakerId: 'local-user',
-        speakerName: 'You'
+        speakerName: 'You',
       },
       {
         role: 'character',
         speakerId: 'nova',
-        speakerName: 'Nova'
-      }
+        speakerName: 'Nova',
+      },
     ]);
 
     const rehydrated = await createLocalRuntimeSessionStore({
@@ -865,15 +858,15 @@ describe('file runtime log store plugin tool event validation', () => {
 
           return {
             character: durableRuntimeSessionCharacterProfile(evidence),
-            messages: evidence.conversationMessages
+            messages: evidence.conversationMessages,
           };
-        }
-      }
+        },
+      },
     }).rehydrateConversationSession(sessionId);
 
     expect(rehydrated.character).toEqual({
       id: 'nova',
-      displayName: 'Nova'
+      displayName: 'Nova',
     });
     expect(rehydrated.visibleTranscript).toHaveLength(2);
 
@@ -886,7 +879,7 @@ describe('file runtime log store plugin tool event validation', () => {
     const conversationRecords = readFileSync(paths.conversationPath, 'utf8')
       .trimEnd()
       .split('\n')
-      .map((line) => JSON.parse(line) as Record<string, unknown>);
+      .map(line => JSON.parse(line) as Record<string, unknown>);
     for (const conversationRecord of conversationRecords) {
       if (conversationRecord['role'] === 'character') {
         conversationRecord['speakerName'] = 'Not Nova';
@@ -895,9 +888,9 @@ describe('file runtime log store plugin tool event validation', () => {
     writeJsonLines(paths.conversationPath, conversationRecords);
 
     expect(() =>
-      createFileRuntimeLogStore({ storeRoot, sessionId }).conversationMessages()
+      createFileRuntimeLogStore({storeRoot, sessionId}).conversationMessages(),
     ).toThrow(
-      'Durable character speaker metadata must match recorded role-model character evidence.'
+      'Durable character speaker metadata must match recorded role-model character evidence.',
     );
 
     for (const conversationRecord of conversationRecords) {
@@ -910,47 +903,47 @@ describe('file runtime log store plugin tool event validation', () => {
     const resumedResult = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
         'keep looking',
-        identity('evt_custom_character_resumed')
+        identity('evt_custom_character_resumed'),
       ),
       session: rehydrated,
-      logStore: createFileRuntimeLogStore({ storeRoot, sessionId }),
-      pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
-      roleModelAdapter: createMultilineVisibleReplyAdapter()
+      logStore: createFileRuntimeLogStore({storeRoot, sessionId}),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
     });
 
     expect(resumedResult.status).toBe('completed');
     expect(
-      createFileRuntimeLogStore({ storeRoot, sessionId })
+      createFileRuntimeLogStore({storeRoot, sessionId})
         .conversationMessages()
-        .at(-1)
+        .at(-1),
     ).toMatchObject({
       role: 'character',
       speakerId: 'nova',
-      speakerName: 'Nova'
+      speakerName: 'Nova',
     });
   });
 
   it('rolls back a custom first turn when visible-reply raw evidence fails before append', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-custom-character-raw-rollback';
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
-    const underlying = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const underlying = createFileRuntimeLogStore({storeRoot, sessionId});
     const appendFailure = new Error('visible reply raw append failed');
     let failedVisibleReplyAppend = false;
     const failingStore = Object.freeze({
       ...(underlying.localRuntimeSessionPaths === undefined
         ? {}
-        : { localRuntimeSessionPaths: underlying.localRuntimeSessionPaths }),
+        : {localRuntimeSessionPaths: underlying.localRuntimeSessionPaths}),
       ...(underlying.localRuntimeWriterLockOwnerToken === undefined
         ? {}
         : {
             localRuntimeWriterLockOwnerToken:
-              underlying.localRuntimeWriterLockOwnerToken
+              underlying.localRuntimeWriterLockOwnerToken,
           }),
-      appendTrace: (entry) => underlying.appendTrace(entry),
+      appendTrace: entry => underlying.appendTrace(entry),
       appendRawEvent(record) {
         if (
           !failedVisibleReplyAppend &&
@@ -964,7 +957,7 @@ describe('file runtime log store plugin tool event validation', () => {
       },
       appendConversationMessage: (record, expectedCharacter) =>
         underlying.appendConversationMessage(record, expectedCharacter),
-      removeConversationMessages: (messageIds) => {
+      removeConversationMessages: messageIds => {
         underlying.removeConversationMessages(messageIds);
       },
       checkpointWriterEvidence: () => underlying.checkpointWriterEvidence?.(),
@@ -973,95 +966,97 @@ describe('file runtime log store plugin tool event validation', () => {
       readSessionEvidence: () => underlying.readSessionEvidence(),
       traceEntries: () => underlying.traceEntries(),
       rawEvents: () => underlying.rawEvents(),
-      conversationMessages: () => underlying.conversationMessages()
+      conversationMessages: () => underlying.conversationMessages(),
     } satisfies RuntimeLogStore);
     const failedSession = createConversationSession({
       id: sessionId,
-      character: { id: 'nova', displayName: 'Nova' }
+      character: {id: 'nova', displayName: 'Nova'},
     });
 
     await expect(
       runLocalUserMessageEvent({
         event: createUserMessageRuntimeEvent(
           'show me the stars',
-          identity('evt_custom_character_raw_rollback')
+          identity('evt_custom_character_raw_rollback'),
         ),
         session: failedSession,
         logStore: failingStore,
-        pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
-        roleModelAdapter: createMultilineVisibleReplyAdapter()
-      })
+        pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+        roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      }),
     ).rejects.toBe(appendFailure);
 
     expect(failedSession.visibleTranscript).toEqual([]);
-    const reopened = createFileRuntimeLogStore({ storeRoot, sessionId });
-    expect(reopened.readSessionEvidence().stored.conversationMessages).toEqual([]);
+    const reopened = createFileRuntimeLogStore({storeRoot, sessionId});
+    expect(reopened.readSessionEvidence().stored.conversationMessages).toEqual(
+      [],
+    );
     expect(reopened.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
-      status: 'rejected'
+      status: 'rejected',
     });
 
     await expect(
       runLocalUserMessageEvent({
         event: createUserMessageRuntimeEvent(
           'try again',
-          identity('evt_custom_character_raw_retry')
+          identity('evt_custom_character_raw_retry'),
         ),
         session: createConversationSession({
           id: sessionId,
-          character: { id: 'nova', displayName: 'Nova' }
+          character: {id: 'nova', displayName: 'Nova'},
         }),
         logStore: reopened,
-        pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
-        roleModelAdapter: createMultilineVisibleReplyAdapter()
-      })
-    ).resolves.toMatchObject({ status: 'completed' });
+        pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+        roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      }),
+    ).resolves.toMatchObject({status: 'completed'});
 
     expect(reopened.conversationMessages()).toEqual([
-      expect.objectContaining({ role: 'user', text: 'try again' }),
+      expect.objectContaining({role: 'user', text: 'try again'}),
       expect.objectContaining({
         role: 'character',
         speakerId: 'nova',
-        speakerName: 'Nova'
-      })
+        speakerName: 'Nova',
+      }),
     ]);
   });
 
   it('persists decodable commit validation for plugin health rejections', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-health-rejected',
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-health-rejected'
+      sessionId: 'session-health-rejected',
     });
     const session = createConversationSession({
-      id: 'session-health-rejected'
+      id: 'session-health-rejected',
     });
 
     const result = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
         'health check',
-        identity('evt_health_rejected')
+        identity('evt_health_rejected'),
       ),
       session,
       logStore,
       roleModelAdapter: createMultilineVisibleReplyAdapter(),
-      pluginHost: createHealthRejectingPluginHost()
+      pluginHost: createHealthRejectingPluginHost(),
     });
 
     expect(result).toMatchObject({
       status: 'rejected',
       reason: 'plugin_health_rejected',
-      message: 'Plugin health unavailable: health fixture offline'
+      message: 'Plugin health unavailable: health fixture offline',
     });
     expect(logStore.conversationMessages()).toEqual([]);
 
     const rawEvents = logStore.rawEvents();
     const commitRejection = rawEvents.find(
-      (event) => event.kind === 'commit_validation_rejected'
+      event => event.kind === 'commit_validation_rejected',
     );
 
     expect(commitRejection).toMatchObject({
@@ -1073,19 +1068,19 @@ describe('file runtime log store plugin tool event validation', () => {
           status: 'rejected',
           rejection: {
             reason: roleModelCommitValidationFailureRejectionReason,
-            details: 'Plugin health unavailable: health fixture offline'
-          }
-        }
+            details: 'Plugin health unavailable: health fixture offline',
+          },
+        },
       },
       runtimePluginTurnEvidence: {
         health: [
           {
             pluginId: 'health.reject.fixture',
             status: 'unavailable',
-            summary: 'health fixture offline'
-          }
-        ]
-      }
+            summary: 'health fixture offline',
+          },
+        ],
+      },
     });
     expect(rawEvents.at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
@@ -1096,51 +1091,51 @@ describe('file runtime log store plugin tool event validation', () => {
           status: 'rejected',
           rejection: {
             reason: roleModelCommitValidationFailureRejectionReason,
-            details: 'Plugin health unavailable: health fixture offline'
-          }
-        }
-      }
+            details: 'Plugin health unavailable: health fixture offline',
+          },
+        },
+      },
     });
   });
 
   it('rejects degraded health snapshots when plugin health policy rejects turns', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-health-degraded-rejected',
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-health-degraded-rejected'
+      sessionId: 'session-health-degraded-rejected',
     });
     const session = createConversationSession({
-      id: 'session-health-degraded-rejected'
+      id: 'session-health-degraded-rejected',
     });
 
     const result = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
         'health check',
-        identity('evt_health_degraded_rejected')
+        identity('evt_health_degraded_rejected'),
       ),
       session,
       logStore,
       roleModelAdapter: createMultilineVisibleReplyAdapter(),
       pluginHost: createHealthRejectingPluginHost({
         status: 'degraded',
-        summary: 'health fixture backpressure'
-      })
+        summary: 'health fixture backpressure',
+      }),
     });
 
     expect(result).toMatchObject({
       status: 'rejected',
       reason: 'plugin_health_rejected',
-      message: 'Plugin health degraded: health fixture backpressure'
+      message: 'Plugin health degraded: health fixture backpressure',
     });
     expect(logStore.conversationMessages()).toEqual([]);
 
     const rawEvents = logStore.rawEvents();
     const commitRejection = rawEvents.find(
-      (event) => event.kind === 'commit_validation_rejected'
+      event => event.kind === 'commit_validation_rejected',
     );
 
     expect(commitRejection).toMatchObject({
@@ -1152,9 +1147,9 @@ describe('file runtime log store plugin tool event validation', () => {
           status: 'rejected',
           rejection: {
             reason: roleModelCommitValidationFailureRejectionReason,
-            details: 'Plugin health degraded: health fixture backpressure'
-          }
-        }
+            details: 'Plugin health degraded: health fixture backpressure',
+          },
+        },
       },
       runtimePluginEvidence: [
         {
@@ -1162,18 +1157,18 @@ describe('file runtime log store plugin tool event validation', () => {
           evidenceKind: 'health',
           status: 'degraded',
           summary: 'Plugin health degraded: health fixture backpressure',
-          policyOutcome: 'health_degraded'
-        }
+          policyOutcome: 'health_degraded',
+        },
       ],
       runtimePluginTurnEvidence: {
         health: [
           {
             pluginId: 'health.reject.fixture',
             status: 'degraded',
-            summary: 'health fixture backpressure'
-          }
-        ]
-      }
+            summary: 'health fixture backpressure',
+          },
+        ],
+      },
     });
     expect(rawEvents.at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
@@ -1184,27 +1179,27 @@ describe('file runtime log store plugin tool event validation', () => {
           status: 'rejected',
           rejection: {
             reason: roleModelCommitValidationFailureRejectionReason,
-            details: 'Plugin health degraded: health fixture backpressure'
-          }
-        }
-      }
+            details: 'Plugin health degraded: health fixture backpressure',
+          },
+        },
+      },
     });
   });
 
   it('rejects started tool calls without matching finished records', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-tools',
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-tools'
+      sessionId: 'session-tools',
     });
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
       sessionId: 'session-tools',
-      ownerToken: fileLogStoreWriterOwnerToken(logStore)
+      ownerToken: fileLogStoreWriterOwnerToken(logStore),
     });
 
     try {
@@ -1218,12 +1213,12 @@ describe('file runtime log store plugin tool event validation', () => {
         toolName: 'memory.search',
         toolPluginId: 'memory.fixture',
         toolInput: {
-          query: 'Mira'
-        }
+          query: 'Mira',
+        },
       });
 
       expect(() => logStore.rawEvents()).toThrow(
-        LocalRuntimeStorageContractError
+        LocalRuntimeStorageContractError,
       );
     } finally {
       await writerLease.release();
@@ -1232,19 +1227,19 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('allows a rejected terminal turn to close an unfinished tool call start', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-tools-rejected',
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-tools-rejected'
+      sessionId: 'session-tools-rejected',
     });
     const eventId = 'evt_tool_finish_log_failed';
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
       sessionId: 'session-tools-rejected',
-      ownerToken: fileLogStoreWriterOwnerToken(logStore)
+      ownerToken: fileLogStoreWriterOwnerToken(logStore),
     });
 
     try {
@@ -1258,24 +1253,24 @@ describe('file runtime log store plugin tool event validation', () => {
         toolName: 'memory.write',
         toolPluginId: 'memory.fixture',
         toolInput: {
-          value: 'planned'
-        }
+          value: 'planned',
+        },
       });
       logStore.appendRawEvent({
         ...identity(eventId),
         kind: 'runtime_turn_rejected',
         eventType: 'USER_MESSAGE',
         status: 'rejected',
-        reason: 'Runtime turn failed before producing a reply.'
+        reason: 'Runtime turn failed before producing a reply.',
       });
       logStore.appendTrace({
         ...identity(eventId),
-        step: 'runtime_turn_rejected'
+        step: 'runtime_turn_rejected',
       });
 
       expect(logStore.rawEvents().at(-1)).toMatchObject({
         kind: 'runtime_turn_rejected',
-        status: 'rejected'
+        status: 'rejected',
       });
     } finally {
       await writerLease.release();
@@ -1284,18 +1279,18 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects terminal events that reference unfinished tool calls', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-terminal-tools',
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-terminal-tools'
+      sessionId: 'session-terminal-tools',
     });
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
       sessionId: 'session-terminal-tools',
-      ownerToken: fileLogStoreWriterOwnerToken(logStore)
+      ownerToken: fileLogStoreWriterOwnerToken(logStore),
     });
 
     try {
@@ -1306,8 +1301,8 @@ describe('file runtime log store plugin tool event validation', () => {
           kind: 'runtime_turn_completed',
           eventType: 'USER_MESSAGE',
           status: 'completed',
-          toolCallIds: ['round-1.1.memory.search']
-        })
+          toolCallIds: ['round-1.1.memory.search'],
+        }),
       ).toThrow(LocalRuntimeStorageContractError);
     } finally {
       await writerLease.release();
@@ -1320,7 +1315,7 @@ function createStoreRoot(): string {
 }
 
 function fileLogStoreWriterOwnerToken(
-  logStore: ReturnType<typeof createFileRuntimeLogStore>
+  logStore: ReturnType<typeof createFileRuntimeLogStore>,
 ) {
   const ownerToken = logStore.localRuntimeWriterLockOwnerToken;
 
@@ -1335,35 +1330,35 @@ function identity(eventId = 'evt_tool_events') {
   return createRuntimeEventIdentity({
     eventId,
     traceId: `trace_${eventId}`,
-    createdAt: '2026-06-15T00:00:00.000Z'
+    createdAt: '2026-06-15T00:00:00.000Z',
   });
 }
 
 function appendTurnPrefix(
   logStore: ReturnType<typeof createFileRuntimeLogStore>,
-  eventId = 'evt_tool_events'
+  eventId = 'evt_tool_events',
 ): void {
   logStore.appendTrace({
     ...identity(eventId),
-    step: 'runtime_event_received'
+    step: 'runtime_event_received',
   });
   logStore.appendRawEvent({
     ...identity(eventId),
     kind: 'runtime_event_received',
-    eventType: 'USER_MESSAGE'
+    eventType: 'USER_MESSAGE',
   });
   logStore.appendRawEvent({
     ...identity(eventId),
     kind: 'runtime_event_normalized',
-    eventType: 'USER_MESSAGE'
+    eventType: 'USER_MESSAGE',
   });
 }
 
 function writeJsonLines(filePath: string, records: readonly object[]): void {
   writeFileSync(
     filePath,
-    records.map((record) => `${JSON.stringify(record)}\n`).join(''),
-    'utf8'
+    records.map(record => `${JSON.stringify(record)}\n`).join(''),
+    'utf8',
   );
 }
 
@@ -1372,22 +1367,22 @@ function isTestRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function persistedDisallowedToolRejectionRecord(
-  sessionId: string
+  sessionId: string,
 ): Promise<Record<string, unknown>> {
   const storeRoot = createStoreRoot();
-  await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+  await createLocalRuntimeSessionStore({storeRoot}).createSession({
     sessionId,
-    createdAt: '2026-06-15T00:00:00.000Z'
+    createdAt: '2026-06-15T00:00:00.000Z',
   });
-  const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+  const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
   const result = await runLocalUserMessageEvent({
     event: createUserMessageRuntimeEvent(
       'try unknown',
-      identity(`evt_${sessionId}`)
+      identity(`evt_${sessionId}`),
     ),
-    session: createConversationSession({ id: sessionId }),
+    session: createConversationSession({id: sessionId}),
     logStore,
-    pluginHost: createDefaultProject02PluginHost({ storeRoot, sessionId }),
+    pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
     roleModelAdapter: Object.freeze({
       invoke() {
         return {
@@ -1396,21 +1391,21 @@ async function persistedDisallowedToolRejectionRecord(
               {
                 name: 'memory.unknown',
                 input: {
-                  query: 'Mira'
-                }
-              }
-            ]
-          })
+                  query: 'Mira',
+                },
+              },
+            ],
+          }),
         };
-      }
+      },
     } satisfies RoleModelAdapter),
-    maxToolRounds: 1
+    maxToolRounds: 1,
   });
   const storedRecord: unknown = structuredClone(logStore.rawEvents().at(-1));
 
   expect(result).toMatchObject({
     status: 'rejected',
-    reason: 'plugin_tool_rejected'
+    reason: 'plugin_tool_rejected',
   });
 
   if (!isTestRecord(storedRecord)) {
@@ -1421,7 +1416,7 @@ async function persistedDisallowedToolRejectionRecord(
 }
 
 function rejectedDecisionResultRecord(
-  storedRecord: Record<string, unknown>
+  storedRecord: Record<string, unknown>,
 ): Record<string, unknown> {
   const parsedSnapshot = storedRecord['parsedRoleModelDecisionSnapshot'];
   const result = isTestRecord(parsedSnapshot)
@@ -1443,7 +1438,7 @@ function supportedPersistedPluginToolJsonSchema() {
       note: {
         type: ['string', 'null'],
         description: 'Optional note.',
-        enum: ['remember', 'forget']
+        enum: ['remember', 'forget'],
       },
       entries: {
         type: ['array', 'null'],
@@ -1451,28 +1446,28 @@ function supportedPersistedPluginToolJsonSchema() {
           type: ['object', 'null'],
           properties: {
             text: {
-              type: 'string'
-            }
+              type: 'string',
+            },
           },
           required: ['text'],
-          additionalProperties: false
-        }
-      }
+          additionalProperties: false,
+        },
+      },
     },
     required: ['entries'],
-    additionalProperties: false
+    additionalProperties: false,
   };
 }
 
 function storedRecordWithPluginToolJsonSchema(
-  jsonSchema: Readonly<Record<string, unknown>>
+  jsonSchema: Readonly<Record<string, unknown>>,
 ): object {
   const storedRecord: unknown = structuredClone(
     decodeRawEventLogRecord(
       JSON.stringify(
-        legacySchema1PatchCompletedEvent('persisted-plugin-tool-schema')
-      )
-    )
+        legacySchema1PatchCompletedEvent('persisted-plugin-tool-schema'),
+      ),
+    ),
   );
 
   if (!isTestRecord(storedRecord)) {
@@ -1501,18 +1496,18 @@ function storedRecordWithPluginToolJsonSchema(
     requiredForUserTurn: false,
     callLimit: {
       scope: 'user_turn',
-      maxCalls: 1
+      maxCalls: 1,
     },
     inputContract: {
       type: 'object',
       fields: [],
       additionalFields: false,
-      jsonSchema
+      jsonSchema,
     },
     validationOwner: 'plugin_host',
     sideEffectLevel: 'local_memory_write',
     requiresConfirmation: false,
-    sourceReferencesRequired: false
+    sourceReferencesRequired: false,
   });
   allowedTools.push('memory.capture');
 
@@ -1526,10 +1521,10 @@ function legacySchema1PatchCompletedEvent(sessionId: string): object {
       {
         name: characterStatePatchModelToolName,
         input: {
-          mood: 'curious'
-        }
-      }
-    ]
+          mood: 'curious',
+        },
+      },
+    ],
   });
 
   return {
@@ -1546,29 +1541,29 @@ function legacySchema1PatchCompletedEvent(sessionId: string): object {
           ...eventIdentity,
           type: 'USER_MESSAGE',
           payload: {
-            currentUserMessage: 'remember the mood'
-          }
+            currentUserMessage: 'remember the mood',
+          },
         },
         decisionContext: {
           sessionId,
           characterSnapshot: {
             id: 'mira',
-            displayName: 'Mira'
+            displayName: 'Mira',
           },
           recentVisibleMessages: [],
-          runtimeNotes: []
+          runtimeNotes: [],
         },
         allowedTools: [
           visibleReplyModelToolName,
-          characterStatePatchModelToolName
+          characterStatePatchModelToolName,
         ],
         toolObservations: [],
         outputContract: {
           version: roleModelDecisionContractVersion,
-          text: 'legacy schema 1 output contract text'
-        }
+          text: 'legacy schema 1 output contract text',
+        },
       },
-      rawOutputText
+      rawOutputText,
     },
     parsedRoleModelDecisionSnapshot: {
       ...eventIdentity,
@@ -1582,21 +1577,21 @@ function legacySchema1PatchCompletedEvent(sessionId: string): object {
             {
               name: characterStatePatchModelToolName,
               input: {
-                mood: 'curious'
-              }
-            }
-          ]
-        }
-      }
+                mood: 'curious',
+              },
+            },
+          ],
+        },
+      },
     },
     commitValidation: {
       ...eventIdentity,
       kind: 'role_model_commit_validation_snapshot',
       sessionId,
       result: {
-        status: 'accepted'
-      }
-    }
+        status: 'accepted',
+      },
+    },
   };
 }
 
@@ -1609,13 +1604,13 @@ function createMultilineVisibleReplyAdapter(): RoleModelAdapter {
             {
               name: 'visible_reply',
               input: {
-                text: 'I can use:\n- runtime.plugin.list\n- character_state.patch'
-              }
-            }
-          ]
-        })
+                text: 'I can use:\n- runtime.plugin.list\n- character_state.patch',
+              },
+            },
+          ],
+        }),
       };
-    }
+    },
   };
 }
 
@@ -1624,18 +1619,18 @@ function createMalformedProviderExchangeAdapter(): RoleModelAdapter {
     invoke(_inputEnvelope, invocation) {
       const providerExchange: RoleModelProviderExchangeSnapshot = {
         provider: {
-          name: 'local'
+          name: 'local',
         },
         capabilities: defaultRoleModelProviderCapabilities,
         reasoning: {
           mode: 'none',
-          params: {}
+          params: {},
         },
         renderedMessages: invocation.turnContext.messages,
         renderedTools: invocation.turnContext.tools,
         toolNameMappings: [],
         requestBody: {},
-        nativeToolResultMessages: []
+        nativeToolResultMessages: [],
       };
       Reflect.deleteProperty(providerExchange, 'reasoning');
 
@@ -1645,14 +1640,14 @@ function createMalformedProviderExchangeAdapter(): RoleModelAdapter {
             {
               name: visibleReplyModelToolName,
               input: {
-                text: 'hello'
-              }
-            }
-          ]
+                text: 'hello',
+              },
+            },
+          ],
         }),
-        providerExchange
+        providerExchange,
       };
-    }
+    },
   };
 }
 
@@ -1675,11 +1670,11 @@ function createHealthRejectingPluginHost(options?: {
           contractVersion: runtimePluginContractVersion,
           compatibility: {
             hostContractVersions: [runtimePluginContractVersion],
-            sourceSystem: 'test'
+            sourceSystem: 'test',
           },
           declaredPlugins: ['health'],
           config: {
-            fields: []
+            fields: [],
           },
           localTrustLevel: 'test_fixture',
           runtimePolicy: {
@@ -1693,14 +1688,14 @@ function createHealthRejectingPluginHost(options?: {
               beforeRoleModelCall: 'degrade',
               handleToolCall: 'reject_tool_call',
               afterTurnCommitted: 'log_failure',
-              health: 'reject_turn'
-            }
+              health: 'reject_turn',
+            },
           },
           activation: {
             defaultEnabled: true,
-            reasons: ['test']
+            reasons: ['test'],
           },
-          requestedAccess: {}
+          requestedAccess: {},
         },
         providedTools: [],
         lifecycleHooks: {
@@ -1710,12 +1705,12 @@ function createHealthRejectingPluginHost(options?: {
               status,
               checkedAt: context.timestamp,
               summary,
-              redactionLabels: []
+              redactionLabels: [],
             });
-          }
-        }
-      })
+          },
+        },
+      }),
     ],
-    enabledPluginIds: [firstPartyModelToolsPluginId, 'health.reject.fixture']
+    enabledPluginIds: [firstPartyModelToolsPluginId, 'health.reject.fixture'],
   });
 }

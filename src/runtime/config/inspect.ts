@@ -1,26 +1,26 @@
-import type { RuntimePluginAccessMap } from '../../plugins/api/index.ts';
+import type {RuntimePluginAccessMap} from '../../plugins/api/index.ts';
 import type {
   LoadedProject02RuntimeConfig,
   ResolvedProject02RuntimeConfig,
   RuntimeConfigInspectShape,
   RuntimePluginConfigActivationInspectShape,
   RuntimePluginConfigInspectShape,
-  RuntimeConfigValue
+  RuntimeConfigValue,
 } from './types.ts';
-import type { RuntimePluginManifest } from '../../plugins/api/index.ts';
-import { ownJsonRecordValue } from '../../shared/json-boundary.ts';
-import { redactRuntimeConfigValue } from './redact.ts';
-import { runtimeConfigDiagnosticMatchesPlugin } from './resolve.ts';
+import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
+import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
+import {redactRuntimeConfigValue} from './redact.ts';
+import {runtimeConfigDiagnosticMatchesPlugin} from './resolve.ts';
 
 export function createRuntimeConfigInspectShape(
-  resolvedConfig: ResolvedProject02RuntimeConfig
+  resolvedConfig: ResolvedProject02RuntimeConfig,
 ): RuntimeConfigInspectShape {
   return Object.freeze({
     source: resolvedConfig.source,
-    ...(resolvedConfig.path === undefined ? {} : { path: resolvedConfig.path }),
+    ...(resolvedConfig.path === undefined ? {} : {path: resolvedConfig.path}),
     project02: resolvedConfig.project02,
     diagnostics: Object.freeze([...resolvedConfig.diagnostics]),
-    fingerprint: resolvedConfig.effectiveConfigFingerprint
+    fingerprint: resolvedConfig.effectiveConfigFingerprint,
   } satisfies RuntimeConfigInspectShape);
 }
 
@@ -34,16 +34,16 @@ export function createRuntimePluginConfigInspectShape(options: {
 }): RuntimePluginConfigInspectShape {
   const authoredPlugin = ownJsonRecordValue(
     options.loadedConfig.config?.plugins,
-    options.manifest.id
+    options.manifest.id,
   );
   const effectiveFields = ownJsonRecordValue(
     options.resolvedConfig.redactedPluginConfigs,
-    options.manifest.id
+    options.manifest.id,
   );
 
   if (effectiveFields === undefined) {
     throw new TypeError(
-      `Resolved runtime config is missing manifest metadata for plugin "${options.manifest.id}".`
+      `Resolved runtime config is missing manifest metadata for plugin "${options.manifest.id}".`,
     );
   }
 
@@ -52,13 +52,14 @@ export function createRuntimePluginConfigInspectShape(options: {
     options.defaultEnabled ??
     options.manifest.activation.defaultEnabled;
   const diagnostics = Object.freeze(
-    options.resolvedConfig.diagnostics.filter((diagnostic) =>
-      diagnostic.scope === 'global' ||
-      runtimeConfigDiagnosticMatchesPlugin({
-        diagnostic,
-        pluginId: options.manifest.id
-      })
-    )
+    options.resolvedConfig.diagnostics.filter(
+      diagnostic =>
+        diagnostic.scope === 'global' ||
+        runtimeConfigDiagnosticMatchesPlugin({
+          diagnostic,
+          pluginId: options.manifest.id,
+        }),
+    ),
   );
   const activation = runtimePluginConfigActivationInspection({
     configuredEnabled,
@@ -66,7 +67,7 @@ export function createRuntimePluginConfigInspectShape(options: {
     manifest: options.manifest,
     ...(options.activation === undefined
       ? {}
-      : { activation: options.activation })
+      : {activation: options.activation}),
   });
 
   return Object.freeze({
@@ -76,16 +77,16 @@ export function createRuntimePluginConfigInspectShape(options: {
     enabled: configuredEnabled,
     activation,
     fields: Object.freeze(
-      options.manifest.config.fields.map((field) => {
+      options.manifest.config.fields.map(field => {
         const authoredValue = ownJsonRecordValue(
           authoredPlugin?.config,
-          field.name
+          field.name,
         );
         const effective = ownJsonRecordValue(effectiveFields, field.name);
 
         if (effective === undefined) {
           throw new TypeError(
-            `Resolved runtime config is missing field "${field.name}" for plugin "${options.manifest.id}".`
+            `Resolved runtime config is missing field "${field.name}" for plugin "${options.manifest.id}".`,
           );
         }
 
@@ -94,13 +95,15 @@ export function createRuntimePluginConfigInspectShape(options: {
           description: field.description,
           required: field.required,
           secret: field.secret,
-          ...(field.valueType === undefined ? {} : { valueType: field.valueType }),
+          ...(field.valueType === undefined
+            ? {}
+            : {valueType: field.valueType}),
           ...(field.defaultValueSummary === undefined
             ? {}
-            : { defaultValueSummary: field.defaultValueSummary }),
+            : {defaultValueSummary: field.defaultValueSummary}),
           ...(field.allowedValues === undefined
             ? {}
-            : { allowedValues: Object.freeze([...field.allowedValues]) }),
+            : {allowedValues: Object.freeze([...field.allowedValues])}),
           agentMutable: field.agentMutable === true && !field.secret,
           reloadRequired: field.reloadRequired === true,
           authored: Object.freeze({
@@ -111,16 +114,16 @@ export function createRuntimePluginConfigInspectShape(options: {
                   value: redactAuthoredPluginConfigValue(
                     authoredValue,
                     field.name,
-                    field.secret
-                  )
-                })
+                    field.secret,
+                  ),
+                }),
           }),
-          effective
+          effective,
         });
-      })
+      }),
     ),
     diagnostics,
-    fingerprint: options.fingerprint
+    fingerprint: options.fingerprint,
   } satisfies RuntimePluginConfigInspectShape);
 }
 
@@ -134,21 +137,21 @@ function runtimePluginConfigActivationInspection(options: {
     return Object.freeze({
       enabled: options.activation.enabled,
       status: options.activation.status,
-      reasons: Object.freeze([...options.activation.reasons])
+      reasons: Object.freeze([...options.activation.reasons]),
     });
   }
 
   const blockingDiagnosticCodes = options.diagnostics
-    .filter((diagnostic) => diagnostic.severity === 'error')
-    .map((diagnostic) => diagnostic.code);
+    .filter(diagnostic => diagnostic.severity === 'error')
+    .map(diagnostic => diagnostic.code);
 
   if (blockingDiagnosticCodes.length > 0) {
     return Object.freeze({
       enabled: false,
       status: 'blocked',
       reasons: Object.freeze(
-        blockingDiagnosticCodes.map((code) => `runtime_config_error:${code}`)
-      )
+        blockingDiagnosticCodes.map(code => `runtime_config_error:${code}`),
+      ),
     });
   }
 
@@ -158,19 +161,19 @@ function runtimePluginConfigActivationInspection(options: {
     reasons: Object.freeze(
       options.configuredEnabled
         ? [...options.manifest.activation.reasons, 'config_inspection_active']
-        : ['config_inspection_disabled']
-    )
+        : ['config_inspection_disabled'],
+    ),
   });
 }
 
 function redactAuthoredPluginConfigValue(
   value: RuntimeConfigValue,
   fieldName: string,
-  secret: boolean
+  secret: boolean,
 ): RuntimeConfigValue {
   return secret
     ? '[redacted]'
-    : redactRuntimeConfigValue(value, { key: fieldName });
+    : redactRuntimeConfigValue(value, {key: fieldName});
 }
 
 export type InspectConfiguredPlugin = {
@@ -206,13 +209,13 @@ type ConfiguredPluginActivationView = {
 // Structural view of the app-layer activation result: runtime/config must
 // not import src/app, and the join only needs these fields.
 export function inspectConfiguredPlugins(
-  runtimeConfig: ConfiguredPluginActivationView
+  runtimeConfig: ConfiguredPluginActivationView,
 ): readonly InspectConfiguredPlugin[] {
   return Object.freeze(
-    runtimeConfig.activation.plugins.map((plugin) => {
+    runtimeConfig.activation.plugins.map(plugin => {
       const config = ownJsonRecordValue(
         runtimeConfig.resolvedConfig.redactedPluginConfigs,
-        plugin.pluginId
+        plugin.pluginId,
       );
 
       return Object.freeze({
@@ -224,8 +227,8 @@ export function inspectConfiguredPlugins(
         activationStatus: plugin.activationStatus,
         activationReasons: Object.freeze([...plugin.activationReasons]),
         diagnostics: Object.freeze([...plugin.diagnostics]),
-        ...(config === undefined ? {} : { config })
+        ...(config === undefined ? {} : {config}),
       } satisfies InspectConfiguredPlugin);
-    })
+    }),
   );
 }

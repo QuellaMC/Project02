@@ -1,16 +1,14 @@
 import {
   runtimeTraceStepValues,
   type RuntimeTraceEntry,
-  type RuntimeTraceStepName
+  type RuntimeTraceStepName,
 } from '../evidence/records.ts';
 import {
   isOneOf,
   requiredRuntimeEventIdentity,
-  throwMalformedRecord
+  throwMalformedRecord,
 } from './codec-primitives.ts';
-import {
-  parseJsonObject
-} from './layout-contract.ts';
+import {parseJsonObject} from './layout-contract.ts';
 
 export function encodeRuntimeTraceEntry(entry: RuntimeTraceEntry): string {
   return JSON.stringify(entry);
@@ -22,7 +20,7 @@ export function decodeRuntimeTraceEntry(line: string): RuntimeTraceEntry {
 
   return Object.freeze({
     ...identity,
-    step: requiredRuntimeTraceStep(record['step'])
+    step: requiredRuntimeTraceStep(record['step']),
   } satisfies RuntimeTraceEntry);
 }
 

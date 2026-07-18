@@ -3,36 +3,31 @@ import {
   canonicalRuntimeConfigMutationPath,
   createRuntimeConfigMutationBase,
   prepareRuntimeConfigMutationCandidate,
-  type RuntimeConfigMutationResult
+  type RuntimeConfigMutationResult,
 } from './mutate.ts';
-import {
-  createRuntimeConfigFingerprint
-} from './fingerprint.ts';
-import { canonicalJsonValuesEqual } from '../../shared/canonical-json.ts';
-import { createRuntimePluginConfigInspectShape } from './inspect.ts';
-import {
-  defaultRuntimeConfigPath,
-  loadProject02RuntimeConfig
-} from './load.ts';
-import { resolveProject02RuntimeConfig } from './resolve.ts';
+import {createRuntimeConfigFingerprint} from './fingerprint.ts';
+import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
+import {createRuntimePluginConfigInspectShape} from './inspect.ts';
+import {defaultRuntimeConfigPath, loadProject02RuntimeConfig} from './load.ts';
+import {resolveProject02RuntimeConfig} from './resolve.ts';
 import {
   runtimeConfigFieldValueMismatchMessage,
-  runtimeConfigValueMatchesField
+  runtimeConfigValueMatchesField,
 } from './schema.ts';
 import {
   redactRuntimeConfigValue,
-  runtimeConfigValueIsSecretMarker
+  runtimeConfigValueIsSecretMarker,
 } from './redact.ts';
 import type {
   RuntimePluginConfigField,
-  RuntimePluginManifest
+  RuntimePluginManifest,
 } from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
   RuntimeConfigMutationOperation,
   RuntimeConfigValue,
   RuntimePluginConfigActivationInspectShape,
-  RuntimePluginConfigInspectShape
+  RuntimePluginConfigInspectShape,
 } from './types.ts';
 
 export type RuntimeConfigControlOperation = Extract<
@@ -59,7 +54,7 @@ export function applyRuntimeConfigControlOperation(options: {
 }
 
 function assertRuntimeConfigControlOperation(
-  operation: RuntimeConfigMutationOperation
+  operation: RuntimeConfigMutationOperation,
 ): asserts operation is RuntimeConfigControlOperation {
   switch (operation.kind) {
     case 'set':
@@ -72,7 +67,7 @@ function assertRuntimeConfigControlOperation(
     case 'plugin_config_unset':
     case 'secret_set':
       throw new TypeError(
-        'Plugin config fields must be changed through manifest-aware control.'
+        'Plugin config fields must be changed through manifest-aware control.',
       );
   }
 }
@@ -106,25 +101,29 @@ export function inspectRuntimePluginConfig(options: {
   readonly defaultEnabled?: boolean;
 }): RuntimePluginConfigInspectShape {
   const loadedConfig = loadProject02RuntimeConfig({
-    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
-    ...(options.env === undefined ? {} : { env: options.env }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.env === undefined ? {} : {env: options.env}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const manifests = manifestsIncludingTarget(
     options.manifest,
-    options.pluginManifests
+    options.pluginManifests,
   );
   const resolvedConfig = resolveProject02RuntimeConfig({
     loadedConfig,
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     pluginManifests: manifests,
     validateInactivePluginConfigs: true,
-    ...(options.env === undefined ? {} : { env: options.env })
+    ...(options.env === undefined ? {} : {env: options.env}),
   });
   const mutationBase = createRuntimeConfigMutationBase({
     loadedConfig,
-    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
 
   return createRuntimePluginConfigInspectShape({
@@ -133,11 +132,11 @@ export function inspectRuntimePluginConfig(options: {
     manifest: options.manifest,
     ...(options.activation === undefined
       ? {}
-      : { activation: options.activation }),
+      : {activation: options.activation}),
     ...(options.defaultEnabled === undefined
       ? {}
-      : { defaultEnabled: options.defaultEnabled }),
-    fingerprint: createRuntimeConfigFingerprint(mutationBase)
+      : {defaultEnabled: options.defaultEnabled}),
+    fingerprint: createRuntimeConfigFingerprint(mutationBase),
   });
 }
 
@@ -153,12 +152,14 @@ export function applyRuntimePluginConfigControlOperation(options: {
   const mutation = runtimePluginConfigControlMutation(options);
 
   return applyRuntimeConfigMutation({
-    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
-    ...(options.env === undefined ? {} : { env: options.env }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.env === undefined ? {} : {env: options.env}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     expectedFingerprint: options.expectedFingerprint,
     validateCandidate: mutation.validateCandidate,
-    operation: mutation.operation
+    operation: mutation.operation,
   });
 }
 
@@ -175,18 +176,22 @@ export function prepareRuntimePluginConfigControlOperation(options: {
   readonly targetConfigPath: string;
 } {
   const loadedConfig = loadProject02RuntimeConfig({
-    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
-    ...(options.env === undefined ? {} : { env: options.env }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.env === undefined ? {} : {env: options.env}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const mutation = runtimePluginConfigControlMutation(options);
   const prepared = prepareRuntimeConfigMutationCandidate({
     loadedConfig,
-    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     expectedFingerprint: options.expectedFingerprint,
     validateCandidate: mutation.validateCandidate,
-    operation: mutation.operation
+    operation: mutation.operation,
   });
 
   return Object.freeze({
@@ -194,14 +199,14 @@ export function prepareRuntimePluginConfigControlOperation(options: {
     targetConfigPath: runtimeConfigControlTargetPathFromLoaded({
       ...(loadedConfig.path === undefined
         ? {}
-        : { loadedPath: loadedConfig.path }),
+        : {loadedPath: loadedConfig.path}),
       ...(options.configPath === undefined
         ? {}
-        : { configPath: options.configPath }),
+        : {configPath: options.configPath}),
       ...(options.storeRoot === undefined
         ? {}
-        : { storeRoot: options.storeRoot })
-    })
+        : {storeRoot: options.storeRoot}),
+    }),
   });
 }
 
@@ -211,21 +216,19 @@ export function resolveRuntimeConfigControlTargetPath(options: {
   readonly storeRoot?: string;
 }): string {
   const loadedConfig = loadProject02RuntimeConfig({
-    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
-    ...(options.env === undefined ? {} : { env: options.env }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.env === undefined ? {} : {env: options.env}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
 
   return runtimeConfigControlTargetPathFromLoaded({
-    ...(loadedConfig.path === undefined
-      ? {}
-      : { loadedPath: loadedConfig.path }),
+    ...(loadedConfig.path === undefined ? {} : {loadedPath: loadedConfig.path}),
     ...(options.configPath === undefined
       ? {}
-      : { configPath: options.configPath }),
-    ...(options.storeRoot === undefined
-      ? {}
-      : { storeRoot: options.storeRoot })
+      : {configPath: options.configPath}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
 }
 
@@ -237,7 +240,7 @@ function runtimeConfigControlTargetPathFromLoaded(options: {
   return canonicalRuntimeConfigMutationPath(
     options.loadedPath ??
       options.configPath ??
-      defaultRuntimeConfigPath(options.storeRoot)
+      defaultRuntimeConfigPath(options.storeRoot),
   );
 }
 
@@ -256,18 +259,18 @@ function runtimePluginConfigControlMutation(options: {
   return {
     operation: runtimePluginConfigMutationOperation(options.operation, {
       pluginId: options.manifest.id,
-      fieldName: field.name
+      fieldName: field.name,
     }),
-    validateCandidate: (config) => {
+    validateCandidate: config => {
       assertRuntimePluginConfigCandidateValid({
         config,
         manifest: options.manifest,
-        ...(options.env === undefined ? {} : { env: options.env }),
+        ...(options.env === undefined ? {} : {env: options.env}),
         ...(options.storeRoot === undefined
           ? {}
-          : { storeRoot: options.storeRoot })
+          : {storeRoot: options.storeRoot}),
       });
-    }
+    },
   };
 }
 
@@ -276,26 +279,26 @@ function runtimePluginConfigMutationOperation(
   target: {
     readonly pluginId: string;
     readonly fieldName: string;
-  }
+  },
 ): RuntimeConfigMutationOperation {
   switch (operation.kind) {
     case 'set':
       return {
         kind: 'plugin_config_set',
         ...target,
-        value: operation.value
+        value: operation.value,
       };
     case 'unset':
       return {
         kind: 'plugin_config_unset',
-        ...target
+        ...target,
       };
     case 'secret_set':
       return {
         kind: 'secret_set',
         ...target,
         envVar: operation.envVar,
-        secretValue: operation.secretValue
+        secretValue: operation.secretValue,
       };
   }
 }
@@ -310,23 +313,23 @@ function assertRuntimePluginConfigCandidateValid(options: {
     loadedConfig: {
       source: 'path',
       config: options.config,
-      diagnostics: Object.freeze([])
+      diagnostics: Object.freeze([]),
     },
     pluginManifests: [options.manifest],
-    ...(options.env === undefined ? {} : { env: options.env }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-    validateInactivePluginConfigs: true
+    ...(options.env === undefined ? {} : {env: options.env}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+    validateInactivePluginConfigs: true,
   });
   const blockingDiagnostic = resolved.diagnostics.find(
-    (diagnostic) =>
+    diagnostic =>
       diagnostic.severity === 'error' &&
       diagnostic.scope === 'plugin' &&
-      diagnostic.pluginId === options.manifest.id
+      diagnostic.pluginId === options.manifest.id,
   );
 
   if (blockingDiagnostic !== undefined) {
     throw new TypeError(
-      `Cannot update plugin config because the resulting config is invalid: ${blockingDiagnostic.message}`
+      `Cannot update plugin config because the resulting config is invalid: ${blockingDiagnostic.message}`,
     );
   }
 }
@@ -337,12 +340,12 @@ export function validateRuntimePluginConfigControlOperation(options: {
   readonly operation: RuntimePluginConfigFieldControlOperation;
 }): RuntimePluginConfigField {
   const field = options.manifest.config.fields.find(
-    (candidate) => candidate.name === options.operation.fieldName
+    candidate => candidate.name === options.operation.fieldName,
   );
 
   if (field === undefined) {
     throw new TypeError(
-      `Plugin "${options.manifest.id}" does not declare config field "${options.operation.fieldName}".`
+      `Plugin "${options.manifest.id}" does not declare config field "${options.operation.fieldName}".`,
     );
   }
 
@@ -353,7 +356,7 @@ export function validateRuntimePluginConfigControlOperation(options: {
 
     if (!field.secret) {
       throw new TypeError(
-        `Plugin config field "${field.name}" is not declared as secret.`
+        `Plugin config field "${field.name}" is not declared as secret.`,
       );
     }
 
@@ -362,33 +365,44 @@ export function validateRuntimePluginConfigControlOperation(options: {
 
   if (field.secret) {
     throw new TypeError(
-      `Plugin config field "${field.name}" is secret and must be managed through the dedicated secret command.`
+      `Plugin config field "${field.name}" is secret and must be managed through the dedicated secret command.`,
     );
   }
 
   if (options.actor === 'agent' && field.agentMutable !== true) {
     throw new TypeError(
-      `Plugin config field "${field.name}" does not allow agent mutation.`
+      `Plugin config field "${field.name}" does not allow agent mutation.`,
     );
   }
 
   if (options.operation.kind === 'unset' && field.required) {
     throw new TypeError(
-      `Required plugin config field "${field.name}" cannot be unset.`
+      `Required plugin config field "${field.name}" cannot be unset.`,
     );
   }
 
   if (options.operation.kind === 'set') {
     if (!runtimeConfigValueMatchesField(options.operation.value, field)) {
-      throw new TypeError(runtimeConfigFieldValueMismatchMessage(field, options.operation.value));
+      throw new TypeError(
+        runtimeConfigFieldValueMismatchMessage(field, options.operation.value),
+      );
     }
 
     if (runtimeConfigControlValueContainsSecret(options.operation.value)) {
-      throw new TypeError(`Plugin config field "${field.name}" value must not embed secret references; secrets are managed through the dedicated secret command.`);
+      throw new TypeError(
+        `Plugin config field "${field.name}" value must not embed secret references; secrets are managed through the dedicated secret command.`,
+      );
     }
 
-    if (runtimeConfigControlValueRequiresRedaction(options.operation.value, field.name)) {
-      throw new TypeError(`Plugin config field "${field.name}" value contains content that must stay redacted and cannot be written.`);
+    if (
+      runtimeConfigControlValueRequiresRedaction(
+        options.operation.value,
+        field.name,
+      )
+    ) {
+      throw new TypeError(
+        `Plugin config field "${field.name}" value contains content that must stay redacted and cannot be written.`,
+      );
     }
   }
 
@@ -397,22 +411,20 @@ export function validateRuntimePluginConfigControlOperation(options: {
 
 function runtimeConfigControlValueRequiresRedaction(
   value: RuntimeConfigValue,
-  fieldName: string
+  fieldName: string,
 ): boolean {
-  return (
-    !canonicalJsonValuesEqual(
-      redactRuntimeConfigValue(value, { key: fieldName }),
-      value
-    )
+  return !canonicalJsonValuesEqual(
+    redactRuntimeConfigValue(value, {key: fieldName}),
+    value,
   );
 }
 
 function manifestsIncludingTarget(
   target: RuntimePluginManifest,
-  manifests: readonly RuntimePluginManifest[] | undefined
+  manifests: readonly RuntimePluginManifest[] | undefined,
 ): readonly RuntimePluginManifest[] {
   const byId = new Map(
-    (manifests ?? []).map((manifest) => [manifest.id, manifest] as const)
+    (manifests ?? []).map(manifest => [manifest.id, manifest] as const),
   );
 
   byId.set(target.id, target);
@@ -420,7 +432,7 @@ function manifestsIncludingTarget(
 }
 
 function runtimeConfigControlValueContainsSecret(
-  value: RuntimeConfigValue
+  value: RuntimeConfigValue,
 ): boolean {
   if (Array.isArray(value)) {
     return value.some(runtimeConfigControlValueContainsSecret);

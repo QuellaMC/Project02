@@ -5,6 +5,6 @@
  */
 export {
   runtimePluginEvidenceOption,
-  runtimePluginTurnEvidenceOption
+  runtimePluginTurnEvidenceOption,
 } from './plugin-evidence.ts';
-export { recoverPendingRuntimeConfigEffects } from './config-effects.ts';
+export {recoverPendingRuntimeConfigEffects} from './config-effects.ts';

@@ -1,28 +1,28 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import { runRuntimeConfigCliFromArgs } from '../../src/cli/config/main.ts';
-import { runInspectCliFromArgs } from '../../src/cli/inspect/main.ts';
+import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
+import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
 import {
   characterStatePluginId,
   firstPartyModelToolsPluginId,
   runtimePluginContractVersion,
-  runtimePluginId
+  runtimePluginId,
 } from '../../src/plugins/api/contract.ts';
-import { createRuntimePluginManifest } from '../../src/plugins/api/manifest-validation.ts';
-import { demoConfigPluginId } from '../../src/plugins/packages/demo-config/plugin.ts';
-import type { RuntimePluginManifest } from '../../src/plugins/api/types.ts';
+import {createRuntimePluginManifest} from '../../src/plugins/api/manifest-validation.ts';
+import {demoConfigPluginId} from '../../src/plugins/packages/demo-config/plugin.ts';
+import type {RuntimePluginManifest} from '../../src/plugins/api/types.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
-  prepareConfiguredProject02PluginActivation
+  prepareConfiguredProject02PluginActivation,
 } from '../../src/app/index.ts';
-import { loadProject02RuntimeConfig } from '../../src/runtime/config/index.ts';
-import { createLocalRuntimeSessionStore } from '../../src/runtime/storage/session-store.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
-import { collect } from '../support/streams.ts';
-import { writeRuntimeConfig } from '../support/runtime-config.ts';
+import {loadProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
+import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
+import {collect} from '../support/streams.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
 
 describe('configured runtime plugin package activation', () => {
   it('builds the default catalog from bundled packages and bootstrap services', () => {
@@ -31,50 +31,52 @@ describe('configured runtime plugin package activation', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
     });
 
-    expect(configured.activation.plugins.map((plugin) => plugin.pluginId).sort()).toEqual(
+    expect(
+      configured.activation.plugins.map(plugin => plugin.pluginId).sort(),
+    ).toEqual(
       [
         characterStatePluginId,
         demoConfigPluginId,
         firstPartyModelToolsPluginId,
-        runtimePluginId
-      ].sort()
+        runtimePluginId,
+      ].sort(),
     );
     const characterState = configured.activation.plugins.find(
-      (plugin) => plugin.pluginId === characterStatePluginId
+      plugin => plugin.pluginId === characterStatePluginId,
     );
 
     expect(characterState).toMatchObject({
       enabled: true,
-      activationStatus: 'active'
+      activationStatus: 'active',
     });
     expect(characterState?.activationReasons).toContain('enabled_by_default');
     expect(configured.packageProvenanceByPluginId).toEqual({
       [characterStatePluginId]: 'bundled',
-      [demoConfigPluginId]: 'bundled'
+      [demoConfigPluginId]: 'bundled',
     });
     expect(configured.catalogEntries[characterStatePluginId]).toMatchObject({
-      catalogKind: 'package'
+      catalogKind: 'package',
     });
     expect(configured.catalogEntries[runtimePluginId]).toMatchObject({
-      catalogKind: 'host_service'
+      catalogKind: 'host_service',
     });
     expect(
       configured.catalogEntries[characterStatePluginId]?.catalogKind ===
         'package' &&
         typeof configured.catalogEntries[characterStatePluginId].load ===
-          'function'
+          'function',
     ).toBe(true);
     expect(
       configured.catalogEntries[runtimePluginId]?.catalogKind ===
         'host_service' &&
         typeof configured.catalogEntries[runtimePluginId].bootstrap ===
-          'function'
+          'function',
     ).toBe(true);
     expect(
-      Object.values(configured.catalogEntries).some((entry) => 'create' in entry)
+      Object.values(configured.catalogEntries).some(entry => 'create' in entry),
     ).toBe(false);
   });
 
@@ -82,40 +84,42 @@ describe('configured runtime plugin package activation', () => {
     const storeRoot = createTestTempRoot('project02-package-disabled-');
     const manifest = testPackageManifest('operator.cold', {
       defaultEnabled: true,
-      localTrustLevel: 'first_party'
+      localTrustLevel: 'first_party',
     });
 
     writeOperatorPackage({
       storeRoot,
       manifest,
-      entrySource: "throw new Error('disabled operator entry was imported');\n"
+      entrySource: "throw new Error('disabled operator entry was imported');\n",
     });
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
     });
     const configured = await createConfiguredProject02PluginHostFromPlan({
-      activationPlan
+      activationPlan,
     });
 
     const operatorPackage = configured.activation.plugins.find(
-      (plugin) => plugin.pluginId === manifest.id
+      plugin => plugin.pluginId === manifest.id,
     );
 
     expect(operatorPackage).toMatchObject({
       pluginId: manifest.id,
       enabled: false,
-      activationStatus: 'disabled'
+      activationStatus: 'disabled',
     });
     expect(operatorPackage?.activationReasons).toContain('not_enabled');
-    expect(configured.plugins.map((plugin) => plugin.manifest.id)).toEqual([
-      characterStatePluginId
+    expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([
+      characterStatePluginId,
     ]);
   });
 
   it('does not let an operator default claim trigger required-config validation', () => {
-    const storeRoot = createTestTempRoot('project02-package-disabled-required-');
+    const storeRoot = createTestTempRoot(
+      'project02-package-disabled-required-',
+    );
     const manifest = testPackageManifest('operator.required-cold', {
       defaultEnabled: true,
       configFields: [
@@ -125,43 +129,43 @@ describe('configured runtime plugin package activation', () => {
           required: true,
           secret: false,
           valueType: 'string',
-          redactionLabels: []
-        }
-      ]
+          redactionLabels: [],
+        },
+      ],
     });
 
     writeOperatorPackage({
       storeRoot,
       manifest,
-      entrySource: "throw new Error('disabled operator entry was imported');\n"
+      entrySource: "throw new Error('disabled operator entry was imported');\n",
     });
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
     });
 
     expect(configured.resolvedConfig.diagnostics).not.toContainEqual(
       expect.objectContaining({
         pluginId: manifest.id,
-        code: 'runtime_config_required_value_missing'
-      })
+        code: 'runtime_config_required_value_missing',
+      }),
     );
     expect(
       configured.activation.plugins.find(
-        (plugin) => plugin.pluginId === manifest.id
-      )
+        plugin => plugin.pluginId === manifest.id,
+      ),
     ).toMatchObject({
       enabled: false,
-      activationStatus: 'disabled'
+      activationStatus: 'disabled',
     });
     expect(
       configured.activation.plugins.find(
-        (plugin) => plugin.pluginId === characterStatePluginId
-      )
+        plugin => plugin.pluginId === characterStatePluginId,
+      ),
     ).toMatchObject({
       enabled: true,
-      activationStatus: 'active'
+      activationStatus: 'active',
     });
   });
 
@@ -173,38 +177,38 @@ describe('configured runtime plugin package activation', () => {
     let inspectStdout = '';
     let inspectStderr = '';
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'cold-package-inspect',
-      createdAt: '2026-07-15T00:00:00.000Z'
+      createdAt: '2026-07-15T00:00:00.000Z',
     });
     writeOperatorPackage({
       storeRoot,
       manifest,
-      entrySource: "throw new Error('cold CLI imported operator entry');\n"
+      entrySource: "throw new Error('cold CLI imported operator entry');\n",
     });
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const checkExitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'check'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           checkStdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           checkStderr += chunk;
-        })
-      }
+        }),
+      },
     );
     const inspectExitCode = await runInspectCliFromArgs(
       ['--store', storeRoot, '--sessions'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           inspectStdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           inspectStderr += chunk;
-        })
-      }
+        }),
+      },
     );
 
     expect(checkExitCode).toBe(0);
@@ -222,30 +226,30 @@ describe('configured runtime plugin package activation', () => {
     writeOperatorPackage({
       storeRoot,
       manifest,
-      entrySource: validOperatorEntrySource()
+      entrySource: validOperatorEntrySource(),
     });
     writeFileSync(
       join(storeRoot, 'plugins', manifest.id, 'project02.plugin.json'),
       '{ malformed',
-      'utf8'
+      'utf8',
     );
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
     });
 
     expect(configured.activation.diagnostics).toContainEqual(
       expect.objectContaining({
         severity: 'warning',
         code: 'runtime_plugin_package_invalid_descriptor',
-        pluginId: manifest.id
-      })
+        pluginId: manifest.id,
+      }),
     );
     expect(
       configured.activation.plugins.find(
-        (plugin) => plugin.pluginId === characterStatePluginId
-      )?.enabled
+        plugin => plugin.pluginId === characterStatePluginId,
+      )?.enabled,
     ).toBe(true);
   });
 
@@ -256,104 +260,108 @@ describe('configured runtime plugin package activation', () => {
     writeOperatorPackage({
       storeRoot,
       manifest,
-      entrySource: validOperatorEntrySource()
+      entrySource: validOperatorEntrySource(),
     });
     writeFileSync(
       join(storeRoot, 'plugins', manifest.id, 'project02.plugin.json'),
       '{ malformed',
-      'utf8'
+      'utf8',
     );
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: { [manifest.id]: { enabled: true } }
+      plugins: {[manifest.id]: {enabled: true}},
     });
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
     });
 
     expect(configured.activation.diagnostics).toContainEqual(
       expect.objectContaining({
         severity: 'error',
         code: 'runtime_plugin_package_invalid_descriptor',
-        pluginId: manifest.id
-      })
+        pluginId: manifest.id,
+      }),
     );
     expect(
       configured.activation.plugins.find(
-        (plugin) => plugin.pluginId === runtimePluginId
-      )?.enabled
+        plugin => plugin.pluginId === runtimePluginId,
+      )?.enabled,
     ).toBe(true);
     expect(
       configured.activation.plugins.find(
-        (plugin) => plugin.pluginId === characterStatePluginId
-      )?.activationStatus
+        plugin => plugin.pluginId === characterStatePluginId,
+      )?.activationStatus,
     ).toBe('blocked');
   });
 
   it('fails closed when config enables the claimed id of a mismatched package', () => {
-    const storeRoot = createTestTempRoot('project02-package-mismatched-enabled-');
+    const storeRoot = createTestTempRoot(
+      'project02-package-mismatched-enabled-',
+    );
     const manifest = testPackageManifest('operator.enabled-mismatch');
 
     writeOperatorPackage({
       storeRoot,
       manifest,
       folderId: 'wrong-folder',
-      entrySource: validOperatorEntrySource()
+      entrySource: validOperatorEntrySource(),
     });
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: { [manifest.id]: { enabled: true } }
+      plugins: {[manifest.id]: {enabled: true}},
     });
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
     });
 
     expect(configured.activation.diagnostics).toContainEqual(
       expect.objectContaining({
         severity: 'error',
         code: 'runtime_plugin_package_package_id_mismatch',
-        pluginId: manifest.id
-      })
+        pluginId: manifest.id,
+      }),
     );
     expect(
       configured.activation.plugins.find(
-        (plugin) => plugin.pluginId === characterStatePluginId
-      )?.activationStatus
+        plugin => plugin.pluginId === characterStatePluginId,
+      )?.activationStatus,
     ).toBe('blocked');
   });
 
   it('keeps bundled Character State when an operator package copies its id', () => {
-    const storeRoot = createTestTempRoot('project02-package-reserved-character-');
+    const storeRoot = createTestTempRoot(
+      'project02-package-reserved-character-',
+    );
     const manifest = testPackageManifest(characterStatePluginId, {
       defaultEnabled: true,
-      localTrustLevel: 'first_party'
+      localTrustLevel: 'first_party',
     });
 
     writeOperatorPackage({
       storeRoot,
       manifest,
-      entrySource: "throw new Error('operator collision must not import');\n"
+      entrySource: "throw new Error('operator collision must not import');\n",
     });
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
     });
 
     expect(configured.packageProvenanceByPluginId[characterStatePluginId]).toBe(
-      'bundled'
+      'bundled',
     );
     expect(configured.activation.diagnostics).toContainEqual(
       expect.objectContaining({
         severity: 'warning',
         code: 'runtime_plugin_package_reserved_plugin_id',
-        pluginId: characterStatePluginId
-      })
+        pluginId: characterStatePluginId,
+      }),
     );
     expect(
       configured.activation.plugins.find(
-        (plugin) => plugin.pluginId === characterStatePluginId
-      )?.enabled
+        plugin => plugin.pluginId === characterStatePluginId,
+      )?.enabled,
     ).toBe(true);
   });
 
@@ -367,9 +375,9 @@ describe('configured runtime plugin package activation', () => {
           required: true,
           secret: false,
           valueType: 'string',
-          redactionLabels: []
-        }
-      ]
+          redactionLabels: [],
+        },
+      ],
     });
     const capturePath = join(storeRoot, 'operator-factory-input.json');
 
@@ -384,23 +392,23 @@ describe('configured runtime plugin package activation', () => {
         `  writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ calls, input }), 'utf8');`,
         '  return { manifest: input.manifest, providedTools: [], lifecycleHooks: {} };',
         '}',
-        ''
-      ].join('\n')
+        '',
+      ].join('\n'),
     });
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [manifest.id]: {
           enabled: true,
-          config: { label: 'hello' }
-        }
-      }
+          config: {label: 'hello'},
+        },
+      },
     });
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({ storeRoot })
+      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
     });
     const configured = await createConfiguredProject02PluginHostFromPlan({
-      activationPlan
+      activationPlan,
     });
     const captured = JSON.parse(readFileSync(capturePath, 'utf8')) as {
       readonly calls: number;
@@ -417,7 +425,7 @@ describe('configured runtime plugin package activation', () => {
       calls: 1,
       input: {
         pluginId: manifest.id,
-        manifest: { id: manifest.id },
+        manifest: {id: manifest.id},
         storeRoot: configured.resolvedConfig.project02.storeRoot,
         resolvedConfig: {
           label: {
@@ -425,8 +433,8 @@ describe('configured runtime plugin package activation', () => {
             secret: false,
             source: 'config',
             resolved: true,
-            value: 'hello'
-          }
+            value: 'hello',
+          },
         },
         redactedConfig: {
           label: {
@@ -434,18 +442,18 @@ describe('configured runtime plugin package activation', () => {
             secret: false,
             source: 'config',
             resolved: true,
-            value: 'hello'
-          }
-        }
-      }
+            value: 'hello',
+          },
+        },
+      },
     });
-    expect(configured.plugins.map((plugin) => plugin.manifest.id).sort()).toEqual(
-      [characterStatePluginId, manifest.id].sort()
+    expect(configured.plugins.map(plugin => plugin.manifest.id).sort()).toEqual(
+      [characterStatePluginId, manifest.id].sort(),
     );
     expect(activationPlan.packageProvenanceByPluginId).toEqual({
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
-      [manifest.id]: 'operator'
+      [manifest.id]: 'operator',
     });
   });
 });
@@ -459,23 +467,23 @@ function writeOperatorPackage(options: {
   const packageRoot = join(
     options.storeRoot,
     'plugins',
-    options.folderId ?? options.manifest.id
+    options.folderId ?? options.manifest.id,
   );
 
-  mkdirSync(packageRoot, { recursive: true });
+  mkdirSync(packageRoot, {recursive: true});
   writeFileSync(
     join(packageRoot, 'package.json'),
-    `${JSON.stringify({ type: 'module' })}\n`,
-    'utf8'
+    `${JSON.stringify({type: 'module'})}\n`,
+    'utf8',
   );
   writeFileSync(
     join(packageRoot, 'project02.plugin.json'),
     `${JSON.stringify({
       format: 'project02.plugin.v1',
       entry: './index.mjs',
-      manifest: options.manifest
+      manifest: options.manifest,
     })}\n`,
-    'utf8'
+    'utf8',
   );
   writeFileSync(join(packageRoot, 'index.mjs'), options.entrySource, 'utf8');
 }
@@ -485,7 +493,7 @@ function validOperatorEntrySource(): string {
     'export function createProject02Plugin(input) {',
     '  return { manifest: input.manifest, providedTools: [], lifecycleHooks: {} };',
     '}',
-    ''
+    '',
   ].join('\n');
 }
 
@@ -495,7 +503,7 @@ function testPackageManifest(
     readonly defaultEnabled?: boolean;
     readonly localTrustLevel?: RuntimePluginManifest['localTrustLevel'];
     readonly configFields?: RuntimePluginManifest['config']['fields'];
-  } = {}
+  } = {},
 ): RuntimePluginManifest {
   return createRuntimePluginManifest({
     id,
@@ -505,10 +513,10 @@ function testPackageManifest(
     description: 'Operator package activation fixture.',
     contractVersion: runtimePluginContractVersion,
     compatibility: {
-      hostContractVersions: [runtimePluginContractVersion]
+      hostContractVersions: [runtimePluginContractVersion],
     },
     declaredPlugins: ['plugin_discovery'],
-    config: { fields: options.configFields ?? [] },
+    config: {fields: options.configFields ?? []},
     localTrustLevel: options.localTrustLevel ?? 'trusted_adapter',
     runtimePolicy: {
       requiredForTurn: false,
@@ -521,13 +529,13 @@ function testPackageManifest(
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
         afterTurnCommitted: 'log_failure',
-        health: 'degrade'
-      }
+        health: 'degrade',
+      },
     },
     activation: {
       defaultEnabled: options.defaultEnabled ?? false,
-      reasons: ['operator_fixture']
+      reasons: ['operator_fixture'],
     },
-    requestedAccess: {}
+    requestedAccess: {},
   });
 }

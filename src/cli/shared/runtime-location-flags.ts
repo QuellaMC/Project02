@@ -1,6 +1,6 @@
-export type { RuntimeLocationCliState } from '../../runtime/config/index.ts';
-import { readFlagValue } from './flags.ts';
-import type { RuntimeLocationCliState } from '../../runtime/config/index.ts';
+export type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
+import {readFlagValue} from './flags.ts';
+import type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
 
 export type RuntimeLocationFlagParseResult =
   | {
@@ -28,7 +28,9 @@ export function parseRuntimeLocationFlag(options: {
 
   if (arg === '--store') {
     if (options.state.storeRoot !== undefined) {
-      throw new RuntimeLocationCliUsageError('--store can only be provided once.');
+      throw new RuntimeLocationCliUsageError(
+        '--store can only be provided once.',
+      );
     }
 
     return {
@@ -36,14 +38,21 @@ export function parseRuntimeLocationFlag(options: {
       nextIndex: options.index + 1,
       state: {
         ...options.state,
-        storeRoot: readFlagValue(options.args, options.index, '--store', (message) => new RuntimeLocationCliUsageError(message))
-      }
+        storeRoot: readFlagValue(
+          options.args,
+          options.index,
+          '--store',
+          message => new RuntimeLocationCliUsageError(message),
+        ),
+      },
     };
   }
 
   if (arg === '--config') {
     if (options.state.configPath !== undefined) {
-      throw new RuntimeLocationCliUsageError('--config can only be provided once.');
+      throw new RuntimeLocationCliUsageError(
+        '--config can only be provided once.',
+      );
     }
 
     return {
@@ -51,13 +60,17 @@ export function parseRuntimeLocationFlag(options: {
       nextIndex: options.index + 1,
       state: {
         ...options.state,
-        configPath: readFlagValue(options.args, options.index, '--config', (message) => new RuntimeLocationCliUsageError(message))
-      }
+        configPath: readFlagValue(
+          options.args,
+          options.index,
+          '--config',
+          message => new RuntimeLocationCliUsageError(message),
+        ),
+      },
     };
   }
 
   return {
-    status: 'unmatched'
+    status: 'unmatched',
   };
 }
-

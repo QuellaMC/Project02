@@ -4,16 +4,16 @@ import {
   type RuntimeEventIdentity,
   type VisibleMessageRole,
   visibleMessageRoleValues,
-  VisibleMessageTextValidationError
+  VisibleMessageTextValidationError,
 } from '../../core/index.ts';
 import {
   LocalRuntimeStorageContractError,
   requiredRecordCanonicalTimestamp,
-  requiredRecordString
+  requiredRecordString,
 } from './layout-contract.ts';
 
 export function requiredRuntimeEventIdentity(
-  record: Record<string, unknown>
+  record: Record<string, unknown>,
 ): RuntimeEventIdentity {
   try {
     return createRuntimeEventIdentitySnapshot({
@@ -22,8 +22,8 @@ export function requiredRuntimeEventIdentity(
       createdAt: requiredRecordCanonicalTimestamp(
         record,
         'createdAt',
-        'malformed_record'
-      )
+        'malformed_record',
+      ),
     });
   } catch (error: unknown) {
     if (error instanceof LocalRuntimeStorageContractError) {
@@ -33,14 +33,14 @@ export function requiredRuntimeEventIdentity(
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
       'Stored local runtime event identity is malformed.',
-      { cause: error }
+      {cause: error},
     );
   }
 }
 
 export function requiredNormalizedVisibleMessageText(
   record: Record<string, unknown>,
-  key: string
+  key: string,
 ): string {
   const value = requiredRecordString(record, key, 'malformed_record');
   let normalizedValue: string;
@@ -72,7 +72,7 @@ export function requiredVisibleMessageRole(value: unknown): VisibleMessageRole {
 
 export function isOneOf<const T extends string>(
   value: unknown,
-  allowedValues: readonly T[]
+  allowedValues: readonly T[],
 ): value is T {
   return typeof value === 'string' && allowedValues.includes(value as T);
 }
@@ -80,6 +80,6 @@ export function isOneOf<const T extends string>(
 export function throwMalformedRecord(field: string): never {
   throw new LocalRuntimeStorageContractError(
     'malformed_record',
-    `Stored local runtime field "${field}" is malformed.`
+    `Stored local runtime field "${field}" is malformed.`,
   );
 }

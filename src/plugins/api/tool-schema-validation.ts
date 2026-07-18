@@ -8,9 +8,9 @@ import {
   type ModelToolInputFieldValueType,
   type ModelToolJsonSchema,
   type ModelToolJsonSchemaType,
-  type ModelToolObjectJsonSchema
+  type ModelToolObjectJsonSchema,
 } from '../../role-model/api/index.ts';
-import type { RuntimePluginValidationResult } from './types.ts';
+import type {RuntimePluginValidationResult} from './types.ts';
 import {
   accept,
   firstRejected,
@@ -22,26 +22,29 @@ import {
   requiredIdentifier,
   requiredNonEmptyString,
   requiredPositiveInteger,
-  requiredStringArray
+  requiredStringArray,
 } from './validation-primitives.ts';
 
 export function requiredModelToolCallLimit(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<ModelToolCallLimit> {
   if (!isRecord(value)) {
     return reject(
       'malformed_tool_definition',
-      'Plugin provided tool callLimit must be an object.'
+      'Plugin provided tool callLimit must be an object.',
     );
   }
 
   const scope = value['scope'];
-  const maxCalls = requiredPositiveInteger(value['maxCalls'], 'callLimit.maxCalls');
+  const maxCalls = requiredPositiveInteger(
+    value['maxCalls'],
+    'callLimit.maxCalls',
+  );
 
   if (!isOneOf(scope, modelToolCallLimitScopes)) {
     return reject(
       'malformed_tool_definition',
-      'Plugin provided tool callLimit.scope is not supported.'
+      'Plugin provided tool callLimit.scope is not supported.',
     );
   }
 
@@ -52,28 +55,33 @@ export function requiredModelToolCallLimit(
   return accept(
     Object.freeze({
       scope,
-      maxCalls: maxCalls.value
-    } satisfies ModelToolCallLimit)
+      maxCalls: maxCalls.value,
+    } satisfies ModelToolCallLimit),
   );
 }
 
 export function optionalModelToolCallLimit(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<ModelToolCallLimit | undefined> {
-  return value === undefined ? accept(undefined) : requiredModelToolCallLimit(value);
+  return value === undefined
+    ? accept(undefined)
+    : requiredModelToolCallLimit(value);
 }
 
 export function requiredModelToolInputContract(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<ModelToolInputContract> {
   if (!isRecord(value) || value['type'] !== 'object') {
     return reject(
       'malformed_tool_definition',
-      'Model tool inputContract must be an object contract.'
+      'Model tool inputContract must be an object contract.',
     );
   }
 
-  const additionalFields = requiredBoolean(value['additionalFields'], 'additionalFields');
+  const additionalFields = requiredBoolean(
+    value['additionalFields'],
+    'additionalFields',
+  );
   const fieldsValue = value['fields'];
 
   if (additionalFields.status === 'rejected') {
@@ -83,7 +91,7 @@ export function requiredModelToolInputContract(
   if (!Array.isArray(fieldsValue)) {
     return reject(
       'malformed_tool_definition',
-      'Model tool inputContract.fields must be an array.'
+      'Model tool inputContract.fields must be an array.',
     );
   }
 
@@ -109,7 +117,7 @@ export function requiredModelToolInputContract(
     if (seenNames.has(field.value.name)) {
       return reject(
         'duplicate_declaration',
-        `Model tool input field "${field.value.name}" is declared more than once.`
+        `Model tool input field "${field.value.name}" is declared more than once.`,
       );
     }
 
@@ -122,16 +130,14 @@ export function requiredModelToolInputContract(
       type: 'object',
       fields: Object.freeze(fields),
       additionalFields: additionalFields.value,
-      ...(jsonSchema.value === undefined
-        ? {}
-        : { jsonSchema: jsonSchema.value })
-    } satisfies ModelToolInputContract)
+      ...(jsonSchema.value === undefined ? {} : {jsonSchema: jsonSchema.value}),
+    } satisfies ModelToolInputContract),
   );
 }
 
 function requiredModelToolObjectJsonSchema(
   value: unknown,
-  fieldPath: string
+  fieldPath: string,
 ): RuntimePluginValidationResult<ModelToolObjectJsonSchema> {
   const schema = requiredModelToolJsonSchema(value, fieldPath);
 
@@ -147,7 +153,7 @@ function requiredModelToolObjectJsonSchema(
   ) {
     return reject(
       'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath} must be a complete object JSON Schema.`
+      `Model tool inputContract.${fieldPath} must be a complete object JSON Schema.`,
     );
   }
 
@@ -156,23 +162,23 @@ function requiredModelToolObjectJsonSchema(
 
 function requiredModelToolJsonSchema(
   value: unknown,
-  fieldPath: string
+  fieldPath: string,
 ): RuntimePluginValidationResult<ModelToolJsonSchema> {
   if (!isRecord(value)) {
     return reject(
       'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath} must be a JSON Schema object.`
+      `Model tool inputContract.${fieldPath} must be a JSON Schema object.`,
     );
   }
 
   const unsupportedKeyword = Object.keys(value).find(
-    (keyword) => !supportedModelToolJsonSchemaKeywords.has(keyword)
+    keyword => !supportedModelToolJsonSchemaKeywords.has(keyword),
   );
 
   if (unsupportedKeyword !== undefined) {
     return reject(
       'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath}.${unsupportedKeyword} is not supported.`
+      `Model tool inputContract.${fieldPath}.${unsupportedKeyword} is not supported.`,
     );
   }
 
@@ -180,7 +186,10 @@ function requiredModelToolJsonSchema(
   const description =
     value['description'] === undefined
       ? accept(undefined)
-      : requiredNonEmptyString(value['description'], `${fieldPath}.description`);
+      : requiredNonEmptyString(
+          value['description'],
+          `${fieldPath}.description`,
+        );
   const enumValues =
     value['enum'] === undefined
       ? accept(undefined)
@@ -194,11 +203,11 @@ function requiredModelToolJsonSchema(
       ? accept(undefined)
       : requiredBoolean(
           value['additionalProperties'],
-          `${fieldPath}.additionalProperties`
+          `${fieldPath}.additionalProperties`,
         );
   const properties = requiredModelToolJsonSchemaProperties(
     value['properties'],
-    fieldPath
+    fieldPath,
   );
   const items =
     value['items'] === undefined
@@ -215,12 +224,12 @@ function requiredModelToolJsonSchema(
 
   if (
     enumValues.value?.some(
-      (enumValue) => redactRuntimePluginText(enumValue) !== enumValue
+      enumValue => redactRuntimePluginText(enumValue) !== enumValue,
     ) === true
   ) {
     return reject(
       'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath}.enum must not contain credential-bearing values.`
+      `Model tool inputContract.${fieldPath}.enum must not contain credential-bearing values.`,
     );
   }
 
@@ -231,11 +240,11 @@ function requiredModelToolJsonSchema(
     required: required.value,
     additionalProperties: additionalProperties.value,
     properties: properties.value,
-    items: items.value
+    items: items.value,
   } satisfies ModelToolJsonSchemaParts;
   const semanticValidation = validateModelToolJsonSchemaSemantics(
     parts,
-    fieldPath
+    fieldPath,
   );
 
   if (semanticValidation !== undefined) {
@@ -247,22 +256,19 @@ function requiredModelToolJsonSchema(
 
 type ModelToolJsonSchemaParts = {
   readonly type:
-    | ModelToolJsonSchemaType
-    | readonly ModelToolJsonSchemaType[]
-    | undefined;
+    ModelToolJsonSchemaType | readonly ModelToolJsonSchemaType[] | undefined;
   readonly description: string | undefined;
   readonly enumValues: readonly string[] | undefined;
   readonly required: readonly string[] | undefined;
   readonly additionalProperties: boolean | undefined;
   readonly properties:
-    | Readonly<Record<string, ModelToolJsonSchema>>
-    | undefined;
+    Readonly<Record<string, ModelToolJsonSchema>> | undefined;
   readonly items: ModelToolJsonSchema | undefined;
 };
 
 function validateModelToolJsonSchemaSemantics(
   parts: ModelToolJsonSchemaParts,
-  fieldPath: string
+  fieldPath: string,
 ): RuntimePluginValidationResult<ModelToolJsonSchema> | undefined {
   const schemaTypes =
     parts.type === undefined
@@ -273,7 +279,7 @@ function validateModelToolJsonSchemaSemantics(
   if (Array.isArray(parts.type) && parts.type.length === 0) {
     return reject(
       'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath}.type must be non-empty.`
+      `Model tool inputContract.${fieldPath}.type must be non-empty.`,
     );
   }
   if (
@@ -282,7 +288,7 @@ function validateModelToolJsonSchemaSemantics(
   ) {
     return reject(
       'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath}.type must not contain duplicates.`
+      `Model tool inputContract.${fieldPath}.type must not contain duplicates.`,
     );
   }
 
@@ -293,13 +299,13 @@ function validateModelToolJsonSchemaSemantics(
   if (usesObjectKeywords && !schemaTypes.includes('object')) {
     return reject(
       'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath} uses object keywords without object type.`
+      `Model tool inputContract.${fieldPath} uses object keywords without object type.`,
     );
   }
   if (parts.items !== undefined && !schemaTypes.includes('array')) {
     return reject(
       'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath} uses items without array type.`
+      `Model tool inputContract.${fieldPath} uses items without array type.`,
     );
   }
   if (
@@ -308,20 +314,20 @@ function validateModelToolJsonSchemaSemantics(
   ) {
     return reject(
       'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath}.required must not contain duplicates.`
+      `Model tool inputContract.${fieldPath}.required must not contain duplicates.`,
     );
   }
   if (parts.required !== undefined) {
     const unknownRequiredName = parts.required.find(
-      (name) =>
+      name =>
         parts.properties === undefined ||
-        !Object.hasOwn(parts.properties, name)
+        !Object.hasOwn(parts.properties, name),
     );
 
     if (unknownRequiredName !== undefined) {
       return reject(
         'malformed_tool_definition',
-        `Model tool inputContract.${fieldPath}.required includes "${unknownRequiredName}" outside properties.`
+        `Model tool inputContract.${fieldPath}.required includes "${unknownRequiredName}" outside properties.`,
       );
     }
   }
@@ -330,32 +336,28 @@ function validateModelToolJsonSchemaSemantics(
 }
 
 function acceptModelToolJsonSchema(
-  parts: ModelToolJsonSchemaParts
+  parts: ModelToolJsonSchemaParts,
 ): RuntimePluginValidationResult<ModelToolJsonSchema> {
   return accept(
     Object.freeze({
-      ...(parts.type === undefined ? {} : { type: parts.type }),
+      ...(parts.type === undefined ? {} : {type: parts.type}),
       ...(parts.description === undefined
         ? {}
-        : { description: redactRuntimePluginText(parts.description) }),
-      ...(parts.enumValues === undefined
-        ? {}
-        : { enum: parts.enumValues }),
-      ...(parts.properties === undefined
-        ? {}
-        : { properties: parts.properties }),
-      ...(parts.required === undefined ? {} : { required: parts.required }),
+        : {description: redactRuntimePluginText(parts.description)}),
+      ...(parts.enumValues === undefined ? {} : {enum: parts.enumValues}),
+      ...(parts.properties === undefined ? {} : {properties: parts.properties}),
+      ...(parts.required === undefined ? {} : {required: parts.required}),
       ...(parts.additionalProperties === undefined
         ? {}
-        : { additionalProperties: parts.additionalProperties }),
-      ...(parts.items === undefined ? {} : { items: parts.items })
-    } satisfies ModelToolJsonSchema)
+        : {additionalProperties: parts.additionalProperties}),
+      ...(parts.items === undefined ? {} : {items: parts.items}),
+    } satisfies ModelToolJsonSchema),
   );
 }
 
 function requiredModelToolJsonSchemaProperties(
   value: unknown,
-  fieldPath: string
+  fieldPath: string,
 ): RuntimePluginValidationResult<
   Readonly<Record<string, ModelToolJsonSchema>> | undefined
 > {
@@ -366,7 +368,7 @@ function requiredModelToolJsonSchemaProperties(
   if (!isRecord(value)) {
     return reject(
       'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath}.properties must be an object.`
+      `Model tool inputContract.${fieldPath}.properties must be an object.`,
     );
   }
 
@@ -376,13 +378,13 @@ function requiredModelToolJsonSchemaProperties(
     if (key.trim().length === 0) {
       return reject(
         'malformed_tool_definition',
-        `Model tool inputContract.${fieldPath}.properties key must be non-empty.`
+        `Model tool inputContract.${fieldPath}.properties key must be non-empty.`,
       );
     }
 
     const property = requiredModelToolJsonSchema(
       item,
-      `${fieldPath}.properties.${key}`
+      `${fieldPath}.properties.${key}`,
     );
 
     if (property.status === 'rejected') {
@@ -397,7 +399,7 @@ function requiredModelToolJsonSchemaProperties(
 
 function optionalModelToolJsonSchemaType(
   value: unknown,
-  fieldPath: string
+  fieldPath: string,
 ): RuntimePluginValidationResult<
   ModelToolJsonSchemaType | readonly ModelToolJsonSchemaType[] | undefined
 > {
@@ -416,7 +418,7 @@ function optionalModelToolJsonSchemaType(
       if (!isModelToolJsonSchemaType(item)) {
         return reject(
           'malformed_tool_definition',
-          `Model tool inputContract.${fieldPath}.type is not supported.`
+          `Model tool inputContract.${fieldPath}.type is not supported.`,
         );
       }
 
@@ -428,22 +430,25 @@ function optionalModelToolJsonSchemaType(
 
   return reject(
     'malformed_tool_definition',
-    `Model tool inputContract.${fieldPath}.type is not supported.`
+    `Model tool inputContract.${fieldPath}.type is not supported.`,
   );
 }
 
 function requiredModelToolInputField(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<ModelToolInputField> {
   if (!isRecord(value)) {
     return reject(
       'malformed_tool_definition',
-      'Model tool inputContract field must be an object.'
+      'Model tool inputContract field must be an object.',
     );
   }
 
   const name = requiredIdentifier(value['name'], 'name');
-  const description = requiredNonEmptyString(value['description'], 'description');
+  const description = requiredNonEmptyString(
+    value['description'],
+    'description',
+  );
   const required = requiredBoolean(value['required'], 'required');
   const valueType = optionalModelToolInputFieldValueType(value['valueType']);
   const allowedValues =
@@ -458,16 +463,22 @@ function requiredModelToolInputField(
     valueType.status === 'rejected' ||
     allowedValues.status === 'rejected'
   ) {
-    return firstRejected([name, description, required, valueType, allowedValues]);
+    return firstRejected([
+      name,
+      description,
+      required,
+      valueType,
+      allowedValues,
+    ]);
   }
   if (
     allowedValues.value?.some(
-      (allowedValue) => redactRuntimePluginText(allowedValue) !== allowedValue
+      allowedValue => redactRuntimePluginText(allowedValue) !== allowedValue,
     ) === true
   ) {
     return reject(
       'malformed_tool_definition',
-      'Model tool inputContract field allowedValues must not contain credential-bearing values.'
+      'Model tool inputContract field allowedValues must not contain credential-bearing values.',
     );
   }
 
@@ -476,16 +487,16 @@ function requiredModelToolInputField(
       name: name.value,
       description: redactRuntimePluginText(description.value),
       required: required.value,
-      ...(valueType.value === undefined ? {} : { valueType: valueType.value }),
+      ...(valueType.value === undefined ? {} : {valueType: valueType.value}),
       ...(allowedValues.value === undefined
         ? {}
-        : { allowedValues: allowedValues.value })
-    } satisfies ModelToolInputField)
+        : {allowedValues: allowedValues.value}),
+    } satisfies ModelToolInputField),
   );
 }
 
 function optionalModelToolInputFieldValueType(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<ModelToolInputFieldValueType | undefined> {
   if (value === undefined) {
     return accept(undefined);
@@ -497,7 +508,7 @@ function optionalModelToolInputFieldValueType(
 
   return reject(
     'malformed_tool_definition',
-    'Model tool inputContract field valueType is not supported.'
+    'Model tool inputContract field valueType is not supported.',
   );
 }
 
@@ -508,5 +519,5 @@ const supportedModelToolJsonSchemaKeywords = new Set([
   'properties',
   'required',
   'additionalProperties',
-  'items'
+  'items',
 ]);

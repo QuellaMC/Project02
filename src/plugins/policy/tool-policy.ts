@@ -1,24 +1,21 @@
-import { isBuiltInModelToolName } from '../../role-model/index.ts';
-import type { RoleModelPluginToolDefinition } from '../../role-model/index.ts';
-import { isFirstPartyModelToolsPlugin } from '../builtin/model-tools/index.ts';
-import { isModelFacingRuntimePluginTool } from '../api/tool-classification.ts';
+import {isBuiltInModelToolName} from '../../role-model/index.ts';
+import type {RoleModelPluginToolDefinition} from '../../role-model/index.ts';
+import {isFirstPartyModelToolsPlugin} from '../builtin/model-tools/index.ts';
+import {isModelFacingRuntimePluginTool} from '../api/tool-classification.ts';
 import {
   runtimePluginAccessFor,
   runtimePluginAccessForPlugin,
   runtimePluginGrantsAccess,
-  type RuntimePluginAccessMapByPluginId
+  type RuntimePluginAccessMapByPluginId,
 } from './access-control.ts';
-import type {
-  RuntimePlugin,
-  RuntimePluginProvidedTool
-} from '../api/types.ts';
+import type {RuntimePlugin, RuntimePluginProvidedTool} from '../api/types.ts';
 import type {
   RuntimePluginAccessSnapshot,
-  RuntimePluginSideEffectLevel
+  RuntimePluginSideEffectLevel,
 } from '../api/contract.ts';
 
 export type IsHostOwnedFirstPartyModelToolsPlugin = (
-  plugin: RuntimePlugin
+  plugin: RuntimePlugin,
 ) => boolean;
 
 export function pluginToolDefinitionsForEnabledPlugins(options: {
@@ -28,30 +25,30 @@ export function pluginToolDefinitionsForEnabledPlugins(options: {
 }): readonly RoleModelPluginToolDefinition[] {
   return Object.freeze(
     options.plugins
-      .flatMap((plugin) => {
+      .flatMap(plugin => {
         const access = runtimePluginAccessForPlugin({
           plugin,
-          accessByPluginId: options.accessByPluginId
+          accessByPluginId: options.accessByPluginId,
         });
 
         return modelVisiblePluginTools({
           plugin,
           access,
-          confirmationAvailable: options.confirmationAvailable
-        }).map((tool) =>
+          confirmationAvailable: options.confirmationAvailable,
+        }).map(tool =>
           Object.freeze({
             pluginId: plugin.manifest.id,
-            ...tool
-          } satisfies RoleModelPluginToolDefinition)
+            ...tool,
+          } satisfies RoleModelPluginToolDefinition),
         );
       })
-      .sort(modelToolDefinitionOrder)
+      .sort(modelToolDefinitionOrder),
   );
 }
 
 function modelToolDefinitionOrder(
   left: RoleModelPluginToolDefinition,
-  right: RoleModelPluginToolDefinition
+  right: RoleModelPluginToolDefinition,
 ): number {
   const leftBuiltIn = isBuiltInModelToolName(left.name);
   const rightBuiltIn = isBuiltInModelToolName(right.name);
@@ -70,17 +67,17 @@ export function modelVisiblePluginTools(options: {
 }): readonly RuntimePluginProvidedTool[] {
   return Object.freeze(
     options.plugin.providedTools.filter(
-      (tool) =>
+      tool =>
         pluginToolHasRequiredGrantedAccess({
           tool,
-          access: options.access
+          access: options.access,
         }) &&
         (!tool.requiresConfirmation || options.confirmationAvailable) &&
         isModelVisiblePluginTool({
           plugin: options.plugin,
-          tool
-        })
-    )
+          tool,
+        }),
+    ),
   );
 }
 
@@ -94,26 +91,26 @@ export function routableModelFacingPluginTools(options: {
 
   return Object.freeze(
     options.plugin.providedTools.filter(
-      (tool) =>
+      tool =>
         pluginToolHasRequiredGrantedAccess({
           tool,
-          access: options.access
+          access: options.access,
         }) &&
         isModelFacingPluginTool({
           plugin: options.plugin,
-          tool
-        })
-    )
+          tool,
+        }),
+    ),
   );
 }
 
 export function pluginCanWriteModelInput(
-  access: RuntimePluginAccessSnapshot
+  access: RuntimePluginAccessSnapshot,
 ): boolean {
   return runtimePluginGrantsAccess({
     access,
     accessName: 'model_input',
-    requiredAccess: 'write'
+    requiredAccess: 'write',
   });
 }
 
@@ -127,7 +124,7 @@ export function pluginToolHasRequiredGrantedAccess(options: {
 
   const requestedFileStoreAccess = runtimePluginAccessFor(
     options.access.requestedAccess,
-    'file_store'
+    'file_store',
   );
 
   // A local-memory tool may own storage behind its provider and request no
@@ -139,7 +136,7 @@ export function pluginToolHasRequiredGrantedAccess(options: {
     runtimePluginGrantsAccess({
       access: options.access,
       accessName: 'file_store',
-      requiredAccess: 'write'
+      requiredAccess: 'write',
     })
   );
 }
@@ -152,10 +149,10 @@ export function discoverableCurrentTurnPluginTools(options: {
 }): readonly RuntimePluginProvidedTool[] {
   return Object.freeze(
     options.plugin.providedTools.filter(
-      (tool) =>
+      tool =>
         pluginToolHasRequiredGrantedAccess({
           tool,
-          access: options.access
+          access: options.access,
         }) &&
         (!tool.requiresConfirmation || options.confirmationAvailable) &&
         isDiscoverableCurrentTurnTool({
@@ -165,10 +162,10 @@ export function discoverableCurrentTurnPluginTools(options: {
             ? {}
             : {
                 isHostOwnedFirstPartyModelToolsPlugin:
-                  options.isHostOwnedFirstPartyModelToolsPlugin
-              })
-        })
-    )
+                  options.isHostOwnedFirstPartyModelToolsPlugin,
+              }),
+        }),
+    ),
   );
 }
 
@@ -204,7 +201,7 @@ export function isModelFacingPluginTool(options: {
 }): boolean {
   return isModelFacingRuntimePluginTool({
     manifest: options.plugin.manifest,
-    tool: options.tool
+    tool: options.tool,
   });
 }
 
@@ -215,7 +212,7 @@ export function isModelVisiblePluginTool(options: {
   if (
     isFirstPartyBuiltInModelTool({
       ...options,
-      isHostOwnedFirstPartyModelToolsPlugin: isFirstPartyModelToolsPlugin
+      isHostOwnedFirstPartyModelToolsPlugin: isFirstPartyModelToolsPlugin,
     })
   ) {
     return true;
@@ -228,19 +225,19 @@ export function isModelVisiblePluginTool(options: {
 }
 
 export function toolAllowsFileStoreWrites(
-  tool: RuntimePluginProvidedTool
+  tool: RuntimePluginProvidedTool,
 ): boolean {
   return sideEffectLevelAllowsFileStoreWrites(tool.sideEffectLevel);
 }
 
 export function sideEffectLevelAllowsFileStoreWrites(
-  sideEffectLevel: RuntimePluginSideEffectLevel
+  sideEffectLevel: RuntimePluginSideEffectLevel,
 ): boolean {
   return sideEffectLevel === 'local_memory_write';
 }
 
 export function toolRequiresConfirmation(
-  tool: RuntimePluginProvidedTool
+  tool: RuntimePluginProvidedTool,
 ): boolean {
   return tool.requiresConfirmation;
 }

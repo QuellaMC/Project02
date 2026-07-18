@@ -1,16 +1,11 @@
-import {
-  readFileSync,
-  symlinkSync,
-  unlinkSync,
-  writeFileSync
-} from 'node:fs';
+import {readFileSync, symlinkSync, unlinkSync, writeFileSync} from 'node:fs';
 import type * as NodeFs from 'node:fs';
-import { join } from 'node:path';
+import {join} from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
-import { runtimeConfigVersion } from '../../src/runtime/config/types.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
+import {runtimeConfigVersion} from '../../src/runtime/config/types.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 
 describe('runtime config canonical path locking', () => {
   afterEach(() => {
@@ -28,19 +23,19 @@ describe('runtime config canonical path locking', () => {
       targetA,
       `${JSON.stringify({
         version: runtimeConfigVersion,
-        project02: { storeRoot: root },
-        plugins: { alpha: { enabled: true } }
+        project02: {storeRoot: root},
+        plugins: {alpha: {enabled: true}},
       })}\n`,
-      'utf8'
+      'utf8',
     );
     writeFileSync(
       targetB,
       `${JSON.stringify({
         version: runtimeConfigVersion,
-        project02: { storeRoot: root },
-        plugins: { beta: { enabled: true } }
+        project02: {storeRoot: root},
+        plugins: {beta: {enabled: true}},
       })}\n`,
-      'utf8'
+      'utf8',
     );
     symlinkSync(targetA, configAlias);
     let swapped = false;
@@ -53,7 +48,7 @@ describe('runtime config canonical path locking', () => {
         readFileSync(path: NodeFs.PathOrFileDescriptor, ...args: unknown[]) {
           const content = Reflect.apply(actual.readFileSync, actual, [
             path,
-            ...args
+            ...args,
           ]) as unknown;
 
           if (path === configAlias && !swapped) {
@@ -63,20 +58,19 @@ describe('runtime config canonical path locking', () => {
           }
 
           return content;
-        }
+        },
       };
     });
 
-    const { applyRuntimeConfigMutation } = await import(
-      '../../src/runtime/config/mutate.ts'
-    );
+    const {applyRuntimeConfigMutation} =
+      await import('../../src/runtime/config/mutate.ts');
 
     applyRuntimeConfigMutation({
       configPath: configAlias,
       operation: {
         kind: 'plugin_enable',
-        pluginId: 'gamma'
-      }
+        pluginId: 'gamma',
+      },
     });
 
     const configA = JSON.parse(readFileSync(targetA, 'utf8')) as {
@@ -86,10 +80,10 @@ describe('runtime config canonical path locking', () => {
       readonly plugins: Readonly<Record<string, unknown>>;
     };
 
-    expect(configA.plugins).toEqual({ alpha: { enabled: true } });
+    expect(configA.plugins).toEqual({alpha: {enabled: true}});
     expect(configB.plugins).toEqual({
-      beta: { enabled: true },
-      gamma: { enabled: true }
+      beta: {enabled: true},
+      gamma: {enabled: true},
     });
   });
 });
