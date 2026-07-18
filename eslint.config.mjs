@@ -98,7 +98,8 @@ export default tseslint.config(
     rules: {
       'max-lines': [
         'error',
-        {max: 1157, skipBlankLines: true, skipComments: true},
+        // Re-pinned +2 for the tool-wire import split (mechanical growth).
+        {max: 1159, skipBlankLines: true, skipComments: true},
       ],
     },
   },

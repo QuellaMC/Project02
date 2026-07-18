@@ -124,11 +124,8 @@ export {
   normalizeReplayableRejectedRoleModelDecisionResult,
 } from './loop/replay-evidence.ts';
 export {
-  createRoleModelProviderToolNameMappings,
   defaultRoleModelProviderCapabilities,
-  modelToolDefinitionToChatTool,
   prepareRoleModelRequest,
-  providerToolNameForRuntimeToolName,
   renderRoleModelTurnContext,
   type RenderRoleModelTurnContextOptions,
   type RoleModelPreparedRequest,
@@ -139,8 +136,13 @@ export {
   type RoleModelPromptFrameKind,
   roleModelStableSystemPromptText,
   type RoleModelTurnContext,
-  runtimeToolNameForProviderToolName,
 } from './prompt/render.ts';
+export {
+  createRoleModelProviderToolNameMappings,
+  modelToolDefinitionToChatTool,
+  providerToolNameForRuntimeToolName,
+  runtimeToolNameForProviderToolName,
+} from './prompt/tool-wire.ts';
 export {createDeterministicCharacterAgent} from './providers/deterministic.ts';
 export {
   createDeterministicLocalRoleModelAdapter,

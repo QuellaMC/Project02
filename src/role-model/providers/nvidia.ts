@@ -20,13 +20,15 @@ import type {
   RoleModelProviderToolNameMapping,
 } from '../api/chat-wire.ts';
 import {
-  createRoleModelProviderToolNameMappings,
   defaultRoleModelProviderCapabilities,
-  providerToolNameForRuntimeToolName,
   renderRoleModelTurnContext,
-  runtimeToolNameForProviderToolName,
   type RoleModelTurnContext,
 } from '../prompt/render.ts';
+import {
+  createRoleModelProviderToolNameMappings,
+  providerToolNameForRuntimeToolName,
+  runtimeToolNameForProviderToolName,
+} from '../prompt/tool-wire.ts';
 import type {
   RoleModelAdapter,
   RoleModelAdapterInvocation,
