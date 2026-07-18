@@ -185,10 +185,12 @@ export {
 } from './list.ts';
 export {
   createRuntimePluginConfigControlHostStateSnapshot,
+  createRuntimePluginInventoryHostStateSnapshot,
   isRuntimeConfigConflictError,
   requiredRuntimePluginConfigControl,
   runtimeConfigConflictErrorCode,
   type RuntimePluginConfigControlHostState,
+  type RuntimePluginInventoryHostState,
 } from './state.ts';
 export {
   createPreparedRuntimePluginConfigEffectConfirmationPreview,

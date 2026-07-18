@@ -58,11 +58,12 @@ export default tseslint.config(
   // seam-based extraction only (never size-motivated cuts), and a cohesive file that
   // genuinely needs to grow may raise its pin in its own commit with a stated reason.
   {
+    // Re-pinned +2 for the inventory/control host-state import split.
     files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1778, skipBlankLines: true, skipComments: true},
+        {max: 1780, skipBlankLines: true, skipComments: true},
       ],
     },
   },
