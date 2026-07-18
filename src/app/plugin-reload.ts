@@ -8,6 +8,8 @@
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {canonicalJsonValuesEqual} from '../shared/canonical-json.ts';
 import {
+  createRuntimeConfigFingerprint,
+  createRuntimeConfigMutationBase,
   diagnosticsHaveErrors,
   loadProject02RuntimeConfig,
   pluginHasConfigErrors,
@@ -42,7 +44,7 @@ export function createConfiguredRuntimePluginReloader(options: {
   );
 
   return Object.freeze({
-    async reload(pluginId): Promise<RuntimePluginReloadResult> {
+    async reload(pluginId, reloadOptions): Promise<RuntimePluginReloadResult> {
       const entry = catalogEntries[pluginId];
 
       if (entry === undefined || entry.catalogKind !== 'package') {
@@ -59,6 +61,22 @@ export function createConfiguredRuntimePluginReloader(options: {
         env: pluginConfigControl.env ?? {},
         storeRoot: resolvedConfig.project02.storeRoot,
       });
+      const authoredFingerprint = createRuntimeConfigFingerprint(
+        createRuntimeConfigMutationBase({
+          loadedConfig,
+          ...(pluginConfigControl.configPath === undefined
+            ? {}
+            : {configPath: pluginConfigControl.configPath}),
+          storeRoot: resolvedConfig.project02.storeRoot,
+        }),
+      );
+
+      if (authoredFingerprint !== reloadOptions.expectedFingerprint) {
+        return {
+          status: 'declined',
+          reason: `the authored config moved past the approved update for plugin "${pluginId}"`,
+        };
+      }
       const freshResolvedConfig = resolveProject02RuntimeConfig({
         loadedConfig,
         storeRoot: resolvedConfig.project02.storeRoot,

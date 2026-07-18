@@ -29,7 +29,13 @@ export type RuntimePluginReloadResult =
  * freshly resolved config, declines ids it cannot rebuild.
  */
 export type RuntimePluginReloader = {
-  reload(pluginId: string): Promise<RuntimePluginReloadResult>;
+  reload(
+    pluginId: string,
+    options: {
+      /** Authored-config fingerprint the approved effect produced; the reloader declines when the file has moved past it. */
+      readonly expectedFingerprint: string;
+    },
+  ): Promise<RuntimePluginReloadResult>;
 };
 
 export type RuntimePluginConfigReloadHostResult = {
@@ -112,7 +118,9 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
   let reloaded: RuntimePluginReloadResult;
 
   try {
-    reloaded = await options.reloader.reload(pluginId);
+    reloaded = await options.reloader.reload(pluginId, {
+      expectedFingerprint: firstEffect.resultFingerprint,
+    });
   } catch (error: unknown) {
     reloaded = {
       status: 'failed',

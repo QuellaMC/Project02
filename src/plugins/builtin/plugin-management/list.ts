@@ -40,6 +40,7 @@ export type RuntimePluginListHostState = () => {
   readonly installedPluginManifests?: readonly RuntimePluginManifest[];
   readonly activationStates?: readonly RuntimePluginListActivationState[];
   readonly confirmationAvailable: boolean;
+  readonly liveReloadAvailable?: boolean;
 };
 
 export function createRuntimePluginListTool(): RuntimePluginProvidedTool {

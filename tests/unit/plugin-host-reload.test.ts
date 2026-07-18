@@ -35,7 +35,7 @@ function reloadFixtureManifest(): RuntimePluginManifest {
       hostContractVersions: [runtimePluginContractVersion],
       sourceSystem: 'test',
     },
-    declaredPlugins: ['before_role_model_call'],
+    declaredPlugins: ['before_role_model_call', 'on_session_end'],
     config: {
       fields: [
         {
@@ -82,10 +82,17 @@ function reloadFixtureManifest(): RuntimePluginManifest {
   });
 }
 
-function reloadFixturePlugin(label: string): RuntimePlugin {
+function reloadFixturePlugin(
+  label: string,
+  sessionEndLog?: string[],
+): RuntimePlugin {
   return createRuntimePlugin({
     manifest: reloadFixtureManifest(),
     lifecycleHooks: {
+      onSessionEnd() {
+        sessionEndLog?.push(label);
+        return {status: 'completed' as const, evidence: []};
+      },
       beforeRoleModelCall(context) {
         return {
           contextItems: [
@@ -188,7 +195,11 @@ describe('runtime plugin host live config reload', () => {
     const changed = createRuntimePlugin({
       manifest: createRuntimePluginManifest({
         ...reloadFixtureManifest(),
-        declaredPlugins: ['tool_provider', 'before_role_model_call'],
+        declaredPlugins: [
+          'tool_provider',
+          'before_role_model_call',
+          'on_session_end',
+        ],
       }),
       providedTools: [
         {
@@ -274,6 +285,26 @@ describe('runtime plugin host live config reload', () => {
       'mix live and reload-required fields',
     );
     expect(await contextText(host)).toBe('v1');
+  });
+
+  it('runs terminal lifecycle hooks on superseded instances too', async () => {
+    const sessionEndLog: string[] = [];
+    const host = reloadHost({
+      initial: reloadFixturePlugin('v1', sessionEndLog),
+      reloader: {
+        reload: () =>
+          Promise.resolve({
+            status: 'rebuilt',
+            plugin: reloadFixturePlugin('v2', sessionEndLog),
+          }),
+      },
+    });
+
+    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+
+    expect(result?.outcome).toBe('live_applied');
+    await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
+    expect(sessionEndLog.sort()).toEqual(['v1', 'v2']);
   });
 
   it('defers when the host has no reloader', async () => {

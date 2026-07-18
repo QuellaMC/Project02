@@ -792,7 +792,20 @@ describe('host-owned runtime plugin management tools', () => {
       configPath,
       storeRoot,
     });
-    const host = createRuntimePluginHost({
+    const hostWithReloader = createRuntimePluginHost({
+      storeRoot,
+      pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: [manifest],
+        configPath,
+      },
+      toolConfirmationHandler: () => ({status: 'approved'}),
+      pluginReloader: {
+        reload: () =>
+          Promise.resolve({status: 'declined', reason: 'unused in this test'}),
+      },
+    });
+    const hostWithoutReloader = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: {
         control: testRuntimePluginConfigControlCapability,
@@ -802,7 +815,7 @@ describe('host-owned runtime plugin management tools', () => {
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
 
-    const result = await updateConfigField(host, {
+    const withReloader = await updateConfigField(hostWithReloader, {
       pluginId: manifest.id,
       fieldName: 'tone',
       operation: 'set',
@@ -810,11 +823,29 @@ describe('host-owned runtime plugin management tools', () => {
       expectedFingerprint: before.fingerprint,
     });
 
-    expect(result).toMatchObject({
+    expect(withReloader).toMatchObject({
       status: 'accepted',
       output: {
         status: 'approved_pending_commit',
         appliesTo: 'next_turn',
+        reloadRequired: false,
+      },
+    });
+
+    // Without a reloader the same field must not promise next-turn apply.
+    const withoutReloader = await updateConfigField(hostWithoutReloader, {
+      pluginId: manifest.id,
+      fieldName: 'tone',
+      operation: 'set',
+      value: 'warm',
+      expectedFingerprint: before.fingerprint,
+    });
+
+    expect(withoutReloader).toMatchObject({
+      status: 'accepted',
+      output: {
+        status: 'approved_pending_commit',
+        appliesTo: 'future_host_construction',
         reloadRequired: false,
       },
     });

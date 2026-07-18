@@ -207,7 +207,7 @@ async function createLiveReloadLoopFixture(
   const fixture = await createConfigEffectTestFixture(`reload-${label}`);
   const manifest = createRuntimePluginManifest({
     ...fixture.targetPlugin.manifest,
-    declaredPlugins: ['before_role_model_call'],
+    declaredPlugins: ['before_role_model_call', 'after_turn_committed'],
     requestedAccess: {model_input: 'write'},
     config: {
       fields: fixture.targetPlugin.manifest.config.fields.map(field =>
@@ -215,10 +215,15 @@ async function createLiveReloadLoopFixture(
       ),
     },
   });
+  const afterCommitLog: string[] = [];
   const stylePlugin = (tone: string) =>
     createRuntimePlugin({
       manifest,
       lifecycleHooks: {
+        afterTurnCommitted() {
+          afterCommitLog.push(`after:${tone}`);
+          return {status: 'completed' as const, evidence: []};
+        },
         beforeRoleModelCall(context) {
           return {
             contextItems: [
@@ -307,6 +312,7 @@ async function createLiveReloadLoopFixture(
     logStore,
     pluginHost,
     authoredTone,
+    afterCommitLog,
     capturedContexts,
     contextCaptureAdapter,
     updateInput: {
@@ -1549,6 +1555,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       .find(evidence => evidence.summary.startsWith('Live-applied'));
 
     expect(liveApplyEvidence).toMatchObject({status: 'accepted'});
+    expect(live.afterCommitLog).toEqual(['after:cool']);
 
     const followupResult = await runLocalUserMessageEvent({
       event: createTestEvent('and now?', 'evt_live_apply_followup'),
@@ -1560,6 +1567,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
 
     expect(followupResult.status).toBe('completed');
     expect(live.capturedContexts[0]).toContain('tone:warm');
+    expect(live.afterCommitLog).toEqual(['after:cool', 'after:warm']);
   });
 
   it('keeps the old instance and records a post-commit failure when the reload factory throws', async () => {
@@ -1601,6 +1609,17 @@ describe('plugin-driven tool loop commit and rollback', () => {
       .find(evidence => evidence.summary.startsWith('Live config reload'));
 
     expect(failedEvidence).toMatchObject({status: 'failed'});
+
+    const failedAfterCommitEvent = live.logStore
+      .rawEvents()
+      .filter(event => event.kind === 'after_turn_committed')
+      .find(event =>
+        event.runtimePluginEvidence?.some(evidence =>
+          evidence.summary.startsWith('Live config reload'),
+        ),
+      );
+
+    expect(failedAfterCommitEvent?.status).toBe('completed_with_failures');
 
     const followupResult = await runLocalUserMessageEvent({
       event: createTestEvent('and now?', 'evt_live_fail_followup'),

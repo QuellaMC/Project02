@@ -257,6 +257,8 @@ type RuntimePluginHostState = {
   readonly enabledPlugins: readonly RuntimePlugin[];
   /** Current instances: identical to enabledPlugins until a live config reload swaps one. */
   readonly livePlugins: () => readonly RuntimePlugin[];
+  /** Instances replaced by live reloads; they still receive terminal lifecycle hooks. */
+  readonly supersededPlugins: () => readonly RuntimePlugin[];
   readonly swapEnabledPlugin: (
     next: RuntimePlugin,
   ) => RuntimePlugin | undefined;
@@ -274,6 +276,7 @@ export function createRuntimePluginHost(
     enabledIds,
     enabledPlugins,
     livePlugins,
+    supersededPlugins,
     swapEnabledPlugin,
     accessByPluginId,
     registrySnapshot,
@@ -389,7 +392,7 @@ export function createRuntimePluginHost(
     },
     async onSessionEnd(context, hookOptions) {
       return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
-        plugins: livePlugins(),
+        plugins: [...livePlugins(), ...supersededPlugins()],
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -401,7 +404,7 @@ export function createRuntimePluginHost(
     },
     shutdown(context) {
       shutdownResult ??= runRuntimePluginShutdownHooksWithResolvedPermissions({
-        plugins: livePlugins(),
+        plugins: [...livePlugins(), ...supersededPlugins()],
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -459,6 +462,7 @@ function createRuntimePluginHostState(
         ));
   let allPlugins: readonly RuntimePlugin[] = [];
   let enabledPlugins: readonly RuntimePlugin[] = [];
+  let supersededPlugins: readonly RuntimePlugin[] = Object.freeze([]);
   let accessByPluginId: RuntimePluginAccessMapByPluginId = Object.freeze({});
   assertNoCallerSuppliedHostScopedFirstPartyPlugins(configuredPlugins);
   const hostScopedPlugins = createHostScopedFirstPartyRuntimePlugins({
@@ -469,6 +473,7 @@ function createRuntimePluginHostState(
       confirmationAvailable:
         options.toolConfirmationHandler !== undefined &&
         pluginConfigControl !== undefined,
+      liveReloadAvailable: options.pluginReloader !== undefined,
       ...(pluginInventoryState === undefined
         ? {}
         : {installedPluginManifests: pluginInventoryState.pluginManifests}),
@@ -521,6 +526,7 @@ function createRuntimePluginHostState(
     enabledIds,
     enabledPlugins,
     livePlugins: () => enabledPlugins,
+    supersededPlugins: () => supersededPlugins,
     swapEnabledPlugin: next => {
       const previous = enabledPlugins.find(
         plugin => plugin.manifest.id === next.manifest.id,
@@ -536,6 +542,7 @@ function createRuntimePluginHostState(
       allPlugins = Object.freeze(
         allPlugins.map(plugin => (plugin === previous ? next : plugin)),
       );
+      supersededPlugins = Object.freeze([...supersededPlugins, previous]);
       return previous;
     },
     accessByPluginId,

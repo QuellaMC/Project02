@@ -103,6 +103,8 @@ export function createRuntimePluginManagementPlugin(
             call,
             context,
             state: pluginConfigControl,
+            liveReloadAvailable:
+              options.hostStateForTurn().liveReloadAvailable === true,
             ...(options.storeRoot === undefined
               ? {}
               : {storeRoot: options.storeRoot}),

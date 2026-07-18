@@ -59,13 +59,14 @@ export default tseslint.config(
   // genuinely needs to grow may raise its pin in its own commit with a stated reason.
   {
     // Re-pinned +2 for the inventory/control host-state import split, then
-    // +40 for the live config-reload seam (state refs + method delegation
-    // only; the reload policy lives in src/plugins/host/reload.ts).
+    // +46 for the live config-reload seam (state refs, superseded-instance
+    // retention, and method delegation only; the reload policy lives in
+    // src/plugins/host/reload.ts).
     files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1820, skipBlankLines: true, skipComments: true},
+        {max: 1826, skipBlankLines: true, skipComments: true},
       ],
     },
   },
