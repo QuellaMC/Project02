@@ -172,11 +172,17 @@ export async function applyCompletedRuntimeConfigReloads(options: {
     string,
     PreparedRuntimePluginConfigEffect[]
   >();
+  let turnFinalAcceptedEffect: PreparedRuntimePluginConfigEffect | undefined;
 
   for (const effect of options.effects) {
     if (!acceptedEffectIds.has(effect.effectId)) {
       continue;
     }
+
+    // Effects arrive in apply order, so the authored file ends at the LAST
+    // accepted effect of the whole turn — every per-plugin group must verify
+    // against that fingerprint, not its own last effect.
+    turnFinalAcceptedEffect = effect;
 
     const group = effectsByPluginId.get(effect.targetPluginId) ?? [];
 
@@ -200,7 +206,14 @@ export async function applyCompletedRuntimeConfigReloads(options: {
     }
 
     try {
-      const result = await reload(group);
+      const result = await reload(
+        group,
+        turnFinalAcceptedEffect === undefined
+          ? undefined
+          : {
+              turnResultFingerprint: turnFinalAcceptedEffect.resultFingerprint,
+            },
+      );
 
       if (result.evidence !== undefined) {
         evidence.push(result.evidence);

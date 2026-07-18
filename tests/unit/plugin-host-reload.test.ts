@@ -347,6 +347,34 @@ describe('runtime plugin host live config reload', () => {
     expect(sessionEndLog.sort()).toEqual(['declined-rebuild', 'v1']);
   });
 
+  it('verifies against a supplied turn-final fingerprint', async () => {
+    const seenFingerprints: string[] = [];
+    const host = reloadHost({
+      reloader: {
+        reload: (_pluginId, reloadOptions) => {
+          seenFingerprints.push(reloadOptions.expectedFingerprint);
+          return Promise.resolve({
+            status: 'rebuilt',
+            plugin: reloadFixturePlugin('v2'),
+          });
+        },
+      },
+    });
+
+    // A turn that also updated ANOTHER plugin leaves the authored file at
+    // the whole turn's final fingerprint, not this group's last effect.
+    const result = await host.reloadPluginForCommittedConfig?.(
+      [toneEffect('tone', 'effect-tone-1', 'sha256:intermediate')],
+      {turnResultFingerprint: 'sha256:turn-final'},
+    );
+
+    expect(result?.outcome).toBe('live_applied');
+    expect(seenFingerprints).toEqual(['sha256:turn-final']);
+    expect(result?.evidence).toMatchObject({
+      configFingerprint: 'sha256:turn-final',
+    });
+  });
+
   it('retires an instance handed back with a declined reload', async () => {
     const sessionEndLog: string[] = [];
     const orphan = reloadFixturePlugin('orphan', sessionEndLog);

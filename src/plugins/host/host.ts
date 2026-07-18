@@ -218,6 +218,10 @@ export type RuntimePluginHost = {
   ): boolean;
   reloadPluginForCommittedConfig?(
     effects: readonly PreparedRuntimePluginConfigEffect[],
+    reloadOptions?: {
+      /** Authored fingerprint after ALL of the turn's accepted effects, across plugins. */
+      readonly turnResultFingerprint?: string;
+    },
   ): Promise<RuntimePluginConfigReloadHostResult>;
   beginFileStoreTransaction?(): void;
   prepareFileStoreTransaction?(
@@ -373,7 +377,7 @@ export function createRuntimePluginHost(
           : {storeRoot: options.storeRoot}),
       });
     },
-    async reloadPluginForCommittedConfig(effects) {
+    async reloadPluginForCommittedConfig(effects, reloadOptions) {
       return await reloadRuntimePluginForCommittedConfig({
         effects,
         reloader: options.pluginReloader,
@@ -381,6 +385,9 @@ export function createRuntimePluginHost(
         livePlugins,
         swapEnabledPlugin,
         retirePlugin,
+        ...(reloadOptions?.turnResultFingerprint === undefined
+          ? {}
+          : {turnResultFingerprint: reloadOptions.turnResultFingerprint}),
       });
     },
     beginFileStoreTransaction() {
