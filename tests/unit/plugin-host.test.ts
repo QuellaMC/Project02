@@ -22,6 +22,10 @@ import {
   type RuntimePluginConfigControlHostState,
 } from '../../src/plugins/index.ts';
 import {
+  createRuntimePluginConfigControlHostStateSnapshot,
+  createRuntimePluginInventoryHostStateSnapshot,
+} from '../../src/plugins/builtin/plugin-management/state.ts';
+import {
   characterStatePluginId,
   createCharacterStatePlugin,
 } from '../../src/plugins/packages/character-state/plugin.ts';
@@ -114,6 +118,24 @@ describe('runtime plugin host catalog and routing', () => {
     expect(() =>
       createRuntimePluginHost({pluginInventoryState: {pluginManifests: []}}),
     ).not.toThrow();
+  });
+
+  it('strips the control capability when inventory-snapshotting a config-control snapshot', () => {
+    const controlSnapshot = createRuntimePluginConfigControlHostStateSnapshot({
+      control: testRuntimePluginConfigControlCapability,
+      pluginManifests: [],
+    });
+    const inventorySnapshot =
+      createRuntimePluginInventoryHostStateSnapshot(controlSnapshot);
+
+    expect(
+      createRuntimePluginConfigControlHostStateSnapshot(controlSnapshot),
+    ).toBe(controlSnapshot);
+    expect(inventorySnapshot).not.toBe(controlSnapshot);
+    expect(Object.hasOwn(inventorySnapshot, 'control')).toBe(false);
+    expect(
+      createRuntimePluginInventoryHostStateSnapshot(inventorySnapshot),
+    ).toBe(inventorySnapshot);
   });
 
   it('keeps real bootstrap constructors separate from ordinary package loaders', () => {

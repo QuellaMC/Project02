@@ -86,26 +86,31 @@ export function isRuntimeConfigConflictError(
   );
 }
 
-const runtimePluginHostStateSnapshots =
+// One marker set per role: a config-control snapshot passed to the
+// inventory helper must NOT short-circuit, or it would come back with
+// its control capability still attached instead of stripped.
+const runtimePluginInventoryHostStateSnapshots =
   new WeakSet<RuntimePluginInventoryHostState>();
+const runtimePluginConfigControlHostStateSnapshots =
+  new WeakSet<RuntimePluginConfigControlHostState>();
 
 export function createRuntimePluginInventoryHostStateSnapshot(
   state: RuntimePluginInventoryHostState,
 ): RuntimePluginInventoryHostState {
-  if (runtimePluginHostStateSnapshots.has(state)) {
+  if (runtimePluginInventoryHostStateSnapshots.has(state)) {
     return state;
   }
 
   const snapshot = Object.freeze(inventoryHostStateSnapshotFields(state));
 
-  runtimePluginHostStateSnapshots.add(snapshot);
+  runtimePluginInventoryHostStateSnapshots.add(snapshot);
   return snapshot;
 }
 
 export function createRuntimePluginConfigControlHostStateSnapshot(
   state: RuntimePluginConfigControlHostState,
 ): RuntimePluginConfigControlHostState {
-  if (runtimePluginHostStateSnapshots.has(state)) {
+  if (runtimePluginConfigControlHostStateSnapshots.has(state)) {
     return state;
   }
 
@@ -114,7 +119,7 @@ export function createRuntimePluginConfigControlHostStateSnapshot(
     control: state.control,
   } satisfies RuntimePluginConfigControlHostState);
 
-  runtimePluginHostStateSnapshots.add(snapshot);
+  runtimePluginConfigControlHostStateSnapshots.add(snapshot);
   return snapshot;
 }
 
