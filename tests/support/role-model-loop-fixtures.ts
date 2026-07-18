@@ -1,9 +1,10 @@
 import {
-  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
+  createDefaultRoleModelPluginToolDefinitions,
+  type RoleModelAdapter,
   type RoleModelPluginToolDefinition,
   type RoleModelProviderMetadata
-} from '../../src/role-model/contracts.ts';
+} from '../../src/role-model/index.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginContext,
@@ -12,13 +13,12 @@ import {
   type RuntimePlugin,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult
-} from '../../src/plugins/validation.ts';
-import { runtimePluginContractVersion } from '../../src/plugins/contract.ts';
+} from '../../src/plugins/api/index.ts';
+import { runtimePluginContractVersion } from '../../src/plugins/api/contract.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent
-} from '../../src/runtime/event.ts';
-import { type RoleModelAdapter } from '../../src/role-model/loop.ts';
+} from '../../src/core/index.ts';
 
 export const memorySearchToolDefinition = Object.freeze({
   pluginId: 'memory.search.fixture',

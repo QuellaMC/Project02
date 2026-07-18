@@ -2,7 +2,7 @@ import {
   runtimeTraceStepValues,
   type RuntimeTraceEntry,
   type RuntimeTraceStepName
-} from '../log.ts';
+} from '../evidence/records.ts';
 import {
   isOneOf,
   requiredRuntimeEventIdentity,

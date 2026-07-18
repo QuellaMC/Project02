@@ -1,20 +1,20 @@
 import {
   CharacterReplyValidationError,
   normalizeCharacterAgentReply
-} from '../../core/conversation.ts';
-import { buildUserTurnDecisionContext } from '../../role-model/decision-context.ts';
+} from '../../core/index.ts';
+import { buildUserTurnDecisionContext } from '../../role-model/index.ts';
 import {
   createRuntimePluginContext,
   createRuntimePluginToolInvocationSnapshot,
+  runtimePluginBeforeRoleModelCallRejectionReason,
   type RuntimePluginContext,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginToolInvocationSnapshot
-} from '../../plugins/types.ts';
-import {
-  runtimePluginBeforeRoleModelCallRejectionReason,
-  type RuntimePluginBeforeRoleModelCallCompletedResult,
-  type RuntimePluginHealthHostResult,
-  type RuntimePluginHost
+} from '../../plugins/api/index.ts';
+import type {
+  RuntimePluginBeforeRoleModelCallCompletedResult,
+  RuntimePluginHealthHostResult,
+  RuntimePluginHost
 } from '../../plugins/index.ts';
 import {
   createDecisionContext,
@@ -22,7 +22,7 @@ import {
   roleModelCommitValidationFailureRejectionReason,
   type DecisionContext,
   type RoleModelDecisionRejection
-} from '../../role-model/contracts.ts';
+} from '../../role-model/index.ts';
 import {
   createRoleModelAdapterFromCharacterAgent,
   runRoleModelLoop,
@@ -34,7 +34,7 @@ import {
   type RoleModelPluginToolCallStartedEvent,
   type RoleModelPluginToolCallsRequestedEvent,
   type RoleModelPluginToolRoutingEvidence
-} from '../../role-model/loop.ts';
+} from '../../role-model/index.ts';
 import {
   appendToolCallFinished,
   appendToolCallStarted,
@@ -150,10 +150,7 @@ async function prepareRuntimeTurn(
     session: state.options.session,
     ...(state.options.characterTurnOptions?.recentMessageLimit === undefined
       ? {}
-      : {
-          recentMessageLimit:
-            state.options.characterTurnOptions.recentMessageLimit
-        })
+      : { recentMessageLimit: state.options.characterTurnOptions.recentMessageLimit })
   });
   const runtimePluginContext = createRuntimePluginContext({
     ...state.identity,
@@ -217,6 +214,7 @@ async function runRuntimeModel(
     const result = await runRoleModelLoop({
       event: state.event,
       decisionContext: roleModelDecisionContext,
+      ...(state.options.maxToolRounds === undefined ? {} : { maxToolRounds: state.options.maxToolRounds }),
       pluginToolDefinitions: prepared.pluginHost.pluginToolDefinitions(),
       pluginToolHost: prepared.pluginHost,
       preparedConfigEffectsByToolCallId:

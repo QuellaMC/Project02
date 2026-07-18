@@ -1,4 +1,4 @@
-import type { RuntimePluginConfigValueType } from '../../plugins/contract.ts';
+import type { RuntimePluginConfigValueType } from '../../plugins/api/index.ts';
 
 export const runtimeConfigVersion = 'project02.config.v2';
 export const runtimeConfigEnvVarName = 'PROJECT02_RUNTIME_CONFIG';

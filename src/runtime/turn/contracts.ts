@@ -1,9 +1,11 @@
-import type {
-  CharacterAgent,
-  CharacterTurnOptions,
-  CharacterTurnResult,
-  ConversationSession
-} from '../../core/conversation.ts';
+import {
+  type CharacterAgent,
+  type CharacterTurnOptions,
+  type CharacterTurnResult,
+  type ConversationSession,
+  type RuntimeEventIdentity,
+  type UserMessageRuntimeEvent
+} from '../../core/index.ts';
 import type {
   PreparedRuntimePluginConfigEffect,
   RuntimePluginContext,
@@ -11,7 +13,7 @@ import type {
   RuntimePluginEvidenceSnapshot,
   RuntimePluginToolCall,
   RuntimePluginToolInvocationSnapshot
-} from '../../plugins/types.ts';
+} from '../../plugins/api/index.ts';
 import type {
   RuntimePluginHealthHostResult,
   RuntimePluginFileStorePreparedTransaction,
@@ -21,15 +23,11 @@ import type {
   ParsedRoleModelDecisionSnapshot,
   RoleModelDecisionRejectionReason,
   RoleModelIOSnapshot
-} from '../../role-model/contracts.ts';
+} from '../../role-model/index.ts';
 import type {
   RoleModelAdapter,
   RoleModelPluginToolRoutingEvidence
-} from '../../role-model/loop.ts';
-import type {
-  RuntimeEventIdentity,
-  UserMessageRuntimeEvent
-} from '../event.ts';
+} from '../../role-model/index.ts';
 import type {
   ConversationLogRecord,
   RawEventLogPayloadSummary,
@@ -39,7 +37,7 @@ import type {
   RuntimeLogStore,
   RuntimeTraceEntry,
   RuntimeTraceStepName
-} from '../log.ts';
+} from '../evidence/records.ts';
 
 export const runtimePluginHealthRejectionReason = 'plugin_health_rejected';
 
@@ -57,6 +55,7 @@ export type RunLocalUserMessageEventOptions = {
   readonly rawInput?: string;
   readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
+  readonly maxToolRounds?: number;
   readonly pluginHost: RuntimePluginHost;
   readonly characterTurnOptions?: CharacterTurnOptions;
   readonly committedAt?: string;

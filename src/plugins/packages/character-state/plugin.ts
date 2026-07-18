@@ -1,25 +1,25 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-import { assertCanonicalRuntimeTimestamp } from '../../../runtime/event.ts';
+import { assertCanonicalRuntimeTimestamp } from '../../../core/index.ts';
 import { canonicalJsonStringify } from '../../../shared/canonical-json.ts';
 
 import {
   createRuntimePlugin
-} from '../../constructors.ts';
+} from '../../api/constructors.ts';
 import {
   createRuntimePluginContextItem,
   createRuntimePluginManifest
-} from '../../manifest-validation.ts';
-import type { RuntimePluginFactoryInput } from '../../factory.ts';
+} from '../../api/manifest-validation.ts';
+import type { RuntimePluginFactoryInput } from '../../api/factory.ts';
 import type {
   RuntimePluginContext,
   RuntimePluginJsonObject
-} from '../../plugin-types.ts';
+} from '../../api/types.ts';
 import {
   type ModelToolInputContract
-} from '../../../role-model/model-tools.ts';
-import { characterStatePatchModelToolName } from './contract.ts';
+} from '../../../role-model/index.ts';
+import { characterStatePatchModelToolName } from '../../api/contract.ts';
 import {
   characterAttentionValues,
   characterCurrentActivityValues,
@@ -35,16 +35,16 @@ import {
   type AcceptedCharacterStatePatchResult,
   type CharacterRuntimeState
 } from './schema.ts';
-import { createPluginContextEvidence, createPluginToolEvidence } from '../../evidence.ts';
+import { createPluginContextEvidence, createPluginToolEvidence } from '../../api/evidence-helpers.ts';
 import type {
   RuntimePlugin,
   RuntimePluginBeforeRoleModelCallResult,
   RuntimePluginFileStore,
   RuntimePluginManifest
-} from '../../plugin-types.ts';
-import { characterStatePluginId } from '../../contract.ts';
+} from '../../api/types.ts';
+import { characterStatePluginId } from '../../api/contract.ts';
 
-export { characterStatePluginId } from '../../contract.ts';
+export { characterStatePluginId } from '../../api/contract.ts';
 
 const characterStatePluginDescriptorFormat = 'project02.plugin.v1';
 const characterStatePluginEntry = './index.ts';

@@ -3,11 +3,11 @@ import { LocalRuntimeStorageContractError } from './layout-contract.ts';
 import { encodeConversationLogRecord } from './conversation-codec.ts';
 import { encodeRawEventLogRecord } from './raw-event-codec.ts';
 import { encodeRuntimeTraceEntry } from './trace-codec.ts';
-import type { RuntimeLogStore } from '../log.ts';
+import type { RuntimeLogStore } from '../evidence/records.ts';
 import {
   createRuntimeSessionEvidenceSnapshot,
   removeConversationLogRecords
-} from './runtime-evidence-recovery.ts';
+} from '../evidence/recovery.ts';
 import {
   FileRuntimeLogStoreState,
   type FileRuntimeLogStoreStateOptions
@@ -16,7 +16,7 @@ import {
 export {
   durableRuntimeSessionCharacterProfile,
   findValidatedTerminalRawEventForSession
-} from './runtime-evidence-validation.ts';
+} from '../evidence/validation.ts';
 
 export type CreateFileRuntimeLogStoreOptions = FileRuntimeLogStoreStateOptions;
 

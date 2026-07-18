@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect } from 'vitest';
-import { createRuntimeEventIdentity } from '../../src/runtime/event.ts';
+import { createRuntimeEventIdentity } from '../../src/core/index.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginAfterTurnCommittedContext,
@@ -12,12 +12,12 @@ import {
   createRuntimePluginProvidedTool,
   runtimePluginContractVersion,
   runtimePluginId
-} from '../../src/plugins/types.ts';
+} from '../../src/plugins/api/index.ts';
 import {
   createRuntimePluginHost,
   type CreateRuntimePluginHostOptions,
   type RuntimePluginHost
-} from '../../src/plugins/host.ts';
+} from '../../src/plugins/host/index.ts';
 import type {
   RuntimePlugin,
   RuntimePluginContext,
@@ -25,8 +25,13 @@ import type {
   RuntimePluginJsonObject,
   RuntimePluginJsonValue,
   RuntimePluginToolCallResult
-} from '../../src/plugins/types.ts';
-import { createRuntimePluginFileStore } from '../../src/plugins/file-store.ts';
+} from '../../src/plugins/api/index.ts';
+import {
+  createRuntimePluginFileStore,
+  createRuntimePluginFileStoreTransaction,
+  type RuntimePluginFileStoreProvider
+} from '../../src/runtime/storage/plugin-file-store/index.ts';
+import { createRuntimePluginConfigControlCapability } from '../../src/runtime/config/index.ts';
 
 export type Deferred<T> = {
   readonly promise: Promise<T>;
@@ -49,10 +54,22 @@ export type TestRuntimePluginHostOptions = Omit<
   readonly plugins: readonly RuntimePlugin[];
 };
 
+/** Real engine wired the way the composition root does in production. */
+export const testRuntimePluginFileStoreProvider: RuntimePluginFileStoreProvider =
+  Object.freeze({
+    createFileStore: createRuntimePluginFileStore,
+    createFileStoreTransaction: createRuntimePluginFileStoreTransaction
+  });
+
+/** Real config-control capability wired the way the composition root does. */
+export const testRuntimePluginConfigControlCapability =
+  createRuntimePluginConfigControlCapability();
+
 export function createExplicitlyEnabledRuntimePluginHost(
   options: TestRuntimePluginHostOptions
 ): RuntimePluginHost {
   return createRuntimePluginHost({
+    fileStore: testRuntimePluginFileStoreProvider,
     ...options,
     enabledPluginIds: options.enabledPluginIds ?? [
       runtimePluginId,

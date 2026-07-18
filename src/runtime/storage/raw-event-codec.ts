@@ -1,14 +1,13 @@
-import type { CharacterProfile, VisibleMessage } from '../../core/conversation.ts';
 import {
+  type CharacterProfile,
   normalizeVisibleMessageText,
-  VisibleMessageTextValidationError
-} from '../../core/message-validation.ts';
-import {
-  runtimeEventTypeValues,
   type RuntimeEventIdentity,
   type RuntimeEventType,
-  type UserMessageRuntimeEvent
-} from '../event.ts';
+  runtimeEventTypeValues,
+  type UserMessageRuntimeEvent,
+  type VisibleMessage,
+  VisibleMessageTextValidationError
+} from '../../core/index.ts';
 import {
   createAcceptedRoleModelDecisionResult,
   createDefaultRoleModelPluginToolDefinitions,
@@ -44,16 +43,13 @@ import {
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
   type RoleModelToolObservation
-} from '../../role-model/contracts.ts';
+} from '../../role-model/index.ts';
 import {
   createVisibleReplyModelToolCall,
   visibleReplyModelToolName,
   type PluginModelToolCall,
   type ModelToolCall
-} from '../../role-model/model-tools.ts';
-import {
-  characterStatePatchModelToolName
-} from '../../plugins/packages/character-state/contract.ts';
+} from '../../role-model/index.ts';
 import {
   createPreparedRuntimePluginConfigEffect,
   createRuntimePluginContextItem,
@@ -69,8 +65,9 @@ import {
   type RuntimePluginSourceReference,
   type RuntimePluginToolCallResult,
   type RuntimePluginTurnEvidenceSnapshot
-} from '../../plugins/validation.ts';
+} from '../../plugins/api/index.ts';
 import {
+  characterStatePatchModelToolName,
   runtimePluginEvidenceKindValues,
   runtimePluginEvidenceStatusValues,
   runtimePluginPolicyOutcomeValues,
@@ -79,7 +76,7 @@ import {
   type RuntimePluginEvidenceStatus,
   type RuntimePluginPolicyOutcome,
   type RuntimePluginSourceKind
-} from '../../plugins/contract.ts';
+} from '../../plugins/api/index.ts';
 import {
   createRoleModelCommitValidationSnapshot,
   isTerminalRawEventLogRecordKind,
@@ -93,7 +90,7 @@ import {
   type RoleModelCommitValidationResult,
   type RoleModelCommitValidationSnapshot,
   type RuntimeTurnStatus
-} from '../log.ts';
+} from '../evidence/records.ts';
 import {
   isOneOf,
   requiredNormalizedVisibleMessageText,
@@ -1068,11 +1065,17 @@ function assertParsedRoleModelDecisionAllowedByEnvelope(options: {
     return;
   }
 
-  const everyToolIsAllowed = parsedResult.decision.toolCalls.every((call) =>
-    options.roleModelIOSnapshot.inputEnvelope.allowedTools.includes(call.name)
+  // Mirrors the live parser: executable calls outside allowedTools are legal
+  // in accepted decisions (tool routing rejects them pre-dispatch as
+  // tool_not_declared); only visible_reply must be allowed when present,
+  // because it commits without a routing gate.
+  const visibleReplyIsAllowed = parsedResult.decision.toolCalls.every(
+    (call) =>
+      call.name !== visibleReplyModelToolName ||
+      options.roleModelIOSnapshot.inputEnvelope.allowedTools.includes(call.name)
   );
 
-  if (!everyToolIsAllowed) {
+  if (!visibleReplyIsAllowed) {
     throwMalformedRecord('roleModelIOSnapshot.inputEnvelope.allowedTools');
   }
 }

@@ -2,7 +2,6 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['tests/**/*.test.ts'],
     environment: 'node',
     maxWorkers: 4,
     globals: false,
@@ -10,6 +9,41 @@ export default defineConfig({
     restoreMocks: true,
     unstubEnvs: true,
     unstubGlobals: true,
+    // One project per test bucket; each inherits this root config. Coverage
+    // stays global (root-level) — vitest 4 does not support per-project coverage.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          include: ['tests/unit/**/*.test.ts']
+        }
+      },
+      {
+        extends: true,
+        test: {
+          name: 'contract',
+          include: ['tests/contract/**/*.test.ts']
+        }
+      },
+      {
+        extends: true,
+        test: {
+          name: 'integration',
+          include: ['tests/integration/**/*.test.ts'],
+          // Headroom only: several suites spawn 2-7 child node processes and
+          // contend for the lock/WAL files they exercise.
+          testTimeout: 30000
+        }
+      },
+      {
+        extends: true,
+        test: {
+          name: 'e2e',
+          include: ['tests/e2e/**/*.test.ts']
+        }
+      }
+    ],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
@@ -67,13 +101,13 @@ export default defineConfig({
           functions: 95,
           lines: 95
         },
-        'src/runtime/storage/runtime-evidence-validation.ts': {
+        'src/runtime/evidence/validation.ts': {
           statements: 83,
           branches: 76,
           functions: 90,
           lines: 83
         },
-        'src/runtime/storage/runtime-evidence-recovery.ts': {
+        'src/runtime/evidence/recovery.ts': {
           statements: 82,
           branches: 74,
           functions: 90,
@@ -97,25 +131,25 @@ export default defineConfig({
           functions: 95,
           lines: 78
         },
-        'src/runtime/storage/runtime-evidence-cache.ts': {
+        'src/runtime/evidence/cache.ts': {
           statements: 78,
           branches: 65,
           functions: 95,
           lines: 78
         },
-        'src/plugins/file-store/wal-codec.ts': {
+        'src/runtime/storage/plugin-file-store/wal-codec.ts': {
           statements: 80,
           branches: 78,
           functions: 88,
           lines: 80
         },
-        'src/plugins/file-store/wal-progress.ts': {
+        'src/runtime/storage/plugin-file-store/wal-progress.ts': {
           statements: 65,
           branches: 60,
           functions: 80,
           lines: 65
         },
-        'src/plugins/file-store/wal.ts': {
+        'src/runtime/storage/plugin-file-store/wal.ts': {
           statements: 82,
           branches: 74,
           functions: 85,

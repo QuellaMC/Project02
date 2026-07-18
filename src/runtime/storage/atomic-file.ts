@@ -20,7 +20,7 @@ import {
 } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { isNodeErrorWithCode } from '../../shared/node-error.ts';
-import { processIsAlive } from '../../shared/process-liveness.ts';
+import { processIsAlive } from './process-liveness.ts';
 
 export type AtomicReplaceFileOptions = {
   readonly targetPath: string;

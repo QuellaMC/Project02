@@ -1,18 +1,18 @@
-export { createConversationSession } from './core/conversation.ts';
-export { createRuntimePluginHost } from './plugins/host.ts';
-export { visibleReplyModelToolName } from './role-model/model-tools.ts';
+export {
+  createConversationSession,
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent
+} from './core/index.ts';
+export { createRuntimePluginHost } from './plugins/host/index.ts';
+export { visibleReplyModelToolName } from './role-model/api/model-tools.ts';
 export {
   parseRoleModelDecision,
   roleModelDecisionContractVersion
-} from './role-model/contracts.ts';
-export { createDeterministicLocalRoleModelAdapter } from './role-model/loop.ts';
-export {
-  createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent
-} from './runtime/event.ts';
-export { runLocalUserMessageEvent } from './runtime/local.ts';
-export { createRuntimeLogStore } from './runtime/log.ts';
+} from './role-model/index.ts';
+export { createDeterministicLocalRoleModelAdapter } from './role-model/index.ts';
+export { runLocalUserMessageEvent } from './runtime/index.ts';
+export { createRuntimeLogStore } from './runtime/evidence/index.ts';
 export {
   createConfiguredProject02PluginHostFromPlan,
   prepareConfiguredProject02PluginActivation
-} from './runtime/config/activation.ts';
+} from './app/index.ts';

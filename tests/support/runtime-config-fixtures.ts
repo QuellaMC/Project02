@@ -1,4 +1,4 @@
-import type { createConfiguredProject02PluginHost } from '../../src/runtime/config/index.ts';
+import type { createConfiguredProject02PluginHost } from '../../src/app/index.ts';
 import {
   createMemoryProviderRuntimePlugin,
   createRuntimePlugin,
