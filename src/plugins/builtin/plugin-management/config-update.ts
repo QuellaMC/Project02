@@ -456,7 +456,7 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
     if (isRuntimeConfigConflictError(error)) {
       return rejectedPluginConfigToolCall(
         'plugin_config_fingerprint_conflict',
-        'Plugin config changed after approval and was not updated.',
+        'Plugin config changed after approval and was not updated. Inspect runtime.plugin.config again for the current fingerprint, then retry.',
       );
     }
 
