@@ -1,6 +1,6 @@
 import type {
   RuntimePluginConfigField
-} from '../../plugins/plugin-types.ts';
+} from '../../plugins/api/index.ts';
 
 import {
   project02RoleModelProviderValues,

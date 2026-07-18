@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { assertCanonicalRuntimeTimestamp } from '../event.ts';
+import { assertCanonicalRuntimeTimestamp } from '../../core/index.ts';
 
 export const defaultLocalRuntimeStoreRoot = '.project02-runtime';
 

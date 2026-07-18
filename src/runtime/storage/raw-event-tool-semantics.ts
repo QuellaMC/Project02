@@ -1,9 +1,9 @@
 import type {
   RuntimePluginJsonObject,
   RuntimePluginToolCallResult
-} from '../../plugins/validation.ts';
-import type { RuntimeEventIdentity } from '../event.ts';
-import type { RawEventLogRecordKind } from '../log.ts';
+} from '../../plugins/api/index.ts';
+import type { RuntimeEventIdentity } from '../../core/index.ts';
+import type { RawEventLogRecordKind } from '../evidence/records.ts';
 import { throwMalformedRecord } from './codec-primitives.ts';
 
 type RawEventToolSemantics = {

@@ -20,16 +20,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type {
   RuntimePluginFactoryInput,
   RuntimePluginPackageCatalogEntry
-} from '../factory.ts';
-import { createRuntimePlugin } from '../constructors.ts';
-import { createRuntimePluginManifest } from '../manifest-validation.ts';
+} from '../api/factory.ts';
+import { createRuntimePlugin } from '../api/constructors.ts';
+import { createRuntimePluginManifest } from '../api/manifest-validation.ts';
 import { isNodeErrorWithCode } from '../../shared/node-error.ts';
-import { isRecord } from '../validation-primitives.ts';
+import { isRecord } from '../api/validation-primitives.ts';
 import type {
   RuntimePlugin,
   RuntimePluginLifecycleHooks,
   RuntimePluginManifest
-} from '../plugin-types.ts';
+} from '../api/types.ts';
 import {
   createJsonBoundarySnapshot
 } from '../../shared/json-boundary.ts';

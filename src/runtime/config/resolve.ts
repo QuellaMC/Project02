@@ -1,10 +1,10 @@
 import {
   createLocalRuntimeStorageLayout
-} from '../storage/layout.ts';
+} from '../storage/layout-contract.ts';
 import type {
   RuntimePluginConfigField,
   RuntimePluginManifest
-} from '../../plugins/types.ts';
+} from '../../plugins/api/index.ts';
 import {
   createRuntimeConfigFingerprint
 } from './fingerprint.ts';

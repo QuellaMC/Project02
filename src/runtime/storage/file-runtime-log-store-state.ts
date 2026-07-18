@@ -15,23 +15,23 @@ import type {
   CachedRuntimeSessionEvidence,
   DurableRuntimeSessionEvidence,
   MutableDurableRuntimeSessionEvidence
-} from './runtime-evidence-contract.ts';
+} from '../evidence/contract.ts';
 import {
   createMutableDurableRuntimeSessionEvidence,
   readCoherentRuntimeSessionEvidence,
   readRuntimeEvidenceFileStamps,
   sameRuntimeEvidenceFileStamps,
   scavengeAbandonedRuntimeEvidenceTemporaryFiles
-} from './runtime-evidence-cache.ts';
+} from '../evidence/cache.ts';
 import {
   createRuntimeEvidenceTransitionMachine,
   type RuntimeEvidenceTransitionMachine
-} from './runtime-evidence-transition.ts';
+} from '../evidence/transition.ts';
 import {
   assertDurableRuntimeSessionEvidence,
   reconcileTerminalRawTraceEvidence
-} from './runtime-evidence-validation.ts';
-import { recoverAbandonedRuntimeWriterEvidence } from './runtime-evidence-recovery.ts';
+} from '../evidence/validation.ts';
+import { recoverAbandonedRuntimeWriterEvidence } from '../evidence/recovery.ts';
 
 export type FileRuntimeLogStoreStateOptions =
   LocalRuntimeSessionPathsOptions & {

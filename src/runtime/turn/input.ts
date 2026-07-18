@@ -3,12 +3,12 @@ import {
   RuntimeEventInputError,
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent
-} from '../event.ts';
+} from '../../core/index.ts';
 import type {
   RawEventLogPayloadSummary,
   RuntimeTraceEntry,
   RuntimeTraceStepName
-} from '../log.ts';
+} from '../evidence/records.ts';
 import type {
   LocalRuntimeUserMessageInputRejectedResult,
   NormalizeUserMessageRuntimeEventResult,

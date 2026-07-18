@@ -1,26 +1,32 @@
+export { createRuntimeConfigDiagnostic } from './diagnostic.ts';
 export {
-  createConfiguredProject02PluginHost,
-  createConfiguredProject02PluginHostFromPlan,
-  createRuntimePluginCatalogSnapshot,
-  prepareConfiguredProject02PluginActivation,
-  resolveRuntimePluginActivation,
-  type PreparedProject02PluginActivationPlan,
-  type Project02ConfiguredPluginActivation,
-  type RuntimePluginCatalogSnapshot,
-  type RuntimePluginFactoryDefinition
-} from './activation.ts';
+  defaultDotEnvForRuntimeLocation,
+  loadRuntimeConfigEnvFile,
+  readDefaultDotEnvFile,
+  runtimeConfigEnvPathForLocation,
+  RuntimeEnvFileError,
+  shouldReadDefaultDotEnvForRuntimeLocation,
+  type RuntimeLocationCliState
+} from './env-file.ts';
 export {
   applyRuntimeConfigControlOperation,
   applyRuntimePluginConfigControlOperation,
   inspectRuntimePluginConfig,
   prepareRuntimePluginConfigControlOperation,
-  type RuntimeConfigControlOperation
+  type RuntimeConfigControlOperation,
+  type RuntimePluginConfigFieldControlOperation
 } from './control.ts';
 export {
-  createProject02RuntimeConfigFingerprint
+  createRuntimePluginConfigControlCapability,
+  type RuntimePluginConfigControlCapability
+} from './plugin-control-capability.ts';
+export {
+  createRuntimeConfigFingerprint
 } from './fingerprint.ts';
 export {
-  createRuntimeConfigInspectShape
+  createRuntimeConfigInspectShape,
+  inspectConfiguredPlugins,
+  type InspectConfiguredPlugin
 } from './inspect.ts';
 export {
   defaultRuntimeConfigEnvPath,
@@ -44,6 +50,7 @@ export {
   diagnosticsHaveErrors,
   pluginHasConfigErrors,
   resolveProject02RuntimeConfig,
+  resolveProject02RuntimeStoreRoot,
   runtimeConfigDiagnosticMatchesPlugin,
   storeRootForLoadedDefaultConfigPath
 } from './resolve.ts';
@@ -59,8 +66,11 @@ export {
   runtimeControlEnvVarNames,
   type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
+  type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigInspectShape,
+  type RedactedPluginRuntimeConfig,
+  type ResolvedPluginRuntimeConfig,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
   type RuntimePluginConfigActivationInspectShape,

@@ -1,3 +1,4 @@
+import type { RuntimePluginAccessMap } from '../../plugins/api/index.ts';
 import type {
   LoadedProject02RuntimeConfig,
   ResolvedProject02RuntimeConfig,
@@ -6,7 +7,7 @@ import type {
   RuntimePluginConfigInspectShape,
   RuntimeConfigValue
 } from './types.ts';
-import type { RuntimePluginManifest } from '../../plugins/plugin-types.ts';
+import type { RuntimePluginManifest } from '../../plugins/api/index.ts';
 import { ownJsonRecordValue } from '../../shared/json-boundary.ts';
 import { redactRuntimeConfigValue } from './redact.ts';
 import { runtimeConfigDiagnosticMatchesPlugin } from './resolve.ts';
@@ -170,4 +171,61 @@ function redactAuthoredPluginConfigValue(
   return secret
     ? '[redacted]'
     : redactRuntimeConfigValue(value, { key: fieldName });
+}
+
+export type InspectConfiguredPlugin = {
+  readonly pluginId: string;
+  readonly kind: string;
+  readonly enabled: boolean;
+  readonly requestedAccess: RuntimePluginAccessMap;
+  readonly grantedAccess: RuntimePluginAccessMap;
+  readonly activationStatus: string;
+  readonly activationReasons: readonly string[];
+  readonly diagnostics: readonly unknown[];
+  readonly config?: unknown;
+};
+
+type ConfiguredPluginActivationView = {
+  readonly activation: {
+    readonly plugins: readonly {
+      readonly pluginId: string;
+      readonly kind: string;
+      readonly enabled: boolean;
+      readonly requestedAccess: InspectConfiguredPlugin['requestedAccess'];
+      readonly grantedAccess: InspectConfiguredPlugin['grantedAccess'];
+      readonly activationStatus: InspectConfiguredPlugin['activationStatus'];
+      readonly activationReasons: readonly string[];
+      readonly diagnostics: InspectConfiguredPlugin['diagnostics'];
+    }[];
+  };
+  readonly resolvedConfig: {
+    readonly redactedPluginConfigs: Readonly<Record<string, unknown>>;
+  };
+};
+
+// Structural view of the app-layer activation result: runtime/config must
+// not import src/app, and the join only needs these fields.
+export function inspectConfiguredPlugins(
+  runtimeConfig: ConfiguredPluginActivationView
+): readonly InspectConfiguredPlugin[] {
+  return Object.freeze(
+    runtimeConfig.activation.plugins.map((plugin) => {
+      const config = ownJsonRecordValue(
+        runtimeConfig.resolvedConfig.redactedPluginConfigs,
+        plugin.pluginId
+      );
+
+      return Object.freeze({
+        pluginId: plugin.pluginId,
+        kind: plugin.kind,
+        enabled: plugin.enabled,
+        requestedAccess: plugin.requestedAccess,
+        grantedAccess: plugin.grantedAccess,
+        activationStatus: plugin.activationStatus,
+        activationReasons: Object.freeze([...plugin.activationReasons]),
+        diagnostics: Object.freeze([...plugin.diagnostics]),
+        ...(config === undefined ? {} : { config })
+      } satisfies InspectConfiguredPlugin);
+    })
+  );
 }

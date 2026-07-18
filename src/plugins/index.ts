@@ -1,18 +1,30 @@
-export { reconcilePreparedRuntimePluginConfigEffect } from './builtin/runtime-plugin/config-update.ts';
+export { reconcilePreparedRuntimePluginConfigEffect } from './builtin/plugin-management/config-update.ts';
 export {
   createRuntimePluginManagementPlugin,
   createRuntimePluginManagementPluginManifest,
-  isRuntimePluginManagementPlugin
-} from './builtin/runtime-plugin/index.ts';
+  isRuntimePluginManagementPlugin,
+  type RuntimePluginConfigControlHostState
+} from './builtin/plugin-management/index.ts';
 export {
   defaultRuntimePluginHostServiceCatalogEntries,
-  hostScopedFirstPartyRuntimePluginIds
-} from './catalog.ts';
+  hostFirstPartyRuntimePluginIds,
+  hostScopedFirstPartyRuntimePluginIds,
+  isHostOwnedFirstPartyRuntimePluginId,
+  isHostScopedFirstPartyRuntimePluginId,
+  type RuntimePluginCatalogEntry
+} from './host/catalog.ts';
+export { runtimePluginAccessSnapshot } from './policy/access-control.ts';
+export type {
+  RuntimePluginFactoryDefinition,
+  RuntimePluginFactoryFunction,
+  RuntimePluginFactoryInput,
+  RuntimePluginPackageCatalogEntry
+} from './api/factory.ts';
 export {
   createRuntimePlugin,
   createRuntimePluginContext,
   preparedRuntimePluginConfigEffectHasApprovalEvidence
-} from './constructors.ts';
+} from './api/constructors.ts';
 export {
   firstPartyModelToolsPluginId,
   runtimePluginConfigReadToolName,
@@ -21,31 +33,44 @@ export {
   runtimePluginId,
   runtimePluginListToolName,
   type RuntimePluginAccessMap
-} from './contract.ts';
+} from './api/contract.ts';
+export type {
+  CreateRuntimePluginFileStoreOptions,
+  DurableRuntimePluginFileStoreOptions,
+  InMemoryRuntimePluginFileStoreOptions,
+  RuntimePluginFileStorePathMode,
+  RuntimePluginFileStorePreparedTransaction,
+  RuntimePluginFileStoreProvider,
+  RuntimePluginFileStoreTransaction
+} from './api/file-store-contract.ts';
 export {
-  createRuntimePluginFileStore,
-  type CreateRuntimePluginFileStoreOptions
-} from './file-store.ts';
-export type { RuntimePluginFileStorePreparedTransaction } from './file-store/contracts.ts';
+  runtimePluginBeforeRoleModelCallRejectionReason,
+  type RuntimePluginBeforeRoleModelCallRejectionReason
+} from './api/contract.ts';
 export {
   createRuntimePluginHost,
-  runtimePluginBeforeRoleModelCallRejectionReason,
+  runRuntimePluginSessionEndHooks,
+  runRuntimePluginShutdownHooks,
+  type RuntimePluginSessionEndOptions,
   type CreateRuntimePluginHostOptions,
   type RuntimePluginBeforeRoleModelCallCompletedResult,
   type RuntimePluginBeforeRoleModelCallHostResult,
   type RuntimePluginBeforeRoleModelCallRejectedResult,
-  type RuntimePluginBeforeRoleModelCallRejectionReason,
   type RuntimePluginHealthHostResult,
   type RuntimePluginHookHostResult,
   type RuntimePluginHost
-} from './hook-runner.ts';
-export { createMemoryProviderRuntimePlugin } from './memory/provider-plugin.ts';
-export { memorySearchTool } from './memory/tools.ts';
+} from './host/host.ts';
+export { createMemoryProviderRuntimePlugin } from './builtin/memory-provider/provider-plugin.ts';
+export { memorySearchTool } from './builtin/memory-provider/tools.ts';
 export type {
+  RuntimePlugin,
   RuntimePluginContext,
+  RuntimePluginFileStore,
+  RuntimePluginJsonValue,
   RuntimePluginManifest
-} from './plugin-types.ts';
+} from './api/types.ts';
+export type { RuntimePluginKind } from './api/contract.ts';
 export {
   type RuntimePluginToolConfirmationHandler,
   type RuntimePluginToolConfirmationRequest
-} from './tool-confirmation.ts';
+} from './host/tool-confirmation.ts';

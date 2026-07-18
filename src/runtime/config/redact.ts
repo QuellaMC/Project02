@@ -1,7 +1,4 @@
-import {
-  isRuntimePluginCredentialKey,
-  redactRuntimePluginText
-} from '../../plugins/types.ts';
+import { isJsonBoundaryCredentialKey, redactJsonBoundaryText } from '../../shared/redaction.ts';
 import type {
   RuntimeConfigValue,
   RedactedRuntimeConfigField,
@@ -9,23 +6,23 @@ import type {
 } from './types.ts';
 
 export function redactRuntimeConfigText(value: string): string {
-  return redactRuntimePluginText(value);
+  return redactJsonBoundaryText(value);
 }
 
 export function redactRuntimeConfigValue(
   value: RuntimeConfigValue,
   options: { readonly secret?: boolean; readonly key?: string } = {}
 ): RuntimeConfigValue {
-  if (options.secret === true || isSecretValue(value)) {
+  if (options.secret === true || runtimeConfigValueIsSecretMarker(value)) {
     return '[redacted]';
   }
 
-  if (options.key !== undefined && isRuntimePluginCredentialKey(options.key)) {
+  if (options.key !== undefined && isJsonBoundaryCredentialKey(options.key)) {
     return '[redacted]';
   }
 
   if (typeof value === 'string') {
-    return redactRuntimePluginText(value);
+    return redactJsonBoundaryText(value);
   }
 
   if (
@@ -75,7 +72,11 @@ export function redactResolvedRuntimeConfigField(
   } satisfies RedactedRuntimeConfigField);
 }
 
-function isSecretValue(value: RuntimeConfigValue): boolean {
+// The single owner of secret-marker detection: a config value is a secret
+// marker when it is a `$env` or `$plaintextSecret` object.
+export function runtimeConfigValueIsSecretMarker(
+  value: RuntimeConfigValue
+): boolean {
   return (
     typeof value === 'object' &&
     value !== null &&

@@ -6,7 +6,7 @@ import {
   type RuntimeConfigMutationResult
 } from './mutate.ts';
 import {
-  createProject02RuntimeConfigFingerprint
+  createRuntimeConfigFingerprint
 } from './fingerprint.ts';
 import { canonicalJsonValuesEqual } from '../../shared/canonical-json.ts';
 import { createRuntimePluginConfigInspectShape } from './inspect.ts';
@@ -16,11 +16,14 @@ import {
 } from './load.ts';
 import { resolveProject02RuntimeConfig } from './resolve.ts';
 import { runtimeConfigValueMatchesField } from './schema.ts';
-import { redactRuntimeConfigValue } from './redact.ts';
+import {
+  redactRuntimeConfigValue,
+  runtimeConfigValueIsSecretMarker
+} from './redact.ts';
 import type {
   RuntimePluginConfigField,
   RuntimePluginManifest
-} from '../../plugins/plugin-types.ts';
+} from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
   RuntimeConfigMutationOperation,
@@ -131,7 +134,7 @@ export function inspectRuntimePluginConfig(options: {
     ...(options.defaultEnabled === undefined
       ? {}
       : { defaultEnabled: options.defaultEnabled }),
-    fingerprint: createProject02RuntimeConfigFingerprint(mutationBase)
+    fingerprint: createRuntimeConfigFingerprint(mutationBase)
   });
 }
 
@@ -424,7 +427,7 @@ function runtimeConfigControlValueContainsSecret(
     return false;
   }
 
-  if ('$env' in value || '$plaintextSecret' in value) {
+  if (runtimeConfigValueIsSecretMarker(value)) {
     return true;
   }
 
