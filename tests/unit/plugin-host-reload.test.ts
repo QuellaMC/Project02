@@ -370,6 +370,74 @@ describe('runtime plugin host live config reload', () => {
     expect(sessionEndLog.sort()).toEqual(['orphan', 'v1']);
   });
 
+  it('removes a resurrected instance from the retired list', async () => {
+    const sessionEndLog: string[] = [];
+    const v1 = reloadFixturePlugin('v1', sessionEndLog);
+    const v2 = reloadFixturePlugin('v2', sessionEndLog);
+    let round = 0;
+    const host = reloadHost({
+      initial: v1,
+      reloader: {
+        reload: () => {
+          round += 1;
+          return Promise.resolve({
+            status: 'rebuilt',
+            plugin: round === 1 ? v2 : v1,
+          });
+        },
+      },
+    });
+
+    const first = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+    const second = await host.reloadPluginForCommittedConfig?.([
+      toneEffect('tone', 'effect-tone-2'),
+    ]);
+
+    expect(first?.outcome).toBe('live_applied');
+    expect(second?.outcome).toBe('live_applied');
+    expect(await contextText(host)).toBe('v1');
+
+    // v1 went live → retired → live again (config-keyed factory cache); it
+    // must not keep its retired slot or terminal hooks would run it twice.
+    await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
+    expect(sessionEndLog.sort()).toEqual(['v1', 'v2']);
+  });
+
+  it('drops an id-drifted instance instead of retiring it under a wrong id', async () => {
+    const sessionEndLog: string[] = [];
+    const drifted = createRuntimePlugin({
+      manifest: createRuntimePluginManifest({
+        ...reloadFixtureManifest(),
+        id: 'reload.style.drifted',
+      }),
+      lifecycleHooks: {
+        onSessionEnd() {
+          sessionEndLog.push('drifted');
+          return {status: 'completed' as const, evidence: []};
+        },
+      },
+    });
+    const host = reloadHost({
+      initial: reloadFixturePlugin('v1', sessionEndLog),
+      reloader: {
+        reload: () =>
+          Promise.resolve({
+            status: 'declined',
+            reason: 'the factory returned a different plugin id',
+            plugin: drifted,
+          }),
+      },
+    });
+
+    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+
+    expect(result?.outcome).toBe('deferred');
+    // Terminal dispatch resolves access by the retired instance's own id, so
+    // an id-drifted product never enters ordinary lifecycle dispatch.
+    await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
+    expect(sessionEndLog).toEqual(['v1']);
+  });
+
   it('does not retire the live instance when the factory returns it unchanged', async () => {
     const sessionEndLog: string[] = [];
     const v1 = reloadFixturePlugin('v1', sessionEndLog);

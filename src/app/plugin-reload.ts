@@ -113,10 +113,18 @@ export function createConfiguredRuntimePluginReloader(options: {
           ) ?? {},
       });
 
-      if (
-        plugin.manifest.id !== entry.manifest.id ||
-        !canonicalJsonValuesEqual(plugin.manifest, entry.manifest)
-      ) {
+      if (plugin.manifest.id !== entry.manifest.id) {
+        // An id-drifted instance cannot be handed back for retirement:
+        // terminal dispatch would resolve access by its own (wrong) id.
+        // The factory violated the id contract; declining without the
+        // instance is the only safe disposal.
+        return {
+          status: 'declined',
+          reason: `the rebuilt plugin "${pluginId}" returned a different plugin id`,
+        };
+      }
+
+      if (!canonicalJsonValuesEqual(plugin.manifest, entry.manifest)) {
         return {
           status: 'declined',
           reason: `the rebuilt plugin "${pluginId}" no longer matches its declared manifest`,

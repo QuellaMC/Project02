@@ -65,12 +65,13 @@ export default tseslint.config(
     // keeps guard-declined rebuilds reachable for terminal lifecycle hooks,
     // then +23 for the retire at-most-once invariant and the confirmed
     // config-update turn log wired at the tool-dispatch choke point (the log
-    // itself lives in reload.ts).
+    // itself lives in reload.ts), then +3 to keep live and retired instance
+    // lists disjoint when a swap resurrects a previously retired object.
     files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1856, skipBlankLines: true, skipComments: true},
+        {max: 1859, skipBlankLines: true, skipComments: true},
       ],
     },
   },

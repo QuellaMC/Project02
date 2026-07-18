@@ -258,6 +258,69 @@ describe('configured runtime plugin reloader', () => {
     expect(result.plugin).toBe(constructed);
   });
 
+  it('declines an id-drifted rebuild without handing the instance back', async () => {
+    const storeRoot = createTestTempRoot('project02-plugin-reload-id-drift-');
+    const configPath = join(storeRoot, 'config.json');
+
+    writeRuntimeConfig(configPath, {
+      plugins: {'demo-config': {enabled: true, config: {tone: 'warm'}}},
+    });
+
+    const activationPlan = prepareConfiguredProject02PluginActivation({
+      loadedConfig: loadProject02RuntimeConfig({
+        configPath,
+        storeRoot,
+        env: {},
+      }),
+      storeRoot,
+      env: {},
+    });
+    const entry = activationPlan.catalogEntries['demo-config'];
+
+    if (entry === undefined || entry.catalogKind !== 'package') {
+      throw new Error('demo-config package entry missing from the plan');
+    }
+
+    const reloader = createConfiguredRuntimePluginReloader({
+      activationPlan: {
+        ...activationPlan,
+        catalogEntries: {
+          ...activationPlan.catalogEntries,
+          'demo-config': {
+            ...entry,
+            load: async input => {
+              const original = await entry.load(input);
+
+              return createRuntimePlugin({
+                manifest: createRuntimePluginManifest({
+                  ...original.manifest,
+                  id: 'demo-config-drifted',
+                }),
+                lifecycleHooks: original.lifecycleHooks,
+              });
+            },
+          },
+        },
+      },
+    });
+
+    const result = await reloader.reload('demo-config', {
+      expectedFingerprint: authoredFingerprint({
+        activationPlan,
+        configPath,
+        storeRoot,
+      }),
+    });
+
+    if (result.status !== 'declined') {
+      throw new Error(`Expected declined, got ${result.status}`);
+    }
+    expect(result.reason).toContain('different plugin id');
+    // Retirement resolves access by the instance's own id, so an id-drifted
+    // product is never handed back for ordinary lifecycle dispatch.
+    expect(result.plugin).toBeUndefined();
+  });
+
   it('declines a reload when the refreshed config is invalid', async () => {
     const storeRoot = createTestTempRoot('project02-plugin-reload-invalid-');
     const configPath = join(storeRoot, 'config.json');

@@ -579,6 +579,12 @@ function createRuntimePluginHostState(
       allPlugins = Object.freeze(
         allPlugins.map(plugin => (plugin === previous ? next : plugin)),
       );
+      // Live and retired stay disjoint: an instance returning to live duty
+      // (e.g. a config-keyed factory cache handing back the earlier object)
+      // must give up its retired slot or terminal hooks would run twice.
+      supersededPlugins = Object.freeze(
+        supersededPlugins.filter(plugin => plugin !== next),
+      );
       retirePlugin(previous);
       return previous;
     },
