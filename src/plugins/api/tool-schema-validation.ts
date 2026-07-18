@@ -36,10 +36,7 @@ export function requiredModelToolCallLimit(
   }
 
   const scope = value['scope'];
-  const maxCalls = requiredPositiveInteger(
-    value['maxCalls'],
-    'callLimit.maxCalls'
-  );
+  const maxCalls = requiredPositiveInteger(value['maxCalls'], 'callLimit.maxCalls');
 
   if (!isOneOf(scope, modelToolCallLimitScopes)) {
     return reject(
@@ -60,6 +57,12 @@ export function requiredModelToolCallLimit(
   );
 }
 
+export function optionalModelToolCallLimit(
+  value: unknown
+): RuntimePluginValidationResult<ModelToolCallLimit | undefined> {
+  return value === undefined ? accept(undefined) : requiredModelToolCallLimit(value);
+}
+
 export function requiredModelToolInputContract(
   value: unknown
 ): RuntimePluginValidationResult<ModelToolInputContract> {
@@ -70,10 +73,7 @@ export function requiredModelToolInputContract(
     );
   }
 
-  const additionalFields = requiredBoolean(
-    value['additionalFields'],
-    'additionalFields'
-  );
+  const additionalFields = requiredBoolean(value['additionalFields'], 'additionalFields');
   const fieldsValue = value['fields'];
 
   if (additionalFields.status === 'rejected') {

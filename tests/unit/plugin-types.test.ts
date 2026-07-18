@@ -733,13 +733,15 @@ describe('runtime plugin model-facing tool policy', () => {
     );
   });
 
-  it('requires the scoped call-limit contract on provided tools', () => {
+  it('accepts absent call limits and rejects malformed ones', () => {
+    const unlimited = createRuntimePluginProvidedTool(
+      runtimePluginProvidedToolFixture({ callLimit: undefined })
+    );
+
+    expect(unlimited.callLimit).toBeUndefined();
     expect(() =>
       createRuntimePluginProvidedTool(
-        runtimePluginProvidedToolFixture({
-          callLimit: undefined,
-          maxCallsPerUserTurn: 1
-        })
+        runtimePluginProvidedToolFixture({ callLimit: 5 })
       )
     ).toThrow('Plugin provided tool callLimit must be an object.');
     expect(() =>

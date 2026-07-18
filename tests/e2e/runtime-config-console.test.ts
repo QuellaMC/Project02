@@ -97,7 +97,7 @@ describe('runtime config console UI', () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toMatch(
-      /Plugins\n1\) .+ \(character-state\)\nSystem services\n2\) .+ \(first_party\.model_tools\)\n3\) .+ \(runtime\.plugin\)/
+      /Plugins\n1\) .+ \(character-state\)\n2\) .+ \(demo-config\)\nSystem services\n3\) .+ \(first_party\.model_tools\)\n4\) .+ \(runtime\.plugin\)/
     );
     expect(stdout.match(/\(runtime\.plugin\)/g)).toHaveLength(1);
     expect(stdout).not.toContain('runtime.plugin_discovery');
@@ -144,7 +144,7 @@ describe('runtime config console UI', () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toMatch(
-      /Plugins\n1\) .+ \(character-state\)\n2\) .+ \(operator\.console\)\nSystem services/
+      /Plugins\n1\) .+ \(character-state\)\n2\) .+ \(demo-config\)\n3\) .+ \(operator\.console\)\nSystem services/
     );
   });
 
@@ -182,7 +182,7 @@ describe('runtime config console UI', () => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        prompt: scriptedPrompt(['2', '2', 'q'])
+        prompt: scriptedPrompt(['2', '3', 'q'])
       }
     );
 
@@ -203,12 +203,12 @@ describe('runtime config console UI', () => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        prompt: scriptedPrompt(['2', '3', 'q'])
+        prompt: scriptedPrompt(['2', '4', 'q'])
       }
     );
 
     expect(exitCode).toBe(0);
-    expect(stdout).toMatch(/System services\n2\) .+\n3\) .+ \(runtime\.plugin\)/);
+    expect(stdout).toMatch(/System services\n3\) .+\n4\) .+ \(runtime\.plugin\)/);
     expect(stdout).toContain('(runtime.plugin)\n1) Enabled:');
   });
 
@@ -230,7 +230,7 @@ describe('runtime config console UI', () => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        prompt: scriptedPrompt(['2', '3', '1', '1', '1'])
+        prompt: scriptedPrompt(['2', '4', '1', '1', '1'])
       }
     );
 

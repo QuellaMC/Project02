@@ -120,19 +120,15 @@ describe('host-owned runtime plugin management tools', () => {
         .pluginToolDefinitions()
         .filter((tool) => tool.pluginId === runtimePluginId)
     ).toEqual([
-      expect.objectContaining({
-        name: runtimePluginListToolName,
-        callLimit: { scope: 'user_turn', maxCalls: 1 }
-      }),
-      expect.objectContaining({
-        name: runtimePluginConfigReadToolName,
-        callLimit: { scope: 'user_turn', maxCalls: 4 }
-      }),
-      expect.objectContaining({
-        name: runtimePluginConfigUpdateToolName,
-        callLimit: { scope: 'user_turn', maxCalls: 1 }
-      })
+      expect.objectContaining({ name: runtimePluginListToolName }),
+      expect.objectContaining({ name: runtimePluginConfigReadToolName }),
+      expect.objectContaining({ name: runtimePluginConfigUpdateToolName })
     ]);
+    for (const tool of writableHost
+      .pluginToolDefinitions()
+      .filter((definition) => definition.pluginId === runtimePluginId)) {
+      expect(tool.callLimit).toBeUndefined();
+    }
     expect(
       bareHost.registrySnapshot().plugins.map((plugin) =>
         plugin.manifest.id

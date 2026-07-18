@@ -39,7 +39,8 @@ import { createLocalRuntimeSessionStore } from '../../src/runtime/storage/sessio
 import { createRuntimeLogStore } from '../../src/runtime/evidence/index.ts';
 import {
   type RoleModelAdapter,
-  type RoleModelChatMessage
+  type RoleModelChatMessage,
+  type RoleModelToolObservation
 } from '../../src/role-model/index.ts';
 import {
   runLocalUserMessageEvent as runLocalUserMessageEventWithoutHost
@@ -1283,6 +1284,94 @@ describe('plugin-driven tool loop commit and rollback', () => {
     );
     expect(nativeToolResult?.content).not.toContain('preparedConfigEffect');
     expect(nativeToolResult?.content).not.toContain('runtimeConfigEffects');
+  });
+
+  it('lets the model correct a rejected config update in the same turn', async () => {
+    const fixture = await createConfigEffectTestFixture('rejected-retry');
+    const session = createConversationSession({ id: fixture.sessionId });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot: fixture.storeRoot,
+      sessionId: fixture.sessionId
+    });
+    const pluginHost = createConfigEffectTestHost({ fixture, session });
+    const observationsByRound: (readonly RoleModelToolObservation[])[] = [];
+    const updateInput = {
+      pluginId: fixture.targetPlugin.manifest.id,
+      fieldName: 'tone',
+      operation: 'set',
+      expectedFingerprint: fixture.before.fingerprint
+    } as const;
+    let invocationCount = 0;
+    const adapter = Object.freeze({
+      invoke(inputEnvelope) {
+        invocationCount += 1;
+        observationsByRound.push(inputEnvelope.toolObservations);
+
+        if (invocationCount === 1) {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: runtimePluginConfigUpdateToolName,
+                  input: { ...updateInput, value: 7 }
+                }
+              ]
+            })
+          };
+        }
+
+        if (invocationCount === 2) {
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: runtimePluginConfigUpdateToolName,
+                  input: { ...updateInput, value: 'warm' }
+                }
+              ]
+            })
+          };
+        }
+
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [
+              {
+                name: 'visible_reply',
+                input: { text: 'Tone corrected to warm.' }
+              }
+            ]
+          })
+        };
+      }
+    } satisfies RoleModelAdapter);
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('update config', 'evt_config_effect_retry'),
+      session,
+      logStore,
+      pluginHost,
+      roleModelAdapter: adapter
+    });
+    const after = inspectRuntimePluginConfig({
+      manifest: fixture.targetPlugin.manifest,
+      pluginManifests: [fixture.targetPlugin.manifest],
+      configPath: fixture.configPath,
+      storeRoot: fixture.storeRoot
+    });
+    const rejection = observationsByRound[1]?.find(
+      (observation) =>
+        observation.toolName === runtimePluginConfigUpdateToolName
+    );
+
+    expect(result.status).toBe('completed');
+    expect(rejection?.result).toMatchObject({
+      status: 'rejected',
+      message:
+        'Plugin config field "tone" must be a string; received a number.'
+    });
+    expect(
+      after.fields.find((field) => field.name === 'tone')?.authored
+    ).toEqual({ configured: true, value: 'warm' });
   });
 
   it('recovers an applied config effect when its commit marker append failed', async () => {

@@ -15,7 +15,10 @@ import {
   loadProject02RuntimeConfig
 } from './load.ts';
 import { resolveProject02RuntimeConfig } from './resolve.ts';
-import { runtimeConfigValueMatchesField } from './schema.ts';
+import {
+  runtimeConfigFieldValueMismatchMessage,
+  runtimeConfigValueMatchesField
+} from './schema.ts';
 import {
   redactRuntimeConfigValue,
   runtimeConfigValueIsSecretMarker
@@ -375,18 +378,18 @@ export function validateRuntimePluginConfigControlOperation(options: {
     );
   }
 
-  if (
-    options.operation.kind === 'set' &&
-    (!runtimeConfigValueMatchesField(options.operation.value, field) ||
-      runtimeConfigControlValueContainsSecret(options.operation.value) ||
-      runtimeConfigControlValueRequiresRedaction(
-        options.operation.value,
-        field.name
-      ))
-  ) {
-    throw new TypeError(
-      `Plugin config field "${field.name}" does not match its declared metadata.`
-    );
+  if (options.operation.kind === 'set') {
+    if (!runtimeConfigValueMatchesField(options.operation.value, field)) {
+      throw new TypeError(runtimeConfigFieldValueMismatchMessage(field, options.operation.value));
+    }
+
+    if (runtimeConfigControlValueContainsSecret(options.operation.value)) {
+      throw new TypeError(`Plugin config field "${field.name}" value must not embed secret references; secrets are managed through the dedicated secret command.`);
+    }
+
+    if (runtimeConfigControlValueRequiresRedaction(options.operation.value, field.name)) {
+      throw new TypeError(`Plugin config field "${field.name}" value contains content that must stay redacted and cannot be written.`);
+    }
   }
 
   return field;
