@@ -4,6 +4,7 @@ export {
   createRuntimePluginManagementPluginManifest,
   isRuntimePluginManagementPlugin,
   type RuntimePluginConfigControlHostState,
+  type RuntimePluginInventoryHostState,
 } from './builtin/plugin-management/index.ts';
 export {
   defaultRuntimePluginHostServiceCatalogEntries,

@@ -17,7 +17,14 @@ import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {visibleReplyModelToolName} from '../../src/role-model/index.ts';
 import {characterStatePatchModelToolName} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
-import {createRuntimePluginManagementPlugin} from '../../src/plugins/index.ts';
+import {
+  createRuntimePluginManagementPlugin,
+  type RuntimePluginConfigControlHostState,
+} from '../../src/plugins/index.ts';
+import {
+  createRuntimePluginConfigControlHostStateSnapshot,
+  createRuntimePluginInventoryHostStateSnapshot,
+} from '../../src/plugins/builtin/plugin-management/state.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin,
@@ -79,8 +86,15 @@ describe('runtime plugin host catalog and routing', () => {
   });
 
   it('fails at construction when config-control state lacks its control capability', () => {
+    // The control property is required by the type, so this state is only
+    // reachable from untyped callers; the cast exists to exercise that
+    // runtime backstop.
+    const controlLessState = {
+      pluginManifests: [],
+    } as unknown as RuntimePluginConfigControlHostState;
+
     expect(() =>
-      createRuntimePluginHost({pluginConfigControl: {pluginManifests: []}}),
+      createRuntimePluginHost({pluginConfigControl: controlLessState}),
     ).toThrow('without its host config-control capability');
     expect(() =>
       createRuntimePluginManagementPlugin({
@@ -90,7 +104,7 @@ describe('runtime plugin host catalog and routing', () => {
           accessByPluginId: Object.freeze({}),
           confirmationAvailable: false,
         }),
-        pluginConfigControl: {pluginManifests: []},
+        pluginConfigControl: controlLessState,
       }),
     ).toThrow('without its host config-control capability');
     expect(() =>
@@ -104,6 +118,24 @@ describe('runtime plugin host catalog and routing', () => {
     expect(() =>
       createRuntimePluginHost({pluginInventoryState: {pluginManifests: []}}),
     ).not.toThrow();
+  });
+
+  it('strips the control capability when inventory-snapshotting a config-control snapshot', () => {
+    const controlSnapshot = createRuntimePluginConfigControlHostStateSnapshot({
+      control: testRuntimePluginConfigControlCapability,
+      pluginManifests: [],
+    });
+    const inventorySnapshot =
+      createRuntimePluginInventoryHostStateSnapshot(controlSnapshot);
+
+    expect(
+      createRuntimePluginConfigControlHostStateSnapshot(controlSnapshot),
+    ).toBe(controlSnapshot);
+    expect(inventorySnapshot).not.toBe(controlSnapshot);
+    expect(Object.hasOwn(inventorySnapshot, 'control')).toBe(false);
+    expect(
+      createRuntimePluginInventoryHostStateSnapshot(inventorySnapshot),
+    ).toBe(inventorySnapshot);
   });
 
   it('keeps real bootstrap constructors separate from ordinary package loaders', () => {
