@@ -27,6 +27,7 @@ import {
 } from '../../src/core/index.ts';
 import { createDefaultProject02PluginHost } from '../support/default-plugin-host.ts';
 import { createRuntimePluginHost } from '../../src/plugins/host/index.ts';
+import { testRuntimePluginConfigControlCapability } from '../support/plugin-host-fixtures.ts';
 import {
   createRuntimePluginContextItem
 } from '../../src/plugins/api/index.ts';
@@ -809,7 +810,10 @@ describe('NVIDIA role-model provider', () => {
 
   it('uses canonical provider-safe names for every runtime plugin management tool', () => {
     const pluginHost = createRuntimePluginHost({
-      pluginConfigControl: { pluginManifests: [] },
+      pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: []
+      },
       toolConfirmationHandler: () => ({ status: 'approved' })
     });
     const inputEnvelope = createNvidiaTestInputEnvelope(

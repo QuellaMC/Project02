@@ -27,6 +27,28 @@ export function requiredRuntimePluginConfigControl(
   return state.control;
 }
 
+/**
+ * Fails plugin-management construction, not first tool invocation, when
+ * config-control state carries no capability: every config tool handler
+ * requires it, so a control-less state would advertise config tools to the
+ * model that fail on each call. The invocation-time check remains as the
+ * backstop.
+ */
+export function assertRuntimePluginConfigControlCapabilityPresent(
+  state: RuntimePluginConfigControlHostState
+): void {
+  if (state.control !== undefined) {
+    return;
+  }
+
+  throw new TypeError(
+    'Runtime plugin config-control state was supplied without its host ' +
+      'config-control capability ("control"). Attach control or compose the ' +
+      'host through the configured plugin activation factory; pass ' +
+      'pluginInventoryState instead for an inventory-only host.'
+  );
+}
+
 export const runtimeConfigConflictErrorCode = 'runtime_config_conflict';
 
 /**

@@ -47,7 +47,8 @@ import {
   pluginDiscoveryPluginSummaries,
   pluginDiscoveryToolNames,
   testIdentity,
-  testPluginContext
+  testPluginContext,
+  testRuntimePluginConfigControlCapability
 } from '../support/plugin-host-fixtures.ts';
 import type {
   LateFileStoreWriteOutcome,
@@ -79,6 +80,34 @@ describe('runtime plugin host catalog and routing', () => {
     ).toThrow(
       'Plugin "runtime.plugin" is host-owned and cannot be supplied by callers.'
     );
+  });
+
+  it('fails at construction when config-control state lacks its control capability', () => {
+    expect(() =>
+      createRuntimePluginHost({ pluginConfigControl: { pluginManifests: [] } })
+    ).toThrow('without its host config-control capability');
+    expect(() =>
+      createRuntimePluginManagementPlugin({
+        hostStateForTurn: () => ({
+          plugins: Object.freeze([]),
+          enabledPlugins: Object.freeze([]),
+          accessByPluginId: Object.freeze({}),
+          confirmationAvailable: false
+        }),
+        pluginConfigControl: { pluginManifests: [] }
+      })
+    ).toThrow('without its host config-control capability');
+    expect(() =>
+      createRuntimePluginHost({
+        pluginConfigControl: {
+          control: testRuntimePluginConfigControlCapability,
+          pluginManifests: []
+        }
+      })
+    ).not.toThrow();
+    expect(() =>
+      createRuntimePluginHost({ pluginInventoryState: { pluginManifests: [] } })
+    ).not.toThrow();
   });
 
   it('keeps real bootstrap constructors separate from ordinary package loaders', () => {

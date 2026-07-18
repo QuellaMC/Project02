@@ -346,7 +346,10 @@ describe('host-owned runtime plugin management tools', () => {
   it('does not register or expose the removed plugin identifiers and tool names', () => {
     const manifest = configurablePluginManifest();
     const host = createRuntimePluginHost({
-      pluginConfigControl: { pluginManifests: [manifest] },
+      pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: [manifest]
+      },
       toolConfirmationHandler: () => ({ status: 'approved' })
     });
 
