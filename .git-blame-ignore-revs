@@ -1,0 +1,4 @@
+# One-time mechanical Prettier reformat (Google TS style adoption).
+# Used automatically by GitHub blame; locally requires:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+736634dab0df36d041594b52ac869acdcf19e5b2
