@@ -18,7 +18,24 @@ export default tseslint.config(
         { prefer: 'type-imports', fixStyle: 'inline-type-imports' }
       ],
       '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-non-null-assertion': 'error'
+      '@typescript-eslint/no-non-null-assertion': 'error',
+      // Google TS style (gts) core rules not covered by the presets above.
+      'block-scoped-var': 'error',
+      eqeqeq: 'error',
+      'no-var': 'error',
+      'prefer-arrow-callback': 'error',
+      'prefer-const': 'error'
+    }
+  },
+  {
+    files: ['tests/**/*.ts'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        { object: 'describe', property: 'only' },
+        { object: 'it', property: 'only' },
+        { object: 'test', property: 'only' }
+      ]
     }
   },
   {
