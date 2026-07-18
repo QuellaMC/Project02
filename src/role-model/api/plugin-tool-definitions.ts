@@ -92,7 +92,7 @@ function assertBuiltInRoleModelToolPolicy(
     providedTool.validationOwner !== 'built_in_model_tools' ||
     providedTool.sideEffectLevel !== 'none' ||
     providedTool.requiresConfirmation ||
-    providedTool.callLimit.scope !== 'model_response' ||
+    providedTool.callLimit?.scope !== 'model_response' ||
     providedTool.callLimit.maxCalls !== 1
   ) {
     throw new TypeError(
@@ -110,9 +110,12 @@ function assertHostRoleModelToolPolicy(
     );
   }
 
-  if (providedTool.callLimit.scope !== 'user_turn') {
+  if (
+    providedTool.callLimit !== undefined &&
+    providedTool.callLimit.scope !== 'user_turn'
+  ) {
     throw new TypeError(
-      `Plugin tool "${providedTool.name}" must use a user_turn call limit.`
+      `Plugin tool "${providedTool.name}" may only declare a user_turn call limit.`
     );
   }
 

@@ -12,6 +12,7 @@ import {
   runtimePluginId
 } from '../../src/plugins/api/contract.ts';
 import { createRuntimePluginManifest } from '../../src/plugins/api/manifest-validation.ts';
+import { demoConfigPluginId } from '../../src/plugins/packages/demo-config/plugin.ts';
 import type { RuntimePluginManifest } from '../../src/plugins/api/types.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
@@ -36,6 +37,7 @@ describe('configured runtime plugin package activation', () => {
     expect(configured.activation.plugins.map((plugin) => plugin.pluginId).sort()).toEqual(
       [
         characterStatePluginId,
+        demoConfigPluginId,
         firstPartyModelToolsPluginId,
         runtimePluginId
       ].sort()
@@ -50,7 +52,8 @@ describe('configured runtime plugin package activation', () => {
     });
     expect(characterState?.activationReasons).toContain('enabled_by_default');
     expect(configured.packageProvenanceByPluginId).toEqual({
-      [characterStatePluginId]: 'bundled'
+      [characterStatePluginId]: 'bundled',
+      [demoConfigPluginId]: 'bundled'
     });
     expect(configured.catalogEntries[characterStatePluginId]).toMatchObject({
       catalogKind: 'package'
@@ -441,6 +444,7 @@ describe('configured runtime plugin package activation', () => {
     );
     expect(activationPlan.packageProvenanceByPluginId).toEqual({
       [characterStatePluginId]: 'bundled',
+      [demoConfigPluginId]: 'bundled',
       [manifest.id]: 'operator'
     });
   });

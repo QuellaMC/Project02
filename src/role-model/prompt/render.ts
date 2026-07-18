@@ -201,14 +201,15 @@ function modelToolTurnPolicyDescription(
   const required = definition.requiredForUserTurn
     ? 'Required for this user turn'
     : 'Optional for this user turn';
-  const scope =
-    definition.callLimit.scope === 'user_turn'
-      ? 'user turn'
-      : 'model response';
+  const limit = definition.callLimit; // absent means unlimited
 
-  return `${required}; at most ${String(
-    definition.callLimit.maxCalls
-  )} call${definition.callLimit.maxCalls === 1 ? '' : 's'} per ${scope}.`;
+  if (limit === undefined) {
+    return `${required}.`;
+  }
+
+  const scope = limit.scope === 'user_turn' ? 'user turn' : 'model response';
+
+  return `${required}; at most ${String(limit.maxCalls)} call${limit.maxCalls === 1 ? '' : 's'} per ${scope}.`;
 }
 
 export function createRoleModelProviderToolNameMappings(

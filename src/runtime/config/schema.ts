@@ -110,3 +110,66 @@ export function runtimeConfigValueMatchesField(
 
   return true;
 }
+
+/**
+ * Model-facing companion to runtimeConfigValueMatchesField: names the
+ * expected type or allowed values and the received value kind so a rejected
+ * config update can be corrected without guessing.
+ */
+export function runtimeConfigFieldValueMismatchMessage(
+  field: RuntimePluginConfigField,
+  value: RuntimeConfigValue
+): string {
+  const received = runtimeConfigValueKindLabel(value);
+
+  if (field.allowedValues !== undefined) {
+    return (
+      `Plugin config field "${field.name}" must be one of: ` +
+      `${field.allowedValues.join(', ')}; received ${received}` +
+      `${typeof value === 'string' ? ' that is not an allowed value' : ''}.`
+    );
+  }
+
+  return `Plugin config field "${field.name}" must be ${runtimeConfigValueTypeLabel(
+    field.valueType
+  )}; received ${received}.`;
+}
+
+function runtimeConfigValueKindLabel(value: RuntimeConfigValue): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+
+  switch (typeof value) {
+    case 'string':
+      return 'a string';
+    case 'number':
+      return 'a number';
+    case 'boolean':
+      return 'a boolean';
+    default:
+      return 'an object';
+  }
+}
+
+function runtimeConfigValueTypeLabel(
+  valueType: RuntimePluginConfigField['valueType']
+): string {
+  switch (valueType) {
+    case 'string':
+    case 'path':
+    case 'enum':
+      return 'a string';
+    case 'number':
+      return 'a finite number';
+    case 'boolean':
+      return 'a boolean';
+    case 'object':
+      return 'a plain object';
+    case 'array':
+      return 'an array';
+    case 'secret':
+      return 'a secret value';
+    case undefined:
+      return 'a JSON value';
+  }
+}

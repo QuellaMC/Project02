@@ -1,0 +1,93 @@
+{
+  "format": "project02.plugin.v1",
+  "entry": "./index.ts",
+  "manifest": {
+    "id": "demo-config",
+    "displayName": "Demo Config",
+    "version": "1.0.0",
+    "kind": "context_provider",
+    "description": "Bundled demo plugin whose reply-style settings exist to exercise the runtime plugin config tools end to end.",
+    "contractVersion": "mvp-008.runtime_plugin.v2",
+    "compatibility": {
+      "hostContractVersions": [
+        "mvp-008.runtime_plugin.v2"
+      ],
+      "sourceSystem": "project02",
+      "externalContract": "demo_config_plugin"
+    },
+    "declaredPlugins": [
+      "before_role_model_call"
+    ],
+    "config": {
+      "fields": [
+        {
+          "name": "tone",
+          "description": "Reply tone directive injected into every turn. Agent-adjustable; a session applies committed changes at its next start.",
+          "required": false,
+          "secret": false,
+          "valueType": "string",
+          "allowedValues": [
+            "neutral",
+            "warm",
+            "formal",
+            "playful",
+            "pirate"
+          ],
+          "agentMutable": true,
+          "redactionLabels": []
+        },
+        {
+          "name": "signoff",
+          "description": "Exact signoff the assistant appends to every reply. Agent-adjustable; unset means no signoff.",
+          "required": false,
+          "secret": false,
+          "valueType": "string",
+          "agentMutable": true,
+          "redactionLabels": []
+        },
+        {
+          "name": "operatorNote",
+          "description": "Operator-owned note. Not agent-mutable: agent-initiated updates must be rejected.",
+          "required": false,
+          "secret": false,
+          "valueType": "string",
+          "agentMutable": false,
+          "redactionLabels": []
+        },
+        {
+          "name": "apiKey",
+          "description": "Secret demo credential; config reads must show it redacted, never the raw value.",
+          "required": false,
+          "secret": true,
+          "valueType": "string",
+          "agentMutable": false,
+          "redactionLabels": []
+        }
+      ]
+    },
+    "localTrustLevel": "first_party",
+    "runtimePolicy": {
+      "requiredForTurn": false,
+      "sideEffectLevel": "none",
+      "confirmation": "not_required",
+      "timeoutMs": 1000,
+      "sourceReferencesRequired": false,
+      "redactionLabels": [],
+      "failureBehavior": {
+        "beforeRoleModelCall": "degrade",
+        "handleToolCall": "reject_tool_call",
+        "afterTurnCommitted": "log_failure",
+        "health": "degrade"
+      }
+    },
+    "activation": {
+      "defaultEnabled": false,
+      "reasons": [
+        "bundled_demo_config"
+      ]
+    },
+    "requestedAccess": {
+      "model_input": "write"
+    }
+  }
+}

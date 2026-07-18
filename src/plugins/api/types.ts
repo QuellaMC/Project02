@@ -112,7 +112,8 @@ export type RuntimePluginProvidedTool = {
   readonly name: string;
   readonly description: string;
   readonly requiredForUserTurn: boolean;
-  readonly callLimit: ModelToolCallLimit;
+  /** Absent means unlimited: tools are only call-limited when they declare one. */
+  readonly callLimit?: ModelToolCallLimit;
   readonly inputContract: ModelToolInputContract;
   readonly validationOwner: RuntimePluginToolValidationOwner;
   readonly sideEffectLevel: RuntimePluginSideEffectLevel;

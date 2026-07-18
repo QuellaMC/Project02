@@ -158,7 +158,7 @@ describe('durable runtime session writer ownership', () => {
         first.kill();
       }
     }
-  }, 15_000);
+  }, 40_000);
 
   it('runs child writers for different sessions concurrently', async () => {
     const storeRoot = await createTempStoreRoot();
@@ -203,7 +203,7 @@ describe('durable runtime session writer ownership', () => {
         second.kill();
       }
     }
-  }, 15_000);
+  }, 40_000);
 });
 
 async function createTempStoreRoot(): Promise<string> {
@@ -229,9 +229,11 @@ async function waitForOutput(
 ): Promise<void> {
   await new Promise<void>((resolveOutput, rejectOutput) => {
     let stdout = '';
+    // Generous on purpose: loaded CI runners have taken >5s just to
+    // cold-start the child Node process before any output appears.
     const timeout = setTimeout(() => {
       rejectOutput(new Error(`Timed out waiting for chat output: ${stdout}`));
-    }, 5_000);
+    }, 15_000);
 
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {

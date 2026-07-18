@@ -316,22 +316,31 @@ describe('runtime plugin config control', () => {
   it('rejects values with the wrong type or outside declared allowed values', () => {
     const fixture = createSeededControlFixture();
 
-    for (const operation of [
-      {
-        kind: 'set',
-        fieldName: 'retries',
-        value: 'three'
-      },
-      {
-        kind: 'set',
-        fieldName: 'mode',
-        value: 'unsupported'
-      },
-      {
-        kind: 'set',
-        fieldName: 'retries',
-        value: Number.NaN
-      }
+    for (const [operation, message] of [
+      [
+        {
+          kind: 'set',
+          fieldName: 'retries',
+          value: 'three'
+        },
+        'Plugin config field "retries" must be a finite number; received a string.'
+      ],
+      [
+        {
+          kind: 'set',
+          fieldName: 'mode',
+          value: 'unsupported'
+        },
+        'Plugin config field "mode" must be one of: local, remote; received a string that is not an allowed value.'
+      ],
+      [
+        {
+          kind: 'set',
+          fieldName: 'retries',
+          value: Number.NaN
+        },
+        'Plugin config field "retries" must be a finite number; received a number.'
+      ]
     ] as const) {
       expect(() =>
         applyRuntimePluginConfigControlOperation({
@@ -342,9 +351,7 @@ describe('runtime plugin config control', () => {
           expectedFingerprint: fixture.fingerprint,
           operation
         })
-      ).toThrow(
-        `Plugin config field "${operation.fieldName}" does not match its declared metadata.`
-      );
+      ).toThrow(message);
     }
 
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
@@ -371,7 +378,7 @@ describe('runtime plugin config control', () => {
         }
       })
     ).toThrow(
-      'Plugin config field "settings" does not match its declared metadata.'
+      'Plugin config field "settings" value must not embed secret references; secrets are managed through the dedicated secret command.'
     );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
@@ -397,7 +404,7 @@ describe('runtime plugin config control', () => {
         }
       })
     ).toThrow(
-      'Plugin config field "settings" does not match its declared metadata.'
+      'Plugin config field "settings" value contains content that must stay redacted and cannot be written.'
     );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });

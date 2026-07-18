@@ -33,7 +33,7 @@ import type {
   RuntimePluginValidationResult
 } from './types.ts';
 import {
-  requiredModelToolCallLimit,
+  optionalModelToolCallLimit,
   requiredModelToolInputContract
 } from './tool-schema-validation.ts';
 import {
@@ -196,7 +196,7 @@ export function validateRuntimePluginProvidedTool(
     value['requiredForUserTurn'],
     'requiredForUserTurn'
   );
-  const callLimit = requiredModelToolCallLimit(value['callLimit']);
+  const callLimit = optionalModelToolCallLimit(value['callLimit']);
   const inputContract = requiredModelToolInputContract(value['inputContract']);
   const validationOwner = value['validationOwner'];
   const sideEffectLevel = value['sideEffectLevel'];
@@ -248,7 +248,7 @@ export function validateRuntimePluginProvidedTool(
       name: name.value,
       description: redactRuntimePluginText(description.value),
       requiredForUserTurn: requiredForUserTurn.value,
-      callLimit: callLimit.value,
+      ...(callLimit.value === undefined ? {} : { callLimit: callLimit.value }),
       inputContract: inputContract.value,
       validationOwner,
       sideEffectLevel,
