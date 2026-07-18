@@ -1,6 +1,6 @@
 import {
   isJsonBoundaryCredentialKey,
-  redactJsonBoundaryText
+  redactJsonBoundaryText,
 } from './redaction.ts';
 
 export type JsonBoundaryValue =
@@ -17,7 +17,7 @@ export type JsonBoundaryObject = {
 
 export function ownJsonRecordValue<T>(
   record: Readonly<Record<string, T>> | undefined,
-  key: string
+  key: string,
 ): T | undefined {
   return record !== undefined && Object.hasOwn(record, key)
     ? record[key]
@@ -37,7 +37,7 @@ export const defaultJsonBoundaryLimits = Object.freeze({
   maxEntriesPerContainer: 256,
   maxNodes: 4_096,
   maxStringBytes: 16 * 1_024,
-  maxTotalStringBytes: 64 * 1_024
+  maxTotalStringBytes: 64 * 1_024,
 } satisfies JsonBoundaryLimits);
 
 export type CreateJsonBoundarySnapshotOptions = {
@@ -53,14 +53,17 @@ type JsonBoundaryState = {
   totalStringBytes: number;
   readonly activeContainers: WeakSet<object>;
   readonly options: Required<
-    Pick<CreateJsonBoundarySnapshotOptions, 'field' | 'redact' | 'limits' | 'now'>
+    Pick<
+      CreateJsonBoundarySnapshotOptions,
+      'field' | 'redact' | 'limits' | 'now'
+    >
   > &
     Pick<CreateJsonBoundarySnapshotOptions, 'deadlineAt'>;
 };
 
 export function createJsonBoundarySnapshot(
   value: unknown,
-  options: CreateJsonBoundarySnapshotOptions
+  options: CreateJsonBoundarySnapshotOptions,
 ): JsonBoundaryValue {
   const state: JsonBoundaryState = {
     nodeCount: 0,
@@ -73,8 +76,8 @@ export function createJsonBoundarySnapshot(
       now: options.now ?? Date.now,
       ...(options.deadlineAt === undefined
         ? {}
-        : { deadlineAt: options.deadlineAt })
-    }
+        : {deadlineAt: options.deadlineAt}),
+    },
   };
 
   return normalizeJsonBoundaryValue(value, options.field, 0, state);
@@ -82,7 +85,7 @@ export function createJsonBoundarySnapshot(
 
 export function createJsonBoundaryObjectSnapshot(
   value: unknown,
-  options: CreateJsonBoundarySnapshotOptions
+  options: CreateJsonBoundarySnapshotOptions,
 ): JsonBoundaryObject {
   const snapshot = createJsonBoundarySnapshot(value, options);
 
@@ -98,7 +101,7 @@ function normalizeJsonBoundaryValue(
   field: string,
   depth: number,
   state: JsonBoundaryState,
-  key?: string
+  key?: string,
 ): JsonBoundaryValue {
   state.nodeCount += 1;
   assertBoundaryProgress(field, depth, state);
@@ -152,9 +155,9 @@ function normalizeJsonBoundaryValue(
             item,
             `${field}[${String(index)}]`,
             depth + 1,
-            state
-          )
-        )
+            state,
+          ),
+        ),
       );
     } finally {
       state.activeContainers.delete(value);
@@ -173,11 +176,7 @@ function normalizeJsonBoundaryValue(
       return Object.freeze(
         Object.fromEntries(
           entries.map(([entryKey, item]) => {
-            accountJsonBoundaryString(
-              entryKey,
-              `${field} object key`,
-              state
-            );
+            accountJsonBoundaryString(entryKey, `${field} object key`, state);
             return [
               entryKey,
               normalizeJsonBoundaryValue(
@@ -185,11 +184,11 @@ function normalizeJsonBoundaryValue(
                 `${field}.${entryKey}`,
                 depth + 1,
                 state,
-                entryKey
-              )
+                entryKey,
+              ),
             ];
-          })
-        )
+          }),
+        ),
       );
     } finally {
       state.activeContainers.delete(value);
@@ -203,7 +202,7 @@ function measureRedactedCredentialValue(
   value: unknown,
   field: string,
   depth: number,
-  state: JsonBoundaryState
+  state: JsonBoundaryState,
 ): void {
   if (Array.isArray(value)) {
     assertContainerCanBeVisited(value, field, state);
@@ -218,7 +217,7 @@ function measureRedactedCredentialValue(
           item,
           `${field}[${String(index)}]`,
           depth + 1,
-          state
+          state,
         );
       });
     } finally {
@@ -237,17 +236,13 @@ function measureRedactedCredentialValue(
     state.activeContainers.add(value);
     try {
       for (const [entryKey, item] of entries) {
-        accountJsonBoundaryString(
-          entryKey,
-          `${field} object key`,
-          state
-        );
+        accountJsonBoundaryString(entryKey, `${field} object key`, state);
         normalizeJsonBoundaryValue(
           item,
           `${field}.${entryKey}`,
           depth + 1,
           state,
-          entryKey
+          entryKey,
         );
       }
     } finally {
@@ -262,7 +257,7 @@ function measureRedactedCredentialValue(
 function accountJsonBoundaryString(
   value: string,
   field: string,
-  state: JsonBoundaryState
+  state: JsonBoundaryState,
 ): void {
   const rawStringBytes = jsonBoundaryUtf8ByteLength(value);
   state.totalStringBytes += rawStringBytes;
@@ -271,7 +266,7 @@ function accountJsonBoundaryString(
   }
   if (state.totalStringBytes > state.options.limits.maxTotalStringBytes) {
     throw new TypeError(
-      `${state.options.field} exceeds the aggregate JSON text limit.`
+      `${state.options.field} exceeds the aggregate JSON text limit.`,
     );
   }
 }
@@ -285,7 +280,7 @@ export function jsonBoundaryUtf8ByteLength(value: string): number {
 function assertBoundaryProgress(
   field: string,
   depth: number,
-  state: JsonBoundaryState
+  state: JsonBoundaryState,
 ): void {
   if (depth > state.options.limits.maxDepth) {
     throw new TypeError(`${field} exceeds the JSON depth limit.`);
@@ -305,7 +300,7 @@ function assertBoundaryProgress(
 function assertContainerCanBeVisited(
   value: object,
   field: string,
-  state: JsonBoundaryState
+  state: JsonBoundaryState,
 ): void {
   if (state.activeContainers.has(value)) {
     throw new TypeError(`${field} must not contain cycles.`);
@@ -314,7 +309,7 @@ function assertContainerCanBeVisited(
 
 export function redactJsonTextPreservingStructure(
   value: string,
-  field: string
+  field: string,
 ): string {
   let parsed: unknown;
 
@@ -328,15 +323,17 @@ export function redactJsonTextPreservingStructure(
     return JSON.stringify(
       createJsonBoundarySnapshot(parsed, {
         field,
-        redact: true
-      })
+        redact: true,
+      }),
     );
   } catch {
     return '';
   }
 }
 
-function isJsonBoundaryObject(value: JsonBoundaryValue): value is JsonBoundaryObject {
+function isJsonBoundaryObject(
+  value: JsonBoundaryValue,
+): value is JsonBoundaryObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 

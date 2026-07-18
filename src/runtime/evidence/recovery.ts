@@ -1,32 +1,32 @@
 import {
   LocalRuntimeStorageContractError,
-  type LocalRuntimeSessionPaths
+  type LocalRuntimeSessionPaths,
 } from '../storage/layout-contract.ts';
-import { encodeConversationLogRecord } from '../storage/conversation-codec.ts';
+import {encodeConversationLogRecord} from '../storage/conversation-codec.ts';
 import {
   decodeRawEventLogRecord,
-  encodeRawEventLogRecord
+  encodeRawEventLogRecord,
 } from '../storage/raw-event-codec.ts';
 import {
   decodeRuntimeTraceEntry,
-  encodeRuntimeTraceEntry
+  encodeRuntimeTraceEntry,
 } from '../storage/trace-codec.ts';
 import {
   isTerminalRawEventLogRecord,
-  type RuntimeSessionEvidenceSnapshot
+  type RuntimeSessionEvidenceSnapshot,
 } from './records.ts';
-import { runtimeEventIdentityKey } from '../../core/index.ts';
-import { atomicReplaceFileSync } from '../storage/atomic-file.ts';
-import type { DurableRuntimeSessionEvidence } from './contract.ts';
+import {runtimeEventIdentityKey} from '../../core/index.ts';
+import {atomicReplaceFileSync} from '../storage/atomic-file.ts';
+import type {DurableRuntimeSessionEvidence} from './contract.ts';
 import {
   assertDurableRuntimeSessionEvidence,
   deriveTerminalRawTraceEvidence,
   reconcileTerminalRawTraceEvidence,
-  startedRawEventIdentitiesWithoutTerminal
+  startedRawEventIdentitiesWithoutTerminal,
 } from './validation.ts';
 
 export function createRuntimeSessionEvidenceSnapshot(
-  stored: DurableRuntimeSessionEvidence
+  stored: DurableRuntimeSessionEvidence,
 ): RuntimeSessionEvidenceSnapshot {
   const derivedTraceEntries = deriveTerminalRawTraceEvidence(stored);
 
@@ -34,11 +34,11 @@ export function createRuntimeSessionEvidenceSnapshot(
     stored: Object.freeze({
       traceEntries: Object.freeze([...stored.traceEntries]),
       rawEvents: Object.freeze([...stored.rawEvents]),
-      conversationMessages: Object.freeze([...stored.conversationMessages])
+      conversationMessages: Object.freeze([...stored.conversationMessages]),
     }),
     derived: Object.freeze({
-      traceEntries: derivedTraceEntries
-    })
+      traceEntries: derivedTraceEntries,
+    }),
   } satisfies RuntimeSessionEvidenceSnapshot);
 }
 
@@ -47,7 +47,7 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
   readonly evidence: DurableRuntimeSessionEvidence;
 }): DurableRuntimeSessionEvidence | undefined {
   const openIdentities = startedRawEventIdentitiesWithoutTerminal(
-    options.evidence.rawEvents
+    options.evidence.rawEvents,
   );
 
   if (openIdentities.size === 0) {
@@ -65,31 +65,31 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
   }
 
   const evidenceWithDerivedTrace = evidenceWithDerivedTerminalTrace(
-    options.evidence
+    options.evidence,
   );
 
   try {
     assertDurableRuntimeSessionEvidence({
       paths: options.paths,
       evidence: evidenceWithDerivedTrace,
-      mode: 'appendConversation'
+      mode: 'appendConversation',
     });
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'partial_write',
       `Local runtime evidence cannot safely recover the abandoned writer for session "${options.paths.sessionId}".`,
-      { cause: error }
+      {cause: error},
     );
   }
 
   const openRawEvents = options.evidence.rawEvents.filter(
-    (record) => runtimeEventIdentityKey(record) === identityKey
+    record => runtimeEventIdentityKey(record) === identityKey,
   );
   const finalOpenRawEvent = openRawEvents.at(-1);
 
   if (
     finalOpenRawEvent === undefined ||
-    openRawEvents.some((record) => (record.visibleMessageIds?.length ?? 0) > 0)
+    openRawEvents.some(record => (record.visibleMessageIds?.length ?? 0) > 0)
   ) {
     throwPriorWriterPartialWrite(options.paths);
   }
@@ -102,19 +102,19 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
       kind: 'runtime_turn_rejected',
       eventType: finalOpenRawEvent.eventType,
       status: 'rejected',
-      reason: 'writer_process_terminated'
-    })
+      reason: 'writer_process_terminated',
+    }),
   );
   const storedTraceSteps = new Set(
     options.evidence.traceEntries
-      .filter((entry) => runtimeEventIdentityKey(entry) === identityKey)
-      .map((entry) => entry.step)
+      .filter(entry => runtimeEventIdentityKey(entry) === identityKey)
+      .map(entry => entry.step),
   );
   const recoveredTraceEntries = [...options.evidence.traceEntries];
 
   for (const step of [
     'raw_event_log_appended',
-    'runtime_turn_rejected'
+    'runtime_turn_rejected',
   ] as const) {
     if (storedTraceSteps.has(step)) {
       continue;
@@ -126,9 +126,9 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
           eventId: rejectedTerminal.eventId,
           traceId: rejectedTerminal.traceId,
           createdAt: rejectedTerminal.createdAt,
-          step
-        })
-      )
+          step,
+        }),
+      ),
     );
   }
 
@@ -137,28 +137,28 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
     rawEvents: Object.freeze([...options.evidence.rawEvents, rejectedTerminal]),
     conversationMessages: Object.freeze(
       options.evidence.conversationMessages.filter(
-        (message) => runtimeEventIdentityKey(message) !== identityKey
-      )
-    )
+        message => runtimeEventIdentityKey(message) !== identityKey,
+      ),
+    ),
   } satisfies DurableRuntimeSessionEvidence);
 
   assertDurableRuntimeSessionEvidence({
     paths: options.paths,
     evidence: evidenceWithDerivedTerminalTrace(recovered),
-    mode: 'public'
+    mode: 'public',
   });
 
   writeJsonLines({
     filePath: options.paths.conversationPath,
-    lines: recovered.conversationMessages.map(encodeConversationLogRecord)
+    lines: recovered.conversationMessages.map(encodeConversationLogRecord),
   });
   writeJsonLines({
     filePath: options.paths.rawEventsPath,
-    lines: recovered.rawEvents.map(encodeRawEventLogRecord)
+    lines: recovered.rawEvents.map(encodeRawEventLogRecord),
   });
   writeJsonLines({
     filePath: options.paths.tracePath,
-    lines: recovered.traceEntries.map(encodeRuntimeTraceEntry)
+    lines: recovered.traceEntries.map(encodeRuntimeTraceEntry),
   });
 
   return recovered;
@@ -181,10 +181,10 @@ function recoverLatestTerminalRawTraceEvidence(options: {
   if (
     latestTerminalRawEvent === undefined ||
     missingTraceEntries.some(
-      (entry) =>
+      entry =>
         entry.eventId !== latestTerminalRawEvent.eventId ||
         entry.traceId !== latestTerminalRawEvent.traceId ||
-        entry.createdAt !== latestTerminalRawEvent.createdAt
+        entry.createdAt !== latestTerminalRawEvent.createdAt,
     )
   ) {
     throwPriorWriterPartialWrite(options.paths);
@@ -196,41 +196,43 @@ function recoverLatestTerminalRawTraceEvidence(options: {
     assertDurableRuntimeSessionEvidence({
       paths: options.paths,
       evidence: recovered,
-      mode: 'public'
+      mode: 'public',
     });
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'partial_write',
       `Local runtime evidence cannot safely recover terminal trace evidence for session "${options.paths.sessionId}".`,
-      { cause: error }
+      {cause: error},
     );
   }
 
   writeJsonLines({
     filePath: options.paths.tracePath,
-    lines: recovered.traceEntries.map(encodeRuntimeTraceEntry)
+    lines: recovered.traceEntries.map(encodeRuntimeTraceEntry),
   });
 
   return recovered;
 }
 
 function evidenceWithDerivedTerminalTrace(
-  evidence: DurableRuntimeSessionEvidence
+  evidence: DurableRuntimeSessionEvidence,
 ): DurableRuntimeSessionEvidence {
   return Object.freeze({
     traceEntries: Object.freeze([
       ...evidence.traceEntries,
-      ...deriveTerminalRawTraceEvidence(evidence)
+      ...deriveTerminalRawTraceEvidence(evidence),
     ]),
     rawEvents: evidence.rawEvents,
-    conversationMessages: evidence.conversationMessages
+    conversationMessages: evidence.conversationMessages,
   });
 }
 
-export function throwPriorWriterPartialWrite(paths: LocalRuntimeSessionPaths): never {
+export function throwPriorWriterPartialWrite(
+  paths: LocalRuntimeSessionPaths,
+): never {
   throw new LocalRuntimeStorageContractError(
     'partial_write',
-    `Local runtime evidence cannot safely recover the abandoned writer for session "${paths.sessionId}".`
+    `Local runtime evidence cannot safely recover the abandoned writer for session "${paths.sessionId}".`,
   );
 }
 
@@ -241,14 +243,14 @@ function writeJsonLines(options: {
   try {
     atomicReplaceFileSync({
       targetPath: options.filePath,
-      content: options.lines.map((line) => `${line}\n`).join(''),
-      mode: 0o600
+      content: options.lines.map(line => `${line}\n`).join(''),
+      mode: 0o600,
     });
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
       `Could not rewrite local runtime log file: ${options.filePath}.`,
-      { cause: error }
+      {cause: error},
     );
   }
 }
@@ -265,12 +267,11 @@ export function removeConversationLogRecords(options: {
   }
 
   const conversationMessages = options.evidence.conversationMessages.filter(
-    (message) => !ids.has(message.id)
+    message => !ids.has(message.id),
   );
 
   if (
-    conversationMessages.length ===
-    options.evidence.conversationMessages.length
+    conversationMessages.length === options.evidence.conversationMessages.length
   ) {
     return undefined;
   }
@@ -278,18 +279,18 @@ export function removeConversationLogRecords(options: {
   const updatedEvidence = Object.freeze({
     traceEntries: options.evidence.traceEntries,
     rawEvents: options.evidence.rawEvents,
-    conversationMessages: Object.freeze(conversationMessages)
+    conversationMessages: Object.freeze(conversationMessages),
   } satisfies DurableRuntimeSessionEvidence);
 
   assertDurableRuntimeSessionEvidence({
     paths: options.paths,
     evidence: updatedEvidence,
-    mode: 'appendConversation'
+    mode: 'appendConversation',
   });
 
   writeJsonLines({
     filePath: options.paths.conversationPath,
-    lines: conversationMessages.map(encodeConversationLogRecord)
+    lines: conversationMessages.map(encodeConversationLogRecord),
   });
 
   return updatedEvidence;

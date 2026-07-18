@@ -1,20 +1,15 @@
-import {
-  mkdirSync,
-  symlinkSync,
-  unlinkSync,
-  writeFileSync
-} from 'node:fs';
-import { join } from 'node:path';
+import {mkdirSync, symlinkSync, unlinkSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import { createRuntimePluginManifest } from '../../src/plugins/api/manifest-validation.ts';
+import {createRuntimePluginManifest} from '../../src/plugins/api/manifest-validation.ts';
 import {
   discoverRuntimePluginPackages,
-  maxRuntimePluginPackageMetadataBytes
+  maxRuntimePluginPackageMetadataBytes,
 } from '../../src/plugins/package-loader/index.ts';
-import type { RuntimePluginManifest } from '../../src/plugins/api/types.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
+import type {RuntimePluginManifest} from '../../src/plugins/api/types.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 
 describe('runtime plugin package loader', () => {
   it('cold-discovers an immutable package without importing its entry', () => {
@@ -24,20 +19,20 @@ describe('runtime plugin package loader', () => {
     writeTestPackage({
       root,
       manifest,
-      entrySource: "throw new Error('entry imported during discovery');\n"
+      entrySource: "throw new Error('entry imported during discovery');\n",
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
     expect(discovery.diagnostics).toEqual([]);
     expect(discovery.packages).toHaveLength(1);
     expect(discovery.packages[0]).toMatchObject({
       catalogKind: 'package',
-      manifest: { id: manifest.id },
-      provenance: 'operator'
+      manifest: {id: manifest.id},
+      provenance: 'operator',
     });
     expect(discovery.packages[0]?.load).toBeTypeOf('function');
     expect(Object.isFrozen(discovery)).toBe(true);
@@ -55,21 +50,21 @@ describe('runtime plugin package loader', () => {
       root,
       manifest: invalidManifest,
       entrySource: validEntrySource(),
-      descriptorExtras: { unexpected: 'do-not-report-this-value' }
+      descriptorExtras: {unexpected: 'do-not-report-this-value'},
     });
     writeTestPackage({
       root,
       manifest: validManifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
-    expect(discovery.packages.map((item) => item.manifest.id)).toEqual([
-      validManifest.id
+    expect(discovery.packages.map(item => item.manifest.id)).toEqual([
+      validManifest.id,
     ]);
     expect(discovery.diagnostics).toEqual([
       {
@@ -79,11 +74,11 @@ describe('runtime plugin package loader', () => {
           'Runtime plugin package descriptor contains unknown field "unexpected".',
         path: join(root, invalidManifest.id, 'project02.plugin.json'),
         provenance: 'operator',
-        pluginId: invalidManifest.id
-      }
+        pluginId: invalidManifest.id,
+      },
     ]);
     expect(JSON.stringify(discovery.diagnostics)).not.toContain(
-      'do-not-report-this-value'
+      'do-not-report-this-value',
     );
   });
 
@@ -95,17 +90,19 @@ describe('runtime plugin package loader', () => {
     writeTestPackage({
       root,
       manifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
     writeFileSync(
       join(packageRoot, 'project02.plugin.json'),
-      JSON.stringify({ padding: 'x'.repeat(maxRuntimePluginPackageMetadataBytes) }),
-      'utf8'
+      JSON.stringify({
+        padding: 'x'.repeat(maxRuntimePluginPackageMetadataBytes),
+      }),
+      'utf8',
     );
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
     expect(discovery.packages).toEqual([]);
@@ -114,8 +111,8 @@ describe('runtime plugin package loader', () => {
         code: 'invalid_descriptor',
         message:
           'Runtime plugin package descriptor exceeds the metadata size limit.',
-        pluginId: manifest.id
-      })
+        pluginId: manifest.id,
+      }),
     ]);
     expect(JSON.stringify(discovery.diagnostics)).not.toContain('xxxxx');
   });
@@ -123,33 +120,28 @@ describe('runtime plugin package loader', () => {
   it('rejects non-regular metadata before attempting to read it', () => {
     const root = createTestTempRoot('project02-plugin-packages-');
     const manifest = testPluginManifest('memory.non-regular-metadata');
-    const descriptorPath = join(
-      root,
-      manifest.id,
-      'project02.plugin.json'
-    );
+    const descriptorPath = join(root, manifest.id, 'project02.plugin.json');
 
     writeTestPackage({
       root,
       manifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
     unlinkSync(descriptorPath);
     mkdirSync(descriptorPath);
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
     expect(discovery.packages).toEqual([]);
     expect(discovery.diagnostics).toEqual([
       expect.objectContaining({
         code: 'invalid_descriptor',
-        message:
-          'Runtime plugin package descriptor must be a regular file.',
-        pluginId: manifest.id
-      })
+        message: 'Runtime plugin package descriptor must be a regular file.',
+        pluginId: manifest.id,
+      }),
     ]);
   });
 
@@ -162,12 +154,12 @@ describe('runtime plugin package loader', () => {
       manifest,
       entry: './index.js',
       entrySource: validEntrySource(),
-      packageType: 'commonjs'
+      packageType: 'commonjs',
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'bundled' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'bundled'}],
+      reservedPluginIds: [],
     });
 
     expect(discovery.packages).toEqual([]);
@@ -179,8 +171,8 @@ describe('runtime plugin package loader', () => {
           'Runtime plugin package package.json must declare type "module".',
         path: join(root, manifest.id, 'package.json'),
         provenance: 'bundled',
-        pluginId: manifest.id
-      }
+        pluginId: manifest.id,
+      },
     ]);
   });
 
@@ -192,24 +184,23 @@ describe('runtime plugin package loader', () => {
       root,
       manifest,
       entrySource: validEntrySource(),
-      descriptorFormat: 'project02.plugin.v0'
+      descriptorFormat: 'project02.plugin.v0',
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
     expect(discovery.packages).toEqual([]);
     expect(discovery.diagnostics).toEqual([
       expect.objectContaining({
         code: 'invalid_descriptor',
-        message:
-          'Runtime plugin package format must be "project02.plugin.v1".',
+        message: 'Runtime plugin package format must be "project02.plugin.v1".',
         path: join(root, manifest.id, 'project02.plugin.json'),
         provenance: 'operator',
-        pluginId: manifest.id
-      })
+        pluginId: manifest.id,
+      }),
     ]);
   });
 
@@ -222,18 +213,18 @@ describe('runtime plugin package loader', () => {
       root,
       manifest: escapingManifest,
       entry: '../outside.ts',
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
     writeTestPackage({
       root,
       manifest: unsupportedManifest,
       entry: './index.cjs',
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
     expect(discovery.packages).toEqual([]);
@@ -243,14 +234,14 @@ describe('runtime plugin package loader', () => {
         message:
           'Runtime plugin package entry must stay inside its package directory.',
         path: join(root, escapingManifest.id, 'project02.plugin.json'),
-        pluginId: escapingManifest.id
+        pluginId: escapingManifest.id,
       }),
       expect.objectContaining({
         code: 'invalid_entry',
         message: 'Runtime plugin package entry must use .ts, .js, or .mjs.',
         path: join(root, unsupportedManifest.id, 'project02.plugin.json'),
-        pluginId: unsupportedManifest.id
-      })
+        pluginId: unsupportedManifest.id,
+      }),
     ]);
   });
 
@@ -258,7 +249,7 @@ describe('runtime plugin package loader', () => {
     ['./index.cts', 'entry.cts'],
     ['./index.tsx', 'entry.tsx'],
     ['./index', 'entry.extensionless'],
-    ['https://example.invalid/plugin.mjs', 'entry.url']
+    ['https://example.invalid/plugin.mjs', 'entry.url'],
   ] as const)('rejects unsupported entry contract %s', (entry, pluginId) => {
     const root = createTestTempRoot('project02-plugin-packages-');
     const manifest = testPluginManifest(pluginId);
@@ -268,19 +259,19 @@ describe('runtime plugin package loader', () => {
       manifest,
       entry,
       entrySource: validEntrySource(),
-      skipEntryWrite: true
+      skipEntryWrite: true,
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
     expect(discovery.packages).toEqual([]);
     expect(discovery.diagnostics).toEqual([
       expect.objectContaining({
         code: 'invalid_entry',
-        pluginId
-      })
+        pluginId,
+      }),
     ]);
   });
 
@@ -292,12 +283,12 @@ describe('runtime plugin package loader', () => {
       root,
       manifest,
       entrySource: validEntrySource(),
-      removeEntryAfterWrite: true
+      removeEntryAfterWrite: true,
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
     expect(discovery.packages).toEqual([]);
@@ -307,8 +298,8 @@ describe('runtime plugin package loader', () => {
         message:
           'Runtime plugin package entry must reference an existing file.',
         path: join(root, manifest.id, 'project02.plugin.json'),
-        pluginId: manifest.id
-      })
+        pluginId: manifest.id,
+      }),
     ]);
   });
 
@@ -316,27 +307,27 @@ describe('runtime plugin package loader', () => {
     const root = createTestTempRoot('project02-plugin-packages-');
     const claimedManifest = testPluginManifest('operator.claims', {
       localTrustLevel: 'first_party',
-      defaultEnabled: true
+      defaultEnabled: true,
     });
     const reservedManifest = testPluginManifest('runtime.plugin', {
       localTrustLevel: 'first_party',
-      defaultEnabled: true
+      defaultEnabled: true,
     });
 
     writeTestPackage({
       root,
       manifest: claimedManifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
     writeTestPackage({
       root,
       manifest: reservedManifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: new Set(['runtime.plugin'])
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: new Set(['runtime.plugin']),
     });
 
     expect(discovery.packages).toHaveLength(1);
@@ -345,8 +336,8 @@ describe('runtime plugin package loader', () => {
       manifest: {
         id: claimedManifest.id,
         localTrustLevel: 'first_party',
-        activation: { defaultEnabled: true }
-      }
+        activation: {defaultEnabled: true},
+      },
     });
     expect(discovery.diagnostics).toEqual([
       expect.objectContaining({
@@ -355,8 +346,8 @@ describe('runtime plugin package loader', () => {
           'Operator runtime plugin package id "runtime.plugin" is reserved by the host.',
         path: join(root, reservedManifest.id, 'project02.plugin.json'),
         provenance: 'operator',
-        pluginId: reservedManifest.id
-      })
+        pluginId: reservedManifest.id,
+      }),
     ]);
   });
 
@@ -367,11 +358,11 @@ describe('runtime plugin package loader', () => {
     writeTestPackage({
       root,
       manifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
     const discoveredPackage = discovery.packages[0];
 
@@ -385,13 +376,13 @@ describe('runtime plugin package loader', () => {
       manifest: discoveredPackage.manifest,
       storeRoot: root,
       resolvedConfig: {},
-      redactedConfig: {}
+      redactedConfig: {},
     });
 
     expect(plugin).toMatchObject({
-      manifest: { id: manifest.id },
+      manifest: {id: manifest.id},
       providedTools: [],
-      lifecycleHooks: {}
+      lifecycleHooks: {},
     });
     expect(Object.isFrozen(plugin)).toBe(true);
     expect(Object.isFrozen(plugin.providedTools)).toBe(true);
@@ -400,21 +391,19 @@ describe('runtime plugin package loader', () => {
 
   it.each(['.ts', '.js', '.mjs'] as const)(
     'loads %s entries through the same package factory path',
-    async (extension) => {
+    async extension => {
       const root = createTestTempRoot('project02-plugin-entry-format-');
-      const manifest = testPluginManifest(
-        `entry.${extension.slice(1)}`
-      );
+      const manifest = testPluginManifest(`entry.${extension.slice(1)}`);
 
       writeTestPackage({
         root,
         manifest,
         entry: `./index${extension}`,
-        entrySource: validEntrySource()
+        entrySource: validEntrySource(),
       });
       const discovery = discoverRuntimePluginPackages({
-        sources: [{ root, provenance: 'operator' }],
-        reservedPluginIds: []
+        sources: [{root, provenance: 'operator'}],
+        reservedPluginIds: [],
       });
       const discoveredPackage = discovery.packages[0];
 
@@ -430,10 +419,10 @@ describe('runtime plugin package loader', () => {
           manifest: discoveredPackage.manifest,
           storeRoot: root,
           resolvedConfig: {},
-          redactedConfig: {}
-        })
-      ).resolves.toMatchObject({ manifest: { id: manifest.id } });
-    }
+          redactedConfig: {},
+        }),
+      ).resolves.toMatchObject({manifest: {id: manifest.id}});
+    },
   );
 
   it('accepts semantically identical factory input with reordered manifest keys', async () => {
@@ -443,21 +432,23 @@ describe('runtime plugin package loader', () => {
     writeTestPackage({
       root,
       manifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
     const discoveredPackage = discovery.packages[0];
 
     expect(discoveredPackage).toBeDefined();
     if (discoveredPackage === undefined) {
-      throw new Error('Expected the reordered-manifest package to be discovered.');
+      throw new Error(
+        'Expected the reordered-manifest package to be discovered.',
+      );
     }
 
     const reorderedManifest = Object.fromEntries(
-      Object.entries(discoveredPackage.manifest).reverse()
+      Object.entries(discoveredPackage.manifest).reverse(),
     ) as RuntimePluginManifest;
 
     await expect(
@@ -466,9 +457,9 @@ describe('runtime plugin package loader', () => {
         manifest: reorderedManifest,
         storeRoot: root,
         resolvedConfig: {},
-        redactedConfig: {}
-      })
-    ).resolves.toMatchObject({ manifest: { id: manifest.id } });
+        redactedConfig: {},
+      }),
+    ).resolves.toMatchObject({manifest: {id: manifest.id}});
   });
 
   it('keeps one bundled package and quarantines an operator duplicate', () => {
@@ -480,20 +471,20 @@ describe('runtime plugin package loader', () => {
     writeTestPackage({
       root: bundledRoot,
       manifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
     writeTestPackage({
       root: operatorRoot,
       manifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
 
     const discovery = discoverRuntimePluginPackages({
       sources: [
-        { root: operatorRoot, provenance: 'operator' },
-        { root: bundledRoot, provenance: 'bundled' }
+        {root: operatorRoot, provenance: 'operator'},
+        {root: bundledRoot, provenance: 'bundled'},
       ],
-      reservedPluginIds: []
+      reservedPluginIds: [],
     });
 
     expect(discovery.packages).toHaveLength(1);
@@ -504,8 +495,8 @@ describe('runtime plugin package loader', () => {
         code: 'duplicate_plugin_id',
         path: join(operatorRoot, manifest.id, 'project02.plugin.json'),
         provenance: 'operator',
-        pluginId: manifest.id
-      })
+        pluginId: manifest.id,
+      }),
     ]);
   });
 
@@ -518,28 +509,28 @@ describe('runtime plugin package loader', () => {
     writeTestPackage({
       root: firstRoot,
       manifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
     writeTestPackage({
       root: secondRoot,
       manifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
 
     const discovery = discoverRuntimePluginPackages({
       sources: [
-        { root: firstRoot, provenance: 'operator' },
-        { root: secondRoot, provenance: 'operator' }
+        {root: firstRoot, provenance: 'operator'},
+        {root: secondRoot, provenance: 'operator'},
       ],
-      reservedPluginIds: []
+      reservedPluginIds: [],
     });
 
     expect(discovery.packages).toEqual([]);
     expect(discovery.diagnostics).toHaveLength(2);
     expect(
       discovery.diagnostics.every(
-        (diagnostic) => diagnostic.code === 'duplicate_plugin_id'
-      )
+        diagnostic => diagnostic.code === 'duplicate_plugin_id',
+      ),
     ).toBe(true);
   });
 
@@ -550,11 +541,11 @@ describe('runtime plugin package loader', () => {
     writeTestPackage({
       root,
       manifest,
-      entrySource: 'export default function createProject02Plugin() {}\n'
+      entrySource: 'export default function createProject02Plugin() {}\n',
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
     const discoveredPackage = discovery.packages[0];
 
@@ -569,10 +560,10 @@ describe('runtime plugin package loader', () => {
         manifest: discoveredPackage.manifest,
         storeRoot: root,
         resolvedConfig: {},
-        redactedConfig: {}
-      })
+        redactedConfig: {},
+      }),
     ).rejects.toThrow(
-      `Runtime plugin package "${manifest.id}" must export exactly one named createProject02Plugin factory.`
+      `Runtime plugin package "${manifest.id}" must export exactly one named createProject02Plugin factory.`,
     );
   });
 
@@ -583,15 +574,15 @@ describe('runtime plugin package loader', () => {
     writeTestPackage({
       root,
       manifest,
-      entrySource: `${validEntrySource()}export const extra = true;\n`
+      entrySource: `${validEntrySource()}export const extra = true;\n`,
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
     await expect(instantiateOnlyPackage(discovery, root)).rejects.toThrow(
-      `Runtime plugin package "${manifest.id}" must export exactly one named createProject02Plugin factory.`
+      `Runtime plugin package "${manifest.id}" must export exactly one named createProject02Plugin factory.`,
     );
   });
 
@@ -602,19 +593,19 @@ describe('runtime plugin package loader', () => {
     writeTestPackage({
       root,
       manifest,
-      entrySource: "throw new Error('private import detail');\n"
+      entrySource: "throw new Error('private import detail');\n",
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
     const error = await instantiateOnlyPackage(discovery, root).catch(
-      (caught: unknown) => caught
+      (caught: unknown) => caught,
     );
 
     expect(error).toBeInstanceOf(TypeError);
     expect(String(error)).toContain(
-      `Runtime plugin package "${manifest.id}" entry could not be imported.`
+      `Runtime plugin package "${manifest.id}" entry could not be imported.`,
     );
     expect(String(error)).not.toContain('private import detail');
   });
@@ -629,14 +620,14 @@ describe('runtime plugin package loader', () => {
       manifest,
       entrySource: [
         'export function createProject02Plugin(input) {',
-        "  throw new Error(input.resolvedConfig.apiKey.value);",
+        '  throw new Error(input.resolvedConfig.apiKey.value);',
         '}',
-        ''
-      ].join('\n')
+        '',
+      ].join('\n'),
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
     const discoveredPackage = discovery.packages[0];
 
@@ -645,33 +636,35 @@ describe('runtime plugin package loader', () => {
       throw new Error('Expected the package to be discovered.');
     }
 
-    const error = await Promise.resolve(discoveredPackage.load({
-      pluginId: manifest.id,
-      manifest: discoveredPackage.manifest,
-      storeRoot: root,
-      resolvedConfig: {
-        apiKey: {
-          name: 'apiKey',
-          secret: true,
-          source: 'env:PLUGIN_SECRET',
-          resolved: true,
-          value: secret
-        }
-      },
-      redactedConfig: {
-        apiKey: {
-          name: 'apiKey',
-          secret: true,
-          source: 'env:PLUGIN_SECRET',
-          resolved: true,
-          value: '[redacted]'
-        }
-      }
-    })).catch((caught: unknown) => caught);
+    const error = await Promise.resolve(
+      discoveredPackage.load({
+        pluginId: manifest.id,
+        manifest: discoveredPackage.manifest,
+        storeRoot: root,
+        resolvedConfig: {
+          apiKey: {
+            name: 'apiKey',
+            secret: true,
+            source: 'env:PLUGIN_SECRET',
+            resolved: true,
+            value: secret,
+          },
+        },
+        redactedConfig: {
+          apiKey: {
+            name: 'apiKey',
+            secret: true,
+            source: 'env:PLUGIN_SECRET',
+            resolved: true,
+            value: '[redacted]',
+          },
+        },
+      }),
+    ).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(TypeError);
     expect(String(error)).toContain(
-      `Runtime plugin package "${manifest.id}" factory failed during construction.`
+      `Runtime plugin package "${manifest.id}" factory failed during construction.`,
     );
     expect(String(error)).not.toContain(secret);
   });
@@ -688,16 +681,16 @@ describe('runtime plugin package loader', () => {
         'export function createProject02Plugin(input) {',
         '  const output = { manifest: input.manifest, lifecycleHooks: {} };',
         "  Object.defineProperty(output, 'providedTools', {",
-        "    get() { throw new Error(input.resolvedConfig.apiKey.value); }",
+        '    get() { throw new Error(input.resolvedConfig.apiKey.value); }',
         '  });',
         '  return output;',
         '}',
-        ''
-      ].join('\n')
+        '',
+      ].join('\n'),
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
     const discoveredPackage = discovery.packages[0];
 
@@ -706,33 +699,35 @@ describe('runtime plugin package loader', () => {
       throw new Error('Expected the package to be discovered.');
     }
 
-    const error = await Promise.resolve(discoveredPackage.load({
-      pluginId: manifest.id,
-      manifest: discoveredPackage.manifest,
-      storeRoot: root,
-      resolvedConfig: {
-        apiKey: {
-          name: 'apiKey',
-          secret: true,
-          source: 'env:PLUGIN_SECRET',
-          resolved: true,
-          value: secret
-        }
-      },
-      redactedConfig: {
-        apiKey: {
-          name: 'apiKey',
-          secret: true,
-          source: 'env:PLUGIN_SECRET',
-          resolved: true,
-          value: '[redacted]'
-        }
-      }
-    })).catch((caught: unknown) => caught);
+    const error = await Promise.resolve(
+      discoveredPackage.load({
+        pluginId: manifest.id,
+        manifest: discoveredPackage.manifest,
+        storeRoot: root,
+        resolvedConfig: {
+          apiKey: {
+            name: 'apiKey',
+            secret: true,
+            source: 'env:PLUGIN_SECRET',
+            resolved: true,
+            value: secret,
+          },
+        },
+        redactedConfig: {
+          apiKey: {
+            name: 'apiKey',
+            secret: true,
+            source: 'env:PLUGIN_SECRET',
+            resolved: true,
+            value: '[redacted]',
+          },
+        },
+      }),
+    ).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(TypeError);
     expect(String(error)).toContain(
-      `Runtime plugin package "${manifest.id}" factory returned an invalid plugin definition.`
+      `Runtime plugin package "${manifest.id}" factory returned an invalid plugin definition.`,
     );
     expect(String(error)).not.toContain(secret);
   });
@@ -749,16 +744,16 @@ describe('runtime plugin package loader', () => {
         'export function createProject02Plugin() {',
         '  return { manifest: {}, providedTools: [] };',
         '}',
-        ''
-      ].join('\n')
+        '',
+      ].join('\n'),
     });
     const invalidDiscovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
     await expect(
-      instantiatePackageById(invalidDiscovery, invalidManifest.id, root)
+      instantiatePackageById(invalidDiscovery, invalidManifest.id, root),
     ).rejects.toThrow('factory returned an invalid plugin definition');
 
     writeTestPackage({
@@ -768,16 +763,16 @@ describe('runtime plugin package loader', () => {
         'export function createProject02Plugin(input) {',
         "  return { manifest: { ...input.manifest, displayName: 'Drifted' }, providedTools: [], lifecycleHooks: {} };",
         '}',
-        ''
-      ].join('\n')
+        '',
+      ].join('\n'),
     });
     const driftDiscovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
     await expect(
-      instantiatePackageById(driftDiscovery, driftManifest.id, root)
+      instantiatePackageById(driftDiscovery, driftManifest.id, root),
     ).rejects.toThrow('factory returned a different manifest');
   });
 
@@ -790,41 +785,41 @@ describe('runtime plugin package loader', () => {
     const metadataManifest = testPluginManifest('memory.metadata-symlink');
     const metadataTarget = join(parentRoot, 'descriptor-target.json');
 
-    mkdirSync(root, { recursive: true });
-    mkdirSync(directoryTarget, { recursive: true });
+    mkdirSync(root, {recursive: true});
+    mkdirSync(directoryTarget, {recursive: true});
     symlinkSync(directoryTarget, join(root, directoryPluginId), 'dir');
     writeTestPackage({
       root,
       manifest: entryManifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
     const entryPackageRoot = join(root, entryManifest.id);
 
     writeFileSync(
       join(entryPackageRoot, 'target.ts'),
       validEntrySource(),
-      'utf8'
+      'utf8',
     );
     unlinkSync(join(entryPackageRoot, 'index.ts'));
     symlinkSync('target.ts', join(entryPackageRoot, 'index.ts'));
     writeTestPackage({
       root,
       manifest: metadataManifest,
-      entrySource: validEntrySource()
+      entrySource: validEntrySource(),
     });
     writeFileSync(metadataTarget, '{}\n', 'utf8');
     const metadataPath = join(
       root,
       metadataManifest.id,
-      'project02.plugin.json'
+      'project02.plugin.json',
     );
 
     unlinkSync(metadataPath);
     symlinkSync(metadataTarget, metadataPath);
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{ root, provenance: 'operator' }],
-      reservedPluginIds: []
+      sources: [{root, provenance: 'operator'}],
+      reservedPluginIds: [],
     });
 
     expect(discovery.packages).toEqual([]);
@@ -834,21 +829,21 @@ describe('runtime plugin package loader', () => {
         message:
           'Runtime plugin package directories must not be symbolic links.',
         path: join(root, directoryPluginId),
-        pluginId: directoryPluginId
+        pluginId: directoryPluginId,
       }),
       expect.objectContaining({
         code: 'invalid_entry',
         message: 'Runtime plugin package entry must not be a symbolic link.',
         path: join(root, entryManifest.id, 'project02.plugin.json'),
-        pluginId: entryManifest.id
+        pluginId: entryManifest.id,
       }),
       expect.objectContaining({
         code: 'invalid_descriptor',
         message:
           'Runtime plugin package descriptor must not be a symbolic link.',
         path: metadataPath,
-        pluginId: metadataManifest.id
-      })
+        pluginId: metadataManifest.id,
+      }),
     ]);
   });
 });
@@ -867,11 +862,11 @@ function writeTestPackage(options: {
   const packageRoot = join(options.root, options.manifest.id);
   const entry = options.entry ?? './index.ts';
 
-  mkdirSync(packageRoot, { recursive: true });
+  mkdirSync(packageRoot, {recursive: true});
   writeFileSync(
     join(packageRoot, 'package.json'),
-    `${JSON.stringify({ type: options.packageType ?? 'module' })}\n`,
-    'utf8'
+    `${JSON.stringify({type: options.packageType ?? 'module'})}\n`,
+    'utf8',
   );
   writeFileSync(
     join(packageRoot, 'project02.plugin.json'),
@@ -879,9 +874,9 @@ function writeTestPackage(options: {
       format: options.descriptorFormat ?? 'project02.plugin.v1',
       entry,
       manifest: options.manifest,
-      ...options.descriptorExtras
+      ...options.descriptorExtras,
     })}\n`,
-    'utf8'
+    'utf8',
   );
   if (options.skipEntryWrite === true) {
     return;
@@ -904,13 +899,13 @@ function validEntrySource(): string {
     'export function createProject02Plugin(input) {',
     '  return { manifest: input.manifest, providedTools: [], lifecycleHooks: {} };',
     '}',
-    ''
+    '',
   ].join('\n');
 }
 
 function instantiateOnlyPackage(
   discovery: ReturnType<typeof discoverRuntimePluginPackages>,
-  storeRoot: string
+  storeRoot: string,
 ) {
   const discoveredPackage = discovery.packages[0];
 
@@ -924,10 +919,10 @@ function instantiateOnlyPackage(
 function instantiatePackageById(
   discovery: ReturnType<typeof discoverRuntimePluginPackages>,
   pluginId: string,
-  storeRoot: string
+  storeRoot: string,
 ) {
   const discoveredPackage = discovery.packages.find(
-    (item) => item.manifest.id === pluginId
+    item => item.manifest.id === pluginId,
   );
 
   if (discoveredPackage === undefined) {
@@ -941,14 +936,14 @@ async function instantiatePackage(
   discoveredPackage: ReturnType<
     typeof discoverRuntimePluginPackages
   >['packages'][number],
-  storeRoot: string
+  storeRoot: string,
 ) {
   return await discoveredPackage.load({
     pluginId: discoveredPackage.manifest.id,
     manifest: discoveredPackage.manifest,
     storeRoot,
     resolvedConfig: {},
-    redactedConfig: {}
+    redactedConfig: {},
   });
 }
 
@@ -957,7 +952,7 @@ function testPluginManifest(
   options: {
     readonly localTrustLevel?: RuntimePluginManifest['localTrustLevel'];
     readonly defaultEnabled?: boolean;
-  } = {}
+  } = {},
 ): RuntimePluginManifest {
   return createRuntimePluginManifest({
     id,
@@ -967,10 +962,10 @@ function testPluginManifest(
     description: 'Test runtime plugin package.',
     contractVersion: 'mvp-008.runtime_plugin.v2',
     compatibility: {
-      hostContractVersions: ['mvp-008.runtime_plugin.v2']
+      hostContractVersions: ['mvp-008.runtime_plugin.v2'],
     },
     declaredPlugins: ['plugin_discovery'],
-    config: { fields: [] },
+    config: {fields: []},
     localTrustLevel: options.localTrustLevel ?? 'trusted_adapter',
     runtimePolicy: {
       requiredForTurn: false,
@@ -983,13 +978,13 @@ function testPluginManifest(
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
         afterTurnCommitted: 'log_failure',
-        health: 'degrade'
-      }
+        health: 'degrade',
+      },
     },
     activation: {
       defaultEnabled: options.defaultEnabled ?? false,
-      reasons: ['test_package']
+      reasons: ['test_package'],
     },
-    requestedAccess: {}
+    requestedAccess: {},
   });
 }

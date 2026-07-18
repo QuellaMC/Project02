@@ -1,115 +1,103 @@
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { performance } from 'node:perf_hooks';
+import {mkdirSync, readdirSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {performance} from 'node:perf_hooks';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import { characterStatePatchModelToolName } from '../../src/plugins/api/contract.ts';
+import {characterStatePatchModelToolName} from '../../src/plugins/api/contract.ts';
 import {
   characterStatePluginId,
-  createCharacterStatePlugin
+  createCharacterStatePlugin,
 } from '../../src/plugins/packages/character-state/plugin.ts';
 import {
   createDefaultCharacterRuntimeState,
-  planCharacterStatePatch
+  planCharacterStatePatch,
 } from '../../src/plugins/packages/character-state/schema.ts';
-import {
-  createRuntimePluginFileStoreTransaction
-} from '../../src/runtime/storage/plugin-file-store/index.ts';
+import {createRuntimePluginFileStoreTransaction} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {
   durablePathModesFileName,
-  durableRevisionFileName
+  durableRevisionFileName,
 } from '../../src/runtime/storage/plugin-file-store/shared.ts';
 import {
   createRuntimePluginContext,
   type RuntimePluginFileStore,
-  type RuntimePluginJsonObject
+  type RuntimePluginJsonObject,
 } from '../../src/plugins/api/index.ts';
-import { createRuntimeEventIdentity } from '../../src/core/index.ts';
-import { createLocalRuntimePluginPaths } from '../../src/runtime/storage/layout-contract.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
+import {createRuntimeEventIdentity} from '../../src/core/index.ts';
+import {createLocalRuntimePluginPaths} from '../../src/runtime/storage/layout-contract.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 
 describe('durable Character State migration', () => {
-  it(
-    'replays 1,000 legacy events once and performs zero event-log reads in the next 100 turns',
-    async () => {
-      const storeRoot = createTestTempRoot(
-        'project02-character-state-durable-migration-'
-      );
-      const sessionId = 'session-character-state-durable-migration';
-      const pluginRoot = createLocalRuntimePluginPaths({
+  it('replays 1,000 legacy events once and performs zero event-log reads in the next 100 turns', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-character-state-durable-migration-',
+    );
+    const sessionId = 'session-character-state-durable-migration';
+    const pluginRoot = createLocalRuntimePluginPaths({
+      storeRoot,
+      sessionId,
+      pluginId: characterStatePluginId,
+    }).pluginRoot;
+    const legacyEvents = createLegacyPatchEvents(1_000);
+
+    mkdirSync(pluginRoot, {recursive: true});
+    writeFileSync(
+      join(pluginRoot, 'events.jsonl'),
+      `${legacyEvents.map(event => JSON.stringify(event)).join('\n')}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(pluginRoot, durablePathModesFileName),
+      '{"events.jsonl":"jsonl"}\n',
+      'utf8',
+    );
+    writeFileSync(join(pluginRoot, durableRevisionFileName), '1000\n', 'utf8');
+
+    const counts = createFileStoreOperationCounts();
+    const migrationIdentity = createRuntimeEventIdentity({
+      eventId: 'evt_character_state_durable_migration',
+      traceId: 'trace_character_state_durable_migration',
+      createdAt: '2026-07-11T00:00:00.000Z',
+    });
+    const migrationTimings = await runCharacterStateTransaction({
+      storeRoot,
+      sessionId,
+      identity: migrationIdentity,
+      counts,
+      action: 'prompt',
+    });
+
+    expect(counts.eventLogReads).toBe(1);
+    expect(counts.jsonWrites).toBe(1_001);
+    expect(
+      Object.values(migrationTimings).every(value => Number.isFinite(value)),
+    ).toBe(true);
+
+    counts.eventLogReads = 0;
+    counts.jsonWrites = 0;
+    counts.jsonlAppends = 0;
+
+    for (let index = 0; index < 100; index += 1) {
+      await runCharacterStateTransaction({
         storeRoot,
         sessionId,
-        pluginId: characterStatePluginId
-      }).pluginRoot;
-      const legacyEvents = createLegacyPatchEvents(1_000);
-
-      mkdirSync(pluginRoot, { recursive: true });
-      writeFileSync(
-        join(pluginRoot, 'events.jsonl'),
-        `${legacyEvents.map((event) => JSON.stringify(event)).join('\n')}\n`,
-        'utf8'
-      );
-      writeFileSync(
-        join(pluginRoot, durablePathModesFileName),
-        '{"events.jsonl":"jsonl"}\n',
-        'utf8'
-      );
-      writeFileSync(
-        join(pluginRoot, durableRevisionFileName),
-        '1000\n',
-        'utf8'
-      );
-
-      const counts = createFileStoreOperationCounts();
-      const migrationIdentity = createRuntimeEventIdentity({
-        eventId: 'evt_character_state_durable_migration',
-        traceId: 'trace_character_state_durable_migration',
-        createdAt: '2026-07-11T00:00:00.000Z'
-      });
-      const migrationTimings = await runCharacterStateTransaction({
-        storeRoot,
-        sessionId,
-        identity: migrationIdentity,
+        identity: createRuntimeEventIdentity({
+          eventId: `evt_character_state_durable_fast_${String(index)}`,
+          traceId: `trace_character_state_durable_fast_${String(index)}`,
+          createdAt: new Date(
+            Date.parse('2026-07-11T00:01:00.000Z') + index * 1_000,
+          ).toISOString(),
+        }),
         counts,
-        action: 'prompt'
+        action: index % 2 === 0 ? 'prompt' : 'patch',
       });
+    }
 
-      expect(counts.eventLogReads).toBe(1);
-      expect(counts.jsonWrites).toBe(1_001);
-      expect(
-        Object.values(migrationTimings).every((value) =>
-          Number.isFinite(value)
-        )
-      ).toBe(true);
-
-      counts.eventLogReads = 0;
-      counts.jsonWrites = 0;
-      counts.jsonlAppends = 0;
-
-      for (let index = 0; index < 100; index += 1) {
-        await runCharacterStateTransaction({
-          storeRoot,
-          sessionId,
-          identity: createRuntimeEventIdentity({
-            eventId: `evt_character_state_durable_fast_${String(index)}`,
-            traceId: `trace_character_state_durable_fast_${String(index)}`,
-            createdAt: new Date(
-              Date.parse('2026-07-11T00:01:00.000Z') + index * 1_000
-            ).toISOString()
-          }),
-          counts,
-          action: index % 2 === 0 ? 'prompt' : 'patch'
-        });
-      }
-
-      expect(counts.eventLogReads).toBe(0);
-      expect(counts.jsonWrites).toBe(100);
-      expect(counts.jsonlAppends).toBe(50);
-      expect(readdirSync(join(pluginRoot, 'idempotency'))).toHaveLength(1_050);
-    },
-    60_000
-  );
+    expect(counts.eventLogReads).toBe(0);
+    expect(counts.jsonWrites).toBe(100);
+    expect(counts.jsonlAppends).toBe(50);
+    expect(readdirSync(join(pluginRoot, 'idempotency'))).toHaveLength(1_050);
+  }, 60_000);
 });
 
 type FileStoreOperationCounts = {
@@ -122,7 +110,7 @@ function createFileStoreOperationCounts(): FileStoreOperationCounts {
   return {
     eventLogReads: 0,
     jsonWrites: 0,
-    jsonlAppends: 0
+    jsonlAppends: 0,
   };
 }
 
@@ -142,9 +130,9 @@ async function runCharacterStateTransaction(options: {
     transaction.fileStoreFor({
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
-      pluginId: characterStatePluginId
+      pluginId: characterStatePluginId,
     }),
-    options.counts
+    options.counts,
   );
   const context = {
     ...createRuntimePluginContext({
@@ -154,11 +142,11 @@ async function runCharacterStateTransaction(options: {
       currentUserMessage: 'hello',
       character: {
         id: 'mira',
-        displayName: 'Mira'
-      }
+        displayName: 'Mira',
+      },
     }),
     pluginId: characterStatePluginId,
-    fileStore
+    fileStore,
   };
   const plugin = createCharacterStatePlugin();
   const hookStartedAt = performance.now();
@@ -175,10 +163,10 @@ async function runCharacterStateTransaction(options: {
           mood:
             Number(options.identity.eventId.match(/\d+$/u)?.[0] ?? 0) % 4 === 1
               ? 'curious'
-              : 'steady'
-        }
+              : 'steady',
+        },
       },
-      context
+      context,
     );
 
     expect(result?.status).toBe('accepted');
@@ -194,13 +182,13 @@ async function runCharacterStateTransaction(options: {
   return Object.freeze({
     hookMs,
     prepareMs,
-    finalizeMs: performance.now() - finalizeStartedAt
+    finalizeMs: performance.now() - finalizeStartedAt,
   });
 }
 
 function countFileStoreOperations(
   fileStore: RuntimePluginFileStore,
-  counts: FileStoreOperationCounts
+  counts: FileStoreOperationCounts,
 ): RuntimePluginFileStore {
   return Object.freeze({
     readJson(path) {
@@ -223,21 +211,24 @@ function countFileStoreOperations(
     },
     revision() {
       return fileStore.revision();
-    }
+    },
   } satisfies RuntimePluginFileStore);
 }
 
 function createLegacyPatchEvents(
-  count: number
+  count: number,
 ): readonly RuntimePluginJsonObject[] {
   const events: RuntimePluginJsonObject[] = [];
   let current = createDefaultCharacterRuntimeState();
 
   for (let index = 0; index < count; index += 1) {
     const input = {
-      mood: index % 2 === 0 ? 'curious' : 'steady'
+      mood: index % 2 === 0 ? 'curious' : 'steady',
     } as const;
-    const result = planCharacterStatePatch({ before: current, patchInput: input });
+    const result = planCharacterStatePatch({
+      before: current,
+      patchInput: input,
+    });
 
     if (result.status !== 'accepted') {
       throw new Error('Expected valid Character State migration fixture.');
@@ -249,11 +240,11 @@ function createLegacyPatchEvents(
         eventId: `evt_character_state_durable_legacy_${String(index)}`,
         traceId: `trace_character_state_durable_legacy_${String(index)}`,
         createdAt: new Date(
-          Date.parse('2026-07-10T00:00:00.000Z') + index * 1_000
-        ).toISOString()
+          Date.parse('2026-07-10T00:00:00.000Z') + index * 1_000,
+        ).toISOString(),
       }),
       input,
-      result
+      result,
     });
     current = result.after;
   }

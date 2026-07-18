@@ -1,11 +1,11 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import {mkdir, mkdtemp, readdir, rm, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import type * as AtomicFileModule from '../../src/runtime/storage/atomic-file.ts';
-import type { AtomicReplaceFileOptions } from '../../src/runtime/storage/atomic-file.ts';
+import type {AtomicReplaceFileOptions} from '../../src/runtime/storage/atomic-file.ts';
 
 const tempRoots: string[] = [];
 
@@ -13,9 +13,9 @@ afterEach(async () => {
   vi.doUnmock('../../src/runtime/storage/atomic-file.ts');
   vi.resetModules();
   await Promise.all(
-    tempRoots.splice(0).map(async (root) => {
-      await rm(root, { force: true, recursive: true });
-    })
+    tempRoots.splice(0).map(async root => {
+      await rm(root, {force: true, recursive: true});
+    }),
   );
 });
 
@@ -24,7 +24,7 @@ describe('local runtime session catalog mutation failures', () => {
     const storeRoot = await createTempStoreRoot();
     vi.doMock('../../src/runtime/storage/atomic-file.ts', async () => {
       const actual = await vi.importActual<typeof AtomicFileModule>(
-        '../../src/runtime/storage/atomic-file.ts'
+        '../../src/runtime/storage/atomic-file.ts',
       );
 
       return {
@@ -35,18 +35,17 @@ describe('local runtime session catalog mutation failures', () => {
           }
 
           await actual.atomicReplaceFile(options);
-        }
+        },
       };
     });
-    const { createLocalRuntimeSessionStore } = await import(
-      '../../src/runtime/storage/session-store.ts'
-    );
+    const {createLocalRuntimeSessionStore} =
+      await import('../../src/runtime/storage/session-store.ts');
 
     await expect(
-      createLocalRuntimeSessionStore({ storeRoot }).createSession({
+      createLocalRuntimeSessionStore({storeRoot}).createSession({
         sessionId: 'rolled-back-session',
-        createdAt: '2026-07-11T00:00:00.000Z'
-      })
+        createdAt: '2026-07-11T00:00:00.000Z',
+      }),
     ).rejects.toThrow('Could not rewrite local runtime session catalog');
 
     expect(await readdir(join(storeRoot, 'sessions'))).toEqual([]);
@@ -54,27 +53,26 @@ describe('local runtime session catalog mutation failures', () => {
 
   it('fails closed when a session directory already contains evidence', async () => {
     const storeRoot = await createTempStoreRoot();
-    const { createLocalRuntimeSessionStore } = await import(
-      '../../src/runtime/storage/session-store.ts'
-    );
-    const store = createLocalRuntimeSessionStore({ storeRoot });
+    const {createLocalRuntimeSessionStore} =
+      await import('../../src/runtime/storage/session-store.ts');
+    const store = createLocalRuntimeSessionStore({storeRoot});
     await store.createSession({
       sessionId: 'existing-session',
-      createdAt: '2026-07-11T00:00:00.000Z'
+      createdAt: '2026-07-11T00:00:00.000Z',
     });
     await mkdir(join(storeRoot, 'sessions', 'orphan-session'));
     await writeFile(
       join(storeRoot, 'sessions', 'orphan-session', 'evidence.jsonl'),
       '{}\n',
-      'utf8'
+      'utf8',
     );
 
     await expect(
       store.createSession({
         sessionId: 'orphan-session',
-        createdAt: '2026-07-11T00:00:01.000Z'
-      })
-    ).rejects.toMatchObject({ code: 'missing_file' });
+        createdAt: '2026-07-11T00:00:01.000Z',
+      }),
+    ).rejects.toMatchObject({code: 'missing_file'});
   });
 });
 

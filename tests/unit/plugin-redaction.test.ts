@@ -1,12 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {
   createRuntimePluginToolInvocationSnapshot,
-  redactRuntimePluginText
+  redactRuntimePluginText,
 } from '../../src/plugins/api/index.ts';
 import type {
   RuntimePluginJsonObject,
-  RuntimePluginJsonValue
+  RuntimePluginJsonValue,
 } from '../../src/plugins/api/index.ts';
 
 describe('runtime plugin text redaction', () => {
@@ -15,7 +15,7 @@ describe('runtime plugin text redaction', () => {
       ['{"api_key":"super-secret"}', '{"api_key":"[redacted]"}'],
       ['"password": "open-sesame"', '"password": "[redacted]"'],
       ['{ "token" : "secret-token" }', '{ "token" : "[redacted]" }'],
-      ["'secret': 'hidden-value'", "'secret': '[redacted]'"]
+      ["'secret': 'hidden-value'", "'secret': '[redacted]'"],
     ] as const;
 
     for (const [input, expected] of cases) {
@@ -30,7 +30,7 @@ describe('runtime plugin text redaction', () => {
     const redacted = redactRuntimePluginText(input);
 
     expect(redacted).toBe(
-      'https://example.test/search?api.key=[redacted]&api_key=[redacted]&api-key=[redacted]&safe=kept#section'
+      'https://example.test/search?api.key=[redacted]&api_key=[redacted]&api-key=[redacted]&safe=kept#section',
     );
     expect(redacted).not.toContain('dotted-secret');
     expect(redacted).not.toContain('underscore-secret');
@@ -46,7 +46,7 @@ describe('runtime plugin text redaction', () => {
       pluginId: 'memory.structured-secret.fixture',
       toolName: 'memory.search',
       input: {
-        query: 'Mira'
+        query: 'Mira',
       },
       result: {
         status: 'accepted',
@@ -54,17 +54,17 @@ describe('runtime plugin text redaction', () => {
           api_key: 'super-secret',
           nested: {
             password: 'open-sesame',
-            safe: 'kept'
+            safe: 'kept',
           },
           list: [
             {
               access_token: 'secret-token',
-              label: 'kept'
-            }
-          ]
+              label: 'kept',
+            },
+          ],
         },
-        evidence: []
-      }
+        evidence: [],
+      },
     });
 
     expect(snapshot.result).toMatchObject({
@@ -73,15 +73,15 @@ describe('runtime plugin text redaction', () => {
         api_key: '[redacted]',
         nested: {
           password: '[redacted]',
-          safe: 'kept'
+          safe: 'kept',
         },
         list: [
           {
             access_token: '[redacted]',
-            label: 'kept'
-          }
-        ]
-      }
+            label: 'kept',
+          },
+        ],
+      },
     });
 
     const serialized = JSON.stringify(snapshot);
@@ -99,13 +99,13 @@ describe('runtime plugin text redaction', () => {
       pluginId: 'memory.proto.fixture',
       toolName: 'memory.search',
       input: {
-        query: 'Mira'
+        query: 'Mira',
       },
       result: {
         status: 'accepted',
         output: createProtoKeyOutput(),
-        evidence: []
-      }
+        evidence: [],
+      },
     });
 
     expect(snapshot.result.status).toBe('accepted');
@@ -118,15 +118,13 @@ describe('runtime plugin text redaction', () => {
 
     expect(Object.hasOwn(output, '__proto__')).toBe(true);
     expect(output['__proto__']).toEqual({
-      polluted: true
+      polluted: true,
     });
     expect(Object.hasOwn(nested, '__proto__')).toBe(true);
     expect(nested['__proto__']).toBe('nested-value');
+    expect(JSON.stringify(output)).toContain('"__proto__":{"polluted":true}');
     expect(JSON.stringify(output)).toContain(
-      '"__proto__":{"polluted":true}'
-    );
-    expect(JSON.stringify(output)).toContain(
-      '"nested":{"__proto__":"nested-value"}'
+      '"nested":{"__proto__":"nested-value"}',
     );
   });
 });
@@ -135,24 +133,24 @@ function createProtoKeyOutput(): RuntimePluginJsonObject {
   const nested: Record<string, RuntimePluginJsonValue> = {};
   Object.defineProperty(nested, '__proto__', {
     value: 'nested-value',
-    enumerable: true
+    enumerable: true,
   });
 
   const output: Record<string, RuntimePluginJsonValue> = {
-    nested
+    nested,
   };
   Object.defineProperty(output, '__proto__', {
     value: {
-      polluted: true
+      polluted: true,
     },
-    enumerable: true
+    enumerable: true,
   });
 
   return output;
 }
 
 function expectJsonObject(
-  value: RuntimePluginJsonValue | undefined
+  value: RuntimePluginJsonValue | undefined,
 ): RuntimePluginJsonObject {
   if (
     value === undefined ||
@@ -167,7 +165,7 @@ function expectJsonObject(
 }
 
 function isJsonArray(
-  value: RuntimePluginJsonValue
+  value: RuntimePluginJsonValue,
 ): value is readonly RuntimePluginJsonValue[] {
   return Array.isArray(value);
 }

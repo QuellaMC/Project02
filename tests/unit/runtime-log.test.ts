@@ -1,26 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {
   runtimePluginContractVersion,
-  createRuntimePluginTurnEvidenceSnapshot
+  createRuntimePluginTurnEvidenceSnapshot,
 } from '../../src/plugins/api/index.ts';
-import { createRuntimeLogStore } from '../../src/runtime/evidence/index.ts';
+import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import type {
   ConversationLogRecordInput,
   RawEventLogRecordInput,
-  RuntimeTraceEntryInput
+  RuntimeTraceEntryInput,
 } from '../../src/runtime/evidence/records.ts';
-import type {
-  RuntimePluginTurnEvidenceSnapshot
-} from '../../src/plugins/api/index.ts';
-import type {
-  RuntimeEventIdentity
-} from '../../src/core/index.ts';
+import type {RuntimePluginTurnEvidenceSnapshot} from '../../src/plugins/api/index.ts';
+import type {RuntimeEventIdentity} from '../../src/core/index.ts';
 
 const identity = {
   eventId: 'evt_log_001',
   traceId: 'trace_log_001',
-  createdAt: '2026-06-04T00:00:00.000Z'
+  createdAt: '2026-06-04T00:00:00.000Z',
 } as const;
 
 describe('runtime log store', () => {
@@ -28,11 +24,11 @@ describe('runtime log store', () => {
     const store = createRuntimeLogStore();
     const received: RuntimeTraceEntryInput = {
       ...identity,
-      step: 'runtime_event_received'
+      step: 'runtime_event_received',
     };
     const started: RuntimeTraceEntryInput = {
       ...identity,
-      step: 'runtime_turn_started'
+      step: 'runtime_turn_started',
     };
 
     store.appendTrace(received);
@@ -40,13 +36,13 @@ describe('runtime log store', () => {
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
-      eventType: 'USER_MESSAGE'
+      eventType: 'USER_MESSAGE',
     });
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_turn_completed',
       eventType: 'USER_MESSAGE',
-      status: 'completed'
+      status: 'completed',
     });
 
     const snapshot = store.traceEntries();
@@ -57,8 +53,8 @@ describe('runtime log store', () => {
     expect(
       Reflect.set(snapshot, '0', {
         ...identity,
-        step: 'runtime_turn_completed'
-      } satisfies RuntimeTraceEntryInput)
+        step: 'runtime_turn_completed',
+      } satisfies RuntimeTraceEntryInput),
     ).toBe(false);
     expect(store.traceEntries()).toEqual([received, started]);
   });
@@ -70,18 +66,21 @@ describe('runtime log store', () => {
       kind: 'runtime_event_received',
       eventType: 'USER_MESSAGE',
       payloadSummary: {
-        rawInput: ' hello '
-      }
+        rawInput: ' hello ',
+      },
     };
-    const visibleMessageIds = ['local-session:message-1', 'local-session:message-2'];
+    const visibleMessageIds = [
+      'local-session:message-1',
+      'local-session:message-2',
+    ];
     const payloadSummary = {
-      normalizedCurrentUserMessage: 'hello'
+      normalizedCurrentUserMessage: 'hello',
     };
     const normalized: RawEventLogRecordInput = {
       ...identity,
       kind: 'runtime_event_normalized',
       eventType: 'USER_MESSAGE',
-      payloadSummary
+      payloadSummary,
     };
     const completed: RawEventLogRecordInput = {
       ...identity,
@@ -89,10 +88,10 @@ describe('runtime log store', () => {
       eventType: 'USER_MESSAGE',
       status: 'completed',
       visibleMessageIds,
-      runtimePluginTurnEvidence: createMinimalPluginTurnEvidence(identity)
+      runtimePluginTurnEvidence: createMinimalPluginTurnEvidence(identity),
     };
 
-    store.appendTrace({ ...identity, step: 'runtime_event_received' });
+    store.appendTrace({...identity, step: 'runtime_event_received'});
     const receivedRecord = store.appendRawEvent(received);
     const normalizedRecord = store.appendRawEvent(normalized);
     store.appendConversationMessage({
@@ -102,7 +101,7 @@ describe('runtime log store', () => {
       speakerId: 'local-user',
       speakerName: 'You',
       text: 'hello',
-      committedAt: '2026-06-04T00:00:01.000Z'
+      committedAt: '2026-06-04T00:00:01.000Z',
     });
     store.appendConversationMessage({
       ...identity,
@@ -111,7 +110,7 @@ describe('runtime log store', () => {
       speakerId: 'mira',
       speakerName: 'Mira',
       text: 'hello back',
-      committedAt: '2026-06-04T00:00:02.000Z'
+      committedAt: '2026-06-04T00:00:02.000Z',
     });
     const appended = store.appendRawEvent(completed);
 
@@ -133,13 +132,13 @@ describe('runtime log store', () => {
             status: 'failed',
             summary: 'handler token=[redacted]',
             policyOutcome: 'handler_rejected',
-            redactionLabels: ['secret']
-          }
-        ]
-      }
+            redactionLabels: ['secret'],
+          },
+        ],
+      },
     });
     expect(normalizedRecord.payloadSummary).toEqual({
-      normalizedCurrentUserMessage: 'hello'
+      normalizedCurrentUserMessage: 'hello',
     });
     expect(Object.isFrozen(appended)).toBe(true);
     expect(Object.isFrozen(appended.visibleMessageIds)).toBe(true);
@@ -147,14 +146,14 @@ describe('runtime log store', () => {
     expect(store.rawEvents()).toEqual([
       receivedRecord,
       normalizedRecord,
-      appended
+      appended,
     ]);
   });
 
   it('deeply snapshots tool input and result evidence before storing it', () => {
     const store = createRuntimeLogStore();
-    const nestedInput = { query: 'before' };
-    const nestedOutput = { answer: 'before' };
+    const nestedInput = {query: 'before'};
+    const nestedOutput = {answer: 'before'};
     const started: RawEventLogRecordInput = {
       ...identity,
       kind: 'tool_call_started',
@@ -163,7 +162,7 @@ describe('runtime log store', () => {
       toolRound: 1,
       toolName: 'memory.search',
       toolPluginId: 'memory.fixture',
-      toolInput: { nested: nestedInput }
+      toolInput: {nested: nestedInput},
     };
     const finished: RawEventLogRecordInput = {
       ...identity,
@@ -177,16 +176,16 @@ describe('runtime log store', () => {
       dispatchedToHost: true,
       toolResult: {
         status: 'accepted',
-        output: { nested: nestedOutput },
-        evidence: []
-      }
+        output: {nested: nestedOutput},
+        evidence: [],
+      },
     };
 
-    store.appendTrace({ ...identity, step: 'runtime_event_received' });
+    store.appendTrace({...identity, step: 'runtime_event_received'});
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
-      eventType: 'USER_MESSAGE'
+      eventType: 'USER_MESSAGE',
     });
     const storedStart = store.appendRawEvent(started);
     const storedFinish = store.appendRawEvent(finished);
@@ -194,16 +193,16 @@ describe('runtime log store', () => {
     nestedInput.query = 'after';
     nestedOutput.answer = 'after';
 
-    expect(storedStart.toolInput).toEqual({ nested: { query: 'before' } });
+    expect(storedStart.toolInput).toEqual({nested: {query: 'before'}});
     expect(storedFinish.toolResult).toEqual({
       status: 'accepted',
-      output: { nested: { answer: 'before' } },
-      evidence: []
+      output: {nested: {answer: 'before'}},
+      evidence: [],
     });
     expect(Object.isFrozen(storedStart.toolInput?.['nested'])).toBe(true);
     expect(
       storedFinish.toolResult?.status === 'accepted' &&
-        Object.isFrozen(storedFinish.toolResult.output)
+        Object.isFrozen(storedFinish.toolResult.output),
     ).toBe(true);
   });
 
@@ -216,7 +215,7 @@ describe('runtime log store', () => {
       speakerId: 'local-user',
       speakerName: 'You',
       text: 'hello',
-      committedAt: '2026-06-04T00:00:01.000Z'
+      committedAt: '2026-06-04T00:00:01.000Z',
     };
     const characterMessage: ConversationLogRecordInput = {
       ...identity,
@@ -225,14 +224,14 @@ describe('runtime log store', () => {
       speakerId: 'mira',
       speakerName: 'Mira',
       text: "I'm here. Tell me what you need.",
-      committedAt: '2026-06-04T00:00:02.000Z'
+      committedAt: '2026-06-04T00:00:02.000Z',
     };
 
-    store.appendTrace({ ...identity, step: 'runtime_event_received' });
+    store.appendTrace({...identity, step: 'runtime_event_received'});
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
-      eventType: 'USER_MESSAGE'
+      eventType: 'USER_MESSAGE',
     });
     store.appendConversationMessage(userMessage);
     store.appendConversationMessage(characterMessage);
@@ -241,10 +240,13 @@ describe('runtime log store', () => {
       kind: 'runtime_turn_completed',
       eventType: 'USER_MESSAGE',
       status: 'completed',
-      visibleMessageIds: [userMessage.id, characterMessage.id]
+      visibleMessageIds: [userMessage.id, characterMessage.id],
     });
 
-    expect(store.conversationMessages()).toEqual([userMessage, characterMessage]);
+    expect(store.conversationMessages()).toEqual([
+      userMessage,
+      characterMessage,
+    ]);
     expect(store.traceEntries()).toHaveLength(1);
     expect(store.rawEvents()).toHaveLength(2);
   });
@@ -256,14 +258,14 @@ describe('runtime log store', () => {
       kind: 'runtime_turn_rejected',
       eventType: 'USER_MESSAGE',
       status: 'rejected',
-      reason: 'Provide exactly one non-empty message.'
+      reason: 'Provide exactly one non-empty message.',
     };
 
-    store.appendTrace({ ...identity, step: 'runtime_event_received' });
+    store.appendTrace({...identity, step: 'runtime_event_received'});
     const received = store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
-      eventType: 'USER_MESSAGE'
+      eventType: 'USER_MESSAGE',
     });
     store.appendRawEvent(rejection);
 
@@ -273,7 +275,7 @@ describe('runtime log store', () => {
 });
 
 function createMinimalPluginTurnEvidence(
-  eventIdentity: RuntimeEventIdentity
+  eventIdentity: RuntimeEventIdentity,
 ): RuntimePluginTurnEvidenceSnapshot {
   return createRuntimePluginTurnEvidenceSnapshot({
     ...eventIdentity,
@@ -290,9 +292,9 @@ function createMinimalPluginTurnEvidence(
         status: 'failed',
         summary: 'handler token=secret-token',
         policyOutcome: 'handler_rejected',
-        redactionLabels: ['secret']
-      }
+        redactionLabels: ['secret'],
+      },
     ],
-    health: []
+    health: [],
   });
 }

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import {randomUUID} from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -9,18 +9,12 @@ import {
   readdirSync,
   renameSync,
   unlinkSync,
-  writeFileSync
+  writeFileSync,
 } from 'node:fs';
-import {
-  chmod,
-  mkdir,
-  open,
-  rename,
-  unlink
-} from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
-import { isNodeErrorWithCode } from '../../shared/node-error.ts';
-import { processIsAlive } from './process-liveness.ts';
+import {chmod, mkdir, open, rename, unlink} from 'node:fs/promises';
+import {basename, dirname, join} from 'node:path';
+import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {processIsAlive} from './process-liveness.ts';
 
 export type AtomicReplaceFileOptions = {
   readonly targetPath: string;
@@ -30,7 +24,7 @@ export type AtomicReplaceFileOptions = {
 };
 
 export async function atomicReplaceFile(
-  options: AtomicReplaceFileOptions
+  options: AtomicReplaceFileOptions,
 ): Promise<void> {
   const targetDirectory = dirname(options.targetPath);
   const temporaryPath = createAtomicReplacementPath(options.targetPath);
@@ -38,7 +32,7 @@ export async function atomicReplaceFile(
   let temporaryFileExists = false;
 
   if (options.createParent !== false) {
-    await mkdir(targetDirectory, { recursive: true });
+    await mkdir(targetDirectory, {recursive: true});
   }
 
   try {
@@ -72,7 +66,7 @@ export function atomicReplaceFileSync(options: AtomicReplaceFileOptions): void {
   let fileDescriptor: number | undefined;
 
   if (options.createParent !== false) {
-    mkdirSync(targetDirectory, { recursive: true });
+    mkdirSync(targetDirectory, {recursive: true});
   }
 
   try {
@@ -107,13 +101,13 @@ export function atomicReplaceFileSync(options: AtomicReplaceFileOptions): void {
 }
 
 export function cleanupAbandonedAtomicReplacementFilesSync(
-  targetPath: string
+  targetPath: string,
 ): void {
   const targetDirectory = dirname(targetPath);
   let entries: Dirent[];
 
   try {
-    entries = readdirSync(targetDirectory, { withFileTypes: true });
+    entries = readdirSync(targetDirectory, {withFileTypes: true});
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return;
@@ -146,7 +140,7 @@ function createAtomicReplacementPath(targetPath: string): string {
 
   return join(
     targetDirectory,
-    `.${basename(targetPath)}.${String(process.pid)}.${randomUUID()}.tmp`
+    `.${basename(targetPath)}.${String(process.pid)}.${randomUUID()}.tmp`,
   );
 }
 
@@ -156,11 +150,12 @@ type AtomicReplacementFileIdentity = {
 };
 
 export function parseAtomicReplacementFileName(
-  fileName: string
+  fileName: string,
 ): AtomicReplacementFileIdentity | undefined {
-  const match = /^\.(.+)\.(\d+)\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/iu.exec(
-    fileName
-  );
+  const match =
+    /^\.(.+)\.(\d+)\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/iu.exec(
+      fileName,
+    );
   const targetName = match?.[1];
   const ownerPid = match?.[2] === undefined ? Number.NaN : Number(match[2]);
 
@@ -168,15 +163,18 @@ export function parseAtomicReplacementFileName(
     targetName.length > 0 &&
     Number.isSafeInteger(ownerPid) &&
     ownerPid > 0
-    ? Object.freeze({ targetName, ownerPid })
+    ? Object.freeze({targetName, ownerPid})
     : undefined;
 }
 
 export function atomicReplacementFileBelongsToTarget(
   fileName: string,
-  targetPath: string
+  targetPath: string,
 ): boolean {
-  return parseAtomicReplacementFileName(fileName)?.targetName === basename(targetPath);
+  return (
+    parseAtomicReplacementFileName(fileName)?.targetName ===
+    basename(targetPath)
+  );
 }
 
 export function isAbandonedAtomicReplacementFile(fileName: string): boolean {

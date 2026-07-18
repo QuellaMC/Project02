@@ -1,7 +1,10 @@
-import type { CharacterProfile } from '../../core/index.ts';
-import { createRuntimeEventIdentity } from '../../core/index.ts';
-import { createRuntimePluginContext } from '../api/index.ts';
-import type { RuntimePluginHost, RuntimePluginSessionEndOptions } from './host.ts';
+import type {CharacterProfile} from '../../core/index.ts';
+import {createRuntimeEventIdentity} from '../../core/index.ts';
+import {createRuntimePluginContext} from '../api/index.ts';
+import type {
+  RuntimePluginHost,
+  RuntimePluginSessionEndOptions,
+} from './host.ts';
 
 /**
  * Best-effort session-end / shutdown hooks shared by the chat and relay
@@ -22,9 +25,9 @@ export async function runBestEffortPluginSessionEnd(options: {
         sessionId: options.sessionId,
         eventType: 'USER_MESSAGE',
         currentUserMessage: options.currentUserMessage,
-        character: options.character
+        character: options.character,
       }),
-      options.hookOptions
+      options.hookOptions,
     );
   } catch {
     // Cleanup must not mask the startup or fatal turn error that triggered it.
@@ -44,8 +47,8 @@ export async function runBestEffortPluginShutdown(options: {
         sessionId: options.sessionId,
         eventType: 'USER_MESSAGE',
         currentUserMessage: options.currentUserMessage,
-        character: options.character
-      })
+        character: options.character,
+      }),
     );
   } catch {
     // Shutdown is best-effort and must not mask the completed or failing chat lifetime.

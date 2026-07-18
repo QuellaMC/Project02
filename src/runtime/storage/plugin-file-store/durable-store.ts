@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import {readFileSync} from 'node:fs';
+import {join} from 'node:path';
 
-import { createLocalRuntimeMutationLockOwnerToken } from '../mutation-lock.ts';
-import type { RuntimePluginFileStore } from '../../../plugins/index.ts';
-import type { CreateRuntimePluginFileStoreOptions } from '../../../plugins/index.ts';
+import {createLocalRuntimeMutationLockOwnerToken} from '../mutation-lock.ts';
+import type {RuntimePluginFileStore} from '../../../plugins/index.ts';
+import type {CreateRuntimePluginFileStoreOptions} from '../../../plugins/index.ts';
 import {
   assertDurableOperationPathMode,
   assertSafeDurablePluginPath,
@@ -13,19 +13,19 @@ import {
   durablePluginRoot,
   readDurablePathMode,
   readDurableRevision,
-  withDurablePluginStoreMutation
+  withDurablePluginStoreMutation,
 } from './durable-primitives.ts';
 import {
   freezeRuntimePluginFileStoreJsonValue,
   isMissingFileError,
   normalizeRuntimePluginFileStorePath,
-  parseRuntimePluginJsonlContent
+  parseRuntimePluginJsonlContent,
 } from './shared.ts';
 import {
   applyRecoverableDurablePluginFileStoreOperation,
   type DurablePluginFileStoreFaultInjector,
   recoverDirectDurablePluginFileStoreMutation,
-  recoverPreparedDurablePluginFileStoreTransactions
+  recoverPreparedDurablePluginFileStoreTransactions,
 } from './wal.ts';
 
 export type DurableRuntimePluginFileStoreDependencies = {
@@ -35,33 +35,35 @@ export type DurableRuntimePluginFileStoreDependencies = {
 };
 
 export function createDurableRuntimePluginFileStore(
-  options: CreateRuntimePluginFileStoreOptions & { readonly storeRoot: string },
-  dependencies: DurableRuntimePluginFileStoreDependencies = {}
+  options: CreateRuntimePluginFileStoreOptions & {readonly storeRoot: string},
+  dependencies: DurableRuntimePluginFileStoreDependencies = {},
 ): RuntimePluginFileStore {
   const durableOptions = Object.freeze({
     ...options,
-    storeRoot: canonicalDurablePluginStoreRoot(options.storeRoot)
-  } satisfies CreateRuntimePluginFileStoreOptions & { readonly storeRoot: string });
+    storeRoot: canonicalDurablePluginStoreRoot(options.storeRoot),
+  } satisfies CreateRuntimePluginFileStoreOptions & {
+    readonly storeRoot: string;
+  });
   const root = durablePluginRoot({
     storeRoot: durableOptions.storeRoot,
     sessionId: durableOptions.sessionId,
-    pluginId: durableOptions.pluginId
+    pluginId: durableOptions.pluginId,
   });
   const ownerToken = createLocalRuntimeMutationLockOwnerToken();
 
   if (dependencies.skipPreparedTransactionRecovery !== true) {
     recoverPreparedDurablePluginFileStoreTransactions(
       durableOptions,
-      ownerToken
+      ownerToken,
     );
   }
   if (dependencies.skipInitialCleanup !== true) {
     withDurablePluginStoreMutation(
-      { storeRoot: durableOptions.storeRoot, root, ownerToken },
+      {storeRoot: durableOptions.storeRoot, root, ownerToken},
       () => {
         assertSafeDurablePluginRoot(root);
         cleanupDurablePluginStoreAtomicTempFiles(root);
-      }
+      },
     );
   }
 
@@ -70,7 +72,7 @@ export function createDurableRuntimePluginFileStore(
       recoverPreparedDurablePluginFileStoreTransactions(
         durableOptions,
         ownerToken,
-        { recoverDirectMutation: false }
+        {recoverDirectMutation: false},
       );
     }
   }
@@ -82,25 +84,25 @@ export function createDurableRuntimePluginFileStore(
 
       recoverPreparedTransactions();
       return withDurablePluginStoreMutation(
-        { storeRoot: durableOptions.storeRoot, root, ownerToken },
+        {storeRoot: durableOptions.storeRoot, root, ownerToken},
         () => {
           recoverDirectDurablePluginFileStoreMutation({
             storeRoot: durableOptions.storeRoot,
             sessionId: durableOptions.sessionId,
             pluginId: durableOptions.pluginId,
             root,
-            ownerToken
+            ownerToken,
           });
           assertSafeDurablePluginPath(root, safePath);
           assertDurableOperationPathMode({
             filePath,
             mode: readDurablePathMode(root, safePath),
-            operation: { kind: 'write_json', path: safePath }
+            operation: {kind: 'write_json', path: safePath},
           });
 
           try {
             return freezeRuntimePluginFileStoreJsonValue(
-              JSON.parse(readFileSync(filePath, 'utf8')) as unknown
+              JSON.parse(readFileSync(filePath, 'utf8')) as unknown,
             );
           } catch (error: unknown) {
             if (isMissingFileError(error)) {
@@ -109,7 +111,7 @@ export function createDurableRuntimePluginFileStore(
 
             throw error;
           }
-        }
+        },
       );
     },
     readJsonl(path) {
@@ -118,25 +120,25 @@ export function createDurableRuntimePluginFileStore(
 
       recoverPreparedTransactions();
       return withDurablePluginStoreMutation(
-        { storeRoot: durableOptions.storeRoot, root, ownerToken },
+        {storeRoot: durableOptions.storeRoot, root, ownerToken},
         () => {
           recoverDirectDurablePluginFileStoreMutation({
             storeRoot: durableOptions.storeRoot,
             sessionId: durableOptions.sessionId,
             pluginId: durableOptions.pluginId,
             root,
-            ownerToken
+            ownerToken,
           });
           assertSafeDurablePluginPath(root, safePath);
           assertDurableOperationPathMode({
             filePath,
             mode: readDurablePathMode(root, safePath),
-            operation: { kind: 'append_jsonl', path: safePath }
+            operation: {kind: 'append_jsonl', path: safePath},
           });
 
           try {
             return parseRuntimePluginJsonlContent(
-              readFileSync(filePath, 'utf8')
+              readFileSync(filePath, 'utf8'),
             );
           } catch (error: unknown) {
             if (isMissingFileError(error)) {
@@ -145,7 +147,7 @@ export function createDurableRuntimePluginFileStore(
 
             throw error;
           }
-        }
+        },
       );
     },
     writeJsonAtomic(path, value) {
@@ -163,7 +165,7 @@ export function createDurableRuntimePluginFileStore(
         ownerToken,
         ...(dependencies.faultInjector === undefined
           ? {}
-          : { faultInjector: dependencies.faultInjector })
+          : {faultInjector: dependencies.faultInjector}),
       });
     },
     appendJsonl(path, value) {
@@ -181,25 +183,25 @@ export function createDurableRuntimePluginFileStore(
         ownerToken,
         ...(dependencies.faultInjector === undefined
           ? {}
-          : { faultInjector: dependencies.faultInjector })
+          : {faultInjector: dependencies.faultInjector}),
       });
     },
     revision() {
       recoverPreparedTransactions();
       return withDurablePluginStoreMutation(
-        { storeRoot: durableOptions.storeRoot, root, ownerToken },
+        {storeRoot: durableOptions.storeRoot, root, ownerToken},
         () => {
           recoverDirectDurablePluginFileStoreMutation({
             storeRoot: durableOptions.storeRoot,
             sessionId: durableOptions.sessionId,
             pluginId: durableOptions.pluginId,
             root,
-            ownerToken
+            ownerToken,
           });
           assertSafeDurablePluginRoot(root);
           return readDurableRevision(root);
-        }
+        },
       );
-    }
+    },
   } satisfies RuntimePluginFileStore);
 }

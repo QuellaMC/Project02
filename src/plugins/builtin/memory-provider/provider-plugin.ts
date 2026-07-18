@@ -1,16 +1,16 @@
-import { createRuntimePlugin } from '../../api/constructors.ts';
+import {createRuntimePlugin} from '../../api/constructors.ts';
 import {
   runtimePluginContractVersion,
   type RuntimePluginAccessMap,
-  type RuntimePluginDeclaration
+  type RuntimePluginDeclaration,
 } from '../../api/contract.ts';
 import type {
   RuntimePlugin,
-  RuntimePluginProvidedTool
+  RuntimePluginProvidedTool,
 } from '../../api/types.ts';
-import { createMemoryProviderLifecycleHooks } from './provider-lifecycle.ts';
-import { memoryAddTool, memorySearchTool } from './tools.ts';
-import type { Project02MemoryProvider } from './types.ts';
+import {createMemoryProviderLifecycleHooks} from './provider-lifecycle.ts';
+import {memoryAddTool, memorySearchTool} from './tools.ts';
+import type {Project02MemoryProvider} from './types.ts';
 
 export type CreateMemoryProviderRuntimePluginOptions = {
   readonly pluginId?: string;
@@ -20,7 +20,7 @@ export type CreateMemoryProviderRuntimePluginOptions = {
 
 export function createMemoryProviderRuntimePlugin(
   provider: Project02MemoryProvider,
-  options: CreateMemoryProviderRuntimePluginOptions = {}
+  options: CreateMemoryProviderRuntimePluginOptions = {},
 ): RuntimePlugin {
   const pluginId = options.pluginId ?? provider.id;
   const toolNamespace = options.toolNamespace ?? 'memory';
@@ -40,18 +40,16 @@ export function createMemoryProviderRuntimePlugin(
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
         sourceSystem: 'project02',
-        externalContract: 'project02_memory_provider'
+        externalContract: 'project02_memory_provider',
       },
       declaredPlugins: memoryProviderDeclarations(provider),
       config: {
-        fields: []
+        fields: [],
       },
       localTrustLevel: 'trusted_adapter',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: canWriteMemory
-          ? 'local_memory_write'
-          : 'runtime_read',
+        sideEffectLevel: canWriteMemory ? 'local_memory_write' : 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1500,
         sourceReferencesRequired: true,
@@ -60,36 +58,38 @@ export function createMemoryProviderRuntimePlugin(
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'degrade',
           afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
+          health: 'degrade',
+        },
       },
       activation: {
         defaultEnabled: false,
-        reasons: ['memory_provider_factory']
+        reasons: ['memory_provider_factory'],
       },
-      requestedAccess: memoryProviderRequestedAccess(provider)
+      requestedAccess: memoryProviderRequestedAccess(provider),
     },
     providedTools: memoryProviderTools({
       provider,
       searchToolName,
-      addToolName
+      addToolName,
     }),
     lifecycleHooks: createMemoryProviderLifecycleHooks({
       provider,
       pluginId,
       searchToolName,
-      addToolName
-    })
+      addToolName,
+    }),
   });
 }
 
 function memoryProviderDeclarations(
-  provider: Project02MemoryProvider
+  provider: Project02MemoryProvider,
 ): readonly RuntimePluginDeclaration[] {
   const declarations: RuntimePluginDeclaration[] = ['plugin_discovery'];
 
-  if (provider.recall !== undefined) declarations.push('before_role_model_call');
-  if (provider.captureTurn !== undefined) declarations.push('after_turn_committed');
+  if (provider.recall !== undefined)
+    declarations.push('before_role_model_call');
+  if (provider.captureTurn !== undefined)
+    declarations.push('after_turn_committed');
   if (provider.search !== undefined || provider.add !== undefined) {
     declarations.push('tool_provider', 'handle_tool_call');
   }
@@ -118,16 +118,16 @@ function memoryProviderTools(options: {
 }
 
 function memoryProviderRequestedAccess(
-  provider: Project02MemoryProvider
+  provider: Project02MemoryProvider,
 ): RuntimePluginAccessMap {
   return Object.freeze({
     ...(provider.recall === undefined && provider.captureTurn === undefined
       ? {}
-      : { turn_context: 'read' }),
+      : {turn_context: 'read'}),
     ...(provider.recall === undefined &&
-      provider.search === undefined &&
-      provider.add === undefined
+    provider.search === undefined &&
+    provider.add === undefined
       ? {}
-      : { model_input: 'write' })
+      : {model_input: 'write'}),
   } satisfies RuntimePluginAccessMap);
 }

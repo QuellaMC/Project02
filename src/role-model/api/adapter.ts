@@ -1,9 +1,11 @@
 import type {
-  RoleModelDecisionRejection, RoleModelInputEnvelope,
-  RoleModelProviderExchangeSnapshot, RoleModelProviderMetadata
+  RoleModelDecisionRejection,
+  RoleModelInputEnvelope,
+  RoleModelProviderExchangeSnapshot,
+  RoleModelProviderMetadata,
 } from './contracts.ts';
-import type { RoleModelAssistantChatMessage } from './chat-wire.ts';
-import type { RoleModelTurnContext } from '../prompt/render.ts';
+import type {RoleModelAssistantChatMessage} from './chat-wire.ts';
+import type {RoleModelTurnContext} from '../prompt/render.ts';
 
 export type RoleModelAdapterRawOutput = {
   readonly rawOutputText: string;
@@ -28,15 +30,14 @@ export type RoleModelAdapterInvocation = {
 export type RoleModelAdapter = {
   invoke(
     inputEnvelope: RoleModelInputEnvelope,
-    invocation: RoleModelAdapterInvocation
+    invocation: RoleModelAdapterInvocation,
   ): Promise<RoleModelAdapterRawOutput> | RoleModelAdapterRawOutput;
 };
 
-
 export function createRoleModelAdapterRawOutput(
-  rawOutputText: string
+  rawOutputText: string,
 ): RoleModelAdapterRawOutput {
   return Object.freeze({
-    rawOutputText
+    rawOutputText,
   } satisfies RoleModelAdapterRawOutput);
 }

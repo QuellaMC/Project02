@@ -1,7 +1,7 @@
-import type { RuntimeLogStore } from './records.ts';
-import type { MutableDurableRuntimeSessionEvidence } from './contract.ts';
-import { createRuntimeSessionEvidenceSnapshot } from './recovery.ts';
-import { createRuntimeEvidenceTransitionMachine } from './transition.ts';
+import type {RuntimeLogStore} from './records.ts';
+import type {MutableDurableRuntimeSessionEvidence} from './contract.ts';
+import {createRuntimeSessionEvidenceSnapshot} from './recovery.ts';
+import {createRuntimeEvidenceTransitionMachine} from './transition.ts';
 
 /**
  * In-memory `RuntimeLogStore`: the second store implementation next to
@@ -10,16 +10,16 @@ import { createRuntimeEvidenceTransitionMachine } from './transition.ts';
  * shared derivation (one snapshot implementation, arch rule 7).
  */
 export function createRuntimeLogStore(
-  options: { readonly sessionId?: string } = {}
+  options: {readonly sessionId?: string} = {},
 ): RuntimeLogStore {
   const evidence: MutableDurableRuntimeSessionEvidence = {
     traceEntries: [],
     rawEvents: [],
-    conversationMessages: []
+    conversationMessages: [],
   };
   const transitionMachine = createRuntimeEvidenceTransitionMachine({
     evidence,
-    ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId })
+    ...(options.sessionId === undefined ? {} : {sessionId: options.sessionId}),
   });
 
   return Object.freeze({
@@ -40,7 +40,7 @@ export function createRuntimeLogStore(
     appendConversationMessage(record, expectedCharacter) {
       const storedRecord = transitionMachine.prepareConversationAppend(
         record,
-        expectedCharacter
+        expectedCharacter,
       );
 
       transitionMachine.commitConversationAppend(storedRecord);
@@ -69,6 +69,6 @@ export function createRuntimeLogStore(
       transitionMachine.assertPublicReadable();
 
       return Object.freeze([...evidence.conversationMessages]);
-    }
+    },
   } satisfies RuntimeLogStore);
 }

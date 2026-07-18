@@ -1,18 +1,22 @@
-import { spawnSync } from 'node:child_process';
+import {spawnSync} from 'node:child_process';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 describe('plugin type barrel startup safety', () => {
   it('does not pull runtime storage into chat CLI startup through plugins/types', () => {
-    const result = spawnSync(process.execPath, ['src/cli/chat/main.ts', '--help'], {
-      cwd: process.cwd(),
-      encoding: 'utf8'
-    });
+    const result = spawnSync(
+      process.execPath,
+      ['src/cli/chat/main.ts', '--help'],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+      },
+    );
     const output = `${result.stdout}\n${result.stderr}`;
 
     expect(output).not.toContain('ReferenceError');
     expect(output).not.toContain(
-      'Cannot access \'roleModelInvalidVisibleReplyRejectionReason\' before initialization'
+      "Cannot access 'roleModelInvalidVisibleReplyRejectionReason' before initialization",
     );
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Unknown chat option: --help.');
@@ -23,18 +27,18 @@ describe('plugin type barrel startup safety', () => {
       process.execPath,
       [
         '-e',
-        "import('./src/role-model/index.ts').then(() => import('./src/runtime/turn/local.ts'))"
+        "import('./src/role-model/index.ts').then(() => import('./src/runtime/turn/local.ts'))",
       ],
       {
         cwd: process.cwd(),
-        encoding: 'utf8'
-      }
+        encoding: 'utf8',
+      },
     );
     const output = `${result.stdout}\n${result.stderr}`;
 
     expect(output).not.toContain('ReferenceError');
     expect(output).not.toContain(
-      'Cannot access \'roleModelInvalidVisibleReplyRejectionReason\' before initialization'
+      "Cannot access 'roleModelInvalidVisibleReplyRejectionReason' before initialization",
     );
     expect(result.status).toBe(0);
   });
@@ -43,30 +47,33 @@ describe('plugin type barrel startup safety', () => {
     [
       './src/plugins/api/index.ts',
       './src/plugins/policy/tool-policy.ts',
-      './src/plugins/builtin/model-tools/index.ts'
+      './src/plugins/builtin/model-tools/index.ts',
     ],
     [
       './src/plugins/builtin/model-tools/index.ts',
       './src/plugins/api/index.ts',
-      './src/plugins/policy/tool-policy.ts'
+      './src/plugins/policy/tool-policy.ts',
     ],
     [
       './src/plugins/policy/tool-policy.ts',
       './src/plugins/builtin/model-tools/index.ts',
-      './src/plugins/api/index.ts'
-    ]
-  ])('imports plugin construction and policy modules in order %j', (...modules) => {
-    const importChain = modules
-      .map((modulePath) => `import(${JSON.stringify(modulePath)})`)
-      .join('.then(() => ')
-      .concat(')'.repeat(modules.length - 1));
-    const result = spawnSync(process.execPath, ['-e', importChain], {
-      cwd: process.cwd(),
-      encoding: 'utf8'
-    });
-    const output = `${result.stdout}\n${result.stderr}`;
+      './src/plugins/api/index.ts',
+    ],
+  ])(
+    'imports plugin construction and policy modules in order %j',
+    (...modules) => {
+      const importChain = modules
+        .map(modulePath => `import(${JSON.stringify(modulePath)})`)
+        .join('.then(() => ')
+        .concat(')'.repeat(modules.length - 1));
+      const result = spawnSync(process.execPath, ['-e', importChain], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+      });
+      const output = `${result.stdout}\n${result.stderr}`;
 
-    expect(output).not.toContain('ReferenceError');
-    expect(result.status).toBe(0);
-  });
+      expect(output).not.toContain('ReferenceError');
+      expect(result.status).toBe(0);
+    },
+  );
 });

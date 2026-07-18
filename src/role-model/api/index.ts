@@ -41,7 +41,7 @@ export {
   type PluginModelToolCall,
   type VisibleReplyModelToolCall,
   type VisibleReplyModelToolName,
-  type VisibleReplyToolInput
+  type VisibleReplyToolInput,
 } from './model-tools.ts';
 export {
   hasDuplicateRoleModelAllowedTools,
@@ -49,7 +49,7 @@ export {
   isRoleModelToolNameSyntax,
   requiredRoleModelIdentifier,
   roleModelAllowedToolNames,
-  type RoleModelAllowedToolName
+  type RoleModelAllowedToolName,
 } from './tool-names.ts';
 export {
   freezeRoleModelChatMessage,
@@ -65,5 +65,5 @@ export {
   type RoleModelProviderToolNameMapping,
   type RoleModelSystemChatMessage,
   type RoleModelToolChatMessage,
-  type RoleModelUserChatMessage
+  type RoleModelUserChatMessage,
 } from './chat-wire.ts';

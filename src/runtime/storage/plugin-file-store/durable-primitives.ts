@@ -1,30 +1,30 @@
-import { createHash, type Hash } from 'node:crypto';
+import {createHash, type Hash} from 'node:crypto';
 import {
   type Dirent,
   lstatSync,
   readFileSync,
   realpathSync,
   readdirSync,
-  rmSync
+  rmSync,
 } from 'node:fs';
-import { basename, dirname, join, parse, resolve, sep } from 'node:path';
+import {basename, dirname, join, parse, resolve, sep} from 'node:path';
 
 import {
   atomicReplaceFileSync,
   isAbandonedAtomicReplacementFile,
-  parseAtomicReplacementFileName
+  parseAtomicReplacementFileName,
 } from '../atomic-file.ts';
 import {
   createLocalRuntimePluginPaths,
-  createLocalRuntimeStorageLayout
+  createLocalRuntimeStorageLayout,
 } from '../layout-contract.ts';
 import {
   acquireLocalRuntimeMutationLocks,
   acquireLocalRuntimeMutationLocksSync,
-  type LocalRuntimeMutationLockOwnerToken
+  type LocalRuntimeMutationLockOwnerToken,
 } from '../mutation-lock.ts';
-import type { RuntimePluginJsonValue } from '../../../plugins/index.ts';
-import type { RuntimePluginFileStorePathMode } from '../../../plugins/index.ts';
+import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
+import type {RuntimePluginFileStorePathMode} from '../../../plugins/index.ts';
 import {
   assertJsonlPathMode,
   assertJsonPathMode,
@@ -35,7 +35,7 @@ import {
   isPlainObject,
   isRuntimePluginFileStorePathMode,
   normalizeRuntimePluginFileStorePath,
-  parseRuntimePluginJsonlContent
+  parseRuntimePluginJsonlContent,
 } from './shared.ts';
 
 const durablePathModeCacheMaxRoots = 128;
@@ -69,7 +69,7 @@ export function withDurablePluginStoreMutation<T>(
     readonly root: string;
     readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
   },
-  operation: () => T
+  operation: () => T,
 ): T {
   return withDurablePluginStoreMutations(
     {
@@ -77,12 +77,12 @@ export function withDurablePluginStoreMutation<T>(
       roots: [options.root],
       ...(options.resourceKeys === undefined
         ? {}
-        : { resourceKeys: options.resourceKeys }),
+        : {resourceKeys: options.resourceKeys}),
       ...(options.ownerToken === undefined
         ? {}
-        : { ownerToken: options.ownerToken })
+        : {ownerToken: options.ownerToken}),
     },
-    operation
+    operation,
   );
 }
 
@@ -93,20 +93,20 @@ export function withDurablePluginStoreMutations<T>(
     readonly roots: readonly string[];
     readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
   },
-  operation: () => T
+  operation: () => T,
 ): T {
   const lease = acquireLocalRuntimeMutationLocksSync({
     locksRoot: createLocalRuntimeStorageLayout({
-      storeRoot: options.storeRoot
+      storeRoot: options.storeRoot,
     }).locksRoot,
     resourceKeys: [
       ...options.roots.map(durablePluginStoreMutationResourceKey),
-      ...(options.resourceKeys ?? [])
+      ...(options.resourceKeys ?? []),
     ],
     waitTimeoutMs: 0,
     ...(options.ownerToken === undefined
       ? {}
-      : { ownerToken: options.ownerToken })
+      : {ownerToken: options.ownerToken}),
   });
 
   try {
@@ -123,20 +123,20 @@ export async function withDurablePluginStoreMutationsAsync<T>(
     readonly roots: readonly string[];
     readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
   },
-  operation: () => T | Promise<T>
+  operation: () => T | Promise<T>,
 ): Promise<T> {
   const lease = await acquireLocalRuntimeMutationLocks({
     locksRoot: createLocalRuntimeStorageLayout({
-      storeRoot: options.storeRoot
+      storeRoot: options.storeRoot,
     }).locksRoot,
     resourceKeys: [
       ...options.roots.map(durablePluginStoreMutationResourceKey),
-      ...(options.resourceKeys ?? [])
+      ...(options.resourceKeys ?? []),
     ],
     waitTimeoutMs: 0,
     ...(options.ownerToken === undefined
       ? {}
-      : { ownerToken: options.ownerToken })
+      : {ownerToken: options.ownerToken}),
   });
 
   try {
@@ -191,7 +191,7 @@ function assertSafeDurableDirectoryPath(path: string, label: string): void {
 
       if (stat.isSymbolicLink()) {
         throw new TypeError(
-          `${label} must be a real directory and cannot contain symlinks.`
+          `${label} must be a real directory and cannot contain symlinks.`,
         );
       }
 
@@ -209,11 +209,11 @@ function assertSafeDurableDirectoryPath(path: string, label: string): void {
 }
 
 export function assertSafeDurableTransactionJournalDirectory(
-  path: string
+  path: string,
 ): void {
   assertSafeDurableDirectoryPath(
     path,
-    'Plugin fileStore transaction journal root'
+    'Plugin fileStore transaction journal root',
   );
 }
 
@@ -223,7 +223,7 @@ export function assertSafeDurablePluginRoot(root: string): void {
 
 export function assertSafeDurablePluginPath(
   root: string,
-  safePath: string
+  safePath: string,
 ): void {
   assertSafeDurablePluginRoot(root);
   let current = root;
@@ -272,7 +272,9 @@ export function readOptionalRegularFile(path: string): string | undefined {
   }
 }
 
-export function readOptionalRegularFileBuffer(path: string): Buffer | undefined {
+export function readOptionalRegularFileBuffer(
+  path: string,
+): Buffer | undefined {
   try {
     assertRegularFile(path, 'Plugin fileStore path');
     return readFileSync(path);
@@ -289,12 +291,12 @@ export function writeTextAtomic(path: string, content: string): void {
   atomicReplaceFileSync({
     targetPath: path,
     content,
-    mode: 0o600
+    mode: 0o600,
   });
 }
 
 export function hashOptionalFileContent(
-  content: string | Buffer | undefined
+  content: string | Buffer | undefined,
 ): string {
   return content === undefined
     ? createHash('sha256').update('missing\u0000').digest('hex')
@@ -306,20 +308,24 @@ export function createPresentFileContentHash(content: string | Buffer): Hash {
 }
 
 export function requiredJournalOperationString(
-  value: string | undefined
+  value: string | undefined,
 ): string {
   if (value === undefined) {
-    throw new TypeError('Plugin fileStore transaction operation is not planned.');
+    throw new TypeError(
+      'Plugin fileStore transaction operation is not planned.',
+    );
   }
 
   return value;
 }
 
 export function requiredJournalOperationRevision(
-  value: number | undefined
+  value: number | undefined,
 ): number {
   if (!isNonNegativeSafeInteger(value)) {
-    throw new TypeError('Plugin fileStore transaction operation is not planned.');
+    throw new TypeError(
+      'Plugin fileStore transaction operation is not planned.',
+    );
   }
 
   return value;
@@ -341,9 +347,7 @@ export function readDurableRevision(root: string): number {
   return readPersistedDurableRevision(root) ?? initialDurableRevision(root);
 }
 
-export function readPersistedDurableRevision(
-  root: string
-): number | undefined {
+export function readPersistedDurableRevision(root: string): number | undefined {
   const revisionPath = join(root, durableRevisionFileName);
 
   try {
@@ -364,27 +368,24 @@ export function readPersistedDurableRevision(
 }
 
 export function writeDurableRevision(root: string, revision: number): void {
-  writeTextAtomic(
-    join(root, durableRevisionFileName),
-    `${String(revision)}\n`
-  );
+  writeTextAtomic(join(root, durableRevisionFileName), `${String(revision)}\n`);
 }
 
 export function readDurablePathModes(
-  root: string
+  root: string,
 ): Map<string, RuntimePluginFileStorePathMode> {
   return new Map(readCachedDurablePathModes(root));
 }
 
 export function readDurablePathMode(
   root: string,
-  path: string
+  path: string,
 ): RuntimePluginFileStorePathMode | undefined {
   return readCachedDurablePathModes(root).get(path);
 }
 
 function readCachedDurablePathModes(
-  root: string
+  root: string,
 ): ReadonlyMap<string, RuntimePluginFileStorePathMode> {
   const beforeStamp = durablePathModesFileStamp(root);
   const cached = durablePathModeCache.get(root);
@@ -407,7 +408,7 @@ function readCachedDurablePathModes(
 }
 
 function readDurablePathModesFile(
-  root: string
+  root: string,
 ): ReadonlyMap<string, RuntimePluginFileStorePathMode> {
   const modesPath = join(root, durablePathModesFileName);
 
@@ -442,36 +443,32 @@ function readDurablePathModesFile(
 
 export function writeDurablePathModes(
   root: string,
-  pathModes: ReadonlyMap<string, RuntimePluginFileStorePathMode>
+  pathModes: ReadonlyMap<string, RuntimePluginFileStorePathMode>,
 ): void {
   const sortedPathModes = [...pathModes].sort(([left], [right]) =>
-    left.localeCompare(right)
+    left.localeCompare(right),
   );
 
   writeTextAtomic(
     join(root, durablePathModesFileName),
-    `${JSON.stringify(Object.fromEntries(sortedPathModes))}\n`
+    `${JSON.stringify(Object.fromEntries(sortedPathModes))}\n`,
   );
   cacheDurablePathModes(
     root,
     durablePathModesFileStamp(root),
-    new Map(pathModes)
+    new Map(pathModes),
   );
 }
 
 function durablePathModesFileStamp(root: string): string {
   try {
     const stat = lstatSync(join(root, durablePathModesFileName), {
-      bigint: true
+      bigint: true,
     });
 
-    return [
-      stat.dev,
-      stat.ino,
-      stat.size,
-      stat.mtimeNs,
-      stat.ctimeNs
-    ].join(':');
+    return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(
+      ':',
+    );
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return 'missing';
@@ -484,11 +481,11 @@ function durablePathModesFileStamp(root: string): string {
 function cacheDurablePathModes(
   root: string,
   fileStamp: string,
-  modes: ReadonlyMap<string, RuntimePluginFileStorePathMode>
+  modes: ReadonlyMap<string, RuntimePluginFileStorePathMode>,
 ): void {
   const entry = Object.freeze({
     fileStamp,
-    modes: new Map(modes)
+    modes: new Map(modes),
   });
 
   touchDurablePathModeCache(root, entry);
@@ -509,7 +506,7 @@ function touchDurablePathModeCache(
   entry: {
     readonly fileStamp: string;
     readonly modes: ReadonlyMap<string, RuntimePluginFileStorePathMode>;
-  }
+  },
 ): void {
   durablePathModeCache.delete(root);
   durablePathModeCache.set(root, entry);
@@ -529,12 +526,12 @@ function initialDurableRevision(root: string): number {
 }
 
 export function cleanupDurablePluginStoreAtomicTempFiles(
-  directory: string
+  directory: string,
 ): void {
   let entries: Dirent[];
 
   try {
-    entries = readdirSync(directory, { withFileTypes: true });
+    entries = readdirSync(directory, {withFileTypes: true});
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return;
@@ -552,7 +549,7 @@ export function cleanupDurablePluginStoreAtomicTempFiles(
     }
 
     if (entry.isFile() && isAbandonedAtomicReplacementFile(entry.name)) {
-      rmSync(entryPath, { force: true });
+      rmSync(entryPath, {force: true});
     }
   }
 }
@@ -560,7 +557,7 @@ export function cleanupDurablePluginStoreAtomicTempFiles(
 function countDurableStoreEntries(directory: string): number {
   let count = 0;
 
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+  for (const entry of readdirSync(directory, {withFileTypes: true})) {
     if (
       entry.name === durableRevisionFileName ||
       entry.name === durablePathModesFileName ||
@@ -604,7 +601,7 @@ export function assertDurableOperationPathMode(options: {
     assertDurableJsonPathMode({
       filePath: options.filePath,
       mode: options.mode,
-      path: options.operation.path
+      path: options.operation.path,
     });
     return;
   }
@@ -612,7 +609,7 @@ export function assertDurableOperationPathMode(options: {
   assertDurableJsonlPathMode({
     filePath: options.filePath,
     mode: options.mode,
-    path: options.operation.path
+    path: options.operation.path,
   });
 }
 
@@ -641,7 +638,7 @@ function assertDurableJsonlPathMode(options: {
   if (options.path.endsWith('.jsonl')) {
     try {
       const records = parseRuntimePluginJsonlContent(
-        readFileSync(options.filePath, 'utf8')
+        readFileSync(options.filePath, 'utf8'),
       );
 
       if (records.length !== 1 || !Array.isArray(records[0])) {

@@ -2,7 +2,7 @@ import {
   createLocalRuntimeStorageLayout,
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction,
-  type RuntimePluginFileStoreProvider
+  type RuntimePluginFileStoreProvider,
 } from '../runtime/storage/index.ts';
 import {
   createRuntimePluginContext,
@@ -26,15 +26,15 @@ import {
   type RuntimePluginManifest,
   type RuntimePluginPackageCatalogEntry,
   type RuntimePluginSessionEndOptions,
-  type RuntimePluginToolConfirmationHandler
+  type RuntimePluginToolConfirmationHandler,
 } from '../plugins/index.ts';
 import {
   bundledRuntimePluginPackageRoot,
   discoverRuntimePluginPackages,
   type RuntimePluginPackageDiagnostic,
-  type RuntimePluginPackageProvenance
+  type RuntimePluginPackageProvenance,
 } from '../plugins/package-loader/index.ts';
-import { ownJsonRecordValue } from '../shared/json-boundary.ts';
+import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {
   createRuntimeConfigDiagnostic,
   createRuntimePluginConfigControlCapability,
@@ -45,22 +45,19 @@ import {
   type LoadedProject02RuntimeConfig,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
-  type RuntimePluginConfigActivationInspectShape
+  type RuntimePluginConfigActivationInspectShape,
 } from '../runtime/config/index.ts';
-import { canonicalJsonValuesEqual } from '../shared/canonical-json.ts';
+import {canonicalJsonValuesEqual} from '../shared/canonical-json.ts';
 
 export type {
   RuntimePluginFactoryFunction,
-  RuntimePluginFactoryInput
+  RuntimePluginFactoryInput,
 } from '../plugins/index.ts';
 
 export type RuntimePluginFactoryDefinition =
   RuntimePluginFactoryDefinitionContract<RuntimePluginFactoryFunction>;
 
-export type RuntimePluginActivationStatus =
-  | 'active'
-  | 'disabled'
-  | 'blocked';
+export type RuntimePluginActivationStatus = 'active' | 'disabled' | 'blocked';
 
 export type RuntimePluginActivationSnapshot = {
   readonly pluginId: string;
@@ -123,7 +120,7 @@ export type RuntimePluginCatalogSnapshot = {
 const configuredRuntimePluginFileStoreProvider: RuntimePluginFileStoreProvider =
   Object.freeze({
     createFileStore: createRuntimePluginFileStore,
-    createFileStoreTransaction: createRuntimePluginFileStoreTransaction
+    createFileStoreTransaction: createRuntimePluginFileStoreTransaction,
   });
 
 const configuredPluginConstructionCleanupSessionId =
@@ -132,10 +129,10 @@ const configuredPluginConstructionCleanupMessage =
   'configured plugin construction failed before host creation';
 const configuredPluginConstructionCleanupCharacter = Object.freeze({
   id: 'project02-runtime-config',
-  displayName: 'Project02 Runtime Config'
+  displayName: 'Project02 Runtime Config',
 });
 const configuredPluginConstructionCleanupOptions = Object.freeze({
-  allowFileStoreWrites: false
+  allowFileStoreWrites: false,
 } satisfies RuntimePluginSessionEndOptions);
 const selectedAsDefaultMemoryProviderReason =
   'selected_as_default_memory_provider';
@@ -147,55 +144,55 @@ export function createRuntimePluginCatalogSnapshot(options: {
   readonly storeRoot?: string;
 }): RuntimePluginCatalogSnapshot {
   const storeRoot = resolveProject02RuntimeStoreRoot(options);
-  const operatorPackageRoot = createLocalRuntimeStorageLayout({ storeRoot })
-    .pluginPackagesRoot;
+  const operatorPackageRoot = createLocalRuntimeStorageLayout({
+    storeRoot,
+  }).pluginPackagesRoot;
   const discovery = discoverRuntimePluginPackages({
     sources: [
       {
         root: bundledRuntimePluginPackageRoot,
-        provenance: 'bundled'
+        provenance: 'bundled',
       },
       {
         root: operatorPackageRoot,
-        provenance: 'operator'
-      }
+        provenance: 'operator',
+      },
     ],
-    reservedPluginIds: hostFirstPartyRuntimePluginIds
+    reservedPluginIds: hostFirstPartyRuntimePluginIds,
   });
   const ordinaryPackages = discovery.packages.filter(
-    (item) => !isHostScopedFirstPartyRuntimePluginId(item.manifest.id)
+    item => !isHostScopedFirstPartyRuntimePluginId(item.manifest.id),
   );
   const bundledSystemServiceDiagnostics = discovery.packages
-    .filter((item) => isHostScopedFirstPartyRuntimePluginId(item.manifest.id))
-    .map(
-      (item): RuntimeConfigDiagnostic =>
-        Object.freeze({
-          severity: 'error',
-          code: 'runtime_plugin_package_reserved_system_service_id',
-          message: `Bundled runtime plugin package id "${item.manifest.id}" is reserved for a bootstrap system service.`,
-          scope: 'plugin',
-          pluginId: item.manifest.id
-        })
+    .filter(item => isHostScopedFirstPartyRuntimePluginId(item.manifest.id))
+    .map((item): RuntimeConfigDiagnostic =>
+      Object.freeze({
+        severity: 'error',
+        code: 'runtime_plugin_package_reserved_system_service_id',
+        message: `Bundled runtime plugin package id "${item.manifest.id}" is reserved for a bootstrap system service.`,
+        scope: 'plugin',
+        pluginId: item.manifest.id,
+      }),
     );
   const packageProvenanceByPluginId = Object.freeze(
     Object.fromEntries(
-      ordinaryPackages.map((item) => [item.manifest.id, item.provenance])
-    )
+      ordinaryPackages.map(item => [item.manifest.id, item.provenance]),
+    ),
   );
   const catalogEntries = Object.freeze({
     ...defaultRuntimePluginHostServiceEntries,
     ...Object.fromEntries(
-      ordinaryPackages.map((item) => [item.manifest.id, item])
-    )
+      ordinaryPackages.map(item => [item.manifest.id, item]),
+    ),
   });
   const discoveredPluginIds = new Set([
-    ...ordinaryPackages.map((item) => item.manifest.id),
-    ...Object.keys(defaultRuntimePluginHostServiceEntries)
+    ...ordinaryPackages.map(item => item.manifest.id),
+    ...Object.keys(defaultRuntimePluginHostServiceEntries),
   ]);
   const defaultEnabledPluginIds = new Set<string>();
 
   for (const definition of Object.values(
-    defaultRuntimePluginHostServiceEntries
+    defaultRuntimePluginHostServiceEntries,
   )) {
     if (definition.manifest.activation.defaultEnabled) {
       defaultEnabledPluginIds.add(definition.manifest.id);
@@ -216,20 +213,20 @@ export function createRuntimePluginCatalogSnapshot(options: {
     defaultEnabledPluginIds: Object.freeze([...defaultEnabledPluginIds]),
     packageProvenanceByPluginId,
     diagnostics: Object.freeze([
-      ...discovery.diagnostics.map((diagnostic) =>
+      ...discovery.diagnostics.map(diagnostic =>
         runtimePluginPackageDiagnostic({
           diagnostic,
           loadedConfig: options.loadedConfig,
-          discoveredPluginIds
-        })
+          discoveredPluginIds,
+        }),
       ),
-      ...bundledSystemServiceDiagnostics
-    ])
+      ...bundledSystemServiceDiagnostics,
+    ]),
   } satisfies RuntimePluginCatalogSnapshot);
 }
 
 function composeRuntimePluginCatalog(
-  factories: Readonly<Record<string, RuntimePluginFactoryDefinition>>
+  factories: Readonly<Record<string, RuntimePluginFactoryDefinition>>,
 ): {
   readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
   readonly defaultEnabledPluginIds: readonly string[];
@@ -242,18 +239,18 @@ function composeRuntimePluginCatalog(
         Object.freeze({
           catalogKind: 'package',
           manifest: definition.manifest,
-          load: (input) => definition.create(input)
-        } satisfies RuntimePluginPackageCatalogEntry)
-      ])
+          load: input => definition.create(input),
+        } satisfies RuntimePluginPackageCatalogEntry),
+      ]),
   );
   const catalogEntries = Object.freeze({
     ...defaultRuntimePluginHostServiceEntries,
-    ...packageEntries
+    ...packageEntries,
   });
   const defaultEnabledPluginIds = new Set<string>();
 
   for (const [pluginId, definition] of Object.entries(
-    defaultRuntimePluginHostServiceEntries
+    defaultRuntimePluginHostServiceEntries,
   )) {
     if (
       pluginId === definition.manifest.id &&
@@ -275,7 +272,7 @@ function composeRuntimePluginCatalog(
 
   return Object.freeze({
     catalogEntries,
-    defaultEnabledPluginIds: Object.freeze([...defaultEnabledPluginIds])
+    defaultEnabledPluginIds: Object.freeze([...defaultEnabledPluginIds]),
   });
 }
 
@@ -287,41 +284,46 @@ export function prepareConfiguredProject02PluginActivation(options: {
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
 }): PreparedProject02PluginActivationPlan {
-  if (options.factories !== undefined && options.catalogSnapshot !== undefined) {
+  if (
+    options.factories !== undefined &&
+    options.catalogSnapshot !== undefined
+  ) {
     throw new TypeError(
-      'Runtime plugin factories and a catalog snapshot cannot both be provided.'
+      'Runtime plugin factories and a catalog snapshot cannot both be provided.',
     );
   }
 
-  const composition = options.factories === undefined
-    ? options.catalogSnapshot ?? createRuntimePluginCatalogSnapshot({
-        loadedConfig: options.loadedConfig,
-        ...(options.storeRoot === undefined
-          ? {}
-          : { storeRoot: options.storeRoot })
-      })
-    : Object.freeze({
-        storeRoot: resolveProject02RuntimeStoreRoot(options),
-        ...composeRuntimePluginCatalog(options.factories),
-        packageProvenanceByPluginId: Object.freeze({}),
-        diagnostics: Object.freeze([])
-      } satisfies RuntimePluginCatalogSnapshot);
+  const composition =
+    options.factories === undefined
+      ? (options.catalogSnapshot ??
+        createRuntimePluginCatalogSnapshot({
+          loadedConfig: options.loadedConfig,
+          ...(options.storeRoot === undefined
+            ? {}
+            : {storeRoot: options.storeRoot}),
+        }))
+      : Object.freeze({
+          storeRoot: resolveProject02RuntimeStoreRoot(options),
+          ...composeRuntimePluginCatalog(options.factories),
+          packageProvenanceByPluginId: Object.freeze({}),
+          diagnostics: Object.freeze([]),
+        } satisfies RuntimePluginCatalogSnapshot);
   const expectedStoreRoot = resolveProject02RuntimeStoreRoot(options);
 
   if (composition.storeRoot !== expectedStoreRoot) {
     throw new TypeError(
-      'Runtime plugin catalog snapshot does not match the resolved store root.'
+      'Runtime plugin catalog snapshot does not match the resolved store root.',
     );
   }
-  const catalogEntries = Object.freeze({ ...composition.catalogEntries });
+  const catalogEntries = Object.freeze({...composition.catalogEntries});
   const pluginManifests = activationPluginManifests(catalogEntries);
   const defaultEnabledPluginIds = new Set(composition.defaultEnabledPluginIds);
   const resolvedConfig = resolveProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     pluginManifests,
     defaultEnabledPluginIds,
-    ...(options.env === undefined ? {} : { env: options.env })
+    ...(options.env === undefined ? {} : {env: options.env}),
   });
   const activation = resolveRuntimePluginActivation({
     pluginManifests,
@@ -329,7 +331,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
     resolvedConfig,
     loadedConfig: options.loadedConfig,
     strictUnknownPlugins: options.strictUnknownPlugins === true,
-    catalogDiagnostics: composition.diagnostics
+    catalogDiagnostics: composition.diagnostics,
   });
 
   return Object.freeze({
@@ -342,32 +344,32 @@ export function prepareConfiguredProject02PluginActivation(options: {
       control: createRuntimePluginConfigControlCapability(),
       activationByPluginId: runtimePluginConfigActivationByPluginId(activation),
       defaultEnabledPluginIds: Object.freeze([
-        ...composition.defaultEnabledPluginIds
+        ...composition.defaultEnabledPluginIds,
       ]),
       ...(resolvedConfig.path === undefined
         ? {}
-        : { configPath: resolvedConfig.path }),
+        : {configPath: resolvedConfig.path}),
       ...(options.env === undefined
         ? {}
-        : { env: Object.freeze({ ...options.env }) })
-    })
+        : {env: Object.freeze({...options.env})}),
+    }),
   } satisfies PreparedProject02PluginActivationPlan);
 }
 
 function runtimePluginConfigActivationByPluginId(
-  activation: RuntimePluginActivationResult
+  activation: RuntimePluginActivationResult,
 ): Readonly<Record<string, RuntimePluginConfigActivationInspectShape>> {
   return Object.freeze(
     Object.fromEntries(
-      activation.plugins.map((plugin) => [
+      activation.plugins.map(plugin => [
         plugin.pluginId,
         Object.freeze({
           enabled: plugin.enabled,
           status: plugin.activationStatus,
-          reasons: Object.freeze([...plugin.activationReasons])
-        } satisfies RuntimePluginConfigActivationInspectShape)
-      ])
-    )
+          reasons: Object.freeze([...plugin.activationReasons]),
+        } satisfies RuntimePluginConfigActivationInspectShape),
+      ]),
+    ),
   );
 }
 
@@ -381,17 +383,18 @@ export async function createConfiguredProject02PluginHost(options: {
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
   readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler | undefined;
+  readonly toolConfirmationHandler?:
+    RuntimePluginToolConfirmationHandler | undefined;
 }): Promise<Project02ConfiguredPluginHost> {
   const activationPlan = prepareConfiguredProject02PluginActivation({
     loadedConfig: options.loadedConfig,
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     strictUnknownPlugins: options.strictUnknownPlugins === true,
-    ...(options.env === undefined ? {} : { env: options.env }),
-    ...(options.factories === undefined ? {} : { factories: options.factories }),
+    ...(options.env === undefined ? {} : {env: options.env}),
+    ...(options.factories === undefined ? {} : {factories: options.factories}),
     ...(options.catalogSnapshot === undefined
       ? {}
-      : { catalogSnapshot: options.catalogSnapshot })
+      : {catalogSnapshot: options.catalogSnapshot}),
   });
 
   return createConfiguredProject02PluginHostFromPlan({
@@ -399,7 +402,7 @@ export async function createConfiguredProject02PluginHost(options: {
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
     constructionCleanup: options.constructionCleanup,
-    toolConfirmationHandler: options.toolConfirmationHandler
+    toolConfirmationHandler: options.toolConfirmationHandler,
   });
 }
 
@@ -408,10 +411,11 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
   readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler | undefined;
+  readonly toolConfirmationHandler?:
+    RuntimePluginToolConfirmationHandler | undefined;
 }): Promise<Project02ConfiguredPluginHost> {
-  const { activationPlan } = options;
-  const { catalogEntries } = activationPlan;
+  const {activationPlan} = options;
+  const {catalogEntries} = activationPlan;
 
   if (diagnosticsHaveErrors(activationPlan.activation.diagnostics)) {
     const plugins: readonly RuntimePlugin[] = Object.freeze([]);
@@ -423,18 +427,17 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
         storeRoot: activationPlan.resolvedConfig.project02.storeRoot,
         fileStore: configuredRuntimePluginFileStoreProvider,
         pluginInventoryState: runtimePluginInventoryStateForInvalidConfig(
-          activationPlan.pluginConfigControl
+          activationPlan.pluginConfigControl,
         ),
         toolConfirmationHandler: options.toolConfirmationHandler,
         sessionId: options.sessionId,
-        sessionIdentity: options.sessionIdentity
+        sessionIdentity: options.sessionIdentity,
       }),
       plugins,
       resolvedConfig: activationPlan.resolvedConfig,
       activation: activationPlan.activation,
-      packageProvenanceByPluginId:
-        activationPlan.packageProvenanceByPluginId,
-      pluginConfigControl: activationPlan.pluginConfigControl
+      packageProvenanceByPluginId: activationPlan.packageProvenanceByPluginId,
+      pluginConfigControl: activationPlan.pluginConfigControl,
     } satisfies Project02ConfiguredPluginHost);
   }
 
@@ -444,7 +447,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     enabledPluginIds: activationPlan.activation.enabledPluginIds,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
-    constructionCleanup: options.constructionCleanup
+    constructionCleanup: options.constructionCleanup,
   });
   let host: RuntimePluginHost;
 
@@ -457,7 +460,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       pluginConfigControl: activationPlan.pluginConfigControl,
       toolConfirmationHandler: options.toolConfirmationHandler,
       sessionId: options.sessionId,
-      sessionIdentity: options.sessionIdentity
+      sessionIdentity: options.sessionIdentity,
     });
   } catch (error: unknown) {
     await cleanupPartiallyInstantiatedPlugins({
@@ -465,7 +468,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       resolvedConfig: activationPlan.resolvedConfig,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
-      constructionCleanup: options.constructionCleanup
+      constructionCleanup: options.constructionCleanup,
     });
     throw error;
   }
@@ -476,7 +479,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     resolvedConfig: activationPlan.resolvedConfig,
     activation: activationPlan.activation,
     packageProvenanceByPluginId: activationPlan.packageProvenanceByPluginId,
-    pluginConfigControl: activationPlan.pluginConfigControl
+    pluginConfigControl: activationPlan.pluginConfigControl,
   } satisfies Project02ConfiguredPluginHost);
 }
 
@@ -490,9 +493,11 @@ export function resolveRuntimePluginActivation(options: {
   readonly strictUnknownPlugins?: boolean;
 }): RuntimePluginActivationResult {
   const pluginManifests =
-    options.pluginManifests ?? options.plugins?.map((plugin) => plugin.manifest) ?? [];
+    options.pluginManifests ??
+    options.plugins?.map(plugin => plugin.manifest) ??
+    [];
   const config = options.loadedConfig.config;
-  const pluginIds = new Set(pluginManifests.map((manifest) => manifest.id));
+  const pluginIds = new Set(pluginManifests.map(manifest => manifest.id));
   const baseDiagnostics: readonly RuntimeConfigDiagnostic[] = Object.freeze([
     ...unknownPluginDiagnostics({
       knownPluginIds: pluginIds,
@@ -500,23 +505,24 @@ export function resolveRuntimePluginActivation(options: {
       ...(config?.project02?.defaultMemoryProvider === undefined
         ? {}
         : {
-            defaultMemoryProviderId:
-              config.project02.defaultMemoryProvider
+            defaultMemoryProviderId: config.project02.defaultMemoryProvider,
           }),
-      strict: options.strictUnknownPlugins === true
+      strict: options.strictUnknownPlugins === true,
     }),
     ...options.resolvedConfig.diagnostics,
-    ...(options.catalogDiagnostics ?? [])
+    ...(options.catalogDiagnostics ?? []),
   ]);
-  const loadedConfigHasErrors = diagnosticsHaveErrors(options.loadedConfig.diagnostics);
+  const loadedConfigHasErrors = diagnosticsHaveErrors(
+    options.loadedConfig.diagnostics,
+  );
   const globalConfigErrors = hasGlobalRuntimeConfigErrors({
     diagnostics: baseDiagnostics,
-    knownPluginIds: pluginIds
+    knownPluginIds: pluginIds,
   });
   const enabledPluginIds: string[] = [];
   const disabledPluginIds: string[] = [];
   const snapshots: RuntimePluginActivationSnapshot[] = [];
-  const preliminaryDecisions = pluginManifests.map((manifest) => {
+  const preliminaryDecisions = pluginManifests.map(manifest => {
     const configured = ownJsonRecordValue(config?.plugins, manifest.id);
     const defaultEnabled =
       options.defaultEnabledPluginIds?.has(manifest.id) === true;
@@ -526,7 +532,7 @@ export function resolveRuntimePluginActivation(options: {
         globalConfigErrors ||
         pluginHasRuntimeConfigErrors({
           diagnostics: baseDiagnostics,
-          pluginId: manifest.id
+          pluginId: manifest.id,
         }));
 
     return Object.freeze({
@@ -534,57 +540,55 @@ export function resolveRuntimePluginActivation(options: {
       duplicateCandidateDecision: activationDecision({
         configuredEnabled: configured?.enabled,
         defaultEnabled,
-        configErrors: false
+        configErrors: false,
       }),
       decision: activationDecision({
         configuredEnabled: configured?.enabled,
         defaultEnabled,
-        configErrors
-      })
-    });
-  });
-  const duplicateCandidateMemoryProviderDecision = defaultMemoryProviderDecision({
-    ...(config?.project02?.defaultMemoryProvider === undefined
-      ? {}
-      : {
-          configDefaultMemoryProvider:
-            config.project02.defaultMemoryProvider
-        }),
-    pluginManifests,
-    memoryProviderManifests: pluginManifests.filter(
-      (manifest) => manifest.kind === 'memory_provider'
-    ),
-    enabledPluginManifests: preliminaryDecisions
-      .filter((preliminary) => preliminary.duplicateCandidateDecision.enabled)
-      .map((preliminary) => preliminary.manifest)
-  });
-  const duplicateManifestDiagnostics =
-    duplicatePluginManifestIdDiagnostics({
-      pluginManifests: duplicateDiagnosticPluginManifests({
-        preliminaryDecisions,
-        memoryProviderDecision: duplicateCandidateMemoryProviderDecision
+        configErrors,
       }),
-      reservedPluginIds: []
     });
+  });
+  const duplicateCandidateMemoryProviderDecision =
+    defaultMemoryProviderDecision({
+      ...(config?.project02?.defaultMemoryProvider === undefined
+        ? {}
+        : {
+            configDefaultMemoryProvider: config.project02.defaultMemoryProvider,
+          }),
+      pluginManifests,
+      memoryProviderManifests: pluginManifests.filter(
+        manifest => manifest.kind === 'memory_provider',
+      ),
+      enabledPluginManifests: preliminaryDecisions
+        .filter(preliminary => preliminary.duplicateCandidateDecision.enabled)
+        .map(preliminary => preliminary.manifest),
+    });
+  const duplicateManifestDiagnostics = duplicatePluginManifestIdDiagnostics({
+    pluginManifests: duplicateDiagnosticPluginManifests({
+      preliminaryDecisions,
+      memoryProviderDecision: duplicateCandidateMemoryProviderDecision,
+    }),
+    reservedPluginIds: [],
+  });
   const diagnostics: RuntimeConfigDiagnostic[] = [
     ...duplicateManifestDiagnostics,
-    ...baseDiagnostics
+    ...baseDiagnostics,
   ];
 
   const memoryProviderDecision = defaultMemoryProviderDecision({
     ...(config?.project02?.defaultMemoryProvider === undefined
       ? {}
       : {
-          configDefaultMemoryProvider:
-            config.project02.defaultMemoryProvider
+          configDefaultMemoryProvider: config.project02.defaultMemoryProvider,
         }),
     pluginManifests,
     memoryProviderManifests: pluginManifests.filter(
-      (manifest) => manifest.kind === 'memory_provider'
+      manifest => manifest.kind === 'memory_provider',
     ),
     enabledPluginManifests: preliminaryDecisions
-      .filter((preliminary) => preliminary.decision.enabled)
-      .map((preliminary) => preliminary.manifest)
+      .filter(preliminary => preliminary.decision.enabled)
+      .map(preliminary => preliminary.manifest),
   });
 
   diagnostics.push(...memoryProviderDecision.diagnostics);
@@ -595,18 +599,18 @@ export function resolveRuntimePluginActivation(options: {
     const memoryDecision = finalizeMemoryProviderActivation({
       manifest,
       decision: preliminaryDecision.decision,
-      memoryProviderDecision
+      memoryProviderDecision,
     });
     const decision = blockActivationAfterRuntimeConfigErrors({
       decision: memoryDecision,
       configErrors:
         activationConfigErrors &&
-        !isRuntimePluginInventoryRecoveryManifest(manifest)
+        !isRuntimePluginInventoryRecoveryManifest(manifest),
     });
     const access = runtimePluginAccessSnapshot({
       requestedAccess: manifest.requestedAccess,
       enabled: decision.enabled,
-      fieldPrefix: manifest.id
+      fieldPrefix: manifest.id,
     });
 
     if (decision.enabled) {
@@ -625,17 +629,17 @@ export function resolveRuntimePluginActivation(options: {
         activationStatus: decision.status,
         activationReasons: Object.freeze([
           ...manifest.activation.reasons,
-          ...decision.reasons
+          ...decision.reasons,
         ]),
         diagnostics: Object.freeze(
-          diagnostics.filter((diagnostic) =>
+          diagnostics.filter(diagnostic =>
             runtimeConfigDiagnosticMatchesPlugin({
               diagnostic,
-              pluginId: manifest.id
-            })
-          )
-        )
-      } satisfies RuntimePluginActivationSnapshot)
+              pluginId: manifest.id,
+            }),
+          ),
+        ),
+      } satisfies RuntimePluginActivationSnapshot),
     );
   }
 
@@ -646,7 +650,7 @@ export function resolveRuntimePluginActivation(options: {
     diagnostics: Object.freeze(diagnostics),
     ...(memoryProviderDecision.defaultMemoryProvider === undefined
       ? {}
-      : { defaultMemoryProvider: memoryProviderDecision.defaultMemoryProvider })
+      : {defaultMemoryProvider: memoryProviderDecision.defaultMemoryProvider}),
   } satisfies RuntimePluginActivationResult);
 }
 
@@ -655,12 +659,12 @@ function hasGlobalRuntimeConfigErrors(options: {
   readonly knownPluginIds: ReadonlySet<string>;
 }): boolean {
   return options.diagnostics.some(
-    (diagnostic) =>
+    diagnostic =>
       diagnostic.severity === 'error' &&
       !isKnownPluginRuntimeConfigDiagnostic({
         diagnostic,
-        knownPluginIds: options.knownPluginIds
-      })
+        knownPluginIds: options.knownPluginIds,
+      }),
   );
 }
 
@@ -669,12 +673,12 @@ function pluginHasRuntimeConfigErrors(options: {
   readonly pluginId: string;
 }): boolean {
   return options.diagnostics.some(
-    (diagnostic) =>
+    diagnostic =>
       diagnostic.severity === 'error' &&
       runtimeConfigDiagnosticMatchesPlugin({
         diagnostic,
-        pluginId: options.pluginId
-      })
+        pluginId: options.pluginId,
+      }),
   );
 }
 
@@ -686,7 +690,7 @@ function isKnownPluginRuntimeConfigDiagnostic(options: {
     if (
       runtimeConfigDiagnosticMatchesPlugin({
         diagnostic: options.diagnostic,
-        pluginId
+        pluginId,
       })
     ) {
       return true;
@@ -720,26 +724,28 @@ async function instantiateRuntimePluginPackages(options: {
         pluginId: entry.manifest.id,
         manifest: entry.manifest,
         storeRoot: options.resolvedConfig.project02.storeRoot,
-        resolvedConfig: ownJsonRecordValue(
-          options.resolvedConfig.pluginConfigs,
-          entry.manifest.id
-        ) ?? {},
-        redactedConfig: ownJsonRecordValue(
-          options.resolvedConfig.redactedPluginConfigs,
-          entry.manifest.id
-        ) ?? {}
+        resolvedConfig:
+          ownJsonRecordValue(
+            options.resolvedConfig.pluginConfigs,
+            entry.manifest.id,
+          ) ?? {},
+        redactedConfig:
+          ownJsonRecordValue(
+            options.resolvedConfig.redactedPluginConfigs,
+            entry.manifest.id,
+          ) ?? {},
       });
       plugins.push(plugin);
 
       if (plugin.manifest.id !== entry.manifest.id) {
         throw new TypeError(
-          `Plugin package loader "${pluginId}" returned plugin "${plugin.manifest.id}" after declaring manifest "${entry.manifest.id}".`
+          `Plugin package loader "${pluginId}" returned plugin "${plugin.manifest.id}" after declaring manifest "${entry.manifest.id}".`,
         );
       }
 
       if (!runtimePluginManifestsMatch(plugin.manifest, entry.manifest)) {
         throw new TypeError(
-          `Plugin package loader "${pluginId}" returned a manifest that differs from its declared manifest "${entry.manifest.id}".`
+          `Plugin package loader "${pluginId}" returned a manifest that differs from its declared manifest "${entry.manifest.id}".`,
         );
       }
     }
@@ -749,7 +755,7 @@ async function instantiateRuntimePluginPackages(options: {
       resolvedConfig: options.resolvedConfig,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
-      constructionCleanup: options.constructionCleanup
+      constructionCleanup: options.constructionCleanup,
     });
     throw error;
   }
@@ -762,41 +768,40 @@ function runtimePluginPackageDiagnostic(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly discoveredPluginIds: ReadonlySet<string>;
 }): RuntimeConfigDiagnostic {
-  const { diagnostic } = options;
+  const {diagnostic} = options;
   const diagnosticPluginIds = [
     diagnostic.pluginId,
-    diagnostic.claimedPluginId
+    diagnostic.claimedPluginId,
   ].filter((pluginId): pluginId is string => pluginId !== undefined);
   const configuredPluginId = diagnosticPluginIds.find(
-    (pluginId) =>
-      ownJsonRecordValue(
-        options.loadedConfig.config?.plugins,
-        pluginId
-      )?.enabled === true
+    pluginId =>
+      ownJsonRecordValue(options.loadedConfig.config?.plugins, pluginId)
+        ?.enabled === true,
   );
-  const pluginId = configuredPluginId ?? diagnostic.pluginId ??
-    diagnostic.claimedPluginId;
-  const hasDiscoveredWinner = diagnosticPluginIds.some((candidateId) =>
-    options.discoveredPluginIds.has(candidateId)
+  const pluginId =
+    configuredPluginId ?? diagnostic.pluginId ?? diagnostic.claimedPluginId;
+  const hasDiscoveredWinner = diagnosticPluginIds.some(candidateId =>
+    options.discoveredPluginIds.has(candidateId),
   );
-  const severity = diagnostic.provenance === 'bundled' ||
+  const severity =
+    diagnostic.provenance === 'bundled' ||
     pluginId === undefined ||
     (configuredPluginId !== undefined && !hasDiscoveredWinner)
-    ? 'error'
-    : 'warning';
+      ? 'error'
+      : 'warning';
   const base = {
     severity,
     code: `runtime_plugin_package_${diagnostic.code}`,
     message: diagnostic.message,
-    path: diagnostic.path
+    path: diagnostic.path,
   } as const;
 
   return pluginId === undefined
-    ? Object.freeze({ ...base, scope: 'global' })
+    ? Object.freeze({...base, scope: 'global'})
     : Object.freeze({
         ...base,
         scope: 'plugin',
-        pluginId
+        pluginId,
       });
 }
 
@@ -820,7 +825,7 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
     sessionId,
     eventType: 'USER_MESSAGE',
     currentUserMessage: configuredPluginConstructionCleanupMessage,
-    character: configuredPluginConstructionCleanupCharacter
+    character: configuredPluginConstructionCleanupCharacter,
   });
   try {
     await runRuntimePluginSessionEndHooks({
@@ -832,8 +837,8 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
       sessionIdentity: options.sessionIdentity,
       hookOptions: {
         ...options.constructionCleanup,
-        ...configuredPluginConstructionCleanupOptions
-      }
+        ...configuredPluginConstructionCleanupOptions,
+      },
     });
   } catch {
     // Construction cleanup is best-effort and must not mask the factory or host error.
@@ -846,7 +851,7 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
       storeRoot: options.resolvedConfig.project02.storeRoot,
       createFileStore: configuredRuntimePluginFileStoreProvider.createFileStore,
       sessionId,
-      sessionIdentity: options.sessionIdentity
+      sessionIdentity: options.sessionIdentity,
     });
   } catch {
     // Shutdown is best-effort and must not mask the factory or host error.
@@ -855,21 +860,21 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
 
 function runtimePluginManifestsMatch(
   actual: RuntimePluginManifest,
-  expected: RuntimePluginManifest
+  expected: RuntimePluginManifest,
 ): boolean {
   return canonicalJsonValuesEqual(actual, expected);
 }
 
 function activationPluginManifests(
-  catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>
+  catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>,
 ): readonly RuntimePluginManifest[] {
   return Object.freeze(
-    Object.values(catalogEntries).map((entry) => entry.manifest)
+    Object.values(catalogEntries).map(entry => entry.manifest),
   );
 }
 
 function isRuntimePluginInventoryRecoveryManifest(
-  manifest: RuntimePluginManifest
+  manifest: RuntimePluginManifest,
 ): boolean {
   return (
     defaultRuntimePluginHostServiceEntries[runtimePluginId]?.manifest ===
@@ -878,7 +883,7 @@ function isRuntimePluginInventoryRecoveryManifest(
 }
 
 function runtimePluginInventoryStateForInvalidConfig(
-  state: RuntimePluginConfigControlHostState
+  state: RuntimePluginConfigControlHostState,
 ): RuntimePluginConfigControlHostState {
   const manifestsById = new Map<string, RuntimePluginManifest>();
 
@@ -892,13 +897,13 @@ function runtimePluginInventoryStateForInvalidConfig(
     pluginManifests: Object.freeze([...manifestsById.values()]),
     ...(state.activationByPluginId === undefined
       ? {}
-      : { activationByPluginId: state.activationByPluginId }),
+      : {activationByPluginId: state.activationByPluginId}),
     ...(state.defaultEnabledPluginIds === undefined
       ? {}
-      : { defaultEnabledPluginIds: state.defaultEnabledPluginIds }),
-    ...(state.configPath === undefined ? {} : { configPath: state.configPath }),
-    ...(state.env === undefined ? {} : { env: state.env }),
-    ...(state.control === undefined ? {} : { control: state.control })
+      : {defaultEnabledPluginIds: state.defaultEnabledPluginIds}),
+    ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
+    ...(state.env === undefined ? {} : {env: state.env}),
+    ...(state.control === undefined ? {} : {control: state.control}),
   });
 }
 
@@ -915,7 +920,7 @@ function activationDecision(options: {
     return {
       enabled: false,
       status: 'disabled',
-      reasons: ['disabled_by_config']
+      reasons: ['disabled_by_config'],
     };
   }
 
@@ -923,7 +928,7 @@ function activationDecision(options: {
     return {
       enabled: false,
       status: 'blocked',
-      reasons: ['blocked_by_config_errors']
+      reasons: ['blocked_by_config_errors'],
     };
   }
 
@@ -931,7 +936,7 @@ function activationDecision(options: {
     return {
       enabled: true,
       status: 'active',
-      reasons: ['enabled_by_config']
+      reasons: ['enabled_by_config'],
     };
   }
 
@@ -939,14 +944,14 @@ function activationDecision(options: {
     return {
       enabled: true,
       status: 'active',
-      reasons: ['enabled_by_default']
+      reasons: ['enabled_by_default'],
     };
   }
 
   return {
     enabled: false,
     status: 'disabled',
-    reasons: ['not_enabled']
+    reasons: ['not_enabled'],
   };
 }
 
@@ -955,7 +960,9 @@ function duplicateDiagnosticPluginManifests(options: {
     readonly manifest: RuntimePluginManifest;
     readonly duplicateCandidateDecision: ReturnType<typeof activationDecision>;
   }[];
-  readonly memoryProviderDecision: ReturnType<typeof defaultMemoryProviderDecision>;
+  readonly memoryProviderDecision: ReturnType<
+    typeof defaultMemoryProviderDecision
+  >;
 }): readonly RuntimePluginManifest[] {
   const activePluginIds = new Set<string>();
 
@@ -965,7 +972,7 @@ function duplicateDiagnosticPluginManifests(options: {
       : finalizeMemoryProviderActivation({
           manifest: preliminary.manifest,
           decision: preliminary.duplicateCandidateDecision,
-          memoryProviderDecision: options.memoryProviderDecision
+          memoryProviderDecision: options.memoryProviderDecision,
         });
 
     if (decision.enabled) {
@@ -975,8 +982,8 @@ function duplicateDiagnosticPluginManifests(options: {
 
   return Object.freeze(
     options.preliminaryDecisions
-      .filter((preliminary) => activePluginIds.has(preliminary.manifest.id))
-      .map((preliminary) => preliminary.manifest)
+      .filter(preliminary => activePluginIds.has(preliminary.manifest.id))
+      .map(preliminary => preliminary.manifest),
   );
 }
 
@@ -993,14 +1000,16 @@ function blockActivationAfterRuntimeConfigErrors(options: {
     status: 'blocked',
     reasons: Object.freeze([
       ...options.decision.reasons,
-      'blocked_by_config_errors'
-    ])
+      'blocked_by_config_errors',
+    ]),
   };
 }
 
 function unknownPluginDiagnostics(options: {
   readonly knownPluginIds: ReadonlySet<string>;
-  readonly loadedPlugins: NonNullable<LoadedProject02RuntimeConfig['config']>['plugins'];
+  readonly loadedPlugins: NonNullable<
+    LoadedProject02RuntimeConfig['config']
+  >['plugins'];
   readonly defaultMemoryProviderId?: string;
   readonly strict: boolean;
 }): readonly RuntimeConfigDiagnostic[] {
@@ -1012,7 +1021,7 @@ function unknownPluginDiagnostics(options: {
   };
 
   for (const [pluginId, pluginConfig] of Object.entries(
-    options.loadedPlugins ?? {}
+    options.loadedPlugins ?? {},
   )) {
     if (
       pluginConfig.enabled === false &&
@@ -1025,7 +1034,10 @@ function unknownPluginDiagnostics(options: {
   }
 
   if (options.defaultMemoryProviderId !== undefined) {
-    addUnknown(options.defaultMemoryProviderId, 'project02.defaultMemoryProvider');
+    addUnknown(
+      options.defaultMemoryProviderId,
+      'project02.defaultMemoryProvider',
+    );
   }
 
   return Object.freeze(
@@ -1035,9 +1047,9 @@ function unknownPluginDiagnostics(options: {
         'runtime_config_unknown_plugin',
         `Runtime config references unknown plugin "${pluginId}".`,
         path,
-        { pluginId }
-      )
-    )
+        {pluginId},
+      ),
+    ),
   );
 }
 
@@ -1058,15 +1070,15 @@ function duplicatePluginManifestIdDiagnostics(options: {
   }
 
   return Object.freeze(
-    [...duplicateIds].map((pluginId) =>
+    [...duplicateIds].map(pluginId =>
       createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_duplicate_plugin_manifest_id',
         `Runtime plugin manifest id "${pluginId}" is declared more than once.`,
         `plugins.${pluginId}`,
-        { pluginId }
-      )
-    )
+        {pluginId},
+      ),
+    ),
   );
 }
 
@@ -1082,18 +1094,18 @@ function defaultMemoryProviderDecision(options: {
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 } {
   const enabledMemoryProviders = options.enabledPluginManifests.filter(
-    (manifest) => manifest.kind === 'memory_provider'
+    manifest => manifest.kind === 'memory_provider',
   );
 
   if (options.configDefaultMemoryProvider !== undefined) {
     const knownPlugin = options.pluginManifests.find(
-      (manifest) => manifest.id === options.configDefaultMemoryProvider
+      manifest => manifest.id === options.configDefaultMemoryProvider,
     );
     const knownMemoryProvider = options.memoryProviderManifests.find(
-      (manifest) => manifest.id === options.configDefaultMemoryProvider
+      manifest => manifest.id === options.configDefaultMemoryProvider,
     );
     const selected = enabledMemoryProviders.find(
-      (manifest) => manifest.id === options.configDefaultMemoryProvider
+      manifest => manifest.id === options.configDefaultMemoryProvider,
     );
 
     if (selected === undefined) {
@@ -1107,9 +1119,9 @@ function defaultMemoryProviderDecision(options: {
               'default_memory_provider_not_memory_provider',
               `Default memory provider "${options.configDefaultMemoryProvider}" is a "${knownPlugin.kind}" plugin, not a memory_provider plugin.`,
               'project02.defaultMemoryProvider',
-              { pluginId: knownPlugin.id }
-            )
-          ]
+              {pluginId: knownPlugin.id},
+            ),
+          ],
         };
       }
 
@@ -1127,9 +1139,9 @@ function defaultMemoryProviderDecision(options: {
             'project02.defaultMemoryProvider',
             knownMemoryProvider === undefined
               ? undefined
-              : { pluginId: knownMemoryProvider.id }
-          )
-        ]
+              : {pluginId: knownMemoryProvider.id},
+          ),
+        ],
       };
     }
 
@@ -1137,7 +1149,7 @@ function defaultMemoryProviderDecision(options: {
       activeMemoryProviderIds: [selected.id],
       ambiguous: false,
       defaultMemoryProvider: selected.id,
-      diagnostics: []
+      diagnostics: [],
     };
   }
 
@@ -1150,9 +1162,9 @@ function defaultMemoryProviderDecision(options: {
           'error',
           'ambiguous_memory_provider_selection',
           'Multiple memory providers are active without defaultMemoryProvider.',
-          'project02.defaultMemoryProvider'
-        )
-      ]
+          'project02.defaultMemoryProvider',
+        ),
+      ],
     };
   }
 
@@ -1162,22 +1174,27 @@ function defaultMemoryProviderDecision(options: {
         ? []
         : [enabledMemoryProviders[0].id],
     ambiguous: false,
-    diagnostics: []
+    diagnostics: [],
   };
 }
 
 function finalizeMemoryProviderActivation(options: {
   readonly manifest: RuntimePluginManifest;
   readonly decision: ReturnType<typeof activationDecision>;
-  readonly memoryProviderDecision: ReturnType<typeof defaultMemoryProviderDecision>;
+  readonly memoryProviderDecision: ReturnType<
+    typeof defaultMemoryProviderDecision
+  >;
 }): ReturnType<typeof activationDecision> {
-  if (!options.decision.enabled || options.manifest.kind !== 'memory_provider') {
+  if (
+    !options.decision.enabled ||
+    options.manifest.kind !== 'memory_provider'
+  ) {
     return options.decision;
   }
 
   if (
     options.memoryProviderDecision.activeMemoryProviderIds.includes(
-      options.manifest.id
+      options.manifest.id,
     )
   ) {
     return {
@@ -1186,10 +1203,12 @@ function finalizeMemoryProviderActivation(options: {
         ...options.decision.reasons,
         ...(options.memoryProviderDecision.defaultMemoryProvider ===
           options.manifest.id &&
-        !options.decision.reasons.includes(selectedAsDefaultMemoryProviderReason)
+        !options.decision.reasons.includes(
+          selectedAsDefaultMemoryProviderReason,
+        )
           ? [selectedAsDefaultMemoryProviderReason]
-          : [])
-      ])
+          : []),
+      ]),
     };
   }
 
@@ -1200,7 +1219,7 @@ function finalizeMemoryProviderActivation(options: {
       ...options.decision.reasons,
       options.memoryProviderDecision.ambiguous
         ? 'ambiguous_memory_provider_selection'
-        : 'not_selected_as_default_memory_provider'
-    ])
+        : 'not_selected_as_default_memory_provider',
+    ]),
   };
 }

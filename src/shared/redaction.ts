@@ -14,7 +14,7 @@ const credentialMetricKeys = new Set([
   'rejectedpredictiontokens',
   'tokencount',
   'tokenusage',
-  'totaltokens'
+  'totaltokens',
 ]);
 
 const exactCredentialKeys = new Set([
@@ -26,7 +26,7 @@ const exactCredentialKeys = new Set([
   'privatekey',
   'accesskey',
   'secretkey',
-  'sessionkey'
+  'sessionkey',
 ]);
 
 export function isJsonBoundaryCredentialKey(value: string): boolean {
@@ -56,16 +56,13 @@ export function isJsonBoundaryCredentialKey(value: string): boolean {
 
 const authorizationHeaderPattern =
   /\b(Authorization|Proxy-Authorization)(\s*[:=]\s*)[^\r\n]+/giu;
-const authenticationSchemePattern =
-  /\b(Basic|Bearer)\s+[A-Za-z0-9._~+/=-]+/giu;
-const cookieHeaderPattern =
-  /\b(Cookie|Set-Cookie)(\s*[:=]\s*)[^\r\n]+/giu;
+const authenticationSchemePattern = /\b(Basic|Bearer)\s+[A-Za-z0-9._~+/=-]+/giu;
+const cookieHeaderPattern = /\b(Cookie|Set-Cookie)(\s*[:=]\s*)[^\r\n]+/giu;
 const secretKeyValuePattern =
   /(["']?)([A-Za-z0-9_.-]*(?:api[_.-]?key|access[_.-]?token|refresh[_.-]?token|client[_.-]?secret|secret[_.-]?access[_.-]?key|private[_.-]?key|access[_.-]?key|session[_.-]?key|password|passphrase|credential|secret|token)[A-Za-z0-9_.-]*)\1(\s*[:=]\s*)("[^"]*"|'[^']*'|[^&#\s,;}]+)/giu;
 const secretQueryValuePattern =
   /([?&][A-Za-z0-9_.-]*(?:api[_.-]?key|access[_.-]?token|refresh[_.-]?token|client[_.-]?secret|secret[_.-]?access[_.-]?key|private[_.-]?key|access[_.-]?key|session[_.-]?key|password|passphrase|credential|secret|token)[A-Za-z0-9_.-]*=)[^&#\s]+/giu;
-const uriCredentialsPattern =
-  /\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/@\s]+)@/giu;
+const uriCredentialsPattern = /\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/@\s]+)@/giu;
 
 export function redactJsonBoundaryText(value: string): string {
   return value
@@ -82,7 +79,7 @@ function redactSecretKeyValueMatch(
   keyQuote: string,
   key: string,
   separator: string,
-  rawValue: string
+  rawValue: string,
 ): string {
   const valueQuote = rawValue.startsWith('"')
     ? '"'

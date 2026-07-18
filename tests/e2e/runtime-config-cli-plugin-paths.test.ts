@@ -1,21 +1,19 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { loadEnvFile } from 'node:process';
-import { describe, expect, it } from 'vitest';
-import { createTestTempRoot } from '../support/temp-root.ts';
-import { runRuntimeConfigCliFromArgs } from '../../src/cli/config/main.ts';
-import {
-  writeRuntimeConfig
-} from '../support/runtime-config.ts';
-import { collect } from '../support/streams.ts';
-import { requiredSecretPlugin } from '../support/runtime-config-fixtures.ts';
+import {existsSync, readFileSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {loadEnvFile} from 'node:process';
+import {describe, expect, it} from 'vitest';
+import {createTestTempRoot} from '../support/temp-root.ts';
+import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {collect} from '../support/streams.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
 
 const installedSecretPlugin = requiredSecretPlugin('mem0-local');
 const installedSecretFactories = Object.freeze({
   [installedSecretPlugin.manifest.id]: Object.freeze({
     manifest: installedSecretPlugin.manifest,
-    create: () => installedSecretPlugin
-  })
+    create: () => installedSecretPlugin,
+  }),
 });
 
 describe('runtime config CLI plugin paths', () => {
@@ -28,9 +26,9 @@ describe('runtime config CLI plugin paths', () => {
         args: [
           'set',
           'plugins.memory.required.config.apiKey',
-          'plaintext-value'
+          'plaintext-value',
         ],
-        env: {}
+        env: {},
       },
       {
         label: 'secret set on an uninstalled plugin',
@@ -39,9 +37,9 @@ describe('runtime config CLI plugin paths', () => {
           'set',
           'not.installed',
           'apiKey',
-          'PROJECT02_H02_SECRET'
+          'PROJECT02_H02_SECRET',
         ],
-        env: { PROJECT02_H02_SECRET: secretValue }
+        env: {PROJECT02_H02_SECRET: secretValue},
       },
       {
         label: 'secret set on an undeclared field',
@@ -50,33 +48,35 @@ describe('runtime config CLI plugin paths', () => {
           'set',
           plugin.manifest.id,
           'notDeclared',
-          'PROJECT02_H02_SECRET'
+          'PROJECT02_H02_SECRET',
         ],
-        env: { PROJECT02_H02_SECRET: secretValue }
-      }
+        env: {PROJECT02_H02_SECRET: secretValue},
+      },
     ] as const;
     const results = await Promise.all(
-      cases.map(async (example) => {
-        const storeRoot = createTestTempRoot('project02-config-manifest-write-');
+      cases.map(async example => {
+        const storeRoot = createTestTempRoot(
+          'project02-config-manifest-write-',
+        );
         let stdout = '';
         let stderr = '';
         const exitCode = await runRuntimeConfigCliFromArgs(
           ['--store', storeRoot, ...example.args],
           {
-            stdout: collect((chunk) => {
+            stdout: collect(chunk => {
               stdout += chunk;
             }),
-            stderr: collect((chunk) => {
+            stderr: collect(chunk => {
               stderr += chunk;
             }),
             env: example.env,
             factories: {
               [plugin.manifest.id]: {
                 manifest: plugin.manifest,
-                create: () => plugin
-              }
-            }
-          }
+                create: () => plugin,
+              },
+            },
+          },
         );
 
         return {
@@ -84,22 +84,25 @@ describe('runtime config CLI plugin paths', () => {
           storeRoot,
           exitCode,
           stdout,
-          stderr
+          stderr,
         };
-      })
+      }),
     );
 
-    expect(results.map(({ label, exitCode }) => ({ label, exitCode }))).toEqual(
-      cases.map(({ label }) => ({ label, exitCode: 1 }))
+    expect(results.map(({label, exitCode}) => ({label, exitCode}))).toEqual(
+      cases.map(({label}) => ({label, exitCode: 1})),
     );
 
     for (const result of results) {
       expect(result.stdout, result.label).toBe('');
       expect(result.stderr, result.label).not.toContain(secretValue);
-      expect(existsSync(join(result.storeRoot, 'config.json')), result.label).toBe(
-        false
+      expect(
+        existsSync(join(result.storeRoot, 'config.json')),
+        result.label,
+      ).toBe(false);
+      expect(existsSync(join(result.storeRoot, '.env')), result.label).toBe(
+        false,
       );
-      expect(existsSync(join(result.storeRoot, '.env')), result.label).toBe(false);
     }
   });
 
@@ -116,14 +119,16 @@ describe('runtime config CLI plugin paths', () => {
         ['--config', configPath, 'set', 'project02.storeRoot', 'next-store'],
         {
           stdout: collect(() => {}),
-          stderr: collect((chunk) => {
+          stderr: collect(chunk => {
             stderr += chunk;
-          })
-        }
-      )
+          }),
+        },
+      ),
     ).toBe(1);
 
-    expect(stderr).toContain('Cannot mutate runtime config because it failed to load');
+    expect(stderr).toContain(
+      'Cannot mutate runtime config because it failed to load',
+    );
     expect(stderr).toContain('Runtime config file is not valid JSON');
     expect(readFileSync(configPath, 'utf8')).toBe(malformedConfig);
   });
@@ -137,11 +142,11 @@ describe('runtime config CLI plugin paths', () => {
         ['--store', storeRoot, 'set', 'enabledPlugins', '[]'],
         {
           stdout: collect(() => {}),
-          stderr: collect((chunk) => {
+          stderr: collect(chunk => {
             stderr += chunk;
-          })
-        }
-      )
+          }),
+        },
+      ),
     ).toBe(1);
     expect(stderr).toContain('Unsupported runtime config path: enabledPlugins');
     expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
@@ -159,15 +164,17 @@ describe('runtime config CLI plugin paths', () => {
         {
           stdout: collect(() => {}),
           stderr: collect(() => {}),
-          env: { [envVar]: secretValue },
-          factories: installedSecretFactories
-        }
-      )
+          env: {[envVar]: secretValue},
+          factories: installedSecretFactories,
+        },
+      ),
     ).toBe(0);
 
     const envPath = join(storeRoot, '.env');
 
-    expect(readFileSync(envPath, 'utf8')).toBe(`${envVar}=\`${secretValue}\`\n`);
+    expect(readFileSync(envPath, 'utf8')).toBe(
+      `${envVar}=\`${secretValue}\`\n`,
+    );
 
     try {
       loadEnvFile(envPath);
@@ -189,10 +196,10 @@ describe('runtime config CLI plugin paths', () => {
         {
           stdout: collect(() => {}),
           stderr: collect(() => {}),
-          env: { [envVar]: secretValue },
-          factories: installedSecretFactories
-        }
-      )
+          env: {[envVar]: secretValue},
+          factories: installedSecretFactories,
+        },
+      ),
     ).toBe(0);
 
     const envPath = join(storeRoot, '.env');
@@ -214,19 +221,20 @@ describe('runtime config CLI plugin paths', () => {
       plugins: {
         'mem0-local': {
           config: {
-            apiKey: { $env: 'PROJECT02_EXISTING_SECRET' }
-          }
-        }
-      }
+            apiKey: {$env: 'PROJECT02_EXISTING_SECRET'},
+          },
+        },
+      },
     });
     const envPath = join(storeRoot, '.env');
     const originalConfig = readFileSync(configPath, 'utf8');
     const originalEnv = [
       '# keep existing env material',
       'PROJECT02_EXISTING_SECRET="keep-existing"',
-      ''
+      '',
     ].join('\n');
-    const secretValue = '-----BEGIN PRIVATE KEY-----\r\nsecret-line\r\n-----END PRIVATE KEY-----';
+    const secretValue =
+      '-----BEGIN PRIVATE KEY-----\r\nsecret-line\r\n-----END PRIVATE KEY-----';
     let stdout = '';
     let stderr = '';
 
@@ -237,16 +245,16 @@ describe('runtime config CLI plugin paths', () => {
       await runRuntimeConfigCliFromArgs(
         ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'apiKey', envVar],
         {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
-          stderr: collect((chunk) => {
+          stderr: collect(chunk => {
             stderr += chunk;
           }),
-          env: { [envVar]: secretValue },
-          factories: installedSecretFactories
-        }
-      )
+          env: {[envVar]: secretValue},
+          factories: installedSecretFactories,
+        },
+      ),
     ).toBe(1);
 
     expect(stdout).toBe('');
@@ -256,7 +264,9 @@ describe('runtime config CLI plugin paths', () => {
   });
 
   it('rejects unquoted dotenv fallback secrets that start with a quote delimiter', async () => {
-    const storeRoot = createTestTempRoot('project02-config-secret-quote-start-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-secret-quote-start-',
+    );
     const envVar = 'PROJECT02_SECRET_QUOTE_START';
     const secretValue = `"starts-and-ends"with'single-and\`backtick`;
     let stdout = '';
@@ -267,21 +277,21 @@ describe('runtime config CLI plugin paths', () => {
       await runRuntimeConfigCliFromArgs(
         ['--store', storeRoot, 'secret', 'set', 'mem0-local', 'apiKey', envVar],
         {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
-          stderr: collect((chunk) => {
+          stderr: collect(chunk => {
             stderr += chunk;
           }),
-          env: { [envVar]: secretValue },
-          factories: installedSecretFactories
-        }
-      )
+          env: {[envVar]: secretValue},
+          factories: installedSecretFactories,
+        },
+      ),
     ).toBe(1);
 
     expect(stdout).toBe('');
     expect(stderr).toContain(
-      'no non-escaping dotenv quote delimiter and cannot be safely written as an unquoted value'
+      'no non-escaping dotenv quote delimiter and cannot be safely written as an unquoted value',
     );
     expect(existsSync(join(storeRoot, '.env'))).toBe(false);
     expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
@@ -300,7 +310,7 @@ describe('runtime config CLI plugin paths', () => {
     writeFileSync(
       envPath,
       `# keep comment\n${otherEnvVar}="other-value"\n${envVar}="${oldSecret}"\n`,
-      'utf8'
+      'utf8',
     );
 
     expect(
@@ -309,10 +319,10 @@ describe('runtime config CLI plugin paths', () => {
         {
           stdout: collect(() => {}),
           stderr: collect(() => {}),
-          env: { [envVar]: newSecret },
-          factories: installedSecretFactories
-        }
-      )
+          env: {[envVar]: newSecret},
+          factories: installedSecretFactories,
+        },
+      ),
     ).toBe(0);
 
     const envFile = readFileSync(envPath, 'utf8');
@@ -343,7 +353,11 @@ describe('runtime config CLI plugin paths', () => {
 
     Reflect.deleteProperty(process.env, envVar);
     Reflect.deleteProperty(process.env, otherEnvVar);
-    writeFileSync(envPath, [`${envVar}='old`, `${otherEnvVar}=keep`, ''].join('\n'), 'utf8');
+    writeFileSync(
+      envPath,
+      [`${envVar}='old`, `${otherEnvVar}=keep`, ''].join('\n'),
+      'utf8',
+    );
 
     expect(
       await runRuntimeConfigCliFromArgs(
@@ -351,16 +365,16 @@ describe('runtime config CLI plugin paths', () => {
         {
           stdout: collect(() => {}),
           stderr: collect(() => {}),
-          env: { [envVar]: newSecret },
-          factories: installedSecretFactories
-        }
-      )
+          env: {[envVar]: newSecret},
+          factories: installedSecretFactories,
+        },
+      ),
     ).toBe(0);
 
     const envFile = readFileSync(envPath, 'utf8');
 
     expect(envFile).toBe(
-      [`${otherEnvVar}=keep`, `${envVar}="${newSecret}"`, ''].join('\n')
+      [`${otherEnvVar}=keep`, `${envVar}="${newSecret}"`, ''].join('\n'),
     );
 
     try {
@@ -374,7 +388,9 @@ describe('runtime config CLI plugin paths', () => {
   });
 
   it('preserves unrelated multiline dotenv blocks when rotating another secret', async () => {
-    const storeRoot = createTestTempRoot('project02-config-secret-rotate-unrelated-block-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-secret-rotate-unrelated-block-',
+    );
     const envVar = 'PROJECT02_SECRET_ROTATION_API_KEY';
     const otherEnvVar = 'PROJECT02_SECRET_ROTATION_OTHER_BLOCK';
     const tailEnvVar = 'PROJECT02_SECRET_ROTATION_TAIL';
@@ -393,9 +409,9 @@ describe('runtime config CLI plugin paths', () => {
         preservedBlock,
         `${tailEnvVar}=visible-tail`,
         `${envVar}="${oldSecret}"`,
-        ''
+        '',
       ].join('\n'),
-      'utf8'
+      'utf8',
     );
 
     expect(
@@ -404,10 +420,10 @@ describe('runtime config CLI plugin paths', () => {
         {
           stdout: collect(() => {}),
           stderr: collect(() => {}),
-          env: { [envVar]: newSecret },
-          factories: installedSecretFactories
-        }
-      )
+          env: {[envVar]: newSecret},
+          factories: installedSecretFactories,
+        },
+      ),
     ).toBe(0);
 
     const envFile = readFileSync(envPath, 'utf8');
@@ -418,8 +434,8 @@ describe('runtime config CLI plugin paths', () => {
         preservedBlock,
         `${tailEnvVar}=visible-tail`,
         `${envVar}="${newSecret}"`,
-        ''
-      ].join('\n')
+        '',
+      ].join('\n'),
     );
     expect(envFile).not.toContain(oldSecret);
 
@@ -452,9 +468,9 @@ describe('runtime config CLI plugin paths', () => {
         `export ${envVar}=old-unquoted-exported`,
         `${otherEnvVar}="other-exported-value"`,
         `  export ${envVar}="${oldSecret}"`,
-        ''
+        '',
       ].join('\n'),
-      'utf8'
+      'utf8',
     );
 
     expect(
@@ -463,10 +479,10 @@ describe('runtime config CLI plugin paths', () => {
         {
           stdout: collect(() => {}),
           stderr: collect(() => {}),
-          env: { [envVar]: newSecret },
-          factories: installedSecretFactories
-        }
-      )
+          env: {[envVar]: newSecret},
+          factories: installedSecretFactories,
+        },
+      ),
     ).toBe(0);
 
     const envFile = readFileSync(envPath, 'utf8');
@@ -494,8 +510,8 @@ describe('runtime config CLI plugin paths', () => {
     const configPath = writeRuntimeConfig(
       join(createTestTempRoot('project02-config-invalid-get-'), 'config.json'),
       {
-        storeRoot: 42
-      }
+        storeRoot: 42,
+      },
     );
     let stdout = '';
     let stderr = '';
@@ -504,18 +520,19 @@ describe('runtime config CLI plugin paths', () => {
       await runRuntimeConfigCliFromArgs(
         ['--config', configPath, 'get', 'project02.storeRoot'],
         {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
-          stderr: collect((chunk) => {
+          stderr: collect(chunk => {
             stderr += chunk;
-          })
-        }
-      )
+          }),
+        },
+      ),
     ).toBe(1);
 
     expect(stdout).toBe('');
-    expect(stderr).toContain('Runtime config field must be a non-empty string.');
+    expect(stderr).toContain(
+      'Runtime config field must be a non-empty string.',
+    );
   });
-
 });

@@ -1,5 +1,5 @@
-import { readFlagValue } from '../shared/flags.ts';
-import { createInterface } from 'node:readline';
+import {readFlagValue} from '../shared/flags.ts';
+import {createInterface} from 'node:readline';
 
 import {
   type CharacterAgent,
@@ -7,17 +7,17 @@ import {
   createConversationSession,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
-  RuntimeEventInputError
+  RuntimeEventInputError,
 } from '../../core/index.ts';
-import { buildUserTurnDecisionContext } from '../../role-model/index.ts';
+import {buildUserTurnDecisionContext} from '../../role-model/index.ts';
 import {
   recordLocalUserMessageInputRejection,
   runLocalUserMessageEvent,
   type LocalRuntimeTurnProgressEvent,
   type LocalRuntimeUserMessageInputRejectedResult,
-  type LocalRuntimeUserMessageResult
+  type LocalRuntimeUserMessageResult,
 } from '../../runtime/index.ts';
-import { recoverPendingRuntimeConfigEffects } from '../../runtime/turn/index.ts';
+import {recoverPendingRuntimeConfigEffects} from '../../runtime/turn/index.ts';
 import {
   type RawEventLogRecord,
   type RuntimeLogStore,
@@ -28,11 +28,11 @@ import {
   createRuntimeLogStore,
   createTraceSummary,
   sameTraceIdentity,
-  type TraceIdentity
+  type TraceIdentity,
 } from '../../runtime/evidence/index.ts';
 import {
   runtimePluginEvidenceOption,
-  runtimePluginTurnEvidenceOption
+  runtimePluginTurnEvidenceOption,
 } from '../../runtime/turn/index.ts';
 import {
   acquireLocalRuntimeSessionWriterLease,
@@ -41,47 +41,50 @@ import {
   createLocalRuntimeStorageLayout,
   type DurableChatRuntime,
   normalizeLocalRuntimeSessionId,
-  runtimeLogStoreWithWriterOwner
+  runtimeLogStoreWithWriterOwner,
 } from '../../runtime/storage/index.ts';
 import {
   createRuntimePluginContext,
   type RuntimePluginHookHostResult,
   type RuntimePluginHost,
   type RuntimePluginToolConfirmationHandler,
-  type RuntimePluginToolConfirmationRequest
+  type RuntimePluginToolConfirmationRequest,
 } from '../../plugins/index.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
   resolveRuntimeCliStartup,
   type PreparedProject02PluginActivationPlan,
-  type RuntimePluginFactoryDefinition
+  type RuntimePluginFactoryDefinition,
 } from '../../app/index.ts';
 import {
   diagnosticsHaveErrors,
   RuntimeEnvFileError,
-  type RuntimeConfigDiagnostic
+  type RuntimeConfigDiagnostic,
 } from '../../runtime/config/index.ts';
-import type { RoleModelAdapter } from '../../role-model/index.ts';
+import type {RoleModelAdapter} from '../../role-model/index.ts';
 import {
   isLocalRuntimeTerminalError,
   type LocalRuntimeTerminalError,
-  formatCliTerminalErrorMessage
+  formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
 import {
   parseRuntimeLocationFlag,
   RuntimeLocationCliUsageError,
-  type RuntimeLocationCliState
+  type RuntimeLocationCliState,
 } from '../shared/runtime-location-flags.ts';
 import {
-  createSelectedRoleModelAdapter, parseProviderName, providerOption,
+  createSelectedRoleModelAdapter,
+  parseProviderName,
+  providerOption,
   RoleModelProviderSelectionError,
-  selectChatProvider, type ChatProviderName
+  selectChatProvider,
+  type ChatProviderName,
 } from '../../role-model/index.ts';
 import {
   runBestEffortPluginSessionEnd,
-  runBestEffortPluginShutdown
+  runBestEffortPluginShutdown,
 } from '../../plugins/host/index.ts';
-import { isMainModule } from '../shared/main-module.ts';
+import {isMainModule} from '../shared/main-module.ts';
 
 type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -135,7 +138,7 @@ type ConfiguredChatPluginHost = Awaited<
 type ChatToolConfirmationBridge = {
   readonly handler: RuntimePluginToolConfirmationHandler;
   installTerminalHandler(
-    handler: RuntimePluginToolConfirmationHandler
+    handler: RuntimePluginToolConfirmationHandler,
   ): () => void;
 };
 
@@ -167,14 +170,14 @@ class ChatCliStartupError extends Error {
 }
 
 function createChatToolConfirmationBridge(
-  injectedHandler: RuntimePluginToolConfirmationHandler | undefined
+  injectedHandler: RuntimePluginToolConfirmationHandler | undefined,
 ): ChatToolConfirmationBridge {
   let activeHandler = injectedHandler;
 
   return Object.freeze({
     handler(request, context) {
       if (activeHandler === undefined) {
-        return { status: 'cancelled' };
+        return {status: 'cancelled'};
       }
 
       return activeHandler(request, context);
@@ -191,7 +194,7 @@ function createChatToolConfirmationBridge(
           activeHandler = undefined;
         }
       };
-    }
+    },
   } satisfies ChatToolConfirmationBridge);
 }
 
@@ -204,58 +207,56 @@ function createTerminalToolConfirmationHandler(options: {
     const response = await options.lines.next(context.signal);
 
     if (response.status !== 'line') {
-      return { status: 'cancelled' };
+      return {status: 'cancelled'};
     }
 
     const answer = response.value.trim().toLowerCase();
 
     if (answer === 'y' || answer === 'yes') {
-      return { status: 'approved' };
+      return {status: 'approved'};
     }
 
-    return { status: 'denied' };
+    return {status: 'denied'};
   };
 }
 
 type ChatLineResult =
-  | { readonly status: 'line'; readonly value: string }
-  | { readonly status: 'end' }
-  | { readonly status: 'cancelled' };
+  | {readonly status: 'line'; readonly value: string}
+  | {readonly status: 'end'}
+  | {readonly status: 'cancelled'};
 
 type ChatLineBroker = {
   next(signal?: AbortSignal): Promise<ChatLineResult>;
 };
 
-function createChatLineBroker(
-  iterator: AsyncIterator<string>
-): ChatLineBroker {
+function createChatLineBroker(iterator: AsyncIterator<string>): ChatLineBroker {
   let pendingRead: Promise<IteratorResult<string>> | undefined;
 
   return Object.freeze({
     async next(signal?: AbortSignal): Promise<ChatLineResult> {
       if (signal?.aborted === true) {
-        return { status: 'cancelled' };
+        return {status: 'cancelled'};
       }
 
       const read = pendingRead ?? iterator.next();
       pendingRead = read;
       let removeAbortListener: (() => void) | undefined;
       const result = await Promise.race([
-        read.then((value) => ({ status: 'read' as const, value })),
+        read.then(value => ({status: 'read' as const, value})),
         ...(signal === undefined
           ? []
           : [
-              new Promise<{ readonly status: 'cancelled' }>((resolve) => {
+              new Promise<{readonly status: 'cancelled'}>(resolve => {
                 const abort = () => {
-                  resolve({ status: 'cancelled' });
+                  resolve({status: 'cancelled'});
                 };
 
-                signal.addEventListener('abort', abort, { once: true });
+                signal.addEventListener('abort', abort, {once: true});
                 removeAbortListener = () => {
                   signal.removeEventListener('abort', abort);
                 };
-              })
-            ])
+              }),
+            ]),
       ]);
 
       removeAbortListener?.();
@@ -269,15 +270,15 @@ function createChatLineBroker(
       }
 
       return result.value.done === true
-        ? { status: 'end' }
-        : { status: 'line', value: result.value.value };
-    }
+        ? {status: 'end'}
+        : {status: 'line', value: result.value.value};
+    },
   });
 }
 
 function writeTerminalToolConfirmationRequest(
   stdout: NodeJS.WritableStream,
-  request: RuntimePluginToolConfirmationRequest
+  request: RuntimePluginToolConfirmationRequest,
 ): void {
   stdout.write('\nPlugin config update requires your approval.\n');
   stdout.write(`${request.summary}\n`);
@@ -287,23 +288,23 @@ function writeTerminalToolConfirmationRequest(
 
 export async function runChatCliFromArgs(
   args: readonly string[],
-  options: ChatCliOptions
+  options: ChatCliOptions,
 ): Promise<number> {
   try {
     const parsedArgs = parseChatCliArgs(args);
     const startup = resolveRuntimeCliStartup({
       location: parsedArgs,
-      ...(options.env === undefined ? {} : { env: options.env }),
+      ...(options.env === undefined ? {} : {env: options.env}),
       ...(options.factories === undefined
         ? {}
-        : { factories: options.factories }),
-      continueAfterActivationErrors: options.pluginHost !== undefined
+        : {factories: options.factories}),
+      continueAfterActivationErrors: options.pluginHost !== undefined,
     });
 
     if (startup.status === 'config_invalid') {
       assertNoRuntimeConfigErrors(
         startup.loadedConfig.diagnostics,
-        'Runtime config is invalid'
+        'Runtime config is invalid',
       );
       throw new ChatCliUsageError('Runtime config is invalid.');
     }
@@ -311,7 +312,7 @@ export async function runChatCliFromArgs(
     if (startup.status === 'activation_blocked_before_runtime_env') {
       assertNoRuntimeConfigErrors(
         startup.activationPlan.activation.diagnostics,
-        'Runtime config activation failed'
+        'Runtime config activation failed',
       );
       throw new ChatCliUsageError('Runtime config activation failed.');
     }
@@ -323,24 +324,22 @@ export async function runChatCliFromArgs(
         selectChatProvider(
           parsedArgs.provider,
           runtimeEnv,
-          startup.loadedConfig.config?.project02?.roleModelProvider
-        )
-      )
+          startup.loadedConfig.config?.project02?.roleModelProvider,
+        ),
+      ),
     } satisfies ChatCliArgs;
 
     const preparedActivationPlan =
-      options.pluginHost === undefined
-        ? startup.activationPlan
-        : undefined;
+      options.pluginHost === undefined ? startup.activationPlan : undefined;
     if (preparedActivationPlan !== undefined) {
       assertNoRuntimeConfigErrors(
         preparedActivationPlan.activation.diagnostics,
-        'Runtime config activation failed'
+        'Runtime config activation failed',
       );
     }
     const runtimeArgs = {
       ...selectedArgs,
-      storeRoot: startup.activationPlan.resolvedConfig.project02.storeRoot
+      storeRoot: startup.activationPlan.resolvedConfig.project02.storeRoot,
     } satisfies ChatCliArgs;
 
     validateDurableSessionArgs(runtimeArgs);
@@ -355,12 +354,12 @@ export async function runChatCliFromArgs(
             activationPlan: preparedActivationPlan,
             ...(toolConfirmationBridge === undefined
               ? {}
-              : { toolConfirmationHandler: toolConfirmationBridge.handler })
+              : {toolConfirmationHandler: toolConfirmationBridge.handler}),
           });
     if (configuredHost !== undefined) {
       assertNoRuntimeConfigErrors(
         configuredHost.activation.diagnostics,
-        'Runtime config activation failed'
+        'Runtime config activation failed',
       );
     }
 
@@ -370,7 +369,7 @@ export async function runChatCliFromArgs(
       runtimeEnv,
       parsedTraceMode: parsedArgs.traceMode,
       configuredHost,
-      toolConfirmationBridge
+      toolConfirmationBridge,
     });
   } catch (error: unknown) {
     if (isFormattedTerminalError(error)) {
@@ -401,24 +400,24 @@ async function runChatCliAfterConfiguredHost(options: {
 
     if (startupPluginHost === undefined) {
       throw new ChatCliStartupError(
-        'Chat startup did not provide a configured plugin host.'
+        'Chat startup did not provide a configured plugin host.',
       );
     }
 
     pluginHost = startupPluginHost;
     recoverPendingRuntimeConfigEffects({
       logStore: durableRuntime.logStore,
-      pluginHost
+      pluginHost,
     });
     roleModelAdapter = createSelectedRoleModelAdapter(
       options.runtimeArgs.provider,
-      options.runtimeEnv
+      options.runtimeEnv,
     );
   } catch (error: unknown) {
     if (options.configuredHost !== undefined) {
       await cleanupConfiguredChatPluginHostAfterStartupFailure({
         configuredHost: options.configuredHost,
-        args: options.runtimeArgs
+        args: options.runtimeArgs,
       });
     }
 
@@ -430,21 +429,18 @@ async function runChatCliAfterConfiguredHost(options: {
       ...options.options,
       session: durableRuntime.session,
       logStore: durableRuntime.logStore,
-      ...(roleModelAdapter === undefined ? {} : { roleModelAdapter }),
+      ...(roleModelAdapter === undefined ? {} : {roleModelAdapter}),
       pluginHost,
       ...(options.toolConfirmationBridge === undefined
         ? {}
-        : { toolConfirmationBridge: options.toolConfirmationBridge }),
-      traceMode: options.options.traceMode === true || options.parsedTraceMode
+        : {toolConfirmationBridge: options.toolConfirmationBridge}),
+      traceMode: options.options.traceMode === true || options.parsedTraceMode,
     });
 
-    if (
-      exitCode !== 0 &&
-      options.configuredHost !== undefined
-    ) {
+    if (exitCode !== 0 && options.configuredHost !== undefined) {
       await cleanupConfiguredChatPluginHostAfterFatalExit({
         configuredHost: options.configuredHost,
-        session: durableRuntime.session
+        session: durableRuntime.session,
       });
     }
 
@@ -452,14 +448,14 @@ async function runChatCliAfterConfiguredHost(options: {
   } finally {
     if (options.configuredHost !== undefined) {
       const decisionContext = buildUserTurnDecisionContext({
-        session: durableRuntime.session
+        session: durableRuntime.session,
       });
 
       await runBestEffortPluginShutdown({
         pluginHost: options.configuredHost.host,
         sessionId: decisionContext.sessionId,
         currentUserMessage: configuredPluginShutdownMessage,
-        character: decisionContext.characterSnapshot
+        character: decisionContext.characterSnapshot,
       });
     }
     await durableRuntime.writerLease.release();
@@ -471,14 +467,14 @@ async function cleanupConfiguredChatPluginHostAfterFatalExit(options: {
   readonly session: ConversationSession;
 }): Promise<void> {
   const decisionContext = buildUserTurnDecisionContext({
-    session: options.session
+    session: options.session,
   });
 
   await runBestEffortPluginSessionEnd({
     pluginHost: options.configuredHost.host,
     sessionId: decisionContext.sessionId,
     currentUserMessage: fatalFailurePluginCleanupMessage,
-    character: decisionContext.characterSnapshot
+    character: decisionContext.characterSnapshot,
   });
 }
 
@@ -489,19 +485,19 @@ async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
   await runBestEffortPluginSessionEnd({
     pluginHost: options.configuredHost.host,
     sessionId: normalizeLocalRuntimeSessionId(
-      options.args.newSessionId ?? options.args.sessionId
+      options.args.newSessionId ?? options.args.sessionId,
     ),
     currentUserMessage: startupFailurePluginCleanupMessage,
     character: createConversationSession().character,
-    hookOptions: { allowFileStoreWrites: false }
+    hookOptions: {allowFileStoreWrites: false},
   });
   await runBestEffortPluginShutdown({
     pluginHost: options.configuredHost.host,
     sessionId: normalizeLocalRuntimeSessionId(
-      options.args.newSessionId ?? options.args.sessionId
+      options.args.newSessionId ?? options.args.sessionId,
     ),
     currentUserMessage: configuredPluginShutdownMessage,
-    character: createConversationSession().character
+    character: createConversationSession().character,
   });
 }
 
@@ -513,30 +509,30 @@ async function createConfiguredChatPluginHostBeforeSession(options: {
     return await createConfiguredProject02PluginHostFromPlan(options);
   } catch {
     throw new ChatCliStartupError(
-      'Configured plugin construction failed before creating a durable session.'
+      'Configured plugin construction failed before creating a durable session.',
     );
   }
 }
 
 function assertNoRuntimeConfigErrors(
   diagnostics: readonly RuntimeConfigDiagnostic[],
-  messagePrefix: string
+  messagePrefix: string,
 ): void {
   if (!diagnosticsHaveErrors(diagnostics)) {
     return;
   }
 
-  const diagnostic = diagnostics.find((item) => item.severity === 'error');
+  const diagnostic = diagnostics.find(item => item.severity === 'error');
   throw new ChatCliUsageError(
     diagnostic === undefined
       ? messagePrefix
-      : formatRuntimeConfigDiagnosticError(messagePrefix, diagnostic)
+      : formatRuntimeConfigDiagnosticError(messagePrefix, diagnostic),
   );
 }
 
 function formatRuntimeConfigDiagnosticError(
   messagePrefix: string,
-  diagnostic: RuntimeConfigDiagnostic
+  diagnostic: RuntimeConfigDiagnostic,
 ): string {
   const diagnosticLocation =
     diagnostic.path === undefined
@@ -560,7 +556,7 @@ export async function runChatCli(options: RunChatCliOptions): Promise<number> {
   const writerLease = await acquireLocalRuntimeSessionWriterLease({
     storeRoot: sessionPaths.storeRoot,
     sessionId: sessionPaths.sessionId,
-    ownerToken: writerOwnerToken
+    ownerToken: writerOwnerToken,
   });
   const activeLogStore =
     configuredLogStore.localRuntimeWriterLockOwnerToken === undefined
@@ -571,7 +567,7 @@ export async function runChatCli(options: RunChatCliOptions): Promise<number> {
     activeLogStore.recoverAbandonedWriterEvidence?.();
     return await runChatCliWithActiveWriter({
       ...options,
-      logStore: activeLogStore
+      logStore: activeLogStore,
     });
   } finally {
     await writerLease.release();
@@ -579,16 +575,16 @@ export async function runChatCli(options: RunChatCliOptions): Promise<number> {
 }
 
 async function runChatCliWithActiveWriter(
-  options: RunChatCliOptions
+  options: RunChatCliOptions,
 ): Promise<number> {
   const session = options.session ?? createConversationSession();
   const logStore =
-    options.logStore ?? createRuntimeLogStore({ sessionId: session.id });
+    options.logStore ?? createRuntimeLogStore({sessionId: session.id});
   const pluginHost = options.pluginHost;
   const lines = createInterface({
     input: options.stdin,
     crlfDelay: Infinity,
-    terminal: false
+    terminal: false,
   });
   const lineIterator = lines[Symbol.asyncIterator]();
   const lineBroker = createChatLineBroker(lineIterator);
@@ -596,8 +592,8 @@ async function runChatCliWithActiveWriter(
     options.toolConfirmationBridge?.installTerminalHandler(
       createTerminalToolConfirmationHandler({
         lines: lineBroker,
-        stdout: options.stdout
-      })
+        stdout: options.stdout,
+      }),
     );
   let showNonCommittedTopLevelText = false;
 
@@ -618,7 +614,7 @@ async function runChatCliWithActiveWriter(
         logStore,
         pluginHost,
         line: nextLine.value,
-        showNonCommittedTopLevelText
+        showNonCommittedTopLevelText,
       });
 
       if (lineResult.status === 'exit') {
@@ -631,7 +627,7 @@ async function runChatCliWithActiveWriter(
     await endChatSession({
       session,
       logStore,
-      pluginHost
+      pluginHost,
     });
   } finally {
     releaseTerminalConfirmationHandler?.();
@@ -646,7 +642,7 @@ type ChatInputLineResult =
       readonly status: 'continue';
       readonly showNonCommittedTopLevelText: boolean;
     }
-  | { readonly status: 'exit'; readonly exitCode: number };
+  | {readonly status: 'exit'; readonly exitCode: number};
 
 async function handleChatInputLine(options: {
   readonly options: RunChatCliOptions;
@@ -660,22 +656,22 @@ async function handleChatInputLine(options: {
 
   if (trimmedLine === exitCommand) {
     await endChatSession(options);
-    return { status: 'exit', exitCode: 0 };
+    return {status: 'exit', exitCode: 0};
   }
 
   const nextModelTextVisibility = modelTextVisibilityCommand(
     trimmedLine,
-    options.showNonCommittedTopLevelText
+    options.showNonCommittedTopLevelText,
   );
 
   if (nextModelTextVisibility !== undefined) {
     options.options.stdout.write(
-      `Model top-level text display: ${nextModelTextVisibility ? 'shown' : 'hidden'}.\n`
+      `Model top-level text display: ${nextModelTextVisibility ? 'shown' : 'hidden'}.\n`,
     );
     options.options.stdout.write(promptText);
     return {
       status: 'continue',
-      showNonCommittedTopLevelText: nextModelTextVisibility
+      showNonCommittedTopLevelText: nextModelTextVisibility,
     };
   }
 
@@ -686,39 +682,39 @@ async function handleChatInputLine(options: {
       line: options.line,
       ...(options.options.agent === undefined
         ? {}
-        : { agent: options.options.agent }),
+        : {agent: options.options.agent}),
       ...(options.options.roleModelAdapter === undefined
         ? {}
-        : { roleModelAdapter: options.options.roleModelAdapter }),
+        : {roleModelAdapter: options.options.roleModelAdapter}),
       pluginHost: options.pluginHost,
       onProgress(progressEvent) {
         writeRuntimeProgress(
           options.options.stdout,
           options.session,
-          progressEvent
+          progressEvent,
         );
-      }
+      },
     });
 
     writeChatRuntimeResult({
       options: options.options,
       session: options.session,
       result,
-      showNonCommittedTopLevelText: options.showNonCommittedTopLevelText
+      showNonCommittedTopLevelText: options.showNonCommittedTopLevelText,
     });
 
     if (result.status === 'rejected' && result.fatal) {
-      return { status: 'exit', exitCode: 1 };
+      return {status: 'exit', exitCode: 1};
     }
   } catch (error: unknown) {
     writeChatInputError(options.options.stderr, error);
-    return { status: 'exit', exitCode: 1 };
+    return {status: 'exit', exitCode: 1};
   }
 
   options.options.stdout.write(promptText);
   return {
     status: 'continue',
-    showNonCommittedTopLevelText: options.showNonCommittedTopLevelText
+    showNonCommittedTopLevelText: options.showNonCommittedTopLevelText,
   };
 }
 
@@ -731,7 +727,7 @@ function writeChatRuntimeResult(options: {
   if (options.result.status === 'completed') {
     if (options.result.characterReplyText !== undefined) {
       options.options.stdout.write(
-        `${options.session.character.displayName}: ${options.result.characterReplyText}\n`
+        `${options.session.character.displayName}: ${options.result.characterReplyText}\n`,
       );
     }
     if (
@@ -740,7 +736,7 @@ function writeChatRuntimeResult(options: {
     ) {
       writeNonCommittedTopLevelText(
         options.options.stdout,
-        options.result.nonCommittedTopLevelText
+        options.result.nonCommittedTopLevelText,
       );
     }
   } else if (options.options.traceMode !== true) {
@@ -754,14 +750,14 @@ function writeChatRuntimeResult(options: {
 
 function writeChatInputError(
   stderr: NodeJS.WritableStream,
-  error: unknown
+  error: unknown,
 ): void {
   stderr.write(
     `Error: ${
       isFormattedTerminalError(error)
         ? formatCliTerminalErrorMessage(error)
         : chatFailedBeforeReplyMessage
-    }\n`
+    }\n`,
   );
 }
 
@@ -774,14 +770,14 @@ type EndChatSessionOptions = {
 async function endChatSession(options: EndChatSessionOptions): Promise<void> {
   const identity = createRuntimeEventIdentity();
   const decisionContext = buildUserTurnDecisionContext({
-    session: options.session
+    session: options.session,
   });
   const context = createRuntimePluginContext({
     ...identity,
     sessionId: decisionContext.sessionId,
     eventType: 'USER_MESSAGE',
     currentUserMessage: exitCommand,
-    character: decisionContext.characterSnapshot
+    character: decisionContext.characterSnapshot,
   });
   const sessionEndResult = await options.pluginHost.onSessionEnd(context);
 
@@ -791,18 +787,18 @@ async function endChatSession(options: EndChatSessionOptions): Promise<void> {
 
   const payloadSummary = {
     rawInput: exitCommand,
-    normalizedCurrentUserMessage: exitCommand
+    normalizedCurrentUserMessage: exitCommand,
   };
 
   options.logStore.appendTrace({
     ...identity,
-    step: 'runtime_event_received'
+    step: 'runtime_event_received',
   });
   options.logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_event_received',
     eventType: 'USER_MESSAGE',
-    payloadSummary
+    payloadSummary,
   });
   options.logStore.appendRawEvent({
     ...identity,
@@ -817,30 +813,30 @@ async function endChatSession(options: EndChatSessionOptions): Promise<void> {
       contextItems: [],
       toolInvocations: [],
       evidence: sessionEndResult.evidence,
-      health: []
-    })
+      health: [],
+    }),
   });
   options.logStore.appendTrace({
     ...identity,
-    step: 'raw_event_log_appended'
+    step: 'raw_event_log_appended',
   });
   options.logStore.appendTrace({
     ...identity,
-    step: 'runtime_turn_completed'
+    step: 'runtime_turn_completed',
   });
 }
 
 function shouldRecordSessionEndResult(
   pluginHost: RuntimePluginHost,
-  result: RuntimePluginHookHostResult
+  result: RuntimePluginHookHostResult,
 ): boolean {
   return (
     result.evidence.length > 0 ||
     result.status === 'completed_with_failures' ||
     pluginHost
       .registrySnapshot()
-      .plugins.some((plugin) =>
-        plugin.registeredLifecycleHooks.includes('on_session_end')
+      .plugins.some(plugin =>
+        plugin.registeredLifecycleHooks.includes('on_session_end'),
       )
   );
 }
@@ -853,12 +849,12 @@ type HandleUserMessageThroughRuntimeOptions = {
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly pluginHost: RuntimePluginHost;
   readonly onProgress?: (
-    event: LocalRuntimeTurnProgressEvent
+    event: LocalRuntimeTurnProgressEvent,
   ) => Promise<void> | void;
 };
 
 async function handleUserMessageThroughRuntime(
-  options: HandleUserMessageThroughRuntimeOptions
+  options: HandleUserMessageThroughRuntimeOptions,
 ): Promise<ChatRuntimeTurn> {
   const identity = createRuntimeEventIdentity();
 
@@ -871,14 +867,14 @@ async function handleUserMessageThroughRuntime(
         session: options.session,
         logStore: options.logStore,
         rawInput: options.line,
-        ...(options.agent === undefined ? {} : { agent: options.agent }),
+        ...(options.agent === undefined ? {} : {agent: options.agent}),
         ...(options.roleModelAdapter === undefined
           ? {}
-          : { roleModelAdapter: options.roleModelAdapter }),
+          : {roleModelAdapter: options.roleModelAdapter}),
         pluginHost: options.pluginHost,
         ...(options.onProgress === undefined
           ? {}
-          : { onProgress: options.onProgress })
+          : {onProgress: options.onProgress}),
       });
 
       return mapRuntimeResult(result);
@@ -891,8 +887,10 @@ async function handleUserMessageThroughRuntime(
 
       return mapUnexpectedRuntimeFailureResult(
         identity,
-        evidence.traceEntries.filter((entry) => sameTraceIdentity(entry, identity)),
-        evidence.rawEvents.filter((event) => sameTraceIdentity(event, identity))
+        evidence.traceEntries.filter(entry =>
+          sameTraceIdentity(entry, identity),
+        ),
+        evidence.rawEvents.filter(event => sameTraceIdentity(event, identity)),
       );
     }
   } catch (error: unknown) {
@@ -901,7 +899,7 @@ async function handleUserMessageThroughRuntime(
         identity: error.identity,
         logStore: options.logStore,
         message: error.message,
-        rawInput: options.line
+        rawInput: options.line,
       });
 
       return mapInputRejectionResult(result);
@@ -911,7 +909,9 @@ async function handleUserMessageThroughRuntime(
   }
 }
 
-function mapRuntimeResult(result: LocalRuntimeUserMessageResult): ChatRuntimeTurn {
+function mapRuntimeResult(
+  result: LocalRuntimeUserMessageResult,
+): ChatRuntimeTurn {
   if (result.status === 'completed') {
     const turn = result.turn;
 
@@ -919,7 +919,7 @@ function mapRuntimeResult(result: LocalRuntimeUserMessageResult): ChatRuntimeTur
       status: 'completed',
       ...(turn === undefined
         ? {}
-        : { characterReplyText: turn.characterMessage.text }),
+        : {characterReplyText: turn.characterMessage.text}),
       ...nonCommittedTopLevelTextOption(result.rawEvent),
       traceSummary: createTraceSummary(
         result.event,
@@ -927,8 +927,8 @@ function mapRuntimeResult(result: LocalRuntimeUserMessageResult): ChatRuntimeTur
         result.traceEntries,
         undefined,
         result.rawEvent,
-        result.rawEventLogRecords
-      )
+        result.rawEventLogRecords,
+      ),
     };
   }
 
@@ -946,15 +946,15 @@ function mapRuntimeResult(result: LocalRuntimeUserMessageResult): ChatRuntimeTur
       result.traceEntries,
       result.message,
       result.rawEvent,
-      result.rawEventLogRecords
-    )
+      result.rawEventLogRecords,
+    ),
   };
 }
 
 function writeRuntimeProgress(
   stdout: NodeJS.WritableStream,
   session: ConversationSession,
-  progressEvent: LocalRuntimeTurnProgressEvent
+  progressEvent: LocalRuntimeTurnProgressEvent,
 ): void {
   if (progressEvent.kind === 'visible_reply') {
     if (!progressEvent.final) {
@@ -966,19 +966,19 @@ function writeRuntimeProgress(
 
   if (progressEvent.kind === 'tool_calls_requested') {
     stdout.write(
-      `[tools] Model requested ${String(progressEvent.toolNames.length)} ${progressEvent.toolNames.length === 1 ? 'tool call' : 'tool calls'}: ${progressEvent.toolNames.join(', ')}\n`
+      `[tools] Model requested ${String(progressEvent.toolNames.length)} ${progressEvent.toolNames.length === 1 ? 'tool call' : 'tool calls'}: ${progressEvent.toolNames.join(', ')}\n`,
     );
     return;
   }
 
   stdout.write(
-    `[tools] ${progressEvent.toolName} ${progressEvent.status === 'accepted' ? 'completed' : 'rejected'}\n`
+    `[tools] ${progressEvent.toolName} ${progressEvent.status === 'accepted' ? 'completed' : 'rejected'}\n`,
   );
 }
 
-function nonCommittedTopLevelTextOption(
-  rawEvent: RawEventLogRecord
-): { readonly nonCommittedTopLevelText?: string } {
+function nonCommittedTopLevelTextOption(rawEvent: RawEventLogRecord): {
+  readonly nonCommittedTopLevelText?: string;
+} {
   const result = rawEvent.parsedRoleModelDecisionSnapshot?.result;
 
   if (result?.status !== 'accepted' || result.nonCommittedText === undefined) {
@@ -986,13 +986,13 @@ function nonCommittedTopLevelTextOption(
   }
 
   return {
-    nonCommittedTopLevelText: result.nonCommittedText
+    nonCommittedTopLevelText: result.nonCommittedText,
   };
 }
 
 function modelTextVisibilityCommand(
   trimmedLine: string,
-  currentlyVisible: boolean
+  currentlyVisible: boolean,
 ): boolean | undefined {
   if (trimmedLine === modelTextToggleCommand) {
     return !currentlyVisible;
@@ -1011,7 +1011,7 @@ function modelTextVisibilityCommand(
 
 function writeNonCommittedTopLevelText(
   stdout: NodeJS.WritableStream,
-  text: string
+  text: string,
 ): void {
   stdout.write('[model top-level text | not committed]\n');
   stdout.write(text);
@@ -1024,7 +1024,7 @@ function writeNonCommittedTopLevelText(
 }
 
 function mapInputRejectionResult(
-  result: LocalRuntimeUserMessageInputRejectedResult
+  result: LocalRuntimeUserMessageInputRejectedResult,
 ): RejectedChatRuntimeTurn {
   return {
     status: 'rejected',
@@ -1035,15 +1035,15 @@ function mapInputRejectionResult(
       'rejected',
       result.traceEntries,
       result.message,
-      result.rawEvent
-    )
+      result.rawEvent,
+    ),
   };
 }
 
 function mapUnexpectedRuntimeFailureResult(
   identity: TraceIdentity,
   traceEntries: readonly RuntimeTraceEntry[],
-  rawEvents: readonly RawEventLogRecord[]
+  rawEvents: readonly RawEventLogRecord[],
 ): RejectedChatRuntimeTurn {
   return {
     status: 'rejected',
@@ -1055,14 +1055,14 @@ function mapUnexpectedRuntimeFailureResult(
       traceEntries,
       chatFailedBeforeReplyMessage,
       undefined,
-      rawEvents
-    )
+      rawEvents,
+    ),
   };
 }
 
 function writeTraceSummary(
   stderr: NodeJS.WritableStream,
-  summary: ChatTraceSummary
+  summary: ChatTraceSummary,
 ): void {
   stderr.write(`${JSON.stringify(summary)}\n`);
 }
@@ -1095,7 +1095,14 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
         throw new ChatCliUsageError('--provider can only be provided once.');
       }
 
-      provider = parseProviderName(readFlagValue(args, index, '--provider', (message) => new ChatCliUsageError(message)));
+      provider = parseProviderName(
+        readFlagValue(
+          args,
+          index,
+          '--provider',
+          message => new ChatCliUsageError(message),
+        ),
+      );
       index += 1;
       continue;
     }
@@ -1103,7 +1110,7 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
     const locationResult = parseRuntimeLocationFlag({
       args,
       index,
-      state: location
+      state: location,
     });
 
     if (locationResult.status === 'matched') {
@@ -1117,7 +1124,12 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
         throw new ChatCliUsageError('--session can only be provided once.');
       }
 
-      sessionId = readFlagValue(args, index, '--session', (message) => new ChatCliUsageError(message));
+      sessionId = readFlagValue(
+        args,
+        index,
+        '--session',
+        message => new ChatCliUsageError(message),
+      );
       index += 1;
       continue;
     }
@@ -1127,7 +1139,12 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
         throw new ChatCliUsageError('--new-session can only be provided once.');
       }
 
-      newSessionId = readFlagValue(args, index, '--new-session', (message) => new ChatCliUsageError(message));
+      newSessionId = readFlagValue(
+        args,
+        index,
+        '--new-session',
+        message => new ChatCliUsageError(message),
+      );
       index += 1;
       continue;
     }
@@ -1136,23 +1153,28 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
   }
 
   if (sessionId !== undefined && newSessionId !== undefined) {
-    throw new ChatCliUsageError('Use either --session or --new-session, not both.');
+    throw new ChatCliUsageError(
+      'Use either --session or --new-session, not both.',
+    );
   }
 
   return {
     traceMode,
     ...providerOption(provider),
-    ...(location.storeRoot === undefined ? {} : { storeRoot: location.storeRoot }),
-    ...(location.configPath === undefined ? {} : { configPath: location.configPath }),
-    ...(sessionId === undefined ? {} : { sessionId }),
-    ...(newSessionId === undefined ? {} : { newSessionId })
+    ...(location.storeRoot === undefined
+      ? {}
+      : {storeRoot: location.storeRoot}),
+    ...(location.configPath === undefined
+      ? {}
+      : {configPath: location.configPath}),
+    ...(sessionId === undefined ? {} : {sessionId}),
+    ...(newSessionId === undefined ? {} : {newSessionId}),
   } satisfies ChatCliArgs;
 }
 
-
 function validateDurableSessionArgs(args: ChatCliArgs): void {
   if (args.storeRoot !== undefined) {
-    createLocalRuntimeStorageLayout({ storeRoot: args.storeRoot });
+    createLocalRuntimeStorageLayout({storeRoot: args.storeRoot});
   }
 
   if (args.sessionId !== undefined) {
@@ -1164,9 +1186,8 @@ function validateDurableSessionArgs(args: ChatCliArgs): void {
   }
 }
 
-
 function isFormattedTerminalError(
-  error: unknown
+  error: unknown,
 ): error is
   | ChatCliUsageError
   | ChatCliStartupError
@@ -1188,6 +1209,6 @@ if (isMainModule(import.meta.url)) {
   process.exitCode = await runChatCliFromArgs(process.argv.slice(2), {
     stdin: process.stdin,
     stdout: process.stdout,
-    stderr: process.stderr
+    stderr: process.stderr,
   });
 }

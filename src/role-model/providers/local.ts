@@ -1,26 +1,31 @@
 import {
-  validateCharacterAgentReply, type CharacterAgent
+  validateCharacterAgentReply,
+  type CharacterAgent,
 } from '../../core/index.ts';
-import { createDeterministicCharacterAgent } from './deterministic.ts';
-import { createVisibleReplyModelToolCall, visibleReplyModelToolName } from '../api/model-tools.ts';
-import type { RoleModelAdapter } from '../api/adapter.ts';
-import { createRoleModelAdapterRawOutput } from '../api/adapter.ts';
+import {createDeterministicCharacterAgent} from './deterministic.ts';
+import {
+  createVisibleReplyModelToolCall,
+  visibleReplyModelToolName,
+} from '../api/model-tools.ts';
+import type {RoleModelAdapter} from '../api/adapter.ts';
+import {createRoleModelAdapterRawOutput} from '../api/adapter.ts';
 
 export function createDeterministicLocalRoleModelAdapter(): RoleModelAdapter {
   return createRoleModelAdapterFromCharacterAgent(
-    createDeterministicCharacterAgent()
+    createDeterministicCharacterAgent(),
   );
 }
 
 export function createRoleModelAdapterFromCharacterAgent(
-  agent: CharacterAgent
+  agent: CharacterAgent,
 ): RoleModelAdapter {
   return Object.freeze({
     async invoke(inputEnvelope) {
       const reply = await agent.reply({
         character: inputEnvelope.decisionContext.characterSnapshot,
         message: inputEnvelope.event.payload.currentUserMessage,
-        recentVisibleMessages: inputEnvelope.decisionContext.recentVisibleMessages
+        recentVisibleMessages:
+          inputEnvelope.decisionContext.recentVisibleMessages,
       });
       const characterReply = validateCharacterAgentReply(reply);
 
@@ -29,16 +34,15 @@ export function createRoleModelAdapterFromCharacterAgent(
           inputEnvelope.allowedTools.includes(visibleReplyModelToolName)
             ? {
                 toolCalls: [
-                  createVisibleReplyModelToolCall(characterReply.text)
-                ]
+                  createVisibleReplyModelToolCall(characterReply.text),
+                ],
               }
             : {
                 toolCalls: [],
-                text: characterReply.text
-              }
-        )
+                text: characterReply.text,
+              },
+        ),
       );
-    }
+    },
   } satisfies RoleModelAdapter);
 }
-

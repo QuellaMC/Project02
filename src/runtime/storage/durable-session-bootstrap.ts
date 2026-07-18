@@ -1,17 +1,19 @@
-import type { ConversationSession } from '../../core/index.ts';
-import type { RuntimeLogStore } from '../evidence/records.ts';
+import type {ConversationSession} from '../../core/index.ts';
+import type {RuntimeLogStore} from '../evidence/records.ts';
 import {
-  createFileRuntimeLogStore, durableRuntimeSessionCharacterProfile
+  createFileRuntimeLogStore,
+  durableRuntimeSessionCharacterProfile,
 } from './file-runtime-log-store.ts';
-import { LocalRuntimeStorageContractError } from './layout-contract.ts';
+import {LocalRuntimeStorageContractError} from './layout-contract.ts';
 import {
-  createLocalRuntimeSessionStore, LocalRuntimeSessionStoreError,
-  type LocalRuntimeSessionConversationEvidence
+  createLocalRuntimeSessionStore,
+  LocalRuntimeSessionStoreError,
+  type LocalRuntimeSessionConversationEvidence,
 } from './session-store.ts';
-import type { LocalRuntimeMutationLockLease } from './mutation-lock.ts';
-import { createLocalRuntimeMutationLockOwnerToken } from './mutation-lock.ts';
-import { acquireLocalRuntimeSessionWriterLease } from './session-store.ts';
-import { normalizeLocalRuntimeSessionId } from './layout-contract.ts';
+import type {LocalRuntimeMutationLockLease} from './mutation-lock.ts';
+import {createLocalRuntimeMutationLockOwnerToken} from './mutation-lock.ts';
+import {acquireLocalRuntimeSessionWriterLease} from './session-store.ts';
+import {normalizeLocalRuntimeSessionId} from './layout-contract.ts';
 
 export type DurableSessionSelection = {
   readonly storeRoot?: string;
@@ -26,36 +28,36 @@ export type DurableChatRuntime = {
 };
 
 export async function createDurableChatRuntime(
-  args: DurableSessionSelection
+  args: DurableSessionSelection,
 ): Promise<DurableChatRuntime> {
   const sessionId = normalizeLocalRuntimeSessionId(
-    args.newSessionId ?? args.sessionId
+    args.newSessionId ?? args.sessionId,
   );
   const storageOptions =
-    args.storeRoot === undefined ? {} : { storeRoot: args.storeRoot };
+    args.storeRoot === undefined ? {} : {storeRoot: args.storeRoot};
   const sessionStore = createLocalRuntimeSessionStore({
     ...storageOptions,
     sessionReadinessValidator: {
       assertSessionReadable(selectedSessionId) {
         const logStore = createFileRuntimeLogStore({
           ...storageOptions,
-          sessionId: selectedSessionId
+          sessionId: selectedSessionId,
         });
 
         logStore.readSessionEvidence();
-      }
-    }
+      },
+    },
   });
   const ownerToken = createLocalRuntimeMutationLockOwnerToken();
   const writerLease = await acquireLocalRuntimeSessionWriterLease({
     ...storageOptions,
     sessionId,
-    ownerToken
+    ownerToken,
   });
 
   try {
     if (args.newSessionId !== undefined) {
-      await sessionStore.createSession({ sessionId });
+      await sessionStore.createSession({sessionId});
     } else if (args.sessionId !== undefined) {
       await sessionStore.selectSession(sessionId);
     } else {
@@ -65,7 +67,7 @@ export async function createDurableChatRuntime(
     const logStore = createFileRuntimeLogStore({
       ...storageOptions,
       sessionId,
-      writerLockOwnerToken: ownerToken
+      writerLockOwnerToken: ownerToken,
     });
     logStore.recoverAbandonedWriterEvidence?.();
 
@@ -77,11 +79,11 @@ export async function createDurableChatRuntime(
           },
           readConversationEvidence() {
             return readDurableConversationEvidence(logStore);
-          }
-        }
+          },
+        },
       }),
       logStore,
-      writerLease
+      writerLease,
     } satisfies DurableChatRuntime);
   } catch (error: unknown) {
     await writerLease.release();
@@ -90,25 +92,25 @@ export async function createDurableChatRuntime(
 }
 
 export function readDurableConversationEvidence(
-  logStore: RuntimeLogStore
+  logStore: RuntimeLogStore,
 ): LocalRuntimeSessionConversationEvidence {
   const evidence = logStore.readSessionEvidence().stored;
 
   return Object.freeze({
     character: durableRuntimeSessionCharacterProfile(evidence),
-    messages: evidence.conversationMessages
+    messages: evidence.conversationMessages,
   } satisfies LocalRuntimeSessionConversationEvidence);
 }
 
 export async function selectOrCreateDefaultSession(
   sessionStore: ReturnType<typeof createLocalRuntimeSessionStore>,
-  sessionId: string
+  sessionId: string,
 ): Promise<void> {
   try {
     await sessionStore.readSession(sessionId);
   } catch (error: unknown) {
     if (isMissingDefaultSessionStore(error)) {
-      await sessionStore.createSession({ sessionId });
+      await sessionStore.createSession({sessionId});
       return;
     }
 
@@ -126,4 +128,3 @@ export function isMissingDefaultSessionStore(error: unknown): boolean {
       error.code === 'session_not_found')
   );
 }
-

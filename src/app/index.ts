@@ -16,6 +16,6 @@ export {
   type RuntimePluginActivationSnapshot,
   type RuntimePluginActivationStatus,
   type RuntimePluginCatalogSnapshot,
-  type RuntimePluginFactoryDefinition
+  type RuntimePluginFactoryDefinition,
 } from './activation.ts';
-export { resolveRuntimeCliStartup } from './startup.ts';
+export {resolveRuntimeCliStartup} from './startup.ts';

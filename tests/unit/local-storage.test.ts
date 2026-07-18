@@ -1,19 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {
   createLocalRuntimeSessionPaths,
   decodeStorageSchemaMarker,
-  localRuntimeStorageSchemaVersion
+  localRuntimeStorageSchemaVersion,
 } from '../../src/runtime/storage/layout-contract.ts';
-import { decodeConversationLogRecord } from '../../src/runtime/storage/conversation-codec.ts';
-import { decodeRawEventLogRecord } from '../../src/runtime/storage/raw-event-codec.ts';
-import { decodeRuntimeTraceEntry } from '../../src/runtime/storage/trace-codec.ts';
+import {decodeConversationLogRecord} from '../../src/runtime/storage/conversation-codec.ts';
+import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec.ts';
+import {decodeRuntimeTraceEntry} from '../../src/runtime/storage/trace-codec.ts';
 
 describe('local storage plugin schema', () => {
   it('uses schema version 3 and no top-level character state path', () => {
     expect(localRuntimeStorageSchemaVersion).toBe(3);
     expect(createLocalRuntimeSessionPaths()).not.toHaveProperty(
-      'characterStatePath'
+      'characterStatePath',
     );
   });
 
@@ -22,12 +22,12 @@ describe('local storage plugin schema', () => {
       decodeStorageSchemaMarker(
         JSON.stringify({
           schemaVersion: 1,
-          createdAt: '2026-06-04T00:00:00.000Z'
-        })
-      )
+          createdAt: '2026-06-04T00:00:00.000Z',
+        }),
+      ),
     ).toEqual({
       schemaVersion: 1,
-      createdAt: '2026-06-04T00:00:00.000Z'
+      createdAt: '2026-06-04T00:00:00.000Z',
     });
   });
 
@@ -47,17 +47,17 @@ describe('local storage plugin schema', () => {
           status: 'rejected',
           reason: 'invalid_state_value',
           message: 'Invalid value.',
-          evidence: []
-        }
-      })
+          evidence: [],
+        },
+      }),
     );
 
     expect(record).toMatchObject({
       kind: 'tool_call_finished',
       toolPluginId: 'character-state',
       toolResult: {
-        status: 'rejected'
-      }
+        status: 'rejected',
+      },
     });
     expect(record).not.toHaveProperty('dispatchedToHost');
   });
@@ -80,28 +80,28 @@ describe('local storage plugin schema', () => {
             status: 'rejected',
             reason: 'invalid_state_value',
             message: 'Invalid value.',
-            evidence: []
-          }
-        })
-      )
+            evidence: [],
+          },
+        }),
+      ),
     ).toMatchObject({
       kind: 'tool_call_finished',
-      dispatchedToHost: true
+      dispatchedToHost: true,
     });
   });
 
   it.each([
-    ['event ID', { eventId: 'evt_other' }],
-    ['trace ID', { traceId: 'trace_other' }],
-    ['creation time', { createdAt: '2026-06-15T00:01:00.000Z' }],
-    ['plugin ID', { pluginId: 'other-plugin' }]
+    ['event ID', {eventId: 'evt_other'}],
+    ['trace ID', {traceId: 'trace_other'}],
+    ['creation time', {createdAt: '2026-06-15T00:01:00.000Z'}],
+    ['plugin ID', {pluginId: 'other-plugin'}],
   ])(
     'rejects persisted tool result evidence with a mismatched %s',
     (_field, mismatchedIdentity) => {
       const identity = {
         eventId: 'evt_storage_tool_identity',
         traceId: 'trace_storage_tool_identity',
-        createdAt: '2026-06-15T00:00:00.000Z'
+        createdAt: '2026-06-15T00:00:00.000Z',
       } as const;
 
       expect(() =>
@@ -116,7 +116,7 @@ describe('local storage plugin schema', () => {
             toolPluginId: 'memory.fixture',
             toolResult: {
               status: 'accepted',
-              output: { matches: [] },
+              output: {matches: []},
               evidence: [
                 {
                   ...identity,
@@ -126,18 +126,18 @@ describe('local storage plugin schema', () => {
                   status: 'accepted',
                   summary: 'Search completed.',
                   redactionLabels: [],
-                  ...mismatchedIdentity
-                }
-              ]
-            }
-          })
-        )
+                  ...mismatchedIdentity,
+                },
+              ],
+            },
+          }),
+        ),
       ).toThrow(
         expect.objectContaining({
-          code: 'malformed_record'
-        })
+          code: 'malformed_record',
+        }),
       );
-    }
+    },
   );
 
   it.each([
@@ -149,9 +149,9 @@ describe('local storage plugin schema', () => {
             eventId: 'same-id',
             traceId: 'same-id',
             createdAt: '2026-06-15T00:00:00.000Z',
-            step: 'runtime_event_received'
-          })
-        )
+            step: 'runtime_event_received',
+          }),
+        ),
     ],
     [
       'conversation',
@@ -166,9 +166,9 @@ describe('local storage plugin schema', () => {
             speakerId: 'local-user',
             speakerName: 'You',
             text: 'Hello',
-            committedAt: '2026-06-15T00:00:01.000Z'
-          })
-        )
+            committedAt: '2026-06-15T00:00:01.000Z',
+          }),
+        ),
     ],
     [
       'raw event',
@@ -179,15 +179,15 @@ describe('local storage plugin schema', () => {
             traceId: 'same-id',
             createdAt: '2026-06-15T00:00:00.000Z',
             kind: 'runtime_event_received',
-            eventType: 'USER_MESSAGE'
-          })
-        )
-    ]
+            eventType: 'USER_MESSAGE',
+          }),
+        ),
+    ],
   ])('rejects equal event and trace IDs in the %s decoder', (_name, decode) => {
     expect(decode).toThrow(
       expect.objectContaining({
-        code: 'malformed_record'
-      })
+        code: 'malformed_record',
+      }),
     );
   });
 
@@ -198,13 +198,13 @@ describe('local storage plugin schema', () => {
           eventId: 'evt_unknown_trace_step',
           traceId: 'trace_unknown_trace_step',
           createdAt: '2026-06-15T00:00:00.000Z',
-          step: 'unknown_step'
-        })
-      )
+          step: 'unknown_step',
+        }),
+      ),
     ).toThrow(
       expect.objectContaining({
-        code: 'malformed_record'
-      })
+        code: 'malformed_record',
+      }),
     );
   });
 });

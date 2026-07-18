@@ -1,31 +1,31 @@
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import {spawn} from 'node:child_process';
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 
 import {
   createRuntimePluginFileStore,
-  createRuntimePluginFileStoreTransaction
+  createRuntimePluginFileStoreTransaction,
 } from '../../src/runtime/storage/plugin-file-store/index.ts';
-import { durablePluginStoreMutationResourceKey } from '../../src/runtime/storage/plugin-file-store/durable-primitives.ts';
+import {durablePluginStoreMutationResourceKey} from '../../src/runtime/storage/plugin-file-store/durable-primitives.ts';
 import {
   createLocalRuntimePluginPaths,
-  createLocalRuntimeStorageLayout
+  createLocalRuntimeStorageLayout,
 } from '../../src/runtime/storage/layout-contract.ts';
 import {
   acquireLocalRuntimeMutationLockSync,
-  LocalRuntimeMutationLockBusyError
+  LocalRuntimeMutationLockBusyError,
 } from '../../src/runtime/storage/mutation-lock.ts';
 
 const tempRoots: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    tempRoots.splice(0).map(async (root) => {
-      await rm(root, { force: true, recursive: true });
-    })
+    tempRoots.splice(0).map(async root => {
+      await rm(root, {force: true, recursive: true});
+    }),
   );
 });
 
@@ -38,18 +38,18 @@ describe('runtime plugin file store concurrency', () => {
     const root = createLocalRuntimePluginPaths({
       storeRoot,
       sessionId,
-      pluginId
+      pluginId,
     }).pluginRoot;
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction
-      .fileStoreFor({ storeRoot, sessionId, pluginId })
-      .appendJsonl('events.jsonl', { source: 'transaction' });
+      .fileStoreFor({storeRoot, sessionId, pluginId})
+      .appendJsonl('events.jsonl', {source: 'transaction'});
     const lockHolder = startMutationLockHolderChild({
-      locksRoot: createLocalRuntimeStorageLayout({ storeRoot }).locksRoot,
+      locksRoot: createLocalRuntimeStorageLayout({storeRoot}).locksRoot,
       resourceKey: durablePluginStoreMutationResourceKey(root),
       readyPath,
-      holdMs: 500
+      holdMs: 500,
     });
 
     await waitForFile(readyPath);
@@ -59,8 +59,8 @@ describe('runtime plugin file store concurrency', () => {
       transaction.prepare({
         eventId: 'evt_plugin_prepare_lock_race',
         traceId: 'trace_plugin_prepare_lock_race',
-        createdAt: '2026-07-11T00:00:00.000Z'
-      })
+        createdAt: '2026-07-11T00:00:00.000Z',
+      }),
     ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
     expect(Date.now() - prepareStartedAt).toBeLessThan(200);
     await lockHolder;
@@ -74,40 +74,40 @@ describe('runtime plugin file store concurrency', () => {
     const root = createLocalRuntimePluginPaths({
       storeRoot,
       sessionId,
-      pluginId
+      pluginId,
     }).pluginRoot;
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction
-      .fileStoreFor({ storeRoot, sessionId, pluginId })
-      .appendJsonl('events.jsonl', { source: 'transaction' });
+      .fileStoreFor({storeRoot, sessionId, pluginId})
+      .appendJsonl('events.jsonl', {source: 'transaction'});
     const prepared = await transaction.prepare({
       eventId: 'evt_plugin_finalize_lock_race',
       traceId: 'trace_plugin_finalize_lock_race',
-      createdAt: '2026-07-11T00:00:00.000Z'
+      createdAt: '2026-07-11T00:00:00.000Z',
     });
     const lockHolder = startMutationLockHolderChild({
-      locksRoot: createLocalRuntimeStorageLayout({ storeRoot }).locksRoot,
+      locksRoot: createLocalRuntimeStorageLayout({storeRoot}).locksRoot,
       resourceKey: durablePluginStoreMutationResourceKey(root),
       readyPath,
-      holdMs: 500
+      holdMs: 500,
     });
 
     await waitForFile(readyPath);
     const finalizeStartedAt = Date.now();
 
     await expect(prepared.finalize()).rejects.toBeInstanceOf(
-      LocalRuntimeMutationLockBusyError
+      LocalRuntimeMutationLockBusyError,
     );
     expect(Date.now() - finalizeStartedAt).toBeLessThan(200);
     await lockHolder;
     await prepared.finalize();
 
     expect(
-      createRuntimePluginFileStore({ storeRoot, sessionId, pluginId }).readJsonl(
-        'events.jsonl'
-      )
-    ).toEqual([{ source: 'transaction' }]);
+      createRuntimePluginFileStore({storeRoot, sessionId, pluginId}).readJsonl(
+        'events.jsonl',
+      ),
+    ).toEqual([{source: 'transaction'}]);
   }, 15_000);
 
   it('fails WAL discard fast with a typed busy error and remains retryable', async () => {
@@ -118,31 +118,31 @@ describe('runtime plugin file store concurrency', () => {
     const root = createLocalRuntimePluginPaths({
       storeRoot,
       sessionId,
-      pluginId
+      pluginId,
     }).pluginRoot;
     const identity = {
       eventId: 'evt_plugin_discard_lock_race',
       traceId: 'trace_plugin_discard_lock_race',
-      createdAt: '2026-07-11T00:00:00.000Z'
+      createdAt: '2026-07-11T00:00:00.000Z',
     };
     const transaction = createRuntimePluginFileStoreTransaction();
 
     transaction
-      .fileStoreFor({ storeRoot, sessionId, pluginId })
-      .appendJsonl('events.jsonl', { source: 'transaction' });
+      .fileStoreFor({storeRoot, sessionId, pluginId})
+      .appendJsonl('events.jsonl', {source: 'transaction'});
     const prepared = await transaction.prepare(identity);
     const lockHolder = startMutationLockHolderChild({
-      locksRoot: createLocalRuntimeStorageLayout({ storeRoot }).locksRoot,
+      locksRoot: createLocalRuntimeStorageLayout({storeRoot}).locksRoot,
       resourceKey: durablePluginStoreMutationResourceKey(root),
       readyPath,
-      holdMs: 500
+      holdMs: 500,
     });
 
     await waitForFile(readyPath);
     const discardStartedAt = Date.now();
 
     await expect(prepared.discard()).rejects.toBeInstanceOf(
-      LocalRuntimeMutationLockBusyError
+      LocalRuntimeMutationLockBusyError,
     );
     expect(Date.now() - discardStartedAt).toBeLessThan(200);
     await lockHolder;
@@ -156,36 +156,36 @@ describe('runtime plugin file store concurrency', () => {
     const root = createLocalRuntimePluginPaths({
       storeRoot,
       sessionId,
-      pluginId
+      pluginId,
     }).pluginRoot;
     const abandoned = acquireLocalRuntimeMutationLockSync({
-      locksRoot: createLocalRuntimeStorageLayout({ storeRoot }).locksRoot,
+      locksRoot: createLocalRuntimeStorageLayout({storeRoot}).locksRoot,
       resourceKey: durablePluginStoreMutationResourceKey(root),
-      waitTimeoutMs: 0
+      waitTimeoutMs: 0,
     });
     const ownerPath = join(abandoned.lockPath, 'owner.json');
     const owner = requiredRecord(
       JSON.parse(await readFile(ownerPath, 'utf8')),
-      'plugin mutation lock owner'
+      'plugin mutation lock owner',
     );
 
     await writeFile(
       ownerPath,
-      `${JSON.stringify({ ...owner, pid: 2_147_483_647 })}\n`,
-      'utf8'
+      `${JSON.stringify({...owner, pid: 2_147_483_647})}\n`,
+      'utf8',
     );
 
     const store = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId
+      pluginId,
     });
 
-    store.appendJsonl('events.jsonl', { recovered: true });
-    expect(store.readJsonl('events.jsonl')).toEqual([{ recovered: true }]);
+    store.appendJsonl('events.jsonl', {recovered: true});
+    expect(store.readJsonl('events.jsonl')).toEqual([{recovered: true}]);
     expect(store.revision()).toBe(1);
     await expect(readFile(ownerPath, 'utf8')).rejects.toMatchObject({
-      code: 'ENOENT'
+      code: 'ENOENT',
     });
     abandoned.release();
   });
@@ -208,26 +208,26 @@ async function startMutationLockHolderChild(options: {
     "writeFileSync(process.argv[3], 'ready\\n', 'utf8');",
     'const sleep = new Int32Array(new SharedArrayBuffer(4));',
     'Atomics.wait(sleep, 0, 0, Number(process.argv[4]));',
-    'lease.release();'
+    'lease.release();',
   ].join('\n');
 
   return runInlineModuleChild(script, [
     options.locksRoot,
     options.resourceKey,
     options.readyPath,
-    String(options.holdMs)
+    String(options.holdMs),
   ]);
 }
 
 async function runInlineModuleChild(
   script: string,
-  arguments_: readonly string[]
+  arguments_: readonly string[],
 ): Promise<void> {
   await new Promise<void>((resolveChild, rejectChild) => {
     const child = spawn(
       process.execPath,
       ['--input-type=module', '-e', script, ...arguments_],
-      { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] }
+      {cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe']},
     );
     let stderr = '';
 
@@ -243,9 +243,7 @@ async function runInlineModuleChild(
       }
 
       rejectChild(
-        new Error(
-          `Inline child failed (${String(code ?? signal)}): ${stderr}`
-        )
+        new Error(`Inline child failed (${String(code ?? signal)}): ${stderr}`),
       );
     });
   });
@@ -273,7 +271,7 @@ async function waitForFile(path: string): Promise<void> {
       throw new Error(`Timed out waiting for child readiness file: ${path}.`);
     }
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>(resolve => {
       setTimeout(resolve, 10);
     });
   }
@@ -281,7 +279,7 @@ async function waitForFile(path: string): Promise<void> {
 
 function requiredRecord(
   value: unknown,
-  label: string
+  label: string,
 ): Readonly<Record<string, unknown>> {
   if (!isRecord(value)) {
     throw new Error(`Expected ${label} to be an object.`);

@@ -24,25 +24,21 @@ import {
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult,
   type RuntimePluginToolValidationOwner,
-  type RuntimePluginContext
+  type RuntimePluginContext,
 } from '../../../src/plugins/api/index.ts';
-import {
-  createFirstPartyModelToolsPlugin
-} from '../../../src/plugins/builtin/model-tools/index.ts';
+import {createFirstPartyModelToolsPlugin} from '../../../src/plugins/builtin/model-tools/index.ts';
 import {
   type ModelToolInputContract,
   type ModelToolInputField,
   type ModelToolInputFieldValueType,
-  modelToolInputFieldValueTypes
+  modelToolInputFieldValueTypes,
 } from '../../../src/role-model/index.ts';
-import { isModelFacingPluginTool } from '../../../src/plugins/policy/tool-policy.ts';
+import {isModelFacingPluginTool} from '../../../src/plugins/policy/tool-policy.ts';
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 
 export type RuntimePluginAdapterCompatibilityDisposition =
-  | 'mapped'
-  | 'ignored_with_evidence'
-  | 'future_extension';
+  'mapped' | 'ignored_with_evidence' | 'future_extension';
 
 export type RuntimePluginAdapterCompatibilityNote = {
   readonly sourceSystem: string;
@@ -57,7 +53,7 @@ export type RuntimePluginAdapterMapping = {
 };
 
 export function mapOpenClawMemoryPluginFixture(
-  value: unknown
+  value: unknown,
 ): RuntimePluginAdapterMapping {
   const fixture = requiredRecord(value, 'OpenClaw fixture');
   const contracts = requiredRecord(fixture['contracts'], 'contracts');
@@ -68,26 +64,26 @@ export function mapOpenClawMemoryPluginFixture(
   const packageOpenClaw = optionalNestedRecord(
     packageMetadata,
     'openclaw',
-    'package.openclaw'
+    'package.openclaw',
   );
   const packageCompat = optionalNestedRecord(
     packageOpenClaw,
     'compat',
-    'package.openclaw.compat'
+    'package.openclaw.compat',
   );
   const activation = requiredRecord(fixture['activation'], 'activation');
   const manifestId = 'openclaw.memory_core.fixture';
-  const providedTools = toolNames.map((toolName) =>
+  const providedTools = toolNames.map(toolName =>
     createProvidedToolFromSchema({
       name: toolName,
       description: toolDescriptionFromMetadata(toolMetadata, toolName),
       inputContract: inputContractFromSchema(
-        toolInputSchemaFromMetadata(toolMetadata, toolName)
+        toolInputSchemaFromMetadata(toolMetadata, toolName),
       ),
       validationOwner: 'adapter',
       sideEffectLevel: 'runtime_read',
-      sourceReferencesRequired: true
-    })
+      sourceReferencesRequired: true,
+    }),
   );
   const notes = [
     createCompatibilityNote({
@@ -95,16 +91,16 @@ export function mapOpenClawMemoryPluginFixture(
       fieldPath: 'contracts.tools',
       disposition: 'mapped',
       evidence:
-        'OpenClaw declared tool names were normalized into local providedTools.'
+        'OpenClaw declared tool names were normalized into local providedTools.',
     }),
     createCompatibilityNote({
       sourceSystem: 'openclaw',
       fieldPath: 'configSchema.properties',
       disposition: 'mapped',
       evidence:
-        'OpenClaw JSON-schema-like config fields were normalized into local config metadata.'
+        'OpenClaw JSON-schema-like config fields were normalized into local config metadata.',
     }),
-    ...unsupportedNotesFromFixture(fixture, 'openclaw')
+    ...unsupportedNotesFromFixture(fixture, 'openclaw'),
   ];
   const manifest = createOpenClawManifest({
     fixture,
@@ -113,10 +109,13 @@ export function mapOpenClawMemoryPluginFixture(
     configFields: configFieldsFromSchema(configSchema),
     activationReasons: activationReasonsFromOpenClawActivation(activation),
     sourceVersion:
-      optionalString(packageCompat?.['pluginApi'], 'package.openclaw.compat.pluginApi') ??
+      optionalString(
+        packageCompat?.['pluginApi'],
+        'package.openclaw.compat.pluginApi',
+      ) ??
       optionalString(fixture['version'], 'version') ??
       'fixture',
-    compatibilityNotes: notes
+    compatibilityNotes: notes,
   });
   const plugin = createRuntimePlugin({
     manifest,
@@ -130,7 +129,7 @@ export function mapOpenClawMemoryPluginFixture(
           output: {
             source: 'openclaw.fixture',
             toolName: call.toolName,
-            declaredBy: 'contracts.tools'
+            declaredBy: 'contracts.tools',
           },
           summary: `Mapped OpenClaw tool ${call.toolName} through fixture adapter.`,
           sourceReferences: [
@@ -139,10 +138,10 @@ export function mapOpenClawMemoryPluginFixture(
               toolName: call.toolName,
               title: `OpenClaw contracts.tools entry ${call.toolName}`,
               uri: `fixture://openclaw/tools/${sourceReferenceIdSegment(
-                call.toolName
-              )}`
-            })
-          ]
+                call.toolName,
+              )}`,
+            }),
+          ],
         });
       },
       health(context) {
@@ -152,24 +151,27 @@ export function mapOpenClawMemoryPluginFixture(
           checkedAt: context.timestamp,
           summary:
             'OpenClaw fixture is static; no universal upstream health field was executed.',
-          redactionLabels: []
+          redactionLabels: [],
         });
-      }
-    }
+      },
+    },
   });
 
-  return freezeMapping({ plugin, compatibilityNotes: notes });
+  return freezeMapping({plugin, compatibilityNotes: notes});
 }
 
 export function mapTencentDbMemoryGatewayFixture(
-  value: unknown
+  value: unknown,
 ): RuntimePluginAdapterMapping {
   const fixture = requiredRecord(value, 'TencentDB gateway fixture');
   const endpoints = requiredRecord(fixture['endpoints'], 'endpoints');
   const recall = requiredEndpoint(endpoints, 'recall');
   const capture = requiredEndpoint(endpoints, 'capture');
   const searchMemories = requiredEndpoint(endpoints, 'searchMemories');
-  const searchConversations = requiredEndpoint(endpoints, 'searchConversations');
+  const searchConversations = requiredEndpoint(
+    endpoints,
+    'searchConversations',
+  );
   const sessionEnd = requiredEndpoint(endpoints, 'sessionEnd');
   const health = requiredEndpoint(endpoints, 'health');
   const config = requiredRecord(fixture['config'], 'config');
@@ -182,7 +184,7 @@ export function mapTencentDbMemoryGatewayFixture(
       validationOwner: 'adapter',
       sideEffectLevel: 'external_read',
       sourceReferencesRequired: true,
-      maxCalls: 2
+      maxCalls: 2,
     }),
     createProvidedToolFromSchema({
       name: 'memory_tencentdb.conversation_search',
@@ -192,29 +194,29 @@ export function mapTencentDbMemoryGatewayFixture(
       validationOwner: 'adapter',
       sideEffectLevel: 'external_read',
       sourceReferencesRequired: true,
-      maxCalls: 2
-    })
+      maxCalls: 2,
+    }),
   ];
   const notes = [
     createCompatibilityNote({
       sourceSystem: 'TencentDB-Agent-Memory',
       fieldPath: 'endpoints.recall',
       disposition: 'mapped',
-      evidence: 'POST /recall fixture response maps to beforeRoleModelCall.'
+      evidence: 'POST /recall fixture response maps to beforeRoleModelCall.',
     }),
     createCompatibilityNote({
       sourceSystem: 'TencentDB-Agent-Memory',
       fieldPath: 'endpoints.capture',
       disposition: 'mapped',
-      evidence: 'POST /capture fixture response maps to afterTurnCommitted.'
+      evidence: 'POST /capture fixture response maps to afterTurnCommitted.',
     }),
     createCompatibilityNote({
       sourceSystem: 'TencentDB-Agent-Memory',
       fieldPath: 'endpoints.sessionEnd',
       disposition: 'mapped',
-      evidence: 'POST /session/end fixture response maps to onSessionEnd.'
+      evidence: 'POST /session/end fixture response maps to onSessionEnd.',
     }),
-    ...unsupportedNotesFromFixture(fixture, 'TencentDB-Agent-Memory')
+    ...unsupportedNotesFromFixture(fixture, 'TencentDB-Agent-Memory'),
   ];
   const manifest = createMemoryGatewayManifest({
     id: manifestId,
@@ -227,7 +229,7 @@ export function mapTencentDbMemoryGatewayFixture(
     providedTools,
     configFields: configFieldsFromConfigRecord(config),
     configFingerprint: 'fixture-redacted-tdai-gateway',
-    compatibilityNotes: notes
+    compatibilityNotes: notes,
   });
   const plugin = createRuntimePlugin({
     manifest,
@@ -236,23 +238,24 @@ export function mapTencentDbMemoryGatewayFixture(
       beforeRoleModelCall(context) {
         const confidence = optionalNumber(
           recall.response['confidence'],
-          'endpoints.recall.response.confidence'
+          'endpoints.recall.response.confidence',
         );
         const contextItem = createMemoryContextItem({
           pluginId: manifestId,
           id: 'tdai.recall.fixture',
           text: requiredString(
             recall.response['context'],
-            'endpoints.recall.response.context'
+            'endpoints.recall.response.context',
           ),
           sourceId: 'tdai.recall.fixture',
           sourceTitle: 'TencentDB /recall fixture',
           sourceUri: 'fixture://tencentdb/recall',
-          estimatedTokens: optionalPositiveInteger(
-            recall.response['estimatedTokens'],
-            'endpoints.recall.response.estimatedTokens'
-          ) ?? 64,
-          ...(confidence === undefined ? {} : { confidence })
+          estimatedTokens:
+            optionalPositiveInteger(
+              recall.response['estimatedTokens'],
+              'endpoints.recall.response.estimatedTokens',
+            ) ?? 64,
+          ...(confidence === undefined ? {} : {confidence}),
         });
 
         return Object.freeze({
@@ -267,9 +270,9 @@ export function mapTencentDbMemoryGatewayFixture(
               sourceReferences: contextItem.sourceReferences,
               ...(manifest.config.fingerprint === undefined
                 ? {}
-                : { configFingerprint: manifest.config.fingerprint })
-            })
-          ])
+                : {configFingerprint: manifest.config.fingerprint}),
+            }),
+          ]),
         });
       },
       handleToolCall(call, context) {
@@ -286,9 +289,9 @@ export function mapTencentDbMemoryGatewayFixture(
                 endpointName: 'searchMemories',
                 endpoint: searchMemories,
                 titlePrefix: 'TencentDB gateway fixture',
-                uriBase: 'fixture://tencentdb'
-              })
-            ]
+                uriBase: 'fixture://tencentdb',
+              }),
+            ],
           });
         }
 
@@ -298,17 +301,16 @@ export function mapTencentDbMemoryGatewayFixture(
             call,
             context,
             output: endpointToolOutput(searchConversations),
-            summary:
-              'Mapped TencentDB /search/conversations fixture response.',
+            summary: 'Mapped TencentDB /search/conversations fixture response.',
             sourceReferences: [
               createEndpointSourceReference({
                 pluginId: manifestId,
                 endpointName: 'searchConversations',
                 endpoint: searchConversations,
                 titlePrefix: 'TencentDB gateway fixture',
-                uriBase: 'fixture://tencentdb'
-              })
-            ]
+                uriBase: 'fixture://tencentdb',
+              }),
+            ],
           });
         }
 
@@ -317,7 +319,7 @@ export function mapTencentDbMemoryGatewayFixture(
           call,
           context,
           reason: 'unsupported_fixture_tool',
-          message: `TencentDB fixture does not map tool ${call.toolName}.`
+          message: `TencentDB fixture does not map tool ${call.toolName}.`,
         });
       },
       afterTurnCommitted(context) {
@@ -326,8 +328,8 @@ export function mapTencentDbMemoryGatewayFixture(
           context,
           evidenceKind: 'after_turn_committed',
           summary: `Mapped TencentDB /capture response: ${JSON.stringify(
-            endpointToolOutput(capture)
-          )}.`
+            endpointToolOutput(capture),
+          )}.`,
         });
       },
       onSessionEnd(context) {
@@ -336,25 +338,25 @@ export function mapTencentDbMemoryGatewayFixture(
           context,
           evidenceKind: 'session_end',
           summary: `Mapped TencentDB /session/end response: ${JSON.stringify(
-            endpointToolOutput(sessionEnd)
-          )}.`
+            endpointToolOutput(sessionEnd),
+          )}.`,
         });
       },
       health(context) {
         return healthSnapshotFromEndpoint({
           pluginId: manifestId,
           context,
-          endpoint: health
+          endpoint: health,
         });
-      }
-    }
+      },
+    },
   });
 
-  return freezeMapping({ plugin, compatibilityNotes: notes });
+  return freezeMapping({plugin, compatibilityNotes: notes});
 }
 
 export function mapHermesMemoryProviderFixture(
-  value: unknown
+  value: unknown,
 ): RuntimePluginAdapterMapping {
   const fixture = requiredRecord(value, 'Hermes provider fixture');
   const behavior = requiredRecord(fixture['behavior'], 'behavior');
@@ -362,10 +364,13 @@ export function mapHermesMemoryProviderFixture(
   const sync = requiredRecord(behavior['sync'], 'behavior.sync');
   const sessionEnd = requiredRecord(
     behavior['sessionEnd'],
-    'behavior.sessionEnd'
+    'behavior.sessionEnd',
   );
   const health = requiredRecord(behavior['health'], 'behavior.health');
-  const searchTools = recordsArray(behavior['searchTools'], 'behavior.searchTools');
+  const searchTools = recordsArray(
+    behavior['searchTools'],
+    'behavior.searchTools',
+  );
   const config = requiredRecord(fixture['config'], 'config');
   const degradation = requiredRecord(fixture['degradation'], 'degradation');
   const manifestId = 'hermes.memory_tencentdb.fixture';
@@ -374,42 +379,43 @@ export function mapHermesMemoryProviderFixture(
       sourceSystem: 'hermes',
       fieldPath: 'behavior.prefetch',
       disposition: 'mapped',
-      evidence: 'Hermes prefetch maps to beforeRoleModelCall recall context.'
+      evidence: 'Hermes prefetch maps to beforeRoleModelCall recall context.',
     }),
     createCompatibilityNote({
       sourceSystem: 'hermes',
       fieldPath: 'behavior.sync',
       disposition: 'mapped',
-      evidence: 'Hermes sync maps to afterTurnCommitted capture.'
+      evidence: 'Hermes sync maps to afterTurnCommitted capture.',
     }),
     createCompatibilityNote({
       sourceSystem: 'hermes',
       fieldPath: 'degradation',
       disposition: 'mapped',
       evidence:
-        'Circuit-breaker and back-pressure metadata map into compatibility notes and health summary.'
+        'Circuit-breaker and back-pressure metadata map into compatibility notes and health summary.',
     }),
-    ...unsupportedNotesFromFixture(fixture, 'hermes')
+    ...unsupportedNotesFromFixture(fixture, 'hermes'),
   ];
-  const providedTools = searchTools.map((tool) =>
+  const providedTools = searchTools.map(tool =>
     createProvidedToolFromSchema({
       name: requiredString(tool['name'], 'behavior.searchTools.name'),
       description: requiredString(
         tool['description'],
-        'behavior.searchTools.description'
+        'behavior.searchTools.description',
       ),
       inputContract: inputContractFromSchema(
-        requiredRecord(tool['inputSchema'], 'behavior.searchTools.inputSchema')
+        requiredRecord(tool['inputSchema'], 'behavior.searchTools.inputSchema'),
       ),
       validationOwner: 'adapter',
       sideEffectLevel: 'external_read',
       sourceReferencesRequired: true,
-      maxCalls: 2
-    })
+      maxCalls: 2,
+    }),
   );
   const manifest = createMemoryGatewayManifest({
     id: manifestId,
-    displayName: optionalString(fixture['displayName'], 'displayName') ??
+    displayName:
+      optionalString(fixture['displayName'], 'displayName') ??
       'Hermes memory provider fixture',
     sourceSystem: 'hermes',
     sourceVersion: optionalString(fixture['version'], 'version') ?? 'fixture',
@@ -419,7 +425,7 @@ export function mapHermesMemoryProviderFixture(
     providedTools,
     configFields: configFieldsFromConfigRecord(config),
     configFingerprint: 'fixture-redacted-hermes-provider',
-    compatibilityNotes: notes
+    compatibilityNotes: notes,
   });
   const plugin = createRuntimePlugin({
     manifest,
@@ -428,21 +434,24 @@ export function mapHermesMemoryProviderFixture(
       beforeRoleModelCall(context) {
         const confidence = optionalNumber(
           prefetch['confidence'],
-          'prefetch.confidence'
+          'prefetch.confidence',
         );
         const contextItem = createMemoryContextItem({
           pluginId: manifestId,
           id: 'hermes.prefetch.fixture',
-          text: requiredString(prefetch['context'], 'behavior.prefetch.context'),
+          text: requiredString(
+            prefetch['context'],
+            'behavior.prefetch.context',
+          ),
           sourceId: 'hermes.prefetch.fixture',
           sourceTitle: 'Hermes prefetch fixture',
           sourceUri: 'fixture://hermes/prefetch',
           estimatedTokens:
             optionalPositiveInteger(
               prefetch['estimatedTokens'],
-              'behavior.prefetch.estimatedTokens'
+              'behavior.prefetch.estimatedTokens',
             ) ?? 72,
-          ...(confidence === undefined ? {} : { confidence })
+          ...(confidence === undefined ? {} : {confidence}),
         });
 
         return Object.freeze({
@@ -457,16 +466,16 @@ export function mapHermesMemoryProviderFixture(
               sourceReferences: contextItem.sourceReferences,
               ...(manifest.config.fingerprint === undefined
                 ? {}
-                : { configFingerprint: manifest.config.fingerprint })
-            })
-          ])
+                : {configFingerprint: manifest.config.fingerprint}),
+            }),
+          ]),
         });
       },
       handleToolCall(call, context) {
         const tool = searchTools.find(
-          (candidate) =>
+          candidate =>
             requiredString(candidate['name'], 'behavior.searchTools.name') ===
-            call.toolName
+            call.toolName,
         );
 
         if (tool === undefined) {
@@ -475,7 +484,7 @@ export function mapHermesMemoryProviderFixture(
             call,
             context,
             reason: 'unsupported_fixture_tool',
-            message: `Hermes fixture does not map tool ${call.toolName}.`
+            message: `Hermes fixture does not map tool ${call.toolName}.`,
           });
         }
 
@@ -484,7 +493,7 @@ export function mapHermesMemoryProviderFixture(
           call,
           context,
           output: jsonObjectFromRecord(
-            requiredRecord(tool['fixtureResponse'], 'fixtureResponse')
+            requiredRecord(tool['fixtureResponse'], 'fixtureResponse'),
           ),
           summary: `Mapped Hermes search tool ${call.toolName}.`,
           sourceReferences: [
@@ -493,10 +502,10 @@ export function mapHermesMemoryProviderFixture(
               toolName: call.toolName,
               title: `Hermes search tool ${call.toolName}`,
               uri: `fixture://hermes/searchTools/${sourceReferenceIdSegment(
-                call.toolName
-              )}`
-            })
-          ]
+                call.toolName,
+              )}`,
+            }),
+          ],
         });
       },
       afterTurnCommitted(context) {
@@ -505,8 +514,8 @@ export function mapHermesMemoryProviderFixture(
           context,
           evidenceKind: 'after_turn_committed',
           summary: `Mapped Hermes sync response: ${JSON.stringify(
-            jsonObjectFromRecord(sync)
-          )}.`
+            jsonObjectFromRecord(sync),
+          )}.`,
         });
       },
       onSessionEnd(context) {
@@ -515,8 +524,8 @@ export function mapHermesMemoryProviderFixture(
           context,
           evidenceKind: 'session_end',
           summary: `Mapped Hermes session-end response: ${JSON.stringify(
-            jsonObjectFromRecord(sessionEnd)
-          )}.`
+            jsonObjectFromRecord(sessionEnd),
+          )}.`,
         });
       },
       health(context) {
@@ -524,27 +533,27 @@ export function mapHermesMemoryProviderFixture(
           pluginId: manifestId,
           status: healthStatusFromString(
             optionalString(health['status'], 'behavior.health.status') ??
-              'degraded'
+              'degraded',
           ),
           checkedAt: context.timestamp,
           summary: `Hermes health fixture; ${degradationSummary(degradation)}.`,
-          redactionLabels: Object.freeze(['secret'])
+          redactionLabels: Object.freeze(['secret']),
         });
-      }
-    }
+      },
+    },
   });
 
-  return freezeMapping({ plugin, compatibilityNotes: notes });
+  return freezeMapping({plugin, compatibilityNotes: notes});
 }
 
 export function mapMcpToolsResourcesFixture(
-  value: unknown
+  value: unknown,
 ): RuntimePluginAdapterMapping {
   const fixture = requiredRecord(value, 'MCP fixture');
   const server = requiredRecord(fixture['server'], 'server');
   const protocolVersion = requiredString(
     fixture['protocolVersion'],
-    'protocolVersion'
+    'protocolVersion',
   );
   const tools = recordsArray(fixture['tools'], 'tools');
   const resources = recordsArray(fixture['resources'], 'resources');
@@ -554,29 +563,29 @@ export function mapMcpToolsResourcesFixture(
       sourceSystem: 'model-context-protocol',
       fieldPath: 'tools',
       disposition: 'mapped',
-      evidence: 'MCP tool declarations map to local providedTools.'
+      evidence: 'MCP tool declarations map to local providedTools.',
     }),
     createCompatibilityNote({
       sourceSystem: 'model-context-protocol',
       fieldPath: 'resources',
       disposition: 'mapped',
       evidence:
-        'MCP resource declarations map to beforeRoleModelCall context resources.'
+        'MCP resource declarations map to beforeRoleModelCall context resources.',
     }),
-    ...unsupportedNotesFromFixture(fixture, 'model-context-protocol')
+    ...unsupportedNotesFromFixture(fixture, 'model-context-protocol'),
   ];
-  const providedTools = tools.map((tool) =>
+  const providedTools = tools.map(tool =>
     createProvidedToolFromSchema({
       name: requiredString(tool['name'], 'tools.name'),
       description: requiredString(tool['description'], 'tools.description'),
       inputContract: inputContractFromSchema(
-        requiredRecord(tool['inputSchema'], 'tools.inputSchema')
+        requiredRecord(tool['inputSchema'], 'tools.inputSchema'),
       ),
       validationOwner: 'adapter',
       sideEffectLevel: 'external_read',
       sourceReferencesRequired: true,
-      maxCalls: 2
-    })
+      maxCalls: 2,
+    }),
   );
   const manifest = createRuntimePluginManifestForAdapter({
     id: manifestId,
@@ -594,7 +603,7 @@ export function mapMcpToolsResourcesFixture(
       'handle_tool_call',
       'context_provider',
       'before_role_model_call',
-      'health'
+      'health',
     ],
     providedTools,
     configFields: [
@@ -602,16 +611,16 @@ export function mapMcpToolsResourcesFixture(
         name: 'server_id',
         description: 'Static MCP fixture server id.',
         required: true,
-        secret: false
-      })
+        secret: false,
+      }),
     ],
     runtimePolicy: createAdapterPolicy({
       sideEffectLevel: 'external_read',
       timeoutMs: 1000,
-      sourceReferencesRequired: true
+      sourceReferencesRequired: true,
     }),
     activationReasons: ['mcp_fixture_mapping'],
-    compatibilityNotes: notes
+    compatibilityNotes: notes,
   });
   const plugin = createRuntimePlugin({
     manifest,
@@ -623,25 +632,28 @@ export function mapMcpToolsResourcesFixture(
             pluginId: manifestId,
             id: `mcp.resource.${String(index + 1)}`,
             kind: 'resource',
-            text: requiredString(resource['fixtureText'], 'resources.fixtureText'),
+            text: requiredString(
+              resource['fixtureText'],
+              'resources.fixtureText',
+            ),
             budget: {
               estimatedTokens:
                 optionalPositiveInteger(
                   resource['estimatedTokens'],
-                  'resources.estimatedTokens'
+                  'resources.estimatedTokens',
                 ) ?? 80,
-              priority: index + 1
+              priority: index + 1,
             },
             sourceReferences: [
               {
                 kind: 'resource',
                 id: `mcp.resource.${String(index + 1)}`,
                 title: requiredString(resource['name'], 'resources.name'),
-                uri: requiredString(resource['uri'], 'resources.uri')
-              }
+                uri: requiredString(resource['uri'], 'resources.uri'),
+              },
             ],
-            redactionLabels: []
-          })
+            redactionLabels: [],
+          }),
         );
 
         return Object.freeze({
@@ -654,16 +666,16 @@ export function mapMcpToolsResourcesFixture(
               status: 'accepted',
               summary: `Mapped ${String(resources.length)} MCP fixture resources into context.`,
               sourceReferences: contextItems.flatMap(
-                (item) => item.sourceReferences
-              )
-            })
-          ])
+                item => item.sourceReferences,
+              ),
+            }),
+          ]),
         });
       },
       handleToolCall(call, context) {
         const tool = tools.find(
-          (candidate) =>
-            requiredString(candidate['name'], 'tools.name') === call.toolName
+          candidate =>
+            requiredString(candidate['name'], 'tools.name') === call.toolName,
         );
 
         if (tool === undefined) {
@@ -672,7 +684,7 @@ export function mapMcpToolsResourcesFixture(
             call,
             context,
             reason: 'unsupported_fixture_tool',
-            message: `MCP fixture does not map tool ${call.toolName}.`
+            message: `MCP fixture does not map tool ${call.toolName}.`,
           });
         }
 
@@ -681,7 +693,7 @@ export function mapMcpToolsResourcesFixture(
           call,
           context,
           output: jsonObjectFromRecord(
-            requiredRecord(tool['fixtureResponse'], 'tools.fixtureResponse')
+            requiredRecord(tool['fixtureResponse'], 'tools.fixtureResponse'),
           ),
           summary: `Mapped MCP tool ${call.toolName}.`,
           sourceReferences: [
@@ -690,10 +702,10 @@ export function mapMcpToolsResourcesFixture(
               toolName: call.toolName,
               title: `MCP tool ${call.toolName}`,
               uri: `fixture://mcp/tools/${sourceReferenceIdSegment(
-                call.toolName
-              )}`
-            })
-          ]
+                call.toolName,
+              )}`,
+            }),
+          ],
         });
       },
       health(context) {
@@ -703,15 +715,15 @@ export function mapMcpToolsResourcesFixture(
           checkedAt: context.timestamp,
           summary: `MCP fixture server ${requiredString(
             server['id'],
-            'server.id'
+            'server.id',
           )} is static and available.`,
-          redactionLabels: []
+          redactionLabels: [],
         });
-      }
-    }
+      },
+    },
   });
 
-  return freezeMapping({ plugin, compatibilityNotes: notes });
+  return freezeMapping({plugin, compatibilityNotes: notes});
 }
 
 export function mapFirstPartyModelToolsPlugin(): RuntimePluginAdapterMapping {
@@ -722,11 +734,11 @@ export function mapFirstPartyModelToolsPlugin(): RuntimePluginAdapterMapping {
       fieldPath: 'builtInModelToolDefinitionsForUserTurn',
       disposition: 'mapped',
       evidence:
-        'First-party built-in tools are represented through RuntimePlugin without changing validationOwner or input contracts.'
-    })
+        'First-party built-in tools are represented through RuntimePlugin without changing validationOwner or input contracts.',
+    }),
   ];
 
-  return freezeMapping({ plugin, compatibilityNotes: notes });
+  return freezeMapping({plugin, compatibilityNotes: notes});
 }
 
 function createOpenClawManifest(options: {
@@ -759,10 +771,10 @@ function createOpenClawManifest(options: {
     runtimePolicy: createAdapterPolicy({
       sideEffectLevel: 'runtime_read',
       timeoutMs: 1000,
-      sourceReferencesRequired: true
+      sourceReferencesRequired: true,
     }),
     activationReasons: options.activationReasons,
-    compatibilityNotes: options.compatibilityNotes
+    compatibilityNotes: options.compatibilityNotes,
   });
 }
 
@@ -794,7 +806,7 @@ function createMemoryGatewayManifest(options: {
       'handle_tool_call',
       'after_turn_committed',
       'on_session_end',
-      'health'
+      'health',
     ],
     providedTools: options.providedTools,
     configFields: options.configFields,
@@ -803,10 +815,10 @@ function createMemoryGatewayManifest(options: {
       sideEffectLevel: 'local_memory_write',
       timeoutMs: 2000,
       sourceReferencesRequired: true,
-      redactionLabels: ['secret']
+      redactionLabels: ['secret'],
     }),
     activationReasons: ['memory_fixture_mapping'],
-    compatibilityNotes: options.compatibilityNotes
+    compatibilityNotes: options.compatibilityNotes,
   });
 }
 
@@ -840,31 +852,31 @@ function createRuntimePluginManifestForAdapter(options: {
       sourceVersion: options.sourceVersion,
       externalContract: options.externalContract,
       notes: options.compatibilityNotes.map(
-        (note) => `${note.disposition}:${note.fieldPath}:${note.evidence}`
-      )
+        note => `${note.disposition}:${note.fieldPath}:${note.evidence}`,
+      ),
     },
     declaredPlugins: options.declaredPlugins,
     config: {
       fields: options.configFields,
       ...(options.configFingerprint === undefined
         ? {}
-        : { fingerprint: options.configFingerprint })
+        : {fingerprint: options.configFingerprint}),
     },
     localTrustLevel: 'test_fixture',
     runtimePolicy: options.runtimePolicy,
     activation: {
       defaultEnabled: false,
-      reasons: options.activationReasons
+      reasons: options.activationReasons,
     },
-    requestedAccess: {}
+    requestedAccess: {},
   } satisfies RuntimePluginManifest;
 
   return {
     ...manifest,
     requestedAccess: adapterRequestedAccess({
       manifest,
-      providedTools: options.providedTools
-    })
+      providedTools: options.providedTools,
+    }),
   };
 }
 
@@ -875,24 +887,24 @@ function adapterRequestedAccess(options: {
   const pluginShape = {
     manifest: options.manifest,
     providedTools: options.providedTools,
-    lifecycleHooks: {}
+    lifecycleHooks: {},
   } satisfies RuntimePlugin;
-  const hasModelFacingPluginHostTool = options.providedTools.some((tool) =>
+  const hasModelFacingPluginHostTool = options.providedTools.some(tool =>
     isModelFacingPluginTool({
       plugin: pluginShape,
-      tool
-    })
+      tool,
+    }),
   );
 
   return Object.freeze({
     ...(options.manifest.declaredPlugins.includes('before_role_model_call') ||
-      options.manifest.declaredPlugins.includes('after_turn_committed')
-      ? { turn_context: 'read' }
+    options.manifest.declaredPlugins.includes('after_turn_committed')
+      ? {turn_context: 'read'}
       : {}),
     ...(options.manifest.declaredPlugins.includes('before_role_model_call') ||
-      hasModelFacingPluginHostTool
-      ? { model_input: 'write' }
-      : {})
+    hasModelFacingPluginHostTool
+      ? {model_input: 'write'}
+      : {}),
   } satisfies RuntimePluginAccessMap);
 }
 
@@ -913,8 +925,8 @@ function createAdapterPolicy(options: {
       beforeRoleModelCall: 'degrade',
       handleToolCall: 'degrade',
       afterTurnCommitted: 'log_failure',
-      health: 'degrade'
-    }
+      health: 'degrade',
+    },
   };
 }
 
@@ -933,22 +945,22 @@ function createProvidedToolFromSchema(options: {
     requiredForUserTurn: false,
     callLimit: {
       scope: 'user_turn',
-      maxCalls: options.maxCalls ?? 1
+      maxCalls: options.maxCalls ?? 1,
     },
     inputContract: options.inputContract,
     validationOwner: options.validationOwner,
     sideEffectLevel: options.sideEffectLevel,
     requiresConfirmation: false,
-    sourceReferencesRequired: options.sourceReferencesRequired
+    sourceReferencesRequired: options.sourceReferencesRequired,
   };
 }
 
 function configFieldsFromSchema(
-  schema: JsonRecord
+  schema: JsonRecord,
 ): readonly RuntimePluginConfigField[] {
   const properties = optionalRecord(schema['properties'], 'schema.properties');
   const required = new Set(
-    optionalStringArray(schema['required'], 'schema.required')
+    optionalStringArray(schema['required'], 'schema.required'),
   );
 
   if (properties === undefined) {
@@ -965,17 +977,17 @@ function configFieldsFromSchema(
         description:
           optionalString(
             property['description'],
-            `schema.properties.${name}.description`
+            `schema.properties.${name}.description`,
           ) ?? `Configuration field ${name}.`,
         required: required.has(name),
-        secret
+        secret,
       });
-    })
+    }),
   );
 }
 
 function configFieldsFromConfigRecord(
-  config: JsonRecord
+  config: JsonRecord,
 ): readonly RuntimePluginConfigField[] {
   return Object.freeze(
     Object.entries(config).map(([name, value]) => {
@@ -987,14 +999,16 @@ function configFieldsFromConfigRecord(
       return createConfigField({
         name,
         description:
-          optionalString(configField['description'], `config.${name}.description`) ??
-          `Configuration field ${name}.`,
+          optionalString(
+            configField['description'],
+            `config.${name}.description`,
+          ) ?? `Configuration field ${name}.`,
         required:
           optionalBoolean(configField['required'], `config.${name}.required`) ??
           false,
-        secret
+        secret,
       });
-    })
+    }),
   );
 }
 
@@ -1009,14 +1023,14 @@ function createConfigField(options: {
     description: options.description,
     required: options.required,
     secret: options.secret,
-    redactionLabels: options.secret ? ['secret'] : []
+    redactionLabels: options.secret ? ['secret'] : [],
   };
 }
 
 function inputContractFromSchema(schema: JsonRecord): ModelToolInputContract {
   const properties = optionalRecord(schema['properties'], 'schema.properties');
   const required = new Set(
-    optionalStringArray(schema['required'], 'schema.required')
+    optionalStringArray(schema['required'], 'schema.required'),
   );
   const fields =
     properties === undefined
@@ -1025,14 +1039,14 @@ function inputContractFromSchema(schema: JsonRecord): ModelToolInputContract {
           inputFieldFromSchemaProperty({
             name,
             property: requiredRecord(value, `schema.properties.${name}`),
-            required: required.has(name)
-          })
+            required: required.has(name),
+          }),
         );
 
   return {
     type: 'object',
     fields: Object.freeze(fields),
-    additionalFields: schema['additionalProperties'] !== false
+    additionalFields: schema['additionalProperties'] !== false,
   };
 }
 
@@ -1043,10 +1057,10 @@ function inputFieldFromSchemaProperty(options: {
 }): ModelToolInputField {
   const allowedValues = optionalStringArray(
     options.property['enum'],
-    `schema.properties.${options.name}.enum`
+    `schema.properties.${options.name}.enum`,
   );
   const valueType = modelToolInputFieldValueTypeFromSchema(
-    options.property['type']
+    options.property['type'],
   );
 
   return {
@@ -1054,24 +1068,24 @@ function inputFieldFromSchemaProperty(options: {
     description:
       optionalString(
         options.property['description'],
-        `schema.properties.${options.name}.description`
+        `schema.properties.${options.name}.description`,
       ) ?? `Input field ${options.name}.`,
     required: options.required,
-    ...(valueType === undefined ? {} : { valueType }),
+    ...(valueType === undefined ? {} : {valueType}),
     ...(allowedValues.length === 0
       ? {}
-      : { allowedValues: Object.freeze([...allowedValues]) })
+      : {allowedValues: Object.freeze([...allowedValues])}),
   };
 }
 
 function modelToolInputFieldValueTypeFromSchema(
-  value: unknown
+  value: unknown,
 ): ModelToolInputFieldValueType | undefined {
   if (typeof value !== 'string') {
     return undefined;
   }
 
-  return modelToolInputFieldValueTypes.find((candidate) => candidate === value);
+  return modelToolInputFieldValueTypes.find(candidate => candidate === value);
 }
 
 function createMemoryContextItem(options: {
@@ -1091,18 +1105,20 @@ function createMemoryContextItem(options: {
     text: options.text,
     budget: {
       estimatedTokens: options.estimatedTokens,
-      priority: 1
+      priority: 1,
     },
     sourceReferences: [
       {
         kind: 'memory',
         id: options.sourceId,
         title: options.sourceTitle,
-        uri: options.sourceUri
-      }
+        uri: options.sourceUri,
+      },
     ],
-    ...(options.confidence === undefined ? {} : { confidence: options.confidence }),
-    redactionLabels: ['memory']
+    ...(options.confidence === undefined
+      ? {}
+      : {confidence: options.confidence}),
+    redactionLabels: ['memory'],
   });
 }
 
@@ -1128,14 +1144,14 @@ function createEvidence(options: {
     summary: options.summary,
     ...(options.policyOutcome === undefined
       ? {}
-      : { policyOutcome: options.policyOutcome }),
+      : {policyOutcome: options.policyOutcome}),
     ...(options.sourceReferences === undefined
       ? {}
-      : { sourceReferences: options.sourceReferences }),
+      : {sourceReferences: options.sourceReferences}),
     redactionLabels: options.redactionLabels ?? [],
     ...(options.configFingerprint === undefined
       ? {}
-      : { configFingerprint: options.configFingerprint })
+      : {configFingerprint: options.configFingerprint}),
   });
 }
 
@@ -1159,9 +1175,9 @@ function createAcceptedToolCallResult(options: {
         summary: `${options.summary} Tool: ${options.call.toolName}.`,
         ...(options.sourceReferences === undefined
           ? {}
-          : { sourceReferences: options.sourceReferences })
-      })
-    ])
+          : {sourceReferences: options.sourceReferences}),
+      }),
+    ]),
   });
 }
 
@@ -1175,7 +1191,7 @@ function createToolContractSourceReference(options: {
     pluginId: options.pluginId,
     idSuffix: `tool.${sourceReferenceIdSegment(options.toolName)}`,
     title: options.title,
-    uri: options.uri
+    uri: options.uri,
   });
 }
 
@@ -1190,7 +1206,7 @@ function createEndpointSourceReference(options: {
     pluginId: options.pluginId,
     idSuffix: `endpoint.${sourceReferenceIdSegment(options.endpointName)}`,
     title: `${options.titlePrefix} ${options.endpoint.method} ${options.endpoint.path}`,
-    uri: `${options.uriBase}${options.endpoint.path}`
+    uri: `${options.uriBase}${options.endpoint.path}`,
   });
 }
 
@@ -1204,7 +1220,7 @@ function createAdapterExternalContractSourceReference(options: {
     kind: 'external_contract',
     id: `${options.pluginId}.${options.idSuffix}`,
     title: options.title,
-    uri: options.uri
+    uri: options.uri,
   });
 }
 
@@ -1212,7 +1228,9 @@ function sourceReferenceIdSegment(value: string): string {
   const normalized = value.replace(/[^A-Za-z0-9._-]+/gu, '-');
   const bounded = normalized.length === 0 ? 'source' : normalized.slice(0, 64);
 
-  return /^[A-Za-z]/u.test(bounded) ? bounded : `source-${bounded}`.slice(0, 64);
+  return /^[A-Za-z]/u.test(bounded)
+    ? bounded
+    : `source-${bounded}`.slice(0, 64);
 }
 
 function createRejectedToolCallResult(options: {
@@ -1233,9 +1251,9 @@ function createRejectedToolCallResult(options: {
         evidenceKind: 'tool_invocation',
         status: 'rejected',
         summary: options.message,
-        policyOutcome: 'handler_rejected'
-      })
-    ])
+        policyOutcome: 'handler_rejected',
+      }),
+    ]),
   });
 }
 
@@ -1253,9 +1271,9 @@ function createCompletedHookResult(options: {
         context: options.context,
         evidenceKind: options.evidenceKind,
         status: 'accepted',
-        summary: options.summary
-      })
-    ])
+        summary: options.summary,
+      }),
+    ]),
   });
 }
 
@@ -1265,19 +1283,20 @@ function healthSnapshotFromEndpoint(options: {
   readonly endpoint: EndpointFixture;
 }): RuntimePluginHealthSnapshot {
   const statusText =
-    optionalString(options.endpoint.response['status'], 'health.status') ?? 'ok';
+    optionalString(options.endpoint.response['status'], 'health.status') ??
+    'ok';
 
   return createRuntimePluginHealthSnapshot({
     pluginId: options.pluginId,
     status: healthStatusFromString(statusText),
     checkedAt: options.context.timestamp,
     summary: `Gateway health fixture status ${statusText}.`,
-    redactionLabels: Object.freeze(['secret'])
+    redactionLabels: Object.freeze(['secret']),
   });
 }
 
 function healthStatusFromString(
-  value: string
+  value: string,
 ): RuntimePluginHealthSnapshot['status'] {
   if (value === 'ok' || value === 'degraded' || value === 'unavailable') {
     return value;
@@ -1295,7 +1314,7 @@ type EndpointFixture = {
 
 function requiredEndpoint(
   endpoints: JsonRecord,
-  name: string
+  name: string,
 ): EndpointFixture {
   const endpoint = requiredRecord(endpoints[name], `endpoints.${name}`);
 
@@ -1305,55 +1324,78 @@ function requiredEndpoint(
     requestSchema:
       optionalRecord(
         endpoint['requestSchema'],
-        `endpoints.${name}.requestSchema`
+        `endpoints.${name}.requestSchema`,
       ) ?? emptyObject(),
-    response: requiredRecord(endpoint['response'], `endpoints.${name}.response`)
+    response: requiredRecord(
+      endpoint['response'],
+      `endpoints.${name}.response`,
+    ),
   });
 }
 
-function endpointToolOutput(endpoint: EndpointFixture): RuntimePluginJsonObject {
+function endpointToolOutput(
+  endpoint: EndpointFixture,
+): RuntimePluginJsonObject {
   return Object.freeze({
     method: endpoint.method,
     path: endpoint.path,
-    response: jsonValueFromUnknown(endpoint.response)
+    response: jsonValueFromUnknown(endpoint.response),
   });
 }
 
 function toolDescriptionFromMetadata(
   metadata: JsonRecord | undefined,
-  toolName: string
+  toolName: string,
 ): string {
-  const tool = optionalNestedRecord(metadata, toolName, `toolMetadata.${toolName}`);
+  const tool = optionalNestedRecord(
+    metadata,
+    toolName,
+    `toolMetadata.${toolName}`,
+  );
 
   return (
-    optionalString(tool?.['description'], `toolMetadata.${toolName}.description`) ??
-    `OpenClaw fixture tool ${toolName}.`
+    optionalString(
+      tool?.['description'],
+      `toolMetadata.${toolName}.description`,
+    ) ?? `OpenClaw fixture tool ${toolName}.`
   );
 }
 
 function toolInputSchemaFromMetadata(
   metadata: JsonRecord | undefined,
-  toolName: string
+  toolName: string,
 ): JsonRecord {
-  const tool = optionalNestedRecord(metadata, toolName, `toolMetadata.${toolName}`);
+  const tool = optionalNestedRecord(
+    metadata,
+    toolName,
+    `toolMetadata.${toolName}`,
+  );
 
   return (
-    optionalNestedRecord(tool, 'inputSchema', `toolMetadata.${toolName}.inputSchema`) ??
-    emptyObject()
+    optionalNestedRecord(
+      tool,
+      'inputSchema',
+      `toolMetadata.${toolName}.inputSchema`,
+    ) ?? emptyObject()
   );
 }
 
 function activationReasonsFromOpenClawActivation(
-  activation: JsonRecord
+  activation: JsonRecord,
 ): readonly string[] {
   const reasons = ['openclaw_fixture_mapping'];
-  const commands = optionalStringArray(activation['commands'], 'activation.commands');
+  const commands = optionalStringArray(
+    activation['commands'],
+    'activation.commands',
+  );
 
   if (commands.length > 0) {
     reasons.push(`commands:${commands.join(',')}`);
   }
 
-  if (optionalBoolean(activation['onStartup'], 'activation.onStartup') === true) {
+  if (
+    optionalBoolean(activation['onStartup'], 'activation.onStartup') === true
+  ) {
     reasons.push('on_startup');
   }
 
@@ -1363,11 +1405,11 @@ function activationReasonsFromOpenClawActivation(
 function degradationSummary(degradation: JsonRecord): string {
   const circuitBreaker = optionalRecord(
     degradation['circuitBreaker'],
-    'degradation.circuitBreaker'
+    'degradation.circuitBreaker',
   );
   const backPressure = optionalRecord(
     degradation['backPressure'],
-    'degradation.backPressure'
+    'degradation.backPressure',
   );
   const failureThreshold =
     circuitBreaker === undefined
@@ -1375,8 +1417,8 @@ function degradationSummary(degradation: JsonRecord): string {
       : String(
           optionalPositiveInteger(
             circuitBreaker['failureThreshold'],
-            'degradation.circuitBreaker.failureThreshold'
-          ) ?? 'unknown'
+            'degradation.circuitBreaker.failureThreshold',
+          ) ?? 'unknown',
         );
   const pauseMs =
     circuitBreaker === undefined
@@ -1384,8 +1426,8 @@ function degradationSummary(degradation: JsonRecord): string {
       : String(
           optionalPositiveInteger(
             circuitBreaker['pauseMs'],
-            'degradation.circuitBreaker.pauseMs'
-          ) ?? 'unknown'
+            'degradation.circuitBreaker.pauseMs',
+          ) ?? 'unknown',
         );
   const maxInFlight =
     backPressure === undefined
@@ -1393,52 +1435,55 @@ function degradationSummary(degradation: JsonRecord): string {
       : String(
           optionalPositiveInteger(
             backPressure['maxInFlight'],
-            'degradation.backPressure.maxInFlight'
-          ) ?? 'unknown'
+            'degradation.backPressure.maxInFlight',
+          ) ?? 'unknown',
         );
 
   return `circuit breaker threshold ${failureThreshold}, pause ${pauseMs}ms, max in-flight sync ${maxInFlight}`;
 }
 
 function createCompatibilityNote(
-  options: RuntimePluginAdapterCompatibilityNote
+  options: RuntimePluginAdapterCompatibilityNote,
 ): RuntimePluginAdapterCompatibilityNote {
   return Object.freeze({
     sourceSystem: options.sourceSystem,
     fieldPath: options.fieldPath,
     disposition: options.disposition,
-    evidence: options.evidence
+    evidence: options.evidence,
   });
 }
 
 function unsupportedNotesFromFixture(
   fixture: JsonRecord,
-  sourceSystem: string
+  sourceSystem: string,
 ): readonly RuntimePluginAdapterCompatibilityNote[] {
   const unsupportedFields = recordsArray(
     fixture['unsupportedFields'],
-    'unsupportedFields'
+    'unsupportedFields',
   );
 
   return Object.freeze(
-    unsupportedFields.map((field) =>
+    unsupportedFields.map(field =>
       createCompatibilityNote({
         sourceSystem,
-        fieldPath: requiredString(field['fieldPath'], 'unsupportedFields.fieldPath'),
-        disposition: compatibilityDispositionFromString(
-          requiredString(
-            field['disposition'],
-            'unsupportedFields.disposition'
-          )
+        fieldPath: requiredString(
+          field['fieldPath'],
+          'unsupportedFields.fieldPath',
         ),
-        evidence: requiredString(field['evidence'], 'unsupportedFields.evidence')
-      })
-    )
+        disposition: compatibilityDispositionFromString(
+          requiredString(field['disposition'], 'unsupportedFields.disposition'),
+        ),
+        evidence: requiredString(
+          field['evidence'],
+          'unsupportedFields.evidence',
+        ),
+      }),
+    ),
   );
 }
 
 function compatibilityDispositionFromString(
-  value: string
+  value: string,
 ): RuntimePluginAdapterCompatibilityDisposition {
   if (
     value === 'mapped' ||
@@ -1452,11 +1497,11 @@ function compatibilityDispositionFromString(
 }
 
 function freezeMapping(
-  mapping: RuntimePluginAdapterMapping
+  mapping: RuntimePluginAdapterMapping,
 ): RuntimePluginAdapterMapping {
   return Object.freeze({
     plugin: mapping.plugin,
-    compatibilityNotes: Object.freeze([...mapping.compatibilityNotes])
+    compatibilityNotes: Object.freeze([...mapping.compatibilityNotes]),
   });
 }
 
@@ -1465,9 +1510,9 @@ function jsonObjectFromRecord(record: JsonRecord): RuntimePluginJsonObject {
     Object.fromEntries(
       Object.entries(record).map(([key, value]) => [
         key,
-        jsonValueFromUnknown(value)
-      ])
-    )
+        jsonValueFromUnknown(value),
+      ]),
+    ),
   );
 }
 
@@ -1511,7 +1556,7 @@ function optionalRecord(value: unknown, field: string): JsonRecord | undefined {
 function optionalNestedRecord(
   record: JsonRecord | undefined,
   key: string,
-  field: string
+  field: string,
 ): JsonRecord | undefined {
   if (record === undefined) {
     return undefined;
@@ -1527,8 +1572,8 @@ function recordsArray(value: unknown, field: string): readonly JsonRecord[] {
 
   return Object.freeze(
     value.map((item, index) =>
-      requiredRecord(item, `${field}[${String(index)}]`)
-    )
+      requiredRecord(item, `${field}[${String(index)}]`),
+    ),
   );
 }
 
@@ -1553,13 +1598,10 @@ function requiredStringArray(value: unknown, field: string): readonly string[] {
     throw new TypeError(`${field} must be an array.`);
   }
 
-  return Object.freeze(value.map((item) => requiredString(item, field)));
+  return Object.freeze(value.map(item => requiredString(item, field)));
 }
 
-function optionalStringArray(
-  value: unknown,
-  field: string
-): readonly string[] {
+function optionalStringArray(value: unknown, field: string): readonly string[] {
   if (value === undefined) {
     return Object.freeze([]);
   }
@@ -1593,7 +1635,7 @@ function optionalNumber(value: unknown, field: string): number | undefined {
 
 function optionalPositiveInteger(
   value: unknown,
-  field: string
+  field: string,
 ): number | undefined {
   if (value === undefined) {
     return undefined;

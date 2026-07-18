@@ -1,50 +1,50 @@
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import {writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {describe, expect, it} from 'vitest';
 
 import {
   loadProject02RuntimeConfig,
   maxProject02RuntimeConfigBytes,
   runtimeConfigVersion,
-  validateProject02RuntimeConfig
+  validateProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
-import { defaultJsonBoundaryLimits } from '../../src/shared/json-boundary.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
+import {defaultJsonBoundaryLimits} from '../../src/shared/json-boundary.ts';
 
 describe('runtime config loader validation', () => {
   it('rejects an oversized valid JSON file with a limit diagnostic before parsing', () => {
     const configPath = join(
       createTestTempRoot('project02-config-load-limit-'),
-      'config.json'
+      'config.json',
     );
 
     writeFileSync(
       configPath,
       JSON.stringify({
         version: runtimeConfigVersion,
-        padding: 'x'.repeat(maxProject02RuntimeConfigBytes)
+        padding: 'x'.repeat(maxProject02RuntimeConfigBytes),
       }),
-      'utf8'
+      'utf8',
     );
 
-    const result = loadProject02RuntimeConfig({ configPath });
+    const result = loadProject02RuntimeConfig({configPath});
 
     expect(result.config).toBeUndefined();
     expect(result.diagnostics).toEqual([
       expect.objectContaining({
         severity: 'error',
-        code: 'runtime_config_limit_exceeded'
-      })
+        code: 'runtime_config_limit_exceeded',
+      }),
     ]);
     expect(result.diagnostics[0]?.code).not.toBe(
-      'runtime_config_malformed_json'
+      'runtime_config_malformed_json',
     );
   });
 
   it('reports a valid JSON value that exceeds boundary limits as a limit failure', () => {
     const configPath = join(
       createTestTempRoot('project02-config-load-json-limit-'),
-      'config.json'
+      'config.json',
     );
 
     writeFileSync(
@@ -54,25 +54,25 @@ describe('runtime config loader validation', () => {
         plugins: {
           foo: {
             config: {
-              label: 'x'.repeat(defaultJsonBoundaryLimits.maxStringBytes + 1)
-            }
-          }
-        }
+              label: 'x'.repeat(defaultJsonBoundaryLimits.maxStringBytes + 1),
+            },
+          },
+        },
       }),
-      'utf8'
+      'utf8',
     );
 
-    const result = loadProject02RuntimeConfig({ configPath });
+    const result = loadProject02RuntimeConfig({configPath});
 
     expect(result.config).toBeUndefined();
     expect(result.diagnostics).toEqual([
       expect.objectContaining({
         severity: 'error',
-        code: 'runtime_config_limit_exceeded'
-      })
+        code: 'runtime_config_limit_exceeded',
+      }),
     ]);
     expect(result.diagnostics[0]?.code).not.toBe(
-      'runtime_config_malformed_json'
+      'runtime_config_malformed_json',
     );
   });
 
@@ -84,22 +84,22 @@ describe('runtime config loader validation', () => {
     writeFileSync(malformedPath, '{', 'utf8');
     writeFileSync(
       invalidSchemaPath,
-      JSON.stringify({ version: 'project02.config.unknown' }),
-      'utf8'
+      JSON.stringify({version: 'project02.config.unknown'}),
+      'utf8',
     );
 
-    expect(loadProject02RuntimeConfig({ configPath: root }).diagnostics).toEqual([
-      expect.objectContaining({ code: 'runtime_config_read_failed' })
+    expect(loadProject02RuntimeConfig({configPath: root}).diagnostics).toEqual([
+      expect.objectContaining({code: 'runtime_config_read_failed'}),
     ]);
     expect(
-      loadProject02RuntimeConfig({ configPath: malformedPath }).diagnostics
+      loadProject02RuntimeConfig({configPath: malformedPath}).diagnostics,
     ).toEqual([
-      expect.objectContaining({ code: 'runtime_config_malformed_json' })
+      expect.objectContaining({code: 'runtime_config_malformed_json'}),
     ]);
     expect(
-      loadProject02RuntimeConfig({ configPath: invalidSchemaPath }).diagnostics
+      loadProject02RuntimeConfig({configPath: invalidSchemaPath}).diagnostics,
     ).toEqual([
-      expect.objectContaining({ code: 'runtime_config_version_unsupported' })
+      expect.objectContaining({code: 'runtime_config_version_unsupported'}),
     ]);
   });
 
@@ -111,11 +111,11 @@ describe('runtime config loader validation', () => {
           config: {
             apiKey: {
               $env: 'PROJECT02_TEST_API_KEY',
-              $plaintextSecret: 'leaked-secret'
-            }
-          }
-        }
-      }
+              $plaintextSecret: 'leaked-secret',
+            },
+          },
+        },
+      },
     });
 
     expect(result.config).toBeUndefined();
@@ -124,9 +124,9 @@ describe('runtime config loader validation', () => {
         expect.objectContaining({
           severity: 'error',
           code: 'runtime_config_value_invalid',
-          path: 'plugins.foo.config.apiKey'
-        })
-      ])
+          path: 'plugins.foo.config.apiKey',
+        }),
+      ]),
     );
   });
 
@@ -139,11 +139,11 @@ describe('runtime config loader validation', () => {
             apiKey: {
               $env: 'PROJECT02_TEST_API_KEY',
               description: 'test key',
-              unexpected: 'not supported'
-            }
-          }
-        }
-      }
+              unexpected: 'not supported',
+            },
+          },
+        },
+      },
     });
 
     expect(result.config).toBeUndefined();
@@ -152,9 +152,9 @@ describe('runtime config loader validation', () => {
         expect.objectContaining({
           severity: 'error',
           code: 'runtime_config_value_invalid',
-          path: 'plugins.foo.config.apiKey'
-        })
-      ])
+          path: 'plugins.foo.config.apiKey',
+        }),
+      ]),
     );
   });
 
@@ -166,17 +166,17 @@ describe('runtime config loader validation', () => {
           config: {
             apiKey: {
               $env: 'PROJECT02_TEST_API_KEY',
-              description: 'test key'
-            }
-          }
-        }
-      }
+              description: 'test key',
+            },
+          },
+        },
+      },
     });
 
     expect(result.diagnostics).toEqual([]);
     expect(result.config?.plugins?.['foo']?.config?.['apiKey']).toEqual({
       $env: 'PROJECT02_TEST_API_KEY',
-      description: 'test key'
+      description: 'test key',
     });
   });
 
@@ -189,33 +189,33 @@ describe('runtime config loader validation', () => {
             apiKey: {
               $plaintextSecret: 'test-only-secret',
               allowPlaintextSecret: true,
-              justification: 'test-only override'
-            }
-          }
-        }
-      }
+              justification: 'test-only override',
+            },
+          },
+        },
+      },
     });
 
     expect(result.diagnostics).toEqual([]);
     expect(result.config?.plugins?.['foo']?.config?.['apiKey']).toEqual({
       $plaintextSecret: 'test-only-secret',
       allowPlaintextSecret: true,
-      justification: 'test-only override'
+      justification: 'test-only override',
     });
   });
 
   it('deeply snapshots accepted nested config values', () => {
     const nested = {
-      object: { value: 'before' },
-      array: [{ value: 'before' }]
+      object: {value: 'before'},
+      array: [{value: 'before'}],
     };
     const result = validateProject02RuntimeConfig({
       version: runtimeConfigVersion,
       plugins: {
         foo: {
-          config: { nested }
-        }
-      }
+          config: {nested},
+        },
+      },
     });
 
     nested.object.value = 'after';
@@ -230,15 +230,15 @@ describe('runtime config loader validation', () => {
     const stored = result.config?.plugins?.['foo']?.config?.['nested'];
 
     expect(stored).toEqual({
-      object: { value: 'before' },
-      array: [{ value: 'before' }]
+      object: {value: 'before'},
+      array: [{value: 'before'}],
     });
     expect(Object.isFrozen(stored)).toBe(true);
     expect(
       typeof stored === 'object' &&
         stored !== null &&
         !Array.isArray(stored) &&
-        Object.isFrozen(Reflect.get(stored, 'object'))
+        Object.isFrozen(Reflect.get(stored, 'object')),
     ).toBe(true);
   });
 });

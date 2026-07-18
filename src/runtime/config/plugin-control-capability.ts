@@ -1,10 +1,12 @@
 import {
-  applyRuntimePluginConfigControlOperation, inspectRuntimePluginConfig,
-  prepareRuntimePluginConfigControlOperation, resolveRuntimeConfigControlTargetPath,
-  validateRuntimePluginConfigControlOperation
+  applyRuntimePluginConfigControlOperation,
+  inspectRuntimePluginConfig,
+  prepareRuntimePluginConfigControlOperation,
+  resolveRuntimeConfigControlTargetPath,
+  validateRuntimePluginConfigControlOperation,
 } from './control.ts';
-import { RuntimeConfigConflictError } from './mutate.ts';
-import { redactRuntimeConfigValue } from './redact.ts';
+import {RuntimeConfigConflictError} from './mutate.ts';
+import {redactRuntimeConfigValue} from './redact.ts';
 
 /**
  * Host capability handed to the builtin plugin-management tools so they can
@@ -31,6 +33,6 @@ export function createRuntimePluginConfigControlCapability(): RuntimePluginConfi
     applyOperation: applyRuntimePluginConfigControlOperation,
     inspectConfig: inspectRuntimePluginConfig,
     redactValue: redactRuntimeConfigValue,
-    createConflictError: (message) => new RuntimeConfigConflictError(message)
+    createConflictError: message => new RuntimeConfigConflictError(message),
   });
 }

@@ -2,13 +2,16 @@ import {
   type CharacterProfile,
   type RuntimeEventIdentity,
   type RuntimeEventType,
-  type VisibleMessage
+  type VisibleMessage,
 } from '../../core/index.ts';
 import type {
   ModelToolCallLimit,
-  ModelToolInputContract
+  ModelToolInputContract,
 } from '../../role-model/api/index.ts';
-import type { JsonBoundaryObject, JsonBoundaryValue } from '../../shared/json-boundary.ts';
+import type {
+  JsonBoundaryObject,
+  JsonBoundaryValue,
+} from '../../shared/json-boundary.ts';
 import type {
   runtimePluginContractVersion,
   RuntimePluginAccessMap,
@@ -29,7 +32,7 @@ import type {
   RuntimePluginSideEffectLevel,
   RuntimePluginSourceKind,
   RuntimePluginToolValidationOwner,
-  RuntimePluginTrustLevel
+  RuntimePluginTrustLevel,
 } from './contract.ts';
 
 export type RuntimePluginJsonValue = JsonBoundaryValue;
@@ -213,10 +216,9 @@ export type RuntimePluginCommittedTurnSnapshot = {
   readonly visibleMessages: readonly VisibleMessage[];
 };
 
-export type RuntimePluginAfterTurnCommittedContext =
-  RuntimePluginContext & {
-    readonly committedTurn: RuntimePluginCommittedTurnSnapshot;
-  };
+export type RuntimePluginAfterTurnCommittedContext = RuntimePluginContext & {
+  readonly committedTurn: RuntimePluginCommittedTurnSnapshot;
+};
 
 export type CreateRuntimePluginContextOptions = RuntimeEventIdentity & {
   readonly sessionId: string;
@@ -278,10 +280,10 @@ export type PreparedRuntimePluginConfigEffect = RuntimeEventIdentity & {
 };
 
 export type RuntimePluginToolCallExecutionResult =
-  | (Extract<RuntimePluginToolCallResult, { readonly status: 'accepted' }> & {
+  | (Extract<RuntimePluginToolCallResult, {readonly status: 'accepted'}> & {
       readonly preparedConfigEffect?: PreparedRuntimePluginConfigEffect;
     })
-  | Extract<RuntimePluginToolCallResult, { readonly status: 'rejected' }>;
+  | Extract<RuntimePluginToolCallResult, {readonly status: 'rejected'}>;
 
 export type RuntimePluginToolInvocationSnapshot = RuntimeEventIdentity & {
   readonly kind: 'runtime_plugin_tool_invocation_snapshot';
@@ -298,27 +300,27 @@ export type RuntimePluginHookResult = {
 
 export type RuntimePluginLifecycleHooks = {
   readonly beforeRoleModelCall?: (
-    context: RuntimePluginContext
+    context: RuntimePluginContext,
   ) =>
     | RuntimePluginBeforeRoleModelCallResult
     | Promise<RuntimePluginBeforeRoleModelCallResult>;
   readonly handleToolCall?: (
     call: RuntimePluginToolCall,
-    context: RuntimePluginContext
+    context: RuntimePluginContext,
   ) =>
     | RuntimePluginToolCallExecutionResult
     | Promise<RuntimePluginToolCallExecutionResult>;
   readonly afterTurnCommitted?: (
-    context: RuntimePluginAfterTurnCommittedContext
+    context: RuntimePluginAfterTurnCommittedContext,
   ) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>;
   readonly onSessionEnd?: (
-    context: RuntimePluginContext
+    context: RuntimePluginContext,
   ) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>;
   readonly onShutdown?: (
-    context: RuntimePluginContext
+    context: RuntimePluginContext,
   ) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>;
   readonly health?: (
-    context: RuntimePluginContext
+    context: RuntimePluginContext,
   ) => RuntimePluginHealthSnapshot | Promise<RuntimePluginHealthSnapshot>;
 };
 
@@ -328,8 +330,7 @@ export type RuntimePlugin = {
   readonly lifecycleHooks: RuntimePluginLifecycleHooks;
 };
 
-export type RuntimePluginRegistrationSnapshot =
-  RuntimePluginAccessSnapshot & {
+export type RuntimePluginRegistrationSnapshot = RuntimePluginAccessSnapshot & {
   readonly manifest: RuntimePluginManifest;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
   readonly registeredLifecycleHooks: readonly RuntimePluginDeclaration[];

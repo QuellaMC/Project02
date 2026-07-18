@@ -1,5 +1,4 @@
-export const runtimePluginContractVersion =
-  'mvp-008.runtime_plugin.v2';
+export const runtimePluginContractVersion = 'mvp-008.runtime_plugin.v2';
 export const firstPartyModelToolsPluginId = 'first_party.model_tools';
 export const runtimePluginId = 'runtime.plugin';
 export const characterStatePluginId = 'character-state';
@@ -7,15 +6,14 @@ export const characterStatePluginId = 'character-state';
 export const characterStatePatchModelToolName = 'character_state.patch';
 export const runtimePluginListToolName = 'runtime.plugin.list';
 export const runtimePluginConfigReadToolName = 'runtime.plugin.config';
-export const runtimePluginConfigUpdateToolName =
-  'runtime.plugin.config.update';
+export const runtimePluginConfigUpdateToolName = 'runtime.plugin.config.update';
 
 export const runtimePluginKindValues = [
   'first_party',
   'memory_provider',
   'tool_provider',
   'context_provider',
-  'bridge_adapter'
+  'bridge_adapter',
 ] as const;
 
 export const runtimePluginDeclarationValues = [
@@ -27,22 +25,26 @@ export const runtimePluginDeclarationValues = [
   'on_session_end',
   'on_shutdown',
   'health',
-  'plugin_discovery'
+  'plugin_discovery',
 ] as const;
 
 export const runtimePluginTrustLevelValues = [
   'first_party',
   'trusted_adapter',
-  'test_fixture'
+  'test_fixture',
 ] as const;
 
 export const runtimePluginAccessNameValues = [
   'file_store',
   'turn_context',
-  'model_input'
+  'model_input',
 ] as const;
 
-export const runtimePluginAccessLevelValues = ['none', 'read', 'write'] as const;
+export const runtimePluginAccessLevelValues = [
+  'none',
+  'read',
+  'write',
+] as const;
 
 export const runtimePluginSideEffectLevelValues = [
   'none',
@@ -50,29 +52,32 @@ export const runtimePluginSideEffectLevelValues = [
   'runtime_config_write',
   'local_memory_write',
   'external_read',
-  'external_write'
+  'external_write',
 ] as const;
 
 export const beforeRoleModelFailureBehaviorValues = [
   'reject_turn',
-  'degrade'
+  'degrade',
 ] as const;
 
 export const handleToolCallFailureBehaviorValues = [
   'reject_tool_call',
-  'degrade'
+  'degrade',
 ] as const;
 
 export const afterTurnCommittedFailureBehaviorValues = ['log_failure'] as const;
 export const healthFailureBehaviorValues = ['degrade', 'reject_turn'] as const;
-export const confirmationRequirementValues = ['not_required', 'required'] as const;
+export const confirmationRequirementValues = [
+  'not_required',
+  'required',
+] as const;
 
 export const runtimePluginContextItemKindValues = [
   'memory',
   'resource',
   'runtime_note',
   'tool_result',
-  'discovery'
+  'discovery',
 ] as const;
 
 export const runtimePluginSourceKindValues = [
@@ -80,13 +85,13 @@ export const runtimePluginSourceKindValues = [
   'conversation',
   'resource',
   'external_contract',
-  'runtime'
+  'runtime',
 ] as const;
 
 export const runtimePluginToolValidationOwnerValues = [
   'built_in_model_tools',
   'plugin_host',
-  'adapter'
+  'adapter',
 ] as const;
 
 export const runtimePluginEvidenceKindValues = [
@@ -97,14 +102,14 @@ export const runtimePluginEvidenceKindValues = [
   'session_end',
   'shutdown',
   'health',
-  'policy'
+  'policy',
 ] as const;
 
 export const runtimePluginEvidenceStatusValues = [
   'accepted',
   'rejected',
   'degraded',
-  'failed'
+  'failed',
 ] as const;
 
 export const runtimePluginPolicyOutcomeValues = [
@@ -117,13 +122,13 @@ export const runtimePluginPolicyOutcomeValues = [
   'user_approved',
   'timeout',
   'health_degraded',
-  'after_commit_failed'
+  'after_commit_failed',
 ] as const;
 
 export const runtimePluginHealthStatusValues = [
   'ok',
   'degraded',
-  'unavailable'
+  'unavailable',
 ] as const;
 
 export const runtimePluginConfigValueTypeValues = [
@@ -134,11 +139,10 @@ export const runtimePluginConfigValueTypeValues = [
   'array',
   'secret',
   'path',
-  'enum'
+  'enum',
 ] as const;
 
-export type RuntimePluginKind =
-  (typeof runtimePluginKindValues)[number];
+export type RuntimePluginKind = (typeof runtimePluginKindValues)[number];
 export type RuntimePluginDeclaration =
   (typeof runtimePluginDeclarationValues)[number];
 export type RuntimePluginTrustLevel =

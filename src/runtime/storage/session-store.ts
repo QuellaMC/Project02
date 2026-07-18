@@ -1,24 +1,21 @@
-import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs';
+import {readFileSync, readdirSync, statSync, type Dirent} from 'node:fs';
 import {
   mkdir,
   readFile,
   readdir,
   rmdir,
   stat,
-  writeFile
+  writeFile,
 } from 'node:fs/promises';
-import { join } from 'node:path';
-import {
-  CompleteJsonLinesError,
-  splitCompleteJsonLines
-} from './json-lines.ts';
-import { isNodeErrorWithCode } from '../../shared/node-error.ts';
+import {join} from 'node:path';
+import {CompleteJsonLinesError, splitCompleteJsonLines} from './json-lines.ts';
+import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 
 import {
   createConversationSession,
   type CharacterProfile,
   type ConversationSession,
-  type VisibleMessage
+  type VisibleMessage,
 } from '../../core/index.ts';
 import {
   createLocalRuntimeSessionMetadata,
@@ -32,15 +29,15 @@ import {
   type LocalRuntimeSessionMetadata,
   type LocalRuntimeSessionPathsOptions,
   type LocalRuntimeStorageLayout,
-  type LocalRuntimeStorageLayoutOptions
+  type LocalRuntimeStorageLayoutOptions,
 } from './layout-contract.ts';
-import { isRecord } from './layout-contract.ts';
-import type { ConversationLogRecord } from '../evidence/records.ts';
-import { atomicReplaceFile } from './atomic-file.ts';
+import {isRecord} from './layout-contract.ts';
+import type {ConversationLogRecord} from '../evidence/records.ts';
+import {atomicReplaceFile} from './atomic-file.ts';
 import {
   acquireLocalRuntimeMutationLock,
   type LocalRuntimeMutationLockLease,
-  type LocalRuntimeMutationLockOwnerToken
+  type LocalRuntimeMutationLockOwnerToken,
 } from './mutation-lock.ts';
 
 export type LocalRuntimeSessionStoreErrorCode =
@@ -60,10 +57,12 @@ export class LocalRuntimeSessionStoreError extends Error {
 
 export type LocalRuntimeSessionConversationLogReader = {
   readConversationMessages(
-    sessionId: string
-  ): Promise<readonly ConversationLogRecord[]> | readonly ConversationLogRecord[];
+    sessionId: string,
+  ):
+    | Promise<readonly ConversationLogRecord[]>
+    | readonly ConversationLogRecord[];
   readConversationEvidence?(
-    sessionId: string
+    sessionId: string,
   ):
     | Promise<LocalRuntimeSessionConversationEvidence>
     | LocalRuntimeSessionConversationEvidence;
@@ -107,17 +106,17 @@ export type RehydrateLocalRuntimeConversationSessionOptions = {
 export type LocalRuntimeSessionStore = {
   readonly layout: LocalRuntimeStorageLayout;
   createSession(
-    options?: CreateLocalRuntimeSessionOptions
+    options?: CreateLocalRuntimeSessionOptions,
   ): Promise<LocalRuntimeSessionMetadata>;
   listSessions(): Promise<readonly LocalRuntimeSessionMetadata[]>;
   readSession(sessionId?: string): Promise<LocalRuntimeSessionMetadata>;
   selectSession(
     sessionId?: string,
-    options?: SelectLocalRuntimeSessionOptions
+    options?: SelectLocalRuntimeSessionOptions,
   ): Promise<LocalRuntimeSessionMetadata>;
   rehydrateConversationSession(
     sessionId?: string,
-    options?: RehydrateLocalRuntimeConversationSessionOptions
+    options?: RehydrateLocalRuntimeConversationSessionOptions,
   ): Promise<ConversationSession>;
 };
 
@@ -130,7 +129,7 @@ const defaultClock = (): string => new Date().toISOString();
 const sessionDirectoryReconciliationConcurrency = 16;
 
 export async function acquireLocalRuntimeSessionWriterLease(
-  options: AcquireLocalRuntimeSessionWriterLeaseOptions = {}
+  options: AcquireLocalRuntimeSessionWriterLeaseOptions = {},
 ): Promise<LocalRuntimeMutationLockLease> {
   const layout = createLocalRuntimeStorageLayout(options);
   const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);
@@ -144,12 +143,12 @@ export async function acquireLocalRuntimeSessionWriterLease(
     busyCode: 'session_busy',
     ...(options.ownerToken === undefined
       ? {}
-      : { ownerToken: options.ownerToken })
+      : {ownerToken: options.ownerToken}),
   });
 }
 
 export function assertLocalRuntimeSessionReadable(
-  options: AssertLocalRuntimeSessionReadableOptions = {}
+  options: AssertLocalRuntimeSessionReadableOptions = {},
 ): LocalRuntimeSessionMetadata {
   const layout = createLocalRuntimeStorageLayout(options);
   const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);
@@ -161,7 +160,7 @@ export function assertLocalRuntimeSessionReadable(
   if (metadata === undefined) {
     throw new LocalRuntimeSessionStoreError(
       'session_not_found',
-      `Local runtime session "${sessionId}" does not exist.`
+      `Local runtime session "${sessionId}" does not exist.`,
     );
   }
 
@@ -171,7 +170,7 @@ export function assertLocalRuntimeSessionReadable(
 }
 
 export function createLocalRuntimeSessionStore(
-  options: CreateLocalRuntimeSessionStoreOptions = {}
+  options: CreateLocalRuntimeSessionStoreOptions = {},
 ): LocalRuntimeSessionStore {
   const layout = createLocalRuntimeStorageLayout(options);
   const now = options.now ?? defaultClock;
@@ -179,7 +178,7 @@ export function createLocalRuntimeSessionStore(
   const configuredSessionReadinessValidator = options.sessionReadinessValidator;
 
   async function createSession(
-    sessionOptions: CreateLocalRuntimeSessionOptions = {}
+    sessionOptions: CreateLocalRuntimeSessionOptions = {},
   ): Promise<LocalRuntimeSessionMetadata> {
     const sessionId = normalizeLocalRuntimeSessionId(sessionOptions.sessionId);
     const createdAt = sessionOptions.createdAt ?? now();
@@ -191,14 +190,14 @@ export function createLocalRuntimeSessionStore(
       if (sessions.has(sessionId)) {
         throw new LocalRuntimeSessionStoreError(
           'session_already_exists',
-          `Local runtime session "${sessionId}" already exists.`
+          `Local runtime session "${sessionId}" already exists.`,
         );
       }
 
       const metadata = createLocalRuntimeSessionMetadata({
         sessionId,
         createdAt,
-        updatedAt: sessionOptions.updatedAt ?? createdAt
+        updatedAt: sessionOptions.updatedAt ?? createdAt,
       });
 
       const sessionDirectory = await createSessionDirectory(layout, sessionId);
@@ -218,17 +217,21 @@ export function createLocalRuntimeSessionStore(
     });
   }
 
-  async function listSessions(): Promise<readonly LocalRuntimeSessionMetadata[]> {
+  async function listSessions(): Promise<
+    readonly LocalRuntimeSessionMetadata[]
+  > {
     await readStorageSchemaMarker(layout);
 
     const sessions = [...(await readSessionCatalog(layout)).values()];
 
     return Object.freeze(
-      sessions.sort((left, right) => compareSessionMetadata(left, right))
+      sessions.sort((left, right) => compareSessionMetadata(left, right)),
     );
   }
 
-  async function readSession(sessionId?: string): Promise<LocalRuntimeSessionMetadata> {
+  async function readSession(
+    sessionId?: string,
+  ): Promise<LocalRuntimeSessionMetadata> {
     const normalizedSessionId = normalizeLocalRuntimeSessionId(sessionId);
 
     await readStorageSchemaMarker(layout);
@@ -238,7 +241,7 @@ export function createLocalRuntimeSessionStore(
     if (metadata === undefined) {
       throw new LocalRuntimeSessionStoreError(
         'session_not_found',
-        `Local runtime session "${normalizedSessionId}" does not exist.`
+        `Local runtime session "${normalizedSessionId}" does not exist.`,
       );
     }
 
@@ -247,7 +250,7 @@ export function createLocalRuntimeSessionStore(
 
   async function selectSession(
     sessionId?: string,
-    selectOptions: SelectLocalRuntimeSessionOptions = {}
+    selectOptions: SelectLocalRuntimeSessionOptions = {},
   ): Promise<LocalRuntimeSessionMetadata> {
     const normalizedSessionId = normalizeLocalRuntimeSessionId(sessionId);
 
@@ -259,18 +262,18 @@ export function createLocalRuntimeSessionStore(
       if (existing === undefined) {
         throw new LocalRuntimeSessionStoreError(
           'session_not_found',
-          `Local runtime session "${normalizedSessionId}" does not exist.`
+          `Local runtime session "${normalizedSessionId}" does not exist.`,
         );
       }
 
       await configuredSessionReadinessValidator?.assertSessionReadable(
-        existing.sessionId
+        existing.sessionId,
       );
 
       const selected = createLocalRuntimeSessionMetadata({
         sessionId: existing.sessionId,
         createdAt: existing.createdAt,
-        updatedAt: selectOptions.updatedAt ?? now()
+        updatedAt: selectOptions.updatedAt ?? now(),
       });
 
       sessions.set(existing.sessionId, selected);
@@ -282,7 +285,7 @@ export function createLocalRuntimeSessionStore(
 
   async function rehydrateConversationSession(
     sessionId?: string,
-    rehydrateOptions: RehydrateLocalRuntimeConversationSessionOptions = {}
+    rehydrateOptions: RehydrateLocalRuntimeConversationSessionOptions = {},
   ): Promise<ConversationSession> {
     const metadata = await readSession(sessionId);
     const conversationLogReader =
@@ -291,26 +294,28 @@ export function createLocalRuntimeSessionStore(
     if (conversationLogReader === undefined) {
       throw new LocalRuntimeSessionStoreError(
         'conversation_log_reader_unavailable',
-        'A CT-02 conversation log reader is required to rehydrate a local runtime session.'
+        'A CT-02 conversation log reader is required to rehydrate a local runtime session.',
       );
     }
 
     const conversationEvidence =
       await conversationLogReader.readConversationEvidence?.(
-        metadata.sessionId
+        metadata.sessionId,
       );
     const persistedMessages =
       conversationEvidence?.messages ??
-      (await conversationLogReader.readConversationMessages(metadata.sessionId));
+      (await conversationLogReader.readConversationMessages(
+        metadata.sessionId,
+      ));
 
     return createConversationSession({
       id: metadata.sessionId,
       ...(conversationEvidence === undefined
         ? {}
-        : { character: conversationEvidence.character }),
-      visibleTranscript: persistedMessages.map((message) =>
-        toVisibleMessage(message)
-      )
+        : {character: conversationEvidence.character}),
+      visibleTranscript: persistedMessages.map(message =>
+        toVisibleMessage(message),
+      ),
     });
   }
 
@@ -320,15 +325,16 @@ export function createLocalRuntimeSessionStore(
     listSessions,
     readSession,
     selectSession,
-    rehydrateConversationSession
+    rehydrateConversationSession,
   } satisfies LocalRuntimeSessionStore);
 }
 
 async function ensureInitializedStore(
   layout: LocalRuntimeStorageLayout,
-  createdAt: string
+  createdAt: string,
 ): Promise<void> {
-  const storeHasExistingContent = await localRuntimeStoreHasExistingContent(layout);
+  const storeHasExistingContent =
+    await localRuntimeStoreHasExistingContent(layout);
 
   try {
     await readStorageSchemaMarker(layout);
@@ -346,10 +352,10 @@ async function ensureInitializedStore(
       filePath: layout.schemaPath,
       content: `${encodeStorageSchemaMarker(
         createLocalRuntimeStorageSchemaMarker({
-          createdAt
-        })
+          createdAt,
+        }),
       )}\n`,
-      failureMessage: `Could not write local runtime storage schema marker: ${layout.schemaPath}.`
+      failureMessage: `Could not write local runtime storage schema marker: ${layout.schemaPath}.`,
     });
     await createSessionsRoot(layout);
     return;
@@ -358,41 +364,42 @@ async function ensureInitializedStore(
   await createSessionsRoot(layout);
 }
 
-async function createSessionsRoot(layout: LocalRuntimeStorageLayout): Promise<void> {
+async function createSessionsRoot(
+  layout: LocalRuntimeStorageLayout,
+): Promise<void> {
   try {
-    await mkdir(layout.sessionsRoot, { recursive: true });
+    await mkdir(layout.sessionsRoot, {recursive: true});
   } catch {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
-      `Could not prepare local runtime sessions directory: ${layout.sessionsRoot}.`
+      `Could not prepare local runtime sessions directory: ${layout.sessionsRoot}.`,
     );
   }
 }
 
-async function createStoreRoot(layout: LocalRuntimeStorageLayout): Promise<void> {
+async function createStoreRoot(
+  layout: LocalRuntimeStorageLayout,
+): Promise<void> {
   try {
-    await mkdir(layout.storeRoot, { recursive: true });
+    await mkdir(layout.storeRoot, {recursive: true});
   } catch {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
-      `Could not prepare local runtime store root: ${layout.storeRoot}.`
+      `Could not prepare local runtime store root: ${layout.storeRoot}.`,
     );
   }
 }
 
 async function localRuntimeStoreHasExistingContent(
-  layout: LocalRuntimeStorageLayout
+  layout: LocalRuntimeStorageLayout,
 ): Promise<boolean> {
   try {
-    const entries = await readdir(layout.storeRoot, { withFileTypes: true });
+    const entries = await readdir(layout.storeRoot, {withFileTypes: true});
 
     for (const entry of entries) {
       const entryPath = join(layout.storeRoot, entry.name);
 
-      if (
-        entry.isDirectory() &&
-        entryPath === layout.sessionsRoot
-      ) {
+      if (entry.isDirectory() && entryPath === layout.sessionsRoot) {
         if (await localRuntimeSessionsRootHasDurableEvidence(layout)) {
           return true;
         }
@@ -418,14 +425,14 @@ async function localRuntimeStoreHasExistingContent(
 
     throw new LocalRuntimeStorageContractError(
       'read_failed',
-      `Could not inspect local runtime store root: ${layout.storeRoot}.`
+      `Could not inspect local runtime store root: ${layout.storeRoot}.`,
     );
   }
 }
 
 function isRuntimeHomeControlEntry(
   layout: LocalRuntimeStorageLayout,
-  entryPath: string
+  entryPath: string,
 ): boolean {
   return (
     entryPath === layout.configPath ||
@@ -435,19 +442,19 @@ function isRuntimeHomeControlEntry(
 }
 
 async function readStorageSchemaMarker(
-  layout: LocalRuntimeStorageLayout
+  layout: LocalRuntimeStorageLayout,
 ): Promise<void> {
   const schema = await readStorageFile({
     filePath: layout.schemaPath,
     missingFileCode: 'missing_file',
-    failureMessage: `Could not read local runtime storage schema marker: ${layout.schemaPath}.`
+    failureMessage: `Could not read local runtime storage schema marker: ${layout.schemaPath}.`,
   });
 
   decodeStorageSchemaMarker(schema);
 }
 
 async function readSessionCatalog(
-  layout: LocalRuntimeStorageLayout
+  layout: LocalRuntimeStorageLayout,
 ): Promise<Map<string, LocalRuntimeSessionMetadata>> {
   let catalog: string;
 
@@ -464,7 +471,7 @@ async function readSessionCatalog(
 
     throw new LocalRuntimeStorageContractError(
       'read_failed',
-      `Could not read local runtime session catalog: ${layout.sessionCatalogPath}.`
+      `Could not read local runtime session catalog: ${layout.sessionCatalogPath}.`,
     );
   }
 
@@ -473,7 +480,7 @@ async function readSessionCatalog(
 
 async function readSessionCatalogEntry(
   layout: LocalRuntimeStorageLayout,
-  sessionId: string
+  sessionId: string,
 ): Promise<LocalRuntimeSessionMetadata | undefined> {
   let catalog: string;
 
@@ -487,14 +494,14 @@ async function readSessionCatalogEntry(
 
     throw new LocalRuntimeStorageContractError(
       'read_failed',
-      `Could not read local runtime session catalog: ${layout.sessionCatalogPath}.`
+      `Could not read local runtime session catalog: ${layout.sessionCatalogPath}.`,
     );
   }
 
   const metadata = decodeRequestedSessionCatalogEntry(
     catalog,
     layout.sessionCatalogPath,
-    sessionId
+    sessionId,
   );
 
   if (metadata === undefined) {
@@ -510,7 +517,7 @@ function readStorageSchemaMarkerSync(layout: LocalRuntimeStorageLayout): void {
   const schema = readStorageFileSync({
     filePath: layout.schemaPath,
     missingFileCode: 'missing_file',
-    failureMessage: `Could not read local runtime storage schema marker: ${layout.schemaPath}.`
+    failureMessage: `Could not read local runtime storage schema marker: ${layout.schemaPath}.`,
   });
 
   decodeStorageSchemaMarker(schema);
@@ -518,7 +525,7 @@ function readStorageSchemaMarkerSync(layout: LocalRuntimeStorageLayout): void {
 
 function readSessionCatalogEntrySync(
   layout: LocalRuntimeStorageLayout,
-  sessionId: string
+  sessionId: string,
 ): LocalRuntimeSessionMetadata | undefined {
   let catalog: string;
 
@@ -532,14 +539,14 @@ function readSessionCatalogEntrySync(
 
     throw new LocalRuntimeStorageContractError(
       'read_failed',
-      `Could not read local runtime session catalog: ${layout.sessionCatalogPath}.`
+      `Could not read local runtime session catalog: ${layout.sessionCatalogPath}.`,
     );
   }
 
   const metadata = decodeRequestedSessionCatalogEntry(
     catalog,
     layout.sessionCatalogPath,
-    sessionId
+    sessionId,
   );
 
   if (metadata === undefined) {
@@ -553,9 +560,12 @@ function readSessionCatalogEntrySync(
 
 async function decodeSessionCatalogForLayout(
   layout: LocalRuntimeStorageLayout,
-  catalog: string
+  catalog: string,
 ): Promise<Map<string, LocalRuntimeSessionMetadata>> {
-  if (catalog.length === 0 && (await localRuntimeSessionsRootHasDurableEvidence(layout))) {
+  if (
+    catalog.length === 0 &&
+    (await localRuntimeSessionsRootHasDurableEvidence(layout))
+  ) {
     throwMissingRequiredSessionCatalog(layout);
   }
 
@@ -569,7 +579,7 @@ async function decodeSessionCatalogForLayout(
 
 function decodeSessionCatalog(
   catalog: string,
-  filePath: string
+  filePath: string,
 ): Map<string, LocalRuntimeSessionMetadata> {
   const sessions = new Map<string, LocalRuntimeSessionMetadata>();
 
@@ -585,7 +595,7 @@ function decodeSessionCatalog(
 function decodeRequestedSessionCatalogEntry(
   catalog: string,
   filePath: string,
-  sessionId: string
+  sessionId: string,
 ): LocalRuntimeSessionMetadata | undefined {
   let metadata: LocalRuntimeSessionMetadata | undefined;
 
@@ -608,11 +618,11 @@ function decodeRequestedSessionCatalogEntry(
 
 async function assertRequestedSessionIsNotMissingFromCatalog(
   layout: LocalRuntimeStorageLayout,
-  sessionId: string
+  sessionId: string,
 ): Promise<void> {
   const sessionRoot = createLocalRuntimeSessionPaths({
     storeRoot: layout.storeRoot,
-    sessionId
+    sessionId,
   }).sessionRoot;
 
   if (await localRuntimeSessionDirectoryHasDurableEvidence(sessionRoot)) {
@@ -622,11 +632,11 @@ async function assertRequestedSessionIsNotMissingFromCatalog(
 
 function assertRequestedSessionIsNotMissingFromCatalogSync(
   layout: LocalRuntimeStorageLayout,
-  sessionId: string
+  sessionId: string,
 ): void {
   const sessionRoot = createLocalRuntimeSessionPaths({
     storeRoot: layout.storeRoot,
-    sessionId
+    sessionId,
   }).sessionRoot;
 
   if (localRuntimeSessionDirectoryHasDurableEvidenceSync(sessionRoot)) {
@@ -635,22 +645,22 @@ function assertRequestedSessionIsNotMissingFromCatalogSync(
 }
 
 function throwMissingRequiredSessionCatalog(
-  layout: LocalRuntimeStorageLayout
+  layout: LocalRuntimeStorageLayout,
 ): never {
   throw new LocalRuntimeStorageContractError(
     'missing_file',
-    `Required local runtime session catalog is missing or empty while session evidence exists: ${layout.sessionCatalogPath}.`
+    `Required local runtime session catalog is missing or empty while session evidence exists: ${layout.sessionCatalogPath}.`,
   );
 }
 
 async function assertSessionCatalogCoversDurableSessionDirectories(
   layout: LocalRuntimeStorageLayout,
-  sessions: ReadonlyMap<string, LocalRuntimeSessionMetadata>
+  sessions: ReadonlyMap<string, LocalRuntimeSessionMetadata>,
 ): Promise<void> {
   let entries: Dirent[];
 
   try {
-    entries = await readdir(layout.sessionsRoot, { withFileTypes: true });
+    entries = await readdir(layout.sessionsRoot, {withFileTypes: true});
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return;
@@ -658,7 +668,7 @@ async function assertSessionCatalogCoversDurableSessionDirectories(
 
     throw new LocalRuntimeStorageContractError(
       'read_failed',
-      `Could not inspect local runtime sessions directory: ${layout.sessionsRoot}.`
+      `Could not inspect local runtime sessions directory: ${layout.sessionsRoot}.`,
     );
   }
 
@@ -671,7 +681,7 @@ async function assertSessionCatalogCoversDurableSessionDirectories(
 
     if (
       !sessions.has(entry.name) &&
-      await localRuntimeSessionDirectoryHasDurableEvidence(sessionRoot)
+      (await localRuntimeSessionDirectoryHasDurableEvidence(sessionRoot))
     ) {
       throwMissingSessionCatalogEntry(sessionRoot);
     }
@@ -680,17 +690,17 @@ async function assertSessionCatalogCoversDurableSessionDirectories(
 
 async function assertSessionCatalogEntriesHaveReadableDirectories(
   layout: LocalRuntimeStorageLayout,
-  sessions: ReadonlyMap<string, LocalRuntimeSessionMetadata>
+  sessions: ReadonlyMap<string, LocalRuntimeSessionMetadata>,
 ): Promise<void> {
   const sessionIds = [...sessions.keys()];
   let nextIndex = 0;
   const workerCount = Math.min(
     sessionDirectoryReconciliationConcurrency,
-    sessionIds.length
+    sessionIds.length,
   );
 
   await Promise.all(
-    Array.from({ length: workerCount }, async () => {
+    Array.from({length: workerCount}, async () => {
       for (;;) {
         const sessionId = sessionIds[nextIndex];
         nextIndex += 1;
@@ -701,15 +711,15 @@ async function assertSessionCatalogEntriesHaveReadableDirectories(
 
         await assertSessionDirectoryReadableAsync(layout, sessionId);
       }
-    })
+    }),
   );
 }
 
 async function localRuntimeSessionsRootHasDurableEvidence(
-  layout: LocalRuntimeStorageLayout
+  layout: LocalRuntimeStorageLayout,
 ): Promise<boolean> {
   try {
-    const entries = await readdir(layout.sessionsRoot, { withFileTypes: true });
+    const entries = await readdir(layout.sessionsRoot, {withFileTypes: true});
 
     for (const entry of entries) {
       if (!entry.isDirectory()) {
@@ -718,7 +728,7 @@ async function localRuntimeSessionsRootHasDurableEvidence(
 
       if (
         await localRuntimeSessionDirectoryHasDurableEvidence(
-          join(layout.sessionsRoot, entry.name)
+          join(layout.sessionsRoot, entry.name),
         )
       ) {
         return true;
@@ -733,13 +743,13 @@ async function localRuntimeSessionsRootHasDurableEvidence(
 
     throw new LocalRuntimeStorageContractError(
       'read_failed',
-      `Could not inspect local runtime sessions directory: ${layout.sessionsRoot}.`
+      `Could not inspect local runtime sessions directory: ${layout.sessionsRoot}.`,
     );
   }
 }
 
 async function localRuntimeSessionDirectoryHasDurableEvidence(
-  sessionRoot: string
+  sessionRoot: string,
 ): Promise<boolean> {
   try {
     return (await readdir(sessionRoot)).length > 0;
@@ -750,13 +760,13 @@ async function localRuntimeSessionDirectoryHasDurableEvidence(
 
     throw new LocalRuntimeStorageContractError(
       'read_failed',
-      `Could not inspect local runtime session directory: ${sessionRoot}.`
+      `Could not inspect local runtime session directory: ${sessionRoot}.`,
     );
   }
 }
 
 function localRuntimeSessionDirectoryHasDurableEvidenceSync(
-  sessionRoot: string
+  sessionRoot: string,
 ): boolean {
   try {
     return readdirSync(sessionRoot).length > 0;
@@ -767,7 +777,7 @@ function localRuntimeSessionDirectoryHasDurableEvidenceSync(
 
     throw new LocalRuntimeStorageContractError(
       'read_failed',
-      `Could not inspect local runtime session directory: ${sessionRoot}.`
+      `Could not inspect local runtime session directory: ${sessionRoot}.`,
     );
   }
 }
@@ -775,31 +785,31 @@ function localRuntimeSessionDirectoryHasDurableEvidenceSync(
 function throwMissingSessionCatalogEntry(sessionRoot: string): never {
   throw new LocalRuntimeStorageContractError(
     'missing_file',
-    `Required local runtime session catalog entry is missing for durable session directory: ${sessionRoot}.`
+    `Required local runtime session catalog entry is missing for durable session directory: ${sessionRoot}.`,
   );
 }
 
 function throwUnsupportedSessionRootEntry(entryPath: string): never {
   throw new LocalRuntimeStorageContractError(
     'malformed_record',
-    `Local runtime sessions directory contains an unsupported entry: ${entryPath}.`
+    `Local runtime sessions directory contains an unsupported entry: ${entryPath}.`,
   );
 }
 
 async function assertSessionDirectoryReadableAsync(
   layout: LocalRuntimeStorageLayout,
-  sessionId: string
+  sessionId: string,
 ): Promise<void> {
   const sessionRoot = createLocalRuntimeSessionPaths({
     storeRoot: layout.storeRoot,
-    sessionId
+    sessionId,
   }).sessionRoot;
 
   try {
     if (!(await stat(sessionRoot)).isDirectory()) {
       throw new LocalRuntimeStorageContractError(
         'read_failed',
-        `Local runtime session path is not a directory: ${sessionRoot}.`
+        `Local runtime session path is not a directory: ${sessionRoot}.`,
       );
     }
   } catch (error: unknown) {
@@ -810,31 +820,31 @@ async function assertSessionDirectoryReadableAsync(
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       throw new LocalRuntimeStorageContractError(
         'missing_file',
-        `Required local runtime session directory is missing: ${sessionRoot}.`
+        `Required local runtime session directory is missing: ${sessionRoot}.`,
       );
     }
 
     throw new LocalRuntimeStorageContractError(
       'read_failed',
-      `Could not inspect local runtime session directory: ${sessionRoot}.`
+      `Could not inspect local runtime session directory: ${sessionRoot}.`,
     );
   }
 }
 
 function assertSessionDirectoryReadable(
   layout: LocalRuntimeStorageLayout,
-  sessionId: string
+  sessionId: string,
 ): void {
   const sessionRoot = createLocalRuntimeSessionPaths({
     storeRoot: layout.storeRoot,
-    sessionId
+    sessionId,
   }).sessionRoot;
 
   try {
     if (!statSync(sessionRoot).isDirectory()) {
       throw new LocalRuntimeStorageContractError(
         'read_failed',
-        `Local runtime session path is not a directory: ${sessionRoot}.`
+        `Local runtime session path is not a directory: ${sessionRoot}.`,
       );
     }
   } catch (error: unknown) {
@@ -845,20 +855,20 @@ function assertSessionDirectoryReadable(
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       throw new LocalRuntimeStorageContractError(
         'missing_file',
-        `Required local runtime session directory is missing: ${sessionRoot}.`
+        `Required local runtime session directory is missing: ${sessionRoot}.`,
       );
     }
 
     throw new LocalRuntimeStorageContractError(
       'read_failed',
-      `Could not inspect local runtime session directory: ${sessionRoot}.`
+      `Could not inspect local runtime session directory: ${sessionRoot}.`,
     );
   }
 }
 
 async function rewriteSessionCatalog(
   layout: LocalRuntimeStorageLayout,
-  sessions: ReadonlyMap<string, LocalRuntimeSessionMetadata>
+  sessions: ReadonlyMap<string, LocalRuntimeSessionMetadata>,
 ): Promise<void> {
   try {
     const orderedSessions = [...sessions.values()].sort(compareSessionMetadata);
@@ -866,27 +876,27 @@ async function rewriteSessionCatalog(
     await atomicReplaceFile({
       targetPath: layout.sessionCatalogPath,
       content: orderedSessions
-        .map((metadata) => `${JSON.stringify(metadata)}\n`)
+        .map(metadata => `${JSON.stringify(metadata)}\n`)
         .join(''),
-      mode: 0o600
+      mode: 0o600,
     });
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
       `Could not rewrite local runtime session catalog: ${layout.sessionCatalogPath}.`,
-      { cause: error }
+      {cause: error},
     );
   }
 }
 
 async function withSessionCatalogMutationLock<Result>(
   layout: LocalRuntimeStorageLayout,
-  operation: () => Promise<Result>
+  operation: () => Promise<Result>,
 ): Promise<Result> {
   await assertStoreRootCanHostMutationLock(layout);
   const lease = await acquireLocalRuntimeMutationLock({
     locksRoot: layout.locksRoot,
-    resourceKey: 'session-catalog'
+    resourceKey: 'session-catalog',
   });
 
   try {
@@ -897,13 +907,13 @@ async function withSessionCatalogMutationLock<Result>(
 }
 
 async function assertStoreRootCanHostMutationLock(
-  layout: LocalRuntimeStorageLayout
+  layout: LocalRuntimeStorageLayout,
 ): Promise<void> {
   try {
     if (!(await stat(layout.storeRoot)).isDirectory()) {
       throw new LocalRuntimeStorageContractError(
         'read_failed',
-        `Local runtime store root is not a directory: ${layout.storeRoot}.`
+        `Local runtime store root is not a directory: ${layout.storeRoot}.`,
       );
     }
   } catch (error: unknown) {
@@ -918,7 +928,7 @@ async function assertStoreRootCanHostMutationLock(
     throw new LocalRuntimeStorageContractError(
       'read_failed',
       `Could not inspect local runtime store root: ${layout.storeRoot}.`,
-      { cause: error }
+      {cause: error},
     );
   }
 }
@@ -931,14 +941,14 @@ function decodeSessionMetadata(line: string): LocalRuntimeSessionMetadata {
   } catch {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
-      'Stored local runtime session metadata is not valid JSON.'
+      'Stored local runtime session metadata is not valid JSON.',
     );
   }
 
   if (!isRecord(parsed)) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
-      'Stored local runtime session metadata must be an object.'
+      'Stored local runtime session metadata must be an object.',
     );
   }
 
@@ -946,7 +956,7 @@ function decodeSessionMetadata(line: string): LocalRuntimeSessionMetadata {
   const metadata = createLocalRuntimeSessionMetadata({
     sessionId,
     createdAt: readRecordString(parsed, 'createdAt'),
-    updatedAt: readRecordString(parsed, 'updatedAt')
+    updatedAt: readRecordString(parsed, 'updatedAt'),
   });
 
   return metadata;
@@ -976,7 +986,7 @@ function readCanonicalStoredSessionId(record: Record<string, unknown>): string {
 function throwMalformedStoredSessionId(): never {
   throw new LocalRuntimeStorageContractError(
     'malformed_record',
-    'Stored local runtime session metadata field "sessionId" must be canonical.'
+    'Stored local runtime session metadata field "sessionId" must be canonical.',
   );
 }
 
@@ -992,7 +1002,7 @@ function splitJsonLines(content: string, filePath: string): readonly string[] {
         error.reason === 'missing_terminal_newline'
           ? `Local runtime JSONL file ended without a complete record: ${filePath}.`
           : `Local runtime JSONL file contains a blank record: ${filePath}.`,
-        { cause: error }
+        {cause: error},
       );
     }
 
@@ -1000,13 +1010,16 @@ function splitJsonLines(content: string, filePath: string): readonly string[] {
   }
 }
 
-function readRecordString(record: Record<string, unknown>, key: string): string {
+function readRecordString(
+  record: Record<string, unknown>,
+  key: string,
+): string {
   const value = record[key];
 
   if (typeof value !== 'string' || value.length === 0) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
-      `Stored local runtime session metadata field "${key}" must be a non-empty string.`
+      `Stored local runtime session metadata field "${key}" must be a non-empty string.`,
     );
   }
 
@@ -1019,13 +1032,13 @@ function toVisibleMessage(record: ConversationLogRecord): VisibleMessage {
     role: record.role,
     speakerId: record.speakerId,
     speakerName: record.speakerName,
-    text: record.text
+    text: record.text,
   };
 }
 
 function compareSessionMetadata(
   left: LocalRuntimeSessionMetadata,
-  right: LocalRuntimeSessionMetadata
+  right: LocalRuntimeSessionMetadata,
 ): number {
   const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
 
@@ -1038,11 +1051,11 @@ function compareSessionMetadata(
 
 async function createSessionDirectory(
   layout: LocalRuntimeStorageLayout,
-  sessionId: string
-): Promise<{ readonly path: string; readonly created: boolean }> {
+  sessionId: string,
+): Promise<{readonly path: string; readonly created: boolean}> {
   const sessionRoot = createLocalRuntimeSessionPaths({
     storeRoot: layout.storeRoot,
-    sessionId
+    sessionId,
   }).sessionRoot;
 
   if (await localRuntimeSessionDirectoryHasDurableEvidence(sessionRoot)) {
@@ -1051,27 +1064,27 @@ async function createSessionDirectory(
 
   try {
     await mkdir(sessionRoot);
-    return { path: sessionRoot, created: true };
+    return {path: sessionRoot, created: true};
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'EEXIST')) {
       if (await localRuntimeSessionDirectoryHasDurableEvidence(sessionRoot)) {
         throwMissingSessionCatalogEntry(sessionRoot);
       }
 
-      return { path: sessionRoot, created: false };
+      return {path: sessionRoot, created: false};
     }
 
     throw new LocalRuntimeStorageContractError(
       'write_failed',
       `Could not prepare local runtime session directory: ${sessionRoot}.`,
-      { cause: error }
+      {cause: error},
     );
   }
 }
 
 async function rollbackCreatedSessionDirectory(
   sessionRoot: string,
-  originalError: unknown
+  originalError: unknown,
 ): Promise<never> {
   try {
     await rmdir(sessionRoot);
@@ -1083,9 +1096,9 @@ async function rollbackCreatedSessionDirectory(
         cause: new AggregateError(
           [cleanupError],
           'Session catalog rewrite failed and the new session directory could not be removed.',
-          { cause: originalError }
-        )
-      }
+          {cause: originalError},
+        ),
+      },
     );
   }
 
@@ -1095,7 +1108,9 @@ async function rollbackCreatedSessionDirectory(
 function errorFromUnknown(error: unknown): Error {
   return error instanceof Error
     ? error
-    : new Error('Local runtime session catalog rewrite failed.', { cause: error });
+    : new Error('Local runtime session catalog rewrite failed.', {
+        cause: error,
+      });
 }
 
 async function readStorageFile(options: {
@@ -1109,11 +1124,14 @@ async function readStorageFile(options: {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       throw new LocalRuntimeStorageContractError(
         options.missingFileCode,
-        `Required local runtime storage file is missing: ${options.filePath}.`
+        `Required local runtime storage file is missing: ${options.filePath}.`,
       );
     }
 
-    throw new LocalRuntimeStorageContractError('read_failed', options.failureMessage);
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      options.failureMessage,
+    );
   }
 }
 
@@ -1128,11 +1146,14 @@ function readStorageFileSync(options: {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       throw new LocalRuntimeStorageContractError(
         options.missingFileCode,
-        `Required local runtime storage file is missing: ${options.filePath}.`
+        `Required local runtime storage file is missing: ${options.filePath}.`,
       );
     }
 
-    throw new LocalRuntimeStorageContractError('read_failed', options.failureMessage);
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      options.failureMessage,
+    );
   }
 }
 
@@ -1146,15 +1167,16 @@ async function writeStorageFile(options: {
   } catch {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
-      options.failureMessage
+      options.failureMessage,
     );
   }
 }
 
-
 function isLocalRuntimeStorageErrorCode(
   error: unknown,
-  code: LocalRuntimeStorageContractError['code']
+  code: LocalRuntimeStorageContractError['code'],
 ): error is LocalRuntimeStorageContractError {
-  return error instanceof LocalRuntimeStorageContractError && error.code === code;
+  return (
+    error instanceof LocalRuntimeStorageContractError && error.code === code
+  );
 }

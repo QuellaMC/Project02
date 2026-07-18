@@ -1,19 +1,19 @@
-import { describe, expect, it } from 'vitest';
-import { createConversationSession } from '../../src/core/index.ts';
-import { createFileRuntimeLogStore } from '../../src/runtime/storage/file-runtime-log-store.ts';
-import { createLocalRuntimeSessionStore } from '../../src/runtime/storage/session-store.ts';
-import { createRuntimeLogStore } from '../../src/runtime/evidence/index.ts';
+import {describe, expect, it} from 'vitest';
+import {createConversationSession} from '../../src/core/index.ts';
+import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
+import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
+import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
   type RoleModelAdapter,
   type RoleModelChatMessage,
-  roleModelInvalidVisibleReplyRejectionReason
+  roleModelInvalidVisibleReplyRejectionReason,
 } from '../../src/role-model/index.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   createDurableCharacterStateHarness,
   createSequencedAdapter,
   createTestEvent,
-  runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent
+  runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
 } from '../support/plugin-tool-loop-fixtures.ts';
 
 describe('plugin-driven tool loop progress and evidence', () => {
@@ -31,62 +31,65 @@ describe('plugin-driven tool loop progress and evidence', () => {
               {
                 name: 'visible_reply',
                 input: {
-                  text:
-                    'I can see callable tools, but I need runtime.plugin.list for the canonical plugin inventory.'
-                }
-              }
-            ]
-          })
+                  text: 'I can see callable tools, but I need runtime.plugin.list for the canonical plugin inventory.',
+                },
+              },
+            ],
+          }),
         };
-      }
+      },
     });
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent(
         'what plugins are available?',
-        'evt_plugin_context_surface'
+        'evt_plugin_context_surface',
       ),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
 
     const runtimeContextMessage = messagesByRound[0]?.find(
-      (message) =>
+      message =>
         message.role === 'user' &&
-        message.content.includes('Untrusted plugin context')
+        message.content.includes('Untrusted plugin context'),
     );
     const currentUserMessage = messagesByRound[0]?.findLast(
-      (message) => message.role === 'user'
+      message => message.role === 'user',
     );
 
     expect(result.status).toBe('completed');
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual([
       'what plugins are available?',
-      'I can see callable tools, but I need runtime.plugin.list for the canonical plugin inventory.'
+      'I can see callable tools, but I need runtime.plugin.list for the canonical plugin inventory.',
     ]);
-    expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_started')).toBe(
-      false
-    );
+    expect(
+      logStore.rawEvents().some(event => event.kind === 'tool_call_started'),
+    ).toBe(false);
     expect(currentUserMessage?.content).toBe('what plugins are available?');
     expect(runtimeContextMessage?.content).toContain(
-      "Mira's internal Character State"
+      "Mira's internal Character State",
     );
     expect(runtimeContextMessage?.content).toContain('sourceReferences');
     expect(runtimeContextMessage?.content).not.toContain('runtime.plugin.list');
     expect(runtimeContextMessage?.content).not.toContain('visible_reply');
-    expect(runtimeContextMessage?.content).not.toContain('character_state.patch');
+    expect(runtimeContextMessage?.content).not.toContain(
+      'character_state.patch',
+    );
   });
 
   it('shows interim visible_reply before executable tools without committing it', async () => {
     const sessionId = 'session-interim-visible-reload';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
-    const session = createConversationSession({ id: sessionId });
-    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const session = createConversationSession({id: sessionId});
+    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
     const progress: unknown[] = [];
     const adapter = createSequencedAdapter([
       {
@@ -94,27 +97,27 @@ describe('plugin-driven tool loop progress and evidence', () => {
           {
             name: 'visible_reply',
             input: {
-              text: 'Authorization: Bearer interim-secret'
-            }
+              text: 'Authorization: Bearer interim-secret',
+            },
           },
           {
             name: 'character_state.patch',
             input: {
-              energy: 'high'
-            }
-          }
-        ]
+              energy: 'high',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'finished'
-            }
-          }
-        ]
-      }
+              text: 'finished',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
@@ -124,67 +127,65 @@ describe('plugin-driven tool loop progress and evidence', () => {
       roleModelAdapter: adapter,
       onProgress(event) {
         progress.push(event);
-      }
+      },
     });
 
     expect(result.status).toBe('completed');
     const reloadedLogStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
     expect(
-      reloadedLogStore.conversationMessages().map((message) => message.text)
+      reloadedLogStore.conversationMessages().map(message => message.text),
     ).toEqual(['needs tool', 'finished']);
     expect(progress).toEqual([
       {
         kind: 'visible_reply',
         final: false,
-        text: 'Authorization: Bearer interim-secret'
+        text: 'Authorization: Bearer interim-secret',
       },
       {
         kind: 'tool_calls_requested',
         round: 1,
-        toolNames: ['character_state.patch']
+        toolNames: ['character_state.patch'],
       },
       {
         kind: 'tool_call_completed',
         round: 1,
         status: 'accepted',
-        toolName: 'character_state.patch'
+        toolName: 'character_state.patch',
       },
       {
         kind: 'visible_reply',
         final: true,
-        text: 'finished'
-      }
+        text: 'finished',
+      },
     ]);
     const reloadedRawEvents = reloadedLogStore.rawEvents();
     const serializedEvidence = JSON.stringify({
       rawEvents: reloadedRawEvents,
-      traceEntries: reloadedLogStore.traceEntries()
+      traceEntries: reloadedLogStore.traceEntries(),
     });
 
     expect(serializedEvidence).toContain('Authorization: [redacted]');
     expect(serializedEvidence).not.toContain('interim-secret');
     const interimEvent = reloadedRawEvents.find(
-      (event) => event.kind === 'interim_visible_reply_emitted'
+      event => event.kind === 'interim_visible_reply_emitted',
     );
     expect(interimEvent).toMatchObject({
-      kind: 'interim_visible_reply_emitted'
+      kind: 'interim_visible_reply_emitted',
     });
     expect(interimEvent).not.toHaveProperty('visibleMessageIds');
     expect(interimEvent).not.toHaveProperty('commitValidation');
     expect(
       reloadedRawEvents
-        .filter((event) => event.kind === 'visible_reply_committed')
-        .map((event) => event.visibleMessageIds)
-    ).toEqual([
-      [`${sessionId}:message-1`, `${sessionId}:message-2`]
-    ]);
+        .filter(event => event.kind === 'visible_reply_committed')
+        .map(event => event.visibleMessageIds),
+    ).toEqual([[`${sessionId}:message-1`, `${sessionId}:message-2`]]);
     expect(
       reloadedLogStore
         .traceEntries()
-        .some((entry) => entry.step === 'interim_visible_reply_emitted')
+        .some(entry => entry.step === 'interim_visible_reply_emitted'),
     ).toBe(true);
   });
 
@@ -198,27 +199,27 @@ describe('plugin-driven tool loop progress and evidence', () => {
           {
             name: 'visible_reply',
             input: {
-              text: 'checking'
-            }
+              text: 'checking',
+            },
           },
           {
             name: 'character_state.patch',
             input: {
-              energy: 'high'
-            }
-          }
-        ]
+              energy: 'high',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'finished'
-            }
-          }
-        ]
-      }
+              text: 'finished',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
@@ -232,60 +233,58 @@ describe('plugin-driven tool loop progress and evidence', () => {
         if (event.kind === 'visible_reply' && !event.final) {
           throw new Error('interim progress observer failed');
         }
-      }
+      },
     });
 
     expect(result.status).toBe('completed');
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
-      'needs tool',
-      'finished'
-    ]);
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['needs tool', 'finished']);
     expect(progress).toEqual([
       {
         kind: 'visible_reply',
         final: false,
-        text: 'checking'
+        text: 'checking',
       },
       {
         kind: 'tool_calls_requested',
         round: 1,
-        toolNames: ['character_state.patch']
+        toolNames: ['character_state.patch'],
       },
       {
         kind: 'tool_call_completed',
         round: 1,
         status: 'accepted',
-        toolName: 'character_state.patch'
+        toolName: 'character_state.patch',
       },
       {
         kind: 'visible_reply',
         final: true,
-        text: 'finished'
-      }
+        text: 'finished',
+      },
     ]);
     expect(
-      logStore.rawEvents().some((event) => event.kind === 'runtime_turn_rejected')
+      logStore
+        .rawEvents()
+        .some(event => event.kind === 'runtime_turn_rejected'),
     ).toBe(false);
   });
 
   it('keeps durable final visible_reply committed when progress callback fails', async () => {
     const sessionId = 'session-final-progress-fails';
-    const {
-      session,
-      logStore,
-      storeRoot
-    } = await createDurableCharacterStateHarness(sessionId);
+    const {session, logStore, storeRoot} =
+      await createDurableCharacterStateHarness(sessionId);
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'final reply'
-            }
-          }
-        ]
-      }
+              text: 'final reply',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
@@ -297,41 +296,42 @@ describe('plugin-driven tool loop progress and evidence', () => {
         if (event.kind === 'visible_reply' && event.final) {
           throw new Error('final progress observer failed');
         }
-      }
+      },
     });
 
     expect(result.status).toBe('completed');
     expect(result.rawEvent).toMatchObject({
       kind: 'runtime_turn_completed',
-      status: 'completed'
+      status: 'completed',
     });
     expect(
-      logStore.rawEvents().some((event) => event.kind === 'runtime_turn_rejected')
+      logStore
+        .rawEvents()
+        .some(event => event.kind === 'runtime_turn_rejected'),
     ).toBe(false);
 
     const reopenedLogStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
 
-    expect(reopenedLogStore.conversationMessages().map((message) => message.text)).toEqual([
-      'hello',
-      'final reply'
-    ]);
+    expect(
+      reopenedLogStore.conversationMessages().map(message => message.text),
+    ).toEqual(['hello', 'final reply']);
     expect(
       reopenedLogStore
         .rawEvents()
         .filter(
-          (event) =>
+          event =>
             event.kind === 'runtime_turn_completed' ||
-            event.kind === 'runtime_turn_rejected'
+            event.kind === 'runtime_turn_rejected',
         )
-        .map((event) => event.kind)
+        .map(event => event.kind),
     ).toEqual(['runtime_turn_completed']);
 
     const restoredSession = createConversationSession({
       id: sessionId,
-      visibleTranscript: reopenedLogStore.conversationMessages()
+      visibleTranscript: reopenedLogStore.conversationMessages(),
     });
     const followupResult = await runLocalUserMessageEvent({
       event: createTestEvent('again', 'evt_final_progress_followup'),
@@ -343,30 +343,27 @@ describe('plugin-driven tool loop progress and evidence', () => {
             {
               name: 'visible_reply',
               input: {
-                text: 'followup reply'
-              }
-            }
-          ]
-        }
-      ])
+                text: 'followup reply',
+              },
+            },
+          ],
+        },
+      ]),
     });
 
     expect(followupResult.status).toBe('completed');
-    expect(reopenedLogStore.conversationMessages().map((message) => message.text)).toEqual([
-      'hello',
-      'final reply',
-      'again',
-      'followup reply'
-    ]);
+    expect(
+      reopenedLogStore.conversationMessages().map(message => message.text),
+    ).toEqual(['hello', 'final reply', 'again', 'followup reply']);
     expect(
       reopenedLogStore
         .rawEvents()
         .filter(
-          (event) =>
+          event =>
             event.kind === 'runtime_turn_completed' ||
-            event.kind === 'runtime_turn_rejected'
+            event.kind === 'runtime_turn_rejected',
         )
-        .map((event) => event.kind)
+        .map(event => event.kind),
     ).toEqual(['runtime_turn_completed', 'runtime_turn_completed']);
   });
 
@@ -379,56 +376,59 @@ describe('plugin-driven tool loop progress and evidence', () => {
           {
             name: 'visible_reply',
             input: {
-              text: '   '
-            }
+              text: '   ',
+            },
           },
           {
             name: 'character_state.patch',
             input: {
-              mood: 'curious'
-            }
-          }
-        ]
+              mood: 'curious',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'finished'
-            }
-          }
-        ]
-      }
+              text: 'finished',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
-      event: createTestEvent('needs invalid interim', 'evt_invalid_interim_visible'),
+      event: createTestEvent(
+        'needs invalid interim',
+        'evt_invalid_interim_visible',
+      ),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
 
     expect(result).toMatchObject({
       status: 'rejected',
-      reason: roleModelInvalidVisibleReplyRejectionReason
+      reason: roleModelInvalidVisibleReplyRejectionReason,
     });
     expect(logStore.conversationMessages()).toEqual([]);
     expect(
       logStore
         .rawEvents()
-        .some((event) => event.kind === 'visible_reply_committed')
+        .some(event => event.kind === 'visible_reply_committed'),
     ).toBe(false);
     expect(
-      logStore.rawEvents().some((event) => event.kind === 'tool_call_started')
+      logStore.rawEvents().some(event => event.kind === 'tool_call_started'),
     ).toBe(false);
 
     const rejectionEvents = logStore
       .rawEvents()
       .filter(
-        (event) =>
+        event =>
           event.kind === 'commit_validation_rejected' ||
-          event.kind === 'runtime_turn_rejected'
+          event.kind === 'runtime_turn_rejected',
       );
 
     expect(rejectionEvents).toHaveLength(2);
@@ -440,10 +440,10 @@ describe('plugin-driven tool loop progress and evidence', () => {
           inputEnvelope: {
             event: {
               payload: {
-                currentUserMessage: 'needs invalid interim'
-              }
-            }
-          }
+                currentUserMessage: 'needs invalid interim',
+              },
+            },
+          },
         },
         parsedRoleModelDecisionSnapshot: {
           result: {
@@ -453,18 +453,18 @@ describe('plugin-driven tool loop progress and evidence', () => {
                 {
                   name: 'visible_reply',
                   input: {
-                    text: '   '
-                  }
+                    text: '   ',
+                  },
                 },
                 {
                   name: 'character_state.patch',
                   input: {
-                    mood: 'curious'
-                  }
-                }
-              ]
-            }
-          }
+                    mood: 'curious',
+                  },
+                },
+              ],
+            },
+          },
         },
         commitValidation: {
           sessionId: 'local-session',
@@ -472,13 +472,13 @@ describe('plugin-driven tool loop progress and evidence', () => {
             status: 'rejected',
             rejection: {
               reason: roleModelInvalidVisibleReplyRejectionReason,
-              details: 'Character agent returned an empty reply.'
-            }
-          }
-        }
+              details: 'Character agent returned an empty reply.',
+            },
+          },
+        },
       });
       expect(event.roleModelIOSnapshot?.rawOutputText).toContain(
-        '"visible_reply"'
+        '"visible_reply"',
       );
     }
   });
@@ -492,47 +492,47 @@ describe('plugin-driven tool loop progress and evidence', () => {
           {
             name: 'character_state.patch',
             input: {
-              mood: 'curious'
-            }
-          }
-        ]
+              mood: 'curious',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: '   '
-            }
+              text: '   ',
+            },
           },
           {
             name: 'runtime.plugin.list',
-            input: {}
-          }
-        ]
-      }
+            input: {},
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent(
         'needs invalid later interim',
-        'evt_invalid_later_interim_visible'
+        'evt_invalid_later_interim_visible',
       ),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
     const rejectionEvents = logStore
       .rawEvents()
       .filter(
-        (event) =>
+        event =>
           event.kind === 'commit_validation_rejected' ||
-          event.kind === 'runtime_turn_rejected'
+          event.kind === 'runtime_turn_rejected',
       );
 
     expect(result).toMatchObject({
       status: 'rejected',
-      reason: roleModelInvalidVisibleReplyRejectionReason
+      reason: roleModelInvalidVisibleReplyRejectionReason,
     });
     expect(rejectionEvents).toHaveLength(2);
 
@@ -540,38 +540,38 @@ describe('plugin-driven tool loop progress and evidence', () => {
       expect(event).toMatchObject({
         reason: roleModelInvalidVisibleReplyRejectionReason,
         toolCallIds: [
-          'evt_invalid_later_interim_visible.trace_evt_invalid_later_interim_visible.round-1.1.character_state.patch'
-        ]
+          'evt_invalid_later_interim_visible.trace_evt_invalid_later_interim_visible.round-1.1.character_state.patch',
+        ],
       });
       expect(event.runtimePluginEvidence).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             pluginId: 'character-state',
             evidenceKind: 'tool_invocation',
-            status: 'accepted'
-          })
-        ])
+            status: 'accepted',
+          }),
+        ]),
       );
       const characterStateInvocation =
         event.runtimePluginTurnEvidence?.toolInvocations.find(
-          (invocation) =>
+          invocation =>
             invocation.pluginId === 'character-state' &&
-            invocation.toolName === 'character_state.patch'
+            invocation.toolName === 'character_state.patch',
         );
 
       expect(characterStateInvocation).toMatchObject({
         result: {
-          status: 'accepted'
-        }
+          status: 'accepted',
+        },
       });
       expect(characterStateInvocation?.result.evidence).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             pluginId: 'character-state',
             evidenceKind: 'tool_invocation',
-            status: 'accepted'
-          })
-        ])
+            status: 'accepted',
+          }),
+        ]),
       );
     }
   });

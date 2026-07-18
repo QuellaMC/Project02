@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {
   createAcceptedRoleModelDecisionResult,
@@ -19,16 +19,14 @@ import {
   type RoleModelPluginToolDefinition,
   roleModelTerminalEmptyOutputRejectionDetails,
   roleModelUnsupportedEffectRejectionReason,
-  visibleReplyModelToolName
+  visibleReplyModelToolName,
 } from '../../src/role-model/index.ts';
-import {
-  characterStatePatchModelToolName
-} from '../../src/plugins/api/contract.ts';
-import { createDefaultProject02PluginHost } from '../support/default-plugin-host.ts';
-import { runtimePluginListToolName } from '../../src/plugins/api/contract.ts';
+import {characterStatePatchModelToolName} from '../../src/plugins/api/contract.ts';
+import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
+import {runtimePluginListToolName} from '../../src/plugins/api/contract.ts';
 import {
   createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent
+  createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
 
 describe('role-model contracts', () => {
@@ -41,30 +39,30 @@ describe('role-model contracts', () => {
         requiredForUserTurn: false,
         callLimit: {
           scope: 'user_turn',
-          maxCalls: 1
+          maxCalls: 1,
         },
         inputContract: {
           type: 'object',
           fields: [],
-          additionalFields: false
+          additionalFields: false,
         },
         validationOwner: 'plugin_host',
         sideEffectLevel: 'runtime_config_write',
         requiresConfirmation: true,
-        sourceReferencesRequired: false
-      }
+        sourceReferencesRequired: false,
+      },
     ]);
 
     expect(definitions).toHaveLength(1);
     expect(definitions[0]).toMatchObject({
       pluginId: 'settings.arbitrary.fixture',
-      name: 'settings.arbitrary.update'
+      name: 'settings.arbitrary.update',
     });
   });
 
   it.each([
     ['input', Number.NaN],
-    ['output', Number.POSITIVE_INFINITY]
+    ['output', Number.POSITIVE_INFINITY],
   ] as const)(
     'rejects non-finite tool observation %s at the public constructor',
     (surface, nonFiniteValue) => {
@@ -75,18 +73,18 @@ describe('role-model contracts', () => {
           toolName: 'memory.search',
           input: {
             query: 'Mira',
-            ...(surface === 'input' ? { score: nonFiniteValue } : {})
+            ...(surface === 'input' ? {score: nonFiniteValue} : {}),
           },
           result: {
             status: 'accepted',
             output:
               surface === 'output'
-                ? { score: nonFiniteValue }
-                : { summary: 'found' }
-          }
-        })
+                ? {score: nonFiniteValue}
+                : {summary: 'found'},
+          },
+        }),
       ).toThrow('must be finite JSON.');
-    }
+    },
   );
 
   it('redacts credentials in public tool observations', () => {
@@ -100,13 +98,13 @@ describe('role-model contracts', () => {
         aws_secret_access_key: 'aws-secret',
         ssh_private_key_pem: 'ssh-secret',
         oauth_client_secret_value: 'oauth-secret',
-        endpoint: 'cockroachdb://user:pass@example.test/db'
+        endpoint: 'cockroachdb://user:pass@example.test/db',
       },
       result: {
         status: 'rejected',
         reason: 'handler_failed token=reason-secret',
-        message: 'Cookie: session=message-secret'
-      }
+        message: 'Cookie: session=message-secret',
+      },
     });
     const serialized = JSON.stringify(observation);
 
@@ -125,13 +123,13 @@ describe('role-model contracts', () => {
         aws_secret_access_key: '[redacted]',
         ssh_private_key_pem: '[redacted]',
         oauth_client_secret_value: '[redacted]',
-        endpoint: 'cockroachdb://[redacted]@example.test/db'
+        endpoint: 'cockroachdb://[redacted]@example.test/db',
       },
       result: {
         status: 'rejected',
         reason: 'handler_failed token=[redacted]',
-        message: 'Cookie: [redacted]'
-      }
+        message: 'Cookie: [redacted]',
+      },
     });
   });
 
@@ -141,17 +139,17 @@ describe('role-model contracts', () => {
     'Adapter rejection must be replayable from rawOutputText.',
     'Role-model adapter native tool-call argument errors are malformed.',
     'providerMetadata.request.messageCount must be finite JSON.',
-    'providerMetadata.response.status must be finite JSON.'
-  ])('replays malformed adapter evidence detail %s', (details) => {
+    'providerMetadata.response.status must be finite JSON.',
+  ])('replays malformed adapter evidence detail %s', details => {
     expect(
       isRoleModelRawOutputReplayableDecisionEvidence({
         rawOutputText: '',
         providerMetadata: undefined,
         decisionResult: createRejectedRoleModelDecisionResult(
           roleModelMalformedOutputRejectionReason,
-          details
-        )
-      })
+          details,
+        ),
+      }),
     ).toBe(true);
   });
 
@@ -160,7 +158,7 @@ describe('role-model contracts', () => {
     const identity = createRuntimeEventIdentity({
       eventId: 'evt_default_allowed_tools',
       traceId: 'trace_default_allowed_tools',
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('hello', identity),
@@ -168,24 +166,24 @@ describe('role-model contracts', () => {
         sessionId: 'session-default-allowed-tools',
         characterSnapshot: {
           id: 'mira',
-          displayName: 'Mira'
-        }
+          displayName: 'Mira',
+        },
       }),
-      pluginToolDefinitions: pluginHost.pluginToolDefinitions()
+      pluginToolDefinitions: pluginHost.pluginToolDefinitions(),
     });
 
     expect(inputEnvelope.allowedTools).toEqual([
       visibleReplyModelToolName,
       runtimePluginListToolName,
-      characterStatePatchModelToolName
+      characterStatePatchModelToolName,
     ]);
     expect(
       inputEnvelope.toolDefinitions.find(
-        (definition) => definition.name === visibleReplyModelToolName
-      )?.callLimit
+        definition => definition.name === visibleReplyModelToolName,
+      )?.callLimit,
     ).toEqual({
       scope: 'model_response',
-      maxCalls: 1
+      maxCalls: 1,
     });
   });
 
@@ -193,15 +191,15 @@ describe('role-model contracts', () => {
     const identity = createRuntimeEventIdentity({
       eventId: 'evt_provider_exchange_redaction',
       traceId: 'trace_provider_exchange_redaction',
-      createdAt: '2026-07-11T00:00:00.000Z'
+      createdAt: '2026-07-11T00:00:00.000Z',
     });
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('hello', identity),
       decisionContext: createDecisionContext({
         sessionId: 'session-provider-exchange-redaction',
-        characterSnapshot: { id: 'mira', displayName: 'Mira' }
+        characterSnapshot: {id: 'mira', displayName: 'Mira'},
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
     });
     const snapshot = createRoleModelIOSnapshot({
       ...identity,
@@ -211,15 +209,15 @@ describe('role-model contracts', () => {
         toolCalls: [
           {
             name: visibleReplyModelToolName,
-            input: { text: 'api_key=raw-output-secret' }
-          }
-        ]
+            input: {text: 'api_key=raw-output-secret'},
+          },
+        ],
       }),
       providerExchange: {
         provider: {
           name: 'nvidia',
           model: 'model?token=model-secret',
-          endpoint: 'https://user:pass@example.test/chat'
+          endpoint: 'https://user:pass@example.test/chat',
         },
         capabilities: {
           supportsNativeTools: true,
@@ -230,18 +228,18 @@ describe('role-model contracts', () => {
           reasoningParameterStyle: 'none',
           requiresReasoningBlockRoundTrip: false,
           supportsToolChoice: true,
-          supportsParallelToolCalls: false
+          supportsParallelToolCalls: false,
         },
-        reasoning: { mode: 'none', params: {} },
+        reasoning: {mode: 'none', params: {}},
         renderedMessages: [
-          { role: 'user', content: 'Authorization: Bearer message-secret' }
+          {role: 'user', content: 'Authorization: Bearer message-secret'},
         ],
         renderedTools: [],
         toolNameMappings: [],
-        requestBody: { cookie: 'session=request-secret' },
+        requestBody: {cookie: 'session=request-secret'},
         nativeToolResultMessages: [],
-        responseBody: { access_token: 'response-secret' }
-      }
+        responseBody: {access_token: 'response-secret'},
+      },
     });
     const serialized = JSON.stringify(snapshot.providerExchange);
 
@@ -253,7 +251,7 @@ describe('role-model contracts', () => {
       'user:pass',
       'message-secret',
       'request-secret',
-      'response-secret'
+      'response-secret',
     ]) {
       expect(serialized).not.toContain(secret);
     }
@@ -263,17 +261,17 @@ describe('role-model contracts', () => {
     const identity = createRuntimeEventIdentity({
       eventId: 'evt_decision_constructor_redaction',
       traceId: 'trace_decision_constructor_redaction',
-      createdAt: '2026-07-11T00:00:00.000Z'
+      createdAt: '2026-07-11T00:00:00.000Z',
     });
     const snapshot = createParsedRoleModelDecisionSnapshot({
       ...identity,
       sessionId: 'session-decision-constructor-redaction',
       result: createAcceptedRoleModelDecisionResult(
         createVisibleReplyCharacterDecision(
-          'Authorization: ApiKey decision-secret'
+          'Authorization: ApiKey decision-secret',
         ),
-        { nonCommittedText: 'api_key=snapshot-secret' }
-      )
+        {nonCommittedText: 'api_key=snapshot-secret'},
+      ),
     });
     const serialized = JSON.stringify(snapshot);
 
@@ -286,8 +284,8 @@ describe('role-model contracts', () => {
     const result = createAcceptedRoleModelDecisionResult(
       createVisibleReplyCharacterDecision('hello'),
       {
-        nonCommittedText: 'Authorization: ApiKey folded-secret'
-      }
+        nonCommittedText: 'Authorization: ApiKey folded-secret',
+      },
     );
 
     expect(result.nonCommittedText).toBe('Authorization: [redacted]');
@@ -298,7 +296,7 @@ describe('role-model contracts', () => {
     const identity = createRuntimeEventIdentity({
       eventId: 'evt_duplicate_allowed_tools',
       traceId: 'trace_duplicate_allowed_tools',
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
     expect(() =>
@@ -308,12 +306,12 @@ describe('role-model contracts', () => {
           sessionId: 'session-duplicate-allowed-tools',
           characterSnapshot: {
             id: 'mira',
-            displayName: 'Mira'
-          }
+            displayName: 'Mira',
+          },
         }),
         allowedTools: [visibleReplyModelToolName, visibleReplyModelToolName],
-        pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
-      })
+        pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      }),
     ).toThrow('Role-model allowedTools must not contain duplicates.');
   });
 
@@ -323,22 +321,23 @@ describe('role-model contracts', () => {
         toolCalls: [
           {
             name: visibleReplyModelToolName,
-            input: { text: 'first' }
+            input: {text: 'first'},
           },
           {
             name: visibleReplyModelToolName,
-            input: { text: 'second' }
-          }
-        ]
-      })
+            input: {text: 'second'},
+          },
+        ],
+      }),
     );
 
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
         reason: roleModelDuplicateToolCallRejectionReason,
-        details: 'Decision must not include duplicate visible_reply tool calls.'
-      }
+        details:
+          'Decision must not include duplicate visible_reply tool calls.',
+      },
     });
   });
 
@@ -349,11 +348,11 @@ describe('role-model contracts', () => {
           {
             name: visibleReplyModelToolName,
             input: {
-              text: 'hello'
-            }
-          }
-        ]
-      })
+              text: 'hello',
+            },
+          },
+        ],
+      }),
     );
 
     expect(result).toEqual({
@@ -364,11 +363,11 @@ describe('role-model contracts', () => {
           {
             name: visibleReplyModelToolName,
             input: {
-              text: 'hello'
-            }
-          }
-        ]
-      }
+              text: 'hello',
+            },
+          },
+        ],
+      },
     });
   });
 
@@ -380,11 +379,11 @@ describe('role-model contracts', () => {
           {
             name: visibleReplyModelToolName,
             input: {
-              text: 'hello'
-            }
-          }
-        ]
-      })
+              text: 'hello',
+            },
+          },
+        ],
+      }),
     );
 
     expect(result).toEqual({
@@ -395,11 +394,11 @@ describe('role-model contracts', () => {
           {
             name: visibleReplyModelToolName,
             input: {
-              text: 'hello'
-            }
-          }
-        ]
-      }
+              text: 'hello',
+            },
+          },
+        ],
+      },
     });
   });
 
@@ -411,13 +410,13 @@ describe('role-model contracts', () => {
           {
             name: characterStatePatchModelToolName,
             input: {
-              mood: 'angry'
-            }
-          }
-        ]
+              mood: 'angry',
+            },
+          },
+        ],
       }),
       [characterStatePatchModelToolName],
-      pluginHost.pluginToolDefinitions()
+      pluginHost.pluginToolDefinitions(),
     );
 
     expect(result).toMatchObject({
@@ -427,11 +426,11 @@ describe('role-model contracts', () => {
           {
             name: characterStatePatchModelToolName,
             input: {
-              mood: 'angry'
-            }
-          }
-        ]
-      }
+              mood: 'angry',
+            },
+          },
+        ],
+      },
     });
   });
 
@@ -439,16 +438,16 @@ describe('role-model contracts', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
         toolCalls: [],
-        text: 'folded model note'
-      })
+        text: 'folded model note',
+      }),
     );
 
     expect(result).toMatchObject({
       status: 'accepted',
       decision: {
-        toolCalls: []
+        toolCalls: [],
       },
-      nonCommittedText: 'folded model note'
+      nonCommittedText: 'folded model note',
     });
   });
 
@@ -456,13 +455,13 @@ describe('role-model contracts', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
         toolCalls: [],
-        text: 'api_key=parsed-secret'
-      })
+        text: 'api_key=parsed-secret',
+      }),
     );
 
     expect(result).toMatchObject({
       status: 'accepted',
-      nonCommittedText: 'api_key=[redacted]'
+      nonCommittedText: 'api_key=[redacted]',
     });
     expect(JSON.stringify(result)).not.toContain('parsed-secret');
   });
@@ -471,16 +470,16 @@ describe('role-model contracts', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
         toolCalls: [],
-        text: ''
-      })
+        text: '',
+      }),
     );
 
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
         reason: roleModelMalformedOutputRejectionReason,
-        details: roleModelTerminalEmptyOutputRejectionDetails
-      }
+        details: roleModelTerminalEmptyOutputRejectionDetails,
+      },
     });
   });
 
@@ -488,16 +487,16 @@ describe('role-model contracts', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
         toolCalls: [],
-        text: ' \n\t '
-      })
+        text: ' \n\t ',
+      }),
     );
 
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
         reason: roleModelMalformedOutputRejectionReason,
-        details: roleModelTerminalEmptyOutputRejectionDetails
-      }
+        details: roleModelTerminalEmptyOutputRejectionDetails,
+      },
     });
   });
 
@@ -512,18 +511,18 @@ describe('role-model contracts', () => {
         requiredForUserTurn: true,
         callLimit: {
           scope: 'user_turn',
-          maxCalls: 1
+          maxCalls: 1,
         },
         inputContract: {
           type: 'object',
           fields: [],
-          additionalFields: true
+          additionalFields: true,
         },
         validationOwner: 'plugin_host',
         sideEffectLevel: 'runtime_read',
         requiresConfirmation: false,
-        sourceReferencesRequired: false
-      }
+        sourceReferencesRequired: false,
+      },
     ] satisfies readonly RoleModelPluginToolDefinition[];
     const toolObservations = [
       {
@@ -531,15 +530,15 @@ describe('role-model contracts', () => {
         pluginId: 'memory',
         toolName: requiredToolName,
         input: {
-          query: 'Mira'
+          query: 'Mira',
         },
         result: {
           status: 'accepted',
           output: {
-            summary: 'Mira likes concise replies.'
-          }
-        }
-      }
+            summary: 'Mira likes concise replies.',
+          },
+        },
+      },
     ] as const;
     const allowedTools = [visibleReplyModelToolName, requiredToolName];
     const rawOutputText = JSON.stringify({
@@ -547,20 +546,20 @@ describe('role-model contracts', () => {
         {
           name: visibleReplyModelToolName,
           input: {
-            text: 'Got it.'
-          }
-        }
-      ]
+            text: 'Got it.',
+          },
+        },
+      ],
     });
     const decisionResult = parseRoleModelDecision(
       rawOutputText,
       allowedTools,
       pluginToolDefinitions,
-      toolObservations
+      toolObservations,
     );
 
     expect(decisionResult).toMatchObject({
-      status: 'accepted'
+      status: 'accepted',
     });
     expect(
       isRoleModelRawOutputReplayableDecisionEvidence({
@@ -569,8 +568,8 @@ describe('role-model contracts', () => {
         decisionResult,
         allowedTools,
         pluginToolDefinitions,
-        toolObservations
-      })
+        toolObservations,
+      }),
     ).toBe(true);
   });
 
@@ -581,20 +580,20 @@ describe('role-model contracts', () => {
           {
             name: visibleReplyModelToolName,
             input: {
-              text: 'committed reply'
-            }
-          }
+              text: 'committed reply',
+            },
+          },
         ],
-        text: 'second non-committed reply'
-      })
+        text: 'second non-committed reply',
+      }),
     );
 
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
         reason: roleModelMalformedOutputRejectionReason,
-        details: 'Decision text is only allowed when toolCalls is empty.'
-      }
+        details: 'Decision text is only allowed when toolCalls is empty.',
+      },
     });
   });
 
@@ -606,17 +605,17 @@ describe('role-model contracts', () => {
       requiredForUserTurn: false,
       callLimit: {
         scope: 'user_turn',
-        maxCalls: 1
+        maxCalls: 1,
       },
       inputContract: {
         type: 'object',
         fields: [],
-        additionalFields: true
+        additionalFields: true,
       },
       validationOwner: 'plugin_host',
       sideEffectLevel: 'runtime_read',
       requiresConfirmation: false,
-      sourceReferencesRequired: false
+      sourceReferencesRequired: false,
     } satisfies RoleModelPluginToolDefinition;
     const result = parseRoleModelDecision(
       JSON.stringify({
@@ -625,23 +624,20 @@ describe('role-model contracts', () => {
           {
             name: 'memory.unknown',
             input: {
-              query: 'Mira'
-            }
-          }
-        ]
+              query: 'Mira',
+            },
+          },
+        ],
       }),
       [visibleReplyModelToolName],
-      [
-        ...createDefaultRoleModelPluginToolDefinitions(),
-        memoryUnknownTool
-      ]
+      [...createDefaultRoleModelPluginToolDefinitions(), memoryUnknownTool],
     );
 
     expect(result).toMatchObject({
       status: 'accepted',
       decision: {
-        toolCalls: [{ name: 'memory.unknown', input: { query: 'Mira' } }]
-      }
+        toolCalls: [{name: 'memory.unknown', input: {query: 'Mira'}}],
+      },
     });
   });
 
@@ -650,16 +646,16 @@ describe('role-model contracts', () => {
       JSON.stringify({
         action: {
           type: visibleReplyModelToolName,
-          text: 'hello'
-        }
-      })
+          text: 'hello',
+        },
+      }),
     );
 
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
-        reason: roleModelUnsupportedEffectRejectionReason
-      }
+        reason: roleModelUnsupportedEffectRejectionReason,
+      },
     });
   });
 });

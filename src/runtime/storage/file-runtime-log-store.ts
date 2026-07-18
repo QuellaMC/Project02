@@ -1,30 +1,30 @@
-import { appendFileSync } from 'node:fs';
-import { LocalRuntimeStorageContractError } from './layout-contract.ts';
-import { encodeConversationLogRecord } from './conversation-codec.ts';
-import { encodeRawEventLogRecord } from './raw-event-codec.ts';
-import { encodeRuntimeTraceEntry } from './trace-codec.ts';
-import type { RuntimeLogStore } from '../evidence/records.ts';
+import {appendFileSync} from 'node:fs';
+import {LocalRuntimeStorageContractError} from './layout-contract.ts';
+import {encodeConversationLogRecord} from './conversation-codec.ts';
+import {encodeRawEventLogRecord} from './raw-event-codec.ts';
+import {encodeRuntimeTraceEntry} from './trace-codec.ts';
+import type {RuntimeLogStore} from '../evidence/records.ts';
 import {
   createRuntimeSessionEvidenceSnapshot,
-  removeConversationLogRecords
+  removeConversationLogRecords,
 } from '../evidence/recovery.ts';
 import {
   FileRuntimeLogStoreState,
-  type FileRuntimeLogStoreStateOptions
+  type FileRuntimeLogStoreStateOptions,
 } from './file-runtime-log-store-state.ts';
 
 export {
   durableRuntimeSessionCharacterProfile,
-  findValidatedTerminalRawEventForSession
+  findValidatedTerminalRawEventForSession,
 } from '../evidence/validation.ts';
 
 export type CreateFileRuntimeLogStoreOptions = FileRuntimeLogStoreStateOptions;
 
 export function createFileRuntimeLogStore(
-  options: CreateFileRuntimeLogStoreOptions = {}
+  options: CreateFileRuntimeLogStoreOptions = {},
 ): RuntimeLogStore {
   const state = new FileRuntimeLogStoreState(options);
-  const { paths, writerLockOwnerToken } = state;
+  const {paths, writerLockOwnerToken} = state;
 
   return Object.freeze({
     localRuntimeSessionPaths: paths,
@@ -59,7 +59,10 @@ export function createFileRuntimeLogStore(
       const storedRecord = machine.prepareRawEventAppend(record);
 
       try {
-        appendJsonLine(paths.rawEventsPath, encodeRawEventLogRecord(storedRecord));
+        appendJsonLine(
+          paths.rawEventsPath,
+          encodeRawEventLogRecord(storedRecord),
+        );
         machine.commitRawEventAppend(storedRecord);
         state.checkpointCachedEvidenceStamps();
       } catch (error: unknown) {
@@ -78,13 +81,13 @@ export function createFileRuntimeLogStore(
       state.recordIncrementalValidation();
       const storedRecord = machine.prepareConversationAppend(
         record,
-        expectedCharacter
+        expectedCharacter,
       );
 
       try {
         appendJsonLine(
           paths.conversationPath,
-          encodeConversationLogRecord(storedRecord)
+          encodeConversationLogRecord(storedRecord),
         );
         machine.commitConversationAppend(storedRecord);
         state.checkpointCachedEvidenceStamps();
@@ -109,7 +112,7 @@ export function createFileRuntimeLogStore(
       const updated = removeConversationLogRecords({
         paths,
         evidence,
-        messageIds
+        messageIds,
       });
 
       if (updated !== undefined) {
@@ -140,18 +143,18 @@ export function createFileRuntimeLogStore(
       const evidence = state.readStoredEvidence();
       state.ensureTransitionMachine(evidence).assertPublicReadable();
       return Object.freeze([...evidence.conversationMessages]);
-    }
+    },
   } satisfies RuntimeLogStore);
 }
 
 function appendJsonLine(filePath: string, line: string): void {
   try {
-    appendFileSync(filePath, `${line}\n`, { encoding: 'utf8', mode: 0o600 });
+    appendFileSync(filePath, `${line}\n`, {encoding: 'utf8', mode: 0o600});
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
       `Could not append local runtime log file: ${filePath}.`,
-      { cause: error }
+      {cause: error},
     );
   }
 }

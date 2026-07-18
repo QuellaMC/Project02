@@ -1,11 +1,8 @@
-import type {
-  Project02RuntimeConfig,
-  RuntimeConfigValue
-} from './types.ts';
-import { createCanonicalJsonFingerprint } from '../../shared/canonical-json.ts';
+import type {Project02RuntimeConfig, RuntimeConfigValue} from './types.ts';
+import {createCanonicalJsonFingerprint} from '../../shared/canonical-json.ts';
 
 export function createRuntimeConfigFingerprint(
-  value: RuntimeConfigValue | Project02RuntimeConfig
+  value: RuntimeConfigValue | Project02RuntimeConfig,
 ): string {
   return createCanonicalJsonFingerprint(secretSafeFingerprintValue(value));
 }
@@ -30,7 +27,7 @@ function secretSafeFingerprintValue(value: unknown): unknown {
 
   if ('$env' in value && typeof value.$env === 'string') {
     return {
-      $secretRef: value.$env
+      $secretRef: value.$env,
     };
   }
 
@@ -41,14 +38,14 @@ function secretSafeFingerprintValue(value: unknown): unknown {
   ) {
     return {
       $plaintextSecret: '[redacted]',
-      justification: value.justification
+      justification: value.justification,
     };
   }
 
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       key,
-      secretSafeFingerprintValue(item)
-    ])
+      secretSafeFingerprintValue(item),
+    ]),
   );
 }

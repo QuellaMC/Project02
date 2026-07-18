@@ -1,4 +1,4 @@
-import type { ModelToolJsonSchema } from './model-tools.ts';
+import type {ModelToolJsonSchema} from './model-tools.ts';
 
 export type RoleModelSystemChatMessage = {
   readonly role: 'system';
@@ -88,7 +88,7 @@ export type RoleModelProviderCapabilities = {
 };
 
 export function freezeRoleModelChatMessage(
-  message: RoleModelChatMessage
+  message: RoleModelChatMessage,
 ): RoleModelChatMessage {
   if (message.role === 'assistant') {
     return Object.freeze({
@@ -98,9 +98,9 @@ export function freezeRoleModelChatMessage(
         ? {}
         : {
             tool_calls: Object.freeze(
-              message.tool_calls.map(freezeRoleModelChatToolCall)
-            )
-          })
+              message.tool_calls.map(freezeRoleModelChatToolCall),
+            ),
+          }),
     } satisfies RoleModelAssistantChatMessage);
   }
 
@@ -108,13 +108,13 @@ export function freezeRoleModelChatMessage(
     return Object.freeze({
       role: 'tool',
       content: message.content,
-      tool_call_id: message.tool_call_id
+      tool_call_id: message.tool_call_id,
     } satisfies RoleModelToolChatMessage);
   }
 
   return Object.freeze({
     role: message.role,
-    content: message.content
+    content: message.content,
   } satisfies
     | RoleModelSystemChatMessage
     | RoleModelDeveloperChatMessage
@@ -122,14 +122,14 @@ export function freezeRoleModelChatMessage(
 }
 
 export function freezeRoleModelChatToolCall(
-  call: RoleModelChatToolCall
+  call: RoleModelChatToolCall,
 ): RoleModelChatToolCall {
   return Object.freeze({
     id: call.id,
     type: 'function',
     function: Object.freeze({
       name: call.function.name,
-      arguments: call.function.arguments
-    })
+      arguments: call.function.arguments,
+    }),
   } satisfies RoleModelChatToolCall);
 }

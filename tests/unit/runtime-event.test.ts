@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {
   assertCanonicalRuntimeTimestamp,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
-  RuntimeEventInputError
+  RuntimeEventInputError,
 } from '../../src/core/index.ts';
 
 describe('runtime event contract', () => {
@@ -12,7 +12,7 @@ describe('runtime event contract', () => {
     const identity = createRuntimeEventIdentity({
       eventId: 'evt_test_001',
       traceId: 'trace_test_001',
-      createdAt: '2026-06-04T00:00:00.000Z'
+      createdAt: '2026-06-04T00:00:00.000Z',
     });
 
     const event = createUserMessageRuntimeEvent('  hello  ', identity);
@@ -23,8 +23,8 @@ describe('runtime event contract', () => {
       createdAt: '2026-06-04T00:00:00.000Z',
       type: 'USER_MESSAGE',
       payload: {
-        currentUserMessage: 'hello'
-      }
+        currentUserMessage: 'hello',
+      },
     });
     expect(event.eventId).not.toBe(event.traceId);
     expect(Object.isFrozen(event)).toBe(true);
@@ -36,15 +36,15 @@ describe('runtime event contract', () => {
       createRuntimeEventIdentity({
         eventId: '',
         traceId: 'trace_test_001',
-        createdAt: '2026-06-04T00:00:00.000Z'
-      })
+        createdAt: '2026-06-04T00:00:00.000Z',
+      }),
     ).toThrow('Runtime event identity requires non-empty event and trace IDs.');
     expect(() =>
       createRuntimeEventIdentity({
         eventId: 'evt_same',
         traceId: 'evt_same',
-        createdAt: '2026-06-04T00:00:00.000Z'
-      })
+        createdAt: '2026-06-04T00:00:00.000Z',
+      }),
     ).toThrow('Runtime event identity requires separate event and trace IDs.');
   });
 
@@ -52,14 +52,14 @@ describe('runtime event contract', () => {
     '',
     'not-a-date',
     '2026-06-04T08:00:00.000+08:00',
-    '2026-06-04T00:00:00Z'
-  ])('rejects non-canonical runtime timestamps', (createdAt) => {
+    '2026-06-04T00:00:00Z',
+  ])('rejects non-canonical runtime timestamps', createdAt => {
     expect(() =>
       createRuntimeEventIdentity({
         eventId: 'evt_invalid_timestamp',
         traceId: 'trace_invalid_timestamp',
-        createdAt
-      })
+        createdAt,
+      }),
     ).toThrow('Runtime event createdAt must be a canonical UTC ISO timestamp.');
   });
 
@@ -67,8 +67,8 @@ describe('runtime event contract', () => {
     expect(
       assertCanonicalRuntimeTimestamp(
         '2026-06-04T00:00:00.000Z',
-        'Runtime event createdAt'
-      )
+        'Runtime event createdAt',
+      ),
     ).toBe('2026-06-04T00:00:00.000Z');
   });
 
@@ -76,11 +76,11 @@ describe('runtime event contract', () => {
     const identity = createRuntimeEventIdentity({
       eventId: 'evt_rejected_empty',
       traceId: 'trace_rejected_empty',
-      createdAt: '2026-06-04T00:01:00.000Z'
+      createdAt: '2026-06-04T00:01:00.000Z',
     });
 
     expect(() => createUserMessageRuntimeEvent('   ', identity)).toThrow(
-      RuntimeEventInputError
+      RuntimeEventInputError,
     );
 
     try {
@@ -90,7 +90,7 @@ describe('runtime event contract', () => {
 
       if (!(error instanceof RuntimeEventInputError)) {
         throw new Error('Expected RuntimeEventInputError.', {
-          cause: error
+          cause: error,
         });
       }
 
@@ -105,7 +105,7 @@ describe('runtime event contract', () => {
     const mutableIdentity = {
       eventId: 'evt_mutable_rejected',
       traceId: 'trace_mutable_rejected',
-      createdAt: '2026-06-04T00:01:30.000Z'
+      createdAt: '2026-06-04T00:01:30.000Z',
     };
 
     try {
@@ -115,7 +115,7 @@ describe('runtime event contract', () => {
 
       if (!(error instanceof RuntimeEventInputError)) {
         throw new Error('Expected RuntimeEventInputError.', {
-          cause: error
+          cause: error,
         });
       }
 
@@ -126,7 +126,7 @@ describe('runtime event contract', () => {
       expect(error.identity).toEqual({
         eventId: 'evt_mutable_rejected',
         traceId: 'trace_mutable_rejected',
-        createdAt: '2026-06-04T00:01:30.000Z'
+        createdAt: '2026-06-04T00:01:30.000Z',
       });
       return;
     }
@@ -138,7 +138,7 @@ describe('runtime event contract', () => {
     const identity = createRuntimeEventIdentity({
       eventId: 'evt_rejected_multiline',
       traceId: 'trace_rejected_multiline',
-      createdAt: '2026-06-04T00:02:00.000Z'
+      createdAt: '2026-06-04T00:02:00.000Z',
     });
 
     try {
@@ -148,13 +148,15 @@ describe('runtime event contract', () => {
 
       if (!(error instanceof RuntimeEventInputError)) {
         throw new Error('Expected RuntimeEventInputError.', {
-          cause: error
+          cause: error,
         });
       }
 
       expect(error.reason).toBe('multiline');
       expect(error.identity).toEqual(identity);
-      expect(error.message).toBe('Provide exactly one non-empty single-line message.');
+      expect(error.message).toBe(
+        'Provide exactly one non-empty single-line message.',
+      );
       return;
     }
 
@@ -166,13 +168,10 @@ describe('runtime event contract', () => {
     'hello\u2029world',
     '\u2028hello',
     'hello\u2029',
-    '\u2028hello\u2029'
-  ])(
-    'rejects Unicode line separators in one-line input',
-    (message) => {
-      expect(() => createUserMessageRuntimeEvent(message)).toThrow(
-        'Provide exactly one non-empty single-line message.'
-      );
-    }
-  );
+    '\u2028hello\u2029',
+  ])('rejects Unicode line separators in one-line input', message => {
+    expect(() => createUserMessageRuntimeEvent(message)).toThrow(
+      'Provide exactly one non-empty single-line message.',
+    );
+  });
 });

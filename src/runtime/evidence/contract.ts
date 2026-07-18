@@ -1,17 +1,15 @@
-import type { ConversationLogRecord, RawEventLogRecord, RuntimeTraceEntry } from './records.ts';
-import type { CharacterProfile } from '../../core/index.ts';
+import type {
+  ConversationLogRecord,
+  RawEventLogRecord,
+  RuntimeTraceEntry,
+} from './records.ts';
+import type {CharacterProfile} from '../../core/index.ts';
 
 export type RuntimeLogReadMode =
-  | 'append'
-  | 'appendTrace'
-  | 'public'
-  | 'publicDecode';
+  'append' | 'appendTrace' | 'public' | 'publicDecode';
 
 export type RuntimeLogValidationMode =
-  | 'appendConversation'
-  | 'appendRawEvent'
-  | 'appendTrace'
-  | 'public';
+  'appendConversation' | 'appendRawEvent' | 'appendTrace' | 'public';
 
 export type DurableRuntimeSessionEvidence = {
   readonly traceEntries: readonly RuntimeTraceEntry[];
@@ -26,7 +24,7 @@ export type MutableDurableRuntimeSessionEvidence = {
 };
 
 export type RuntimeEvidenceFileStamp =
-  | { readonly exists: false }
+  | {readonly exists: false}
   | {
       readonly exists: true;
       readonly device: bigint;
@@ -63,7 +61,7 @@ export type RuntimeEvidenceIncrementalState = {
   readonly missingStoredTerminalTraceEvidence: Set<string>;
   readonly startedToolCalls: Map<
     string,
-    { readonly identityKey: string; readonly record: RawEventLogRecord }
+    {readonly identityKey: string; readonly record: RawEventLogRecord}
   >;
   readonly finishedToolCalls: Set<string>;
   readonly unfinishedToolCallIdsByIdentity: Map<string, Set<string>>;
@@ -76,8 +74,4 @@ export type RuntimeEvidenceIncrementalState = {
 };
 
 export type RuntimeTurnEvidenceState =
-  | 'completed'
-  | 'empty'
-  | 'raw_started'
-  | 'rejected'
-  | 'trace_started';
+  'completed' | 'empty' | 'raw_started' | 'rejected' | 'trace_started';

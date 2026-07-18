@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {
   CharacterInputError,
@@ -9,9 +9,9 @@ import {
   ConversationRehydrationError,
   type CharacterAgent,
   type CharacterAgentReply,
-  type VisibleMessage
+  type VisibleMessage,
 } from '../../src/core/index.ts';
-import { createDeterministicCharacterAgent } from '../../src/role-model/providers/deterministic.ts';
+import {createDeterministicCharacterAgent} from '../../src/role-model/providers/deterministic.ts';
 
 type DeferredReply = {
   readonly promise: Promise<CharacterAgentReply>;
@@ -25,7 +25,7 @@ describe('conversation core', () => {
     expect(session).toEqual({
       id: 'local-session',
       character: localCharacterProfile,
-      visibleTranscript: []
+      visibleTranscript: [],
     });
   });
 
@@ -34,9 +34,9 @@ describe('conversation core', () => {
     const agent: CharacterAgent = {
       reply(input) {
         return {
-          text: `${input.character.displayName}: ${input.message}`
+          text: `${input.character.displayName}: ${input.message}`,
         };
-      }
+      },
     };
 
     const result = await runCharacterTurn(session, '  are you there?  ', agent);
@@ -47,22 +47,22 @@ describe('conversation core', () => {
         role: 'user',
         speakerId: 'local-user',
         speakerName: 'You',
-        text: 'are you there?'
+        text: 'are you there?',
       },
       characterMessage: {
         id: 'local-session:message-2',
         role: 'character',
         speakerId: 'mira',
         speakerName: 'Mira',
-        text: 'Mira: are you there?'
+        text: 'Mira: are you there?',
       },
       reply: {
-        text: 'Mira: are you there?'
-      }
+        text: 'Mira: are you there?',
+      },
     });
     expect(session.visibleTranscript).toEqual([
       result.userMessage,
-      result.characterMessage
+      result.characterMessage,
     ]);
   });
 
@@ -71,19 +71,19 @@ describe('conversation core', () => {
     const agent: CharacterAgent = {
       reply() {
         return {
-          text: 'Tools available:\n- runtime.plugin.list\n- character_state.patch'
+          text: 'Tools available:\n- runtime.plugin.list\n- character_state.patch',
         };
-      }
+      },
     };
 
     const result = await runCharacterTurn(session, 'list tools', agent);
 
     expect(result.characterMessage.text).toBe(
-      'Tools available:\n- runtime.plugin.list\n- character_state.patch'
+      'Tools available:\n- runtime.plugin.list\n- character_state.patch',
     );
-    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+    expect(session.visibleTranscript.map(message => message.text)).toEqual([
       'list tools',
-      'Tools available:\n- runtime.plugin.list\n- character_state.patch'
+      'Tools available:\n- runtime.plugin.list\n- character_state.patch',
     ]);
   });
 
@@ -94,9 +94,9 @@ describe('conversation core', () => {
       reply(input) {
         observedContexts.push([...input.recentVisibleMessages]);
         return {
-          text: `reply ${String(observedContexts.length)}`
+          text: `reply ${String(observedContexts.length)}`,
         };
-      }
+      },
     };
 
     await runCharacterTurn(session, 'first', agent);
@@ -110,16 +110,16 @@ describe('conversation core', () => {
           role: 'user',
           speakerId: 'local-user',
           speakerName: 'You',
-          text: 'first'
+          text: 'first',
         },
         {
           id: 'local-session:message-2',
           role: 'character',
           speakerId: 'mira',
           speakerName: 'Mira',
-          text: 'reply 1'
-        }
-      ]
+          text: 'reply 1',
+        },
+      ],
     ]);
   });
 
@@ -139,7 +139,7 @@ describe('conversation core', () => {
         }
 
         return secondReply.promise;
-      }
+      },
     };
 
     const firstTurn = runCharacterTurn(session, 'first', agent);
@@ -150,32 +150,32 @@ describe('conversation core', () => {
     expect(observedMessages).toEqual(['first']);
 
     secondReply.resolve({
-      text: 'reply 2'
+      text: 'reply 2',
     });
     firstReply.resolve({
-      text: 'reply 1'
+      text: 'reply 1',
     });
 
     await expect(firstTurn).resolves.toMatchObject({
       userMessage: {
         id: 'local-session:message-1',
-        text: 'first'
+        text: 'first',
       },
       characterMessage: {
         id: 'local-session:message-2',
-        text: 'reply 1'
-      }
+        text: 'reply 1',
+      },
     });
     await Promise.resolve();
     await expect(secondTurn).resolves.toMatchObject({
       userMessage: {
         id: 'local-session:message-3',
-        text: 'second'
+        text: 'second',
       },
       characterMessage: {
         id: 'local-session:message-4',
-        text: 'reply 2'
-      }
+        text: 'reply 2',
+      },
     });
     expect(observedMessages).toEqual(['first', 'second']);
     expect(observedContexts).toEqual([
@@ -186,22 +186,22 @@ describe('conversation core', () => {
           role: 'user',
           speakerId: 'local-user',
           speakerName: 'You',
-          text: 'first'
+          text: 'first',
         },
         {
           id: 'local-session:message-2',
           role: 'character',
           speakerId: 'mira',
           speakerName: 'Mira',
-          text: 'reply 1'
-        }
-      ]
+          text: 'reply 1',
+        },
+      ],
     ]);
-    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+    expect(session.visibleTranscript.map(message => message.text)).toEqual([
       'first',
       'reply 1',
       'second',
-      'reply 2'
+      'reply 2',
     ]);
   });
 
@@ -228,20 +228,22 @@ describe('conversation core', () => {
           role: 'user',
           speakerId: 'external-user',
           speakerName: 'External',
-          text: 'injected'
-        } satisfies VisibleMessage
+          text: 'injected',
+        } satisfies VisibleMessage,
       ]);
     }).toThrow(TypeError);
     expect(() => {
       Object.defineProperty(firstVisibleMessage, 'text', {
-        value: 'tampered'
+        value: 'tampered',
       });
     }).toThrow(TypeError);
 
-    await expect(runCharacterTurn(session, 'second', agent)).resolves.toMatchObject({
+    await expect(
+      runCharacterTurn(session, 'second', agent),
+    ).resolves.toMatchObject({
       reply: {
-        text: 'I remember you said "first" Stay with me for a minute.'
-      }
+        text: 'I remember you said "first" Stay with me for a minute.',
+      },
     });
     expect(session.visibleTranscript).toEqual([
       firstTurn.userMessage,
@@ -251,15 +253,15 @@ describe('conversation core', () => {
         role: 'user',
         speakerId: 'local-user',
         speakerName: 'You',
-        text: 'second'
+        text: 'second',
       },
       {
         id: 'local-session:message-4',
         role: 'character',
         speakerId: 'mira',
         speakerName: 'Mira',
-        text: 'I remember you said "first" Stay with me for a minute.'
-      }
+        text: 'I remember you said "first" Stay with me for a minute.',
+      },
     ]);
   });
 
@@ -270,13 +272,13 @@ describe('conversation core', () => {
         expect(Object.isFrozen(input.character)).toBe(true);
         expect(() => {
           Object.defineProperty(input.character, 'displayName', {
-            value: 'Mutated'
+            value: 'Mutated',
           });
         }).toThrow(TypeError);
         return {
-          text: `${input.character.displayName}: protected`
+          text: `${input.character.displayName}: protected`,
         };
-      }
+      },
     };
 
     const result = await runCharacterTurn(session, 'hello', agent);
@@ -286,11 +288,11 @@ describe('conversation core', () => {
       role: 'character',
       speakerId: 'mira',
       speakerName: 'Mira',
-      text: 'Mira: protected'
+      text: 'Mira: protected',
     });
     expect(session.visibleTranscript[1]).toMatchObject({
       speakerId: 'mira',
-      speakerName: 'Mira'
+      speakerName: 'Mira',
     });
   });
 
@@ -301,14 +303,14 @@ describe('conversation core', () => {
       reply(input) {
         calls.push(input);
         return {
-          text: 'unused'
+          text: 'unused',
         };
-      }
+      },
     };
 
-    await expect(runCharacterTurn(session, 'hello\nthere', agent)).rejects.toThrow(
-      CharacterInputError
-    );
+    await expect(
+      runCharacterTurn(session, 'hello\nthere', agent),
+    ).rejects.toThrow(CharacterInputError);
     expect(calls).toEqual([]);
     expect(session.visibleTranscript).toEqual([]);
   });
@@ -320,9 +322,9 @@ describe('conversation core', () => {
       reply(input) {
         calls.push(input.message);
         return {
-          text: `reply to ${input.message}`
+          text: `reply to ${input.message}`,
         };
-      }
+      },
     };
 
     const invalidTurn = runCharacterTurn(session, '', agent);
@@ -332,17 +334,17 @@ describe('conversation core', () => {
     await expect(validTurn).resolves.toMatchObject({
       userMessage: {
         id: 'local-session:message-1',
-        text: 'hello'
+        text: 'hello',
       },
       characterMessage: {
         id: 'local-session:message-2',
-        text: 'reply to hello'
-      }
+        text: 'reply to hello',
+      },
     });
     expect(calls).toEqual(['hello']);
-    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+    expect(session.visibleTranscript.map(message => message.text)).toEqual([
       'hello',
-      'reply to hello'
+      'reply to hello',
     ]);
   });
 
@@ -354,33 +356,35 @@ describe('conversation core', () => {
           role: 'user',
           speakerId: 'local-user',
           speakerName: 'You',
-          text: 'first'
+          text: 'first',
         },
         {
           id: 'local-session:message-2',
           role: 'character',
           speakerId: 'mira',
           speakerName: 'Mira',
-          text: "I'm here. Tell me what you need."
-        }
-      ]
+          text: "I'm here. Tell me what you need.",
+        },
+      ],
     });
 
-    await expect(runCharacterTurn(session, 'second', createDeterministicCharacterAgent())).resolves.toMatchObject({
+    await expect(
+      runCharacterTurn(session, 'second', createDeterministicCharacterAgent()),
+    ).resolves.toMatchObject({
       userMessage: {
         id: 'local-session:message-3',
-        text: 'second'
+        text: 'second',
       },
       characterMessage: {
         id: 'local-session:message-4',
-        text: 'I remember you said "first" Stay with me for a minute.'
-      }
+        text: 'I remember you said "first" Stay with me for a minute.',
+      },
     });
-    expect(session.visibleTranscript.map((message) => message.id)).toEqual([
+    expect(session.visibleTranscript.map(message => message.id)).toEqual([
       'local-session:message-1',
       'local-session:message-2',
       'local-session:message-3',
-      'local-session:message-4'
+      'local-session:message-4',
     ]);
   });
 
@@ -394,10 +398,10 @@ describe('conversation core', () => {
             role: 'user',
             speakerId: 'local-user',
             speakerName: 'You',
-            text: 'first'
-          }
-        ]
-      })
+            text: 'first',
+          },
+        ],
+      }),
     ).toThrow(ConversationRehydrationError);
   });
 
@@ -410,17 +414,17 @@ describe('conversation core', () => {
             role: 'user',
             speakerId: 'local-user',
             speakerName: 'You',
-            text: 'first'
+            text: 'first',
           },
           {
             id: 'local-session:message-1',
             role: 'character',
             speakerId: 'mira',
             speakerName: 'Mira',
-            text: 'duplicate'
-          }
-        ]
-      })
+            text: 'duplicate',
+          },
+        ],
+      }),
     ).toThrow(ConversationRehydrationError);
   });
 
@@ -433,10 +437,10 @@ describe('conversation core', () => {
             role: 'character',
             speakerId: 'mira',
             speakerName: 'Mira',
-            text: 'out of order'
-          }
-        ]
-      })
+            text: 'out of order',
+          },
+        ],
+      }),
     ).toThrow(ConversationRehydrationError);
   });
 
@@ -449,10 +453,10 @@ describe('conversation core', () => {
             role: 'user',
             speakerId: 'local-user',
             speakerName: 'You',
-            text: 'unpaired user'
-          }
-        ]
-      })
+            text: 'unpaired user',
+          },
+        ],
+      }),
     ).toThrow(ConversationRehydrationError);
   });
 
@@ -461,13 +465,13 @@ describe('conversation core', () => {
     const agent: CharacterAgent = {
       reply() {
         return {
-          text: '   '
+          text: '   ',
         };
-      }
+      },
     };
 
     await expect(runCharacterTurn(session, 'hello', agent)).rejects.toThrow(
-      CharacterReplyValidationError
+      CharacterReplyValidationError,
     );
     expect(session.visibleTranscript).toEqual([]);
   });
@@ -479,14 +483,14 @@ describe('conversation core', () => {
     const agent: CharacterAgent = {
       reply() {
         return malformedReply;
-      }
+      },
     };
 
     await expect(runCharacterTurn(session, 'hello', agent)).rejects.toThrow(
-      CharacterReplyValidationError
+      CharacterReplyValidationError,
     );
     await expect(runCharacterTurn(session, 'hello', agent)).rejects.toThrow(
-      'Character agent returned an invalid reply.'
+      'Character agent returned an invalid reply.',
     );
     expect(session.visibleTranscript).toEqual([]);
   });
@@ -496,11 +500,11 @@ describe('conversation core', () => {
     const agent: CharacterAgent = {
       reply() {
         throw new Error('agent unavailable');
-      }
+      },
     };
 
     await expect(runCharacterTurn(session, 'hello', agent)).rejects.toThrow(
-      'agent unavailable'
+      'agent unavailable',
     );
     expect(session.visibleTranscript).toEqual([]);
   });
@@ -509,22 +513,26 @@ describe('conversation core', () => {
     const session = createConversationSession();
     const agent = createDeterministicCharacterAgent();
 
-    await expect(runCharacterTurn(session, 'are you there?', agent)).resolves.toMatchObject({
+    await expect(
+      runCharacterTurn(session, 'are you there?', agent),
+    ).resolves.toMatchObject({
       reply: {
-        text: "I'm here. Tell me what you need."
-      }
+        text: "I'm here. Tell me what you need.",
+      },
     });
-    await expect(runCharacterTurn(session, 'I am tired', agent)).resolves.toMatchObject({
+    await expect(
+      runCharacterTurn(session, 'I am tired', agent),
+    ).resolves.toMatchObject({
       reply: {
-        text: 'I remember you said "are you there?" Stay with me for a minute.'
-      }
+        text: 'I remember you said "are you there?" Stay with me for a minute.',
+      },
     });
   });
 });
 
 function createDeferredReply(): DeferredReply {
   let resolveReply: ((reply: CharacterAgentReply) => void) | undefined;
-  const promise = new Promise<CharacterAgentReply>((resolve) => {
+  const promise = new Promise<CharacterAgentReply>(resolve => {
     resolveReply = resolve;
   });
 
@@ -534,6 +542,6 @@ function createDeferredReply(): DeferredReply {
 
   return {
     promise,
-    resolve: resolveReply
+    resolve: resolveReply,
   };
 }

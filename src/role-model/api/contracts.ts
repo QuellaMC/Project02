@@ -1,19 +1,21 @@
 import type {
-  CharacterProfile, RuntimeEventIdentity,
-  UserMessageRuntimeEvent, VisibleMessage
+  CharacterProfile,
+  RuntimeEventIdentity,
+  UserMessageRuntimeEvent,
+  VisibleMessage,
 } from '../../core/index.ts';
 import type {
-  RuntimePluginContextItem, RuntimePluginJsonValue,
-  RuntimePluginProvidedTool
+  RuntimePluginContextItem,
+  RuntimePluginJsonValue,
+  RuntimePluginProvidedTool,
 } from '../../plugins/api/index.ts';
+import type {ModelToolCall, ModelToolDefinition} from './model-tools.ts';
+import type {RoleModelAllowedToolName} from './tool-names.ts';
 import type {
-  ModelToolCall,
-  ModelToolDefinition
-} from './model-tools.ts';
-import type { RoleModelAllowedToolName } from './tool-names.ts';
-import type {
-  RoleModelChatCompletionTool, RoleModelChatMessage,
-  RoleModelProviderCapabilities, RoleModelProviderToolNameMapping
+  RoleModelChatCompletionTool,
+  RoleModelChatMessage,
+  RoleModelProviderCapabilities,
+  RoleModelProviderToolNameMapping,
 } from './chat-wire.ts';
 
 export const roleModelDecisionContractVersion = 'mvp-006.tool_calls.v1';
@@ -23,7 +25,6 @@ export type RoleModelToolDefinition = ModelToolDefinition;
 export type RoleModelPluginToolDefinition = RuntimePluginProvidedTool & {
   readonly pluginId: string;
 };
-
 
 export const roleModelDecisionOutputContractText =
   'Return exactly one complete valid JSON CharacterDecision object with ordered toolCalls. The only allowed top-level response fields are "toolCalls" and optional "text". Do not include a version field; the runtime stamps the internal decision version after validation. Do not copy input envelope fields such as event, decisionContext, recentVisibleMessages, toolObservations, pluginContextItems, characterSnapshot, allowedTools, toolDefinitions, responseContract, or runtimeInput. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is the only non-executed output tool. Any other tool call is executed and fed back as a tool observation. If visible_reply appears with executable tools, it is interim visible output. A terminal response may use exactly one visible_reply, or may use top-level text only as folded model text with no visible final reply.';
@@ -90,7 +91,7 @@ export type RoleModelProviderExchangeSnapshot = {
 
 export const roleModelDecisionOutputContract = Object.freeze({
   version: roleModelDecisionContractVersion,
-  text: roleModelDecisionOutputContractText
+  text: roleModelDecisionOutputContractText,
 } satisfies RoleModelOutputContract);
 
 export type DecisionContext = {
@@ -156,12 +157,12 @@ export const roleModelMalformedOutputRejectionReason = 'malformed_output';
 export const roleModelMalformedToolCallRejectionReason = 'malformed_tool_call';
 export const roleModelUnknownToolRejectionReason = 'unknown_tool';
 export const roleModelDisallowedToolRejectionReason = 'disallowed_tool';
-export const roleModelDuplicateToolCallRejectionReason =
-  'duplicate_tool_call';
+export const roleModelDuplicateToolCallRejectionReason = 'duplicate_tool_call';
 export const roleModelMissingRequiredToolCallRejectionReason =
   'missing_required_tool_call';
 export const roleModelUnsupportedEffectRejectionReason = 'unsupported_effect';
-export const roleModelInvalidVisibleReplyRejectionReason = 'invalid_visible_reply';
+export const roleModelInvalidVisibleReplyRejectionReason =
+  'invalid_visible_reply';
 export const roleModelProviderErrorRejectionReason = 'provider_error';
 export const roleModelCommitValidationFailureRejectionReason =
   'commit_validation_failure';
@@ -188,17 +189,17 @@ export const roleModelMalformedAdapterRawOutputDetails = Object.freeze([
   roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails,
   roleModelAdapterProviderRequestMessageCountNonFiniteDetails,
   roleModelAdapterProviderResponseStatusNonFiniteDetails,
-  roleModelAdapterRejectionNotReplayableDetails
+  roleModelAdapterRejectionNotReplayableDetails,
 ] as const);
 
 export type RoleModelMalformedAdapterRawOutputDetails =
   (typeof roleModelMalformedAdapterRawOutputDetails)[number];
 
 export function isRoleModelMalformedAdapterRawOutputDetails(
-  value: unknown
+  value: unknown,
 ): value is RoleModelMalformedAdapterRawOutputDetails {
   return roleModelMalformedAdapterRawOutputDetails.some(
-    (details) => details === value
+    details => details === value,
   );
 }
 
@@ -226,7 +227,7 @@ export const roleModelDecisionRejectionReasons = Object.freeze([
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelProviderErrorRejectionReason,
   roleModelCommitValidationFailureRejectionReason,
-  roleModelPluginToolRejectedRejectionReason
+  roleModelPluginToolRejectedRejectionReason,
 ] satisfies readonly RoleModelDecisionRejectionReason[]);
 
 export type RoleModelDecisionRejection = {
@@ -247,8 +248,7 @@ export type RejectedRoleModelDecisionResult = {
 };
 
 export type RoleModelDecisionResult =
-  | AcceptedRoleModelDecisionResult
-  | RejectedRoleModelDecisionResult;
+  AcceptedRoleModelDecisionResult | RejectedRoleModelDecisionResult;
 
 export type RoleModelIOSnapshot = RuntimeEventIdentity & {
   readonly kind: 'role_model_io_snapshot';
@@ -278,5 +278,3 @@ export type CreateParsedRoleModelDecisionSnapshotOptions =
     readonly sessionId: string;
     readonly result: RoleModelDecisionResult;
   };
-
-

@@ -1,13 +1,16 @@
 import {
   createRuntimePluginHealthSnapshot,
   createRuntimePluginRegistrySnapshot,
-  createRuntimePluginToolCallResultSnapshot
+  createRuntimePluginToolCallResultSnapshot,
 } from '../api/constructors.ts';
-import { createRuntimePluginContextItem } from '../api/manifest-validation.ts';
-import { isRecord, redactRuntimePluginText } from '../api/validation-primitives.ts';
+import {createRuntimePluginContextItem} from '../api/manifest-validation.ts';
+import {
+  isRecord,
+  redactRuntimePluginText,
+} from '../api/validation-primitives.ts';
 import type {
   RuntimePluginEvidenceKind,
-  RuntimePluginEvidenceStatus
+  RuntimePluginEvidenceStatus,
 } from '../api/contract.ts';
 import type {
   RuntimePlugin,
@@ -24,34 +27,35 @@ import type {
   RuntimePluginToolCallResult,
   RuntimePluginRegistrySnapshot,
   RuntimePluginAfterTurnCommittedContext,
-  RuntimePluginContext
+  RuntimePluginContext,
 } from '../api/types.ts';
 import {
   assertRuntimePluginFileStoreProviderPresent,
   resolveRuntimePluginAccessForPlugins,
   runtimePluginAccessForPlugin,
-  type RuntimePluginAccessMapByPluginId
+  type RuntimePluginAccessMapByPluginId,
 } from '../policy/access-control.ts';
 import {
   createHostScopedFirstPartyRuntimePlugins,
   isHostOwnedFirstPartyRuntimePlugin,
-  isHostScopedFirstPartyRuntimePluginId
+  isHostScopedFirstPartyRuntimePluginId,
 } from './catalog.ts';
-import { createPluginHookContext } from './hook-context.ts';
+import {createPluginHookContext} from './hook-context.ts';
 import type {
-  RuntimePluginFileStorePreparedTransaction, RuntimePluginFileStoreProvider,
-  RuntimePluginFileStoreTransaction
+  RuntimePluginFileStorePreparedTransaction,
+  RuntimePluginFileStoreProvider,
+  RuntimePluginFileStoreTransaction,
 } from '../api/file-store-contract.ts';
-import { isApprovalGatedRuntimePluginTool } from '../api/tool-classification.ts';
-import type { RuntimeEventIdentity } from '../../core/index.ts';
-import { validateModelToolInputAgainstContract } from '../../role-model/index.ts';
+import {isApprovalGatedRuntimePluginTool} from '../api/tool-classification.ts';
+import type {RuntimeEventIdentity} from '../../core/index.ts';
+import {validateModelToolInputAgainstContract} from '../../role-model/index.ts';
 import {
   isModelFacingPluginTool,
   pluginCanWriteModelInput,
   pluginToolHasRequiredGrantedAccess,
   pluginToolDefinitionsForEnabledPlugins,
   routableModelFacingPluginTools,
-  toolAllowsFileStoreWrites
+  toolAllowsFileStoreWrites,
 } from '../policy/tool-policy.ts';
 import {
   assertAcceptedToolEvidenceSourceReferences,
@@ -60,44 +64,43 @@ import {
   createHookFailureEvidence,
   failurePolicyOutcomeOption,
   normalizeEvidenceSnapshots,
-  requiredArray
+  requiredArray,
 } from './hook-evidence.ts';
 import {
   boundPluginPromptContext,
-  type CollectedPluginContextItem
+  type CollectedPluginContextItem,
 } from '../policy/prompt-context-budget.ts';
 import {
   beforeRoleModelFailureRejectsTurn,
   mergedRedactionLabels,
-  runtimePluginEvidenceBlocksToolInvocation
+  runtimePluginEvidenceBlocksToolInvocation,
 } from '../api/evidence-policy.ts';
 import {
   createRoleModelPluginToolDefinitions,
-  type RoleModelPluginToolDefinition
+  type RoleModelPluginToolDefinition,
 } from '../../role-model/index.ts';
-import {
-  createJsonBoundarySnapshot
-} from '../../shared/json-boundary.ts';
+import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import {
   createRuntimePluginConfigControlHostStateSnapshot,
   normalizePreparedRuntimePluginConfigEffect,
   reconcilePreparedRuntimePluginConfigEffect,
-  type RuntimePluginConfigControlHostState
+  type RuntimePluginConfigControlHostState,
 } from '../builtin/plugin-management/index.ts';
 import {
   confirmPreparedRuntimePluginToolResult,
   createRejectedToolCallResult,
-  type RuntimePluginToolConfirmationHandler
+  type RuntimePluginToolConfirmationHandler,
 } from './tool-confirmation.ts';
-import { runtimeIdentityMatchesContext } from '../api/identity.ts';
+import {runtimeIdentityMatchesContext} from '../api/identity.ts';
 
-export { runtimePluginId } from '../api/contract.ts';
+export {runtimePluginId} from '../api/contract.ts';
 import {
   runtimePluginBeforeRoleModelCallRejectionReason,
-  type RuntimePluginBeforeRoleModelCallRejectionReason
+  type RuntimePluginBeforeRoleModelCallRejectionReason,
 } from '../api/contract.ts';
 
-type CreateRuntimePluginFileStore = RuntimePluginFileStoreProvider['createFileStore'];
+type CreateRuntimePluginFileStore =
+  RuntimePluginFileStoreProvider['createFileStore'];
 
 export type CreateRuntimePluginHostOptions = {
   readonly plugins?: readonly RuntimePlugin[];
@@ -107,7 +110,8 @@ export type CreateRuntimePluginHostOptions = {
   readonly sessionIdentity?: object | undefined;
   readonly pluginInventoryState?: RuntimePluginConfigControlHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler | undefined;
+  readonly toolConfirmationHandler?:
+    RuntimePluginToolConfirmationHandler | undefined;
   readonly fileStore?: RuntimePluginFileStoreProvider;
 };
 
@@ -188,30 +192,28 @@ export type RuntimePluginHost = {
   enabledPluginIds(): readonly string[];
   pluginToolDefinitions(): readonly RoleModelPluginToolDefinition[];
   beforeRoleModelCall(
-    context: RuntimePluginContext
+    context: RuntimePluginContext,
   ): Promise<RuntimePluginBeforeRoleModelCallHostResult>;
   handleToolCall(
     call: RuntimePluginToolCall,
-    context: RuntimePluginContext
+    context: RuntimePluginContext,
   ): Promise<RuntimePluginToolCallExecutionResult>;
   reconcileConfigEffect?(
-    effect: PreparedRuntimePluginConfigEffect
+    effect: PreparedRuntimePluginConfigEffect,
   ): RuntimePluginEvidenceSnapshot;
   beginFileStoreTransaction?(): void;
   prepareFileStoreTransaction?(
-    identity: RuntimeEventIdentity
+    identity: RuntimeEventIdentity,
   ): Promise<RuntimePluginFileStorePreparedTransaction | undefined>;
   rollbackFileStoreTransaction?(): void;
   afterTurnCommitted(
-    context: RuntimePluginAfterTurnCommittedContext
+    context: RuntimePluginAfterTurnCommittedContext,
   ): Promise<RuntimePluginHookHostResult>;
   onSessionEnd(
     context: RuntimePluginContext,
-    options?: RuntimePluginSessionEndOptions
+    options?: RuntimePluginSessionEndOptions,
   ): Promise<RuntimePluginHookHostResult>;
-  shutdown(
-    context: RuntimePluginContext
-  ): Promise<RuntimePluginHookHostResult>;
+  shutdown(context: RuntimePluginContext): Promise<RuntimePluginHookHostResult>;
   health(context: RuntimePluginContext): Promise<RuntimePluginHealthHostResult>;
 };
 
@@ -220,22 +222,22 @@ type BeforeRoleModelCallInvocationResult =
       readonly status: 'accepted';
       readonly value: RuntimePluginBeforeRoleModelCallResult;
     }
-    | {
-        readonly status: 'failed';
-        readonly message: string;
-        readonly failureKind: 'exception' | 'timeout';
-      };
+  | {
+      readonly status: 'failed';
+      readonly message: string;
+      readonly failureKind: 'exception' | 'timeout';
+    };
 
 type HookInvocationResult =
   | {
       readonly status: 'accepted';
       readonly value: RuntimePluginHookResult;
     }
-    | {
-        readonly status: 'failed';
-        readonly message: string;
-        readonly failureKind: 'exception' | 'timeout';
-      };
+  | {
+      readonly status: 'failed';
+      readonly message: string;
+      readonly failureKind: 'exception' | 'timeout';
+    };
 
 type RuntimePluginHostState = {
   readonly sessionIdentity: object | undefined;
@@ -248,7 +250,7 @@ type RuntimePluginHostState = {
 };
 
 export function createRuntimePluginHost(
-  options: CreateRuntimePluginHostOptions = {}
+  options: CreateRuntimePluginHostOptions = {},
 ): RuntimePluginHost {
   const {
     sessionIdentity,
@@ -257,16 +259,14 @@ export function createRuntimePluginHost(
     enabledPlugins,
     accessByPluginId,
     registrySnapshot,
-    pluginToolDefinitions
+    pluginToolDefinitions,
   } = createRuntimePluginHostState(options);
   assertRuntimePluginFileStoreProviderPresent({
     enabledPlugins,
     accessByPluginId,
-    hasFileStoreProvider: options.fileStore !== undefined
+    hasFileStoreProvider: options.fileStore !== undefined,
   });
-  let activeFileStoreTransaction:
-    | RuntimePluginFileStoreTransaction
-    | undefined;
+  let activeFileStoreTransaction: RuntimePluginFileStoreTransaction | undefined;
   let shutdownResult: Promise<RuntimePluginHookHostResult> | undefined;
 
   return Object.freeze({
@@ -288,7 +288,7 @@ export function createRuntimePluginHost(
         sessionId: options.sessionId,
         sessionIdentity,
         createFileStore: options.fileStore?.createFileStore,
-        fileStoreTransaction: activeFileStoreTransaction
+        fileStoreTransaction: activeFileStoreTransaction,
       });
     },
     async handleToolCall(call, context) {
@@ -303,20 +303,20 @@ export function createRuntimePluginHost(
         toolConfirmationHandler: options.toolConfirmationHandler,
         pluginConfigControl,
         createFileStore: options.fileStore?.createFileStore,
-        fileStoreTransaction: activeFileStoreTransaction
+        fileStoreTransaction: activeFileStoreTransaction,
       });
     },
     reconcileConfigEffect(effect) {
       if (pluginConfigControl === undefined) {
         throw new Error(
-          'Runtime plugin config reconciliation requires configured host control state.'
+          'Runtime plugin config reconciliation requires configured host control state.',
         );
       }
 
       return reconcilePreparedRuntimePluginConfigEffect({
         effect,
         state: pluginConfigControl,
-        storeRoot: options.storeRoot
+        storeRoot: options.storeRoot,
       });
     },
     beginFileStoreTransaction() {
@@ -326,7 +326,8 @@ export function createRuntimePluginHost(
 
       // Without a provider no plugin can obtain a store, so there is nothing
       // to stage; granted plugins still fail loudly in createPluginHookContext.
-      activeFileStoreTransaction = options.fileStore?.createFileStoreTransaction();
+      activeFileStoreTransaction =
+        options.fileStore?.createFileStoreTransaction();
     },
     async prepareFileStoreTransaction(identity) {
       const transaction = activeFileStoreTransaction;
@@ -351,13 +352,12 @@ export function createRuntimePluginHost(
         createFileStore: options.fileStore?.createFileStore,
         hookName: 'afterTurnCommitted',
         evidenceKind: 'after_turn_committed',
-        hookForPlugin: (plugin) =>
-          plugin.lifecycleHooks.afterTurnCommitted
+        hookForPlugin: plugin => plugin.lifecycleHooks.afterTurnCommitted,
       });
 
       return Object.freeze({
         status: hookResult.status,
-        evidence: hookResult.evidence
+        evidence: hookResult.evidence,
       } satisfies RuntimePluginHookHostResult);
     },
     async onSessionEnd(context, hookOptions) {
@@ -369,7 +369,7 @@ export function createRuntimePluginHost(
         sessionId: options.sessionId,
         sessionIdentity,
         createFileStore: options.fileStore?.createFileStore,
-        hookOptions
+        hookOptions,
       });
     },
     shutdown(context) {
@@ -380,7 +380,7 @@ export function createRuntimePluginHost(
         storeRoot: options.storeRoot,
         sessionId: options.sessionId,
         sessionIdentity,
-        createFileStore: options.fileStore?.createFileStore
+        createFileStore: options.fileStore?.createFileStore,
       });
 
       return shutdownResult;
@@ -394,21 +394,21 @@ export function createRuntimePluginHost(
         sessionId: options.sessionId,
         sessionIdentity,
         createFileStore: options.fileStore?.createFileStore,
-        fileStoreTransaction: activeFileStoreTransaction
+        fileStoreTransaction: activeFileStoreTransaction,
       });
-    }
+    },
   } satisfies RuntimePluginHost);
 }
 
 function createRuntimePluginHostState(
-  options: CreateRuntimePluginHostOptions
+  options: CreateRuntimePluginHostOptions,
 ): RuntimePluginHostState {
   if (
     options.pluginInventoryState !== undefined &&
     options.pluginConfigControl !== undefined
   ) {
     throw new TypeError(
-      'Runtime plugin inventory-only state and config-control state cannot both be supplied.'
+      'Runtime plugin inventory-only state and config-control state cannot both be supplied.',
     );
   }
 
@@ -420,12 +420,16 @@ function createRuntimePluginHostState(
   const pluginConfigControl =
     options.pluginConfigControl === undefined
       ? undefined
-      : createRuntimePluginConfigControlHostStateSnapshot(options.pluginConfigControl);
+      : createRuntimePluginConfigControlHostStateSnapshot(
+          options.pluginConfigControl,
+        );
   const pluginInventoryState =
     pluginConfigControl ??
     (options.pluginInventoryState === undefined
       ? undefined
-      : createRuntimePluginConfigControlHostStateSnapshot(options.pluginInventoryState));
+      : createRuntimePluginConfigControlHostStateSnapshot(
+          options.pluginInventoryState,
+        ));
   let allPlugins: readonly RuntimePlugin[] = [];
   let enabledPlugins: readonly RuntimePlugin[] = [];
   let accessByPluginId: RuntimePluginAccessMapByPluginId = Object.freeze({});
@@ -438,7 +442,9 @@ function createRuntimePluginHostState(
       confirmationAvailable:
         options.toolConfirmationHandler !== undefined &&
         pluginConfigControl !== undefined,
-      ...(pluginInventoryState === undefined ? {} : { installedPluginManifests: pluginInventoryState.pluginManifests }),
+      ...(pluginInventoryState === undefined
+        ? {}
+        : {installedPluginManifests: pluginInventoryState.pluginManifests}),
       ...(pluginInventoryState?.activationByPluginId === undefined
         ? {}
         : {
@@ -447,30 +453,30 @@ function createRuntimePluginHostState(
                 ([pluginId, activation]) =>
                   Object.freeze({
                     pluginId,
-                    activationStatus: activation.status
-                  })
-              )
-            )
-          })
+                    activationStatus: activation.status,
+                  }),
+              ),
+            ),
+          }),
     }),
-    ...(pluginConfigControl === undefined ? {} : { pluginConfigControl }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    ...(pluginConfigControl === undefined ? {} : {pluginConfigControl}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const plugins = Object.freeze([...hostScopedPlugins, ...configuredPlugins]);
   allPlugins = plugins;
   const enabledIds = enabledPluginIdsForHost({
     plugins,
-    enabledPluginIds: options.enabledPluginIds
+    enabledPluginIds: options.enabledPluginIds,
   });
   enabledPlugins = Object.freeze(
-    plugins.filter((plugin) => enabledIds.includes(plugin.manifest.id))
+    plugins.filter(plugin => enabledIds.includes(plugin.manifest.id)),
   );
   accessByPluginId = resolveRuntimePluginAccessForPlugins({
     plugins,
-    enabledPluginIds: enabledIds
+    enabledPluginIds: enabledIds,
   });
   const registrySnapshot = createRuntimePluginRegistrySnapshot(plugins, {
-    accessByPluginId
+    accessByPluginId,
   });
   const pluginToolDefinitions = createRoleModelPluginToolDefinitions(
     pluginToolDefinitionsForEnabledPlugins({
@@ -478,8 +484,8 @@ function createRuntimePluginHostState(
       accessByPluginId,
       confirmationAvailable:
         options.toolConfirmationHandler !== undefined &&
-        pluginConfigControl !== undefined
-    })
+        pluginConfigControl !== undefined,
+    }),
   );
 
   return Object.freeze({
@@ -489,12 +495,12 @@ function createRuntimePluginHostState(
     enabledPlugins,
     accessByPluginId,
     registrySnapshot,
-    pluginToolDefinitions
+    pluginToolDefinitions,
   } satisfies RuntimePluginHostState);
 }
 
 export async function runRuntimePluginSessionEndHooks(
-  options: RunRuntimePluginSessionEndHooksOptions
+  options: RunRuntimePluginSessionEndHooksOptions,
 ): Promise<RuntimePluginHookHostResult> {
   // This standalone helper treats the supplied plugins as already selected and
   // enabled. Callers that need activation filtering should pass only activated
@@ -504,18 +510,18 @@ export async function runRuntimePluginSessionEndHooks(
     context: options.context,
     accessByPluginId: resolveRuntimePluginAccessForPlugins({
       plugins: options.plugins,
-      enabledPluginIds: options.plugins.map((plugin) => plugin.manifest.id)
+      enabledPluginIds: options.plugins.map(plugin => plugin.manifest.id),
     }),
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
     createFileStore: options.createFileStore,
-    hookOptions: options.hookOptions
+    hookOptions: options.hookOptions,
   });
 }
 
 export async function runRuntimePluginShutdownHooks(
-  options: RunRuntimePluginShutdownHooksOptions
+  options: RunRuntimePluginShutdownHooksOptions,
 ): Promise<RuntimePluginHookHostResult> {
   // As with standalone session-end cleanup, callers supply the already-selected
   // plugin set. This path deliberately does not rebuild or revalidate a host.
@@ -524,17 +530,17 @@ export async function runRuntimePluginShutdownHooks(
     context: options.context,
     accessByPluginId: resolveRuntimePluginAccessForPlugins({
       plugins: options.plugins,
-      enabledPluginIds: options.plugins.map((plugin) => plugin.manifest.id)
+      enabledPluginIds: options.plugins.map(plugin => plugin.manifest.id),
     }),
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
-    createFileStore: options.createFileStore
+    createFileStore: options.createFileStore,
   });
 }
 
 async function runRuntimePluginSessionEndHooksWithResolvedPermissions(
-  options: RunRuntimePluginSessionEndHooksWithResolvedPermissionsOptions
+  options: RunRuntimePluginSessionEndHooksWithResolvedPermissionsOptions,
 ): Promise<RuntimePluginHookHostResult> {
   return await runHookPhase({
     plugins: options.plugins,
@@ -547,12 +553,12 @@ async function runRuntimePluginSessionEndHooksWithResolvedPermissions(
     allowFileStoreWrites: options.hookOptions?.allowFileStoreWrites,
     hookName: 'onSessionEnd',
     evidenceKind: 'session_end',
-    hookForPlugin: (plugin) => plugin.lifecycleHooks.onSessionEnd
+    hookForPlugin: plugin => plugin.lifecycleHooks.onSessionEnd,
   });
 }
 
 async function runRuntimePluginShutdownHooksWithResolvedPermissions(
-  options: RunRuntimePluginShutdownHooksWithResolvedPermissionsOptions
+  options: RunRuntimePluginShutdownHooksWithResolvedPermissionsOptions,
 ): Promise<RuntimePluginHookHostResult> {
   return await runHookPhase({
     plugins: options.plugins,
@@ -565,7 +571,7 @@ async function runRuntimePluginShutdownHooksWithResolvedPermissions(
     allowFileStoreWrites: false,
     hookName: 'onShutdown',
     evidenceKind: 'shutdown',
-    hookForPlugin: (plugin) => plugin.lifecycleHooks.onShutdown
+    hookForPlugin: plugin => plugin.lifecycleHooks.onShutdown,
   });
 }
 
@@ -594,7 +600,7 @@ type BeforeRoleModelCallPluginOutcome =
     };
 
 async function runBeforeRoleModelCall(
-  options: BeforeRoleModelCallOptions
+  options: BeforeRoleModelCallOptions,
 ): Promise<RuntimePluginBeforeRoleModelCallHostResult> {
   const contextItems: CollectedPluginContextItem[] = [];
   const evidence: RuntimePluginEvidenceSnapshot[] = [];
@@ -609,7 +615,7 @@ async function runBeforeRoleModelCall(
         reason: runtimePluginBeforeRoleModelCallRejectionReason,
         pluginId: outcome.pluginId,
         message: outcome.message,
-        evidence: Object.freeze([...evidence])
+        evidence: Object.freeze([...evidence]),
       } satisfies RuntimePluginBeforeRoleModelCallHostResult);
     }
 
@@ -618,7 +624,7 @@ async function runBeforeRoleModelCall(
 
   const boundedContext = boundPluginPromptContext({
     context: options.context,
-    contextItems
+    contextItems,
   });
   evidence.push(...boundedContext.evidence);
 
@@ -628,20 +634,20 @@ async function runBeforeRoleModelCall(
       reason: runtimePluginBeforeRoleModelCallRejectionReason,
       pluginId: boundedContext.pluginId,
       message: boundedContext.message,
-      evidence: Object.freeze([...evidence])
+      evidence: Object.freeze([...evidence]),
     } satisfies RuntimePluginBeforeRoleModelCallHostResult);
   }
 
   return Object.freeze({
     status: 'completed',
     contextItems: boundedContext.contextItems,
-    evidence: Object.freeze([...evidence])
+    evidence: Object.freeze([...evidence]),
   } satisfies RuntimePluginBeforeRoleModelCallHostResult);
 }
 
 async function runBeforeRoleModelCallPlugin(
   plugin: RuntimePlugin,
-  options: BeforeRoleModelCallOptions
+  options: BeforeRoleModelCallOptions,
 ): Promise<BeforeRoleModelCallPluginOutcome> {
   const hook = plugin.lifecycleHooks.beforeRoleModelCall;
 
@@ -651,7 +657,7 @@ async function runBeforeRoleModelCallPlugin(
 
   const access = runtimePluginAccessForPlugin({
     plugin,
-    accessByPluginId: options.accessByPluginId
+    accessByPluginId: options.accessByPluginId,
   });
   const executionScope = createPluginHookExecutionScope(plugin);
   const hookContext = createPluginHookContext({
@@ -664,14 +670,14 @@ async function runBeforeRoleModelCallPlugin(
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
     fileStoreTransaction: options.fileStoreTransaction,
-    createFileStore: options.createFileStore
+    createFileStore: options.createFileStore,
   });
   const result = await invokeBeforeRoleModelCallHook({
     plugin,
     context: hookContext.context,
     executionScope,
     revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
-    hook
+    hook,
   });
 
   if (result.status === 'failed') {
@@ -679,7 +685,7 @@ async function runBeforeRoleModelCallPlugin(
       plugin,
       context: options.context,
       message: result.message,
-      failureKind: result.failureKind
+      failureKind: result.failureKind,
     });
   }
 
@@ -688,25 +694,28 @@ async function runBeforeRoleModelCallPlugin(
       plugin,
       context: options.context,
       message: `Plugin "${plugin.manifest.id}" accepted beforeRoleModelCall result included blocking before-role-model evidence.`,
-      acceptedEvidence: result.value.evidence
+      acceptedEvidence: result.value.evidence,
     });
   }
 
-  if (!pluginCanWriteModelInput(access) && result.value.contextItems.length > 0) {
+  if (
+    !pluginCanWriteModelInput(access) &&
+    result.value.contextItems.length > 0
+  ) {
     return failedBeforeRoleModelCallPlugin({
       plugin,
       context: options.context,
       message: `Plugin "${plugin.manifest.id}" returned beforeRoleModelCall model input contributions without declaring model_input write access.`,
-      acceptedEvidence: result.value.evidence
+      acceptedEvidence: result.value.evidence,
     });
   }
 
   return Object.freeze({
     status: 'continued',
     contextItems: Object.freeze(
-      result.value.contextItems.map((item) => ({ plugin, item }))
+      result.value.contextItems.map(item => ({plugin, item})),
     ),
-    evidence: result.value.evidence
+    evidence: result.value.evidence,
   } satisfies BeforeRoleModelCallPluginOutcome);
 }
 
@@ -732,11 +741,11 @@ function failedBeforeRoleModelCallPlugin(options: {
     summary: rejectsTurn
       ? `Required before-role-model plugin hook rejected the turn: ${options.message}`
       : `Optional before-role-model plugin hook degraded: ${options.message}`,
-    policyOutcome
+    policyOutcome,
   });
   const evidence = Object.freeze([
     ...(options.acceptedEvidence ?? []),
-    failureEvidence
+    failureEvidence,
   ]);
 
   return rejectsTurn
@@ -744,18 +753,18 @@ function failedBeforeRoleModelCallPlugin(options: {
         status: 'rejected',
         pluginId: options.plugin.manifest.id,
         message: options.message,
-        evidence
+        evidence,
       })
     : continuedBeforeRoleModelCall(evidence);
 }
 
 function continuedBeforeRoleModelCall(
-  evidence: readonly RuntimePluginEvidenceSnapshot[] = []
+  evidence: readonly RuntimePluginEvidenceSnapshot[] = [],
 ): BeforeRoleModelCallPluginOutcome {
   return Object.freeze({
     status: 'continued',
     contextItems: Object.freeze([]),
-    evidence
+    evidence,
   });
 }
 
@@ -769,25 +778,24 @@ type HandleToolCallOptions = {
   readonly sessionIdentity?: object | undefined;
   readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction | undefined;
   readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler | undefined;
-  readonly pluginConfigControl?: RuntimePluginConfigControlHostState | undefined;
+  readonly toolConfirmationHandler?:
+    RuntimePluginToolConfirmationHandler | undefined;
+  readonly pluginConfigControl?:
+    RuntimePluginConfigControlHostState | undefined;
 };
 
 type ResolvedRuntimePluginToolExecution = {
   readonly status: 'resolved';
   readonly plugin: RuntimePlugin;
   readonly providedTool: RuntimePluginProvidedTool;
-  readonly hook: NonNullable<
-    RuntimePlugin['lifecycleHooks']['handleToolCall']
-  >;
+  readonly hook: NonNullable<RuntimePlugin['lifecycleHooks']['handleToolCall']>;
   readonly access: ReturnType<typeof runtimePluginAccessForPlugin>;
   readonly failureDegrades: boolean;
   readonly approvalGatedTool: boolean;
 };
 
 type RuntimePluginToolExecutionResolution =
-  | ResolvedRuntimePluginToolExecution
-  | RejectedRuntimePluginToolExecution;
+  ResolvedRuntimePluginToolExecution | RejectedRuntimePluginToolExecution;
 
 type RejectedRuntimePluginToolExecution = {
   readonly status: 'rejected';
@@ -795,7 +803,7 @@ type RejectedRuntimePluginToolExecution = {
 };
 
 async function runHandleToolCall(
-  options: HandleToolCallOptions
+  options: HandleToolCallOptions,
 ): Promise<RuntimePluginToolCallExecutionResult> {
   const resolution = resolveRuntimePluginToolExecution(options);
 
@@ -809,7 +817,7 @@ async function runHandleToolCall(
     hook,
     access,
     failureDegrades,
-    approvalGatedTool
+    approvalGatedTool,
   } = resolution;
   const executionScope = createPluginHookExecutionScope(plugin);
   const hookContext = createPluginHookContext({
@@ -823,7 +831,7 @@ async function runHandleToolCall(
     sessionIdentity: options.sessionIdentity,
     fileStoreTransaction: options.fileStoreTransaction,
     createFileStore: options.createFileStore,
-    allowFileStoreWrites: toolAllowsFileStoreWrites(providedTool)
+    allowFileStoreWrites: toolAllowsFileStoreWrites(providedTool),
   });
 
   try {
@@ -832,14 +840,14 @@ async function runHandleToolCall(
       hookName: 'handleToolCall',
       executionScope,
       revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
-      operation: async (deadlineAt) =>
+      operation: async deadlineAt =>
         normalizeToolCallResult({
           plugin,
           providedTool,
           context: hookContext.context,
           value: await hook(options.call, hookContext.context),
-          deadlineAt
-        })
+          deadlineAt,
+        }),
     });
 
     if (!approvalGatedTool || result.status === 'rejected') {
@@ -851,7 +859,7 @@ async function runHandleToolCall(
       options.pluginConfigControl === undefined
     ) {
       throw new TypeError(
-        'Approval-gated plugin tool lost its host approval state.'
+        'Approval-gated plugin tool lost its host approval state.',
       );
     }
 
@@ -863,7 +871,9 @@ async function runHandleToolCall(
       result,
       confirmationHandler: options.toolConfirmationHandler,
       pluginConfigControl: options.pluginConfigControl,
-      ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+      ...(options.storeRoot === undefined
+        ? {}
+        : {storeRoot: options.storeRoot}),
     });
   } catch (error: unknown) {
     if (error instanceof PluginHookTimeoutError) {
@@ -873,7 +883,7 @@ async function runHandleToolCall(
         reason: 'handler_timeout',
         message: error.message,
         evidenceStatus: failureDegrades ? 'degraded' : 'failed',
-        policyOutcome: 'timeout'
+        policyOutcome: 'timeout',
       });
     }
 
@@ -883,25 +893,25 @@ async function runHandleToolCall(
       reason: 'handler_failed',
       message: errorMessage(error),
       evidenceStatus: failureDegrades ? 'degraded' : 'rejected',
-      policyOutcome: failureDegrades ? 'optional_degraded' : 'handler_rejected'
+      policyOutcome: failureDegrades ? 'optional_degraded' : 'handler_rejected',
     });
   }
 }
 
 function resolveRuntimePluginToolExecution(
-  options: HandleToolCallOptions
+  options: HandleToolCallOptions,
 ): RuntimePluginToolExecutionResolution {
   if (!runtimeIdentityMatchesContext(options.call, options.context)) {
     return rejectedRuntimePluginToolExecution({
       call: options.call,
       context: options.context,
       reason: 'tool_call_identity_mismatch',
-      message: 'Tool call identity must match current runtime event identity.'
+      message: 'Tool call identity must match current runtime event identity.',
     });
   }
 
   const plugin = options.plugins.find(
-    (candidate) => candidate.manifest.id === options.call.pluginId
+    candidate => candidate.manifest.id === options.call.pluginId,
   );
 
   if (plugin === undefined) {
@@ -909,12 +919,12 @@ function resolveRuntimePluginToolExecution(
       call: options.call,
       context: options.context,
       reason: 'plugin_not_enabled',
-      message: `Plugin "${options.call.pluginId}" is not enabled for this turn.`
+      message: `Plugin "${options.call.pluginId}" is not enabled for this turn.`,
     });
   }
 
   const providedTool = plugin.providedTools.find(
-    (tool) => tool.name === options.call.toolName
+    tool => tool.name === options.call.toolName,
   );
 
   if (providedTool === undefined) {
@@ -922,18 +932,18 @@ function resolveRuntimePluginToolExecution(
       call: options.call,
       context: options.context,
       reason: 'tool_not_declared',
-      message: `Plugin "${plugin.manifest.id}" did not declare tool "${options.call.toolName}".`
+      message: `Plugin "${plugin.manifest.id}" did not declare tool "${options.call.toolName}".`,
     });
   }
 
   const hook = plugin.lifecycleHooks.handleToolCall;
   const failureDegrades = handleToolCallFailureDegrades({
     plugin,
-    providedTool
+    providedTool,
   });
   const access = runtimePluginAccessForPlugin({
     plugin,
-    accessByPluginId: options.accessByPluginId
+    accessByPluginId: options.accessByPluginId,
   });
   const policyRejection = rejectedRuntimePluginToolPolicy({
     plugin,
@@ -942,7 +952,7 @@ function resolveRuntimePluginToolExecution(
     access,
     failureDegrades,
     call: options.call,
-    context: options.context
+    context: options.context,
   });
 
   if (policyRejection !== undefined) {
@@ -955,7 +965,7 @@ function resolveRuntimePluginToolExecution(
     providedTool,
     hook,
     access,
-    failureDegrades
+    failureDegrades,
   });
 }
 
@@ -970,7 +980,7 @@ function rejectedRuntimePluginToolPolicy(options: {
 }): RejectedRuntimePluginToolExecution | undefined {
   const modelFacing = isModelFacingPluginTool({
     plugin: options.plugin,
-    tool: options.providedTool
+    tool: options.providedTool,
   });
 
   if (modelFacing && !pluginCanWriteModelInput(options.access)) {
@@ -982,7 +992,7 @@ function rejectedRuntimePluginToolPolicy(options: {
       evidenceStatus: options.failureDegrades ? 'degraded' : 'rejected',
       policyOutcome: options.failureDegrades
         ? 'optional_degraded'
-        : 'disallowed_tool_call'
+        : 'disallowed_tool_call',
     });
   }
 
@@ -990,7 +1000,7 @@ function rejectedRuntimePluginToolPolicy(options: {
     modelFacing &&
     !pluginToolHasRequiredGrantedAccess({
       tool: options.providedTool,
-      access: options.access
+      access: options.access,
     })
   ) {
     return rejectedRuntimePluginToolExecution({
@@ -1001,7 +1011,7 @@ function rejectedRuntimePluginToolPolicy(options: {
       evidenceStatus: options.failureDegrades ? 'degraded' : 'rejected',
       policyOutcome: options.failureDegrades
         ? 'optional_degraded'
-        : 'disallowed_tool_call'
+        : 'disallowed_tool_call',
     });
   }
 
@@ -1009,10 +1019,8 @@ function rejectedRuntimePluginToolPolicy(options: {
     options.hook !== undefined &&
     !routableModelFacingPluginTools({
       plugin: options.plugin,
-      access: options.access
-    }).some(
-      (tool) => tool.name === options.providedTool.name
-    )
+      access: options.access,
+    }).some(tool => tool.name === options.providedTool.name)
   ) {
     return rejectedRuntimePluginToolExecution({
       call: options.call,
@@ -1020,7 +1028,7 @@ function rejectedRuntimePluginToolPolicy(options: {
       reason: 'tool_not_routable',
       message: `Plugin "${options.plugin.manifest.id}" tool "${options.providedTool.name}" is not routable for model execution under current plugin policy.`,
       evidenceStatus: 'rejected',
-      policyOutcome: 'disallowed_tool_call'
+      policyOutcome: 'disallowed_tool_call',
     });
   }
 
@@ -1035,14 +1043,14 @@ function resolveRuntimePluginToolHandler(options: {
   readonly access: ReturnType<typeof runtimePluginAccessForPlugin>;
   readonly failureDegrades: boolean;
 }): RuntimePluginToolExecutionResolution {
-  const { plugin, providedTool, hook, access, failureDegrades } = options;
+  const {plugin, providedTool, hook, access, failureDegrades} = options;
 
   const inputValidation =
     providedTool.validationOwner === 'plugin_host'
       ? validateModelToolInputAgainstContract({
           toolName: options.options.call.toolName,
           input: options.options.call.input,
-          inputContract: providedTool.inputContract
+          inputContract: providedTool.inputContract,
         })
       : undefined;
 
@@ -1053,7 +1061,7 @@ function resolveRuntimePluginToolHandler(options: {
       reason: 'invalid_input',
       message: inputValidation.details,
       evidenceStatus: failureDegrades ? 'degraded' : 'rejected',
-      policyOutcome: failureDegrades ? 'optional_degraded' : 'handler_rejected'
+      policyOutcome: failureDegrades ? 'optional_degraded' : 'handler_rejected',
     });
   }
 
@@ -1064,7 +1072,7 @@ function resolveRuntimePluginToolHandler(options: {
       reason: 'handler_missing',
       message: `Plugin "${plugin.manifest.id}" has no handleToolCall hook.`,
       evidenceStatus: failureDegrades ? 'degraded' : 'rejected',
-      policyOutcome: failureDegrades ? 'optional_degraded' : 'handler_rejected'
+      policyOutcome: failureDegrades ? 'optional_degraded' : 'handler_rejected',
     });
   }
 
@@ -1081,7 +1089,7 @@ function resolveRuntimePluginToolHandler(options: {
       reason: 'tool_not_routable',
       message: `Plugin "${plugin.manifest.id}" tool "${providedTool.name}" requires an unavailable confirmation handler.`,
       evidenceStatus: 'rejected',
-      policyOutcome: 'disallowed_tool_call'
+      policyOutcome: 'disallowed_tool_call',
     });
   }
 
@@ -1092,16 +1100,16 @@ function resolveRuntimePluginToolHandler(options: {
     hook,
     access,
     failureDegrades,
-    approvalGatedTool
+    approvalGatedTool,
   } satisfies ResolvedRuntimePluginToolExecution);
 }
 
 function rejectedRuntimePluginToolExecution(
-  options: Parameters<typeof createRejectedToolCallResult>[0]
+  options: Parameters<typeof createRejectedToolCallResult>[0],
 ): RejectedRuntimePluginToolExecution {
   return Object.freeze({
     status: 'rejected',
-    result: createRejectedToolCallResult(options)
+    result: createRejectedToolCallResult(options),
   });
 }
 
@@ -1114,11 +1122,18 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
   readonly sessionIdentity?: object | undefined;
   readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
   readonly hookName: 'afterTurnCommitted' | 'onSessionEnd' | 'onShutdown';
-  readonly evidenceKind: Extract<RuntimePluginEvidenceKind, 'after_turn_committed' | 'session_end' | 'shutdown'>;
+  readonly evidenceKind: Extract<
+    RuntimePluginEvidenceKind,
+    'after_turn_committed' | 'session_end' | 'shutdown'
+  >;
   readonly allowFileStoreWrites?: boolean | undefined;
   readonly hookForPlugin: (
-    plugin: RuntimePlugin
-  ) => ((context: TContext) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>) | undefined;
+    plugin: RuntimePlugin,
+  ) =>
+    | ((
+        context: TContext,
+      ) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>)
+    | undefined;
 }): Promise<RuntimePluginHookHostResult> {
   const evidence: RuntimePluginEvidenceSnapshot[] = [];
   let failed = false;
@@ -1138,13 +1153,13 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
       signal: executionScope.abortController.signal,
       access: runtimePluginAccessForPlugin({
         plugin,
-        accessByPluginId: options.accessByPluginId
+        accessByPluginId: options.accessByPluginId,
       }),
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
       createFileStore: options.createFileStore,
-      allowFileStoreWrites: options.allowFileStoreWrites
+      allowFileStoreWrites: options.allowFileStoreWrites,
     });
     const result = await invokeHook({
       plugin,
@@ -1152,7 +1167,7 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
       executionScope,
       revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
       hookName: options.hookName,
-      hook
+      hook,
     });
 
     if (result.status === 'failed') {
@@ -1164,8 +1179,11 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
           evidenceKind: options.evidenceKind,
           status: 'failed',
           summary: `${options.hookName} plugin hook failed: ${result.message}`,
-          ...failurePolicyOutcomeOption(options.evidenceKind, result.failureKind)
-        })
+          ...failurePolicyOutcomeOption(
+            options.evidenceKind,
+            result.failureKind,
+          ),
+        }),
       );
       continue;
     }
@@ -1178,7 +1196,7 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
       if (
         !hookEvidenceRecordsFailure({
           evidence: result.value.evidence,
-          evidenceKind: options.evidenceKind
+          evidenceKind: options.evidenceKind,
         })
       ) {
         evidence.push(
@@ -1188,8 +1206,8 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
             evidenceKind: options.evidenceKind,
             status: 'failed',
             summary: `${options.hookName} plugin hook reported failure.`,
-            ...failurePolicyOutcomeOption(options.evidenceKind, 'exception')
-          })
+            ...failurePolicyOutcomeOption(options.evidenceKind, 'exception'),
+          }),
         );
       }
     }
@@ -1197,18 +1215,21 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
 
   return Object.freeze({
     status: failed ? 'completed_with_failures' : 'completed',
-    evidence: Object.freeze([...evidence])
+    evidence: Object.freeze([...evidence]),
   } satisfies RuntimePluginHookHostResult);
 }
 
 function hookEvidenceRecordsFailure(options: {
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
-  readonly evidenceKind: Extract<RuntimePluginEvidenceKind, 'after_turn_committed' | 'session_end' | 'shutdown'>;
+  readonly evidenceKind: Extract<
+    RuntimePluginEvidenceKind,
+    'after_turn_committed' | 'session_end' | 'shutdown'
+  >;
 }): boolean {
   return evidenceRecordsStatus({
     evidence: options.evidence,
     evidenceKind: options.evidenceKind,
-    statuses: ['failed']
+    statuses: ['failed'],
   });
 }
 
@@ -1218,32 +1239,32 @@ function evidenceRecordsStatus(options: {
   readonly statuses: readonly RuntimePluginEvidenceStatus[];
 }): boolean {
   return options.evidence.some(
-    (item) =>
+    item =>
       item.evidenceKind === options.evidenceKind &&
-      options.statuses.includes(item.status)
+      options.statuses.includes(item.status),
   );
 }
 
 function evidenceRecordsToolInvocationDegrade(
-  evidence: readonly RuntimePluginEvidenceSnapshot[]
+  evidence: readonly RuntimePluginEvidenceSnapshot[],
 ): boolean {
   return evidence.some(
-    (item) =>
+    item =>
       item.evidenceKind === 'tool_invocation' &&
       (item.status === 'degraded' ||
-        item.policyOutcome === 'optional_degraded')
+        item.policyOutcome === 'optional_degraded'),
   );
 }
 
 function evidenceRecordsBlockingBeforeRoleModelCall(
-  evidence: readonly RuntimePluginEvidenceSnapshot[]
+  evidence: readonly RuntimePluginEvidenceSnapshot[],
 ): boolean {
   return evidence.some(
-    (item) =>
+    item =>
       item.evidenceKind === 'before_role_model_call' &&
       (item.status === 'rejected' ||
         item.status === 'failed' ||
-        item.policyOutcome === 'required_rejected')
+        item.policyOutcome === 'required_rejected'),
   );
 }
 
@@ -1258,7 +1279,7 @@ function normalizeToolCallResult(options: {
     plugin: options.plugin,
     hookName: 'handleToolCall',
     value: options.value,
-    deadlineAt: options.deadlineAt
+    deadlineAt: options.deadlineAt,
   });
 
   if (!isRecord(value)) {
@@ -1271,13 +1292,13 @@ function normalizeToolCallResult(options: {
     const evidence = normalizeEvidenceSnapshots({
       plugin: options.plugin,
       context: options.context,
-      value: value['evidence']
+      value: value['evidence'],
     });
 
     assertAcceptedToolEvidenceSourceReferences({
       plugin: options.plugin,
       providedTool: options.providedTool,
-      evidence
+      evidence,
     });
 
     if (evidence.some(runtimePluginEvidenceBlocksToolInvocation)) {
@@ -1285,22 +1306,22 @@ function normalizeToolCallResult(options: {
         status: 'rejected',
         reason: 'blocking_tool_invocation_evidence',
         message: `Plugin "${options.plugin.manifest.id}" tool "${options.providedTool.name}" accepted result included blocking tool invocation evidence.`,
-        evidence
+        evidence,
       } satisfies RuntimePluginToolCallResult);
     }
 
     const preparedConfigEffect = normalizePreparedRuntimePluginConfigEffect({
       providedTool: options.providedTool,
       context: options.context,
-      value: value['preparedConfigEffect']
+      value: value['preparedConfigEffect'],
     });
     const approvalGatedTool = isApprovalGatedRuntimePluginTool(
-      options.providedTool
+      options.providedTool,
     );
 
     if (approvalGatedTool && preparedConfigEffect === undefined) {
       throw new TypeError(
-        'Approval-gated runtime config tools must prepare one config effect.'
+        'Approval-gated runtime config tools must prepare one config effect.',
       );
     }
 
@@ -1308,9 +1329,9 @@ function normalizeToolCallResult(options: {
       status: 'accepted',
       output: normalizeJsonValue(value['output'], {
         plugin: options.plugin,
-        deadlineAt: options.deadlineAt
+        deadlineAt: options.deadlineAt,
       }),
-      evidence
+      evidence,
     });
 
     if (result.status !== 'accepted') {
@@ -1323,28 +1344,28 @@ function normalizeToolCallResult(options: {
 
     return Object.freeze({
       ...result,
-      preparedConfigEffect
+      preparedConfigEffect,
     } satisfies RuntimePluginToolCallExecutionResult);
   }
 
   if (status === 'rejected') {
-    if (
-      value['preparedConfigEffect'] !== undefined
-    ) {
+    if (value['preparedConfigEffect'] !== undefined) {
       throw new TypeError(
-        'Rejected plugin tool results cannot include a prepared config effect.'
+        'Rejected plugin tool results cannot include a prepared config effect.',
       );
     }
     const reason = value['reason'];
     const message = value['message'];
 
     if (typeof reason !== 'string' || typeof message !== 'string') {
-      throw new TypeError('Plugin rejected tool result must include reason and message.');
+      throw new TypeError(
+        'Plugin rejected tool result must include reason and message.',
+      );
     }
 
     if (reason.trim().length === 0 || message.trim().length === 0) {
       throw new TypeError(
-        'Plugin rejected tool result reason and message must be non-empty.'
+        'Plugin rejected tool result reason and message must be non-empty.',
       );
     }
 
@@ -1352,17 +1373,18 @@ function normalizeToolCallResult(options: {
     const evidence = normalizeEvidenceSnapshots({
       plugin: options.plugin,
       context: options.context,
-      value: value['evidence']
+      value: value['evidence'],
     });
     const failureDegrades = handleToolCallFailureDegrades({
       plugin: options.plugin,
-      providedTool: options.providedTool
+      providedTool: options.providedTool,
     });
-    const evidenceAlreadyExplainsRejectedResult = evidenceRecordsStatus({
-      evidence,
-      evidenceKind: 'tool_invocation',
-      statuses: ['rejected', 'failed']
-    }) || evidenceRecordsToolInvocationDegrade(evidence);
+    const evidenceAlreadyExplainsRejectedResult =
+      evidenceRecordsStatus({
+        evidence,
+        evidenceKind: 'tool_invocation',
+        statuses: ['rejected', 'failed'],
+      }) || evidenceRecordsToolInvocationDegrade(evidence);
     const evidenceWithFallback = evidenceAlreadyExplainsRejectedResult
       ? evidence
       : Object.freeze([
@@ -1375,15 +1397,15 @@ function normalizeToolCallResult(options: {
             summary: redactedMessage,
             policyOutcome: failureDegrades
               ? 'optional_degraded'
-              : 'handler_rejected'
-          })
+              : 'handler_rejected',
+          }),
         ]);
 
     return createRuntimePluginToolCallResultSnapshot({
       status: 'rejected',
       reason,
       message: redactedMessage,
-      evidence: evidenceWithFallback
+      evidence: evidenceWithFallback,
     });
   }
 
@@ -1395,13 +1417,13 @@ function normalizeJsonValue(
   options: {
     readonly plugin: RuntimePlugin;
     readonly deadlineAt?: number | undefined;
-  }
+  },
 ): RuntimePluginJsonValue {
   try {
     return createJsonBoundarySnapshot(value, {
       field: 'Plugin tool output',
       redact: true,
-      deadlineAt: options.deadlineAt
+      deadlineAt: options.deadlineAt,
     });
   } catch (error: unknown) {
     if (
@@ -1412,9 +1434,9 @@ function normalizeJsonValue(
         {
           pluginId: options.plugin.manifest.id,
           hookName: 'handleToolCall',
-          timeoutMs: options.plugin.manifest.runtimePolicy.timeoutMs
+          timeoutMs: options.plugin.manifest.runtimePolicy.timeoutMs,
         },
-        { cause: error }
+        {cause: error},
       );
     }
 
@@ -1438,7 +1460,7 @@ function snapshotPluginHookResult(options: {
     return createJsonBoundarySnapshot(options.value, {
       field: `Plugin ${options.hookName} result`,
       redact: true,
-      deadlineAt: options.deadlineAt
+      deadlineAt: options.deadlineAt,
     });
   } catch (error: unknown) {
     if (
@@ -1449,9 +1471,9 @@ function snapshotPluginHookResult(options: {
         {
           pluginId: options.plugin.manifest.id,
           hookName: options.hookName,
-          timeoutMs: options.plugin.manifest.runtimePolicy.timeoutMs
+          timeoutMs: options.plugin.manifest.runtimePolicy.timeoutMs,
         },
-        { cause: error }
+        {cause: error},
       );
     }
 
@@ -1487,13 +1509,13 @@ async function runHealth(options: {
       signal: executionScope.abortController.signal,
       access: runtimePluginAccessForPlugin({
         plugin,
-        accessByPluginId: options.accessByPluginId
+        accessByPluginId: options.accessByPluginId,
       }),
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
       fileStoreTransaction: options.fileStoreTransaction,
-      createFileStore: options.createFileStore
+      createFileStore: options.createFileStore,
     });
 
     try {
@@ -1502,27 +1524,27 @@ async function runHealth(options: {
         hookName: 'health',
         executionScope,
         revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
-        operation: async (deadlineAt) =>
+        operation: async deadlineAt =>
           createRuntimePluginHealthSnapshot(
             snapshotPluginHookResult({
               plugin,
               hookName: 'health',
               value: await hook(hookContext.context),
-              deadlineAt
-            })
-          )
+              deadlineAt,
+            }),
+          ),
       });
 
       assertSnapshotPluginId({
         plugin,
         actualPluginId: snapshot.pluginId,
-        field: 'health.pluginId'
+        field: 'health.pluginId',
       });
       snapshots.push(snapshot);
       const healthEvidence = createHealthSnapshotEvidence({
         plugin,
         context: options.context,
-        snapshot
+        snapshot,
       });
 
       if (healthEvidence !== undefined) {
@@ -1541,9 +1563,9 @@ async function runHealth(options: {
           summary: message,
           redactionLabels: mergedRedactionLabels({
             plugin,
-            context: options.context
-          })
-        })
+            context: options.context,
+          }),
+        }),
       );
       evidence.push(
         createHookFailureEvidence({
@@ -1555,15 +1577,15 @@ async function runHealth(options: {
               ? 'degraded'
               : 'failed',
           summary: `Plugin health hook failed: ${message}`,
-          policyOutcome
-        })
+          policyOutcome,
+        }),
       );
     }
   }
 
   return Object.freeze({
     snapshots: Object.freeze([...snapshots]),
-    evidence: Object.freeze([...evidence])
+    evidence: Object.freeze([...evidence]),
   } satisfies RuntimePluginHealthHostResult);
 }
 
@@ -1582,7 +1604,7 @@ function createHealthSnapshotEvidence(options: {
     evidenceKind: 'health',
     status: healthSnapshotEvidenceStatus(options),
     summary: `Plugin health ${options.snapshot.status}: ${options.snapshot.summary}`,
-    policyOutcome: 'health_degraded'
+    policyOutcome: 'health_degraded',
   });
 }
 
@@ -1592,7 +1614,8 @@ function healthSnapshotEvidenceStatus(options: {
 }): RuntimePluginEvidenceStatus {
   if (
     options.snapshot.status === 'unavailable' &&
-    options.plugin.manifest.runtimePolicy.failureBehavior.health === 'reject_turn'
+    options.plugin.manifest.runtimePolicy.failureBehavior.health ===
+      'reject_turn'
   ) {
     return 'failed';
   }
@@ -1605,31 +1628,33 @@ async function invokeBeforeRoleModelCallHook(options: {
   readonly context: RuntimePluginContext;
   readonly executionScope: PluginHookExecutionScope;
   readonly revokeFileStoreWrites: () => void;
-  readonly hook: NonNullable<RuntimePlugin['lifecycleHooks']['beforeRoleModelCall']>;
+  readonly hook: NonNullable<
+    RuntimePlugin['lifecycleHooks']['beforeRoleModelCall']
+  >;
 }): Promise<BeforeRoleModelCallInvocationResult> {
   try {
     return Object.freeze({
       status: 'accepted',
       value: await withPluginHookTimeout({
-          plugin: options.plugin,
-          hookName: 'beforeRoleModelCall',
-          executionScope: options.executionScope,
-          revokeFileStoreWrites: options.revokeFileStoreWrites,
-          operation: async (deadlineAt) =>
-            normalizeBeforeRoleModelCallResult({
-              plugin: options.plugin,
-              context: options.context,
-              value: await options.hook(options.context),
-              deadlineAt
-            })
-        })
+        plugin: options.plugin,
+        hookName: 'beforeRoleModelCall',
+        executionScope: options.executionScope,
+        revokeFileStoreWrites: options.revokeFileStoreWrites,
+        operation: async deadlineAt =>
+          normalizeBeforeRoleModelCallResult({
+            plugin: options.plugin,
+            context: options.context,
+            value: await options.hook(options.context),
+            deadlineAt,
+          }),
+      }),
     } satisfies BeforeRoleModelCallInvocationResult);
   } catch (error: unknown) {
     return Object.freeze({
       status: 'failed',
       message: errorMessage(error),
       failureKind:
-        error instanceof PluginHookTimeoutError ? 'timeout' : 'exception'
+        error instanceof PluginHookTimeoutError ? 'timeout' : 'exception',
     } satisfies BeforeRoleModelCallInvocationResult);
   }
 }
@@ -1640,32 +1665,34 @@ async function invokeHook<TContext extends RuntimePluginContext>(options: {
   readonly executionScope: PluginHookExecutionScope;
   readonly revokeFileStoreWrites: () => void;
   readonly hookName: 'afterTurnCommitted' | 'onSessionEnd' | 'onShutdown';
-  readonly hook: (context: TContext) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>;
+  readonly hook: (
+    context: TContext,
+  ) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>;
 }): Promise<HookInvocationResult> {
   try {
     return Object.freeze({
       status: 'accepted',
       value: await withPluginHookTimeout({
-          plugin: options.plugin,
-          hookName: options.hookName,
-          executionScope: options.executionScope,
-          revokeFileStoreWrites: options.revokeFileStoreWrites,
-          operation: async (deadlineAt) =>
-            normalizeHookResult({
-              plugin: options.plugin,
-              context: options.context,
-              value: await options.hook(options.context),
-              deadlineAt,
-              hookName: options.hookName
-            })
-        })
+        plugin: options.plugin,
+        hookName: options.hookName,
+        executionScope: options.executionScope,
+        revokeFileStoreWrites: options.revokeFileStoreWrites,
+        operation: async deadlineAt =>
+          normalizeHookResult({
+            plugin: options.plugin,
+            context: options.context,
+            value: await options.hook(options.context),
+            deadlineAt,
+            hookName: options.hookName,
+          }),
+      }),
     } satisfies HookInvocationResult);
   } catch (error: unknown) {
     return Object.freeze({
       status: 'failed',
       message: errorMessage(error),
       failureKind:
-        error instanceof PluginHookTimeoutError ? 'timeout' : 'exception'
+        error instanceof PluginHookTimeoutError ? 'timeout' : 'exception',
     } satisfies HookInvocationResult);
   }
 }
@@ -1680,7 +1707,7 @@ function normalizeBeforeRoleModelCallResult(options: {
     plugin: options.plugin,
     hookName: 'beforeRoleModelCall',
     value: options.value,
-    deadlineAt: options.deadlineAt
+    deadlineAt: options.deadlineAt,
   });
 
   if (!isRecord(value)) {
@@ -1689,13 +1716,13 @@ function normalizeBeforeRoleModelCallResult(options: {
 
   if (Object.hasOwn(value, 'runtimeNotes')) {
     throw new TypeError(
-      'beforeRoleModelCall runtimeNotes are not supported; return source-attributed contextItems.'
+      'beforeRoleModelCall runtimeNotes are not supported; return source-attributed contextItems.',
     );
   }
 
   const contextItems = normalizeContextItems({
     plugin: options.plugin,
-    value: value['contextItems']
+    value: value['contextItems'],
   });
 
   return Object.freeze({
@@ -1703,8 +1730,8 @@ function normalizeBeforeRoleModelCallResult(options: {
     evidence: normalizeEvidenceSnapshots({
       plugin: options.plugin,
       context: options.context,
-      value: value['evidence']
-    })
+      value: value['evidence'],
+    }),
   } satisfies RuntimePluginBeforeRoleModelCallResult);
 }
 
@@ -1719,7 +1746,7 @@ function normalizeHookResult(options: {
     plugin: options.plugin,
     hookName: options.hookName,
     value: options.value,
-    deadlineAt: options.deadlineAt
+    deadlineAt: options.deadlineAt,
   });
 
   if (!isRecord(value)) {
@@ -1737,8 +1764,8 @@ function normalizeHookResult(options: {
     evidence: normalizeEvidenceSnapshots({
       plugin: options.plugin,
       context: options.context,
-      value: value['evidence']
-    })
+      value: value['evidence'],
+    }),
   } satisfies RuntimePluginHookResult);
 }
 
@@ -1752,21 +1779,21 @@ function normalizeContextItems(options: {
   }
 
   return Object.freeze(
-    items.map((item) => {
+    items.map(item => {
       const contextItem = createRuntimePluginContextItem(item);
 
       assertSnapshotPluginId({
         plugin: options.plugin,
         actualPluginId: contextItem.pluginId,
-        field: 'contextItems.pluginId'
+        field: 'contextItems.pluginId',
       });
       assertContextItemSourceReferences({
         plugin: options.plugin,
-        contextItem
+        contextItem,
       });
 
       return contextItem;
-    })
+    }),
   );
 }
 
@@ -1778,17 +1805,15 @@ function enabledPluginIdsForHost(options: {
     return Object.freeze(
       options.plugins
         .filter(
-          (plugin) =>
+          plugin =>
             isHostOwnedFirstPartyRuntimePlugin(plugin) &&
-            plugin.manifest.activation.defaultEnabled
+            plugin.manifest.activation.defaultEnabled,
         )
-        .map((plugin) => plugin.manifest.id)
+        .map(plugin => plugin.manifest.id),
     );
   }
 
-  const pluginIds = new Set(
-    options.plugins.map((plugin) => plugin.manifest.id)
-  );
+  const pluginIds = new Set(options.plugins.map(plugin => plugin.manifest.id));
   const seenEnabledIds = new Set<string>();
   const enabledIds: string[] = [];
 
@@ -1809,12 +1834,12 @@ function enabledPluginIdsForHost(options: {
 }
 
 function assertNoCallerSuppliedHostScopedFirstPartyPlugins(
-  plugins: readonly RuntimePlugin[]
+  plugins: readonly RuntimePlugin[],
 ): void {
   for (const plugin of plugins) {
     if (isHostScopedFirstPartyRuntimePluginId(plugin.manifest.id)) {
       throw new TypeError(
-        `Plugin "${plugin.manifest.id}" is host-owned and cannot be supplied by callers.`
+        `Plugin "${plugin.manifest.id}" is host-owned and cannot be supplied by callers.`,
       );
     }
   }
@@ -1833,16 +1858,19 @@ function handleToolCallFailureDegrades(options: {
 }
 
 class PluginHookTimeoutError extends Error {
-  constructor(options: {
-    readonly pluginId: string;
-    readonly hookName: string;
-    readonly timeoutMs: number;
-  }, errorOptions?: ErrorOptions) {
+  constructor(
+    options: {
+      readonly pluginId: string;
+      readonly hookName: string;
+      readonly timeoutMs: number;
+    },
+    errorOptions?: ErrorOptions,
+  ) {
     super(
       `Plugin "${options.pluginId}" ${options.hookName} timed out after ${String(
-        options.timeoutMs
+        options.timeoutMs,
       )}ms.`,
-      errorOptions
+      errorOptions,
     );
     this.name = 'PluginHookTimeoutError';
   }
@@ -1854,11 +1882,11 @@ type PluginHookExecutionScope = {
 };
 
 function createPluginHookExecutionScope(
-  plugin: RuntimePlugin
+  plugin: RuntimePlugin,
 ): PluginHookExecutionScope {
   return Object.freeze({
     abortController: new AbortController(),
-    deadlineAt: Date.now() + plugin.manifest.runtimePolicy.timeoutMs
+    deadlineAt: Date.now() + plugin.manifest.runtimePolicy.timeoutMs,
   });
 }
 
@@ -1878,12 +1906,12 @@ async function withPluginHookTimeout<T>(options: {
     return await Promise.race([
       Promise.resolve()
         .then(() => options.operation(deadlineAt))
-        .then((value) => {
+        .then(value => {
           if (Date.now() >= deadlineAt) {
             const error = new PluginHookTimeoutError({
               pluginId: options.plugin.manifest.id,
               hookName: options.hookName,
-              timeoutMs
+              timeoutMs,
             });
 
             options.executionScope.abortController.abort(error);
@@ -1897,14 +1925,14 @@ async function withPluginHookTimeout<T>(options: {
           const error = new PluginHookTimeoutError({
             pluginId: options.plugin.manifest.id,
             hookName: options.hookName,
-            timeoutMs
+            timeoutMs,
           });
 
           options.executionScope.abortController.abort(error);
           options.revokeFileStoreWrites();
           reject(error);
         }, remainingMs);
-      })
+      }),
     ]);
   } finally {
     if (timeoutId !== undefined) {
@@ -1921,4 +1949,3 @@ function errorMessage(error: unknown): string {
 
   return 'Plugin hook failed.';
 }
-

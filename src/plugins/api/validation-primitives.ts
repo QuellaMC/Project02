@@ -1,28 +1,29 @@
+import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {
-  ownJsonRecordValue
-} from '../../shared/json-boundary.ts';
-import { isJsonBoundaryCredentialKey, redactJsonBoundaryText } from '../../shared/redaction.ts';
-import { runtimePluginSourceKindValues } from './contract.ts';
+  isJsonBoundaryCredentialKey,
+  redactJsonBoundaryText,
+} from '../../shared/redaction.ts';
+import {runtimePluginSourceKindValues} from './contract.ts';
 import type {
   RuntimePluginContextBudget,
   RuntimePluginSourceReference,
   RuntimePluginValidationFailureReason,
-  RuntimePluginValidationResult
+  RuntimePluginValidationResult,
 } from './types.ts';
 
 export function requiredContextBudget(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginContextBudget> {
   if (!isRecord(value)) {
     return reject(
       'malformed_context_item',
-      'Plugin context budget must be an object.'
+      'Plugin context budget must be an object.',
     );
   }
 
   const estimatedTokens = requiredPositiveInteger(
     value['estimatedTokens'],
-    'estimatedTokens'
+    'estimatedTokens',
   );
   const priority = requiredPositiveInteger(value['priority'], 'priority');
 
@@ -33,25 +34,25 @@ export function requiredContextBudget(
   return accept(
     Object.freeze({
       estimatedTokens: estimatedTokens.value,
-      priority: priority.value
-    } satisfies RuntimePluginContextBudget)
+      priority: priority.value,
+    } satisfies RuntimePluginContextBudget),
   );
 }
 
 export function requiredSourceReferences(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<readonly RuntimePluginSourceReference[]> {
   if (!Array.isArray(value)) {
     return reject(
       'malformed_context_item',
-      'Plugin sourceReferences must be an array.'
+      'Plugin sourceReferences must be an array.',
     );
   }
 
   if (value.length > 32) {
     return reject(
       'malformed_context_item',
-      'Plugin sourceReferences exceed the 32-record limit.'
+      'Plugin sourceReferences exceed the 32-record limit.',
     );
   }
 
@@ -71,12 +72,12 @@ export function requiredSourceReferences(
 }
 
 export function requiredSourceReference(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginSourceReference> {
   if (!isRecord(value)) {
     return reject(
       'malformed_context_item',
-      'Plugin source reference must be an object.'
+      'Plugin source reference must be an object.',
     );
   }
 
@@ -96,7 +97,7 @@ export function requiredSourceReference(
   if (!isOneOf(kind, runtimePluginSourceKindValues)) {
     return reject(
       'malformed_context_item',
-      'Plugin source reference kind is not supported.'
+      'Plugin source reference kind is not supported.',
     );
   }
 
@@ -104,39 +105,39 @@ export function requiredSourceReference(
     Object.freeze({
       kind,
       id: id.value,
-      ...(title.value === undefined ? {} : { title: title.value }),
-      ...(uri.value === undefined ? {} : { uri: uri.value })
-    } satisfies RuntimePluginSourceReference)
+      ...(title.value === undefined ? {} : {title: title.value}),
+      ...(uri.value === undefined ? {} : {uri: uri.value}),
+    } satisfies RuntimePluginSourceReference),
   );
 }
 
 export function freezeSourceReferences(
-  value: readonly RuntimePluginSourceReference[]
+  value: readonly RuntimePluginSourceReference[],
 ): readonly RuntimePluginSourceReference[] {
   return Object.freeze(
-    value.map((sourceReference) =>
+    value.map(sourceReference =>
       Object.freeze({
         kind: sourceReference.kind,
         id: redactRuntimePluginText(sourceReference.id),
         ...(sourceReference.title === undefined
           ? {}
-          : { title: redactRuntimePluginText(sourceReference.title) }),
+          : {title: redactRuntimePluginText(sourceReference.title)}),
         ...(sourceReference.uri === undefined
           ? {}
-          : { uri: redactRuntimePluginText(sourceReference.uri) })
-      } satisfies RuntimePluginSourceReference)
-    )
+          : {uri: redactRuntimePluginText(sourceReference.uri)}),
+      } satisfies RuntimePluginSourceReference),
+    ),
   );
 }
 
 export function freezeRedactedStrings(
-  values: readonly string[]
+  values: readonly string[],
 ): readonly string[] {
   return Object.freeze(values.map(redactRuntimePluginText));
 }
 
 export function optionalConfidence(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<number | undefined> {
   if (value === undefined) {
     return accept(undefined);
@@ -150,7 +151,7 @@ export function optionalConfidence(
   ) {
     return reject(
       'malformed_context_item',
-      'Plugin context item confidence must be a finite number between 0 and 1.'
+      'Plugin context item confidence must be a finite number between 0 and 1.',
     );
   }
 
@@ -159,7 +160,7 @@ export function optionalConfidence(
 
 export function requiredIdentifier(
   value: unknown,
-  field: string
+  field: string,
 ): RuntimePluginValidationResult<string> {
   const stringValue = requiredNonEmptyString(value, field);
 
@@ -170,7 +171,7 @@ export function requiredIdentifier(
   if (!/^[A-Za-z][A-Za-z0-9._-]{0,127}$/u.test(stringValue.value)) {
     return reject(
       'malformed_manifest',
-      `Plugin field "${field}" must start with a letter and use only letters, numbers, dots, underscores, or hyphens.`
+      `Plugin field "${field}" must start with a letter and use only letters, numbers, dots, underscores, or hyphens.`,
     );
   }
 
@@ -179,12 +180,12 @@ export function requiredIdentifier(
 
 export function requiredNonEmptyString(
   value: unknown,
-  field: string
+  field: string,
 ): RuntimePluginValidationResult<string> {
   if (typeof value !== 'string' || value.trim().length === 0) {
     return reject(
       'malformed_manifest',
-      `Plugin field "${field}" must be a non-empty string.`
+      `Plugin field "${field}" must be a non-empty string.`,
     );
   }
 
@@ -193,7 +194,7 @@ export function requiredNonEmptyString(
 
 export function optionalString(
   value: unknown,
-  field: string
+  field: string,
 ): RuntimePluginValidationResult<string | undefined> {
   if (value === undefined) {
     return accept(undefined);
@@ -204,12 +205,12 @@ export function optionalString(
 
 export function requiredBoolean(
   value: unknown,
-  field: string
+  field: string,
 ): RuntimePluginValidationResult<boolean> {
   if (typeof value !== 'boolean') {
     return reject(
       'malformed_manifest',
-      `Plugin field "${field}" must be a boolean.`
+      `Plugin field "${field}" must be a boolean.`,
     );
   }
 
@@ -218,12 +219,12 @@ export function requiredBoolean(
 
 export function requiredPositiveInteger(
   value: unknown,
-  field: string
+  field: string,
 ): RuntimePluginValidationResult<number> {
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
     return reject(
       'malformed_manifest',
-      `Plugin field "${field}" must be a positive integer.`
+      `Plugin field "${field}" must be a positive integer.`,
     );
   }
 
@@ -232,12 +233,12 @@ export function requiredPositiveInteger(
 
 export function requiredStringArray(
   value: unknown,
-  field: string
+  field: string,
 ): RuntimePluginValidationResult<readonly string[]> {
   if (!Array.isArray(value)) {
     return reject(
       'malformed_manifest',
-      `Plugin field "${field}" must be an array.`
+      `Plugin field "${field}" must be an array.`,
     );
   }
 
@@ -257,9 +258,9 @@ export function requiredStringArray(
 }
 
 export function firstRejected(
-  results: readonly RuntimePluginValidationResult<unknown>[]
+  results: readonly RuntimePluginValidationResult<unknown>[],
 ): RuntimePluginValidationResult<never> {
-  const rejected = results.find((result) => result.status === 'rejected');
+  const rejected = results.find(result => result.status === 'rejected');
 
   if (rejected !== undefined) {
     return reject(rejected.reason, rejected.details);
@@ -268,7 +269,9 @@ export function firstRejected(
   throw new Error('Expected at least one rejected validation result.');
 }
 
-export function acceptedOrThrow<T>(result: RuntimePluginValidationResult<T>): T {
+export function acceptedOrThrow<T>(
+  result: RuntimePluginValidationResult<T>,
+): T {
   if (result.status === 'accepted') {
     return result.value;
   }
@@ -279,39 +282,41 @@ export function acceptedOrThrow<T>(result: RuntimePluginValidationResult<T>): T 
 export function accept<T>(value: T): RuntimePluginValidationResult<T> {
   return Object.freeze({
     status: 'accepted',
-    value
+    value,
   } satisfies RuntimePluginValidationResult<T>);
 }
 
 export function reject(
   reason: RuntimePluginValidationFailureReason,
-  details: string
+  details: string,
 ): RuntimePluginValidationResult<never> {
   return Object.freeze({
     status: 'rejected',
     reason,
-    details
+    details,
   } satisfies RuntimePluginValidationResult<never>);
 }
 
-export function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+export function isRecord(
+  value: unknown,
+): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function isOneOf<T extends string>(
   value: unknown,
-  allowedValues: readonly T[]
+  allowedValues: readonly T[],
 ): value is T {
   return (
     typeof value === 'string' &&
-    allowedValues.some((allowedValue) => allowedValue === value)
+    allowedValues.some(allowedValue => allowedValue === value)
   );
 }
 
 export function requiredOneOf<T extends string>(
   value: unknown,
   allowedValues: readonly T[],
-  field: string
+  field: string,
 ): T {
   if (!isOneOf(value, allowedValues)) {
     throw new TypeError(`Unsupported ${field}: ${String(value)}.`);
@@ -323,7 +328,7 @@ export function requiredOneOf<T extends string>(
 export function optionalOneOf<T extends string>(
   value: unknown,
   allowedValues: readonly T[],
-  field: string
+  field: string,
 ): T | undefined {
   if (value === undefined) {
     return undefined;
@@ -332,7 +337,10 @@ export function optionalOneOf<T extends string>(
   return requiredOneOf(value, allowedValues, field);
 }
 
-export function optionalPlainString(value: unknown, field: string): string | undefined {
+export function optionalPlainString(
+  value: unknown,
+  field: string,
+): string | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -342,7 +350,7 @@ export function optionalPlainString(value: unknown, field: string): string | und
 
 export function requiredArrayOrThrow(
   value: unknown,
-  field: string
+  field: string,
 ): readonly unknown[] {
   if (!Array.isArray(value)) {
     throw new TypeError(`Plugin field "${field}" must be an array.`);
@@ -353,7 +361,7 @@ export function requiredArrayOrThrow(
 
 export function requiredStringArrayOrThrow(
   value: unknown,
-  field: string
+  field: string,
 ): readonly string[] {
   const result = requiredStringArray(value, field);
 
@@ -366,7 +374,7 @@ export function requiredStringArrayOrThrow(
 
 export function requireBooleanRecordField(
   record: Readonly<Record<string, unknown>>,
-  field: string
+  field: string,
 ): boolean {
   const value = ownJsonRecordValue(record, field);
 
@@ -377,7 +385,10 @@ export function requireBooleanRecordField(
   return value;
 }
 
-export function requirePlainNonEmptyString(value: string, field: string): string {
+export function requirePlainNonEmptyString(
+  value: string,
+  field: string,
+): string {
   if (value.trim().length === 0) {
     throw new TypeError(`Plugin field "${field}" must be non-empty.`);
   }
@@ -387,17 +398,17 @@ export function requirePlainNonEmptyString(value: string, field: string): string
 
 export function requirePlainNonEmptyRecordString(
   record: Readonly<Record<string, unknown>>,
-  field: string
+  field: string,
 ): string {
   return requirePlainNonEmptyStringFromUnknown(
     ownJsonRecordValue(record, field),
-    field
+    field,
   );
 }
 
 export function requirePlainNonEmptyStringFromUnknown(
   value: unknown,
-  field: string
+  field: string,
 ): string {
   if (typeof value !== 'string') {
     throw new TypeError(`Plugin field "${field}" must be a string.`);
