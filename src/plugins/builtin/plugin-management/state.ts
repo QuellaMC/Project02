@@ -3,7 +3,11 @@ import type {RuntimePluginManifest} from '../../api/types.ts';
 import type {RuntimePluginConfigActivationInspectShape} from '../../../runtime/config/index.ts';
 import type {RuntimePluginConfigControlCapability} from '../../../runtime/config/index.ts';
 
-export type RuntimePluginConfigControlHostState = {
+/**
+ * Manifest inventory a host can serve without any config mutation
+ * capability: enough for runtime.plugin.list and activation display.
+ */
+export type RuntimePluginInventoryHostState = {
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly activationByPluginId?: Readonly<
     Record<string, RuntimePluginConfigActivationInspectShape>
@@ -11,12 +15,28 @@ export type RuntimePluginConfigControlHostState = {
   readonly defaultEnabledPluginIds?: readonly string[];
   readonly configPath?: string;
   readonly env?: NodeJS.ProcessEnv;
-  /** Injected by the composition root; plugins never import the functions. */
-  readonly control?: RuntimePluginConfigControlCapability;
 };
 
+/**
+ * Inventory plus the config-control capability. The capability is part
+ * of the type, so a control-less config-control state cannot be
+ * expressed in TypeScript; the runtime guards below remain as the
+ * backstop for untyped callers.
+ */
+export type RuntimePluginConfigControlHostState =
+  RuntimePluginInventoryHostState & {
+    /** Injected by the composition root; plugins never import the functions. */
+    readonly control: RuntimePluginConfigControlCapability;
+  };
+
+/** Wide shape the runtime backstops accept: untyped callers may omit control. */
+type MaybeRuntimePluginConfigControlHostState =
+  RuntimePluginInventoryHostState & {
+    readonly control?: RuntimePluginConfigControlCapability;
+  };
+
 export function requiredRuntimePluginConfigControl(
-  state: RuntimePluginConfigControlHostState,
+  state: MaybeRuntimePluginConfigControlHostState,
 ): RuntimePluginConfigControlCapability {
   if (state.control === undefined) {
     throw new Error(
@@ -31,11 +51,12 @@ export function requiredRuntimePluginConfigControl(
  * Fails plugin-management construction, not first tool invocation, when
  * config-control state carries no capability: every config tool handler
  * requires it, so a control-less state would advertise config tools to the
- * model that fail on each call. The invocation-time check remains as the
- * backstop.
+ * model that fail on each call. TypeScript callers cannot express that
+ * state since control became a required property; this remains for
+ * untyped callers, and the invocation-time check is the last backstop.
  */
 export function assertRuntimePluginConfigControlCapabilityPresent(
-  state: RuntimePluginConfigControlHostState,
+  state: MaybeRuntimePluginConfigControlHostState,
 ): void {
   if (state.control !== undefined) {
     return;
@@ -65,23 +86,48 @@ export function isRuntimeConfigConflictError(
   );
 }
 
-const runtimePluginConfigControlHostStateSnapshots =
-  new WeakSet<RuntimePluginConfigControlHostState>();
+const runtimePluginHostStateSnapshots =
+  new WeakSet<RuntimePluginInventoryHostState>();
+
+export function createRuntimePluginInventoryHostStateSnapshot(
+  state: RuntimePluginInventoryHostState,
+): RuntimePluginInventoryHostState {
+  if (runtimePluginHostStateSnapshots.has(state)) {
+    return state;
+  }
+
+  const snapshot = Object.freeze(inventoryHostStateSnapshotFields(state));
+
+  runtimePluginHostStateSnapshots.add(snapshot);
+  return snapshot;
+}
 
 export function createRuntimePluginConfigControlHostStateSnapshot(
   state: RuntimePluginConfigControlHostState,
 ): RuntimePluginConfigControlHostState {
-  if (runtimePluginConfigControlHostStateSnapshots.has(state)) {
+  if (runtimePluginHostStateSnapshots.has(state)) {
     return state;
   }
 
+  const snapshot = Object.freeze({
+    ...inventoryHostStateSnapshotFields(state),
+    control: state.control,
+  } satisfies RuntimePluginConfigControlHostState);
+
+  runtimePluginHostStateSnapshots.add(snapshot);
+  return snapshot;
+}
+
+function inventoryHostStateSnapshotFields(
+  state: RuntimePluginInventoryHostState,
+): RuntimePluginInventoryHostState {
   const pluginManifests = state.pluginManifests.map(manifest =>
     createRuntimePluginManifest(manifest),
   );
 
   assertUniquePluginConfigControlManifestIds(pluginManifests);
 
-  const snapshot = Object.freeze({
+  return {
     pluginManifests: Object.freeze(pluginManifests),
     ...(state.activationByPluginId === undefined
       ? {}
@@ -110,11 +156,7 @@ export function createRuntimePluginConfigControlHostStateSnapshot(
         }),
     ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
     ...(state.env === undefined ? {} : {env: Object.freeze({...state.env})}),
-    ...(state.control === undefined ? {} : {control: state.control}),
-  } satisfies RuntimePluginConfigControlHostState);
-
-  runtimePluginConfigControlHostStateSnapshots.add(snapshot);
-  return snapshot;
+  };
 }
 
 function assertUniquePluginConfigControlManifestIds(
