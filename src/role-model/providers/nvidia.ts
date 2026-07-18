@@ -6,11 +6,11 @@ import {
 } from '../api/contracts.ts';
 import {parseRoleModelProviderExchangeSnapshot} from '../api/provider-exchange.ts';
 import {
-  validateModelToolInputAgainstContract,
   visibleReplyModelToolName,
   type ModelToolCall,
   type ModelToolInputContract,
 } from '../api/model-tools.ts';
+import {validateModelToolInputAgainstContract} from '../api/model-tool-input-validation.ts';
 import type {
   RoleModelAssistantChatMessage,
   RoleModelChatCompletionTool,
