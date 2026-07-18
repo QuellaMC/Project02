@@ -67,7 +67,8 @@ export async function recoverPendingRuntimeConfigEffects(options: {
         createdAt: terminal.createdAt,
         kind: 'after_turn_committed',
         eventType: terminal.eventType,
-        status: 'completed',
+        status:
+          reload.failures.length > 0 ? 'completed_with_failures' : 'completed',
         ...(terminal.visibleMessageIds === undefined
           ? {}
           : {visibleMessageIds: terminal.visibleMessageIds}),

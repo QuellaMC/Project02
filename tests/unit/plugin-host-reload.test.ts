@@ -124,6 +124,7 @@ function reloadFixturePlugin(
 function toneEffect(
   fieldName = 'tone',
   effectId = 'effect-tone-1',
+  resultFingerprint = 'sha256:after',
 ): PreparedRuntimePluginConfigEffect {
   return createPreparedRuntimePluginConfigEffect({
     ...testIdentity(),
@@ -133,7 +134,7 @@ function toneEffect(
     targetConfigPath: '/unused/config.json',
     fieldName,
     expectedFingerprint: 'sha256:before',
-    resultFingerprint: 'sha256:after',
+    resultFingerprint,
     operation: {kind: 'set', value: 'warm'},
   });
 }
@@ -285,6 +286,29 @@ describe('runtime plugin host live config reload', () => {
       'mix live and reload-required fields',
     );
     expect(await contextText(host)).toBe('v1');
+  });
+
+  it('verifies against the final fingerprint when a turn groups several updates', async () => {
+    const seenFingerprints: string[] = [];
+    const host = reloadHost({
+      reloader: {
+        reload: (_pluginId, reloadOptions) => {
+          seenFingerprints.push(reloadOptions.expectedFingerprint);
+          return Promise.resolve({
+            status: 'rebuilt',
+            plugin: reloadFixturePlugin('v2'),
+          });
+        },
+      },
+    });
+
+    const result = await host.reloadPluginForCommittedConfig?.([
+      toneEffect('tone', 'effect-tone-1', 'sha256:intermediate'),
+      toneEffect('tone', 'effect-tone-2', 'sha256:final'),
+    ]);
+
+    expect(result?.outcome).toBe('live_applied');
+    expect(seenFingerprints).toEqual(['sha256:final']);
   });
 
   it('runs terminal lifecycle hooks on superseded instances too', async () => {

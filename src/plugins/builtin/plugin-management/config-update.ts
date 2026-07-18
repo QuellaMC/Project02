@@ -360,7 +360,7 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly liveReloadAvailable?: boolean;
+  readonly canLiveReload?: (pluginId: string) => boolean;
   readonly storeRoot?: string;
 }): RuntimePluginToolCallExecutionResult {
   let pluginId: string;
@@ -473,7 +473,8 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
       {
         status: 'approved_pending_commit',
         appliesTo:
-          field.reloadRequired === false && options.liveReloadAvailable === true
+          field.reloadRequired === false &&
+          options.canLiveReload?.(manifest.id) === true
             ? 'next_turn'
             : 'future_host_construction',
         pluginId: manifest.id,

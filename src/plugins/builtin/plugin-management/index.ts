@@ -103,8 +103,16 @@ export function createRuntimePluginManagementPlugin(
             call,
             context,
             state: pluginConfigControl,
-            liveReloadAvailable:
-              options.hostStateForTurn().liveReloadAvailable === true,
+            canLiveReload: pluginId => {
+              const hostState = options.hostStateForTurn();
+
+              return (
+                hostState.liveReloadAvailable === true &&
+                hostState.enabledPlugins.some(
+                  plugin => plugin.manifest.id === pluginId,
+                )
+              );
+            },
             ...(options.storeRoot === undefined
               ? {}
               : {storeRoot: options.storeRoot}),

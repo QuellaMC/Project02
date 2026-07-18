@@ -118,8 +118,12 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
   let reloaded: RuntimePluginReloadResult;
 
   try {
+    const finalEffect = options.effects[options.effects.length - 1];
+
     reloaded = await options.reloader.reload(pluginId, {
-      expectedFingerprint: firstEffect.resultFingerprint,
+      // Effects arrive in apply order; the file ends at the LAST effect's
+      // fingerprint, so grouped updates must verify against that one.
+      expectedFingerprint: (finalEffect ?? firstEffect).resultFingerprint,
     });
   } catch (error: unknown) {
     reloaded = {
