@@ -21,8 +21,8 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 type ScriptedPromptStep =
   | string
   | {
-      readonly answer: string;
-      readonly beforeAnswer: () => void;
+      readonly answer: string | (() => string);
+      readonly beforeAnswer?: () => void;
     };
 
 describe('runtime config console UI', () => {
@@ -138,7 +138,7 @@ describe('runtime config console UI', () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toMatch(
-      /Plugins\n1\) .+ \(character-state\)\n2\) .+ \(demo-config\)\n3\) .+ \(operator\.console\)\nSystem services/,
+      /Plugins\n(?:\d+\) .+\n)*?\d+\) .+ \(operator\.console\)\n(?:\d+\) .+\n)*?System services/,
     );
   });
 
@@ -181,7 +181,11 @@ describe('runtime config console UI', () => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        prompt: scriptedPrompt(['2', '3', 'q']),
+        prompt: scriptedPrompt([
+          '2',
+          selectPluginStep(() => stdout, 'operator.console-default'),
+          'q',
+        ]),
       },
     );
 
@@ -204,13 +208,17 @@ describe('runtime config console UI', () => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        prompt: scriptedPrompt(['2', '4', 'q']),
+        prompt: scriptedPrompt([
+          '2',
+          selectPluginStep(() => stdout, 'runtime.plugin'),
+          'q',
+        ]),
       },
     );
 
     expect(exitCode).toBe(0);
     expect(stdout).toMatch(
-      /System services\n3\) .+\n4\) .+ \(runtime\.plugin\)/,
+      /System services\n(?:.*\n)*?\d+\) .+ \(runtime\.plugin\)/,
     );
     expect(stdout).toContain('(runtime.plugin)\n1) Enabled:');
   });
@@ -235,7 +243,13 @@ describe('runtime config console UI', () => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        prompt: scriptedPrompt(['2', '4', '1', '1', '1']),
+        prompt: scriptedPrompt([
+          '2',
+          selectPluginStep(() => stdout, 'runtime.plugin'),
+          '1',
+          '1',
+          '1',
+        ]),
       },
     );
 
@@ -373,7 +387,14 @@ describe('runtime config console UI', () => {
         }),
         stderr: collect(() => {}),
         factories: factoriesFor(plugin),
-        prompt: scriptedPrompt(['2', '1', '2', '1', 'remote', '1']),
+        prompt: scriptedPrompt([
+          '2',
+          selectPluginStep(() => stdout, 'sample.plugin'),
+          '2',
+          '1',
+          'remote',
+          '1',
+        ]),
       },
     );
 
@@ -430,7 +451,13 @@ describe('runtime config console UI', () => {
           }),
           stderr: collect(() => {}),
           factories: factoriesFor(plugin),
-          prompt: scriptedPrompt(['2', '1', '1', '2', finalAnswer]),
+          prompt: scriptedPrompt([
+            '2',
+            selectPluginStep(() => stdout, 'sample.plugin'),
+            '1',
+            '2',
+            finalAnswer,
+          ]),
         },
       );
 
@@ -483,7 +510,11 @@ describe('runtime config console UI', () => {
           MEMORY_SECRET_API_KEY: 'must-never-appear',
         },
         factories: factoriesFor(plugin),
-        prompt: scriptedPrompt(['2', '1', '2']),
+        prompt: scriptedPrompt([
+          '2',
+          selectPluginStep(() => stdout, 'memory.secret'),
+          '2',
+        ]),
       },
     );
 
@@ -526,7 +557,11 @@ describe('runtime config console UI', () => {
         }),
         stderr: collect(() => {}),
         factories: factoriesFor(plugin),
-        prompt: scriptedPrompt(['2', '1', '2']),
+        prompt: scriptedPrompt([
+          '2',
+          selectPluginStep(() => stdout, 'memory.secret-auto'),
+          '2',
+        ]),
       },
     );
 
@@ -573,7 +608,11 @@ describe('runtime config console UI', () => {
         stderr: collect(() => {}),
         env: {},
         factories: factoriesFor(plugin),
-        prompt: scriptedPrompt(['2', '1', '2']),
+        prompt: scriptedPrompt([
+          '2',
+          selectPluginStep(() => stdout, 'memory.runtime-file'),
+          '2',
+        ]),
       },
     );
 
@@ -669,8 +708,42 @@ function scriptedPrompt(
         return Promise.resolve(undefined);
       }
 
-      step.beforeAnswer();
-      return Promise.resolve(step.answer);
+      step.beforeAnswer?.();
+      return Promise.resolve(
+        typeof step.answer === 'function' ? step.answer() : step.answer,
+      );
     },
   });
+}
+
+/**
+ * Selects a plugin by id instead of by hard-coded list position: reads
+ * the rendered "N) Display Name (plugin-id)" line from the accumulated
+ * console output at answer time, so adding a bundled package never
+ * shifts these scripts.
+ */
+function selectPluginStep(
+  readStdout: () => string,
+  pluginId: string,
+): ScriptedPromptStep {
+  return {
+    answer: () => {
+      const listing = readStdout();
+      const escapedId = pluginId.replaceAll(
+        /[.*+?^${}()|[\]\\]/gu,
+        String.raw`\$&`,
+      );
+      const match = new RegExp(`(\\d+)\\) [^\\n]*\\(${escapedId}\\)`, 'u').exec(
+        listing,
+      );
+
+      if (match?.[1] === undefined) {
+        throw new Error(
+          `Plugin "${pluginId}" not found in the rendered console list:\n${listing}`,
+        );
+      }
+
+      return match[1];
+    },
+  };
 }
