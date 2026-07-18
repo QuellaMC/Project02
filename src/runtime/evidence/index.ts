@@ -17,7 +17,5 @@ export {
   type ChatTraceSummary,
   type TraceIdentity,
 } from './trace-summary.ts';
-export {
-  createTurnEvidence,
-  type InspectTurnEvidence,
-} from './turn-projection.ts';
+export {createTurnEvidence} from './turn-projection.ts';
+export {type InspectTurnEvidence} from './turn-projection-contract.ts';
